@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import User
-from .models import User,Track,Playlist,Profile,Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification
+from .models import User,Track,Playlist,Profile,Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -89,15 +89,21 @@ class PlaylistSerializer(serializers.ModelSerializer):
 
 
 class ProfileSerializer(serializers.ModelSerializer):
+    user_id = serializers.ReadOnlyField(source='user.id')
     class Meta:
         model = Profile
-        fields = ['bio', 'birth_date', 'location', 'is_public', 'picture',]
+        fields = ['bio','user_id', 'birth_date', 'location', 'is_public', 'picture',]
 
     def create(self, validated_data):
         user = self.context['request'].user  # Access user from request
         # Remove 'user' from validated_data if it exists
         profile = Profile.objects.create(user=user, **validated_data)
         return profile
+    def get_picture(self, obj):
+        if obj.picture:
+            request = self.context.get('request')
+            return request.build_absolute_uri(obj.picture.url) if request else obj.picture.url
+        return None
 
 class CommentSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -277,3 +283,172 @@ class NotificationSerializer(serializers.ModelSerializer):
             ).first()
             return comment.content if comment else None
         return None
+
+
+
+class ChurchSerializer(serializers.ModelSerializer):
+    image = serializers.ImageField(max_length=None, use_url=True, required=False)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_picture = serializers.SerializerMethodField(read_only=True)
+    
+    class Meta:
+        model = Church
+        fields = '__all__'
+        read_only_fields = ('created_by', 'created_at', 'updated_at', 'id')
+
+    def get_created_by_picture(self, obj):
+        # Ensure we're returning a complete URL
+        if hasattr(obj.created_by, 'profile') and obj.created_by.profile.picture:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.created_by.profile.picture.url)
+            return obj.created_by.profile.picture.url
+        return None
+
+
+# Add to existing serializers
+# from .models import Videostudio, Audiostudio, Choir
+
+class VideoStudioSerializer(serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+    logo_url = serializers.SerializerMethodField()
+    cover_image_url = serializers.SerializerMethodField()
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_picture = serializers.SerializerMethodField(read_only=True)  # Only one definition
+    service_types = serializers.ListField(child=serializers.ChoiceField(choices=Videostudio.SERVICE_TYPES),default=list)
+    
+    class Meta:
+        model = Videostudio
+        fields = '__all__'
+        read_only_fields = ('created_by', 'is_verified')
+    
+    def get_logo_url(self, obj):
+        if obj.logo:
+            return self.context['request'].build_absolute_uri(obj.logo.url)
+        return None
+    
+    def get_cover_image_url(self, obj):
+        if obj.cover_image:
+            return self.context['request'].build_absolute_uri(obj.cover_image.url)
+        return None
+
+    def get_created_by_picture(self, obj):
+        # Add null checks for safety
+        if obj.created_by and hasattr(obj.created_by, 'profile') and obj.created_by.profile.picture:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.created_by.profile.picture.url)
+            return obj.created_by.profile.picture.url
+        return None
+
+    # ... rest of the serializer ...
+class ChoirSerializer(serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+    profile_image_url = serializers.SerializerMethodField()
+    cover_image_url = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Choir
+        fields = '__all__'
+        read_only_fields = ('created_by', 'members_count')
+    
+    def get_profile_image_url(self, obj):
+        if obj.profile_image:
+            return self.context['request'].build_absolute_uri(obj.profile_image.url)
+        return None
+    
+    def get_cover_image_url(self, obj):
+        if obj.cover_image:
+            return self.context['request'].build_absolute_uri(obj.cover_image.url)
+        return None
+    
+class GroupSerializer(serializers.ModelSerializer):
+    creator = UserSerializer(read_only=True)
+    member_count = serializers.SerializerMethodField()
+    is_member = serializers.SerializerMethodField()
+    is_admin = serializers.SerializerMethodField()
+    cover_image = serializers.ImageField(required=False, allow_null=True) 
+    is_private = serializers.BooleanField(default=False)  # Ensure default is False
+
+    class Meta:
+        model = Group
+        fields = '__all__'
+        read_only_fields = ['creator', 'slug', 'created_at', 'updated_at']
+    
+    def get_member_count(self, obj):
+        return obj.members.count()
+    
+    def get_is_member(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return GroupMember.objects.filter(group=obj, user=request.user).exists()
+        return False
+    
+    def get_is_admin(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return GroupMember.objects.filter(
+                group=obj, 
+                user=request.user, 
+                is_admin=True
+            ).exists()
+        return False
+
+class GroupMemberSerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField()
+    
+    class Meta:
+        model = GroupMember
+        fields = ['id', 'user', 'is_admin', 'joined_at']
+
+class GroupJoinRequestSerializer(serializers.ModelSerializer):
+    # user = serializers.StringRelatedField(read_only=True)
+    user = UserSerializer(read_only=True)
+    group = serializers.StringRelatedField(read_only=True)
+    
+    class Meta:
+        model = GroupJoinRequest
+        fields = '__all__'
+        read_only_fields = ['status', 'created_at']
+        extra_kwargs = {
+            'message': {'required': False, 'allow_blank': True}
+        }
+
+class GroupPostAttachmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GroupPostAttachment  # Make sure this model is imported
+        fields = ['id', 'file', 'file_type', 'created_at']
+        read_only_fields = ['file_type', 'created_at']
+
+class GroupPostSerializer(serializers.ModelSerializer):
+    # user = serializers.StringRelatedField(read_only=True)
+    user = UserSerializer(read_only=True)
+    attachments = GroupPostAttachmentSerializer(many=True, read_only=True, required=False)
+    
+    class Meta:
+        model = GroupPost
+        fields = ['id', 'content', 'created_at', 'updated_at', 'group', 'user', 'attachments']
+        read_only_fields = ['group', 'user', 'created_at', 'updated_at', 'attachments']
+        extra_kwargs = {
+            'content': {'required': False, 'allow_blank': True}
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

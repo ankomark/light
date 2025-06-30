@@ -1,10 +1,12 @@
 from rest_framework import viewsets, permissions
+from django.db.models import Q
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
+from django.core.cache import cache
 from django.contrib.auth.models import User
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission
 from rest_framework.permissions import AllowAny
 from django.utils.text import slugify
 from rest_framework.exceptions import ValidationError
@@ -13,10 +15,14 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404 
 from rest_framework.pagination import PageNumberPagination
-
+from django.db import transaction
 from django.contrib.auth.decorators import login_required
+from rest_framework.exceptions import PermissionDenied
 from rest_framework import status
-from .models import User,SocialPost,PostSave,PostComment, PostLike, Track, Playlist, Profile, Comment, Like, Category, Notification
+from rest_framework.parsers import MultiPartParser, FormParser,JSONParser
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_control
+from .models import User,SocialPost,PostSave,PostComment, PostLike, Track, Playlist, Profile, Comment, Like, Category, Notification,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment
 from .serializers import (
     UserSerializer,
     TrackSerializer,
@@ -30,6 +36,14 @@ from .serializers import (
     PostCommentSerializer,
     PostSaveSerializer,
     NotificationSerializer,
+    ChurchSerializer,
+    VideoStudioSerializer,  
+    ChoirSerializer, 
+    GroupSerializer, 
+    GroupMemberSerializer, 
+    GroupJoinRequestSerializer, 
+    GroupPostSerializer,
+    GroupPostAttachmentSerializer
 )
 import logging
 import time
@@ -53,44 +67,6 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-
-    # @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
-    # def follow(self, request, pk=None):
-    #     user_to_follow = self.get_object()
-    #     current_user = request.user
-
-    #     if current_user == user_to_follow:
-    #         return Response(
-    #             {"error": "You cannot follow yourself"},
-    #             status=status.HTTP_400_BAD_REQUEST
-    #         )
-
-    #     if current_user in user_to_follow.followers.all():
-    #         # Unfollow
-    #         user_to_follow.followers.remove(current_user)
-    #         action = 'unfollowed'
-    #     else:
-    #         # Follow
-    #         user_to_follow.followers.add(current_user)
-    #         action = 'followed'
-    #         # Create notification
-    #         Notification.objects.create(
-    #             recipient=user_to_follow,
-    #             sender=current_user,
-    #             message=f"{current_user.username} started following you",
-    #             notification_type='follow'
-    #         )
-
-    #     # Get updated counts
-    #     followers_count = user_to_follow.followers.count()
-    #     following_count = current_user.followed_by.count()
-
-    #     return Response({
-    #         "status": f"Successfully {action} {user_to_follow.username}",
-    #         "followers_count": followers_count,
-    #         "following_count": following_count,
-    #         "is_following": action == 'followed'
-    #     })
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -385,24 +361,6 @@ class CommentViewSet(viewsets.ModelViewSet):
                 notification_type='comment',
                 track=track
             )
-
-    # def get_queryset(self):
-    #     # Use 'track_pk' from the nested route's lookup
-    #     track_id = self.kwargs.get('track_pk')
-    #     if track_id:
-    #         return Comment.objects.filter(track__id=track_id)
-    #     return super().get_queryset()
-
-    # def perform_create(self, serializer):
-    #     # Use 'track_pk' from the nested route's lookup
-    #     track_id = self.kwargs.get('track_pk')
-    #     try:
-    #         track = Track.objects.get(id=track_id)
-    #     except Track.DoesNotExist:
-    #         raise ValidationError({"error": "Track not found"})
-    #     serializer.save(user=self.request.user, track=track)
-
-
 class LikeViewSet(viewsets.ModelViewSet):
     queryset = Like.objects.all()
     serializer_class = LikeSerializer
@@ -661,35 +619,6 @@ class PostSaveViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return self.queryset.filter(user=self.request.user)
 
-
-# Update UserViewSet to include social posts
-# class UserViewSet(viewsets.ModelViewSet):
-#     queryset = User.objects.all()
-#     serializer_class = UserSerializer
-#     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-
-#     @action(detail=True, methods=['get'])
-#     def social_posts(self, request, pk=None):
-#         user = self.get_object()
-#         posts = SocialPost.objects.filter(user=user)
-#         page = self.paginate_queryset(posts)
-        
-#         if page is not None:
-#             serializer = SocialPostSerializer(
-#                 page, 
-#                 many=True,
-#                 context={'request': request}
-#             )
-#             return self.get_paginated_response(serializer.data)
-            
-#         serializer = SocialPostSerializer(
-#             posts, 
-#             many=True,
-#             context={'request': request}
-#         )
-#         return Response(serializer.data)
-
-
 class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -713,3 +642,489 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def unread_count(self, request):
         count = Notification.objects.filter(recipient=request.user, read=False).count()
         return Response({'unread_count': count})
+
+class ChurchViewSet(viewsets.ModelViewSet):
+    queryset = Church.objects.all()
+    serializer_class = ChurchSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def get_permissions(self):
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by != request.user:
+            return Response(
+                {"error": "You can only edit churches you created"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by != request.user:
+            return Response(
+                {"error": "You can only delete churches you created"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['get'])
+    def my_churches(self, request):
+        churches = Church.objects.filter(created_by=request.user)
+        serializer = self.get_serializer(churches, many=True)
+        return Response(serializer.data)
+
+
+
+
+
+from rest_framework.exceptions import PermissionDenied
+
+class VideoStudioViewSet(viewsets.ModelViewSet):
+    queryset = Videostudio.objects.all().order_by('-created_at')
+    serializer_class = VideoStudioSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+     
+    def create(self, request, *args, **kwargs):
+        # Convert single service type to array if needed
+        if 'service_types' in request.data and isinstance(request.data['service_types'], str):
+            request.data._mutable = True
+            request.data['service_types'] = [request.data['service_types']]
+        return super().create(request, *args, **kwargs)
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def get_queryset(self):
+        # Add filtering by user if requested
+        user_id = self.request.query_params.get('user_id')
+        if user_id:
+            return Videostudio.objects.filter(created_by=user_id)
+        return super().get_queryset()
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by != request.user:
+            return Response(
+                {"error": "You can only edit video studios you created"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by != request.user:
+            return Response(
+                {"error": "You can only delete video studios you created"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['get'])
+    def my_videostudios(self, request):
+        studios = Videostudio.objects.filter(created_by=request.user)
+        serializer = self.get_serializer(studios, many=True)
+        return Response(serializer.data)
+
+class ChoirViewSet(viewsets.ModelViewSet):
+    queryset = Choir.objects.all().order_by('-created_at')
+    serializer_class = ChoirSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def get_queryset(self):
+        user_id = self.request.query_params.get('user_id')
+        if user_id:
+            return Choir.objects.filter(created_by=user_id)
+        return super().get_queryset()
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by != request.user:
+            return Response(
+                {"error": "You can only edit choirs you created"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by != request.user:
+            return Response(
+                {"error": "You can only delete choirs you created"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['get'])
+    def my_choirs(self, request):
+        choirs = Choir.objects.filter(created_by=request.user)
+        serializer = self.get_serializer(choirs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def add_member(self, request, pk=None):
+        choir = self.get_object()
+        user_id = request.data.get('user_id')
+        
+        if not user_id:
+            return Response(
+                {"error": "User ID is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if choir.members.filter(id=user.id).exists():
+            return Response(
+                {"error": "User is already a member of this choir"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        choir.members.add(user)
+        choir.members_count = choir.members.count()
+        choir.save()
+        
+        return Response(
+            {"status": "Member added successfully"},
+            status=status.HTTP_200_OK
+        )
+    
+    @action(detail=True, methods=['post'])
+    def toggle_active(self, request, pk=None):
+            choir = self.get_object()
+            if choir.created_by != request.user:
+                return Response(
+                    {"error": "Only the creator can toggle active status"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            choir.is_active = not choir.is_active
+            choir.save()
+            return Response(
+                {"status": "Active status updated", "is_active": choir.is_active},
+                status=status.HTTP_200_OK
+            )    
+    @action(detail=True, methods=['post'])
+    def update_members(self, request, pk=None):
+            choir = self.get_object()
+            if choir.created_by != request.user:
+                return Response(
+                    {"error": "Only the creator can update members count"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            count = request.data.get('count')
+            if count is None or not str(count).isdigit() or int(count) < 0:
+                return Response(
+                    {"error": "Valid count value is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            choir.members_count = int(count)
+            choir.save()
+            return Response(
+                {"status": "Members count updated", "members_count": choir.members_count},
+                status=status.HTTP_200_OK
+            )
+class IsGroupCreator(BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return obj.creator == request.user
+
+@method_decorator(cache_control(no_cache=True, no_store=True, must_revalidate=True), name='dispatch')
+class GroupViewSet(viewsets.ModelViewSet):
+    queryset = Group.objects.all().order_by('-created_at')
+    serializer_class = GroupSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'slug'
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        # For authenticated users
+        if self.request.user.is_authenticated:
+            return Group.objects.filter(
+                Q(is_private=False) |  # Show all public groups
+                Q(creator=self.request.user) |  # Show groups user created
+                Q(members__user=self.request.user)  # Show groups user is member of
+            ).distinct().order_by('-created_at')
+        # For unauthenticated users (if needed)
+        return Group.objects.filter(is_private=False).order_by('-created_at')
+
+    def get_permissions(self):
+        if self.action in ['update', 'partial_update', 'destroy']:
+            self.permission_classes = [IsAuthenticated, IsGroupCreator]
+        return super().get_permissions()
+
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        group = serializer.save(creator=self.request.user)
+        GroupMember.objects.create(
+            group=group, 
+            user=self.request.user, 
+            is_admin=True
+        )
+        return group
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        cache.delete('group_list')
+
+    @action(detail=True, methods=['get'], url_path='members')
+    def group_members(self, request, slug=None):
+        group = self.get_object()
+        if not GroupMember.objects.filter(group=group, user=request.user).exists():
+            raise PermissionDenied("You are not a member of this group")
+        
+        members = GroupMember.objects.filter(group=group)
+        serializer = GroupMemberSerializer(members, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='request-join')
+    def request_join(self, request, slug=None):
+        group = self.get_object()
+        
+        if GroupMember.objects.filter(group=group, user=request.user).exists():
+            return Response(
+                {"error": "You are already a member of this group"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        existing_request = GroupJoinRequest.objects.filter(
+            group=group, 
+            user=request.user,
+            status='pending'
+        ).first()
+        
+        if existing_request:
+            return Response(
+                {"error": "You already have a pending request to join this group"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Allow empty requests
+        message = request.data.get('message', '')
+        
+        # Create join request directly
+        join_request = GroupJoinRequest.objects.create(
+            group=group,
+            user=request.user,
+            message=message,
+            status='pending'
+        )
+        
+        # Notify group admins
+        admins = GroupMember.objects.filter(group=group, is_admin=True)
+        for admin in admins:
+            Notification.objects.create(
+                recipient=admin.user,
+                sender=request.user,
+                message=f"{request.user.username} requested to join {group.name}",
+                notification_type='group_join_request',
+                # group=group
+            )
+        
+        serializer = GroupJoinRequestSerializer(join_request)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    @action(detail=True, methods=['get'], url_path='check-membership')
+    def check_membership(self, request, slug=None):
+        group = self.get_object()
+        is_member = GroupMember.objects.filter(group=group, user=request.user).exists()
+        is_admin = GroupMember.objects.filter(
+            group=group, 
+            user=request.user,
+            is_admin=True
+        ).exists()
+        
+        return Response({
+            'is_member': is_member,
+            'is_admin': is_admin,
+            'group_slug': slug  # Include group slug in response for verification
+        })
+
+class GroupPostViewSet(viewsets.ModelViewSet):
+    queryset = GroupPost.objects.all()
+    serializer_class = GroupPostSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        group_slug = self.kwargs.get('group_slug')
+        group = get_object_or_404(Group, slug=group_slug)
+        return super().get_queryset().filter(group=group).order_by('-created_at')
+
+    def perform_create(self, serializer):
+        group_slug = self.kwargs.get('group_slug')
+        group = get_object_or_404(Group, slug=group_slug)
+        if not GroupMember.objects.filter(group=group, user=self.request.user).exists():
+            raise PermissionDenied("You are not a member of this group")
+        
+        post = serializer.save(user=self.request.user, group=group)
+        
+        # Handle attachments
+        for file in self.request.FILES.getlist('attachments'):
+            mime_type, _ = mimetypes.guess_type(file.name)
+            file_type = 'document'
+            if mime_type:
+                if mime_type.startswith('image/'):
+                    file_type = 'image'
+                elif mime_type.startswith('video/'):
+                    file_type = 'video'
+                elif mime_type.startswith('audio/'):
+                    file_type = 'audio'
+            
+            GroupPostAttachment.objects.create(
+                post=post,
+                file=file,
+                file_type=file_type
+            )
+
+    def create(self, request, *args, **kwargs):
+        group_slug = self.kwargs.get('group_slug')
+        group = get_object_or_404(Group, slug=group_slug)
+        
+        post_data = {
+            'content': request.data.get('content', ''),
+            'group': group.id,
+            'user': request.user.id
+        }
+        
+        serializer = self.get_serializer(data=post_data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.user != request.user and not GroupMember.objects.filter(
+            group=instance.group, 
+            user=request.user,
+            is_admin=True
+        ).exists():
+            return Response(
+                {"error": "You don't have permission to delete this post"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class GroupJoinRequestViewSet(viewsets.ModelViewSet):
+    queryset = GroupJoinRequest.objects.all()
+    serializer_class = GroupJoinRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return GroupJoinRequest.objects.filter(
+            group__members__user=self.request.user,
+            group__members__is_admin=True,
+            status='pending'
+        )
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve_request(self, request, pk=None):
+        join_request = self.get_object()
+        if not GroupMember.objects.filter(
+            group=join_request.group, 
+            user=request.user,
+            is_admin=True
+        ).exists():
+            raise PermissionDenied("Only group admins can approve requests")
+        
+        GroupMember.objects.create(
+            group=join_request.group,
+            user=join_request.user
+        )
+        join_request.status = 'approved'
+        join_request.save()
+        
+        return Response({"status": "Request approved"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject_request(self, request, pk=None):
+        join_request = self.get_object()
+        if not GroupMember.objects.filter(
+            group=join_request.group, 
+            user=request.user,
+            is_admin=True
+        ).exists():
+            raise PermissionDenied("Only group admins can reject requests")
+        
+        join_request.status = 'rejected'
+        join_request.save()
+        
+        return Response({"status": "Request rejected"}, status=status.HTTP_200_OK)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

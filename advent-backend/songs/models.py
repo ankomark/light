@@ -3,6 +3,8 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.utils.text import slugify
 from django.core.validators import FileExtensionValidator
+from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
 
 
 # Custom User Model
@@ -210,3 +212,209 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.sender.username} -> {self.recipient.username}: {self.message}"
+
+
+class Church(models.Model):
+    name = models.CharField(max_length=200)
+    continent = models.CharField(max_length=100)
+    country = models.CharField(max_length=100)
+    county = models.CharField(max_length=100, blank=True, null=True)
+    conference = models.CharField(max_length=200)
+    district = models.CharField(max_length=200, blank=True, null=True)
+    location = models.CharField(max_length=300)
+    members = models.PositiveIntegerField(default=0)
+    pastor = models.CharField(max_length=200, blank=True, null=True)
+    contact = models.CharField(max_length=100, blank=True, null=True)
+    image = models.ImageField(upload_to='churches/', blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='churches')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class Videostudio(models.Model):
+    SERVICE_TYPES = (
+        ('music_video', 'Music Video Production'),
+        ('live_event', 'Live Event Coverage'),
+        ('editing', 'Video Editing'),
+        ('other', 'Other Video Services'),
+        ('recording', 'Audio Recording'),
+        ('mixing', 'Mixing & Mastering'),
+        ('voice_over', 'Voice Over Recording'),
+        ('podcast', 'Podcast Production'),
+        ('documentary', 'Documentary Production'),  
+    )
+    
+    SERVICE_TYPE_CHOICES = [choice[0] for choice in SERVICE_TYPES]
+    
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, null=True)
+    location = models.CharField(max_length=300)
+    contact_phone = models.CharField(max_length=20, blank=True, null=True)
+    contact_email = models.EmailField(blank=True, null=True)
+    logo = models.ImageField(upload_to='videostudios/logos/', blank=True, null=True)
+    cover_image = models.ImageField(upload_to='videostudios/covers/', blank=True, null=True)
+    whatsapp_number = models.CharField(max_length=20, blank=True, null=True)
+    service_types = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        help_text="List of service types the studio offers (stored as JSON array)"
+    )
+    youtube_link = models.URLField(blank=True, null=True)
+    service_rates = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
+    is_verified = models.BooleanField(default=False)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videostudios')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        """Validate service_types before saving"""
+        super().clean()
+        
+        if self.service_types is not None:
+            # Ensure it's a list
+            if not isinstance(self.service_types, list):
+                raise ValidationError({
+                    'service_types': 'Must be a list of service type strings'
+                })
+            
+            # Validate each service type
+            invalid = [s for s in self.service_types 
+                      if s not in self.SERVICE_TYPE_CHOICES]
+            if invalid:
+                raise ValidationError({
+                    'service_types': f'Invalid service types: {", ".join(invalid)}. '
+                                  f'Valid options: {", ".join(self.SERVICE_TYPE_CHOICES)}'
+                })
+
+    def save(self, *args, **kwargs):
+        """Ensure validation runs on every save"""
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    class Meta:
+        verbose_name = "Video Studio"
+        verbose_name_plural = "Video Studios"
+        ordering = ['-created_at']
+
+class Choir(models.Model):
+    GENRE_CHOICES = (
+        ('gospel', 'Gospel'),
+        ('contemporary', 'Contemporary Christian'),
+        ('traditional', 'Traditional Hymns'),
+        ('mixed', 'Mixed Repertoire'),
+    )
+    
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, null=True)
+    church = models.ForeignKey(Church, on_delete=models.SET_NULL, null=True, blank=True, related_name='choirs')
+    location = models.CharField(max_length=300)
+    contact_phone = models.CharField(max_length=20, blank=True, null=True)
+    contact_email = models.EmailField(blank=True, null=True)
+    genre = models.CharField(max_length=50, choices=GENRE_CHOICES, default='gospel')
+    members_count = models.PositiveIntegerField(default=0)
+    profile_image = models.ImageField(upload_to='choirs/profiles/', blank=True, null=True)
+    cover_image = models.ImageField(upload_to='choirs/covers/', blank=True, null=True)
+    founded_date = models.DateField(blank=True, null=True)
+    youtube_link = models.URLField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choirs')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name_plural = "Choirs"
+        ordering = ['-created_at']
+
+class Group(models.Model):
+    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_groups')
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    cover_image = models.ImageField(upload_to='group_covers/', blank=True, null=True)
+    is_private = models.BooleanField(default=True)
+    slug = models.SlugField(unique=True, max_length=100)
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.name)
+            slug = base_slug
+            counter = 1
+            while Group.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+class GroupMember(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_memberships')
+    is_admin = models.BooleanField(default=False)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('group', 'user')
+
+    def __str__(self):
+        return f"{self.user.username} in {self.group.name}"
+
+class GroupJoinRequest(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    )
+    
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='join_requests')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_join_requests')
+    message = models.TextField(blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('group', 'user')
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.group.name} ({self.status})"
+
+class GroupPost(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='posts')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Post in {self.group.name} by {self.user.username}"
+
+class GroupPostAttachment(models.Model):
+    ATTACHMENT_TYPES = (
+        ('image', 'Image'),
+        ('video', 'Video'),
+        ('audio', 'Audio'),
+        ('document', 'Document'),
+    )
+    
+    post = models.ForeignKey(GroupPost, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='group_posts/%Y/%m/%d/')
+    file_type = models.CharField(max_length=10, choices=ATTACHMENT_TYPES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Attachment for post {self.post.id}"

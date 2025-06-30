@@ -1,66 +1,3 @@
-
-
-# from rest_framework.routers import DefaultRouter
-# from django.urls import path, include
-# from .views import (
-#     UserViewSet,
-#     TrackViewSet,
-#     PlaylistViewSet,
-#     ProfileViewSet,
-#     CommentViewSet,
-#     LikeViewSet,
-#     CategoryViewSet,
-#     SignUpView,
-#     FavoriteTracksView,
-#     SocialPostViewSet,
-#     PostLikeViewSet,
-#     PostCommentViewSet,
-#     PostSaveViewSet, 
-#     # ProfileByUserView,
-# )
-# from .favorites import toggle_favorite
-# from .views import FavoriteTracksView
-# from rest_framework_nested.routers import NestedSimpleRouter
-# from django.urls import path, include
-# from rest_framework.routers import DefaultRouter
-# # Base router
-# router = DefaultRouter()
-# router.register(r'users', UserViewSet)
-# router.register(r'tracks', TrackViewSet)
-# router.register(r'playlists', PlaylistViewSet)
-# router.register(r'profiles', ProfileViewSet, basename='profiles')
-
-# router.register(r'comments', CommentViewSet)
-# router.register(r'likes', LikeViewSet)
-# router.register(r'categories', CategoryViewSet)
-# router.register(r'social-posts', SocialPostViewSet)
-
-# router.register(r'post-likes', PostLikeViewSet)
-# router.register(r'post-comments', PostCommentViewSet)
-# router.register(r'post-saves', PostSaveViewSet)
-# # Nested router for comments under tracks
-# tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
-# tracks_router.register(r'comments', CommentViewSet, basename='track-comments')
-# social_posts_router = NestedSimpleRouter(router, r'social-posts', lookup='post')
-# social_posts_router.register(r'comments', PostCommentViewSet, basename='post-comments')
-# # Additional routes
-# urlpatterns = [
-#     path('api/auth/signup/', SignUpView.as_view(), name='signup'),
-#     path('tracks/<int:pk>/download/', TrackViewSet.as_view({'get': 'download'}), name='track-download'),
-#     path('api/songs/tracks/<int:track_id>/favorite/', toggle_favorite, name='toggle_favorite'),
-#     path('favorites/', FavoriteTracksView.as_view(), name='favorite-tracks'),
-#     path('profiles/by_user/<int:user_id>/', ProfileViewSet.as_view({'get': 'by_user'}), name='profile-by-user'),
-#     path('tracks/upload/', TrackViewSet.as_view({'post': 'upload_track'}), name='track-upload'),
-
-#     # path('social-posts/<int:pk>/like/', SocialPostViewSet.as_view({'post': 'like'}), name='post-like'),
-#     # path('social-posts/<int:pk>/comment/', SocialPostViewSet.as_view({'post': 'comment'}), name='post-comment'),
-#     # path('social-posts/<int:pk>/save/', SocialPostViewSet.as_view({'post': 'save_post'}), name='post-save'),
-#     # path('social-posts/<int:pk>/share/', SocialPostViewSet.as_view({'get': 'share'}), name='post-share'),
-#     # path('social-posts/<int:pk>/download/', SocialPostViewSet.as_view({'get': 'download'}), name='post-download'),
-# ]
-# # Add router URLs
-# urlpatterns += router.urls + tracks_router.urls + social_posts_router.urls
-
 from rest_framework.routers import DefaultRouter
 from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
@@ -79,6 +16,12 @@ from .views import (
     PostCommentViewSet,
     PostSaveViewSet, 
     NotificationViewSet,
+    ChurchViewSet, 
+    VideoStudioViewSet,
+    ChoirViewSet,
+    GroupViewSet,
+    GroupJoinRequestViewSet, 
+    GroupPostViewSet
 )
 
 router = DefaultRouter()
@@ -86,7 +29,6 @@ router.register(r'users', UserViewSet)
 router.register(r'tracks', TrackViewSet)
 router.register(r'playlists', PlaylistViewSet)
 router.register(r'profiles', ProfileViewSet, basename='profiles')
-# router.register(r'comments', CommentViewSet)
 router.register(r'likes', LikeViewSet)
 router.register(r'categories', CategoryViewSet)
 router.register(r'social-posts', SocialPostViewSet)
@@ -94,21 +36,60 @@ router.register(r'post-likes', PostLikeViewSet)
 router.register(r'post-comments', PostCommentViewSet)
 router.register(r'post-saves', PostSaveViewSet)
 router.register(r'notifications', NotificationViewSet, basename='notifications')
+router.register(r'churches', ChurchViewSet, basename='churches') 
+router.register(r'video-studios', VideoStudioViewSet, basename='video-studios')
+router.register(r'choirs', ChoirViewSet, basename='choirs')
+router.register(r'groups', GroupViewSet, basename='groups')
+router.register(r'group-join-requests', GroupJoinRequestViewSet, basename='group-join-requests')
+router.register(r'group-posts', GroupPostViewSet, basename='group-posts')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
-# tracks_router.register(r'comments', CommentViewSet, basename='track-comments')
 tracks_router.register(r'comments', CommentViewSet, basename='track-comments')
 
 social_posts_router = NestedSimpleRouter(router, r'social-posts', lookup='post')
 social_posts_router.register(r'comments', PostCommentViewSet, basename='post-comments')
 
+# Group nested router
+groups_router = NestedSimpleRouter(router, r'groups', lookup='group')
+groups_router.register(r'join-requests', GroupJoinRequestViewSet, basename='group-join-requests')
+groups_router.register(r'posts', GroupPostViewSet, basename='group-posts')
+
 urlpatterns = [
-    # Your existing additional routes
+    # Existing routes
+    path('signup/', SignUpView.as_view(), name='signup'),
     path('tracks/<int:pk>/download/', TrackViewSet.as_view({'get': 'download'}), name='track-download'),
     path('tracks/upload/', TrackViewSet.as_view({'post': 'upload_track'}), name='track-upload'),
+    path('tracks/favorites/', TrackViewSet.as_view({'get': 'get_favorites'}), name='track-favorites'),
     path('notifications/unread_count/', NotificationViewSet.as_view({'get': 'unread_count'}), name='notification-unread-count'),
-    # path('tracks/<int:track_pk>/comments/', CommentViewSet.as_view({'get': 'list'})),
+    path('churches/my_churches/', ChurchViewSet.as_view({'get': 'my_churches'}), name='church-my-churches'),
+    path('video-studios/my-studios/', VideoStudioViewSet.as_view({'get': 'my_videostudios'}), name='video-my-studios'),
+    path('choirs/my-choirs/', ChoirViewSet.as_view({'get': 'my_choirs'}), name='choir-my-choirs'),
+    path('choirs/<int:pk>/add-member/', ChoirViewSet.as_view({'post': 'add_member'}), name='choir-add-member'),
+    path('choirs/<int:pk>/toggle-active/', ChoirViewSet.as_view({'post': 'toggle_active'}), name='choir-toggle-active'),
+    path('choirs/<int:pk>/update-members/', ChoirViewSet.as_view({'post': 'update_members'}), name='choir-update-members'),
+    
+    
+    # New group-related routes
+    path('groups/<slug:slug>/request-join/', 
+         GroupViewSet.as_view({'post': 'request_join'}), 
+         name='group-request-join'),
+    path('groups/<slug:slug>/members/', 
+         GroupViewSet.as_view({'get': 'group_members'}), 
+         name='group-members'),
+    path('group-join-requests/<int:pk>/approve/', 
+         GroupJoinRequestViewSet.as_view({'post': 'approve_request'}), 
+         name='group-join-approve'),
+    path('group-join-requests/<int:pk>/reject/', 
+         GroupJoinRequestViewSet.as_view({'post': 'reject_request'}), 
+         name='group-join-reject'),
+     path('groups/<slug:slug>/check-membership/', GroupViewSet.as_view({'get': 'check_membership'}), name='group-check-membership'),
+     #     path('groups/<slug:slug>/posts/', 
+     #     GroupViewSet.as_view({'get': 'group_posts', 'post': 'group_posts'}), 
+     #     name='group-posts'),
 ]
 
-urlpatterns += router.urls + tracks_router.urls + social_posts_router.urls
+urlpatterns += router.urls 
+urlpatterns += tracks_router.urls 
+urlpatterns += social_posts_router.urls
+urlpatterns += groups_router.urls
