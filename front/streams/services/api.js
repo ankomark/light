@@ -587,38 +587,65 @@ export const rejectJoinRequest = async (requestId) => {
 };
 
 export const fetchGroupMembers = async (slug) => {
-  return apiRequest('get', `/groups/${slug}/members/`);
+  try {
+    const response = await apiRequest('get', `/groups/${slug}/members/`);
+    return response; // No need to transform, as backend provides correct structure
+  } catch (error) {
+    console.error('Failed to fetch members:', error);
+    throw error;
+  }
 };
 
 // ... other exports
 export const createGroupPost = async (content, groupSlug, attachments = []) => {
-  const formData = new FormData();
-  formData.append('content', content || '');
-  
-  // Handle attachments properly
-  attachments.forEach((attachment) => {
-    formData.append('attachments', {
-      uri: attachment.uri,
-      type: attachment.mimeType || getMimeType(attachment.type),
-      name: attachment.name || `attachment_${Date.now()}.${getFileExtension(attachment.type)}`,
+  try {
+    const formData = new FormData();
+    formData.append('content', content || '');
+    
+    // Properly format attachments for FormData
+    attachments.forEach((attachment) => {
+      formData.append('attachments', {
+        uri: attachment.uri,
+        name: attachment.name || `file_${Date.now()}`,
+        type: attachment.type || getMimeTypeFromUri(attachment.uri)
+      });
     });
-  });
 
-  return apiRequest('post', `/groups/${groupSlug}/posts/`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
+    const token = await getAuthToken();
+    const response = await axios.post(
+      `${API_URL}/groups/${groupSlug}/posts/`,
+      formData,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
+        },
+        transformRequest: () => formData,
+      }
+    );
+
+    // Validate and normalize the response
+    if (!response.data?.id) {
+      throw new Error('Invalid post creation response');
+    }
+
+    return {
+      id: response.data.id,
+      content: response.data.content || '',
+      created_at: response.data.created_at || new Date().toISOString(),
+      user: response.data.user || { username: 'You' }, // Fallback for immediate UI
+      attachments: response.data.attachments || [],
+      group: response.data.group || { slug: groupSlug }
+    };
+  } catch (error) {
+    console.error('Post creation failed:', error);
+    throw error.response?.data || { 
+      message: 'Failed to create post',
+      details: error.message 
+    };
+  }
 };
-// export const checkGroupMembership = async (groupSlug) => {
-//   try {
-//     const response = await apiRequest('get', `/groups/${groupSlug}/check-membership/`);
-//     return response;
-//   } catch (error) {
-//     console.error('Failed to check group membership:', error);
-//     throw error;
-//   }
-// };
+
 export const checkGroupMembership = async (slug) => {
   try {
     const response = await apiRequest('get', `/groups/${slug}/check-membership/`);
@@ -636,14 +663,21 @@ export const checkGroupMembership = async (slug) => {
   }
 };
 
-// Helper functions for file types
-const getMimeType = (type) => {
-  switch (type) {
-    case 'image': return 'image/jpeg';
-    case 'video': return 'video/mp4';
-    case 'audio': return 'audio/m4a';
-    case 'document': return 'application/octet-stream';
-    default: return 'application/octet-stream';
+// Helper to get mime type from URI
+const getMimeTypeFromUri = (uri) => {
+  const extension = uri.split('.').pop().toLowerCase();
+  switch (extension) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'mp4':
+      return 'video/mp4';
+    case 'm4a':
+      return 'audio/m4a';
+    default:
+      return 'application/octet-stream';
   }
 };
 
@@ -655,6 +689,200 @@ const getFileExtension = (type) => {
     default: return 'file';
   }
 };
+
+
+// Marketplace endpoints
+export const fetchProductCategories = async () => {
+  return apiRequest('get', '/marketplace/categories/');
+};
+
+export const fetchProducts = async (params = {}) => {
+  try {
+    const response = await axios.get(`${API_URL}/marketplace/products/`, { params });
+    
+    const products = response.data.map(product => {
+      // Directly use backend's numeric price_value and currency code
+      const price = parseFloat(product.price);
+      const quantity = parseInt(product.quantity);
+      
+      return {
+        ...product,
+        price: isNaN(price) ? 0 : price,
+        quantity: isNaN(quantity) ? 0 : quantity,
+        currency: product.currency || 'USD',
+        is_owner: product.is_owner || false,
+      };
+    });
+    
+    return products;
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    
+    if (error.response) {
+      let errorMessage = 'Failed to fetch products from server';
+      if (error.response.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response.data?.detail) {
+        errorMessage = error.response.data.detail;
+      }
+      throw new Error(errorMessage);
+    } 
+    
+    if (error.request) {
+      throw new Error('No response received from server. Check network or server status.');
+    }
+    
+    throw new Error('Unexpected error occurred while fetching products');
+  }
+};
+export const fetchProductById = async (identifier) => {
+  try {
+    const token = await getAuthToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const response = await axios.get(`${API_URL}/marketplace/products/${identifier}/`, { headers });
+    const price = parseFloat(response.data.price);
+    const quantity = parseInt(response.data.quantity);
+    return {
+      ...response.data,
+      price: isNaN(price) ? 0 : price,
+      quantity: isNaN(quantity) ? 0 : quantity,
+      is_owner: response.data.is_owner || false,
+    };
+  } catch (error) {
+    console.error(`API Error [get /marketplace/products/${identifier}/]:`, error);
+    if (error.response?.status === 404) {
+      throw new Error('Product not found');
+    }
+    throw new Error(error.response?.data?.detail || 'Failed to fetch product');
+  }
+};
+
+export const addToCart = async (productId, quantity = 1) => {
+  return apiRequest('post', '/marketplace/cart/add_item/', { 
+    product_id: productId, 
+    quantity 
+  });
+};
+
+// services/api.js
+// services/api.js
+export const fetchCart = async () => {
+  try {
+    // Use the dedicated endpoint for current user's cart
+    const response = await apiRequest('get', '/marketplace/cart/my_cart/');
+    
+    // Backend now returns a single cart object
+    return {
+      items: response.items || [],
+      ...response
+    };
+  } catch (error) {
+    console.error('Error fetching cart:', error);
+    
+    // Handle 404 by returning an empty cart
+    if (error.response && error.response.status === 404) {
+      return { items: [] };
+    }
+    
+    return { items: [] };
+  }
+};
+
+export const removeFromCart = async (itemId) => {
+  try {
+    // Use the correct endpoint format
+    return await apiRequest('delete', `/marketplace/cart/items/${itemId}/`);
+  } catch (error) {
+    console.error('Error removing item from cart:', error);
+    throw error;
+  }
+};
+
+export const checkoutCart = async () => {
+  return apiRequest('post', '/marketplace/cart/checkout/');
+};
+
+export const fetchOrders = async (params = {}) => {
+  return apiRequest('get', '/marketplace/orders/', { params });
+};
+
+export const fetchOrderById = async (id) => {
+  return apiRequest('get', `/marketplace/orders/${id}/`);
+};
+
+export const processPayment = async (paymentData) => {
+  return apiRequest('post', '/marketplace/payments/', paymentData);
+};
+
+export const createProduct = async (formData) => {
+  try {
+    if (formData.price) formData.price = parseFloat(formData.price);
+    if (formData.quantity) formData.quantity = parseInt(formData.quantity);
+    const token = await getAuthToken();
+    const response = await axios.post(`${API_URL}/marketplace/products/`, formData, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 30000, // 30 seconds timeout
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Product creation error:', error);
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      console.error('Response data:', error.response.data);
+      console.error('Response status:', error.response.status);
+      console.error('Response headers:', error.response.headers);
+      throw error.response.data;
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error('Request:', error.request);
+      throw new Error('No response received from server');
+    } else {
+      // Something happened in setting up the request
+      console.error('Error message:', error.message);
+      throw error;
+    }
+  }
+};
+
+export const updateProduct = async (slug, formData) => {
+  return apiRequest('patch', `/marketplace/products/${slug}/`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+};
+
+
+export const deleteProduct = async (slug) => {
+  return apiRequest('delete', `/marketplace/products/${slug}/`);
+};
+
+export const addProductReview = async (slug, rating, comment) => {
+  return apiRequest('post', `/marketplace/products/${slug}/reviews/`, { 
+    rating, 
+    comment 
+  });
+};
+
+export const fetchWishlist = async () => {
+  return apiRequest('get', '/marketplace/wishlist/');
+};
+
+export const addToWishlist = async (slug) => {
+  return apiRequest('post', '/marketplace/wishlist/add_product/', { 
+    product_id: slug  // Update backend to accept slug or update to product_slug
+  });
+};
+
+export const removeFromWishlist = async (slug) => {
+  return apiRequest('post', '/marketplace/wishlist/remove_product/', { 
+    product_id: slug  // Update backend to accept slug or update to product_slug
+  });
+};
+
 
 // Export all API functions
 export default {
@@ -720,4 +948,58 @@ export default {
   approveJoinRequest,
   rejectJoinRequest,
   fetchGroupMembers,
+  fetchProductCategories,
+  fetchProducts,
+  fetchProductById,
+  addToCart,
+  fetchCart,
+  checkoutCart,
+  fetchOrders,
+  fetchOrderById,
+  addProductReview,
+  addToWishlist,
+  removeFromWishlist,
+  fetchWishlist,
+  removeFromCart,
+  processPayment,
+  createProduct,
+  updateProduct,
+  deleteProduct
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,20 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity, Image } from 'react-native';
 import { fetchGroupMembers } from '../services/api';
-import GroupMemberItem from './GroupMemberItem'; // Fixed import path
+import { MaterialIcons } from '@expo/vector-icons';
+
+const GroupMemberItem = ({ member }) => (
+  <View style={styles.memberItem}>
+    <Image
+      source={
+        member.user?.profile?.picture
+          ? { uri: member.user.profile.picture }
+          : require('../assets/user-placeholder.png')
+      }
+      style={styles.memberAvatar}
+    />
+    <View style={styles.memberInfo}>
+      <Text style={styles.memberName}>
+        {member.user?.username || 'Unknown User'}
+      </Text>
+      {member.is_admin && (
+        <Text style={styles.adminBadge}>Admin</Text>
+      )}
+    </View>
+  </View>
+);
 
 const GroupMembers = ({ groupSlug, onClose }) => {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const loadMembers = async () => {
       try {
         setLoading(true);
+        setError(null);
         const data = await fetchGroupMembers(groupSlug);
         setMembers(data);
       } catch (error) {
         console.error('Failed to load members:', error);
+        setError('Failed to load members. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -34,7 +58,7 @@ const GroupMembers = ({ groupSlug, onClose }) => {
         <View style={styles.header}>
           <Text style={styles.title}>Group Members</Text>
           <TouchableOpacity onPress={onClose}>
-            <Text style={styles.closeButton}>Close</Text>
+            <MaterialIcons name="close" size={24} color="#1e88e5" />
           </TouchableOpacity>
         </View>
         
@@ -48,6 +72,7 @@ const GroupMembers = ({ groupSlug, onClose }) => {
             ListEmptyComponent={
               <Text style={styles.emptyText}>No members found</Text>
             }
+            contentContainerStyle={styles.listContent}
           />
         )}
       </View>
@@ -74,10 +99,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
   },
-  closeButton: {
-    color: '#1e88e5',
-    fontSize: 16,
-  },
   loader: {
     flex: 1,
     justifyContent: 'center',
@@ -88,6 +109,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
+  listContent: {
+    paddingBottom: 20,
+  },
+  memberItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f5f5f5',
+  },
+  memberAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+    backgroundColor: '#E5E7EB',
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  adminBadge: {
+    fontSize: 12,
+    color: '#4CAF50',
+    marginTop: 4,
+  },
 });
 
-export default GroupMembers; // Must have this export
+export default GroupMembers;

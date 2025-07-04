@@ -51,16 +51,15 @@ function HamburgerMenu() {
 
   const menuItems = [
     { name: 'Groups', icon: 'group', iconType: 'FontAwesome', color: COLORS.tertiary },
-    { name: 'Rooms', icon: 'users', iconType: 'Feather', color: COLORS.tertiary },
     { name: 'Churches', icon: 'church', iconType: 'MaterialCommunityIcons', color: COLORS.primary },
     { name: 'Choirs', icon: 'music-note', iconType: 'MaterialIcons', color: COLORS.accent },
     { name: 'Live Events', icon: 'broadcast', iconType: 'MaterialCommunityIcons', color: 'red'},
     { name: 'Unions&Conferences', icon: 'account-group', iconType: 'MaterialCommunityIcons', color: COLORS.primary },
     { name: 'MediaScreen', icon: 'radio', iconType: 'MaterialCommunityIcons', color: COLORS.secondary },
     { name: 'Studios', icon: 'video', iconType: 'Feather', color: COLORS.accent },
-    // { name: 'SoloArtist', icon: 'mic', iconType: 'Feather', color: COLORS.primary },
     { name: 'News', icon: 'newspaper', iconType: 'MaterialCommunityIcons', color: COLORS.tertiary },
-    { name: 'Market Places', icon: 'shopping-cart', iconType: 'Feather', color: COLORS.accent },
+    { name: 'MarketplaceHome', icon: 'shopping-cart', iconType: 'Feather', color: COLORS.accent },
+    { name: 'Cart', icon: 'mic', iconType: 'Feather', color: COLORS.primary },
     { name: 'Settings', icon: 'settings', iconType: 'Feather', color: COLORS.light },
     { name: 'About', icon: 'info', iconType: 'Feather', color: COLORS.light },
     { name: 'Help', icon: 'help-circle', iconType: 'Feather', color: COLORS.light },

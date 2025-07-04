@@ -91,14 +91,21 @@ const GroupDetail = ({ route, navigation }) => {
     }
   };
 
-  const loadPosts = async () => {
-    try {
-      const postsData = await fetchGroupPosts(groupSlug);
-      setPosts(postsData);
-    } catch (error) {
-      console.error('Failed to load posts:', error);
-    }
-  };
+  // In loadPosts():
+const loadPosts = async () => {
+  try {
+    const postsData = await fetchGroupPosts(groupSlug);
+    setPosts(postsData.map(post => ({
+      ...post,
+      user: post.user || { username: 'Unknown' },
+      created_at: post.created_at || new Date().toISOString(),
+      attachments: post.attachments || []
+    })));
+  } catch (error) {
+    console.error('Failed to load posts:', error);
+    setPosts([]);
+  }
+};
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -153,23 +160,48 @@ const GroupDetail = ({ route, navigation }) => {
   };
 
   const handleCreatePost = async (formData) => {
-    try {
-      setCreatingPost(true);
-      const content = formData.get('content') || '';
-      const attachments = formData.getAll('attachments') || [];
-      const newPost = await createGroupPost(content, groupSlug, attachments);
-      setPosts([newPost, ...posts]);
-      setShowMediaModal(false);
-    } catch (error) {
-      console.error('Failed to create post:', error);
-      Alert.alert(
-        'Error',
-        error.detail || error.message || 'Failed to create post. Please try again.'
-      );
-    } finally {
-      setCreatingPost(false);
-    }
-  };
+  try {
+    setCreatingPost(true);
+    
+    // Create the post
+    const newPost = await createGroupPost(
+      formData.get('content') || '',
+      groupSlug,
+      Array.from(formData.getAll('attachments')) // Convert to proper array
+    );
+
+    // Update state with proper merging
+    setPosts(prevPosts => {
+      const updatedPosts = [{
+        ...newPost,
+        // Ensure complete user data for immediate UI
+        user: {
+          ...newPost.user,
+          profile: currentUser?.profile || {}
+        },
+        // Ensure attachments array exists
+        attachments: newPost.attachments || []
+      }, ...prevPosts];
+      
+      console.log('Updated posts:', updatedPosts); // Debug log
+      return updatedPosts;
+    });
+
+    setShowMediaModal(false);
+    
+    // Optional: Refresh to ensure consistency
+    await loadPosts();
+    
+  } catch (error) {
+    console.error('Failed to create post:', error);
+    Alert.alert(
+      'Error',
+      error.message || 'Failed to create post. Please try again.'
+    );
+  } finally {
+    setCreatingPost(false);
+  }
+};
 
   if (loading || !group) {
     return (
