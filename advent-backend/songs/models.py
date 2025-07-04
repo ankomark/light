@@ -5,6 +5,8 @@ from django.utils.text import slugify
 from django.core.validators import FileExtensionValidator
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from django.core.validators import MinValueValidator
+from django.utils import timezone
 
 
 # Custom User Model
@@ -418,3 +420,206 @@ class GroupPostAttachment(models.Model):
 
     def __str__(self):
         return f"Attachment for post {self.post.id}"
+
+
+
+
+
+
+
+
+
+# Marketplace Category Model
+class ProductCategory(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    icon = models.CharField(max_length=50, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)  # instead of auto_now_add
+    updated_at = models.DateTimeField(auto_now=True)
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='children')
+    
+    class Meta:
+        verbose_name_plural = "Product Categories"
+        ordering = ['name']
+    
+    def __str__(self):
+        return self.name
+
+# Product Model
+class Product(models.Model):
+    CONDITION_CHOICES = [
+        ('NEW', 'New'),
+        ('USED', 'Used'),
+        ('REFURBISHED', 'Refurbished'),
+    ]
+    
+    currency = models.CharField(
+        max_length=3, 
+        default='USD',
+        choices=[
+            ('USD', 'US Dollar'),
+            ('EUR', 'Euro'),
+            ('GBP', 'British Pound'),
+            ('KES', 'Kenyan Shilling'),
+            ('NGN', 'Nigerian Naira')
+        ]
+    )
+    seller = models.ForeignKey('User', on_delete=models.CASCADE, related_name='products_for_sale')
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        validators=[MinValueValidator(0)]
+    )
+    condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='NEW')
+    quantity = models.PositiveIntegerField(default=1)
+    category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, related_name='products')
+    is_digital = models.BooleanField(default=False)
+    is_available = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    views = models.PositiveIntegerField(default=0)
+    slug = models.SlugField(unique=True, max_length=255)
+    
+    # Link to tracks if this is a music-related product
+    track = models.ForeignKey('Track', on_delete=models.SET_NULL, null=True, blank=True, related_name='marketplace_products')
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.title} by {self.seller.username}"
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title)
+            slug = base_slug
+            counter = 1
+            while Product.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+# Product Image Model
+class ProductImage(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='products/images/', validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png'])])
+    is_primary = models.BooleanField(default=False)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['is_primary', 'uploaded_at']
+    
+    def __str__(self):
+        return f"Image for {self.product.title}"
+
+# Shopping Cart Model
+class Cart(models.Model):
+    user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='shopping_cart')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"Cart of {self.user.username}"
+    
+    @property
+    def total_items(self):
+        return self.items.aggregate(total=models.Sum('quantity'))['total'] or 0
+    
+    @property
+    def subtotal(self):
+        return sum(item.total_price for item in self.items.all())
+
+# Cart Item Model
+class CartItem(models.Model):
+    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField(default=1)
+    added_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('cart', 'product')
+        ordering = ['-added_at']
+    
+    def __str__(self):
+        return f"{self.quantity} x {self.product.title}"
+    
+    @property
+    def total_price(self):
+        return self.product.price * self.quantity
+
+# Order Model
+class Order(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('PROCESSING', 'Processing'),
+        ('SHIPPED', 'Shipped'),
+        ('DELIVERED', 'Delivered'),
+        ('CANCELLED', 'Cancelled'),
+        ('REFUNDED', 'Refunded'),
+    ]
+    
+    buyer = models.ForeignKey('User', on_delete=models.CASCADE, related_name='purchases')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    shipping_address = models.TextField(blank=True)
+    payment_method = models.CharField(max_length=50, blank=True)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    transaction_id = models.CharField(max_length=100, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Order #{self.id} by {self.buyer.username}"
+
+# Order Item Model
+class OrderItem(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True)
+    quantity = models.PositiveIntegerField()
+    price_at_purchase = models.DecimalField(max_digits=10, decimal_places=2)
+    seller = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, related_name='sales')
+    
+    class Meta:
+        ordering = ['-id']
+    
+    def __str__(self):
+        return f"{self.quantity} x {self.product.title if self.product else '[Deleted Product]'}"
+    
+    @property
+    def total_price(self):
+        return self.price_at_purchase * self.quantity
+
+# Product Review Model
+class ProductReview(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
+    reviewer = models.ForeignKey('User', on_delete=models.CASCADE, related_name='product_reviews')
+    rating = models.PositiveIntegerField(choices=[(i, str(i)) for i in range(1, 6)])
+    comment = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('product', 'reviewer')
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Review by {self.reviewer.username} for {self.product.title}"
+
+# Wishlist Model
+class Wishlist(models.Model):
+    user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='wishlist')
+    products = models.ManyToManyField(Product, related_name='wishlisted_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Wishlist of {self.user.username}"
+
+
+
+
+
+

@@ -22,7 +22,7 @@ from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser,JSONParser
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
-from .models import User,SocialPost,PostSave,PostComment, PostLike, Track, Playlist, Profile, Comment, Like, Category, Notification,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment
+from .models import User,SocialPost,PostSave,PostComment, PostLike, Track, Playlist, Profile, Comment, Like, Category, Notification,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
 from .serializers import (
     UserSerializer,
     TrackSerializer,
@@ -43,7 +43,21 @@ from .serializers import (
     GroupMemberSerializer, 
     GroupJoinRequestSerializer, 
     GroupPostSerializer,
-    GroupPostAttachmentSerializer
+    GroupPostAttachmentSerializer,
+    WishlistSerializer,
+    ProductReviewSerializer,
+    OrderSerializer,
+    OrderItemSerializer,
+    CartSerializer,
+    CartItemSerializer,
+    ProductSerializer,
+    ProductImageSerializer,
+    ProductCategorySerializer
+
+
+
+
+
 )
 import logging
 import time
@@ -877,11 +891,18 @@ class GroupViewSet(viewsets.ModelViewSet):
             self.permission_classes = [IsAuthenticated, IsGroupCreator]
         return super().get_permissions()
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+    
+    
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -909,8 +930,8 @@ class GroupViewSet(viewsets.ModelViewSet):
         if not GroupMember.objects.filter(group=group, user=request.user).exists():
             raise PermissionDenied("You are not a member of this group")
         
-        members = GroupMember.objects.filter(group=group)
-        serializer = GroupMemberSerializer(members, many=True)
+        members = GroupMember.objects.filter(group=group).select_related('user', 'user__profile')
+        serializer = GroupMemberSerializer(members, many=True, context={'request': request})
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='request-join')
@@ -959,6 +980,20 @@ class GroupViewSet(viewsets.ModelViewSet):
         
         serializer = GroupJoinRequestSerializer(join_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+    @action(detail=True, methods=['post'], url_path='remove-member')
+    def remove_member(self, request, slug=None):
+        group = self.get_object()
+        if not GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists():
+            raise PermissionDenied("Only admins can remove members")
+        
+        user_id = request.data.get('user_id')
+        if not user_id:
+            return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        GroupMember.objects.filter(group=group, user_id=user_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
     @action(detail=True, methods=['get'], url_path='check-membership')
     def check_membership(self, request, slug=None):
         group = self.get_object()
@@ -989,6 +1024,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         group_slug = self.kwargs.get('group_slug')
         group = get_object_or_404(Group, slug=group_slug)
+        
         if not GroupMember.objects.filter(group=group, user=self.request.user).exists():
             raise PermissionDenied("You are not a member of this group")
         
@@ -1011,23 +1047,19 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                 file=file,
                 file_type=file_type
             )
+        return post  # Make sure to return the post object
 
     def create(self, request, *args, **kwargs):
-        group_slug = self.kwargs.get('group_slug')
-        group = get_object_or_404(Group, slug=group_slug)
-        
-        post_data = {
-            'content': request.data.get('content', ''),
-            'group': group.id,
-            'user': request.user.id
-        }
-        
-        serializer = self.get_serializer(data=post_data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
         
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        # This will call perform_create and return the post object
+        post = self.perform_create(serializer)  
+        
+        # Serialize the complete post with attachments
+        complete_serializer = self.get_serializer(post)
+        headers = self.get_success_headers(complete_serializer.data)
+        return Response(complete_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -1040,7 +1072,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                 {"error": "You don't have permission to delete this post"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        instance.delete()
+        self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class GroupJoinRequestViewSet(viewsets.ModelViewSet):
@@ -1088,6 +1120,274 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         join_request.save()
         
         return Response({"status": "Request rejected"}, status=status.HTTP_200_OK)
+
+
+
+
+
+
+# Add to existing views.py
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.all().order_by('-created_at')
+    serializer_class = ProductSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    lookup_field = 'slug'
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        seller_id = self.request.query_params.get('seller')
+        if seller_id:
+            try:
+                queryset = queryset.filter(seller__id=seller_id)
+            except ValueError:
+                logger.warning(f"Invalid seller ID: {seller_id}")
+                return queryset.none()
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        try:
+            logger.debug(f"Listing products with query params: {request.query_params}")
+            return super().list(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error listing products: {str(e)}", exc_info=True)
+            return Response(
+                {"error": f"An unexpected error occurred while fetching products: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def create(self, request, *args, **kwargs):
+        logger.debug(f"Received product creation request: {request.data}")
+        logger.debug(f"FILES: {request.FILES}")
+        if not request.user.is_authenticated:
+            logger.error("Unauthenticated user attempted to create a product")
+            return Response(
+                {"error": "Authentication required to create a product"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        try:
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error creating product: {str(e)}", exc_info=True)
+            return Response(
+                {"error": f"An unexpected error occurred while creating the product: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def perform_create(self, serializer):
+        # No need to set seller here, as it's handled in the serializer
+        serializer.save()
+
+    @action(detail=True, methods=['post'])
+    def upload_images(self, request, slug=None):
+        logger.debug(f"Received image upload request for slug {slug}: {request.FILES}")
+        try:
+            product = self.get_object()
+            if product.seller != request.user:
+                return Response(
+                    {"error": "You can only add images to your own products"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            images = request.FILES.getlist('images')
+            for image in images:
+                ProductImage.objects.create(product=product, image=image)
+            return Response(
+                {"status": "Images uploaded successfully"},
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            logger.error(f"Error uploading images: {str(e)}", exc_info=True)
+            return Response(
+                {"error": f"An unexpected error occurred while uploading images: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class ProductCategoryViewSet(viewsets.ModelViewSet):
+    queryset = ProductCategory.objects.all()
+    serializer_class = ProductCategorySerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+class CartViewSet(viewsets.ModelViewSet):
+    serializer_class = CartSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return Cart.objects.filter(user=self.request.user)
+    def destroy(self, request, *args, **kwargs):
+        # Handle DELETE requests for cart items
+        try:
+            item_id = kwargs.get('pk')
+            cart_item = CartItem.objects.get(id=item_id, cart__user=request.user)
+            cart_item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except CartItem.DoesNotExist:
+            return Response(
+                {"error": "Item not found in cart"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    @action(detail=False, methods=['get'])
+    def my_cart(self, request):
+        cart = get_object_or_404(Cart, user=request.user)
+        serializer = self.get_serializer(cart)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'])
+    def add_item(self, request):
+        product_id = request.data.get('product_id')
+        quantity = request.data.get('quantity', 1)
+        
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return Response(
+                {"error": "Product not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        cart, created = Cart.objects.get_or_create(user=request.user)
+        cart_item, created = CartItem.objects.get_or_create(
+            cart=cart,
+            product=product,
+            defaults={'quantity': quantity}
+        )
+        
+        if not created:
+            cart_item.quantity += int(quantity)
+            cart_item.save()
+        
+        return Response(
+            {"status": "Item added to cart"},
+            status=status.HTTP_200_OK
+        )
+    
+    @action(detail=False, methods=['post'])
+    def checkout(self, request):
+        cart = get_object_or_404(Cart, user=request.user)
+        
+        if cart.items.count() == 0:
+            return Response(
+                {"error": "Your cart is empty"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            order = Order.objects.create(
+                buyer=request.user,
+                status='PENDING',
+                total_amount=sum(item.product.price * item.quantity for item in cart.items.all())
+            )
+            
+            for item in cart.items.all():
+                OrderItem.objects.create(
+                    order=order,
+                    product=item.product,
+                    quantity=item.quantity,
+                    price_at_purchase=item.product.price,
+                    seller=item.product.seller
+                )
+                
+                # Update product quantity
+                item.product.quantity -= item.quantity
+                item.product.save()
+            
+            # Clear the cart
+            cart.items.all().delete()
+        
+        return Response(
+            OrderSerializer(order, context={'request': request}).data,
+            status=status.HTTP_201_CREATED
+        )
+
+class OrderViewSet(viewsets.ModelViewSet):
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return Order.objects.filter(Q(buyer=self.request.user) | Q(items__seller=self.request.user)).distinct()
+    
+    @action(detail=True, methods=['post'])
+    def update_status(self, request, pk=None):
+        order = self.get_object()
+        new_status = request.data.get('status')
+        
+        if new_status not in dict(Order.STATUS_CHOICES).keys():
+            return Response(
+                {"error": "Invalid status"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if order.items.filter(seller=request.user).exists() or order.buyer == request.user:
+            order.status = new_status
+            order.save()
+            return Response(
+                {"status": "Order status updated"},
+                status=status.HTTP_200_OK
+            )
+        
+        return Response(
+            {"error": "You don't have permission to update this order"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+class ProductReviewViewSet(viewsets.ModelViewSet):
+    serializer_class = ProductReviewSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    
+    def get_queryset(self):
+        product_id = self.kwargs.get('product_pk')
+        if product_id:
+            return ProductReview.objects.filter(product_id=product_id)
+        return ProductReview.objects.all()
+    
+    def perform_create(self, serializer):
+        product = get_object_or_404(Product, id=self.kwargs.get('product_pk'))
+        serializer.save(reviewer=self.request.user, product=product)
+
+class WishlistViewSet(viewsets.ModelViewSet):
+    serializer_class = WishlistSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return Wishlist.objects.filter(user=self.request.user)
+    
+    @action(detail=False, methods=['post'])
+    def add_product(self, request):
+        product_id = request.data.get('product_id')
+        
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return Response(
+                {"error": "Product not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        wishlist, created = Wishlist.objects.get_or_create(user=request.user)
+        wishlist.products.add(product)
+        
+        return Response(
+            {"status": "Product added to wishlist"},
+            status=status.HTTP_200_OK
+        )
+    
+    @action(detail=False, methods=['post'])
+    def remove_product(self, request):
+        product_id = request.data.get('product_id')
+        
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return Response(
+                {"error": "Product not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        wishlist = get_object_or_404(Wishlist, user=request.user)
+        wishlist.products.remove(product)
+        
+        return Response(
+            {"status": "Product removed from wishlist"},
+            status=status.HTTP_200_OK
+        )
 
 
 

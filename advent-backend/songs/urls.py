@@ -21,7 +21,16 @@ from .views import (
     ChoirViewSet,
     GroupViewSet,
     GroupJoinRequestViewSet, 
-    GroupPostViewSet
+    GroupPostViewSet,
+    WishlistViewSet,
+    ProductReviewViewSet,
+    OrderViewSet,
+    CartViewSet,
+    ProductCategoryViewSet,
+    ProductViewSet
+
+
+
 )
 
 router = DefaultRouter()
@@ -42,6 +51,11 @@ router.register(r'choirs', ChoirViewSet, basename='choirs')
 router.register(r'groups', GroupViewSet, basename='groups')
 router.register(r'group-join-requests', GroupJoinRequestViewSet, basename='group-join-requests')
 router.register(r'group-posts', GroupPostViewSet, basename='group-posts')
+router.register(r'marketplace/categories', ProductCategoryViewSet, basename='product-categories')
+router.register(r'marketplace/products', ProductViewSet, basename='products')
+router.register(r'marketplace/cart', CartViewSet, basename='cart')
+router.register(r'marketplace/orders', OrderViewSet, basename='orders')
+router.register(r'marketplace/wishlist', WishlistViewSet, basename='wishlist')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
@@ -54,6 +68,8 @@ social_posts_router.register(r'comments', PostCommentViewSet, basename='post-com
 groups_router = NestedSimpleRouter(router, r'groups', lookup='group')
 groups_router.register(r'join-requests', GroupJoinRequestViewSet, basename='group-join-requests')
 groups_router.register(r'posts', GroupPostViewSet, basename='group-posts')
+products_router = NestedSimpleRouter(router, r'marketplace/products', lookup='product')
+products_router.register(r'reviews', ProductReviewViewSet, basename='product-reviews')
 
 urlpatterns = [
     # Existing routes
@@ -87,6 +103,29 @@ urlpatterns = [
      #     path('groups/<slug:slug>/posts/', 
      #     GroupViewSet.as_view({'get': 'group_posts', 'post': 'group_posts'}), 
      #     name='group-posts'),
+
+     path('marketplace/products/<slug:slug>/upload-images/', 
+         ProductViewSet.as_view({'post': 'upload_images'}), 
+         name='product-upload-images'),
+    path('marketplace/cart/add-item/', 
+         CartViewSet.as_view({'post': 'add_item'}), 
+         name='cart-add-item'),
+    path('marketplace/cart/checkout/', 
+         CartViewSet.as_view({'post': 'checkout'}), 
+         name='cart-checkout'),
+    path('marketplace/orders/<int:pk>/update-status/', 
+         OrderViewSet.as_view({'post': 'update_status'}), 
+         name='order-update-status'),
+    path('marketplace/wishlist/add-product/', 
+         WishlistViewSet.as_view({'post': 'add_product'}), 
+         name='wishlist-add-product'),
+    path('marketplace/wishlist/remove-product/', 
+         WishlistViewSet.as_view({'post': 'remove_product'}), 
+         name='wishlist-remove-product'),
+     # Add this to your urlpatterns
+     path('marketplace/cart/items/<int:pk>/', 
+          CartViewSet.as_view({'delete': 'destroy'}), 
+          name='cart-item-delete'),
 ]
 
 urlpatterns += router.urls 
