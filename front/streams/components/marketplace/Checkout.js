@@ -13,10 +13,20 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchOrderById, processPayment } from '../../services/api';
 
-// Price formatting helper
+// Price formatting helper (consistent with Cart component)
 const formatPrice = (price, currency = 'USD') => {
+  const symbols = {
+    USD: '$',
+    EUR: '€',
+    GBP: '£',
+    KES: 'Ksh',
+    NGN: '₦',
+  };
+  
+  const symbol = symbols[currency] || currency;
   const numericPrice = typeof price === 'number' ? price : parseFloat(price) || 0;
-  return numericPrice.toFixed(2);
+  
+  return `${symbol}${numericPrice.toFixed(2)}`;
 };
 
 const Checkout = () => {
@@ -91,6 +101,10 @@ const Checkout = () => {
     );
   }
 
+  // Get currency from first item (consistent with Cart component)
+  const currency = order.items[0]?.product?.currency || 'USD';
+  const shippingCost = 200; // Updated to match Cart component's shipping cost
+
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.sectionTitle}>Order Summary</Text>
@@ -98,23 +112,40 @@ const Checkout = () => {
       <View style={styles.orderSummary}>
         {order.items.map((item, index) => {
           const itemPrice = item.price_at_purchase || item.product?.price || 0;
+          const itemCurrency = item.product?.currency || currency;
           return (
             <View key={index} style={styles.orderItem}>
               <Text style={styles.itemName}>{item.product?.title || 'Unknown Product'}</Text>
               <Text style={styles.itemPrice}>
-                {item.quantity} x ${formatPrice(itemPrice)}
+                {item.quantity} × {formatPrice(itemPrice, itemCurrency)}
               </Text>
               <Text style={styles.itemTotal}>
-                ${formatPrice(item.quantity * itemPrice)}
+                {formatPrice(item.quantity * itemPrice, itemCurrency)}
               </Text>
             </View>
           );
         })}
       </View>
 
-      <View style={styles.totalContainer}>
-        <Text style={styles.totalLabel}>Total:</Text>
-        <Text style={styles.totalAmount}>${formatPrice(order.total_amount)}</Text>
+      <View style={styles.summaryContainer}>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Subtotal:</Text>
+          <Text style={styles.summaryPrice}>
+            {formatPrice(order.subtotal || order.total_amount - shippingCost, currency)}
+          </Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Shipping:</Text>
+          <Text style={styles.summaryPrice}>
+            {formatPrice(shippingCost, currency)}
+          </Text>
+        </View>
+        <View style={[styles.summaryRow, styles.totalRow]}>
+          <Text style={styles.totalLabel}>Total:</Text>
+          <Text style={styles.totalAmount}>
+            {formatPrice(order.total_amount, currency)}
+          </Text>
+        </View>
       </View>
 
       <Text style={styles.sectionTitle}>Shipping Information</Text>
@@ -242,6 +273,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
     borderRadius: 8,
     padding: 12,
+    marginBottom: 16,
   },
   orderItem: {
     flexDirection: 'row',
@@ -266,16 +298,34 @@ const styles = StyleSheet.create({
     color: '#1D478B',
     textAlign: 'right',
   },
-  totalContainer: {
+  summaryContainer: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  },
+  summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 12,
+    marginBottom: 8,
+  },
+  summaryLabel: {
+    fontSize: 16,
+    color: '#555',
+  },
+  summaryPrice: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  totalRow: {
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderColor: '#eee',
+    borderColor: '#ddd',
   },
   totalLabel: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
   },
@@ -288,7 +338,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 12,
+    marginBottom: 16,
     fontSize: 16,
   },
   paymentMethods: {

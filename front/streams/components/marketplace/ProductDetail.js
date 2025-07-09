@@ -9,7 +9,8 @@ import {
   FlatList,
   Alert,
   Share,
-  ActivityIndicator
+  ActivityIndicator,
+  Linking
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -80,6 +81,28 @@ const ProductDetail = () => {
       console.error('Error sharing:', error);
       Alert.alert('Error', 'Failed to share product');
     }
+  };
+
+  const handleWhatsAppPress = () => {
+    if (!product.whatsapp_number) {
+      Alert.alert('Error', 'No WhatsApp number provided for this product');
+      return;
+    }
+    const url = `https://wa.me/${product.whatsapp_number}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'Could not open WhatsApp');
+    });
+  };
+
+  const handleCallPress = () => {
+    if (!product.contact_number) {
+      Alert.alert('Error', 'No contact number provided for this product');
+      return;
+    }
+    const url = `tel:${product.contact_number}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'Could not make a call');
+    });
   };
 
   // Enhanced price formatting with fallbacks
@@ -175,6 +198,32 @@ const ProductDetail = () => {
             <Icon name="star" size={16} color="#FFD700" />
             <Text style={styles.ratingText}>4.5 (24 reviews)</Text>
           </View>
+        </View>
+
+        {/* Contact Information Section */}
+        <View style={styles.contactInfoContainer}>
+          <Text style={styles.sectionTitle}>Contact Information</Text>
+          
+          {product.whatsapp_number && (
+            <TouchableOpacity style={styles.contactButton} onPress={handleWhatsAppPress}>
+              <Icon name="whatsapp" size={20} color="#25D366" />
+              <Text style={styles.contactButtonText}>Chat via WhatsApp</Text>
+            </TouchableOpacity>
+          )}
+          
+          {product.contact_number && (
+            <TouchableOpacity style={styles.contactButton} onPress={handleCallPress}>
+              <Icon name="phone" size={20} color="#1D478B" />
+              <Text style={styles.contactButtonText}>Call Seller</Text>
+            </TouchableOpacity>
+          )}
+          
+          {product.location && (
+            <View style={styles.locationContainer}>
+              <Icon name="map-marker" size={20} color="#FF6347" />
+              <Text style={styles.locationText}>{product.location}</Text>
+            </View>
+          )}
         </View>
 
         <Text style={styles.description}>{product.description || 'No description available'}</Text>
@@ -336,6 +385,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888',
     marginLeft: 4,
+  },
+  // New styles for contact information
+  contactInfoContainer: {
+    marginBottom: 16,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#eee',
+    paddingVertical: 12,
+  },
+  contactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  contactButtonText: {
+    marginLeft: 10,
+    fontSize: 16,
+    color: '#333',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  locationText: {
+    marginLeft: 10,
+    fontSize: 16,
+    color: '#555',
   },
   description: {
     fontSize: 16,

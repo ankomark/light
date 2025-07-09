@@ -59,8 +59,8 @@ const MarketplaceHome = () => {
     <ScrollView style={styles.container}>
       {/* Hero Banner */}
       <View style={styles.heroContainer}>
-        <Text style={styles.heroText}>Discover Unique Products</Text>
-        <Text style={styles.heroSubtext}>start Selling and buying </Text>
+        <Text style={styles.heroText}>Open Air Market</Text>
+        <Text style={styles.heroSubtext}> Sell and Buy Products </Text>
       </View>
 
       {/* Categories */}

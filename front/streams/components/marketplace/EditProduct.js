@@ -8,18 +8,32 @@ import {
   TouchableOpacity, 
   Alert,
   Image,
-  ActivityIndicator
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
-import { fetchProductById, updateProduct } from '../../services/api';
+import { fetchProductById, updateProduct, fetchProductCategories } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+
+// Constants
+const COLORS = {
+  primary: '#1D478B',
+  secondary: '#2E8B57',
+  error: '#FF6347',
+  warning: '#FFA500',
+  gray: '#888',
+  lightGray: '#f5f5f5',
+  white: '#fff',
+  black: '#333'
+};
+
+const DEFAULT_IMAGE = 'https://via.placeholder.com/120';
 
 const EditProduct = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { productId } = route.params;
+  const { slug } = route.params;
   const { currentUser } = useAuth();
   const [formData, setFormData] = useState({
     title: '',
@@ -30,6 +44,7 @@ const EditProduct = () => {
     category: '',
     is_digital: false,
   });
+  const [categories, setCategories] = useState([]);
   const [existingImages, setExistingImages] = useState([]);
   const [newImages, setNewImages] = useState([]);
   const [removedImages, setRemovedImages] = useState([]);
@@ -38,39 +53,68 @@ const EditProduct = () => {
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
-    const loadProduct = async () => {
-      try {
-        const product = await fetchProductById(productId);
-        
-        if (product.seller.id !== currentUser?.id) {
-          Alert.alert('Error', 'You can only edit your own products');
-          navigation.goBack();
-          return;
-        }
+  if (!currentUser || !currentUser.id) {
+    console.log('Waiting for currentUser to be loaded...');
+    return;
+  }
 
-        setFormData({
-          title: product.title,
-          description: product.description,
-          price: product.price.toString(),
-          quantity: product.quantity.toString(),
-          condition: product.condition,
-          category: product.category?.id.toString() || '',
-          is_digital: product.is_digital,
-        });
-        
-        setExistingImages(product.images);
-        if (product.track) setTrack(product.track);
-      } catch (error) {
-        console.error('Error loading product:', error);
-        Alert.alert('Error', 'Failed to load product details');
-        navigation.goBack();
-      } finally {
-        setLoading(false);
+  const loadData = async () => {
+    try {
+      setLoading(true);
+
+      const [product, categoriesData] = await Promise.all([
+        fetchProductById(slug),
+        fetchProductCategories()
+      ]);
+
+      console.log('✅ Product data:', product);
+      console.log('✅ Current user:', currentUser);
+
+      if (!product) {
+        throw new Error('Product data is empty');
       }
-    };
 
-    loadProduct();
-  }, [productId]);
+      // Extract seller ID from product
+      const sellerId =
+        product?.seller?.id ||
+        product?.seller?.profile?.user_id ||
+        product?.seller;
+
+      const currentUserId = currentUser.id;
+
+      console.log('🔎 Seller ID:', sellerId, '| Current User ID:', currentUserId);
+
+      if (!sellerId || sellerId !== currentUserId) {
+        throw new Error(`You can only edit your own products. Seller ID: ${sellerId}, Your ID: ${currentUserId}`);
+      }
+
+      // Populate form data
+      setFormData({
+        title: product.title || '',
+        description: product.description || '',
+        price: product.price?.toString() || '',
+        quantity: product.quantity?.toString() || '',
+        condition: product.condition || 'NEW',
+        category: product.category?.name || product.category || '',
+        is_digital: product.is_digital || false,
+      });
+
+      setCategories(categoriesData || []);
+      setExistingImages(product.images || []);
+      if (product.track) setTrack(product.track);
+
+    } catch (error) {
+      console.error('❌ Error loading product:', error);
+      Alert.alert('Error', error.message || 'Failed to load product details');
+      navigation.goBack();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  loadData();
+}, [slug, currentUser]);
+
 
   const handleChange = (name, value) => {
     setFormData({
@@ -93,7 +137,7 @@ const EditProduct = () => {
       quality: 0.8,
     });
 
-    if (!result.cancelled) {
+    if (!result.canceled) {
       setNewImages([...newImages, result.uri]);
     }
   };
@@ -122,23 +166,21 @@ const EditProduct = () => {
 
     try {
       setUpdating(true);
-      
-      // Prepare FormData for file upload
       const data = new FormData();
       
-      // Append product data
+      // Append basic fields
       data.append('title', formData.title);
       data.append('description', formData.description);
       data.append('price', parseFloat(formData.price));
-      data.append('quantity', parseInt(formData.quantity));
+      data.append('quantity', parseInt(formData.quantity || 0));
       data.append('condition', formData.condition);
       if (formData.category) data.append('category', formData.category);
-      data.append('is_digital', formData.is_digital);
+      data.append('is_digital', formData.is_digital.toString());
       if (track) data.append('track', track.id);
 
       // Append new images
       newImages.forEach((uri, index) => {
-        data.append(`images`, {
+        data.append('images', {
           uri,
           name: `product_image_${index}.jpg`,
           type: 'image/jpeg'
@@ -150,12 +192,12 @@ const EditProduct = () => {
         data.append('remove_images', id);
       });
 
-      await updateProduct(productId, data);
+      await updateProduct(slug, data);
       Alert.alert('Success', 'Product updated successfully');
       navigation.goBack();
     } catch (error) {
       console.error('Error updating product:', error);
-      Alert.alert('Error', 'Failed to update product');
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to update product');
     } finally {
       setUpdating(false);
     }
@@ -164,7 +206,7 @@ const EditProduct = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1D478B" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
       </View>
     );
   }
@@ -207,13 +249,23 @@ const EditProduct = () => {
         />
       </View>
 
+      <TextInput
+        style={styles.input}
+        placeholder="Category*"
+        value={formData.category}
+        onChangeText={(text) => handleChange('category', text)}
+      />
+
       <Text style={styles.sectionTitle}>Product Images*</Text>
       <Text style={styles.subtitle}>Keep at least one image</Text>
       
       <View style={styles.imageContainer}>
         {existingImages.map((image) => (
           <View key={image.id} style={styles.imageWrapper}>
-            <Image source={{ uri: image.image_url }} style={styles.image} />
+            <Image 
+              source={{ uri: image.image_url }} 
+              style={styles.image}
+            />
             <TouchableOpacity 
               style={styles.removeImageButton}
               onPress={() => removeExistingImage(image.id)}
@@ -225,7 +277,10 @@ const EditProduct = () => {
         
         {newImages.map((uri, index) => (
           <View key={`new-${index}`} style={styles.imageWrapper}>
-            <Image source={{ uri }} style={styles.image} />
+            <Image 
+              source={{ uri }} 
+              style={styles.image}
+            />
             <TouchableOpacity 
               style={styles.removeImageButton}
               onPress={() => removeNewImage(index)}
@@ -236,8 +291,11 @@ const EditProduct = () => {
         ))}
         
         {(existingImages.length + newImages.length) < 5 && (
-          <TouchableOpacity style={styles.addImageButton} onPress={pickImage}>
-            <Icon name="plus" size={24} color="#888" />
+          <TouchableOpacity 
+            style={styles.addImageButton} 
+            onPress={pickImage}
+          >
+            <Icon name="plus" size={24} color={COLORS.gray} />
           </TouchableOpacity>
         )}
       </View>
@@ -280,7 +338,7 @@ const EditProduct = () => {
         disabled={updating}
       >
         {updating ? (
-          <Text style={styles.submitButtonText}>Updating Product...</Text>
+          <ActivityIndicator color={COLORS.white} />
         ) : (
           <Text style={styles.submitButtonText}>Update Product</Text>
         )}
@@ -293,9 +351,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+    padding: 16,
   },
   contentContainer: {
-    padding: 16,
+    paddingBottom: 32,
   },
   loadingContainer: {
     flex: 1,
@@ -307,18 +366,19 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 16,
     marginBottom: 8,
-    color: '#333',
+    color: COLORS.black,
   },
   subtitle: {
     fontSize: 14,
-    color: '#888',
+    color: COLORS.gray,
     marginBottom: 12,
   },
   input: {
-    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: COLORS.lightGray,
     borderRadius: 8,
     padding: 12,
-    marginBottom: 12,
+    marginBottom: 16,
     fontSize: 16,
   },
   textArea: {
@@ -338,8 +398,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   imageWrapper: {
-    width: 80,
-    height: 80,
+    width: 100,
+    height: 100,
     marginRight: 8,
     marginBottom: 8,
     position: 'relative',
@@ -351,9 +411,9 @@ const styles = StyleSheet.create({
   },
   removeImageButton: {
     position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#FF6347',
+    top: 4,
+    right: 4,
+    backgroundColor: COLORS.error,
     width: 24,
     height: 24,
     borderRadius: 12,
@@ -361,10 +421,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   addImageButton: {
-    width: 80,
-    height: 80,
+    width: 100,
+    height: 100,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.lightGray,
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
@@ -375,7 +435,7 @@ const styles = StyleSheet.create({
   radioLabel: {
     fontSize: 16,
     marginBottom: 8,
-    color: '#555',
+    color: COLORS.black,
   },
   radioOptions: {
     flexDirection: 'row',
@@ -390,44 +450,39 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#888',
+    borderColor: COLORS.primary,
+    marginRight: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
   },
   radioDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#1D478B',
+    backgroundColor: COLORS.primary,
   },
   radioText: {
     fontSize: 14,
-    color: '#333',
   },
   linkButton: {
-    backgroundColor: '#f0f7ff',
-    borderWidth: 1,
-    borderColor: '#1D478B',
-    borderRadius: 8,
     padding: 12,
+    backgroundColor: COLORS.lightGray,
+    borderRadius: 8,
     marginBottom: 16,
   },
   linkButtonText: {
-    color: '#1D478B',
-    fontSize: 16,
+    color: COLORS.primary,
     textAlign: 'center',
   },
   submitButton: {
-    backgroundColor: '#1D478B',
-    borderRadius: 8,
+    backgroundColor: COLORS.primary,
     padding: 16,
+    borderRadius: 8,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 32,
   },
   submitButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontWeight: 'bold',
     fontSize: 16,
   },

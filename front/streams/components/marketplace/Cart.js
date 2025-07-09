@@ -8,11 +8,13 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchCart, removeFromCart, checkoutCart } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+import NetInfo from '@react-native-community/netinfo';
 
 // Price formatting helper
 const formatPrice = (price, currency) => {
@@ -37,40 +39,66 @@ const Cart = () => {
   const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [subtotal, setSubtotal] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
 
-  useEffect(() => {
-    const loadCart = async () => {
-      try {
-        const cartData = await fetchCart();
-        
-        // Ensure items array exists
-        const items = cartData?.items || [];
-        setCartItems(items);
-        
-        // Calculate subtotal
-        const total = items.reduce((sum, item) => {
-          // Ensure product and price exist
-          const price = item.product?.price || 0;
-          return sum + (price * item.quantity);
-        }, 0);
-        
-        setSubtotal(total);
-      } catch (error) {
-        console.error('Error loading cart:', error);
-        Alert.alert('Error', 'Failed to load cart data');
-        setCartItems([]);
-        setSubtotal(0);
-      } finally {
-        setLoading(false);
+  // Load cart data
+  const loadCartData = async () => {
+    try {
+      const cartData = await fetchCart();
+      const items = cartData?.items || [];
+      setCartItems(items);
+      
+      // Calculate subtotal
+      const total = items.reduce((sum, item) => {
+        const price = item.product?.price || 0;
+        return sum + (price * item.quantity);
+      }, 0);
+      
+      setSubtotal(total);
+      return true;
+    } catch (error) {
+      console.error('Error loading cart:', error);
+      if (error.response?.status !== 401) { // Don't show alert for unauthorized
+        Alert.alert(
+          'Error', 
+          isOnline ? 'Failed to load cart data' : 'You are offline. Connect to load your cart.'
+        );
       }
+      return false;
+    }
+  };
+
+  // Initial load and network status listener
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected);
+      if (state.isConnected && currentUser) {
+        loadCartData();
+      }
+    });
+
+    const loadInitialData = async () => {
+      setLoading(true);
+      await loadCartData();
+      setLoading(false);
     };
 
-    loadCart();
-  }, []);
+    loadInitialData();
+    return () => unsubscribe();
+  }, [currentUser]);
 
+  // Handle refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadCartData();
+    setRefreshing(false);
+  };
+
+  // Remove item from cart
   const handleRemoveItem = async (itemId) => {
     try {
-      await removeFromCart(itemId);
+      // Optimistic update
       const updatedItems = cartItems.filter(item => item.id !== itemId);
       setCartItems(updatedItems);
       
@@ -80,12 +108,20 @@ const Cart = () => {
         return sum + (price * item.quantity);
       }, 0);
       setSubtotal(newTotal);
+
+      // API call
+      await removeFromCart(itemId);
     } catch (error) {
       console.error('Error removing item:', error);
-      Alert.alert('Error', 'Failed to remove item from cart');
+      // Revert on error
+      const success = await loadCartData();
+      if (!success) {
+        Alert.alert('Error', 'Failed to remove item. Please try again.');
+      }
     }
   };
 
+  // Handle checkout
   const handleCheckout = async () => {
     if (!currentUser) {
       Alert.alert('Login Required', 'Please login to proceed to checkout', [
@@ -167,6 +203,14 @@ const Cart = () => {
           </View>
         )}
         contentContainerStyle={styles.cartList}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#1D478B']}
+            tintColor="#1D478B"
+          />
+        }
       />
 
       <View style={styles.summaryContainer}>
@@ -176,19 +220,22 @@ const Cart = () => {
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Shipping:</Text>
-          <Text style={styles.summaryPrice}>{formatPrice(5, currency)}</Text>
+          <Text style={styles.summaryPrice}>{formatPrice(200, currency)}</Text>
         </View>
         <View style={[styles.summaryRow, styles.totalRow]}>
           <Text style={styles.totalLabel}>Total:</Text>
-          <Text style={styles.totalPrice}>{formatPrice(subtotal + 5, currency)}</Text>
+          <Text style={styles.totalPrice}>{formatPrice(subtotal + 200, currency)}</Text>
         </View>
       </View>
 
       <TouchableOpacity 
         style={styles.checkoutButton}
         onPress={handleCheckout}
+        disabled={!isOnline}
       >
-        <Text style={styles.checkoutButtonText}>Proceed to Checkout</Text>
+        <Text style={styles.checkoutButtonText}>
+          {isOnline ? 'Proceed to Checkout' : 'Offline - Checkout Unavailable'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -324,6 +371,10 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 8,
     alignItems: 'center',
+    opacity: 1,
+  },
+  checkoutButtonDisabled: {
+    backgroundColor: '#cccccc',
   },
   checkoutButtonText: {
     color: '#fff',

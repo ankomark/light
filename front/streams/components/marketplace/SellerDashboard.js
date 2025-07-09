@@ -14,7 +14,61 @@ import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts, fetchOrders, deleteProduct } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 
+// Constants
+const COLORS = {
+  primary: '#1D478B',
+  secondary: '#2E8B57',
+  error: '#FF6347',
+  warning: '#FFA500',
+  gray: '#888',
+  lightGray: '#f5f5f5',
+  white: '#fff',
+  black: '#333'
+};
+
+const SHADOW = {
+  sm: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  md: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  }
+};
+
+const CURRENCY_SYMBOLS = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  KES: 'Ksh',
+  NGN: '₦',
+};
+
+const STATUS_COLORS = {
+  delivered: '#2E8B57',
+  shipped: '#1D478B',
+  processing: '#FFA500',
+  default: '#888'
+};
+
+const DEFAULT_IMAGE = 'https://via.placeholder.com/120';
+
+// Helper Functions
+const formatPrice = (price, currency = 'USD') => {
+  const symbol = CURRENCY_SYMBOLS[currency] || currency;
+  const numericPrice = typeof price === 'number' ? price : parseFloat(price) || 0;
+  return `${symbol}${numericPrice.toFixed(2)}`;
+};
+
 const SellerDashboard = () => {
+  // Hooks and State
   const navigation = useNavigation();
   const { currentUser, isAuthenticated, isLoading: authLoading } = useAuth();
   const [products, setProducts] = useState([]);
@@ -22,6 +76,7 @@ const SellerDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('products');
 
+  // Data Fetching
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -50,6 +105,7 @@ const SellerDashboard = () => {
     loadData();
   }, [isAuthenticated, currentUser]);
 
+  // Business Logic
   const handleDeleteProduct = async (slug) => {
     Alert.alert(
       'Delete Product',
@@ -64,7 +120,6 @@ const SellerDashboard = () => {
           onPress: async () => {
             try {
               await deleteProduct(slug);
-              // Refresh products after deletion
               const productsData = await fetchProducts({ seller_id: currentUser?.id });
               setProducts(productsData);
               Alert.alert('Success', 'Product deleted successfully');
@@ -80,17 +135,25 @@ const SellerDashboard = () => {
   };
 
   const calculateEarnings = () => {
-    return orders.reduce((total, order) => {
-      return total + (order.total_amount || 0);
-    }, 0);
+    try {
+      if (!Array.isArray(orders)) return 0;
+      return orders.reduce((sum, order) => {
+        const amount = Number(order?.total_amount);
+        return sum + (isNaN(amount) ? 0 : amount);
+      }, 0);
+    } catch (error) {
+      console.error('Error calculating earnings:', error);
+      return 0;
+    }
   };
 
   const getOrderStatusCount = (status) => {
     return orders.filter(order => 
-      order.status && order.status.toLowerCase() === status.toLowerCase()
+      order.status?.toLowerCase() === status.toLowerCase()
     ).length;
   };
 
+  // Render Components
   const renderHeader = () => (
     <>
       <View style={styles.statsContainer}>
@@ -103,66 +166,59 @@ const SellerDashboard = () => {
           <Text style={styles.statLabel}>Orders</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>${calculateEarnings().toFixed(2)}</Text>
+          <Text style={styles.statValue}>
+            {formatPrice(calculateEarnings(), 'USD')}
+          </Text>
           <Text style={styles.statLabel}>Earnings</Text>
         </View>
       </View>
 
       {orders.length > 0 && (
         <View style={styles.statusContainer}>
-          <View style={styles.statusCard}>
-            <Text style={styles.statusValue}>{getOrderStatusCount('processing')}</Text>
-            <Text style={styles.statusLabel}>Processing</Text>
-          </View>
-          <View style={styles.statusCard}>
-            <Text style={styles.statusValue}>{getOrderStatusCount('shipped')}</Text>
-            <Text style={styles.statusLabel}>Shipped</Text>
-          </View>
-          <View style={styles.statusCard}>
-            <Text style={styles.statusValue}>{getOrderStatusCount('delivered')}</Text>
-            <Text style={styles.statusLabel}>Delivered</Text>
-          </View>
+          {['processing', 'shipped', 'delivered'].map((status) => (
+            <View key={status} style={styles.statusCard}>
+              <Text style={styles.statusValue}>{getOrderStatusCount(status)}</Text>
+              <Text style={styles.statusLabel}>
+                {status.charAt(0).toUpperCase() + status.slice(1)}
+              </Text>
+            </View>
+          ))}
         </View>
       )}
 
       <View style={styles.tabsContainer}>
-        <TouchableOpacity 
-          style={[
-            styles.tabButton,
-            activeTab === 'products' && styles.activeTab
-          ]}
-          onPress={() => setActiveTab('products')}
-        >
-          <Text style={[
-            styles.tabText,
-            activeTab === 'products' && styles.activeTabText
-          ]}>
-            My Products
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[
-            styles.tabButton,
-            activeTab === 'orders' && styles.activeTab
-          ]}
-          onPress={() => setActiveTab('orders')}
-        >
-          <Text style={[
-            styles.tabText,
-            activeTab === 'orders' && styles.activeTabText
-          ]}>
-            My Orders
-          </Text>
-        </TouchableOpacity>
+        {['products', 'orders'].map((tab) => (
+          <TouchableOpacity 
+            key={tab}
+            style={[
+              styles.tabButton,
+              activeTab === tab && styles.activeTab
+            ]}
+            onPress={() => setActiveTab(tab)}
+          >
+            <Text style={[
+              styles.tabText,
+              activeTab === tab && styles.activeTabText
+            ]}>
+              My {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
     </>
   );
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Icon name={activeTab === 'products' ? "box-open" : "shopping-bag"} size={40} color="#888" />
+      <Icon 
+        name={activeTab === 'products' ? "box-open" : "shopping-bag"} 
+        size={40} 
+        color={COLORS.gray} 
+      />
       <Text style={styles.emptyText}>
-        {activeTab === 'products' ? 'You have no products listed yet' : 'You have no orders yet'}
+        {activeTab === 'products' 
+          ? 'You have no products listed yet' 
+          : 'You have no orders yet'}
       </Text>
       {activeTab === 'products' && (
         <TouchableOpacity 
@@ -178,21 +234,23 @@ const SellerDashboard = () => {
   const renderProductItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.productCard}
-      onPress={() => {
-        // Only allow editing if current user is the owner
-        if (item.is_owner) {
-          navigation.navigate('EditProduct', { slug: item.slug })
-        }
-      }}
+      onPress={() => navigation.navigate(
+        item.is_owner ? 'EditProduct' : 'ProductDetail', 
+        { slug: item.slug }
+      )}
     >
       <Image 
-        source={{ uri: item.images?.[0]?.image_url || 'https://via.placeholder.com/120' }} 
+        source={{ uri: item.images?.[0]?.image_url || DEFAULT_IMAGE }} 
         style={styles.productImage}
         resizeMode="cover"
       />
       <View style={styles.productInfo}>
-        <Text style={styles.productTitle} numberOfLines={1}>{item.title || 'Untitled Product'}</Text>
-        <Text style={styles.productPrice}>${(item.price ? Number(item.price) : 0).toFixed(2)}</Text>
+        <Text style={styles.productTitle} numberOfLines={1}>
+          {item.title || 'Untitled Product'}
+        </Text>
+        <Text style={styles.productPrice}>
+          {formatPrice(item.price, item.currency)}
+        </Text>
         <Text style={[
           styles.productStock,
           item.quantity <= 0 && styles.outOfStock
@@ -201,60 +259,58 @@ const SellerDashboard = () => {
         </Text>
       </View>
       
-      {/* Only show actions for products owned by current user */}
       {item.is_owner && (
         <View style={styles.productActions}>
           <TouchableOpacity 
             style={styles.actionButton}
             onPress={() => navigation.navigate('EditProduct', { slug: item.slug })}
           >
-            <Icon name="edit" size={18} color="#1D478B" />
+            <Icon name="edit" size={18} color={COLORS.primary} />
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.actionButton}
             onPress={() => handleDeleteProduct(item.slug)}
           >
-            <Icon name="trash" size={18} color="#FF6347" />
+            <Icon name="trash" size={18} color={COLORS.error} />
           </TouchableOpacity>
         </View>
       )}
     </TouchableOpacity>
   );
 
-  const renderOrderItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.orderCard}
-      onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
-    >
-      <View style={styles.orderHeader}>
-        <Text style={styles.orderId}>Order #{item.id}</Text>
-        <Text style={[
-          styles.orderStatus,
-          { 
-            color: item.status === 'delivered' ? '#2E8B57' : 
-                  item.status === 'shipped' ? '#1D478B' : 
-                  item.status === 'processing' ? '#FFA500' : '#888'
-          }
-        ]}>
-          {item.status || 'Unknown'}
+  const renderOrderItem = ({ item }) => {
+    const currency = item.items?.[0]?.product?.currency || 'USD';
+    const statusColor = STATUS_COLORS[item.status?.toLowerCase()] || STATUS_COLORS.default;
+    
+    return (
+      <TouchableOpacity 
+        style={styles.orderCard}
+        onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
+      >
+        <View style={styles.orderHeader}>
+          <Text style={styles.orderId}>Order #{item.id}</Text>
+          <Text style={[styles.orderStatus, { color: statusColor }]}>
+            {item.status || 'Unknown'}
+          </Text>
+        </View>
+        <Text style={styles.orderDate}>
+          {item.ordered_at ? new Date(item.ordered_at).toLocaleDateString() : 'No date'}
         </Text>
-      </View>
-      <Text style={styles.orderDate}>
-        {item.ordered_at ? new Date(item.ordered_at).toLocaleDateString() : 'No date'}
-      </Text>
-      <Text style={styles.orderTotal}>
-        Total: ${(item.total_amount || 0).toFixed(2)}
-      </Text>
-      <Text style={styles.orderItems}>
-        {item.items?.length || 0} item{item.items?.length !== 1 ? 's' : ''}
-      </Text>
-    </TouchableOpacity>
-  );
+        <Text style={styles.orderTotal}>
+          Total: {formatPrice(item.total_amount, currency)}
+        </Text>
+        <Text style={styles.orderItems}>
+          {item.items?.length || 0} item{item.items?.length !== 1 ? 's' : ''}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
 
+  // Conditional Rendering
   if (authLoading || (isAuthenticated && loading)) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1D478B" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
       </View>
     );
   }
@@ -262,7 +318,7 @@ const SellerDashboard = () => {
   if (!isAuthenticated) {
     return (
       <View style={styles.authContainer}>
-        <Icon name="user-circle" size={50} color="#888" />
+        <Icon name="user-circle" size={50} color={COLORS.gray} />
         <Text style={styles.authText}>Please login to access seller dashboard</Text>
         <TouchableOpacity 
           style={styles.authButton}
@@ -274,6 +330,7 @@ const SellerDashboard = () => {
     );
   }
 
+  // Main Render
   return (
     <View style={styles.container}>
       <FlatList
@@ -290,7 +347,7 @@ const SellerDashboard = () => {
           style={styles.floatingButton}
           onPress={() => navigation.navigate('AddProduct')}
         >
-          <Icon name="plus" size={24} color="#fff" />
+          <Icon name="plus" size={24} color={COLORS.white} />
         </TouchableOpacity>
       )}
     </View>
@@ -300,7 +357,7 @@ const SellerDashboard = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
   },
   loadingContainer: {
     flex: 1,
@@ -315,18 +372,18 @@ const styles = StyleSheet.create({
   },
   authText: {
     fontSize: 18,
-    color: '#555',
+    color: COLORS.black,
     marginVertical: 20,
     textAlign: 'center',
   },
   authButton: {
-    backgroundColor: '#1D478B',
+    backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 30,
     borderRadius: 8,
   },
   authButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -337,7 +394,7 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.lightGray,
     borderRadius: 8,
     padding: 16,
     marginHorizontal: 4,
@@ -346,12 +403,12 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1D478B',
+    color: COLORS.primary,
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 14,
-    color: '#888',
+    color: COLORS.gray,
   },
   statusContainer: {
     flexDirection: 'row',
@@ -361,32 +418,28 @@ const styles = StyleSheet.create({
   },
   statusCard: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     borderRadius: 8,
     padding: 12,
     marginHorizontal: 4,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    ...SHADOW.sm,
   },
   statusValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: COLORS.black,
     marginBottom: 4,
   },
   statusLabel: {
     fontSize: 12,
-    color: '#888',
+    color: COLORS.gray,
     textTransform: 'uppercase',
   },
   tabsContainer: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderColor: '#eee',
+    borderColor: COLORS.lightGray,
     marginHorizontal: 16,
   },
   tabButton: {
@@ -396,18 +449,18 @@ const styles = StyleSheet.create({
   },
   activeTab: {
     borderBottomWidth: 2,
-    borderColor: '#1D478B',
+    borderColor: COLORS.primary,
   },
   tabText: {
     fontSize: 16,
-    color: '#888',
+    color: COLORS.gray,
     fontWeight: '500',
   },
   activeTabText: {
-    color: '#1D478B',
+    color: COLORS.primary,
   },
   contentContainer: {
-    flex: 1,
+    flexGrow: 1,
     padding: 16,
   },
   emptyContainer: {
@@ -418,33 +471,29 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#888',
+    color: COLORS.gray,
     marginTop: 16,
     marginBottom: 24,
     textAlign: 'center',
   },
   addButton: {
-    backgroundColor: '#1D478B',
+    backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
   },
   addButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontWeight: 'bold',
     fontSize: 16,
   },
   productCard: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     borderRadius: 8,
     marginBottom: 16,
     padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    ...SHADOW.sm,
   },
   productImage: {
     width: 80,
@@ -460,20 +509,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 4,
-    color: '#333',
+    color: COLORS.black,
   },
   productPrice: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1D478B',
+    color: COLORS.primary,
     marginBottom: 4,
   },
   productStock: {
     fontSize: 14,
-    color: '#2E8B57',
+    color: COLORS.secondary,
   },
   outOfStock: {
-    color: '#FF6347',
+    color: COLORS.error,
   },
   productActions: {
     flexDirection: 'row',
@@ -484,15 +533,11 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   orderCard: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    ...SHADOW.sm,
   },
   orderHeader: {
     flexDirection: 'row',
@@ -502,7 +547,7 @@ const styles = StyleSheet.create({
   orderId: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: COLORS.black,
   },
   orderStatus: {
     fontSize: 14,
@@ -511,18 +556,18 @@ const styles = StyleSheet.create({
   },
   orderDate: {
     fontSize: 14,
-    color: '#888',
+    color: COLORS.gray,
     marginBottom: 4,
   },
   orderTotal: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1D478B',
+    color: COLORS.primary,
     marginBottom: 4,
   },
   orderItems: {
     fontSize: 14,
-    color: '#555',
+    color: COLORS.black,
   },
   floatingButton: {
     position: 'absolute',
@@ -531,14 +576,10 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#1D478B',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+    ...SHADOW.md,
   },
 });
 

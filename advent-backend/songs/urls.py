@@ -27,7 +27,9 @@ from .views import (
     OrderViewSet,
     CartViewSet,
     ProductCategoryViewSet,
-    ProductViewSet
+    ProductViewSet,
+    LiveEventViewSet
+
 
 
 
@@ -56,6 +58,7 @@ router.register(r'marketplace/products', ProductViewSet, basename='products')
 router.register(r'marketplace/cart', CartViewSet, basename='cart')
 router.register(r'marketplace/orders', OrderViewSet, basename='orders')
 router.register(r'marketplace/wishlist', WishlistViewSet, basename='wishlist')
+router.register(r'live-events', LiveEventViewSet, basename='live-events')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
@@ -126,6 +129,11 @@ urlpatterns = [
      path('marketplace/cart/items/<int:pk>/', 
           CartViewSet.as_view({'delete': 'destroy'}), 
           name='cart-item-delete'),
+          
+     path('live-events/featured/', 
+         LiveEventViewSet.as_view({'get': 'featured'}), 
+         name='live-event-featured'),
+
 ]
 
 urlpatterns += router.urls 

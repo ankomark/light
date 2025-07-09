@@ -41,7 +41,11 @@ import EditProduct from './components/marketplace/EditProduct';
 import AddProduct from './components/marketplace/AddProduct';
 import SellerDashboard from './components/marketplace/SellerDashboard';
 import Checkout from './components/marketplace/Checkout';
-
+import LiveEventForm from './components/Live/LiveEventForm';
+import LiveEventPlayer from './components/Live/LiveEventPlayer';
+import LiveEventsList from './components/Live/LiveEventsList';
+import LiveHomeScreen from './components/Live/LiveHomeScreen';
+import { useRoute } from '@react-navigation/native';
 
 
 const Stack = createNativeStackNavigator();
@@ -62,6 +66,7 @@ const HymnalAppWrapper = ({ navigation }) => (
 
 
 const App = () => {
+  
 
     return (
        
@@ -110,6 +115,12 @@ const App = () => {
                 <Stack.Screen name="SellerDashboard" component={SellerDashboardWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
+                <Stack.Screen name="LiveHomeScreen" component={LiveHomeScreenWrapper} />
+                <Stack.Screen name="LiveEvents" component={LiveEventsListWrapper} />
+                <Stack.Screen name="LiveEventForm" component={LiveEventFormWrapper} />
+                <Stack.Screen name="LiveEventPlayer" component={LiveEventPlayerWrapper} options={{ headerShown: false, presentation: 'modal' }}/>
+                
+                
               
 
             </Stack.Navigator>
@@ -117,6 +128,33 @@ const App = () => {
        
     );
 };
+const LiveHomeScreenWrapper = ({ navigation,route }) => (
+ 
+  <View style={{ flex: 1 }}>
+    <Header navigation={navigation} />
+    <LiveHomeScreen navigation={navigation} route={route} />
+  </View>
+);
+
+const LiveEventsListWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1 }}>
+    <Header navigation={navigation} />
+    <LiveEventsList navigation={navigation} route={route} />
+  </View>
+);
+
+const LiveEventFormWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1 }}>
+    <Header navigation={navigation} />
+    <LiveEventForm navigation={navigation} route={route} />
+  </View>
+);
+
+const LiveEventPlayerWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1 }}>
+    <LiveEventPlayer navigation={navigation} route={route} />
+  </View>
+);
 
 const GroupListWrapper = ({ navigation }) => (
   <View style={{ flex: 1 }}>

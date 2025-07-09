@@ -1,6 +1,6 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
+import { extractYoutubeId } from '../utils/youtubeUtils';
 // Base URL configuration
 export const API_BASE = 'http://192.168.1.126:8000';
 export const API_URL = `${API_BASE}/api`;
@@ -699,7 +699,7 @@ export const fetchProductCategories = async () => {
 export const fetchProducts = async (params = {}) => {
   try {
     const response = await axios.get(`${API_URL}/marketplace/products/`, { params });
-    
+    console.log('Raw FetchProducts response:', response.data);
     const products = response.data.map(product => {
       // Directly use backend's numeric price_value and currency code
       const price = parseFloat(product.price);
@@ -883,6 +883,272 @@ export const removeFromWishlist = async (slug) => {
   });
 };
 
+
+
+
+// Enhanced liveevent endpoints with comprehensive debugging
+// Utility function for consistent logging
+const apiLog = (message, data = null, level = 'log') => {
+  const logMessage = `[LiveEventsAPI] ${message}`;
+  const logData = data ? JSON.stringify(data, null, 2) : '';
+  
+  switch(level) {
+    case 'error':
+      console.error(logMessage, logData);
+      break;
+    case 'warn':
+      console.warn(logMessage, logData);
+      break;
+    default:
+      console.log(logMessage, logData);
+  }
+};
+
+// services/api.js
+export const fetchLiveEvents = async (params = {}) => {
+  // Normalize parameters
+  const normalizedParams = {
+    is_active: 'true', // Default to active events
+    ...params,
+    is_active: params.is_active !== undefined ? 
+      String(params.is_active) : 'true'
+  };
+
+  try {
+    const response = await apiRequest('get', '/live-events/', { params: normalizedParams });
+    
+    // Validate response structure
+    if (!response.data?.results && !Array.isArray(response.data)) {
+      throw new Error('Invalid API response structure');
+    }
+
+    // Transform data for consistency
+    return (response.data.results || response.data).map(event => ({
+      ...event,
+      thumbnail: event.thumbnail || getDefaultThumbnail(event.youtube_url),
+      is_live: event.is_live !== false, // Default to true if undefined
+    }));
+  } catch (error) {
+    console.error('API Error:', error);
+    return []; // Fail gracefully
+  }
+};
+
+// Helper function
+const getDefaultThumbnail = (url) => {
+  const videoId = extractYoutubeId(url);
+  return videoId ? 
+    `https://img.youtube.com/vi/${videoId}/mqdefault.jpg` : 
+    null;
+};
+
+export const createLiveEvent = async (data) => {
+  const startTime = Date.now();
+  const requestId = Math.random().toString(36).substring(2, 9);
+
+  try {
+    apiLog(`[${requestId}] Creating live event`, {
+      inputData: {
+        ...data,
+        youtube_url: data.youtube_url // Log full URL for verification
+      }
+    });
+
+    // Validate YouTube URL before sending
+    const videoId = extractYoutubeId(data.youtube_url);
+    apiLog(`[${requestId}] Extracted YouTube ID`, { videoId });
+
+    if (!videoId) {
+      throw new Error('Invalid YouTube URL format');
+    }
+
+    // Add default values for critical fields
+    const payload = {
+      ...data,
+      is_live: true,
+      viewers_count: 0,
+      start_time: new Date().toISOString(),
+      thumbnail: data.thumbnail || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+      embed_url: data.embed_url || `https://www.youtube.com/embed/${videoId}`
+    };
+
+    apiLog(`[${requestId}] Final payload to server`, payload);
+
+    const response = await apiRequest('post', '/live-events/', payload);
+    const responseData = response.data || response;
+    
+    apiLog(`[${requestId}] Creation response`, {
+      status: response.status,
+      responseData: {
+        ...responseData,
+        // Truncate large fields for readability
+        description: responseData.description ? 
+          `${responseData.description.substring(0, 50)}...` : null
+      }
+    });
+
+    if (!responseData?.id) {
+      throw new Error('Server returned incomplete event data');
+    }
+
+    // Ensure all required fields are present
+    const requiredFields = ['id', 'title', 'is_live', 'youtube_url'];
+    const missingFields = requiredFields.filter(field => !responseData[field]);
+    
+    if (missingFields.length > 0) {
+      throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+    }
+
+    // Return enhanced event data
+    const enhancedEvent = {
+      ...responseData,
+      thumbnail: responseData.thumbnail || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+      embed_url: responseData.embed_url || `https://www.youtube.com/embed/${videoId}`,
+      is_live: responseData.is_live !== undefined ? responseData.is_live : true,
+      viewers_count: responseData.viewers_count || 0,
+      start_time: responseData.start_time || new Date().toISOString()
+    };
+
+    apiLog(`[${requestId}] Successfully created event`, {
+      eventId: enhancedEvent.id,
+      processingTime: `${Date.now() - startTime}ms`,
+      finalEventData: enhancedEvent
+    });
+
+    return enhancedEvent;
+
+  } catch (error) {
+    let errorMessage = 'Failed to create event';
+    
+    if (error.response) {
+      // Handle Django REST framework error format
+      if (error.response.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } 
+      // Handle custom error format
+      else if (error.response.data?.error) {
+        errorMessage = error.response.data.error;
+      }
+      // Handle field-specific errors
+      else if (error.response.data?.youtube_url) {
+        errorMessage = Array.isArray(error.response.data.youtube_url)
+          ? error.response.data.youtube_url.join('\n')
+          : error.response.data.youtube_url;
+      }
+    } else {
+      errorMessage = error.message || errorMessage;
+    }
+
+    apiLog(`[${requestId}] Error creating event`, {
+      error: errorMessage,
+      stack: error.stack,
+      response: error.response?.data
+    }, 'error');
+    
+    throw new Error(errorMessage);
+  }
+};
+
+export const incrementViewerCount = async (eventId) => {
+  const requestId = Math.random().toString(36).substring(2, 9);
+  
+  try {
+    apiLog(`[${requestId}] Incrementing viewer count`, { eventId });
+
+    const response = await apiRequest('post', `/live-events/${eventId}/increment_viewer/`);
+    
+    apiLog(`[${requestId}] Viewer count incremented`, {
+      newCount: response.data?.viewers_count,
+      eventId: eventId
+    });
+    
+    return response;
+  } catch (error) {
+    apiLog(`[${requestId}] Failed to increment viewer count`, {
+      eventId,
+      error: {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      }
+    }, 'error');
+    throw error;
+  }
+};
+
+export const fetchFeaturedContent = async () => {
+  const requestId = Math.random().toString(36).substring(2, 9);
+  
+  try {
+    apiLog(`[${requestId}] Fetching featured content`);
+
+    const response = await apiRequest('get', '/featured-content/');
+    
+    apiLog(`[${requestId}] Received featured content`, {
+      count: response.data?.length || 0
+    });
+
+    return response.data || [];
+  } catch (error) {
+    apiLog(`[${requestId}] Error fetching featured content`, {
+      error: error.message,
+      stack: error.stack
+    }, 'error');
+    return [];
+  }
+};
+
+const cacheLiveEvents = async (events) => {
+  const requestId = Math.random().toString(36).substring(2, 9);
+  
+  try {
+    apiLog(`[${requestId}] Caching live events`, {
+      eventCount: events.length,
+      firstEventId: events[0]?.id
+    });
+
+    const cacheData = {
+      timestamp: Date.now(),
+      data: events.map(event => ({
+        ...event,
+        thumbnail: event.thumbnail || `https://img.youtube.com/vi/${extractYoutubeId(event.youtube_url)}/mqdefault.jpg`,
+        is_live: event.is_live !== undefined ? event.is_live : true,
+        viewers_count: event.viewers_count || 0
+      }))
+    };
+
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+    
+    apiLog(`[${requestId}] Successfully cached events`, {
+      cacheSize: JSON.stringify(cacheData).length
+    });
+  } catch (error) {
+    apiLog(`[${requestId}] Error writing to cache`, {
+      error: error.message,
+      stack: error.stack
+    }, 'error');
+  }
+};
+
+// Enhanced debug utility
+export const debugApiResponse = (response, context = 'API') => {
+  const debugData = {
+    status: response.status,
+    data: response.data ? {
+      ...response.data,
+      _truncated: Object.keys(response.data).reduce((acc, key) => {
+        if (typeof response.data[key] === 'string' && response.data[key].length > 100) {
+          acc[key] = `${response.data[key].substring(0, 100)}...`;
+        }
+        return acc;
+      }, {})
+    } : null,
+    headers: response.headers
+  };
+
+  apiLog(`Debug response for ${context}`, debugData);
+  return response;
+};
 
 // Export all API functions
 export default {

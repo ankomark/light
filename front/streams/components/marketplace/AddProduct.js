@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -27,11 +27,15 @@ const AddProduct = () => {
     condition: 'NEW',
     category: '',
     is_digital: false,
+    whatsapp_number: '',
+    contact_number: '',
+    location: '',
   });
   const [currency, setCurrency] = useState('USD');
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [track, setTrack] = useState(null);
+  const whatsappInputRef = useRef(null);
 
   const handleChange = (name, value) => {
     setFormData({
@@ -86,6 +90,11 @@ const AddProduct = () => {
     );
   };
 
+  const validateWhatsAppNumber = (number) => {
+    if (!number) return true; // Optional field
+    return number.startsWith('+254') && number.length === 13;
+  };
+
   const handleSubmit = async () => {
     if (!formData.title || !formData.description || !formData.price_value) {
       Alert.alert('Error', 'Please fill in all required fields');
@@ -102,6 +111,20 @@ const AddProduct = () => {
       return;
     }
 
+    if (formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number)) {
+      Alert.alert(
+        'Invalid WhatsApp Number',
+        'Please enter a valid Kenyan WhatsApp number starting with +254 (12 digits total)',
+        [
+          { 
+            text: 'OK', 
+            onPress: () => whatsappInputRef.current?.focus() 
+          }
+        ]
+      );
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -114,6 +137,9 @@ const AddProduct = () => {
       data.append('condition', formData.condition);
       data.append('category', formData.category.trim());
       data.append('is_digital', formData.is_digital.toString());
+      data.append('whatsapp_number', formData.whatsapp_number);
+      data.append('contact_number', formData.contact_number);
+      data.append('location', formData.location);
       
       if (track) {
         data.append('track', track.id.toString());
@@ -157,6 +183,21 @@ const AddProduct = () => {
       NGN: '₦',
     };
     return symbols[currency] || currency;
+  };
+
+  const handleWhatsAppNumberChange = (text) => {
+    // Auto-format +254 if user starts with 254
+    if (text.length === 3 && text === '254') {
+      text = '+254';
+    }
+    // Ensure it starts with +
+    if (text.length === 1 && text !== '+') {
+      text = '+' + text;
+    }
+    // Only allow numbers after +
+    if (/^\+[0-9]*$/.test(text) || text === '') {
+      handleChange('whatsapp_number', text);
+    }
   };
 
   return (
@@ -210,6 +251,45 @@ const AddProduct = () => {
         placeholder="Category (e.g., Clothes)*"
         value={formData.category}
         onChangeText={(text) => handleChange('category', text)}
+      />
+
+      <Text style={styles.sectionTitle}>Contact Information</Text>
+
+      <View>
+        <TextInput
+          ref={whatsappInputRef}
+          style={[
+            styles.input,
+            formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number) 
+              ? styles.invalidInput 
+              : null
+          ]}
+          placeholder="WhatsApp Number (e.g., +254712345678)"
+          value={formData.whatsapp_number}
+          onChangeText={handleWhatsAppNumberChange}
+          keyboardType="phone-pad"
+          maxLength={13}
+        />
+        {formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number) && (
+          <Text style={styles.errorText}>
+            Must start with +254 and be 12 digits total (e.g., +254712345678)
+          </Text>
+        )}
+      </View>
+
+      <TextInput
+        style={styles.input}
+        placeholder="Contact Number (optional)"
+        value={formData.contact_number}
+        onChangeText={(text) => handleChange('contact_number', text)}
+        keyboardType="phone-pad"
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Location (optional)"
+        value={formData.location}
+        onChangeText={(text) => handleChange('location', text)}
       />
 
       <Text style={styles.sectionTitle}>Product Images*</Text>
@@ -303,6 +383,18 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     fontSize: 16,
+  },
+  invalidInput: {
+    borderColor: '#FF6347',
+    borderWidth: 1,
+    backgroundColor: '#FFF0F0',
+  },
+  errorText: {
+    color: '#FF6347',
+    fontSize: 12,
+    marginTop: -8,
+    marginBottom: 12,
+    marginLeft: 4,
   },
   textArea: {
     height: 100,

@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator
 from django.utils import timezone
+from urllib.parse import urlparse, parse_qs
+import re
 
 
 # Custom User Model
@@ -481,6 +483,9 @@ class Product(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     views = models.PositiveIntegerField(default=0)
     slug = models.SlugField(unique=True, max_length=255)
+    whatsapp_number = models.CharField(max_length=20, blank=True, null=True)
+    contact_number = models.CharField(max_length=20, blank=True, null=True)
+    location = models.CharField(max_length=200, blank=True, null=True)
     
     # Link to tracks if this is a music-related product
     track = models.ForeignKey('Track', on_delete=models.SET_NULL, null=True, blank=True, related_name='marketplace_products')
@@ -620,6 +625,136 @@ class Wishlist(models.Model):
 
 
 
-
-
-
+class LiveEvent(models.Model):
+    user = models.ForeignKey(
+        'User', 
+        on_delete=models.CASCADE, 
+        related_name='live_events',
+        help_text="The user who created this live event"
+    )
+    youtube_url = models.URLField(
+        max_length=500,
+        help_text="URL of the YouTube live stream"
+    )
+    title = models.CharField(
+        max_length=200,
+        help_text="Title of the live event"
+    )
+    description = models.TextField(
+        blank=True, 
+        null=True,
+        help_text="Detailed description of the event"
+    )
+    thumbnail = models.URLField(
+        blank=True, 
+        null=True,
+        help_text="Thumbnail image URL for the event"
+    )
+    is_live = models.BooleanField(
+        default=True,
+        help_text="Whether the event is currently live"
+    )
+    start_time = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the event started"
+    )
+    end_time = models.DateTimeField(
+        blank=True, 
+        null=True,
+        help_text="When the event ended"
+    )
+    viewers_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of viewers who watched this event"
+    )
+    
+    class Meta:
+        ordering = ['-start_time']
+        verbose_name = "Live Event"
+        verbose_name_plural = "Live Events"
+        
+    def __str__(self):
+        return f"{self.title} by {self.user.username}"
+    
+    def clean(self):
+        """Validate the YouTube URL before saving"""
+        super().clean()
+        if not self.extract_youtube_id(self.youtube_url):
+            raise ValidationError({
+                'youtube_url': "Please enter a valid YouTube URL in one of these formats:\n"
+                "- https://www.youtube.com/watch?v=VIDEO_ID\n"
+                "- https://www.youtube.com/live/VIDEO_ID\n"
+                "- https://youtu.be/VIDEO_ID"
+            })
+    
+    def is_active(self):
+        """Model-level active check"""
+        if self.is_live:
+            return True
+        if self.end_time:
+            return (timezone.now() - self.end_time).total_seconds() < 86400
+        return False
+    @staticmethod
+    def extract_youtube_id(url=None):
+        """
+        Extract YouTube ID from URL, works as both instance and static method
+        """
+        if url is None:
+            raise ValueError("URL parameter is required when called as static method")
+            
+        if not url:
+            return None
+            
+        patterns = [
+            r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([^&]{11})',
+            r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/live\/([^?]{11})',
+            r'(?:https?:\/\/)?(?:www\.)?youtu\.be\/([^?]{11})',
+            r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([^?]{11})'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return None
+    
+    def get_embed_url(self):
+        """Generate YouTube embed URL with enhanced parameters"""
+        video_id = self.extract_youtube_id(self.youtube_url)  # Pass the URL here
+        if video_id:
+            return (
+                f"https://www.youtube.com/embed/{video_id}?"
+                "autoplay=1&rel=0&modestbranding=1"
+            )
+        return None
+    
+    def save(self, *args, **kwargs):
+        """Override save to ensure validation and set thumbnail"""
+        self.full_clean()
+        
+        # Always try to set thumbnail if not provided
+        if not self.thumbnail:
+            video_id = self.extract_youtube_id(self.youtube_url)
+            if video_id:
+                # Try multiple thumbnail qualities
+                thumbnail_options = [
+                    f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+                    f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
+                    f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
+                    f"https://img.youtube.com/vi/{video_id}/default.jpg"
+                ]
+                
+                # Set the first available thumbnail
+                for thumb_url in thumbnail_options:
+                    if self.thumbnail_exists(thumb_url):
+                        self.thumbnail = thumb_url
+                        break
+        
+        super().save(*args, **kwargs)
+    def thumbnail_exists(self, url):
+        """Check if thumbnail URL is valid"""
+        try:
+            response = requests.head(url, timeout=2)
+            return response.status_code == 200
+        except:
+            return False
