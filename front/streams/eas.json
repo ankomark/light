@@ -1,15 +1,26 @@
 {
   "cli": {
-    "appVersionSource": "local"
+    "appVersionSource": "local",
+    "requireCommit": true
   },
   "build": {
     "production": {
+      "env": {
+        "APP_ENV": "production"
+      },
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "image": "latest"
       },
       "ios": {
-        "simulator": true
+        "simulator": false,
+        "image": "latest",
+        "autoIncrement": "version"
       }
+    },
+    "preview": {
+      "distribution": "internal"
     }
   }
 }

@@ -1,8 +1,9 @@
-const { getDefaultConfig } = require('expo/metro-config');
+// metro.config.js
+const { getDefaultConfig } = require('@expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-// Add db extension support
+// Add SQLite/database extensions
 config.resolver.assetExts.push(
   'db',
   'sqlite'

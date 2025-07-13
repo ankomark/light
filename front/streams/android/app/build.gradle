@@ -87,7 +87,7 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.streams"
+    namespace 'streamscom.ankom.streams'
     defaultConfig {
         applicationId 'streamscom.ankom.streams'
         minSdkVersion rootProject.ext.minSdkVersion
