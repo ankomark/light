@@ -16,7 +16,8 @@
       "ios": {
         "simulator": false,
         "image": "latest",
-        "autoIncrement": "version"
+        "autoIncrement": "version",
+        "enterpriseProvisioning": "universal"
       }
     },
     "preview": {
