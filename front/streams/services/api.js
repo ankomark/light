@@ -2,7 +2,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { extractYoutubeId } from '../utils/youtubeUtils';
 // Base URL configuration
-export const API_BASE = 'http://192.168.1.126:8000';
+export const API_BASE = 'https://light-backend-production.up.railway.app';
 export const API_URL = `${API_BASE}/api`;
 
 // Token management utilities
