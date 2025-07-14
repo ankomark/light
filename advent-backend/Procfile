@@ -1,0 +1,1 @@
+web: gunicorn music.wsgi --workers 2
