@@ -16,6 +16,7 @@ from datetime import timedelta
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
+import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -34,7 +35,8 @@ ALLOWED_HOSTS = [
     '192.168.1.126',
     'localhost',
     '127.0.0.1',
-    'your-production-domain.com'
+    'your-production-domain.com',
+    'your-app-name.onrender.com'
 ]
 
 
