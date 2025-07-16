@@ -9,12 +9,14 @@ from django.core.validators import MinValueValidator
 from django.utils import timezone
 from urllib.parse import urlparse, parse_qs
 import re
+from cloudinary.models import CloudinaryField
 
 
 # Custom User Model
 class User(AbstractUser):
     bio = models.TextField(blank=True)
-    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
+    # avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
+    avatar = CloudinaryField('image', folder='avatars/', blank=True, null=True)
     followers = models.ManyToManyField(
         'self', symmetrical=False, related_name='followed_by', blank=True
     )
@@ -42,8 +44,10 @@ class Track(models.Model):
     title = models.CharField(max_length=100)
     artist = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tracks')
     album = models.CharField(max_length=100, blank=True, null=True)
-    audio_file = models.FileField(upload_to='audio/')  # Use a descriptive name
-    cover_image = models.ImageField(upload_to='covers/', blank=True, null=True)
+    # audio_file = models.FileField(upload_to='audio/')  
+    # cover_image = models.ImageField(upload_to='covers/', blank=True, null=True)
+    audio_file = CloudinaryField(resource_type='video', folder='audio/')
+    cover_image = CloudinaryField('image', folder='covers/', blank=True, null=True)
     lyrics = models.TextField(blank=True, null=True)
     slug = models.SlugField(unique=True)
     is_favorite = models.BooleanField(default=False)
@@ -118,7 +122,9 @@ class Category(models.Model):
 # Profile Model (Extended Features for Users)
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    picture = models.ImageField(upload_to='profiles/', blank=True, null=True)
+    # picture = models.ImageField(upload_to='profiles/', blank=True, null=True)
+    picture = CloudinaryField('image', folder='profiles/',transformation=[
+        {'width': 400, 'height': 400, 'crop': 'fill', 'gravity': 'face'}])
 
     bio = models.TextField(blank=True, null=True)
     birth_date = models.DateField(blank=True, null=True)
@@ -140,8 +146,12 @@ class SocialPost(models.Model):
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='social_posts')
     content_type = models.CharField(max_length=5, choices=CONTENT_TYPES)
-    media_file = models.FileField(
-        upload_to='social_media/',
+    media_file = CloudinaryField(
+        resource_type='auto',
+        folder='social_media/',
+        transformation=[
+        {'quality': 'auto', 'fetch_format': 'auto'},
+        {'width': 1080, 'height': 1080, 'crop': 'limit'}],
         validators=[
             FileExtensionValidator(
                 allowed_extensions=['mp4', 'mov', 'avi', 'jpg', 'jpeg', 'png']
@@ -229,7 +239,8 @@ class Church(models.Model):
     members = models.PositiveIntegerField(default=0)
     pastor = models.CharField(max_length=200, blank=True, null=True)
     contact = models.CharField(max_length=100, blank=True, null=True)
-    image = models.ImageField(upload_to='churches/', blank=True, null=True)
+    # image = models.ImageField(upload_to='churches/', blank=True, null=True)
+    image = CloudinaryField('image', folder='churches/', blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='churches')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -261,8 +272,10 @@ class Videostudio(models.Model):
     location = models.CharField(max_length=300)
     contact_phone = models.CharField(max_length=20, blank=True, null=True)
     contact_email = models.EmailField(blank=True, null=True)
-    logo = models.ImageField(upload_to='videostudios/logos/', blank=True, null=True)
-    cover_image = models.ImageField(upload_to='videostudios/covers/', blank=True, null=True)
+    # logo = models.ImageField(upload_to='videostudios/logos/', blank=True, null=True)
+    # cover_image = models.ImageField(upload_to='videostudios/covers/', blank=True, null=True)
+    logo = CloudinaryField('image', folder='videostudios/logos/', blank=True, null=True)
+    cover_image = CloudinaryField('image', folder='videostudios/covers/', blank=True, null=True)
     whatsapp_number = models.CharField(max_length=20, blank=True, null=True)
     service_types = models.JSONField(
         default=list,
@@ -326,8 +339,10 @@ class Choir(models.Model):
     contact_email = models.EmailField(blank=True, null=True)
     genre = models.CharField(max_length=50, choices=GENRE_CHOICES, default='gospel')
     members_count = models.PositiveIntegerField(default=0)
-    profile_image = models.ImageField(upload_to='choirs/profiles/', blank=True, null=True)
-    cover_image = models.ImageField(upload_to='choirs/covers/', blank=True, null=True)
+    # profile_image = models.ImageField(upload_to='choirs/profiles/', blank=True, null=True)
+    # cover_image = models.ImageField(upload_to='choirs/covers/', blank=True, null=True)
+    profile_image = CloudinaryField('image', folder='choirs/profiles/', blank=True, null=True)
+    cover_image = CloudinaryField('image', folder='choirs/covers/', blank=True, null=True)
     founded_date = models.DateField(blank=True, null=True)
     youtube_link = models.URLField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
@@ -348,7 +363,8 @@ class Group(models.Model):
     description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    cover_image = models.ImageField(upload_to='group_covers/', blank=True, null=True)
+    # cover_image = models.ImageField(upload_to='group_covers/', blank=True, null=True)
+    cover_image = CloudinaryField('image', folder='group_covers/', blank=True, null=True)
     is_private = models.BooleanField(default=True)
     slug = models.SlugField(unique=True, max_length=100)
 
@@ -416,7 +432,8 @@ class GroupPostAttachment(models.Model):
     )
     
     post = models.ForeignKey(GroupPost, on_delete=models.CASCADE, related_name='attachments')
-    file = models.FileField(upload_to='group_posts/%Y/%m/%d/')
+    # file = models.FileField(upload_to='group_posts/%Y/%m/%d/')
+    file = CloudinaryField(resource_type='auto', folder='group_posts/%Y/%m/%d/')
     file_type = models.CharField(max_length=10, choices=ATTACHMENT_TYPES)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -510,7 +527,8 @@ class Product(models.Model):
 # Product Image Model
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='products/images/', validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png'])])
+    # image = models.ImageField(upload_to='products/images/', validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png'])])
+    image = CloudinaryField('image', folder='products/images/')
     is_primary = models.BooleanField(default=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 

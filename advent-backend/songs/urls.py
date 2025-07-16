@@ -28,7 +28,10 @@ from .views import (
     CartViewSet,
     ProductCategoryViewSet,
     ProductViewSet,
-    LiveEventViewSet
+    LiveEventViewSet,
+    AvatarUploadView,
+    TrackUploadView,
+    SocialPostUploadView
 
 
 
@@ -133,6 +136,9 @@ urlpatterns = [
      path('live-events/featured/', 
          LiveEventViewSet.as_view({'get': 'featured'}), 
          name='live-event-featured'),
+    path('api/upload/avatar/', AvatarUploadView.as_view(), name='avatar-upload'),
+    path('api/upload/track/', TrackUploadView.as_view(), name='track-upload'),
+    path('api/upload/post/', SocialPostUploadView.as_view(), name='post-upload'),
 
 ]
 

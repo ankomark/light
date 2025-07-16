@@ -17,33 +17,34 @@ import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 import dj_database_url
+from dotenv import load_dotenv
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-sm4_o$%#fl*t((*#4tgmzp=@d%djqaxuva=t#u9#i$^p*ex8jf'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 
 ALLOWED_HOSTS = [
+    'light-backend-production.up.railway.app',
     '192.168.1.126',
     'localhost',
     '127.0.0.1',
-    'your-production-domain.com',
-    'your-app-name.onrender.com'
+    '.railway.app',
+    '10.0.2.2'
+   
 ]
 
-
 CORS_ALLOW_HEADERS =[
-    'acces-control-allow-origin',
+    'access-control-allow-origin',
     'content-type',
-    'Authorization', 'Content-Type',
+    'Authorization', 
+    'Content-Type',
 ]
 CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
 CORS_ALLOW_CREDENTIALS = True
@@ -55,13 +56,14 @@ CORS_ALLOW_METHODS =[
     'POST',
     'PUT',
 ]
-CORS_ALLOW_ALL_ORIGINS = True
-
-
+CORS_ALLOW_ALL_ORIGINS = True  # Disable this
 # Application definition
 CORS_ALLOWED_ORIGINS = [
+    'https://light-backend-production.up.railway.app',
     "http://localhost:19006",
-    "http://192.168.1.126"  # Adjust for your network
+    "http://192.168.1.126",  # Adjust for your network
+    "http://192.168.1.126:19006",  # Add port
+    "http://10.0.2.2:19006"        # For Android emulator
     
 ]
 INSTALLED_APPS = [
@@ -78,9 +80,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'cloudinary',
     'cloudinary_storage',
-    
-    
-]
+    ]
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # Must be before any other middleware that uses request.is_secure()
@@ -105,8 +105,6 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
     ),
 }
-
-
 ROOT_URLCONF = 'music.urls'
 
 TEMPLATES = [
@@ -130,9 +128,6 @@ WSGI_APPLICATION = 'music.wsgi.application'
 AUTH_USER_MODEL = 'songs.User'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
-
-
-
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -144,16 +139,12 @@ SIMPLE_JWT = {
 }
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'postgres',
-        'USER': 'postgres.gfgsazkebkfrfnkljaot',
-        'PASSWORD': 'mark3661.1',
-        'HOST': 'aws-0-eu-north-1.pooler.supabase.com',
-        'PORT': '5432',
-    }
+    'default': dj_database_url.config(
+        default=os.getenv('DATABASE_URL'),
+        conn_max_age=600,
+        ssl_require=True  # Essential for Supabase
+    )
 }
-
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
@@ -189,25 +180,39 @@ USE_I18N = True
 
 USE_TZ = True
 
-
-
 # Cache hymns API for 1 hour
 HYMN_CACHE_TIMEOUT = 60 * 60
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.1/howto/static-files/
-
 STATIC_URL = 'static/'
 
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
+
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800
+DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
+
+cloudinary.config(
+    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
+    api_key=os.getenv('CLOUDINARY_API_KEY'),
+    api_secret=os.getenv('CLOUDINARY_API_SECRET'),
+    secure=True
+)
+
 CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': 'dxdmobj4v',
-    'API_KEY': '646695939138698',
-    'API_SECRET': 'a1KZpv5H1H5f5-91X_3tcAUYzmo'
+    'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME'),
+    'API_KEY': os.getenv('CLOUDINARY_API_KEY'),
+    'API_SECRET': os.getenv('CLOUDINARY_API_SECRET'),
+    'SECURE': True,
+    'MEDIA_TAG': 'media',
+    'INVALID_VIDEO_ERROR_MESSAGE': 'Please upload a valid video file',
+    'EXCLUDE_DELETE_ORPHANED_MEDIA_PATHS': (),
+    'STATIC_TAG': 'static',
+    'STATICFILES_MANIFEST_ROOT': os.path.join(BASE_DIR, 'manifest'),
+    'STATIC_IMAGES_EXTENSIONS': ['jpg', 'jpeg', 'png'],
+    'STATIC_VIDEOS_EXTENSIONS': ['mp4', 'webm'],
+}
+CLOUDINARY_UPLOAD_OPTIONS = {
+    'resource_type': 'auto',
+    'timeout': 30000  # 30 seconds timeout
 }

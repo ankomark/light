@@ -23,6 +23,8 @@ from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser,JSONParser
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
+from cloudinary.uploader import upload
+from cloudinary.exceptions import Error as CloudinaryError
 from .models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
 from .serializers import (
     UserSerializer,
@@ -54,18 +56,147 @@ from .serializers import (
     ProductSerializer,
     ProductImageSerializer,
     ProductCategorySerializer,
-    LiveEventSerializer
-
-
-
-
-
+    LiveEventSerializer,
+    AvatarUploadSerializer,
+    TrackUploadSerializer,
+    SocialPostUploadSerializer
 )
 import logging
 import time
 from django.utils import timezone
 from datetime import timedelta
 logger = logging.getLogger(__name__)
+
+
+
+class AvatarUploadView(APIView):
+    parser_classes = [MultiPartParser]
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request):
+        serializer = AvatarUploadSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Upload to Cloudinary
+                result = upload(
+                    serializer.validated_data['avatar'],
+                    folder='avatars',
+                    resource_type='image',
+                    transformation=[
+                        {'width': 500, 'height': 500, 'crop': 'fill'},
+                        {'quality': 'auto'}
+                    ]
+                )
+                # Save to user model
+                request.user.avatar = result['public_id']
+                request.user.save()
+                return Response(
+                    {'status': 'avatar updated', 'url': result['secure_url']},
+                    status=status.HTTP_200_OK
+                )
+            except CloudinaryError as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class TrackUploadView(APIView):
+    parser_classes = [MultiPartParser]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = TrackUploadSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Upload audio file
+                audio_result = upload(
+                    serializer.validated_data['audio_file'],
+                    folder='audio',
+                    resource_type='video',
+                    format='mp3'
+                )
+                
+                # Upload cover image if provided
+                cover_result = None
+                if 'cover_image' in serializer.validated_data:
+                    cover_result = upload(
+                        serializer.validated_data['cover_image'],
+                        folder='covers',
+                        resource_type='image'
+                    )
+                
+                # Create track
+                track_data = {
+                    'title': request.data.get('title', 'Untitled Track'),
+                    'artist': request.user.id,
+                    'audio_file': audio_result['public_id'],
+                    'cover_image': cover_result['public_id'] if cover_result else None,
+                    'album': request.data.get('album', ''),
+                    'lyrics': request.data.get('lyrics', '')
+                }
+                
+                track_serializer = TrackSerializer(data=track_data, context={'request': request})
+                if track_serializer.is_valid():
+                    track = track_serializer.save()
+                    return Response(track_serializer.data, status=status.HTTP_201_CREATED)
+                return Response(track_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                
+            except CloudinaryError as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class SocialPostUploadView(APIView):
+    parser_classes = [MultiPartParser]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = SocialPostUploadSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Determine resource type
+                content_type = 'video' if serializer.validated_data['media_file'].content_type.startswith('video/') else 'image'
+                
+                # Upload to Cloudinary
+                result = upload(
+                    serializer.validated_data['media_file'],
+                    folder='social_media',
+                    resource_type='auto',
+                    transformation=[
+                        {'quality': 'auto'},
+                        {'fetch_format': 'auto'}
+                    ]
+                )
+                
+                # Create post
+                post_data = {
+                    'user': request.user.id,
+                    'content_type': content_type,
+                    'media_file': result['public_id'],
+                    'caption': request.data.get('caption', ''),
+                    'tags': request.data.get('tags', ''),
+                    'location': request.data.get('location', ''),
+                    'duration': request.data.get('duration', None)
+                }
+                
+                post_serializer = SocialPostSerializer(data=post_data, context={'request': request})
+                if post_serializer.is_valid():
+                    post = post_serializer.save()
+                    return Response(post_serializer.data, status=status.HTTP_201_CREATED)
+                return Response(post_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                
+            except CloudinaryError as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+
 class SignUpView(APIView):
     permission_classes = [AllowAny]
 
@@ -246,7 +377,9 @@ class TrackViewSet(viewsets.ModelViewSet):
         track = self.get_object()
         if not track.audio_file:
             return Response({'error': 'Audio file not found'}, status=404)
-        return FileResponse(open(track.audio_file.path, 'rb'), as_attachment=True, filename=track.audio_file.name)
+        return Response({
+            'download_url': CloudinaryFieldSerializer().to_representation(track.audio_file)
+        })
     @action(detail=True, methods=['post'])
     def favorites(self, request):
    
@@ -352,6 +485,44 @@ class ProfileViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
         except Profile.DoesNotExist:
             return Response({'detail': 'Profile not found for this user.'}, status=status.HTTP_404_NOT_FOUND)
+
+
+
+    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def upload_picture(self, request):
+        """Handle profile picture upload to Cloudinary"""
+        if not hasattr(request.user, 'profile'):
+            return Response(
+                {'error': 'Profile does not exist'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        serializer = AvatarUploadSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Upload to Cloudinary
+                result = upload(
+                    serializer.validated_data['avatar'],
+                    folder='profiles',
+                    resource_type='image',
+                    transformation=[
+                        {'width': 500, 'height': 500, 'crop': 'fill'},
+                        {'quality': 'auto'}
+                    ]
+                )
+                # Save to profile
+                request.user.profile.picture = result['public_id']
+                request.user.profile.save()
+                return Response(
+                    ProfileSerializer(request.user.profile, context={'request': request}).data,
+                    status=status.HTTP_200_OK
+                )
+            except CloudinaryError as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 class CommentViewSet(viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
@@ -584,11 +755,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
             
-        return FileResponse(
-            open(post.media_file.path, 'rb'), 
-            as_attachment=True, 
-            filename=post.media_file.name
-        )
+        return Response({
+            'download_url': CloudinaryFieldSerializer().to_representation(post.media_file)
+        })
 
 
 class PostLikeViewSet(viewsets.ModelViewSet):
@@ -1013,6 +1182,45 @@ class GroupViewSet(viewsets.ModelViewSet):
             'is_admin': is_admin,
             'group_slug': slug  # Include group slug in response for verification
         })
+    
+    @action(detail=True, methods=['post'], url_path='upload-cover')
+    def upload_cover(self, request, slug=None):
+        group = self.get_object()
+        if group.creator != request.user:
+            return Response(
+                {"error": "Only the group creator can upload cover images"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        if 'cover_image' not in request.FILES:
+            return Response(
+                {"error": "No cover image provided"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            # Upload to Cloudinary
+            result = upload(
+                request.FILES['cover_image'],
+                folder='group_covers',
+                resource_type='image',
+                transformation=[
+                    {'width': 1200, 'height': 630, 'crop': 'fill'},
+                    {'quality': 'auto'}
+                ]
+            )
+            # Save to group
+            group.cover_image = result['public_id']
+            group.save()
+            return Response(
+                GroupSerializer(group, context={'request': request}).data,
+                status=status.HTTP_200_OK
+            )
+        except CloudinaryError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class GroupPostViewSet(viewsets.ModelViewSet):
     queryset = GroupPost.objects.all()

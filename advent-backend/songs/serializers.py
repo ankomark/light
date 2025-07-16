@@ -3,34 +3,129 @@ from .models import User
 from .models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
 import re
 from django.utils import timezone
+import logging
+logger = logging.getLogger(__name__)
 
+class CloudinaryFieldSerializer(serializers.Field):
+    def to_representation(self, value):
+        if not value:
+            return None
+        
+        try:
+            # Handle different Cloudinary response formats
+            if isinstance(value, dict):
+                return value.get('secure_url') or value.get('url')
+            
+            if hasattr(value, 'url'):
+                return value.url
+            
+            # Handle string URLs
+            if isinstance(value, str):
+                return value
+                
+            return str(value)
+        except Exception as e:
+            logger.error(f"Error processing Cloudinary field: {str(e)}")
+            return None
+    
+    def to_internal_value(self, data):
+        if not data:
+            return None
+            
+        try:
+            if isinstance(data, str) and data.startswith(('http://', 'https://')):
+                # Validate it's a Cloudinary URL
+                if 'res.cloudinary.com' in data:
+                    return data
+                else:
+                    raise serializers.ValidationError("Only Cloudinary URLs are allowed")
+            
+            return data
+        except Exception as e:
+            logger.error(f"Error processing Cloudinary input: {str(e)}")
+            raise serializers.ValidationError("Invalid file data")
+
+class ProfileSerializer(serializers.ModelSerializer):
+    user_id = serializers.ReadOnlyField(source='user.id')
+    picture = CloudinaryFieldSerializer(required=False)
+    
+    class Meta:
+        model = Profile
+        fields = ['bio', 'user_id', 'birth_date', 'location', 'is_public', 'picture']
+        extra_kwargs = {
+            'picture': {'write_only': True}  # Only needed for uploads
+        }
+
+    def get_picture(self, obj):
+        """Handles all possible Cloudinary response formats"""
+        if not obj.picture:
+            return None
+            
+        try:
+            # Case 1: Cloudinary resource dictionary
+            if isinstance(obj.picture, dict):
+                return obj.picture.get('secure_url') or obj.picture.get('url')
+            
+            # Case 2: CloudinaryField with url property
+            if hasattr(obj.picture, 'url'):
+                return obj.picture.url
+                
+            # Case 3: Direct URL string
+            return str(obj.picture)
+        except Exception as e:
+            print(f"Error processing picture URL: {e}")
+            return None
+
+    def create(self, validated_data):
+        """Handles profile creation with request context"""
+        try:
+            user = self.context['request'].user
+            profile = Profile.objects.create(user=user, **validated_data)
+            return profile
+        except Exception as e:
+            print(f"Profile creation error: {e}")
+            raise serializers.ValidationError("Profile creation failed")
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
+    avatar = CloudinaryFieldSerializer(read_only=True)
+    profile = ProfileSerializer(read_only=True)
+    social_posts = serializers.SerializerMethodField()
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
-        fields = ('id', 'username', 'email',  'password','profile','followers_count', 'following_count', 'is_following')
+        fields = [
+            'id', 'username', 'email', 'password', 'avatar',
+            'profile', 'social_posts', 'followers_count',
+            'following_count', 'is_following'
+        ]
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'email': {'required': True}
+        }
+    
+    def get_social_posts(self, obj):
+        # Add pagination or limit
+        posts = obj.social_posts.select_related('user').prefetch_related('likes', 'comments')[:5]
+        return SocialPostSerializer(posts, many=True, context=self.context).data
     
     def get_followers_count(self, obj):
-        return obj.followers.count()
-
+        return getattr(obj, 'followers_count', obj.followers.count())
+    
     def get_following_count(self, obj):
-        return obj.followed_by.count()
-
+        return getattr(obj, 'followed_by_count', obj.followed_by.count())
+    
     def get_is_following(self, obj):
         request = self.context.get('request')
-        if request and request.user.is_authenticated:
+        if request and request.user.is_authenticated and request.user != obj:
             return obj.followers.filter(id=request.user.id).exists()
         return False
+    
     def create(self, validated_data):
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-            # is_artist=validated_data.get('is_artist', False)
-        )
+        password = validated_data.pop('password')
+        user = User.objects.create_user(password=password, **validated_data)
         return user
 class TrackSerializer(serializers.ModelSerializer):
      likes_count = serializers.SerializerMethodField()
@@ -38,8 +133,8 @@ class TrackSerializer(serializers.ModelSerializer):
     #  favorite = serializers.SerializerMethodField()
      artist = UserSerializer(read_only=True)  # Include full artist detai
      is_owner = serializers.SerializerMethodField() 
-     audio_file = serializers.FileField(required=False, allow_null=True)
-     cover_image = serializers.ImageField(required=False, allow_null=True)
+     audio_file = CloudinaryFieldSerializer(read_only=True)
+     cover_image = CloudinaryFieldSerializer(read_only=True)
      class Meta:
         model = Track
         fields = [
@@ -48,6 +143,14 @@ class TrackSerializer(serializers.ModelSerializer):
             'views', 'downloads','likes_count','is_liked', 'created_at', 'updated_at'
         ]
         read_only_fields = ['artist', 'slug', 'views', 'downloads', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'title': {'required': True, 'max_length': 200},
+            'lyrics': {'allow_blank': True}
+        }
+     def validate_title(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Title cannot be empty")
+        return value.strip()
      def get_favorite(self, obj):
         user = self.context['request'].user
         return Like.objects.filter(user=user, track=obj).exists()
@@ -58,13 +161,7 @@ class TrackSerializer(serializers.ModelSerializer):
         if user.is_authenticated:
             return obj.likes.filter(user=user).exists()
         return False
-    #  def get_serializer_context(self):
-    #     context = super().get_serializer_context()
-    #     context['request'] = self.request
-    #     # Add owner flag for direct API use
-    #     if self.action == 'retrieve':
-    #         context['is_owner'] = self.get_object().artist == self.request.user
-    #     return context
+  
      def get_is_owner(self, obj):
         request = self.context.get('request')
         return request and obj.artist == request.user
@@ -72,14 +169,6 @@ class TrackSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
         return user.is_authenticated and obj.favorites.filter(id=user.id).exists()
 
-    #  def update(self, instance, validated_data):
-    #     # Handle partial updates
-    #     instance.title = validated_data.get('title', instance.title)
-    #     instance.album = validated_data.get('album', instance.album)
-    #     instance.lyrics = validated_data.get('lyrics', instance.lyrics)
-    #     instance.save()
-    #     return instance 
-        
 
 class PlaylistSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -89,22 +178,6 @@ class PlaylistSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'user', 'tracks', 'created_at', 'updated_at')
 
 
-class ProfileSerializer(serializers.ModelSerializer):
-    user_id = serializers.ReadOnlyField(source='user.id')
-    class Meta:
-        model = Profile
-        fields = ['bio','user_id', 'birth_date', 'location', 'is_public', 'picture',]
-
-    def create(self, validated_data):
-        user = self.context['request'].user  # Access user from request
-        # Remove 'user' from validated_data if it exists
-        profile = Profile.objects.create(user=user, **validated_data)
-        return profile
-    def get_picture(self, obj):
-        if obj.picture:
-            request = self.context.get('request')
-            return request.build_absolute_uri(obj.picture.url) if request else obj.picture.url
-        return None
 
 class CommentSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -128,10 +201,6 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'created_at', 'updated_at')
 
 
-
-
-
-
 # Add these new serializers after your existing ones
 
 class SocialPostSerializer(serializers.ModelSerializer):
@@ -141,7 +210,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
     comments_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
-    media_url = serializers.SerializerMethodField()
+    media_file = CloudinaryFieldSerializer(read_only=True)
     can_edit = serializers.SerializerMethodField()
 
     class Meta:
@@ -160,7 +229,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
     def get_media_url(self, obj):
         request = self.context.get('request')
         if obj.media_file and request:
-            return request.build_absolute_uri(obj.media_file.url)
+            return CloudinaryFieldSerializer().to_representation(obj.media_file)
         return None
 
     def get_likes_count(self, obj):
@@ -218,54 +287,6 @@ class PostSaveSerializer(serializers.ModelSerializer):
         read_only_fields = ['user', 'post', 'created_at']
 
 
-# Update UserSerializer to include social posts
-class UserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    social_posts = serializers.SerializerMethodField()
-    profile = ProfileSerializer(read_only=True)
-    followers_count = serializers.SerializerMethodField()
-    following_count = serializers.SerializerMethodField()
-    is_following = serializers.SerializerMethodField()
-
-    class Meta:
-        model = User
-        fields = (
-            'id', 'username', 'email', 'password', 
-            'social_posts', 'profile','followers_count',
-            'following_count', 'is_following'
-        )
-
-    def get_followers_count(self, obj):
-        return obj.followers.count()
-
-    def get_following_count(self, obj):
-        return obj.followed_by.count()
-
-    def get_is_following(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.followers.filter(id=request.user.id).exists()
-        return False
-
-
-
-
-
-
-    def get_social_posts(self, obj):
-        posts = obj.social_posts.all()[:5]  # Get latest 5 posts
-        return SocialPostSerializer(posts, many=True, context=self.context).data
-
-    def create(self, validated_data):
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-        )
-        return user
-
-
-
 class NotificationSerializer(serializers.ModelSerializer):
     sender = UserSerializer(read_only=True)
     post = SocialPostSerializer(read_only=True, required=False)
@@ -288,9 +309,10 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class ChurchSerializer(serializers.ModelSerializer):
-    image = serializers.ImageField(max_length=None, use_url=True, required=False)
+    image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
-    created_by_picture = serializers.SerializerMethodField(read_only=True)
+    created_by_picture = CloudinaryFieldSerializer(source='created_by.profile.picture', read_only=True)
+    
     
     class Meta:
         model = Church
@@ -312,10 +334,10 @@ class ChurchSerializer(serializers.ModelSerializer):
 
 class VideoStudioSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
-    logo_url = serializers.SerializerMethodField()
-    cover_image_url = serializers.SerializerMethodField()
+    logo = CloudinaryFieldSerializer(read_only=True)
+    cover_image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
-    created_by_picture = serializers.SerializerMethodField(read_only=True)  # Only one definition
+    created_by_picture = CloudinaryFieldSerializer(source='created_by.profile.picture', read_only=True)
     service_types = serializers.ListField(child=serializers.ChoiceField(choices=Videostudio.SERVICE_TYPES),default=list)
     
     class Meta:
@@ -345,8 +367,8 @@ class VideoStudioSerializer(serializers.ModelSerializer):
     # ... rest of the serializer ...
 class ChoirSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
-    profile_image_url = serializers.SerializerMethodField()
-    cover_image_url = serializers.SerializerMethodField()
+    profile_image = CloudinaryFieldSerializer(read_only=True)
+    cover_image = CloudinaryFieldSerializer(read_only=True)
     
     class Meta:
         model = Choir
@@ -444,15 +466,6 @@ class GroupPostSerializer(serializers.ModelSerializer):
         }
 
 
-
-
-
-
-
-
-
-
-
 # Add to existing serializers.py
 class ProductCategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -460,6 +473,7 @@ class ProductCategorySerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ProductImageSerializer(serializers.ModelSerializer):
+    image = CloudinaryFieldSerializer(read_only=True)
     image_url = serializers.SerializerMethodField()
     
     class Meta:
@@ -470,7 +484,7 @@ class ProductImageSerializer(serializers.ModelSerializer):
     def get_image_url(self, obj):
         request = self.context.get('request')
         if obj.image and request:
-            return request.build_absolute_uri(obj.image.url)
+            return CloudinaryFieldSerializer().to_representation(obj.image)
         return None
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -805,8 +819,52 @@ class LiveEventSerializer(serializers.ModelSerializer):
 
 
 
+class FileSizeValidator:
+    def __init__(self, max_size_mb):
+        self.max_size_mb = max_size_mb
+    
+    def __call__(self, value):
+        filesize = value.size
+        if filesize > self.max_size_mb * 1024 * 1024:
+            raise serializers.ValidationError(f"Max file size is {self.max_size_mb}MB")
+class AvatarUploadSerializer(serializers.Serializer):
+    avatar = serializers.ImageField(
+        write_only=True,
+        required=True,
+        validators=[FileSizeValidator(max_size_mb=5)],
+        help_text="Image file for avatar upload (max 5MB)"
+    )
+
+class TrackUploadSerializer(serializers.Serializer):
+    audio_file = serializers.FileField(
+        write_only=True,
+        required=True,
+        validators=[FileSizeValidator(max_size_mb=20)],
+        help_text="Audio file upload (max 20MB)"
+    )
+    cover_image = serializers.ImageField(
+        write_only=True,
+        required=False,
+        validators=[FileSizeValidator(max_size_mb=5)],
+        help_text="Optional cover image (max 5MB)"
+    )
+
+class SocialPostUploadSerializer(serializers.Serializer):
+    media_file = serializers.FileField(
+        write_only=True,
+        required=True,
+        help_text="Media file for post (image or video)"
+    )
 
 
+class CloudinaryURLValidator:
+    def __call__(self, value):
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Invalid URL format")
+        if not value.startswith(('http://', 'https://')):
+            raise serializers.ValidationError("URL must start with http:// or https://")
+        if 'res.cloudinary.com' not in value:
+            raise serializers.ValidationError("Only Cloudinary URLs are allowed")
 
 
 
