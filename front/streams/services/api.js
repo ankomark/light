@@ -2,9 +2,9 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { extractYoutubeId } from '../utils/youtubeUtils';
 // Base URL configuration
-export const API_BASE = 'https://light-backend-production.up.railway.app';
-// const DEBUG = process.env.NODE_ENV === 'development';
-// export const API_BASE = DEBUG ? 'http://192.168.1.126:8000' : 'https://light-backend-production.up.railway.app';
+// export const API_BASE = 'https://light-backend-production.up.railway.app';
+const DEBUG = process.env.NODE_ENV === 'development';
+export const API_BASE = DEBUG ? 'http://192.168.1.126:8000' : 'https://light-backend-production.up.railway.app';
 
 // Add timeout and error handling:
 axios.defaults.timeout = 30000;

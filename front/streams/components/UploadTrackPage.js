@@ -1,7 +1,6 @@
-
 import 'react-native-get-random-values'; 
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, TextInput,KeyboardAvoidingView,Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
@@ -9,7 +8,8 @@ import * as FileSystem from 'expo-file-system';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { useNavigation } from '@react-navigation/native';
-
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Added AsyncStorage
+import { API_URL } from '../services/api'; // Only import API_URL
 
 const TrackUploadForm = () => {
   const navigation = useNavigation();
@@ -209,28 +209,51 @@ const TrackUploadForm = () => {
       // Prepare data for backend
       const trackPayload = {
         title: trackData.title,
-        audio_file: audioResponse.secure_url,
-        cover_image: coverResponse?.secure_url || null,
+        audio_file: audioResponse.public_id,
+        cover_image: coverResponse?.public_id || null,
         album: trackData.album || null,
         lyrics: trackData.lyrics || null
       };
 
+      // FIXED: Get token directly from AsyncStorage
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) {
+        throw new Error('Authentication token not found. Please log in again.');
+      }
+
       // Send to your Django backend
-      const response = await axios.post('/api/tracks/upload/', trackPayload, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer YOUR_AUTH_TOKEN`
+      const response = await axios.post(
+        `${API_URL}/tracks/upload/`,
+        trackPayload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          }
         }
-      });
+      );
 
       Alert.alert('Success', 'Track uploaded successfully!');
       navigation.goBack();
     } catch (error) {
       console.error('Upload error:', error);
-      Alert.alert(
-        'Upload Failed', 
-        error.response?.data?.message || error.message || 'Upload failed'
-      );
+      
+      // Improved error message
+      let errorMessage = 'Upload failed';
+      if (error.response) {
+        // Handle Django error formats
+        if (error.response.data?.detail) {
+          errorMessage = error.response.data.detail;
+        } else if (error.response.data?.error) {
+          errorMessage = error.response.data.error;
+        } else if (typeof error.response.data === 'string') {
+          errorMessage = error.response.data;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      Alert.alert('Upload Failed', errorMessage);
     } finally {
       setIsUploading(false);
       setStatusMessages({ audio: '', image: '' });

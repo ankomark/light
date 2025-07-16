@@ -6,8 +6,8 @@ const SearchBar = ({ onSearch }) => {
     const [searchTerm, setSearchTerm] = useState('');
 
     const handleChange = (text) => {
-        setSearchTerm(text); // Update the state with the new text
-        onSearch(text); // Notify the parent of the search term change
+        setSearchTerm(text);
+        onSearch(text);
     };
 
     return (
@@ -15,8 +15,9 @@ const SearchBar = ({ onSearch }) => {
             <TextInput
                 style={styles.input}
                 placeholder="Search for tracks..."
+                placeholderTextColor="#888"
                 value={searchTerm}
-                onChangeText={handleChange} // Use onChangeText for text input changes
+                onChangeText={handleChange}
             />
         </View>
     );
@@ -24,25 +25,22 @@ const SearchBar = ({ onSearch }) => {
 
 const styles = StyleSheet.create({
     container: {
-        padding: 6,
-        backgroundColor: '#f8f8f8',
-        borderBottomWidth: 1,
-        borderBottomColor: '#ccc',
-        color:'black',
-        marginTop:-25,
-        marginBottom:1,
-        alignItems: 'center',
+        backgroundColor: '#fff',
+        paddingVertical: 4,
+        paddingHorizontal: 16,
+        marginHorizontal: 20,
+        marginTop: 6,
+        marginBottom: 8,
+        borderRadius: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
         elevation: 3,
-        borderRadius: 15,
     },
     input: {
-        // height: 30,
-        // borderColor: '#ccc',
-        // borderWidth: 1,
-        // borderRadius: 8,
-        // paddingHorizontal: 10,
-        fontSize: 10,
-        color: '#333',
+        fontSize: 12,
+        color: '#000',
     },
 });
 

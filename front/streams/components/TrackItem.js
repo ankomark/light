@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator  } from 'react-native';
 import PlayControls from './PlayControls';
 import Likes from './LikeButton';
 import Comments from './Comments';
@@ -32,6 +32,9 @@ const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
     const [artistProfile, setArtistProfile] = useState(null);
     const isOwner = track.is_owner;
     const navigation = useNavigation();
+    const [downloadProgress, setDownloadProgress] = useState(0);
+    const [isDownloading, setIsDownloading] = useState(false);
+    const [downloadError, setDownloadError] = useState(null);
 
     // Apply Cloudinary optimizations
     const optimizedCover = getOptimizedUrl(track.cover_image, 'image');
@@ -109,23 +112,32 @@ const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
         }
 
         try {
+            setIsDownloading(true);
+            setDownloadProgress(0);
+            setDownloadError(null);
+            
             const { status } = await MediaLibrary.requestPermissionsAsync();
             if (status !== 'granted') {
-                Alert.alert("Permission Denied", "Storage access is required to save the track.");
-                return;
+                throw new Error("Storage access is required to save the track.");
             }
 
-            const fileExtension = optimizedAudio.split('.').pop() || 'mp3';
-            const fileName = `${track.id}.${fileExtension}`;
-            const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+            // Create a safe filename and directory
+            const safeTrackId = track.id.toString().replace(/[^a-zA-Z0-9]/g, '_');
+            const fileExtension = 'mp3'; // Force MP3 extension for consistency
+            const fileName = `track_${safeTrackId}.${fileExtension}`;
+            const downloadDir = `${FileSystem.documentDirectory}downloads/`;
+            const fileUri = `${downloadDir}${fileName}`;
+
+            // Ensure download directory exists
+            await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
 
             const downloadResumable = FileSystem.createDownloadResumable(
-                optimizedAudio, // Using optimized URL
+                optimizedAudio,
                 fileUri,
                 {},
                 (downloadProgress) => {
                     const progress = (downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite) * 100;
-                    console.log(`Download Progress: ${progress.toFixed(2)}%`);
+                    setDownloadProgress(progress);
                 }
             );
 
@@ -133,17 +145,29 @@ const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
             const asset = await MediaLibrary.createAssetAsync(uri);
 
             try {
-                await MediaLibrary.createAlbumAsync("Downloads", asset, false);
+                await MediaLibrary.createAlbumAsync("Music Downloads", asset, false);
             } catch (albumError) {
-                console.warn('Album creation failed:', albumError);
+                console.warn('Album creation failed, saving to default location:', albumError);
             }
 
             if (await Sharing.isAvailableAsync()) {
                 await Sharing.shareAsync(uri);
             }
+            
+            Alert.alert("Success", "Track downloaded successfully");
         } catch (error) {
-            console.error('Error downloading the track:', error);
-            Alert.alert("Download Failed", error.message || "An unexpected error occurred.");
+            console.error('Download error:', error);
+            setDownloadError(error.message);
+            Alert.alert(
+                "Download Failed", 
+                error.message || "An unexpected error occurred",
+                [
+                    { text: "OK", onPress: () => {} },
+                    { text: "Retry", onPress: handleDownload }
+                ]
+            );
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -242,10 +266,32 @@ return (
             <View style={styles.bottomSection}>
                 <Likes trackId={track.id} initialLikes={track.likes_count} />
                 <Comments trackId={track.id} />
-                <TouchableOpacity style={styles.downloadButton} onPress={handleDownload}>
-                    <MaterialIcons name="download" size={20} color="white" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.favoriteButton} onPress={handleToggleFavorite}>
+                
+                {isDownloading ? (
+                    <View style={styles.downloadProgressContainer}>
+                        <ActivityIndicator size="small" color="#1DB954" />
+                        <Text style={styles.downloadProgressText}>
+                            {Math.round(downloadProgress)}%
+                        </Text>
+                    </View>
+                ) : (
+                    <TouchableOpacity 
+                        style={styles.downloadButton} 
+                        onPress={handleDownload}
+                        disabled={isDownloading}
+                    >
+                        <MaterialIcons 
+                            name={downloadError ? "error" : "download"} 
+                            size={20} 
+                            color={downloadError ? '#ff3333' : 'white'} 
+                        />
+                    </TouchableOpacity>
+                )}
+                
+                <TouchableOpacity 
+                    style={styles.favoriteButton} 
+                    onPress={handleToggleFavorite}
+                >
                     <FontAwesome 
                         name="heart" 
                         size={20} 
@@ -253,6 +299,12 @@ return (
                     />
                 </TouchableOpacity>
             </View>
+            
+            {downloadError && (
+                <Text style={styles.errorText}>
+                    Download failed: {downloadError}
+                </Text>
+            )}
         </View>
     );
 };
@@ -260,7 +312,7 @@ const styles = StyleSheet.create({
     trackItem: {
       
         borderRadius: 10,
-        padding: 16,
+        padding: 29,
         marginVertical: 10,
         backgroundColor: '#0c2756',
         alignItems: 'center',
@@ -344,6 +396,25 @@ const styles = StyleSheet.create({
         padding: 8,
         borderRadius: 5,
         // marginLeft: 10,
+    },
+    downloadProgressContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 10,
+        borderRadius: 5,
+        marginLeft: 10,
+        minWidth: 60,
+    },
+    downloadProgressText: {
+        color: 'white',
+        fontSize: 12,
+        marginLeft: 5,
+    },
+    errorText: {
+        color: '#ff3333',
+        fontSize: 12,
+        marginTop: 5,
+        textAlign: 'center',
     },
 });
 
