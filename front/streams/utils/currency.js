@@ -18,3 +18,6 @@ export const formatPrice = (price, currency) => {
   const symbol = getCurrencySymbol(currency);
   return `${symbol}${parseFloat(price).toFixed(2)}`;
 };
+
+
+

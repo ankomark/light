@@ -11,12 +11,34 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_URL } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
+
 const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/50';
-const TrackItem = ({ track, currentUserId, onDelete,onRefresh  }) => {
+
+// Cloudinary URL transformation helper
+const getOptimizedUrl = (url, type = 'image') => {
+  if (!url || !url.includes('res.cloudinary.com')) return url;
+  
+  const transformations = {
+    image: 'w_300,h_300,c_fill,q_auto,f_auto',
+    audio: 'q_auto',
+    profile: 'w_50,h_50,c_fill,q_auto'
+  };
+  
+  return url.replace('/upload/', `/upload/${transformations[type]}/`);
+};
+
+const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
     const [isFavorite, setIsFavorite] = useState(false);
     const [artistProfile, setArtistProfile] = useState(null);
     const isOwner = track.is_owner;
     const navigation = useNavigation();
+
+    // Apply Cloudinary optimizations
+    const optimizedCover = getOptimizedUrl(track.cover_image, 'image');
+    const optimizedAudio = getOptimizedUrl(track.audio_file, 'audio');
+    const optimizedProfile = artistProfile?.picture 
+      ? getOptimizedUrl(artistProfile.picture, 'profile') 
+      : DEFAULT_PROFILE_IMAGE;
 
     useEffect(() => {
         const fetchArtistProfile = async () => {
@@ -51,7 +73,6 @@ const TrackItem = ({ track, currentUserId, onDelete,onRefresh  }) => {
         fetchFavoriteStatus();
     }, [track.id]);
     
-   
     const handleDelete = async () => {
         Alert.alert(
             "Delete Track",
@@ -89,23 +110,17 @@ const TrackItem = ({ track, currentUserId, onDelete,onRefresh  }) => {
 
         try {
             const { status } = await MediaLibrary.requestPermissionsAsync();
-            console.log('Media Library Permission Status:', status);
-
             if (status !== 'granted') {
                 Alert.alert("Permission Denied", "Storage access is required to save the track.");
                 return;
             }
 
-            const fileExtension = track.audio_file.split('.').pop();
-            if (!fileExtension) {
-                throw new Error("Could not determine file extension.");
-            }
-
+            const fileExtension = optimizedAudio.split('.').pop() || 'mp3';
             const fileName = `${track.id}.${fileExtension}`;
             const fileUri = `${FileSystem.documentDirectory}${fileName}`;
 
             const downloadResumable = FileSystem.createDownloadResumable(
-                track.audio_file,
+                optimizedAudio, // Using optimized URL
                 fileUri,
                 {},
                 (downloadProgress) => {
@@ -115,16 +130,12 @@ const TrackItem = ({ track, currentUserId, onDelete,onRefresh  }) => {
             );
 
             const { uri } = await downloadResumable.downloadAsync();
-
             const asset = await MediaLibrary.createAssetAsync(uri);
-            console.log('Asset Created:', asset);
 
             try {
                 await MediaLibrary.createAlbumAsync("Downloads", asset, false);
-                console.log('Album Created Successfully');
             } catch (albumError) {
                 console.warn('Album creation failed:', albumError);
-                console.log('File saved to device without album.');
             }
 
             if (await Sharing.isAvailableAsync()) {
@@ -186,64 +197,65 @@ const TrackItem = ({ track, currentUserId, onDelete,onRefresh  }) => {
 
 
 return (
-    <View style={styles.trackItem}>
-        {/* Header Section */}
-        <View style={styles.header}>
-            <View style={styles.artistContainer}>
-                <Image 
-                    source={{ uri: artistProfile?.picture || DEFAULT_PROFILE_IMAGE }} 
-                    style={styles.artistImage} 
-                />
-                <Text style={styles.artistText}>{track.artist.username}</Text>
-            </View>
-            
-            {isOwner && (
-                <View style={styles.ownerActions}>
-                    <TouchableOpacity 
-                        style={styles.editButton} 
-                        onPress={handleEdit}
-                    >
-                        <MaterialIcons name="edit" size={20} color="white" />
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                        style={styles.deleteButton} 
-                        onPress={handleDelete}
-                    >
-                        <MaterialIcons name="delete" size={20} color="white" />
-                    </TouchableOpacity>
+        <View style={styles.trackItem}>
+            {/* Header Section */}
+            <View style={styles.header}>
+                <View style={styles.artistContainer}>
+                    <Image 
+                        source={{ uri: optimizedProfile }} 
+                        style={styles.artistImage} 
+                    />
+                    <Text style={styles.artistText}>{track.artist.username}</Text>
                 </View>
-            )}
+                
+                {isOwner && (
+                    <View style={styles.ownerActions}>
+                        <TouchableOpacity 
+                            style={styles.editButton} 
+                            onPress={() => navigation.navigate('EditTrack', { track, onRefresh })}
+                        >
+                            <MaterialIcons name="edit" size={20} color="white" />
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={styles.deleteButton} 
+                            onPress={handleDelete}
+                        >
+                            <MaterialIcons name="delete" size={20} color="white" />
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </View>
+
+            {/* Cover Image with Cloudinary optimizations */}
+            <Image 
+                source={{ uri: optimizedCover }} 
+                style={styles.trackCover} 
+            />
+
+            {/* Track Title */}
+            <Text style={styles.trackTitle}>{track.title}</Text>
+
+            {/* Play Controls - passes optimized audio URL */}
+            <PlayControls track={{ ...track, audio_file: optimizedAudio }} />
+
+            {/* Bottom Actions */}
+            <View style={styles.bottomSection}>
+                <Likes trackId={track.id} initialLikes={track.likes_count} />
+                <Comments trackId={track.id} />
+                <TouchableOpacity style={styles.downloadButton} onPress={handleDownload}>
+                    <MaterialIcons name="download" size={20} color="white" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.favoriteButton} onPress={handleToggleFavorite}>
+                    <FontAwesome 
+                        name="heart" 
+                        size={20} 
+                        color={isFavorite ? 'red' : 'gray'} 
+                    />
+                </TouchableOpacity>
+            </View>
         </View>
-
-        {/* Cover Image */}
-        <Image 
-            source={{ uri: track.cover_image || DEFAULT_PROFILE_IMAGE }} 
-            style={styles.trackCover} 
-        />
-
-        {/* Track Title */}
-        <Text style={styles.trackTitle}>{track.title}</Text>
-
-        {/* Play Controls */}
-        <PlayControls track={track} />
-
-        {/* Bottom Actions */}
-        <View style={styles.bottomSection}>
-            <Likes trackId={track.id} initialLikes={track.likes_count} />
-            <Comments trackId={track.id} />
-            <TouchableOpacity style={styles.downloadButton} onPress={handleDownload}>
-                <MaterialIcons name="download" size={20} color="white" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.favoriteButton} onPress={handleToggleFavorite}>
-                <FontAwesome 
-                    name="heart" 
-                    size={20} 
-                    color={isFavorite ? 'red' : 'gray'} 
-                />
-            </TouchableOpacity>
-        </View>
-    </View>
-)};
+    );
+};
 const styles = StyleSheet.create({
     trackItem: {
       
