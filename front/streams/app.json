@@ -8,10 +8,15 @@
     "scheme": "streams",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "assetBundlePatterns": ["assets/*.db"],
+    "assetBundlePatterns": [
+      "assets/*.db"
+    ],
     "ios": {
       "supportsTablet": true,
-       "bundleIdentifier": "com.yourcompany.yourapp"
+      "bundleIdentifier": "com.yourcompany.yourapp",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
