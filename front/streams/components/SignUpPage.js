@@ -1,6 +1,4 @@
 
-
-
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import axios from 'axios';
@@ -58,25 +56,7 @@ const SignUpPage = () => {
         autoComplete="password"
         required
       />
-      {/* <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}> */}
-        {/* <TouchableOpacity onPress={handleCheckboxChange}>
-          <View
-            style={{
-              height: 20,
-              width: 20,
-              borderWidth: 1,
-              borderColor: '#ccc',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: 10,
-              backgroundColor: formData.is_artist ? '#007bff' : '#fff',
-            }}
-          >
-            {formData.is_artist && <Text style={{ color: '#fff' }}>✓</Text>}
-          </View>
-        </TouchableOpacity>
-        <Text>Are you an artist?</Text>
-      </View> */}
+    
       <TouchableOpacity style={styles.button} onPress={handleSubmit}>
         <Text style={styles.buttonText}>Sign Up</Text>
       </TouchableOpacity>

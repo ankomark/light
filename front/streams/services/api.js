@@ -5,8 +5,6 @@ import { extractYoutubeId } from '../utils/youtubeUtils';
 // export const API_BASE = 'https://light-backend-production.up.railway.app';
 const DEBUG = process.env.NODE_ENV === 'development';
 export const API_BASE = DEBUG ? 'http://192.168.1.126:8000' : 'https://light-backend-production.up.railway.app';
-
-// Add timeout and error handling:
 axios.defaults.timeout = 30000;
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 export const API_URL = `${API_BASE}/api`;
@@ -37,8 +35,6 @@ const getAuthToken = async () => {
     throw error;
   }
 };
-
-
 // Enhanced refresh token flow with retry
 const refreshAuthToken = async (retryCount = 0) => {
   try {
@@ -68,6 +64,7 @@ const refreshAuthToken = async (retryCount = 0) => {
     throw error;
   }
 };
+
 
 // Request interceptor for adding auth token
 axios.interceptors.request.use(async (config) => {
@@ -111,34 +108,70 @@ axios.interceptors.response.use(
   }
 );
 
-const apiRequest = async (method, endpoint, data = null, options = {}) => {
+// Enhanced apiRequest function
+export const apiRequest = async (method, endpoint, data = null, options = {}) => {
+  const url = `${API_URL}${endpoint}`;
+  const requestId = `${method}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   try {
+    const startTime = Date.now();
     const response = await axios({
       method,
-      url: `${API_URL}${endpoint}`,
+      url,
       data,
       timeout: 60000,
       ...options,
       headers: {
+        'X-Request-ID': requestId,
         'Content-Type': 'application/json',
         ...options.headers,
       }
     });
+    
+    const duration = Date.now() - startTime;
     return response.data;
+    
   } catch (error) {
-    console.error(`API Error [${method} ${endpoint}]:`, error.response?.data || error.message);
+    const errorDetails = {
+      requestId,
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+    };
     
-    // Handle specific error cases
-     if (error.response?.status === 401 || error.message.includes('token')) {
-      await clearTokens();
-      throw new Error('Session expired - please login again');
+    if (error.response) {
+      // Server responded with error status
+      console.error('[NETWORK] Server error response:', {
+        ...errorDetails,
+        status: error.response.status,
+        data: error.response.data
+      });
+    } else if (error.request) {
+      // Request was made but no response
+      console.error('[NETWORK] No response received:', {
+        ...errorDetails,
+        diagnosis: diagnoseNetworkError(error, url)
+      });
+    } else {
+      // Request setup error
+      console.error('[NETWORK] Request setup error:', errorDetails);
     }
     
-    if (error.code === 'ECONNABORTED') {
-      throw new Error('Request timeout - please check your connection');
+    // Enhanced error messages
+    let errorMessage = error.message;
+    if (error.message.includes('Network Error')) {
+      errorMessage = `Network issue - ${diagnoseNetworkError(error, url)}`;
+    } 
+    else if (error.response?.status === 401) {
+      errorMessage = 'Session expired - please login again';
+    }
+    else if (error.response?.data) {
+      errorMessage = error.response.data.error || 
+                    error.response.data.detail || 
+                    JSON.stringify(error.response.data);
     }
     
-    throw error.response?.data || error;
+    throw new Error(errorMessage);
   }
 };
 
@@ -178,34 +211,79 @@ export const createTrack = async (formData) => {
     }
   });
 };
-
-// Social endpoints
-export const fetchSocialPosts = async () => {
-  return apiRequest('get', '/social-posts/');
-};
-
-
-export const createSocialPost = async (formData) => {
+// api.js - Updated createSocialPost function
+export const createSocialPost = async (postData) => {
   try {
-    // Ensure FormData is properly constructed
-    console.log("FormData contents:");
-    for (let [key, value] of formData.entries()) {
-      console.log(key, value);
-    }
-
-    const response = await axios.post(`${API_URL}/social-posts/`, formData, {
+    console.log('[DEBUG] Creating post with:', postData);
+    
+    // USE apiRequest INSTEAD OF DIRECT AXIOS CALL
+    const response = await apiRequest('post', '/social-posts/', postData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
-        'Authorization': `Bearer ${await getAuthToken()}`
-      },
-      timeout: 30000
+        'Content-Type': 'application/json' // Explicit content type
+      }
+    });
+
+    console.log('[DEBUG] Post created:', response);
+    return response;
+    
+  } catch (error) {
+    console.error('[ERROR] Post creation failed:', {
+      error: error.response?.data || error.message,
+      status: error.response?.status,
+      config: error.config
     });
     
-    return response.data;
-  } catch (error) {
-    console.error('Post creation error:', error.response?.data || error.message);
-    throw error.response?.data || { message: 'Failed to create post' };
+    // Enhanced error messages
+    let errorMessage = error.response?.data?.error 
+      || error.response?.data?.detail
+      || error.message;
+    
+    if (error.response?.status === 401) {
+      errorMessage = 'Session expired - please login again';
+    } else if (error.message.includes('Network Error')) {
+      errorMessage = 'Network issue - check your connection';
+    }
+
+    throw new Error(errorMessage);
   }
+};
+
+// Enhanced fetchSocialPosts with retry mechanism
+export const fetchSocialPosts = async (maxRetries = 3) => {
+  const retry = async (attempt = 1) => {
+    try {
+      
+      const response = await apiRequest('get', '/social-posts/', null, {
+        params: {
+          _cache: Date.now(),
+          _fields: 'id,user,content_type,media_url,caption,location,created_at,likes_count,comments_count,is_liked,is_saved,can_edit'
+        }
+      });
+      
+      if (!Array.isArray(response)) {
+        
+        throw new Error('Invalid response format from server');
+      }
+      return response;
+    } catch (error) {
+      console.error(`[FETCH_POSTS] Attempt ${attempt} failed:`, {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        config: error.config
+      });
+      
+      if (attempt <= maxRetries && error.response?.status >= 500) {
+        const delay = 1000 * Math.pow(2, attempt - 1);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return retry(attempt + 1);
+      }
+      
+      throw error;
+    }
+  };
+  
+  return retry();
 };
 
 // Social Post Endpoints
@@ -274,6 +352,7 @@ export const fetchComments = async (trackId) => {  // Renamed from fetchTrackCom
 export const postComment = async (trackId, content) => {
   return apiRequest('post', `/tracks/${trackId}/comments/`, { content });
 };
+
 // Utility endpoints
 export const checkAuthStatus = async () => {
   try {
@@ -526,16 +605,6 @@ export const createGroup = async (formData) => {
   }
 };
 
-// export const requestJoinGroup = async (slug, message = "") => {
-//   const formData = new FormData();
-//   formData.append('message', message);
-  
-//   return apiRequest('post', `/groups/${slug}/request-join/`, formData, {
-//     headers: {
-//       'Content-Type': 'multipart/form-data'
-//     }
-//   });
-// };
 export const requestJoinGroup = async (slug, message = "") => {
   try {
     const formData = new FormData();

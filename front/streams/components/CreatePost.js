@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import config from '../config';
 import { 
   View, 
   Text, 
@@ -24,7 +25,6 @@ const CreatePost = ({ navigation }) => {
   // Request media library permissions
   useEffect(() => {
     (async () => {
-      await Video.requestPermissionsAsync();
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission required!', 'We need access to your media library to upload files');
@@ -33,90 +33,141 @@ const CreatePost = ({ navigation }) => {
   }, []);
 
   const pickMedia = async () => {
-    // build an array of one string: either "images" or "videos"
-    const mediaTypesArray = [ contentType === 'video' ? 'videos' : 'images' ];
-  
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes:      mediaTypesArray,  // <-- simple lowercase string array
-      allowsEditing:   true,
-      aspect:          [4, 5],
-      quality:         1,
-      // you can explicitly disable multiple selection if you want:
+    try {
+      const mediaTypesArray = [contentType === 'video' ? 'videos' : 'images'];
+    
+      const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: contentType === 'video'
+        ? ImagePicker.MediaTypeOptions.Videos
+        : ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false, // Don't crop or enforce aspect ratio
+      quality: 0.7,
       allowsMultipleSelection: false,
     });
-  
-    if (!result.canceled && result.assets.length > 0) {
-      console.log('PICKED MEDIA OBJECT →', result.assets[0]);
-      setMedia(result.assets[0]);
+    
+      if (!result.canceled && result.assets.length > 0) {
+        console.log('PICKED MEDIA OBJECT →', result.assets[0]);
+        
+        // Validate the selected media
+        const selectedMedia = result.assets[0];
+        
+        if (contentType === 'video') {
+          // Check video duration (max 1 minute = 60000ms)
+          if (selectedMedia.duration && selectedMedia.duration > 60000) {
+            Alert.alert('Error', 'Video must be shorter than 1 minute');
+            return;
+          }
+        }
+        
+        // Check file size (max 10MB)
+        if (selectedMedia.fileSize && selectedMedia.fileSize > 10 * 1024 * 1024) {
+          Alert.alert('Error', 'File size must be less than 10MB');
+          return;
+        }
+        
+        setMedia(selectedMedia);
+      }
+    } catch (error) {
+      console.error('Media picker error:', error);
+      Alert.alert('Error', 'Failed to pick media. Please try again.');
     }
   };
 
-  // const handlePost = async () => {
-  //   if (!media) {
-  //     Alert.alert('Error', 'Please select a media file');
-  //     return;
-  //   }
-  
-  //   setIsUploading(true);
-  //   try {
-  //     const formData = new FormData();
-      
-  //   // Determine the MIME type based on the content type
-  //   const fileType = contentType === 'video' ? 'video/mp4' : 'image/jpeg';
-  //     // Convert local URI to proper file object
-  //     const file = {
-  //       uri: media.uri,
-  //       name: media.fileName || `media_${Date.now()}.${contentType === 'video' ? 'mp4' : 'jpg'}`,
-  //     type: fileType, // Set the correct MIME type
-  //     };
-  
-  //     formData.append('media_file', file);
-  //     formData.append('content_type', contentType);
-  //     formData.append('caption', caption);
-  
-  //     console.log('Final FormData:', formData);
-      
-  //     const response = await createSocialPost(formData);
-  //     navigation.goBack();
-  //   } catch (error) {
-  //     console.error('Full error:', error.response?.data || error.message);
-  //     Alert.alert('Error', `Failed to create post: ${error.response?.data?.detail || 'Invalid file format or missing fields'}`);
-  //   } finally {
-  //     setIsUploading(false);
-  //   }
-  // };
   const handlePost = async () => {
-    if (!media) {
-      Alert.alert('Error', 'Please select a media file');
-      return;
+  if (!media) {
+    Alert.alert('Error', 'Please select a media file');
+    return;
+  }
+
+  if (!caption.trim()) {
+    Alert.alert('Error', 'Please add a caption');
+    return;
+  }
+
+  setIsUploading(true);
+  try {
+    // 1. Upload to Cloudinary first
+    console.log('Uploading to Cloudinary...');
+    
+    const uploadResult = await uploadToCloudinary(media, contentType);
+    
+    if (!uploadResult.public_id) {
+      throw new Error('Failed to get Cloudinary public_id');
     }
+
+    console.log('Cloudinary upload successful:', uploadResult);
+
+    // 2. Create post with Cloudinary public_id (extract filename only)
+    const postData = {
+      caption: caption.trim(),
+      media_file: uploadResult.public_id,  // Send FULL public_id with folder
+      content_type: contentType,
+      width: uploadResult.width,
+      height: uploadResult.height,
+      ...(contentType === 'video' && media.duration && { 
+        duration: Math.floor(media.duration / 1000)
+      }),
+    };
+
+    console.log('Sending to backend:', postData);
+
+    const response = await createSocialPost(postData);
+    console.log('Post created successfully:', response);
+    
+    Alert.alert('Success', 'Post created successfully!');
+    navigation.goBack();
+  } catch (error) {
+    console.error('Upload error:', error);
+    Alert.alert(
+      'Error',
+      error.message || 'Failed to create post. Please try again.'
+    );
+  } finally {
+    setIsUploading(false);
+  }
+};
+
+const uploadToCloudinary = async (mediaFile, type) => {
+  const formData = new FormData();
   
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      
-      // Convert local URI to proper file object
-      const file = {
-        uri: media.uri,
-        name: media.fileName || `post_${Date.now()}.${contentType === 'video' ? 'mp4' : 'jpg'}`,
-        type: contentType === 'video' ? 'video/mp4' : 'image/jpeg'
-      };
-  
-      formData.append('media_file', file);
-      formData.append('content_type', contentType);
-      formData.append('caption', caption);
-  
-      console.log('Final FormData:', formData);
-      
-      const response = await createSocialPost(formData);
-      navigation.goBack();
-    } catch (error) {
-      console.error('Full error:', error);
-      Alert.alert('Error', error.message || 'Failed to create post');
-    } finally {
-      setIsUploading(false);
-    }
+  // Prepare file object
+  const file = {
+    uri: mediaFile.uri,
+    name: mediaFile.fileName || `post_${Date.now()}.${type === 'video' ? 'mp4' : 'jpg'}`,
+    type: mediaFile.mimeType || (type === 'video' ? 'video/mp4' : 'image/jpeg')
   };
+
+  formData.append('file', file);
+  formData.append('upload_preset', config.cloudinary.presets.socialImages);
+  formData.append('folder', 'social_media');
+
+  // Determine endpoint
+  const endpoint = type === 'video' ? 'video/upload' : 'image/upload';
+  
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${config.cloudinary.cloudName}/${endpoint}`,
+    {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error?.message || 'Cloudinary upload failed');
+  }
+
+  const result = await response.json();
+  
+  // Log original and processed public_id for debugging
+  console.log('Original public_id:', result.public_id);
+  console.log('Processed public_id:', result.public_id.split('/').pop());
+  
+  return result;
+};
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -155,30 +206,30 @@ const CreatePost = ({ navigation }) => {
 
       {/* Media Preview */}
       {media ? (
-  <View style={styles.mediaPreviewContainer}>
-    {contentType === 'image' ? (
-      <Image
-        source={{ uri: media.uri }}
-        style={styles.mediaPreview}
-        resizeMode="contain"
-      />
-    ) : (
-      <Video
-        source={{ uri: media.uri }}
-        style={styles.mediaPreview}
-        useNativeControls
-        resizeMode="contain"
-        isLooping
-        shouldPlay={false}
-      />
-    )}
-    <TouchableOpacity
-      style={styles.changeMediaButton}
-      onPress={pickMedia}
-    >
-      <Feather name="edit" size={20} color="#fff" />
-    </TouchableOpacity>
-  </View>
+        <View style={styles.mediaPreviewContainer}>
+          {contentType === 'image' ? (
+            <Image
+              source={{ uri: media.uri }}
+              style={styles.mediaPreview}
+              resizeMode="contain"
+            />
+          ) : (
+            <Video
+              source={{ uri: media.uri }}
+              style={styles.mediaPreview}
+              useNativeControls
+              resizeMode="contain"
+              isLooping
+              shouldPlay={false}
+            />
+          )}
+          <TouchableOpacity
+            style={styles.changeMediaButton}
+            onPress={pickMedia}
+          >
+            <Feather name="edit" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
       ) : (
         <TouchableOpacity 
           style={styles.uploadButton}
@@ -193,7 +244,7 @@ const CreatePost = ({ navigation }) => {
 
       {/* Caption Input */}
       <View style={styles.inputContainer}>
-        <Text style={styles.inputLabel}>Caption</Text>
+        <Text style={styles.inputLabel}>Caption *</Text>
         <TextInput
           style={styles.captionInput}
           placeholder="Write a caption..."
@@ -203,6 +254,7 @@ const CreatePost = ({ navigation }) => {
           multiline
           maxLength={2200}
         />
+        <Text style={styles.charCount}>{caption.length}/2200</Text>
       </View>
 
       {/* Post Button */}
@@ -326,6 +378,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  videoThumbnail: {
+  width: '100%',
+  height: '100%',
+  resizeMode: 'cover',
+},
+videoContainer: {
+  position: 'relative',
+},
 });
 
 export default CreatePost;

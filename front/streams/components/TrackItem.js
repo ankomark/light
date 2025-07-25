@@ -11,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_URL } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
-
+import { useAuth } from '../context/useAuth';
 const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/50';
 
 // Cloudinary URL transformation helper
@@ -28,6 +28,7 @@ const getOptimizedUrl = (url, type = 'image') => {
 };
 
 const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
+    const { processProfilePicture } = useAuth();
     const [isFavorite, setIsFavorite] = useState(false);
     const [artistProfile, setArtistProfile] = useState(null);
     const isOwner = track.is_owner;
@@ -35,34 +36,45 @@ const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
     const [downloadProgress, setDownloadProgress] = useState(0);
     const [isDownloading, setIsDownloading] = useState(false);
     const [downloadError, setDownloadError] = useState(null);
+    const [profileImageError, setProfileImageError] = useState(false);
 
-    // Apply Cloudinary optimizations
-    const optimizedCover = getOptimizedUrl(track.cover_image, 'image');
-    const optimizedAudio = getOptimizedUrl(track.audio_file, 'audio');
+    // Get optimized URLs
+    const optimizedCover = track.cover_image?.includes('cloudinary') 
+        ? track.cover_image.replace('/upload/', '/upload/w_300,h_300,c_fill,q_auto/')
+        : track.cover_image;
+
+    const optimizedAudio = track.audio_file?.includes('cloudinary')
+        ? track.audio_file.replace('/upload/', '/upload/q_auto/')
+        : track.audio_file;
+
     const optimizedProfile = artistProfile?.picture 
-      ? getOptimizedUrl(artistProfile.picture, 'profile') 
-      : DEFAULT_PROFILE_IMAGE;
+        ? processProfilePicture(artistProfile.picture, 50)
+        : DEFAULT_PROFILE_IMAGE;
 
     useEffect(() => {
         const fetchArtistProfile = async () => {
-          try {
-            const token = await AsyncStorage.getItem('accessToken');
-            if (!token) return;
-            const response = await axios.get(
-              `${API_URL}/profiles/by_user/${track.artist.id}/`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            setArtistProfile(response.data);
-          } catch (error) {
-            if (error.response?.status !== 404) console.error(error);
-            setArtistProfile({ picture: DEFAULT_PROFILE_IMAGE });
-          }
+            try {
+                const token = await AsyncStorage.getItem('accessToken');
+                if (!token) return;
+                
+                const response = await axios.get(
+                    `${API_URL}/profiles/by_user/${track.artist.id}/`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                
+                setArtistProfile(response.data);
+            } catch (error) {
+                if (error.response?.status !== 404) {
+                    console.error('Error fetching artist profile:', error);
+                }
+                setArtistProfile({ picture: DEFAULT_PROFILE_IMAGE });
+            }
         };
-    
+
         if (track?.artist?.id) {
-          fetchArtistProfile();
+            fetchArtistProfile();
         }
-      }, [track.artist.id]);
+    }, [track.artist.id]);
 
     useEffect(() => {
         const fetchFavoriteStatus = async () => {
@@ -225,9 +237,17 @@ return (
             {/* Header Section */}
             <View style={styles.header}>
                 <View style={styles.artistContainer}>
-                    <Image 
-                        source={{ uri: optimizedProfile }} 
-                        style={styles.artistImage} 
+                     <Image 
+                        source={{ 
+                            uri: profileImageError ? DEFAULT_PROFILE_IMAGE : optimizedProfile,
+                            cache: 'force-cache'
+                        }} 
+                        style={styles.artistImage}
+                        defaultSource={{ uri: DEFAULT_PROFILE_IMAGE }}
+                        onError={() => {
+                            console.log('Failed to load artist profile image');
+                            setProfileImageError(true);
+                        }}
                     />
                     <Text style={styles.artistText}>{track.artist.username}</Text>
                 </View>
@@ -415,7 +435,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         marginTop: 5,
         textAlign: 'center',
-    },
+    },  
 });
 
 export default TrackItem;

@@ -169,6 +169,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+  videoThumbnail: {
+  width: '100%',
+  height: '100%',
+  resizeMode: 'cover',
+},
+videoContainer: {
+  position: 'relative',
+},
 });
 
 export default PostActions;

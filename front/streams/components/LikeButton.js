@@ -29,18 +29,7 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
             Alert.alert('Error', error.message || 'Failed to update like status');
           }
         };
-    //     try {
-    //         const response = await likePost(trackId, !isLiked); // Pass trackId and new like state
-    //         if (response && typeof response.likes_count === 'number') {
-    //             setLikes(response.likes_count); // Update UI with the new like count
-    //             setIsLiked(!isLiked); // Toggle like state
-    //         } else {
-    //             console.error('Invalid response format:', response);
-    //         }
-    //     } catch (error) {
-    //         console.error('Failed to update like status:', error);
-    //     }
-    // };
+
 
     return (
         <TouchableOpacity

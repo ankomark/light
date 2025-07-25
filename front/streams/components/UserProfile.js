@@ -1,55 +1,30 @@
-// import React from "react";
-
-// const UserProfile = ({ profile }) => {
-//   if (!profile) return null;
-
-//   return (
-//     <div className="user-profile">
-//       <img
-//         src={profile.profile_picture}
-//         alt={`${profile.user}'s profile`}
-//         className="profile-picture"
-//       />
-//       <div className="profile-details">
-//         <h3>{profile.user}</h3>
-//         <p>{profile.bio}</p>
-//         <p>{profile.location}</p>
-//       </div>
-//     </div>
-//   );
-// };
-
-// export default UserProfile;
 import React from "react";
 import { Image, View, Text, StyleSheet } from "react-native";
+import { useAuth } from "../hooks/useAuth";
 
-const UserProfile = ({ profile }) => {
-  if (!profile) return null;
+const UserProfile = ({ profile, size = 200 }) => {
+  const { currentUser } = useAuth();
+  const displayedProfile = profile || currentUser;
 
-  // Cloudinary image URL construction
-  const getCloudinaryUrl = (publicId, width = 200, height = 200) => {
-    if (!publicId) return null;
-    
-    // Check if it's already a URL (for backward compatibility)
-    if (publicId.startsWith('http')) {
-      return publicId;
-    }
-    
-    return `https://res.cloudinary.com/YOUR_CLOUD_NAME/image/upload/w_${width},h_${height},c_fill/${publicId}`;
-  };
+  if (!displayedProfile) return null;
 
   return (
     <View style={styles.container}>
       <Image
-        source={{ uri: getCloudinaryUrl(profile.profile_picture) || 'https://via.placeholder.com/200' }}
-        style={styles.profilePicture}
+        source={{ 
+          uri: displayedProfile.profile_picture,
+          cache: 'force-cache'
+        }}
+        style={[styles.profilePicture, { width: size, height: size, borderRadius: size/2 }]}
         resizeMode="cover"
         onError={(e) => console.log("Image load error:", e.nativeEvent.error)}
       />
       <View style={styles.detailsContainer}>
-        <Text style={styles.username}>{profile.user}</Text>
-        {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
-        {profile.location && <Text style={styles.location}>{profile.location}</Text>}
+        <Text style={styles.username}>{displayedProfile.username}</Text>
+        {displayedProfile.bio && <Text style={styles.bio}>{displayedProfile.bio}</Text>}
+        {displayedProfile.location && (
+          <Text style={styles.location}>{displayedProfile.location}</Text>
+        )}
       </View>
     </View>
   );
@@ -59,38 +34,39 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: 10,
     backgroundColor: '#fff',
     borderRadius: 8,
+    marginVertical: 5,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
     elevation: 2,
-    marginBottom: 16,
   },
   profilePicture: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginRight: 16,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginRight: 15,
   },
   detailsContainer: {
     flex: 1,
   },
   username: {
-    fontSize: 18,
     fontWeight: 'bold',
+    fontSize: 16,
     marginBottom: 4,
   },
   bio: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   location: {
     fontSize: 12,
     color: '#999',
+    fontStyle: 'italic',
   },
 });
 
