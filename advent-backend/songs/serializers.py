@@ -3,77 +3,169 @@ from .models import User
 from .models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
 import re
 from django.utils import timezone
+from datetime import timedelta
+from django.conf import settings
 import logging
+import cloudinary
+import os
+from cloudinary import config
 logger = logging.getLogger(__name__)
 
 class CloudinaryFieldSerializer(serializers.Field):
     def to_representation(self, value):
+        """
+        Convert internal value to representation for output.
+        Handles multiple Cloudinary value formats:
+        - CloudinaryResource objects
+        - Dictionaries with URLs
+        - Direct URLs
+        - Public IDs
+        """
         if not value:
             return None
-        
+
         try:
-            # Handle different Cloudinary response formats
-            if isinstance(value, dict):
-                return value.get('secure_url') or value.get('url')
-            
+            # Case 1: CloudinaryResource object
             if hasattr(value, 'url'):
                 return value.url
-            
-            # Handle string URLs
-            if isinstance(value, str):
+
+            # Case 2: Dictionary format
+            if isinstance(value, dict):
+                return value.get('secure_url') or value.get('url') or value.get('public_id')
+
+            # Case 3: Already a URL string
+            if isinstance(value, str) and value.startswith(('http://', 'https://')):
                 return value
-                
+
+            # Case 4: Public ID - build URL
+            if isinstance(value, str):
+                from cloudinary import CloudinaryImage
+                return str(CloudinaryImage(value).build_url())
+
+            # Fallback: string conversion
             return str(value)
+
         except Exception as e:
-            logger.error(f"Error processing Cloudinary field: {str(e)}")
+            logger.error(f"Error processing Cloudinary field representation: {str(e)}")
             return None
-    
+
     def to_internal_value(self, data):
+        """
+        Convert incoming data to internal value.
+        Handles:
+        - Cloudinary URLs
+        - CloudinaryResource objects
+        - Dictionaries with public_id/url
+        - Direct public_ids
+        """
         if not data:
             return None
-            
+
         try:
-            if isinstance(data, str) and data.startswith(('http://', 'https://')):
-                # Validate it's a Cloudinary URL
+            # Case 1: CloudinaryResource object
+            if hasattr(data, 'public_id'):
+                return data.public_id
+
+            # Case 2: Dictionary input
+            if isinstance(data, dict):
+                if 'public_id' in data:
+                    return data['public_id']
+                if 'url' in data:
+                    data = data['url']
+
+            # Case 3: String input
+            if isinstance(data, str):
+                # If it's a URL, extract public_id
                 if 'res.cloudinary.com' in data:
-                    return data
-                else:
-                    raise serializers.ValidationError("Only Cloudinary URLs are allowed")
-            
-            return data
+                    try:
+                        path = urlparse(data).path
+                        parts = path.split('/')
+                        
+                        # Find the upload segment
+                        upload_index = parts.index('upload') + 2 if 'upload' in parts else 0
+                        
+                        # Handle different URL formats:
+                        # 1. Regular upload: .../upload/v123/public_id
+                        # 2. Fetch upload: .../upload/f_auto,q_auto/public_id
+                        if upload_index > 0:
+                            public_id = '/'.join(parts[upload_index:])
+                        else:
+                            # For fetch URLs, the public_id might be after version
+                            version_index = parts.index('v1') + 1 if 'v1' in parts else 1
+                            public_id = '/'.join(parts[version_index:])
+                        
+                        # Remove file extension if present
+                        return os.path.splitext(public_id)[0]
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Couldn't parse Cloudinary URL: {str(e)}")
+                        return data
+                # Otherwise assume it's already a public_id
+                return data
+
+            # Case 4: Other types (fallback)
+            return str(data)
+
         except Exception as e:
             logger.error(f"Error processing Cloudinary input: {str(e)}")
-            raise serializers.ValidationError("Invalid file data")
+            raise serializers.ValidationError({
+                'cloudinary': 'Invalid file data. Must be a Cloudinary URL, public_id, or resource object.'
+            })
 
 class ProfileSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source='user.id')
-    picture = CloudinaryFieldSerializer(required=False)
+    picture_url = serializers.SerializerMethodField()
+    username = serializers.ReadOnlyField(source='user.username')
     
     class Meta:
         model = Profile
-        fields = ['bio', 'user_id', 'birth_date', 'location', 'is_public', 'picture']
+        fields = ['bio', 'user_id','username', 'birth_date', 'location', 'is_public', 'picture','picture_url']
+        read_only_fields = ['user_id', 'username', 'picture_url']
         extra_kwargs = {
             'picture': {'write_only': True}  # Only needed for uploads
         }
 
-    def get_picture(self, obj):
-        """Handles all possible Cloudinary response formats"""
+    def get_picture_url(self, obj):
+        """
+        Returns optimized profile picture URL with consistent transformations
+        Handles three formats:
+        1. Cloudinary resource dict
+        2. CloudinaryField object
+        3. Public ID string
+        """
         if not obj.picture:
             return None
             
         try:
-            # Case 1: Cloudinary resource dictionary
-            if isinstance(obj.picture, dict):
-                return obj.picture.get('secure_url') or obj.picture.get('url')
+            # Default transformation parameters
+            width = self.context.get('picture_width', 200)
+            height = self.context.get('picture_height', 200)
+            crop = self.context.get('picture_crop', 'fill')
+            gravity = self.context.get('picture_gravity', 'face')
+            quality = self.context.get('picture_quality', 'auto')
             
-            # Case 2: CloudinaryField with url property
-            if hasattr(obj.picture, 'url'):
-                return obj.picture.url
+            # Handle Cloudinary resource dict
+            if isinstance(obj.picture, dict):
+                if 'secure_url' in obj.picture:
+                    base_url = obj.picture['secure_url']
+                    return f"{base_url.split('/upload/')[0]}/upload/w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/{base_url.split('/upload/')[1]}"
+                return None
                 
-            # Case 3: Direct URL string
-            return str(obj.picture)
+            # Handle CloudinaryField object
+            elif hasattr(obj.picture, 'url'):
+                base_url = obj.picture.url
+                return f"{base_url.split('/upload/')[0]}/upload/w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/{base_url.split('/upload/')[1]}"
+                
+            # Handle public_id string
+            elif isinstance(obj.picture, str):
+                return (
+                    f"https://res.cloudinary.com/"
+                    f"{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/"
+                    f"image/upload/w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/{obj.picture}"
+                )
+                
+            return None
         except Exception as e:
-            print(f"Error processing picture URL: {e}")
+            logger.error(f"Error processing picture URL: {str(e)}", exc_info=True)
             return None
 
     def create(self, validated_data):
@@ -85,9 +177,79 @@ class ProfileSerializer(serializers.ModelSerializer):
         except Exception as e:
             print(f"Profile creation error: {e}")
             raise serializers.ValidationError("Profile creation failed")
+
+class SimpleUserSerializer(serializers.ModelSerializer):
+    profile_picture = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'profile_picture']
+        read_only_fields = ['id', 'username', 'profile_picture']
+    
+    def get_profile_picture(self, obj):
+        """
+        Returns optimized profile picture URL with consistent transformations
+        Handles three formats:
+        1. Cloudinary resource dict
+        2. CloudinaryField object
+        3. Public ID string
+        
+        Uses context parameters for customization (width, height, crop, etc.)
+        """
+        if not hasattr(obj, 'profile') or not obj.profile.picture:
+            return None
+            
+        try:
+            # Get transformation parameters from context or use defaults
+            width = self.context.get('picture_width', 50)  # Default smaller for lists
+            height = self.context.get('picture_height', 50)
+            crop = self.context.get('picture_crop', 'fill')
+            gravity = self.context.get('picture_gravity', 'face')
+            quality = self.context.get('picture_quality', 'auto')
+            
+            picture = obj.profile.picture
+            
+            # Handle Cloudinary resource dict
+            if isinstance(picture, dict):
+                if 'secure_url' in picture:
+                    base_url = picture['secure_url']
+                    return (
+                        f"{base_url.split('/upload/')[0]}/upload/"
+                        f"w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/"
+                        f"{base_url.split('/upload/')[1]}"
+                    )
+                return None
+                
+            # Handle CloudinaryField object
+            elif hasattr(picture, 'url'):
+                base_url = picture.url
+                return (
+                    f"{base_url.split('/upload/')[0]}/upload/"
+                    f"w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/"
+                    f"{base_url.split('/upload/')[1]}"
+                )
+                
+            # Handle public_id string
+            elif isinstance(picture, str):
+                return (
+                    f"https://res.cloudinary.com/"
+                    f"{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/"
+                    f"image/upload/"
+                    f"w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/"
+                    f"{picture}"
+                )
+                
+            return None
+            
+        except Exception as e:
+            logger.error(
+                f"Error processing profile picture for user {obj.id}: {str(e)}",
+                exc_info=True
+            )
+            return None
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
-    avatar = CloudinaryFieldSerializer(read_only=True)
+    profile_picture = serializers.SerializerMethodField() 
     profile = ProfileSerializer(read_only=True)
     social_posts = serializers.SerializerMethodField()
     followers_count = serializers.SerializerMethodField()
@@ -97,18 +259,37 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'email', 'password', 'avatar',
+            'id', 'username', 'email', 'password',
             'profile', 'social_posts', 'followers_count',
-            'following_count', 'is_following'
+            'following_count', 'is_following','profile_picture'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
             'email': {'required': True}
         }
+    def get_profile_picture(self, obj):
+        """Get optimized profile picture URL from associated profile"""
+        if hasattr(obj, 'profile') and obj.profile.picture:
+            # Reuse the transformation logic from ProfileSerializer
+            return ProfileSerializer(
+                obj.profile,
+                context=self.context
+            ).data.get('picture_url')
+        return None
     
     def get_social_posts(self, obj):
-        # Add pagination or limit
-        posts = obj.social_posts.select_related('user').prefetch_related('likes', 'comments')[:5]
+        posts = obj.social_posts.select_related('user').prefetch_related(
+            'likes',
+            'comments'
+        ).order_by('-created_at')
+        
+        # Optional: Add request-based filtering
+        if self.context.get('request'):
+            # Example: Filter by post type if requested
+            content_type = self.context['request'].GET.get('content_type')
+            if content_type in ['image', 'video']:
+                posts = posts.filter(content_type=content_type)
+                
         return SocialPostSerializer(posts, many=True, context=self.context).data
     
     def get_followers_count(self, obj):
@@ -127,14 +308,15 @@ class UserSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password')
         user = User.objects.create_user(password=password, **validated_data)
         return user
+    
 class TrackSerializer(serializers.ModelSerializer):
      likes_count = serializers.SerializerMethodField()
      is_liked = serializers.SerializerMethodField()
     #  favorite = serializers.SerializerMethodField()
      artist = UserSerializer(read_only=True)  # Include full artist detai
      is_owner = serializers.SerializerMethodField() 
-     audio_file = CloudinaryFieldSerializer(read_only=True)
-     cover_image = CloudinaryFieldSerializer(read_only=True)
+     audio_file = CloudinaryFieldSerializer()
+     cover_image = CloudinaryFieldSerializer(required=False)
      class Meta:
         model = Track
         fields = [
@@ -143,10 +325,10 @@ class TrackSerializer(serializers.ModelSerializer):
             'views', 'downloads','likes_count','is_liked', 'created_at', 'updated_at'
         ]
         read_only_fields = ['artist', 'slug', 'views', 'downloads', 'created_at', 'updated_at']
-        extra_kwargs = {
-            'title': {'required': True, 'max_length': 200},
-            'lyrics': {'allow_blank': True}
-        }
+        # extra_kwargs = {
+        #     'title': {'required': True, 'max_length': 200},
+        #     'lyrics': {'allow_blank': True}
+        # }
      def validate_title(self, value):
         if not value or not value.strip():
             raise serializers.ValidationError("Title cannot be empty")
@@ -201,37 +383,210 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'created_at', 'updated_at')
 
 
-# Add these new serializers after your existing ones
 
 class SocialPostSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+    user = SimpleUserSerializer(read_only=True)
     song = TrackSerializer(read_only=True)
     likes_count = serializers.SerializerMethodField()
     comments_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
-    media_file = CloudinaryFieldSerializer(read_only=True)
+    media_url = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
+    optimized_url = serializers.SerializerMethodField()
 
     class Meta:
         model = SocialPost
         fields = [
             'id', 'user', 'content_type', 'media_file', 'media_url', 'song',
-            'caption', 'tags', 'location', 'duration', 'created_at', 'updated_at',
-            'likes_count', 'comments_count', 'is_liked', 'is_saved','can_edit'
+            'caption', 'tags', 'location', 'duration', 'width', 'height',
+            'created_at', 'updated_at', 'likes_count', 'comments_count', 
+            'is_liked', 'is_saved', 'can_edit','optimized_url'
         ]
-        read_only_fields = ['user', 'created_at', 'updated_at','content_type', 'media_file']
+        read_only_fields = ['user', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'media_file': {'write_only': True}
+        }
     
     def get_can_edit(self, obj):
-        request = self.context.get('request')
-        return request and request.user == obj.user
+        try:
+            request = self.context.get('request')
+            return request and request.user == obj.user
+        except Exception as e:
+            logger.error("get_media_url failed on SocialPost %s: %r", obj.pk, e, exc_info=True)
+            return None  # or safe fallback
 
+   
     def get_media_url(self, obj):
-        request = self.context.get('request')
-        if obj.media_file and request:
-            return CloudinaryFieldSerializer().to_representation(obj.media_file)
-        return None
+        if not obj.media_file:
+            return None
+            
+        try:
+            # Handle both FileField and raw strings
+            if hasattr(obj.media_file, 'url'):
+                url = obj.media_file.url
+                # Convert auto/upload URLs to proper delivery URLs
+                if '/auto/upload/' in url:
+                    return self._convert_auto_url(url, obj.content_type)
+                return url
+                
+            if isinstance(obj.media_file, str):
+                ext = '.jpg' if obj.content_type == 'image' else '.mp4'
+                return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/{obj.content_type}/upload/{obj.media_file}{ext}"
+                
+        except Exception as e:
+            logger.error(f"URL generation error for post {obj.id}: {str(e)}")
+            return None
 
+    def _convert_auto_url(self, url, content_type):
+        """Convert auto/upload URL to proper delivery URL"""
+        parts = url.split('/auto/upload/')
+        if len(parts) != 2:
+            return url
+            
+        public_id = parts[1]
+        ext = '.jpg' if content_type == 'image' else '.mp4'
+        
+        return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/{content_type}/upload/{public_id}{ext}"
+
+    def get_optimized_url(self, obj):
+        if not obj.media_file:
+            return None
+            
+        try:
+            base_url = f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}"
+            ext = '.jpg' if obj.content_type == 'image' else '.mp4'
+            
+            if hasattr(obj.media_file, 'url') and '/auto/upload/' in obj.media_file.url:
+                public_id = obj.media_file.url.split('/auto/upload/')[1]
+            elif isinstance(obj.media_file, str):
+                public_id = obj.media_file
+            else:
+                return None
+                
+            if obj.content_type == 'image':
+                return f"{base_url}/image/upload/w_600,h_600,c_fill,q_auto,f_auto/{public_id}{ext}"
+            else:
+                return f"{base_url}/video/upload/q_auto,f_auto/{public_id}{ext}"
+                
+        except Exception as e:
+            logger.error(f"Optimized URL error: {str(e)}")
+            return None
+    def to_internal_value(self, data):
+        internal_data = super().to_internal_value(data)
+        
+        if 'media_file' in internal_data:
+            media_file = internal_data['media_file']
+            
+            # Handle CloudinaryResource objects first
+            if hasattr(media_file, 'public_id'):
+                internal_data['media_file'] = media_file.public_id
+                return internal_data
+                
+            # Then handle string paths
+            if isinstance(media_file, str):
+                # If it's already a full public_id with folder, keep it
+                if '/' in media_file:
+                    return internal_data
+                    
+                # Parse if it looks like a URL
+                if 'res.cloudinary.com' in media_file:
+                    try:
+                        path = urlparse(media_file).path
+                        parts = path.split('/')
+                        try:
+                            upload_index = parts.index('upload') + 1
+                            public_id = '/'.join(parts[upload_index:])
+                            public_id = os.path.splitext(public_id)[0]
+                            internal_data['media_file'] = public_id
+                        except ValueError:
+                            pass
+                    except Exception as e:
+                        logger.error(f"URL parsing error: {str(e)}")
+        
+        return internal_data
+    def create(self, validated_data):
+        """Create a new social post with enhanced logging"""
+        logger.info(f"Creating new social post with data: {validated_data}")
+        try:
+            post = SocialPost.objects.create(**validated_data)
+            logger.info(f"Successfully created post {post.id}")
+            if post.media_file:
+                logger.info(f"Post media details - Type: {post.content_type}, Public ID: {post.media_file}")
+            return post
+        except Exception as e:
+            logger.error(f"Post creation failed: {str(e)}", exc_info=True)
+            raise
+
+    def update(self, instance, validated_data):
+        """Update an existing social post with logging"""
+        logger.info(f"Updating post {instance.id} with data: {validated_data}")
+        if 'media_file' in validated_data:
+            logger.warning("Attempt to update media_file was blocked (media_file can only be set at creation)")
+            validated_data.pop('media_file', None)
+        
+        try:
+            instance = super().update(instance, validated_data)
+            logger.info(f"Successfully updated post {instance.id}")
+            return instance
+        except Exception as e:
+            logger.error(f"Post update failed: {str(e)}", exc_info=True)
+            raise
+    def _convert_auto_url(self, url, content_type):
+        """Convert auto/upload URL to proper delivery URL"""
+        parts = url.split('/auto/upload/')
+        if len(parts) != 2:
+            return url
+            
+        public_id = parts[1]
+        ext = '.jpg' if content_type == 'image' else '.mp4'
+        
+        return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/{content_type}/upload/{public_id}{ext}"
+
+
+
+    def _ensure_proper_url(self, url, content_type):
+        """Convert any Cloudinary URL to proper delivery URL"""
+        if not url or 'res.cloudinary.com' not in url:
+            return url
+            
+        # Handle auto/upload URLs
+        if '/auto/upload/' in url:
+            parts = url.split('/auto/upload/')
+            base = parts[0].replace('/auto/upload', '')
+            public_id = parts[1]
+            
+            if content_type == 'image':
+                return f"{base}/image/upload/w_600,h_600,c_fill,q_auto,f_auto/{public_id}.jpg"
+            else:
+                return f"{base}/video/upload/q_auto,f_auto/{public_id}.mp4"
+                
+        # Already proper URL
+        return url
+
+    def _fix_auto_upload_url(self, url, content_type):
+        """
+        Convert auto/upload URLs to proper Cloudinary delivery URLs
+        Example: 
+        Input: https://res.cloudinary.com/dxdmo9j4v/auto/upload/vdv2gbt7zagsmongikwr
+        Output: https://res.cloudinary.com/dxdmo9j4v/image/upload/w_600,h_600,c_fill/vdv2gbt7zagsmongikwr.jpg
+        """
+        try:
+            parts = url.split('/auto/upload/')
+            if len(parts) != 2:
+                return url
+                
+            base = parts[0].replace('/auto/upload', '')
+            public_id = parts[1]
+            
+            if content_type == 'image':
+                return f"{base}/image/upload/w_600,h_600,c_fill,q_auto,f_auto/{public_id}.jpg"
+            else:
+                return f"{base}/video/upload/q_auto,f_auto/{public_id}.mp4"
+                
+        except Exception as e:
+            logger.error(f"Error fixing auto upload URL {url}: {str(e)}")
+            return url
     def get_likes_count(self, obj):
         return obj.likes.count()
 
@@ -239,23 +594,43 @@ class SocialPostSerializer(serializers.ModelSerializer):
         return obj.comments.count()
 
     def get_is_liked(self, obj):
-        user = self.context.get('request').user
-        if user.is_authenticated:
-            return obj.likes.filter(user=user).exists()
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(user=request.user).exists()
         return False
 
     def get_is_saved(self, obj):
-        user = self.context.get('request').user
-        if user.is_authenticated:
-            return obj.saves.filter(user=user).exists()
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.saves.filter(user=request.user).exists()
         return False
 
     def validate(self, data):
-        if data.get('content_type') == 'video' and 'media_file' in data:
-            # Add video validation logic here
-            pass
+        if data.get('content_type') == 'video':
+            duration = data.get('duration')
+            if duration and duration > timedelta(minutes=1):
+                raise serializers.ValidationError("Video cannot exceed 1 minute")
         return data
 
+    
+   
+    def create(self, validated_data):
+        """Create a new social post"""
+        return SocialPost.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        """Update an existing social post"""
+        # Don't allow updating media_file after creation
+        validated_data.pop('media_file', None)
+        return super().update(instance, validated_data)
+
+class SocialPostUploadSerializer(serializers.Serializer):
+    """Serializer for handling file uploads to Cloudinary"""
+    media_file = serializers.FileField()
+    caption = serializers.CharField(max_length=2200, required=False, allow_blank=True)
+    tags = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    location = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    duration = serializers.DurationField(required=False, allow_null=True)
 
 class PostLikeSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -288,17 +663,22 @@ class PostSaveSerializer(serializers.ModelSerializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    sender = UserSerializer(read_only=True)
+    sender = SimpleUserSerializer(read_only=True)
     post = SocialPostSerializer(read_only=True, required=False)
     track = TrackSerializer(read_only=True, required=False)
     related_comment = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
-        fields = ['id', 'sender', 'message', 'read', 'notification_type', 
-                 'post', 'track', 'created_at','related_comment']
+        fields = [
+            'id', 'sender', 'message', 'read', 
+            'notification_type', 'post', 'track', 
+            'created_at', 'related_comment'
+        ]
+    
     def get_related_comment(self, obj):
         if obj.notification_type == 'comment':
+            from .models import PostComment  # Import here to avoid circular imports
             comment = PostComment.objects.filter(
                 post=obj.post,
                 user=obj.sender
@@ -306,8 +686,35 @@ class NotificationSerializer(serializers.ModelSerializer):
             return comment.content if comment else None
         return None
 
-
-
+class SimpleUserSerializer(serializers.ModelSerializer):
+    profile_picture = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'profile_picture']
+    
+    def get_profile_picture(self, obj):
+        """Get optimized profile picture URL"""
+        if hasattr(obj, 'profile') and obj.profile.picture:
+            picture = obj.profile.picture
+            
+            # Handle Cloudinary resource dict
+            if isinstance(picture, dict):
+                return picture.get('secure_url')
+            
+            # Handle CloudinaryField object
+            if hasattr(picture, 'url'):
+                return picture.url
+                
+            # Handle public_id string
+            if isinstance(picture, str):
+                return (
+                    f"https://res.cloudinary.com/"
+                    f"{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/"
+                    f"image/upload/w_50,h_50,c_fill/{picture}"
+                )
+        
+        return None
 class ChurchSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)

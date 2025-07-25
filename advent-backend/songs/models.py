@@ -10,6 +10,8 @@ from django.utils import timezone
 from urllib.parse import urlparse, parse_qs
 import re
 from cloudinary.models import CloudinaryField
+import os
+
 
 
 # Custom User Model
@@ -123,8 +125,12 @@ class Category(models.Model):
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     # picture = models.ImageField(upload_to='profiles/', blank=True, null=True)
-    picture = CloudinaryField('image', folder='profiles/',transformation=[
-        {'width': 400, 'height': 400, 'crop': 'fill', 'gravity': 'face'}])
+    picture = CloudinaryField(
+    'image',
+    folder='profiles/',
+    default='https://res.cloudinary.com/YOUR_CLOUD_NAME/image/upload/v1234567890/profiles/default.jpg',
+    transformation=[{'width': 400, 'height': 400, 'crop': 'fill', 'gravity': 'face'}])
+
 
     bio = models.TextField(blank=True, null=True)
     birth_date = models.DateField(blank=True, null=True)
@@ -147,16 +153,14 @@ class SocialPost(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='social_posts')
     content_type = models.CharField(max_length=5, choices=CONTENT_TYPES)
     media_file = CloudinaryField(
+        'media',  # This is the folder in Cloudinary
         resource_type='auto',
-        folder='social_media/',
-        transformation=[
-        {'quality': 'auto', 'fetch_format': 'auto'},
-        {'width': 1080, 'height': 1080, 'crop': 'limit'}],
-        validators=[
-            FileExtensionValidator(
-                allowed_extensions=['mp4', 'mov', 'avi', 'jpg', 'jpeg', 'png']
-            )
-        ]
+        folder='social_media',  # Subfolder
+        overwrite=True,
+        use_filename=True,
+        unique_filename=True,
+        blank=True,
+        null=True
     )
     song = models.ForeignKey(
         Track, 
@@ -173,6 +177,8 @@ class SocialPost(models.Model):
         blank=True,
         help_text="Duration for video posts (max 1 minute)"
     )
+    width = models.IntegerField(null=True, blank=True)
+    height = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -180,17 +186,70 @@ class SocialPost(models.Model):
         return f"{self.user.username}'s {self.content_type} post"
 
     def clean(self):
-        super().clean()
-        if self.content_type == 'video':
-            ext = os.path.splitext(self.media_file.name)[1].lower()
-            if ext not in ['.mp4', '.mov', '.avi']:
-                raise ValidationError("Invalid video format")
-            if self.duration and self.duration > timedelta(minutes=1):
-                raise ValidationError("Video cannot exceed 1 minute")
-        elif self.content_type == 'image' and self.song:
-            ext = os.path.splitext(self.song.audio_file.name)[1].lower()
-            if ext not in ['.mp3', '.wav', '.ogg']:
-                raise ValidationError("Invalid audio format")
+        """Comprehensive validation handling Cloudinary resources"""
+        try:
+            logger.info(f"Starting clean() for SocialPost. Content type: {self.content_type}")
+            
+            # Log media file details
+            media_info = {
+                'media_file': str(self.media_file),
+                'type': str(type(self.media_file)),
+                'exists': bool(self.media_file)
+            }
+            logger.info(f"Media file info: {media_info}")
+            
+            if self.content_type == 'video':
+                logger.info("Validating video content")
+                
+                # Get filename or public_id
+                filename = str(self.media_file)
+                
+                # Extract extension safely
+                _, ext = os.path.splitext(filename)
+                ext = (ext or '').lower()
+                logger.info(f"Detected video extension: {ext}")
+                
+                # Validate extension
+                if ext not in ['.mp4', '.mov', '.avi']:
+                    error_msg = f"Invalid video format: {ext}. Allowed: .mp4, .mov, .avi"
+                    logger.error(error_msg)
+                    raise ValidationError(_(error_msg))
+                
+                # Validate duration
+                if self.duration and self.duration > timedelta(minutes=1):
+                    error_msg = "Video cannot exceed 1 minute"
+                    logger.error(error_msg)
+                    raise ValidationError(_(error_msg))
+                    
+            elif self.content_type == 'image' and self.song:
+                logger.info("Validating image with song")
+                
+                # Validate song audio file
+                if not hasattr(self.song, 'audio_file'):
+                    error_msg = "Associated song has no audio file"
+                    logger.error(error_msg)
+                    raise ValidationError(_(error_msg))
+                
+                # Get filename or public_id for audio
+                filename = str(self.song.audio_file)
+                
+                # Extract extension
+                _, ext = os.path.splitext(filename)
+                ext = (ext or '').lower()
+                logger.info(f"Detected audio extension: {ext}")
+                
+                # Validate extension
+                if ext not in ['.mp3', '.wav', '.ogg']:
+                    error_msg = f"Invalid audio format: {ext}. Allowed: .mp3, .wav, .ogg"
+                    logger.error(error_msg)
+                    raise ValidationError(_(error_msg))
+                    
+        except ValidationError as ve:
+            logger.exception("Validation error in SocialPost.clean()")
+            raise
+        except Exception as e:
+            logger.exception("Unexpected error in SocialPost.clean()")
+            raise ValidationError(_("An unexpected error occurred while validating the post"))
 
 class PostLike(models.Model):
     post = models.ForeignKey(SocialPost, on_delete=models.CASCADE, related_name='likes')

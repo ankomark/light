@@ -24,6 +24,7 @@ from rest_framework.parsers import MultiPartParser, FormParser,JSONParser
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from cloudinary.uploader import upload
+from cloudinary.uploader import destroy 
 from cloudinary.exceptions import Error as CloudinaryError
 from .models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
 from .serializers import (
@@ -64,6 +65,8 @@ from .serializers import (
 import logging
 import time
 from django.utils import timezone
+from django.conf import settings
+from django.db.models import Count
 from datetime import timedelta
 logger = logging.getLogger(__name__)
 
@@ -71,35 +74,49 @@ logger = logging.getLogger(__name__)
 
 class AvatarUploadView(APIView):
     parser_classes = [MultiPartParser]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
 
     def put(self, request):
+        """Alternative endpoint for avatar uploads"""
+        if not hasattr(request.user, 'profile'):
+            return Response(
+                {'error': 'Profile does not exist'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
         serializer = AvatarUploadSerializer(data=request.data)
-        if serializer.is_valid():
-            try:
-                # Upload to Cloudinary
-                result = upload(
-                    serializer.validated_data['avatar'],
-                    folder='avatars',
-                    resource_type='image',
-                    transformation=[
-                        {'width': 500, 'height': 500, 'crop': 'fill'},
-                        {'quality': 'auto'}
-                    ]
-                )
-                # Save to user model
-                request.user.avatar = result['public_id']
-                request.user.save()
-                return Response(
-                    {'status': 'avatar updated', 'url': result['secure_url']},
-                    status=status.HTTP_200_OK
-                )
-            except CloudinaryError as e:
-                return Response(
-                    {'error': str(e)},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = upload(
+                serializer.validated_data['avatar'],
+                folder='profile_pictures',
+                resource_type='image',
+                transformation=[
+                    {'width': 300, 'height': 300, 'crop': 'thumb', 'gravity': 'face'},
+                    {'quality': 'auto'}
+                ]
+            )
+            
+            # Update profile with new picture data
+            profile = request.user.profile
+            profile.picture = {
+                'public_id': result['public_id'],
+                'secure_url': result['secure_url']
+            }
+            profile.save()
+            
+            return Response(
+                ProfileSerializer(profile, context={'request': request}).data,
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"Avatar upload failed: {str(e)}")
+            return Response(
+                {'error': 'Failed to process image upload'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class TrackUploadView(APIView):
     parser_classes = [MultiPartParser]
@@ -149,54 +166,6 @@ class TrackUploadView(APIView):
                 )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class SocialPostUploadView(APIView):
-    parser_classes = [MultiPartParser]
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = SocialPostUploadSerializer(data=request.data)
-        if serializer.is_valid():
-            try:
-                # Determine resource type
-                content_type = 'video' if serializer.validated_data['media_file'].content_type.startswith('video/') else 'image'
-                
-                # Upload to Cloudinary
-                result = upload(
-                    serializer.validated_data['media_file'],
-                    folder='social_media',
-                    resource_type='auto',
-                    transformation=[
-                        {'quality': 'auto'},
-                        {'fetch_format': 'auto'}
-                    ]
-                )
-                
-                # Create post
-                post_data = {
-                    'user': request.user.id,
-                    'content_type': content_type,
-                    'media_file': result['public_id'],
-                    'caption': request.data.get('caption', ''),
-                    'tags': request.data.get('tags', ''),
-                    'location': request.data.get('location', ''),
-                    'duration': request.data.get('duration', None)
-                }
-                
-                post_serializer = SocialPostSerializer(data=post_data, context={'request': request})
-                if post_serializer.is_valid():
-                    post = post_serializer.save()
-                    return Response(post_serializer.data, status=status.HTTP_201_CREATED)
-                return Response(post_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-                
-            except CloudinaryError as e:
-                return Response(
-                    {'error': str(e)},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-
 class SignUpView(APIView):
     permission_classes = [AllowAny]
 
@@ -216,6 +185,36 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Annotate followers count if needed
+        if self.action in ['list', 'retrieve']:
+            queryset = queryset.annotate(
+                followers_count=Count('followers', distinct=True),
+                following_count=Count('followed_by', distinct=True)
+            )
+            
+            # For authenticated users, prefetch follow status
+            if self.request.user.is_authenticated:
+                queryset = queryset.prefetch_related(
+                    Prefetch('followers', 
+                           queryset=User.objects.filter(id=self.request.user.id),
+                           to_attr='followers_set')
+                )
+                
+        return queryset
+    def get_serializer_context(self):
+        """Add context for profile picture transformations"""
+        context = super().get_serializer_context()
+        context.update({
+            'picture_width': 50,  # Smaller for user lists
+            'picture_height': 50,
+            'picture_crop': 'fill',
+            'picture_gravity': 'face',
+            'picture_quality': 'auto'
+        })
+        return context
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -229,6 +228,35 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = PlaylistSerializer(playlists, many=True)
         return Response(serializer.data)
 
+    # @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    # def follow(self, request, pk=None):
+    #     user_to_follow = self.get_object()
+    #     current_user = request.user
+
+    #     if current_user == user_to_follow:
+    #         return Response(
+    #             {"error": "You cannot follow yourself"},
+    #             status=status.HTTP_400_BAD_REQUEST
+    #         )
+
+    #     if current_user in user_to_follow.followers.all():
+    #         user_to_follow.followers.remove(current_user)
+    #         action = 'unfollowed'
+    #     else:
+    #         user_to_follow.followers.add(current_user)
+    #         action = 'followed'
+    #         Notification.objects.create(
+    #             recipient=user_to_follow,
+    #             sender=current_user,
+    #             message=f"{current_user.username} started following you",
+    #             notification_type='follow'
+    #         )
+
+    #     return Response({
+    #         "status": f"Successfully {action} {user_to_follow.username}",
+    #         "followers_count": user_to_follow.followers.count(),
+    #         "following_count": current_user.followed_by.count()
+    #     })
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def follow(self, request, pk=None):
         user_to_follow = self.get_object()
@@ -253,30 +281,32 @@ class UserViewSet(viewsets.ModelViewSet):
                 notification_type='follow'
             )
 
+        # Return updated counts
         return Response({
             "status": f"Successfully {action} {user_to_follow.username}",
+            "is_following": current_user in user_to_follow.followers.all(),
             "followers_count": user_to_follow.followers.count(),
-            "following_count": current_user.followed_by.count()
+            "following_count": user_to_follow.followed_by.count()
         })
-
     @action(detail=True, methods=['get'])
     def social_posts(self, request, pk=None):
+        """Get user's posts with optimized author pictures"""
         user = self.get_object()
-        posts = SocialPost.objects.filter(user=user)
-        page = self.paginate_queryset(posts)
+        posts = SocialPost.objects.filter(user=user).select_related('user__profile')
         
+        page = self.paginate_queryset(posts)
         if page is not None:
             serializer = SocialPostSerializer(
                 page, 
                 many=True,
-                context={'request': request}
+                context=self.get_serializer_context()
             )
             return self.get_paginated_response(serializer.data)
             
         serializer = SocialPostSerializer(
             posts, 
             many=True,
-            context={'request': request}
+            context=self.get_serializer_context()
         )
         return Response(serializer.data)
 class TrackViewSet(viewsets.ModelViewSet):
@@ -426,6 +456,17 @@ class ProfileViewSet(viewsets.ModelViewSet):
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    def get_serializer_context(self):
+        """Add picture transformation parameters to serializer context"""
+        context = super().get_serializer_context()
+        context.update({
+            'picture_width': 200,
+            'picture_height': 200,
+            'picture_crop': 'fill',
+            'picture_gravity': 'face',
+            'picture_quality': 'auto'
+        })
+        return context
 
     def perform_update(self, serializer):
         if serializer.instance.user != self.request.user:
@@ -464,13 +505,16 @@ class ProfileViewSet(viewsets.ModelViewSet):
         return Response({'profile_exists': profile_exists})
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def me(self, request):
-        """Retrieve the profile of the authenticated user."""
+        """Retrieve the authenticated user's profile with optimized picture"""
         try:
-            profile = request.user.profile  # Assuming 'profile' is a one-to-one field related to the user
+            profile = request.user.profile
             serializer = self.get_serializer(profile)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.data)
         except Profile.DoesNotExist:
-            return Response({'detail': 'Profile does not exist for this user.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'detail': 'Profile does not exist for this user.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 
     @action(detail=False, methods=['get'], url_path='by_user/(?P<user_id>[^/.]+)')
@@ -490,7 +534,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def upload_picture(self, request):
-        """Handle profile picture upload to Cloudinary"""
+        """Handle profile picture upload with Cloudinary transformations"""
         if not hasattr(request.user, 'profile'):
             return Response(
                 {'error': 'Profile does not exist'},
@@ -498,31 +542,37 @@ class ProfileViewSet(viewsets.ModelViewSet):
             )
             
         serializer = AvatarUploadSerializer(data=request.data)
-        if serializer.is_valid():
-            try:
-                # Upload to Cloudinary
-                result = upload(
-                    serializer.validated_data['avatar'],
-                    folder='profiles',
-                    resource_type='image',
-                    transformation=[
-                        {'width': 500, 'height': 500, 'crop': 'fill'},
-                        {'quality': 'auto'}
-                    ]
-                )
-                # Save to profile
-                request.user.profile.picture = result['public_id']
-                request.user.profile.save()
-                return Response(
-                    ProfileSerializer(request.user.profile, context={'request': request}).data,
-                    status=status.HTTP_200_OK
-                )
-            except CloudinaryError as e:
-                return Response(
-                    {'error': str(e)},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = upload(
+                serializer.validated_data['avatar'],
+                folder='profiles',
+                resource_type='image',
+                transformation=[
+                    {'width': 500, 'height': 500, 'crop': 'fill', 'gravity': 'face'},
+                    {'quality': 'auto', 'fetch_format': 'auto'}
+                ]
+            )
+            
+            # Store both public_id and URL for flexibility
+            request.user.profile.picture = {
+                'public_id': result['public_id'],
+                'secure_url': result['secure_url']
+            }
+            request.user.profile.save()
+            
+            return Response(
+                self.get_serializer(request.user.profile).data,
+                status=status.HTTP_200_OK
+            )
+        except CloudinaryError as e:
+            logger.error(f"Cloudinary upload failed: {str(e)}")
+            return Response(
+                {'error': 'Failed to upload image to Cloudinary'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 class CommentViewSet(viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
@@ -575,97 +625,139 @@ class FavoriteTracksView(APIView):
         return Response(serializer.data, status=200)
 
 class SocialPostViewSet(viewsets.ModelViewSet):
-    queryset = SocialPost.objects.all()
+    queryset = SocialPost.objects.select_related(
+        'user', 
+        # 'user__avatar',  
+        'song',
+        'song__artist'
+    ).prefetch_related(
+        'likes',
+        'likes__user',
+        'comments',
+        'comments__user',
+        'saves'
+    ).order_by('-created_at')
+    queryset = SocialPost.objects.all().order_by('-created_at')
     serializer_class = SocialPostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    
+    # Add this to ensure request context is available in serializers
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
 
     def get_permissions(self):
-        # For update/delete actions, require authentication
         if self.action in ['update', 'partial_update', 'destroy']:
             return [permissions.IsAuthenticated()]
-        # For other actions, use default permissions
         return super().get_permissions()
-
 
     def perform_create(self, serializer):
         try:
-            media_file = self.request.FILES.get('media_file')
-            content_type = self.request.data.get('content_type')
-            caption = self.request.data.get('caption')
-
-            # Validate required fields
-            if not media_file:
-                raise ValidationError({"media_file": "Media file is required"})
-            if not content_type:
-                raise ValidationError({"content_type": "Content type is required"})
-            if not caption:
-                raise ValidationError({"caption": "Caption is required"})
-
-            # Verify file signature
-            allowed_types = {
-                'image': ['image/jpeg', 'image/png', 'image/jpg'],
-                'video': ['video/mp4', 'video/quicktime']
-            }
-            
-            # Validate content type
-            if content_type not in allowed_types:
-                raise ValidationError({
-                    "content_type": "Invalid content type. Must be 'image' or 'video'"
-                })
-            
-            # Validate file type matches content type
-            if media_file.content_type not in allowed_types[content_type]:
-                raise ValidationError({
-                    "media_file": f"Invalid {content_type} format. Allowed: {', '.join(allowed_types[content_type])}"
-                })
-
-            # Save the post with media file
-            post = serializer.save(
-                user=self.request.user,
-                media_file=media_file,
-                content_type=content_type,
-                caption=caption
-            )
-
-            logger.info(f"Successfully created post ID {post.id}")
+            # Create the post with the authenticated user
+            logger.info(f"Creating post with data: {serializer.validated_data}")
+            post = serializer.save(user=self.request.user)
+            if post.media_file:
+                logger.info(f"Created post ID {post.id} with media_file: {post.media_file}")
+                logger.info(f"Media type: {post.content_type}, Size: {post.width}x{post.height}")
             return post
 
         except ValidationError as ve:
-            logger.warning(f"Validation error: {ve.detail}")
+            logger.warning(f"Validation error: {ve}")
             raise
         except Exception as e:
+            logger.exception("Post creation failed with exception:")
             logger.error(f"Post creation failed: {str(e)}", exc_info=True)
+            # Log the serializer data that caused the error
+            logger.error(f"Error data: {serializer.validated_data}")
+            
+            # Also log the request data
+            logger.error(f"Request data: {self.request.data}")
             raise ValidationError({
-                "non_field_errors": "Failed to create post. Please try again."
+                "non_field_errors": [f"Failed to create post: {str(e)}"]
             })
+    def get_queryset(self):
+        return SocialPost.objects.annotate(
+            # Add annotations for counts to reduce queries
+            likes_count=Count('likes', distinct=True),
+            comments_count=Count('comments', distinct=True)
+        ).select_related('user', 'song').order_by('-created_at')
+
     def update(self, request, *args, **kwargs):
-        instance = self.get_object()  # Get the post being updated
+        instance = self.get_object()
         
-        # Check if requesting user is the post owner
         if instance.user != request.user:
             return Response(
                 {"error": "You can only edit your own posts."},
-                status=status.HTTP_403_FORBIDDEN  # Return 403 Forbidden if not owner
+                status=status.HTTP_403_FORBIDDEN
             )
         
-        # Proceed with default update behavior if owner
-        return super().update(request, *args, **kwargs)
-
-    # Custom destroy method to add ownership validation
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()  # Get the post being deleted
+        # Only allow updating certain fields for existing posts
+        allowed_fields = ['caption', 'tags', 'location']
+        filtered_data = {k: v for k, v in request.data.items() if k in allowed_fields}
         
-        # Check if requesting user is the post owner
+        serializer = self.get_serializer(instance, data=filtered_data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
         if instance.user != request.user:
             return Response(
                 {"error": "You can only delete your own posts."},
-                status=status.HTTP_403_FORBIDDEN  # Return 403 Forbidden if not owner
+                status=status.HTTP_403_FORBIDDEN
             )
         
-        # Delete the post if owner
+        try:
+            # Delete from Cloudinary if media exists
+            if instance.media_file:
+                # Get public_id from either CloudinaryResource or string
+                public_id = (
+                    instance.media_file.public_id 
+                    if hasattr(instance.media_file, 'public_id') 
+                    else str(instance.media_file))
+                
+                # If it's a URL, extract just the public_id
+                if 'res.cloudinary.com' in public_id:
+                    path = urlparse(public_id).path
+                    parts = path.split('/')
+                    try:
+                        upload_index = parts.index('upload') + 1
+                        public_id = '/'.join(parts[upload_index:])
+                        public_id = public_id.split('.')[0]  # Remove extension
+                    except ValueError:
+                        pass
+                
+                # Determine resource type from content_type
+                resource_type = 'video' if instance.content_type == 'video' else 'image'
+                
+                try:
+                    destroy(public_id, resource_type=resource_type)
+                    logger.info(f"Deleted Cloudinary {resource_type}: {public_id}")
+                except Exception as e:
+                    logger.error(f"Cloudinary deletion failed: {str(e)}")
+                    # Continue with DB deletion even if Cloudinary fails
+        
+        except Exception as e:
+            logger.error(f"Error during post deletion: {str(e)}", exc_info=True)
+        
         instance.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)  # Return success with no content
-     
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    # Keep all your existing methods but add this optimization:
+    def list(self, request, *args, **kwargs):
+        # Add pagination and field selection
+        page = self.paginate_queryset(self.get_queryset())
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(self.get_queryset(), many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def like(self, request, pk=None):
@@ -685,13 +777,15 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             liked = True
             
             # Create notification only when liking (not unliking)
-            Notification.objects.create(
-                recipient=post.user,
-                sender=user,
-                message=f"{user.username} liked your post",
-                notification_type='like',
-                post=post
-            )
+            if user != post.user:  # Don't notify self
+                Notification.objects.create(
+                    recipient=post.user,
+                    sender=user,
+                    message=f"{user.username} liked your post",
+                    notification_type='like',
+                    post=post
+                )
+        
         # Get updated like count
         likes_count = PostLike.objects.filter(post=post).count()
         
@@ -707,7 +801,10 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         serializer = PostCommentSerializer(data=request.data, context={'request': request})
         
         if serializer.is_valid():
-            if request.user != post.user:  # Avoid notifying self
+            comment = serializer.save(user=request.user, post=post)
+            
+            # Create notification if commenter is not the post owner
+            if request.user != post.user:
                 Notification.objects.create(
                     recipient=post.user,
                     sender=request.user,
@@ -715,32 +812,35 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                     notification_type='comment',
                     post=post
                 )
-            serializer.save(user=request.user, post=post)
+            
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def save_post(self, request, pk=None):
         post = self.get_object()
         user = request.user
         
-        if PostSave.objects.filter(user=user, post=post).exists():
+        save_obj, created = PostSave.objects.get_or_create(user=user, post=post)
+        
+        if created:
             return Response(
-                {"error": "You have already saved this post."}, 
-                status=status.HTTP_400_BAD_REQUEST
+                {"status": "Post saved", "is_saved": True},
+                status=status.HTTP_201_CREATED
             )
-            
-        PostSave.objects.create(user=user, post=post)
-        return Response(
-            {"status": "Post saved"},
-            status=status.HTTP_201_CREATED
-        )
+        else:
+            # Toggle save - remove if already saved
+            save_obj.delete()
+            return Response(
+                {"status": "Post unsaved", "is_saved": False},
+                status=status.HTTP_200_OK
+            )
 
     @action(detail=True, methods=['get'])
     def share(self, request, pk=None):
         post = self.get_object()
-        share_url = request.build_absolute_uri(post.get_absolute_url())
+        share_url = request.build_absolute_uri(f'/posts/{post.id}/')
         return Response(
             {"share_url": share_url},
             status=status.HTTP_200_OK
@@ -756,8 +856,60 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             )
             
         return Response({
-            'download_url': CloudinaryFieldSerializer().to_representation(post.media_file)
-        })
+            'public_id': str(post.media_file),
+            'content_type': post.content_type,
+            'media_url': post.media_file.url if hasattr(post.media_file, 'url') else str(post.media_file)
+        }, status=status.HTTP_200_OK)
+
+
+class SocialPostUploadView(APIView):
+    """Alternative view for handling file uploads directly to Cloudinary"""
+    parser_classes = [MultiPartParser]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = SocialPostUploadSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Determine content type from file
+                media_file = serializer.validated_data['media_file']
+                content_type = 'video' if media_file.content_type.startswith('video/') else 'image'
+                
+                # Upload to Cloudinary
+                result = upload(
+                    media_file,
+                    folder='social_media',
+                    resource_type='auto',
+                    # transformation=[
+                    #     {'quality': 'auto'},
+                    #     {'fetch_format': 'auto'}
+                    # ]
+                )
+                
+                # Create post with Cloudinary public_id
+                post_data = {
+                    'content_type': content_type,
+                    'media_file': result['public_id'],
+                    'caption': serializer.validated_data.get('caption', ''),
+                    'tags': serializer.validated_data.get('tags', ''),
+                    'location': serializer.validated_data.get('location', ''),
+                    'duration': serializer.validated_data.get('duration', None),
+                    'width': result.get('width'),
+                    'height': result.get('height'),
+                }
+                
+                post_serializer = SocialPostSerializer(data=post_data, context={'request': request})
+                if post_serializer.is_valid():
+                    post = post_serializer.save(user=request.user)
+                    return Response(post_serializer.data, status=status.HTTP_201_CREATED)
+                return Response(post_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                
+            except CloudinaryError as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PostLikeViewSet(viewsets.ModelViewSet):
@@ -811,7 +963,20 @@ class NotificationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Notification.objects.filter(recipient=self.request.user).order_by('-created_at')
+        return Notification.objects.filter(recipient=self.request.user)\
+            .select_related(
+                'sender__profile',
+                'post',
+                'track',
+                'post__user__profile',
+                'track__artist__profile'
+            )\
+            .order_by('-created_at')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
     @action(detail=True, methods=['post'])
     def mark_as_read(self, request, pk=None):
@@ -827,7 +992,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
-        count = Notification.objects.filter(recipient=request.user, read=False).count()
+        count = Notification.objects.filter(
+            recipient=request.user, 
+            read=False
+        ).count()
         return Response({'unread_count': count})
 
 class ChurchViewSet(viewsets.ModelViewSet):
