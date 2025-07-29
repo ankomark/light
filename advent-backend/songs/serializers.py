@@ -180,57 +180,71 @@ class ProfileSerializer(serializers.ModelSerializer):
 
 class SimpleUserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
+    followers_count = serializers.SerializerMethodField()
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'profile_picture']
+        fields = ['id', 'username', 'profile_picture', 'followers_count']
         read_only_fields = ['id', 'username', 'profile_picture']
     
     def get_profile_picture(self, obj):
         """
-        Returns optimized profile picture URL with consistent transformations
-        Handles three formats:
+        Returns optimized profile picture URL with consistent transformations.
+        Always returns a string or None.
+        Handles:
         1. Cloudinary resource dict
         2. CloudinaryField object
         3. Public ID string
-        
-        Uses context parameters for customization (width, height, crop, etc.)
         """
         if not hasattr(obj, 'profile') or not obj.profile.picture:
             return None
-            
+
         try:
-            # Get transformation parameters from context or use defaults
-            width = self.context.get('picture_width', 50)  # Default smaller for lists
+            width = self.context.get('picture_width', 50)
             height = self.context.get('picture_height', 50)
             crop = self.context.get('picture_crop', 'fill')
             gravity = self.context.get('picture_gravity', 'face')
             quality = self.context.get('picture_quality', 'auto')
-            
+
             picture = obj.profile.picture
-            
-            # Handle Cloudinary resource dict
+
+            # If dict, get the URL string
             if isinstance(picture, dict):
-                if 'secure_url' in picture:
-                    base_url = picture['secure_url']
+                url = picture.get('secure_url') or picture.get('url')
+                if url:
+                    # Transform the URL if needed
                     return (
-                        f"{base_url.split('/upload/')[0]}/upload/"
+                        f"{url.split('/upload/')[0]}/upload/"
                         f"w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/"
-                        f"{base_url.split('/upload/')[1]}"
+                        f"{url.split('/upload/')[1]}"
+                    )
+                # If only public_id, build URL
+                public_id = picture.get('public_id')
+                if public_id:
+                    return (
+                        f"https://res.cloudinary.com/"
+                        f"{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/"
+                        f"image/upload/"
+                        f"w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/"
+                        f"{public_id}"
                     )
                 return None
-                
-            # Handle CloudinaryField object
-            elif hasattr(picture, 'url'):
-                base_url = picture.url
+
+            # If CloudinaryField object
+            if hasattr(picture, 'url'):
+                url = picture.url
                 return (
-                    f"{base_url.split('/upload/')[0]}/upload/"
+                    f"{url.split('/upload/')[0]}/upload/"
                     f"w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/"
-                    f"{base_url.split('/upload/')[1]}"
+                    f"{url.split('/upload/')[1]}"
                 )
-                
-            # Handle public_id string
-            elif isinstance(picture, str):
+
+            # If string (public_id or URL)
+            if isinstance(picture, str):
+                if picture.startswith('http'):
+                    # It's already a URL
+                    return picture
+                # Otherwise, build URL from public_id
                 return (
                     f"https://res.cloudinary.com/"
                     f"{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/"
@@ -238,15 +252,18 @@ class SimpleUserSerializer(serializers.ModelSerializer):
                     f"w_{width},h_{height},c_{crop},g_{gravity},q_{quality}/"
                     f"{picture}"
                 )
-                
+
             return None
-            
+
         except Exception as e:
             logger.error(
                 f"Error processing profile picture for user {obj.id}: {str(e)}",
                 exc_info=True
             )
             return None
+    def get_followers_count(self, obj):
+        # Use annotated value if available, else count
+        return getattr(obj, 'followers_count', obj.followers.count())
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     profile_picture = serializers.SerializerMethodField() 
@@ -362,7 +379,7 @@ class PlaylistSerializer(serializers.ModelSerializer):
 
 
 class CommentSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+    user = SimpleUserSerializer(read_only=True) 
     track = TrackSerializer(read_only=True)
     class Meta:
         model = Comment
@@ -394,11 +411,19 @@ class SocialPostSerializer(serializers.ModelSerializer):
     media_url = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
     optimized_url = serializers.SerializerMethodField()
+    song_id = serializers.PrimaryKeyRelatedField(
+        queryset=Track.objects.all(),
+        source='song',
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = SocialPost
         fields = [
-            'id', 'user', 'content_type', 'media_file', 'media_url', 'song',
+            'id', 'user', 'content_type', 'media_file', 'media_url', 'song','song_id',
+            # 'song_start_time', 'song_end_time',
             'caption', 'tags', 'location', 'duration', 'width', 'height',
             'created_at', 'updated_at', 'likes_count', 'comments_count', 
             'is_liked', 'is_saved', 'can_edit','optimized_url'
@@ -611,6 +636,12 @@ class SocialPostSerializer(serializers.ModelSerializer):
             if duration and duration > timedelta(minutes=1):
                 raise serializers.ValidationError("Video cannot exceed 1 minute")
         return data
+
+    
+   
+    def create(self, validated_data):
+        """Create a new social post"""
+        return SocialPost.objects.create(**validated_data)
 
     
    

@@ -1,4 +1,3 @@
-
 from django.db import models
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.utils.text import slugify
@@ -162,13 +161,8 @@ class SocialPost(models.Model):
         blank=True,
         null=True
     )
-    song = models.ForeignKey(
-        Track, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True,
-        help_text="Optional song for image posts"
-    )
+    song = models.ForeignKey(Track, null=True, blank=True, on_delete=models.SET_NULL)
+
     caption = models.TextField(blank=True)
     tags = models.CharField(max_length=200, blank=True)
     location = models.CharField(max_length=100, blank=True)

@@ -228,35 +228,7 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = PlaylistSerializer(playlists, many=True)
         return Response(serializer.data)
 
-    # @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
-    # def follow(self, request, pk=None):
-    #     user_to_follow = self.get_object()
-    #     current_user = request.user
 
-    #     if current_user == user_to_follow:
-    #         return Response(
-    #             {"error": "You cannot follow yourself"},
-    #             status=status.HTTP_400_BAD_REQUEST
-    #         )
-
-    #     if current_user in user_to_follow.followers.all():
-    #         user_to_follow.followers.remove(current_user)
-    #         action = 'unfollowed'
-    #     else:
-    #         user_to_follow.followers.add(current_user)
-    #         action = 'followed'
-    #         Notification.objects.create(
-    #             recipient=user_to_follow,
-    #             sender=current_user,
-    #             message=f"{current_user.username} started following you",
-    #             notification_type='follow'
-    #         )
-
-    #     return Response({
-    #         "status": f"Successfully {action} {user_to_follow.username}",
-    #         "followers_count": user_to_follow.followers.count(),
-    #         "following_count": current_user.followed_by.count()
-    #     })
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def follow(self, request, pk=None):
         user_to_follow = self.get_object()
@@ -308,6 +280,38 @@ class UserViewSet(viewsets.ModelViewSet):
             many=True,
             context=self.get_serializer_context()
         )
+        return Response(serializer.data)
+    @action(detail=True, methods=['get'])
+    def followers_count(self, request, pk=None):
+        """Dedicated endpoint just for follower count"""
+        user = self.get_object()
+        return Response({
+            "count": user.followers.count(),
+            "user_id": user.id
+        })
+
+    @action(detail=True, methods=['get'])
+    def following_count(self, request, pk=None):
+        """Dedicated endpoint just for following count"""
+        user = self.get_object()
+        return Response({
+            "count": user.followed_by.count(),
+            "user_id": user.id
+        })
+    @action(detail=True, methods=['get'])
+    def followers(self, request, pk=None):
+        """Get list of followers"""
+        user = self.get_object()
+        followers = user.followers.all()
+        serializer = self.get_serializer(followers, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def following(self, request, pk=None):
+        """Get list of users this user follows"""
+        user = self.get_object()
+        following = user.followed_by.all()
+        serializer = self.get_serializer(following, many=True)
         return Response(serializer.data)
 class TrackViewSet(viewsets.ModelViewSet):
     queryset = Track.objects.all().order_by('-created_at')
@@ -440,6 +444,7 @@ class TrackViewSet(viewsets.ModelViewSet):
         favorites = Track.objects.filter(likes__user=user)
         serializer = TrackSerializer(favorites, many=True, context={"request": request})
         return Response(serializer.data)
+    
 
 class PlaylistViewSet(viewsets.ModelViewSet):
     queryset = Playlist.objects.all()
@@ -641,7 +646,16 @@ class SocialPostViewSet(viewsets.ModelViewSet):
     serializer_class = SocialPostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
-    
+    def get_queryset(self):
+        user_queryset = User.objects.annotate(
+            followers_count=Count('followers', distinct=True)
+        )
+        return SocialPost.objects.annotate(
+            likes_count=Count('likes', distinct=True),
+            comments_count=Count('comments', distinct=True)
+        ).select_related('song').prefetch_related(
+            Prefetch('user', queryset=user_queryset)  # Prefetch with annotation
+        ).order_by('-created_at')
     # Add this to ensure request context is available in serializers
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -678,6 +692,7 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             raise ValidationError({
                 "non_field_errors": [f"Failed to create post: {str(e)}"]
             })
+    
     def get_queryset(self):
         return SocialPost.objects.annotate(
             # Add annotations for counts to reduce queries

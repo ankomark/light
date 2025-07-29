@@ -139,6 +139,18 @@ urlpatterns = [
     path('api/upload/avatar/', AvatarUploadView.as_view(), name='avatar-upload'),
     path('api/upload/track/', TrackUploadView.as_view(), name='track-upload'),
     path('api/upload/post/', SocialPostUploadView.as_view(), name='post-upload'),
+    path('users/<int:pk>/followers_count/', 
+         UserViewSet.as_view({'get': 'followers_count'}), 
+         name='user-followers-count'),
+    path('users/<int:pk>/following_count/', 
+         UserViewSet.as_view({'get': 'following_count'}), 
+         name='user-following-count'),
+    path('users/<int:pk>/followers/', 
+         UserViewSet.as_view({'get': 'followers'}), 
+         name='user-followers-list'),
+    path('users/<int:pk>/following/', 
+         UserViewSet.as_view({'get': 'following'}), 
+         name='user-following-list'),
 
 ]
 
