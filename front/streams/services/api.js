@@ -4,7 +4,7 @@ import { extractYoutubeId } from '../utils/youtubeUtils';
 // Base URL configuration
 // export const API_BASE = 'https://light-backend-production.up.railway.app';
 const DEBUG = process.env.NODE_ENV === 'development';
-export const API_BASE = DEBUG ? 'http://192.168.1.126:8000' : 'https://light-backend-production.up.railway.app';
+export const API_BASE = DEBUG ? 'http://192.168.1.126:8000' : 'https://web-production-f266.up.railway.app';
 axios.defaults.timeout = 30000;
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 export const API_URL = `${API_BASE}/api`;
