@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import config from '../config';
 import { 
   View, 
@@ -8,19 +8,29 @@ import {
   TextInput, 
   StyleSheet, 
   ScrollView,
-  Alert 
+  Alert,
+  Modal,  
+  Slider   
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Video } from 'expo-av';
+import { Video, Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { createSocialPost } from '../services/api';
+import { createSocialPost, fetchTracks } from '../services/api';
+import * as DocumentPicker from 'expo-document-picker';
 
 const CreatePost = ({ navigation }) => {
   const [contentType, setContentType] = useState('image');
   const [media, setMedia] = useState(null);
   const [caption, setCaption] = useState('');
+  const [tracks, setTracks] = useState([]);
   const [selectedSong, setSelectedSong] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [showSongModal, setShowSongModal] = useState(false);
+  const [playbackStatus, setPlaybackStatus] = useState(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(30);
+  const soundRef = useRef(null);
+  const [localAudio, setLocalAudio] = useState(null);
 
   // Request media library permissions
   useEffect(() => {
@@ -31,6 +41,12 @@ const CreatePost = ({ navigation }) => {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (contentType === 'image') {
+      fetchTracks().then(setTracks).catch(() => setTracks([]));
+    }
+  }, [contentType]);
 
   const pickMedia = async () => {
     try {
@@ -60,8 +76,8 @@ const CreatePost = ({ navigation }) => {
         }
         
         // Check file size (max 10MB)
-        if (selectedMedia.fileSize && selectedMedia.fileSize > 10 * 1024 * 1024) {
-          Alert.alert('Error', 'File size must be less than 10MB');
+        if (selectedMedia.fileSize && selectedMedia.fileSize > 50 * 1024 * 1024) {
+          Alert.alert('Error', 'File size must be less than 50MB');
           return;
         }
         
@@ -72,6 +88,76 @@ const CreatePost = ({ navigation }) => {
       Alert.alert('Error', 'Failed to pick media. Please try again.');
     }
   };
+  const pickLocalAudio = async () => {
+  try {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: 'audio/*',
+      copyToCacheDirectory: true,
+    });
+
+    if (result.type === 'success') {
+      const audioFile = {
+        uri: result.uri,
+        name: result.name,
+        type: result.mimeType,
+        size: result.size,
+      };
+      setLocalAudio(audioFile);
+      setSelectedSong({
+        id: `local-${Date.now()}`,  // Create a unique ID for local files
+        title: result.name.replace(/\.[^/.]+$/, ""),  // Remove file extension
+        artist: 'Local File',
+        audio_url: result.uri,
+      });
+      setShowSongModal(true);
+    }
+  } catch (error) {
+    console.error('Error picking audio:', error);
+    Alert.alert('Error', 'Failed to pick audio file');
+  }
+};
+  const handleTrimSong = async (song) => {
+    setSelectedSong(song);
+    setShowSongModal(true);
+    
+    try {
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+      }
+      
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: song.audio_url },
+        { shouldPlay: false }
+      );
+      soundRef.current = sound;
+      
+      const status = await sound.getStatusAsync();
+      setPlaybackStatus(status);
+      
+      // Set default trim range (first 30 seconds or full song if shorter)
+      const maxDuration = Math.min(30, status.durationMillis / 1000);
+      setTrimEnd(maxDuration);
+    } catch (error) {
+      console.error('Error loading song:', error);
+      Alert.alert('Error', 'Failed to load song for trimming');
+    }
+  };
+
+  const previewTrimmedSong = async () => {
+    if (!soundRef.current) return;
+    
+    try {
+      await soundRef.current.setPositionAsync(trimStart * 1000);
+      await soundRef.current.playAsync();
+      
+      // Stop after trimmed duration
+      setTimeout(async () => {
+        await soundRef.current.stopAsync();
+      }, (trimEnd - trimStart) * 1000);
+    } catch (error) {
+      console.error('Preview error:', error);
+    }
+  };
 
   const handlePost = async () => {
   if (!media) {
@@ -79,49 +165,53 @@ const CreatePost = ({ navigation }) => {
     return;
   }
 
-  if (!caption.trim()) {
-    Alert.alert('Error', 'Please add a caption');
-    return;
-  }
-
   setIsUploading(true);
   try {
-    // 1. Upload to Cloudinary first
-    console.log('Uploading to Cloudinary...');
-    
     const uploadResult = await uploadToCloudinary(media, contentType);
     
-    if (!uploadResult.public_id) {
-      throw new Error('Failed to get Cloudinary public_id');
+    let songData = null;
+    if (contentType === 'image' && selectedSong) {
+      // For local files, we might want to upload the audio first
+      if (selectedSong.id.startsWith('local-') && localAudio) {
+        const audioUploadResult = await uploadToCloudinary(localAudio, 'audio');
+        songData = {
+          title: selectedSong.title,
+          artist: selectedSong.artist,
+          audio_url: audioUploadResult.secure_url,
+          start_time: trimStart,
+          end_time: trimEnd
+        };
+      } else {
+        // For tracks from the library
+        songData = {
+          id: selectedSong.id,
+          title: selectedSong.title,
+          artist: selectedSong.artist,
+          audio_url: selectedSong.audio_url,
+          start_time: trimStart,
+          end_time: trimEnd
+        };
+      }
     }
 
-    console.log('Cloudinary upload successful:', uploadResult);
-
-    // 2. Create post with Cloudinary public_id (extract filename only)
     const postData = {
       caption: caption.trim(),
-      media_file: uploadResult.public_id,  // Send FULL public_id with folder
+      media_file: uploadResult.public_id,
       content_type: contentType,
       width: uploadResult.width,
       height: uploadResult.height,
       ...(contentType === 'video' && media.duration && { 
         duration: Math.floor(media.duration / 1000)
       }),
+      ...(songData && { song: songData })
     };
 
-    console.log('Sending to backend:', postData);
-
     const response = await createSocialPost(postData);
-    console.log('Post created successfully:', response);
-    
     Alert.alert('Success', 'Post created successfully!');
     navigation.goBack();
   } catch (error) {
     console.error('Upload error:', error);
-    Alert.alert(
-      'Error',
-      error.message || 'Failed to create post. Please try again.'
-    );
+    Alert.alert('Error', error.message || 'Failed to create post. Please try again.');
   } finally {
     setIsUploading(false);
   }
@@ -257,6 +347,61 @@ const uploadToCloudinary = async (mediaFile, type) => {
         <Text style={styles.charCount}>{caption.length}/2200</Text>
       </View>
 
+      {/* Song Picker (only for images) */}
+      {contentType === 'image' && (
+  <View style={styles.inputContainer}>
+    <Text style={styles.inputLabel}>Accompanying Song (optional)</Text>
+    
+    <View style={styles.songOptionsContainer}>
+      <TouchableOpacity
+        style={styles.audioOptionButton}
+        onPress={pickLocalAudio}
+      >
+        <MaterialIcons name="audiotrack" size={24} color="#1DA1F2" />
+        <Text style={styles.audioOptionText}>Pick Local Audio</Text>
+      </TouchableOpacity>
+      
+      <TouchableOpacity
+        style={styles.audioOptionButton}
+        onPress={() => setShowSongModal(true)}
+      >
+        <MaterialIcons name="library-music" size={24} color="#1DA1F2" />
+        <Text style={styles.audioOptionText}>Choose from Library</Text>
+      </TouchableOpacity>
+    </View>
+
+    {selectedSong && (
+      <View style={styles.selectedSongContainer}>
+        <Text style={styles.songTitle}>{selectedSong.title}</Text>
+        <Text style={styles.songArtist}>{selectedSong.artist}</Text>
+        {selectedSong.id.startsWith('local-') && (
+          <Text style={styles.localFileTag}>(Local File)</Text>
+        )}
+        <Text style={styles.trimInfo}>
+          Trimmed: {trimStart.toFixed(1)}s - {trimEnd.toFixed(1)}s
+        </Text>
+        <View style={styles.songActionButtons}>
+          <TouchableOpacity
+            style={styles.editSongButton}
+            onPress={() => selectedSong.id.startsWith('local-') ? pickLocalAudio() : setShowSongModal(true)}
+          >
+            <Feather name="edit" size={16} color="#1DA1F2" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.removeSongButton}
+            onPress={() => {
+              setSelectedSong(null);
+              setLocalAudio(null);
+            }}
+          >
+            <Feather name="x-circle" size={16} color="#FF4444" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    )}
+  </View>
+)}
+
       {/* Post Button */}
       <TouchableOpacity 
         style={[styles.postButton, isUploading && styles.disabledButton]}
@@ -267,6 +412,138 @@ const uploadToCloudinary = async (mediaFile, type) => {
           {isUploading ? 'Posting...' : 'Share Post'}
         </Text>
       </TouchableOpacity>
+
+      {/* Song Selection Modal */}
+      <Modal
+        visible={showSongModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowSongModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowSongModal(false)}>
+              <Feather name="x" size={24} color="#1DA1F2" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Select a Song</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <ScrollView>
+            {tracks.map(track => (
+              <TouchableOpacity
+                key={track.id}
+                style={[
+                  styles.songItem,
+                  selectedSong?.id === track.id && styles.selectedSongItem
+                ]}
+                onPress={() => handleTrimSong(track)}
+              >
+                <MaterialIcons name="music-note" size={24} color="#666" />
+                <View style={styles.songInfo}>
+                  <Text style={styles.songTitle}>{track.title}</Text>
+                  <Text style={styles.songArtist}>{track.artist}</Text>
+                </View>
+                <Feather name="chevron-right" size={20} color="#666" />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Song Trimming Modal */}
+      {/* Song Trimming Modal */}
+{selectedSong && playbackStatus && (
+  <Modal
+    visible={!!selectedSong}
+    animationType="slide"
+    transparent={false}
+    onRequestClose={() => setSelectedSong(null)}
+  >
+    <View style={styles.modalContainer}>
+      <View style={styles.modalHeader}>
+        <TouchableOpacity onPress={() => setSelectedSong(null)}>
+          <Feather name="x" size={24} color="#1DA1F2" />
+        </TouchableOpacity>
+        <Text style={styles.modalTitle}>Trim Song</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <View style={styles.trimContainer}>
+        {/* Safely render song title */}
+        <Text style={styles.songTitle}>
+          {selectedSong.title || 'Untitled Song'}
+        </Text>
+        
+        {/* Safely render artist name */}
+        <Text style={styles.songArtist}>
+          {selectedSong.artist || 'Unknown Artist'}
+        </Text>
+        
+        <View style={styles.trimControls}>
+          <Text style={styles.trimLabel}>
+            Start: {trimStart.toFixed(1)}s
+          </Text>
+          <Slider
+            style={styles.slider}
+            minimumValue={0}
+            maximumValue={Math.min(playbackStatus.durationMillis / 1000, 60)}
+            value={trimStart}
+            onValueChange={setTrimStart}
+            minimumTrackTintColor="#1DA1F2"
+            maximumTrackTintColor="#ddd"
+            thumbTintColor="#1DA1F2"
+            step={0.1}
+          />
+          
+          <Text style={styles.trimLabel}>
+            End: {trimEnd.toFixed(1)}s (max 30s)
+          </Text>
+          <Slider
+            style={styles.slider}
+            minimumValue={trimStart + 1}
+            maximumValue={Math.min(trimStart + 30, playbackStatus.durationMillis / 1000)}
+            value={trimEnd}
+            onValueChange={setTrimEnd}
+            minimumTrackTintColor="#1DA1F2"
+            maximumTrackTintColor="#ddd"
+            thumbTintColor="#1DA1F2"
+            step={0.1}
+          />
+          
+          <Text style={styles.trimDuration}>
+            Duration: {(trimEnd - trimStart).toFixed(1)} seconds
+          </Text>
+        </View>
+        
+        <TouchableOpacity
+          style={styles.previewButton}
+          onPress={previewTrimmedSong}
+        >
+          <Feather name="play" size={20} color="white" />
+          <Text style={styles.previewButtonText}>Preview</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={styles.confirmButton}
+          onPress={() => {
+            setShowSongModal(false);
+            // Ensure we're only saving the necessary song data
+            setSelectedSong({
+              id: selectedSong.id,
+              title: selectedSong.title,
+              artist: selectedSong.artist,
+              audio_url: selectedSong.audio_url
+              // Don't include any nested objects
+            });
+          }}
+        >
+          <Text style={styles.confirmButtonText}>Confirm Selection</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+)}
     </ScrollView>
   );
 };
@@ -386,6 +663,182 @@ const styles = StyleSheet.create({
 videoContainer: {
   position: 'relative',
 },
+songOption: {
+  backgroundColor: '#f9f9f9',
+  borderRadius: 10,
+  padding: 10,
+  marginRight: 10,
+  borderWidth: 1,
+  borderColor: '#ddd',
+},
+selectedSongOption: {
+  backgroundColor: '#1DA1F2',
+  borderColor: '#1DA1F2',
+},
+songTitle: {
+  fontSize: 16,
+  fontWeight: '500',
+  color: '#333',
+},
+songArtist: {
+  fontSize: 14,
+  color: '#666',
+},
+pickSongButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  padding: 10,
+  marginBottom: 10,
+  backgroundColor: '#f0f8ff',
+  borderRadius: 8,
+  borderWidth: 1,
+  borderColor: '#1DA1F2',
+},
+pickSongText: {
+  marginLeft: 8,
+  fontSize: 16,
+  color: '#1DA1F2',
+  fontWeight: '500',
+},
+selectedSongContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: '#e6f7ff',
+  borderRadius: 8,
+  padding: 10,
+  marginBottom: 10,
+},
+removeSongButton: {
+  marginLeft: 10,
+},
+modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  songItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  selectedSongItem: {
+    backgroundColor: '#e6f7ff',
+  },
+  songInfo: {
+    flex: 1,
+    marginLeft: 15,
+  },
+  trimContainer: {
+    padding: 20,
+  },
+  trimControls: {
+    marginVertical: 20,
+  },
+  slider: {
+    height: 40,
+    marginBottom: 20,
+  },
+  trimLabel: {
+    fontSize: 16,
+    marginBottom: 5,
+    color: '#333',
+  },
+  trimDuration: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginVertical: 10,
+  },
+  trimInfo: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  previewButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1DA1F2',
+    padding: 15,
+    borderRadius: 8,
+    marginVertical: 10,
+  },
+  previewButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 10,
+  },
+  confirmButton: {
+    backgroundColor: '#34C759',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  editSongButton: {
+    marginLeft: 10,
+    padding: 5,
+  },
+  selectedSongContainer: {
+    position: 'relative',
+    backgroundColor: '#e6f7ff',
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 10
+},
+songOptionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  audioOptionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    backgroundColor: '#f0f8ff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1DA1F2',
+    marginHorizontal: 5,
+  },
+  audioOptionText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#1DA1F2',
+  },
+  localFileTag: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  songActionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+  },
 });
 
 export default CreatePost;

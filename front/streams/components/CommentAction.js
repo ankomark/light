@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
@@ -14,7 +13,6 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { commentOnPost, fetchSocialPostComments } from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import { API_URL } from '../services/api';
 
 const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
@@ -40,41 +38,12 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
     }
   }, [comments]);
 
+  // FIX: Only one API call, no profile fetch loop!
   const fetchComments = async () => {
     try {
       setLoading(true);
       const data = await fetchSocialPostComments(postId);
-      const commentsWithProfiles = await Promise.all(
-        data.map(async (comment) => {
-          try {
-            const token = await AsyncStorage.getItem('accessToken');
-            if (!token) return comment;
-
-            const response = await axios.get(
-              `${API_URL}/profiles/by_user/${comment.user.id}/`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            
-            return {
-              ...comment,
-              user: {
-                ...comment.user,
-                profile_picture: response.data?.picture || DEFAULT_PROFILE_IMAGE,
-              },
-            };
-          } catch (error) {
-            console.error('Profile fetch error:', error);
-            return {
-              ...comment,
-              user: {
-                ...comment.user,
-                profile_picture: DEFAULT_PROFILE_IMAGE,
-              },
-            };
-          }
-        })
-      );
-      setComments(commentsWithProfiles);
+      setComments(data); // Use backend data directly
     } catch (error) {
       Alert.alert('Error', 'Failed to load comments');
       console.error('Comments fetch error:', error);
@@ -94,11 +63,11 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
       const token = await AsyncStorage.getItem('accessToken');
       if (!token) return;
 
-      const response = await axios.get(
-        `${API_URL}/profiles/me/`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setUserProfile(response.data);
+      const response = await fetch(`${API_URL}/profiles/me/`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setUserProfile(data);
     } catch (error) {
       console.error('Profile fetch error:', error);
     }
@@ -180,7 +149,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
               renderItem={({ item }) => (
                 <View style={styles.commentItem}>
                   <Image
-                    source={{ uri: item.user.profile_picture }}
+                    source={{ uri: item.user.profile_picture || DEFAULT_PROFILE_IMAGE }}
                     style={styles.avatar}
                   />
                   <View style={styles.commentContent}>

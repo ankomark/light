@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { 
   View, 
@@ -10,6 +9,7 @@ import {
   TouchableOpacity
 } from 'react-native';
 import { Video } from 'expo-av';
+import { Audio } from 'expo-av';
 import axios from 'axios';
 import { Feather } from '@expo/vector-icons';
 import { API_URL } from '../services/api';
@@ -18,19 +18,16 @@ import PostActions from '../components/PostActions';
 
 const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
 
-// Simplified URL handler - only processes profile images
 const getOptimizedUrl = (url, type = 'image') => {
   if (!url) return null;
   
-  // Only process profile images
   if (type === 'profile' && url.includes('res.cloudinary.com')) {
     return url.replace('/upload/', '/upload/w_50,h_50,c_fill/');
   }
   
-  return url; // Return original URL for all other cases
+  return url;
 };
 
-// Updated to use backend's optimized_url
 const processPost = (post) => {
   return {
     ...post,
@@ -53,6 +50,8 @@ const PostDetail = ({ route, navigation }) => {
   const [commentsCount, setCommentsCount] = useState(0);
   const videoRef = useRef(null);
   const [mediaError, setMediaError] = useState(false);
+  const audioRef = useRef(null);
+  const timeoutRef = useRef(null);
 
   // Auto-open comments if coming from notification
   useEffect(() => {
@@ -66,10 +65,7 @@ const PostDetail = ({ route, navigation }) => {
       try {
         setLoading(true);
         const response = await axios.get(`${API_URL}/social-posts/${postId}/`);
-        
-        // Apply processing
         const processedPost = processPost(response.data);
-        
         setPost(processedPost);
         setCommentsCount(response.data.comments_count || 0);
       } catch (err) {
@@ -82,6 +78,54 @@ const PostDetail = ({ route, navigation }) => {
 
     fetchPostDetail();
   }, [postId]);
+
+  useEffect(() => {
+    // Play song if image post with song
+    const playSong = async () => {
+      if (post?.content_type === 'image' && post?.song?.audio_url) {
+        try {
+          if (audioRef.current) {
+            await audioRef.current.unloadAsync();
+            audioRef.current = null;
+          }
+          
+          const { sound } = await Audio.Sound.createAsync({ uri: post.song.audio_url });
+          audioRef.current = sound;
+          
+          // Play from the trimmed start position
+          await sound.playFromPositionAsync((post.song.start_time || 0) * 1000);
+          
+          // Clear any existing timeout
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+          }
+          
+          // Set timeout to stop after trimmed duration
+          const duration = (post.song.end_time - (post.song.start_time || 0)) * 1000;
+          timeoutRef.current = setTimeout(async () => {
+            if (audioRef.current) {
+              await audioRef.current.stopAsync();
+            }
+          }, duration);
+        } catch (e) {
+          console.log('Audio play error:', e);
+        }
+      }
+    };
+
+    playSong();
+
+    // Cleanup on unmount
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      if (audioRef.current) {
+        audioRef.current.unloadAsync();
+        audioRef.current = null;
+      }
+    };
+  }, [post]);
 
   const handleCommentsLoaded = (comments) => {
     if (commentId && flatListRef.current) {
@@ -212,6 +256,17 @@ const PostDetail = ({ route, navigation }) => {
             {post.likes_count || 0} likes • {commentsCount} comments
           </Text>
         </View>
+
+        {/* Song details section */}
+        {post.song && (
+          <View style={styles.songDetails}>
+            <Text style={styles.songTitle}>{post.song.title}</Text>
+            <Text style={styles.songArtist}>{post.song.artist}</Text>
+            <Text style={styles.trimInfo}>
+              Audio: {post.song.start_time || 0}s - {post.song.end_time}s
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
       <CommentAction 
@@ -278,6 +333,21 @@ const styles = StyleSheet.create({
 },
 videoContainer: {
   position: 'relative',
+},
+songDetails: {
+  backgroundColor: '#f9f9f9',
+  padding: 12,
+  borderRadius: 8,
+  marginTop: 16,
+},
+songTitle: {
+  fontSize: 18,
+  fontWeight: 'bold',
+  color: '#333',
+},
+songArtist: {
+  fontSize: 16,
+  color: '#666',
 },
 });
 

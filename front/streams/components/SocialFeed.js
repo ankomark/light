@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Video } from 'expo-av';
+import { Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
@@ -17,63 +18,83 @@ import SearchBaar from '../components/SearchBaar';
 import { fetchSocialPosts } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
-// import LikeButton from './LikeButton';
 import CommentAction from './CommentAction';
-import { DownloadButton, SaveButton,LikeButton } from './SocialActions';
+import { DownloadButton, SaveButton, LikeButton } from './SocialActions';
 
 const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
 
-// Simplified URL handler - only processes profile images
+// Only processes profile images
 const getOptimizedUrl = (url, type = 'image') => {
   if (!url) return null;
-  
-  // Only process profile images
   if (type === 'profile' && url.includes('res.cloudinary.com')) {
     return url.replace('/upload/', '/upload/w_50,h_50,c_fill/');
   }
-  
-  return url; // Return original URL for all other cases
+  return url;
 };
 
-// Updated to use backend's optimized_url
-const processPost = (post) => {
-  let mediaUrl = post.optimized_url || post.media_url;
-  
-  // Fallback for auto-upload URLs
-  if (mediaUrl?.includes('/auto/upload/')) {
-    const parts = mediaUrl.split('/auto/upload/');
-    const ext = post.content_type === 'image' ? '.jpg' : '.mp4';
-    mediaUrl = `https://res.cloudinary.com/dxdmo9j4v/${post.content_type}/upload/${parts[1]}${ext}`;
+// Always sanitize user object and profile_picture
+const processPost = (post, existingFollowStates = {}) => {
+  // Ensure user object exists
+  if (!post.user || typeof post.user !== 'object') {
+    post.user = {
+      id: 0,
+      username: 'Unknown',
+      profile_picture: DEFAULT_PROFILE_IMAGE,
+      followers_count: 0,
+      is_following: false
+    };
   }
-  
+  // Ensure profile_picture is always a string
+  let profilePic = post.user?.profile_picture;
+  if (typeof profilePic !== 'string') {
+    profilePic = profilePic?.secure_url || profilePic?.url || DEFAULT_PROFILE_IMAGE;
+  }
+  if (!profilePic) profilePic = DEFAULT_PROFILE_IMAGE;
+
+  // Preserve follow state if available
+  const existingState = existingFollowStates[post.user?.id];
+  const userFollowersCount = typeof existingState?.followers_count === 'number'
+    ? existingState.followers_count
+    : post.user?.followers_count ?? 0;
+  const userIsFollowing = typeof existingState?.is_following === 'boolean'
+    ? existingState.is_following
+    : post.user?.is_following ?? false;
+
   return {
     ...post,
-    mediaUrl,
-    thumbnailUrl: mediaUrl,
     user: {
-      ...post.user,
-      profile_picture: post.user?.profile_picture || DEFAULT_PROFILE_IMAGE
-    }
+      id: post.user?.id || 0,
+      username: String(post.user?.username || 'Unknown'),
+      profile_picture: profilePic,
+      followers_count: userFollowersCount,
+      is_following: userIsFollowing
+    },
+    mediaUrl: post.optimized_url || post.media_url,
+    thumbnailUrl: post.optimized_url || post.media_url
   };
-};;
+};
 
-// Simplified media component with better error handling
-const PostMedia = ({ item, videoRefs }) => {
+// Media component with error handling
+const PostMedia = ({ item, videoRefs,isFocused }) => {
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-  // Reset states when item changes
   useEffect(() => {
     setCurrentUrl(item.mediaUrl);
     setIsLoading(true);
     setHasError(false);
-    setDimensions({ width: 0, height: 0 });
   }, [item.id, item.mediaUrl]);
+  // Audio focus handling - just for logging/debugging
+  useEffect(() => {
+    if (isFocused && item.content_type === 'image' && item.song?.audio_url) {
+      console.log(`Post ${item.id} with song is now focused`);
+    } else if (!isFocused) {
+      console.log(`Post ${item.id} is no longer focused`);
+    }
+  }, [isFocused, item]);
 
   const handleError = useCallback(() => {
-    // Only try original media_url as fallback
     if (currentUrl !== item.media_url) {
       setCurrentUrl(item.media_url);
     } else {
@@ -152,12 +173,15 @@ const SocialFeed = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState(null);
-  
+  // const [currentAudio, setCurrentAudio] = useState(null);
+  const [followStates, setFollowStates] = useState({});
   const navigation = useNavigation();
   const videoRefs = useRef({});
+  const audioRef = useRef(null);
   const { currentUser } = useAuth();
   const loadingTimeoutRef = useRef(null);
   const lastFetchTimeRef = useRef(0);
+  const [currentlyPlayingPostId, setCurrentlyPlayingPostId] = useState(null);
 
   const filteredPosts = useMemo(() => {
     if (!searchQuery.trim()) return posts;
@@ -184,21 +208,26 @@ const SocialFeed = () => {
       }, 15000);
 
       const data = await fetchSocialPosts();
-      
+      // Filter out posts with invalid user data
+      const validPosts = Array.isArray(data)
+        ? data.filter(post => post.user && typeof post.user === 'object')
+        : [];
       if (!Array.isArray(data)) {
         throw new Error('Invalid data format');
       }
+      if (validPosts.length !== data.length) {
+        console.warn('Some posts had invalid user data and were filtered out.');
+      }
 
-      const processedPosts = data.map(processPost);
+      // Process posts while preserving existing follow states
+      const processedPosts = validPosts.map(post => processPost(post, followStates));
       const sortedPosts = processedPosts.sort((a, b) => 
         new Date(b.created_at) - new Date(a.created_at)
       );
-      
       setPosts(sortedPosts);
       lastFetchTimeRef.current = now;
     } catch (err) {
       setError(err);
-      
       if (!isRefresh) {
         Alert.alert(
           'Error Loading Posts',
@@ -214,10 +243,13 @@ const SocialFeed = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [followStates]);
 
   const handleRefresh = useCallback(() => loadPosts(true), [loadPosts]);
 
+
+
+  
   useEffect(() => {
     loadPosts();
   }, []);
@@ -228,7 +260,6 @@ const SocialFeed = () => {
         loadPosts();
       }
     }, 300000);
-    
     return () => clearInterval(interval);
   }, [refreshing, loading, loadPosts]);
 
@@ -241,13 +272,68 @@ const SocialFeed = () => {
     }, [loadPosts])
   );
 
+  // Helper to play song
+  // Enhanced playSong function
+  const playSong = async (post) => {
+    if (!post?.song?.audio_url || currentlyPlayingPostId === post.id) return;
+    
+    try {
+      // Stop any currently playing audio
+      if (audioRef.current) {
+        await stopSong();
+      }
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: post.song.audio_url },
+        { shouldPlay: false }
+      );
+      
+      audioRef.current = sound;
+      setCurrentlyPlayingPostId(post.id);
+      
+      // Play from the trimmed start position if available
+      const startPosition = (post.song.start_time || 0) * 1000;
+      await sound.playFromPositionAsync(startPosition);
+      
+      // Set timeout to stop after trimmed duration if available
+      if (post.song.end_time) {
+        const duration = (post.song.end_time - (post.song.start_time || 0)) * 1000;
+        setTimeout(async () => {
+          if (audioRef.current && currentlyPlayingPostId === post.id) {
+            await stopSong();
+          }
+        }, duration);
+      }
+    } catch (e) {
+      console.log('Audio play error:', e);
+    }
+  };
+
+  // Enhanced stopSong function
+  const stopSong = async () => {
+    if (audioRef.current) {
+      try {
+        await audioRef.current.stopAsync();
+        await audioRef.current.unloadAsync();
+      } catch (e) {
+        console.log('Audio stop error:', e);
+      } finally {
+        audioRef.current = null;
+        setCurrentlyPlayingPostId(null);
+      }
+    }
+  };
+
+  // Detect viewable items
   const onViewableItemsChanged = useRef(({ changed }) => {
     changed.forEach(item => {
-      const videoRef = videoRefs.current[item.key];
-      if (videoRef) {
-        item.isViewable 
-          ? videoRef.playAsync().catch(console.error)
-          : videoRef.pauseAsync().catch(console.error);
+      if (item.isViewable && 
+          item.item.content_type === 'image' && 
+          item.item.song?.audio_url) {
+        playSong(item.item);
+      } else if (!item.isViewable && 
+                currentlyPlayingPostId === item.item.id) {
+        stopSong();
       }
     });
   }).current;
@@ -258,12 +344,27 @@ const SocialFeed = () => {
     minimumViewTime: 100,
   }), []);
 
-  const handleFollowChange = useCallback((userId, data) => {
-    setPosts(prev => prev.map(post => 
-      post.user.id === userId 
-        ? { ...post, user: { ...post.user, ...data } }
-        : post
-    ));
+  const handleFollowChange = useCallback((data) => {
+    setFollowStates(prev => ({
+      ...prev,
+      [data.id]: {
+        is_following: data.is_following,
+        followers_count: data.followers_count
+      }
+    }));
+    setPosts(prev => prev.map(post => {
+      if (post.user.id === data.id) {
+        return {
+          ...post,
+          user: {
+            ...post.user,
+            is_following: data.is_following,
+            followers_count: data.followers_count ?? post.user.followers_count
+          }
+        };
+      }
+      return post;
+    }));
   }, []);
 
   const handlePostUpdate = useCallback(updatedPost => {
@@ -276,44 +377,52 @@ const SocialFeed = () => {
     setPosts(prev => prev.filter(post => post.id !== postId));
   }, []);
 
-  const renderPostHeader = useCallback(({ item }) => (
-    <View style={styles.postHeader}>
-      <View style={styles.userInfo}>
-        <Image
-          source={{ uri: item.user.profile_picture }}
-          style={styles.profileImage}
-          defaultSource={{ uri: DEFAULT_PROFILE_IMAGE }}
-          onError={() => setPosts(prev => prev.map(p => 
-            p.id === item.id 
-              ? { ...p, user: { ...p.user, profile_picture: DEFAULT_PROFILE_IMAGE } }
-              : p
-          ))}
-        />
-        <View style={styles.userTextContainer}>
-          <Text style={styles.username}>{item.user.username}</Text>
-          <Text style={styles.followersText}>
-            {item.user.followers_count || 0} followers
-          </Text>
+  // Always validate user object before rendering
+  const renderPostHeader = useCallback(({ item }) => {
+    if (!item.user || typeof item.user !== 'object') {
+      console.warn('Post missing user data:', item.id);
+      return null;
+    }
+    return (
+      <View style={styles.postHeader}>
+        <View style={styles.userInfo}>
+          <Image
+            source={{ uri: typeof item.user.profile_picture === 'string' ? item.user.profile_picture : DEFAULT_PROFILE_IMAGE }}
+            style={styles.profileImage}
+            defaultSource={{ uri: DEFAULT_PROFILE_IMAGE }}
+            onError={() => setPosts(prev => prev.map(p => 
+              p.id === item.id 
+                ? { ...p, user: { ...p.user, profile_picture: DEFAULT_PROFILE_IMAGE } }
+                : p
+            ))}
+          />
+          <View style={styles.userTextContainer}>
+            <Text style={styles.username}>{String(item.user.username || 'Unknown user')}</Text>
+            <Text style={styles.followersText}>
+              {typeof item.user.followers_count === 'number' ? item.user.followers_count : 0} followers
+            </Text>
+          </View>
+        </View>
+        <View style={styles.headerActions}>
+          {currentUser?.id !== item.user.id && (
+            <FollowButton 
+              userId={item.user.id}
+              initialFollowing={item.user.is_following}
+              initialFollowersCount={item.user.followers_count}
+              onFollowChange={handleFollowChange}
+            />
+          )}
+          {item.can_edit && (
+            <PostActions 
+              post={item} 
+              onUpdate={handlePostUpdate}
+              onDelete={() => handlePostDelete(item.id)}
+            />
+          )}
         </View>
       </View>
-      <View style={styles.headerActions}>
-        {currentUser?.id !== item.user.id && (
-          <FollowButton 
-            userId={item.user.id}
-            initialFollowing={item.user.is_following}
-            onFollowChange={(data) => handleFollowChange(item.user.id, data)}
-          />
-        )}
-        {item.can_edit && (
-          <PostActions 
-            post={item} 
-            onUpdate={handlePostUpdate}
-            onDelete={() => handlePostDelete(item.id)}
-          />
-        )}
-      </View>
-    </View>
-  ), [currentUser?.id, handleFollowChange, handlePostUpdate, handlePostDelete]);
+    );
+  }, [currentUser?.id, handleFollowChange, handlePostUpdate, handlePostDelete]);
 
   const renderPostFooter = useCallback(({ item }) => (
     <View style={styles.postFooter}>
@@ -359,7 +468,8 @@ const SocialFeed = () => {
       {renderPostHeader({ item })}
       <PostMedia 
         item={item} 
-        videoRefs={videoRefs} 
+        videoRefs={videoRefs}
+        isFocused={currentlyPlayingPostId === item.id} 
       />
       {renderPostFooter({ item })}
     </View>
@@ -373,7 +483,7 @@ const SocialFeed = () => {
           <>
             <MaterialIcons name="error-outline" size={48} color="#666" />
             <Text style={styles.errorText}>
-              {error.message.includes('Session expired')
+              {error.message?.includes('Session expired')
                 ? 'Session expired. Please log in again.'
                 : error.response?.status === 500
                   ? 'Server error. Please try again.'
@@ -624,6 +734,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
 
+  errorText: {
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+
   createFirstPostButton: {
     marginTop: 16,
     backgroundColor: '#1DA1F2',
@@ -660,6 +777,14 @@ const styles = StyleSheet.create({
     color: '#1DA1F2',
     marginTop: 12,
     fontSize: 16,
+  },
+  audioIndicator: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 12,
+    padding: 5,
   },
 });
 

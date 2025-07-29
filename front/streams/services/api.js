@@ -352,7 +352,27 @@ export const fetchComments = async (trackId) => {  // Renamed from fetchTrackCom
 export const postComment = async (trackId, content) => {
   return apiRequest('post', `/tracks/${trackId}/comments/`, { content });
 };
+// Add to api.js
+export const fetchFollowersCount = async (userId) => {
+  try {
+    return await apiRequest('get', `/users/${userId}/followers_count/`);
+  } catch (error) {
+    if (error.response?.status === 404) {
+      // Fallback to using the regular user endpoint
+      const user = await apiRequest('get', `/users/${userId}/`);
+      return { count: user.followers_count };
+    }
+    throw error;
+  }
+};
 
+export const fetchFollowingCount = async (userId) => {
+  return apiRequest('get', `/users/${userId}/following_count/`);
+};
+
+export const followUser = async (userId) => {
+  return apiRequest('post', `/users/${userId}/follow/`);
+};
 // Utility endpoints
 export const checkAuthStatus = async () => {
   try {
