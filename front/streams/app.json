@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "streams",
+    "name": "Advent Light",
     "slug": "streams",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -36,7 +36,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"

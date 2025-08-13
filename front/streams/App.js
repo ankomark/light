@@ -17,7 +17,7 @@ import CreatePost from './components/CreatePost';
 import Music from './components/Music';
 import EditTrackScreen from './components/EditTrackScreen';
 import PostDetail from './components/PostDetail'
-import { View, Text, TextInput, Button, StyleSheet, TouchableOpacity, Image, Alert } from 'react-native';
+import { View, ActivityIndicator} from 'react-native';
 import BibleReader from './components/BibleReader';
 import HymnList from './components/HymnList';
 import HymnDetail from './components/HymnDetail';
@@ -45,10 +45,24 @@ import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
 import LiveEventsList from './components/Live/LiveEventsList';
 import LiveHomeScreen from './components/Live/LiveHomeScreen';
-import { useRoute } from '@react-navigation/native';
 
+
+import { useAuth } from './context/useAuth';
 
 const Stack = createNativeStackNavigator();
+const AuthInitializer = ({ children }) => {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  return children;
+};
 const HymnalAppWrapper = ({ navigation }) => (
     <View style={{ flex: 1 }}>
       <Header navigation={navigation} />
@@ -69,6 +83,7 @@ const App = () => {
   
 
     return (
+      <AuthInitializer>
        
         <NavigationContainer>
             <Stack.Navigator
@@ -125,6 +140,7 @@ const App = () => {
 
             </Stack.Navigator>
         </NavigationContainer>
+      </AuthInitializer>
        
     );
 };
