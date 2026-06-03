@@ -94,6 +94,34 @@ class StandardPagination(PageNumberPagination):
         })
 
 
+class IsOwnerOrReadOnly(BasePermission):
+    """Object-level permission: safe methods are open; writes/deletes are
+    restricted to the object's owner.
+
+    The owner attribute is resolved from the view's ``owner_field`` if set,
+    otherwise from the first matching name in ``OWNER_FIELDS``. Applied
+    alongside ``IsAuthenticatedOrReadOnly`` it guarantees a user can only
+    modify their own content. DRF invokes ``has_object_permission`` whenever
+    a detail view calls ``get_object()`` (retrieve/update/partial_update/
+    destroy), so no per-view update/destroy overrides are needed.
+    """
+    message = "You can only modify your own content."
+
+    OWNER_FIELDS = ('user', 'artist', 'seller', 'reviewer', 'created_by', 'creator')
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        owner_field = getattr(view, 'owner_field', None)
+        if owner_field:
+            return getattr(obj, owner_field, None) == request.user
+        for name in self.OWNER_FIELDS:
+            if hasattr(obj, name):
+                return getattr(obj, name) == request.user
+        # No recognizable owner field — deny writes rather than fail open.
+        return False
+
+
 class CloudinarySignView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -631,7 +659,7 @@ class TrackViewSet(viewsets.ModelViewSet):
 class PlaylistViewSet(viewsets.ModelViewSet):
     queryset = Playlist.objects.all()
     serializer_class = PlaylistSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -770,7 +798,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
 class CommentViewSet(viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
     pagination_class = PageNumberPagination
     page_size = 20
 
@@ -836,7 +864,7 @@ class SocialPostViewSet(viewsets.ModelViewSet):
     ).order_by('-created_at')
     queryset = SocialPost.objects.all().order_by('-created_at')
     serializer_class = SocialPostSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     def get_queryset(self):
         user_queryset = User.objects.annotate(
@@ -854,11 +882,6 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         context['request'] = self.request
         return context
     
-
-    def get_permissions(self):
-        if self.action in ['update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated()]
-        return super().get_permissions()
 
     def perform_create(self, serializer):
         try:
@@ -1156,7 +1179,7 @@ class PostLikeViewSet(viewsets.ModelViewSet):
 class PostCommentViewSet(viewsets.ModelViewSet):
     queryset = PostComment.objects.all()
     serializer_class = PostCommentSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
 
     def get_queryset(self):
         post_id = self.kwargs.get('post_pk')
@@ -1193,7 +1216,7 @@ class PostSaveViewSet(viewsets.ModelViewSet):
         return self.queryset.filter(user=self.request.user)
 
 class StoryViewSet(viewsets.ModelViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly]
     serializer_class = StorySerializer
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
@@ -1954,7 +1977,7 @@ class GroupViewSet(viewsets.ModelViewSet):
 class GroupPostViewSet(viewsets.ModelViewSet):
     queryset = GroupPost.objects.all()
     serializer_class = GroupPostSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
     pagination_class = StandardPagination
     parser_classes = [MultiPartParser, FormParser]
 
@@ -2072,7 +2095,8 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all().order_by('-created_at')
     serializer_class = ProductSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    owner_field = 'seller'
     pagination_class = StandardPagination
     lookup_field = 'slug'
 
@@ -2273,7 +2297,8 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 class ProductReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ProductReviewSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    owner_field = 'reviewer'
     
     def get_queryset(self):
         product_id = self.kwargs.get('product_pk')
