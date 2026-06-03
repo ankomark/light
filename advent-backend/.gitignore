@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-journal
+
+# Local secrets / environment
+.env
+.env.*
+!.env.example
+
+# Uploaded media (production uses Cloudinary; local media is dev-only)
+media/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
