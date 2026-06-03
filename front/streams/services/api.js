@@ -1,68 +1,71 @@
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { extractYoutubeId } from '../utils/youtubeUtils';
-// Base URL configuration
-// export const API_BASE = 'https://light-backend-production.up.railway.app';
-const DEBUG = process.env.NODE_ENV === 'development';
-export const API_BASE = DEBUG ? 'http://192.168.1.126:8000' : 'https://web-production-f266.up.railway.app';
+
+export const API_BASE = 'https://web-production-f266.up.railway.app';
 axios.defaults.timeout = 30000;
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 export const API_URL = `${API_BASE}/api`;
 
-// Token management utilities
-const storeTokens = async (access, refresh) => {
-  await AsyncStorage.multiSet([
-    ['accessToken', access],
-    ['refreshToken', refresh]
+// ── Secure token storage (uses iOS Keychain / Android Keystore) ───────────────
+/** Use this anywhere you need the current access token instead of reading AsyncStorage directly. */
+export const getAccessToken = () => SecureStore.getItemAsync('accessToken');
+export const storeTokens = async (access, refresh) => {
+  await Promise.all([
+    SecureStore.setItemAsync('accessToken', access),
+    SecureStore.setItemAsync('refreshToken', refresh),
   ]);
 };
 
-const clearTokens = async () => {
-  await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+export const clearTokens = async () => {
+  await Promise.all([
+    SecureStore.deleteItemAsync('accessToken').catch(() => {}),
+    SecureStore.deleteItemAsync('refreshToken').catch(() => {}),
+  ]);
 };
-
 
 const getAuthToken = async () => {
-  try {
-    const token = await AsyncStorage.getItem('accessToken');
-    if (!token) {
-      await clearTokens();
-      throw new Error('No authentication token found');
-    }
-    return token;
-  } catch (error) {
+  const token = await SecureStore.getItemAsync('accessToken');
+  if (!token) {
     await clearTokens();
-    throw error;
+    throw new Error('No authentication token found');
   }
+  return token;
 };
-// Enhanced refresh token flow with retry
-const refreshAuthToken = async (retryCount = 0) => {
-  try {
-    const refreshToken = await AsyncStorage.getItem('refreshToken');
-    if (!refreshToken) {
+
+// ── Mutex: one refresh at a time, all callers share the same promise ──────────
+let _refreshPromise = null;
+
+const refreshAuthToken = async () => {
+  if (_refreshPromise) return _refreshPromise;
+
+  _refreshPromise = (async () => {
+    try {
+      const refreshToken = await SecureStore.getItemAsync('refreshToken');
+      if (!refreshToken) {
+        await clearTokens();
+        throw new Error('Session expired - please login again');
+      }
+
+      const response = await axios.post(
+        `${API_URL}/auth/token/refresh/`,
+        { refresh: refreshToken },
+        { timeout: 10000 }
+      );
+
+      if (!response.data?.access) throw new Error('Invalid token refresh response');
+
+      await storeTokens(response.data.access, refreshToken);
+      return response.data.access;
+    } catch (error) {
       await clearTokens();
-      throw new Error('Session expired - please login again');
+      throw error;
+    } finally {
+      _refreshPromise = null;
     }
+  })();
 
-    const response = await axios.post(`${API_URL}/auth/token/refresh/`, {
-      refresh: refreshToken
-    }, {
-      timeout: 10000
-    });
-
-    if (!response.data?.access) {
-      throw new Error('Invalid token refresh response');
-    }
-
-    await storeTokens(response.data.access, refreshToken);
-    return response.data.access;
-  } catch (error) {
-    if (retryCount < 1) {
-      return refreshAuthToken(retryCount + 1);
-    }
-    await clearTokens();
-    throw error;
-  }
+  return _refreshPromise;
 };
 
 
@@ -200,8 +203,8 @@ export const checkProfileExistence = async () => {
 };
 
 // Track endpoints
-export const fetchTracks = async () => {
-  return apiRequest('get', '/tracks/');
+export const fetchTracks = async (page = 1) => {
+  return apiRequest('get', '/tracks/', null, { params: { page, page_size: 20 } });
 };
 
 export const createTrack = async (formData) => {
@@ -214,16 +217,9 @@ export const createTrack = async (formData) => {
 // api.js - Updated createSocialPost function
 export const createSocialPost = async (postData) => {
   try {
-    console.log('[DEBUG] Creating post with:', postData);
-    
-    // USE apiRequest INSTEAD OF DIRECT AXIOS CALL
     const response = await apiRequest('post', '/social-posts/', postData, {
-      headers: {
-        'Content-Type': 'application/json' // Explicit content type
-      }
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    console.log('[DEBUG] Post created:', response);
     return response;
     
   } catch (error) {
@@ -248,34 +244,19 @@ export const createSocialPost = async (postData) => {
   }
 };
 
-// Enhanced fetchSocialPosts with retry mechanism
-export const fetchSocialPosts = async (maxRetries = 3) => {
+// Paginated social posts — returns { count, next, previous, results }
+export const fetchSocialPosts = async (page = 1) => {
   const retry = async (attempt = 1) => {
     try {
-      
       const response = await apiRequest('get', '/social-posts/', null, {
-        params: {
-          _cache: Date.now(),
-          _fields: 'id,user,content_type,media_url,caption,location,created_at,likes_count,comments_count,is_liked,is_saved,can_edit'
-        }
+        params: { page, page_size: 20 },
       });
-      
-      if (!Array.isArray(response)) {
-        
-        throw new Error('Invalid response format from server');
-      }
+      // response is { count, next, previous, results }
+      if (!response?.results) throw new Error('Invalid response format from server');
       return response;
     } catch (error) {
-      console.error(`[FETCH_POSTS] Attempt ${attempt} failed:`, {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data,
-        config: error.config
-      });
-      
-      if (attempt <= maxRetries && error.response?.status >= 500) {
-        const delay = 1000 * Math.pow(2, attempt - 1);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      if (attempt <= 2 && error.response?.status >= 500) {
+        await new Promise(r => setTimeout(r, 1000 * attempt));
         return retry(attempt + 1);
       }
       
@@ -651,8 +632,8 @@ export const requestJoinGroup = async (slug, message = "") => {
 
 
 
-export const fetchGroupPosts = async (slug) => {
-  return apiRequest('get', `/groups/${slug}/posts/`);
+export const fetchGroupPosts = async (slug, page = 1) => {
+  return apiRequest('get', `/groups/${slug}/posts/`, null, { params: { page, page_size: 20 } });
 };
 
 
@@ -791,43 +772,25 @@ export const fetchProductCategories = async () => {
   return apiRequest('get', '/marketplace/categories/');
 };
 
-export const fetchProducts = async (params = {}) => {
+export const fetchProducts = async (page = 1, extraParams = {}) => {
   try {
-    const response = await axios.get(`${API_URL}/marketplace/products/`, { params });
-    console.log('Raw FetchProducts response:', response.data);
-    const products = response.data.map(product => {
-      // Directly use backend's numeric price_value and currency code
-      const price = parseFloat(product.price);
-      const quantity = parseInt(product.quantity);
-      
-      return {
-        ...product,
-        price: isNaN(price) ? 0 : price,
-        quantity: isNaN(quantity) ? 0 : quantity,
-        currency: product.currency || 'USD',
-        is_owner: product.is_owner || false,
-      };
+    const response = await apiRequest('get', '/marketplace/products/', null, {
+      params: { page, page_size: 20, ...extraParams },
     });
-    
-    return products;
+    // response = { count, next, previous, results }
+    const results = (response?.results ?? []).map(product => ({
+      ...product,
+      price: isNaN(parseFloat(product.price)) ? 0 : parseFloat(product.price),
+      quantity: isNaN(parseInt(product.quantity)) ? 0 : parseInt(product.quantity),
+      currency: product.currency || 'USD',
+      is_owner: product.is_owner || false,
+    }));
+    return { ...response, results };
   } catch (error) {
-    console.error('Error fetching products:', error);
-    
-    if (error.response) {
-      let errorMessage = 'Failed to fetch products from server';
-      if (error.response.data?.error) {
-        errorMessage = error.response.data.error;
-      } else if (error.response.data?.detail) {
-        errorMessage = error.response.data.detail;
-      }
-      throw new Error(errorMessage);
-    } 
-    
-    if (error.request) {
-      throw new Error('No response received from server. Check network or server status.');
-    }
-    
-    throw new Error('Unexpected error occurred while fetching products');
+    const msg = error.response?.data?.error
+      ?? error.response?.data?.detail
+      ?? 'Failed to load products';
+    throw new Error(msg);
   }
 };
 export const fetchProductById = async (identifier) => {
@@ -1244,6 +1207,65 @@ export const debugApiResponse = (response, context = 'API') => {
   apiLog(`Debug response for ${context}`, debugData);
   return response;
 };
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+export const updateProfile = (formData) =>
+  apiRequest('patch', '/profiles/update_me/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+
+// ── Password reset ────────────────────────────────────────────────────────────
+export const forgotPassword = (email) =>
+  apiRequest('post', '/auth/forgot-password/', { email });
+
+export const resetPassword = (email, code, new_password) =>
+  apiRequest('post', '/auth/reset-password/', { email, code, new_password });
+
+// ── Post insights + view tracking ────────────────────────────────────────────
+export const markPostViewed = (postId) =>
+  apiRequest('post', `/social-posts/${postId}/viewed/`);
+
+export const fetchPostInsights = (postId) =>
+  apiRequest('get', `/social-posts/${postId}/insights/`);
+
+// ── Hashtag feed ──────────────────────────────────────────────────────────────
+export const fetchHashtagPosts = (tag, page = 1) =>
+  apiRequest('get', '/social-posts/', null, { params: { tag, page, page_size: 20 } });
+
+export const fetchTrendingHashtags = () =>
+  apiRequest('get', '/explore/trending_hashtags/');
+
+// ── Stories ──────────────────────────────────────────────────────────────────
+export const fetchStoryFeed = () => apiRequest('get', '/stories/feed/');
+export const createStory = (data) => apiRequest('post', '/stories/', data);
+export const deleteStory = (id) => apiRequest('delete', `/stories/${id}/`);
+export const viewStory = (id) => apiRequest('post', `/stories/${id}/view_story/`);
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+export const reportContent = (contentType, objectId, reason, description = '') =>
+  apiRequest('post', '/reports/', { content_type: contentType, object_id: objectId, reason, description });
+
+// ── Cloudinary signed upload ───────────────────────────────────────────────────
+export const getCloudinarySignature = (type) =>
+  apiRequest('post', '/upload/sign/', { type });
+
+// ── Direct Messaging ──────────────────────────────────────────────────────────
+export const fetchConversations = () => apiRequest('get', '/conversations/');
+
+export const getOrCreateConversation = (userId) =>
+  apiRequest('post', '/conversations/', { user_id: userId });
+
+export const fetchMessages = (conversationId) =>
+  apiRequest('get', `/conversations/${conversationId}/messages/`);
+
+export const sendMessage = (conversationId, content) =>
+  apiRequest('post', `/conversations/${conversationId}/send_message/`, { content });
+
+export const markConversationRead = (conversationId) =>
+  apiRequest('post', `/conversations/${conversationId}/mark_read/`);
+
+export const fetchUnreadMessageCount = () =>
+  apiRequest('get', '/conversations/unread_count/');
 
 // Export all API functions
 export default {

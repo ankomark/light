@@ -12,9 +12,8 @@ import {
   Platform
 } from 'react-native';
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../services/api';
+import { API_URL, getAccessToken } from '../services/api';
 
 const EditTrackScreen = ({ route }) => {
   const { track } = route.params;
@@ -33,7 +32,7 @@ const EditTrackScreen = ({ route }) => {
     setIsSubmitting(true);
     
     try {
-      const token = await AsyncStorage.getItem('accessToken');
+      const token = await getAccessToken();
       const formData = new FormData();
       
       formData.append('title', title.trim());

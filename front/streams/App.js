@@ -1,3 +1,12 @@
+import * as Sentry from '@sentry/react-native';
+
+// Init Sentry before anything else — DSN is set at build time via EXPO_PUBLIC_SENTRY_DSN
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN ?? '',
+  environment: __DEV__ ? 'development' : 'production',
+  tracesSampleRate: __DEV__ ? 0 : 0.2,
+  enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+});
 
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
@@ -45,9 +54,17 @@ import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
 import LiveEventsList from './components/Live/LiveEventsList';
 import LiveHomeScreen from './components/Live/LiveHomeScreen';
+import InboxScreen from './components/InboxScreen';
+import ChatScreen from './components/ChatScreen';
+import ExploreScreen from './components/ExploreScreen';
+import EmailVerificationScreen from './components/EmailVerificationScreen';
+import StoryViewer from './components/StoryViewer';
+import CreateStoryScreen from './components/CreateStoryScreen';
 
 
 import { useAuth } from './context/useAuth';
+import { addNotificationResponseListener } from './services/pushNotifications';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const Stack = createNativeStackNavigator();
 const AuthInitializer = ({ children }) => {
@@ -80,12 +97,24 @@ const HymnalAppWrapper = ({ navigation }) => (
 
 
 const App = () => {
-  
+  const navigationRef = React.useRef(null);
+
+  // Handle notification taps when app is killed or in background
+  React.useEffect(() => {
+    const sub = addNotificationResponseListener(response => {
+      const data = response.notification.request.content.data;
+      if (data?.postId && navigationRef.current) {
+        navigationRef.current.navigate('PostDetail', { postId: data.postId });
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
     return (
+      <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
       <AuthInitializer>
-       
-        <NavigationContainer>
+
+        <NavigationContainer ref={navigationRef}>
             <Stack.Navigator
                 initialRouteName="Home"
                 screenOptions={{
@@ -130,6 +159,12 @@ const App = () => {
                 <Stack.Screen name="SellerDashboard" component={SellerDashboardWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
+                <Stack.Screen name="Inbox" component={InboxScreen} />
+                <Stack.Screen name="Chat" component={ChatScreen} />
+                <Stack.Screen name="Explore" component={ExploreWrapper} />
+                <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
+                <Stack.Screen name="StoryViewer" component={StoryViewer} options={{ headerShown: false, animation: 'fade' }} />
+                <Stack.Screen name="CreateStory" component={CreateStoryScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="LiveHomeScreen" component={LiveHomeScreenWrapper} />
                 <Stack.Screen name="LiveEvents" component={LiveEventsListWrapper} />
                 <Stack.Screen name="LiveEventForm" component={LiveEventFormWrapper} />
@@ -141,7 +176,7 @@ const App = () => {
             </Stack.Navigator>
         </NavigationContainer>
       </AuthInitializer>
-       
+      </ErrorBoundary>
     );
 };
 const LiveHomeScreenWrapper = ({ navigation,route }) => (
@@ -175,14 +210,27 @@ const LiveEventPlayerWrapper = ({ navigation, route }) => (
 const GroupListWrapper = ({ navigation }) => (
   <View style={{ flex: 1 }}>
     <Header navigation={navigation} />
-    <GroupList navigation={navigation} />
+    <ErrorBoundary fallbackMessage="Groups couldn't load.">
+      <GroupList navigation={navigation} />
+    </ErrorBoundary>
+  </View>
+);
+
+const ExploreWrapper = ({ navigation }) => (
+  <View style={{ flex: 1 }}>
+    <Header navigation={navigation} />
+    <ErrorBoundary fallbackMessage="Explore couldn't load.">
+      <ExploreScreen navigation={navigation} />
+    </ErrorBoundary>
   </View>
 );
 // Wrapper components for each screen to include the Header
 const HomePageWrapper = ({ navigation }) => (
     <View style={{ flex: 1 }}>
         <Header navigation={navigation} />
-        <HomePage />
+        <ErrorBoundary fallbackMessage="The feed couldn't load. Pull down to retry.">
+          <HomePage />
+        </ErrorBoundary>
     </View>
 );
 
@@ -211,7 +259,9 @@ const BooksListsPageWrapper = ({ navigation }) => (
 const MarketplaceHomeWrapper = ({ navigation }) => (
   <View style={{ flex: 1 }}>
     <Header navigation={navigation} />
-    <MarketplaceHome navigation={navigation} />
+    <ErrorBoundary fallbackMessage="Marketplace couldn't load.">
+      <MarketplaceHome navigation={navigation} />
+    </ErrorBoundary>
   </View>
 );
 
@@ -284,4 +334,4 @@ const SocialFeedWrapper = ({ navigation }) => (
         <SocialFeed navigation={navigation} />
     </View>
 );
-export default App;
+export default Sentry.wrap(App);

@@ -580,7 +580,6 @@ import {
   ActivityIndicator,
   Alert,
   TouchableOpacity,
-  handleRefresh
 } from 'react-native';
 import { Video } from 'expo-av';
 import { Audio } from 'expo-av';
@@ -593,8 +592,12 @@ import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
 import { DownloadButton, SaveButton, LikeButton } from './SocialActions';
+import { PostSkeleton } from './SkeletonLoader';
+import StoriesBar from './StoriesBar';
+import { colors } from '../constants/theme';
 
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+const AVATAR_FAILED = '__failed__';
 
 const getOptimizedUrl = (url, type = 'image') => {
   if (!url) return null;
@@ -609,16 +612,16 @@ const processPost = (post, existingFollowStates = {}) => {
     post.user = {
       id: 0,
       username: 'Unknown',
-      profile_picture: DEFAULT_PROFILE_IMAGE,
+      profile_picture: null,
       followers_count: 0,
       is_following: false
     };
   }
   let profilePic = post.user?.profile_picture;
   if (typeof profilePic !== 'string') {
-    profilePic = profilePic?.secure_url || profilePic?.url || DEFAULT_PROFILE_IMAGE;
+    profilePic = profilePic?.secure_url || profilePic?.url || null;
   }
-  if (!profilePic) profilePic = DEFAULT_PROFILE_IMAGE;
+  if (!profilePic) profilePic = null;
 
   const existingState = existingFollowStates[post.user?.id];
   const userFollowersCount = typeof existingState?.followers_count === 'number'
@@ -730,6 +733,9 @@ const SocialFeed = () => {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState(null);
   const [followStates, setFollowStates] = useState({});
@@ -758,24 +764,21 @@ const SocialFeed = () => {
       isRefresh ? setRefreshing(true) : setLoading(true);
       setError(null);
 
-      const data = await fetchSocialPosts();
-      const validPosts = Array.isArray(data)
-        ? data.filter(post => post.user && typeof post.user === 'object')
-        : [];
-      if (!Array.isArray(data)) throw new Error('Invalid data format');
+      const response = await fetchSocialPosts(1);
+      const raw = response?.results ?? [];
+      const valid = raw.filter(p => p.user && typeof p.user === 'object');
+      const processed = valid.map(p => processPost(p, followStates));
 
-      const processedPosts = validPosts.map(post => processPost(post, followStates));
-      const sortedPosts = processedPosts.sort((a, b) => 
-        new Date(b.created_at) - new Date(a.created_at)
-      );
-      setPosts(sortedPosts);
+      setPosts(processed);
+      setPage(1);
+      setHasMore(!!response?.next);
       lastFetchTimeRef.current = now;
     } catch (err) {
       setError(err);
       if (!isRefresh) {
         Alert.alert(
           'Error Loading Posts',
-          err.response?.status === 500 
+          err.response?.status === 500
             ? 'Server error. Please try again later.'
             : 'Failed to load posts. Please check your connection.',
           [{ text: 'OK' }, { text: 'Retry', onPress: () => loadPosts(false) }]
@@ -786,6 +789,28 @@ const SocialFeed = () => {
       setRefreshing(false);
     }
   }, [followStates]);
+
+  const loadMorePosts = useCallback(async () => {
+    if (loadingMore || !hasMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const response = await fetchSocialPosts(nextPage);
+      const raw = response?.results ?? [];
+      const processed = raw
+        .filter(p => p.user && typeof p.user === 'object')
+        .map(p => processPost(p, followStates));
+      setPosts(prev => [...prev, ...processed]);
+      setPage(nextPage);
+      setHasMore(!!response?.next);
+    } catch {
+      // silent — user can pull-to-refresh
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, loading, page, followStates]);
+
+  const handleRefresh = useCallback(() => loadPosts(true), [loadPosts]);
 
   useEffect(() => {
     loadPosts();
@@ -827,8 +852,8 @@ const SocialFeed = () => {
           }
         }, duration);
       }
-    } catch (e) {
-      console.log('Audio play error:', e);
+    } catch {
+      // Audio failed — continue silently
     }
   };
 
@@ -837,8 +862,7 @@ const SocialFeed = () => {
       try {
         await audioRef.current.stopAsync();
         await audioRef.current.unloadAsync();
-      } catch (e) {
-        console.log('Audio stop error:', e);
+      } catch {
       } finally {
         audioRef.current = null;
         setCurrentlyPlayingPostId(null);
@@ -906,12 +930,16 @@ const SocialFeed = () => {
       <View style={styles.postHeader}>
         <View style={styles.userInfo}>
           <Image
-            source={{ uri: typeof item.user.profile_picture === 'string' ? item.user.profile_picture : DEFAULT_PROFILE_IMAGE }}
+            source={
+              item.user.profile_picture && item.user.profile_picture !== AVATAR_FAILED
+                ? { uri: item.user.profile_picture }
+                : DEFAULT_AVATAR
+            }
+            defaultSource={DEFAULT_AVATAR}
             style={styles.profileImage}
-            defaultSource={{ uri: DEFAULT_PROFILE_IMAGE }}
-            onError={() => setPosts(prev => prev.map(p => 
-              p.id === item.id 
-                ? { ...p, user: { ...p.user, profile_picture: DEFAULT_PROFILE_IMAGE } }
+            onError={() => setPosts(prev => prev.map(p =>
+              p.id === item.id
+                ? { ...p, user: { ...p.user, profile_picture: AVATAR_FAILED } }
                 : p
             ))}
           />
@@ -931,13 +959,11 @@ const SocialFeed = () => {
               onFollowChange={handleFollowChange}
             />
           )}
-          {item.can_edit && (
-            <PostActions 
-              post={item} 
-              onUpdate={handlePostUpdate}
-              onDelete={() => handlePostDelete(item.id)}
-            />
-          )}
+          <PostActions
+            post={item}
+            onUpdate={handlePostUpdate}
+            onDelete={() => handlePostDelete(item.id)}
+          />
         </View>
       </View>
     );
@@ -1022,11 +1048,11 @@ const SocialFeed = () => {
               {searchQuery ? `No results for "${searchQuery}"` : 'Getting new posts to show'}
             </Text>
             {!searchQuery && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.createFirstPostButton}
                 onPress={() => navigation.navigate('CreatePost')}
               >
-                <Text style={styles.createFirstPostText}>Hi Welcome Again</Text>
+                <Text style={styles.createFirstPostText}>Share Something</Text>
               </TouchableOpacity>
             )}
           </>
@@ -1036,16 +1062,18 @@ const SocialFeed = () => {
   }, [loading, error, searchQuery, navigation, loadPosts]);
 
   const keyExtractor = useCallback(item => `post_${item.id}`, []);
-  const getItemLayout = useCallback((_, index) => ({
-    length: 400,
-    offset: 400 * index,
-    index,
-  }), []);
+
+  const renderFooter = useCallback(() =>
+    loadingMore
+      ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 16 }} />
+      : null
+  , [loadingMore]);
 
   return (
     <View style={styles.container}>
-      <SearchBaar 
-        onSearch={setSearchQuery} 
+      <StoriesBar navigation={navigation} />
+      <SearchBaar
+        onSearch={setSearchQuery}
         placeholder="Search posts, users, locations..."
       />
 
@@ -1071,18 +1099,20 @@ const SocialFeed = () => {
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        removeClippedSubviews
+        onEndReached={loadMorePosts}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={renderFooter}
         maxToRenderPerBatch={5}
         updateCellsBatchingPeriod={100}
-        initialNumToRender={3}
+        initialNumToRender={5}
         windowSize={10}
-        getItemLayout={getItemLayout}
       />
 
-      {loading && !refreshing && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#1DA1F2" />
-          <Text style={styles.loadingText}>Loading posts...</Text>
+      {loading && !refreshing && posts.length === 0 && (
+        <View style={styles.skeletonContainer}>
+          <PostSkeleton />
+          <PostSkeleton />
+          <PostSkeleton />
         </View>
       )}
     </View>
@@ -1307,6 +1337,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 12,
     padding: 5,
+  },
+  skeletonContainer: {
+    flex: 1,
+    paddingTop: 8,
   },
 });
 

@@ -1,261 +1,248 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  Alert,
-  Modal,
-  Image,
-  ActivityIndicator
+  View, Text, TouchableOpacity, StyleSheet, FlatList,
+  Modal, Image, ActivityIndicator, AppState, Pressable,
 } from 'react-native';
-import { MaterialIcons, Feather } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from '@react-navigation/native';
 import { fetchNotifications, markNotificationAsRead, checkAuthStatus } from '../services/api';
+import { addNotificationReceivedListener } from '../services/pushNotifications';
 import * as Notifications from 'expo-notifications';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import axios from 'axios';
 import { API_URL } from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+const POLL_INTERVAL_MS = 15000;
+
+const TYPE_ICON = {
+  like: { name: 'heart', color: '#E0245E' },
+  comment: { name: 'chatbubble', color: colors.primary },
+  follow: { name: 'person-add', color: '#17BF63' },
+  group_join_request: { name: 'people', color: colors.accent },
+};
+
+function timeAgo(dateStr) {
+  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
 
 const NotificationsBell = ({ navigation }) => {
-  const [notificationCount, setNotificationCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [notificationListener, setNotificationListener] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showPanel, setShowPanel] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [markingAll, setMarkingAll] = useState(false);
+  const appState = useRef(AppState.currentState);
+  const pollRef = useRef(null);
+  const pushListenerRef = useRef(null);
+  const isMounted = useRef(true);
 
-  useEffect(() => {
-    let isMounted = true;
-    let refreshInterval;
+  const loadNotifications = useCallback(async (silent = false) => {
+    try {
+      const isAuth = await checkAuthStatus();
+      if (!isAuth || !isMounted.current) return;
 
-    const setupNotifications = async () => {
-      try {
-        // Request notification permissions
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') {
-          console.log('Notification permission not granted');
-          return;
-        }
+      if (!silent) setLoading(true);
 
-        // Set up push notification listener
-        const listener = Notifications.addNotificationReceivedListener(handlePushNotification);
-        if (isMounted) setNotificationListener(listener);
+      const data = await fetchNotifications();
+      if (!isMounted.current) return;
 
-        // Initial load
-        await loadNotifications();
-
-        // Set up refresh interval (every 60 seconds)
-        refreshInterval = setInterval(async () => {
-          if (isMounted) await loadNotifications();
-        }, 60000);
-
-      } catch (err) {
-        console.error('Notification setup error:', err);
-        if (isMounted) setError('Failed to setup notifications');
-      }
-    };
-
-    setupNotifications();
-
-    return () => {
-      isMounted = false;
-      if (refreshInterval) clearInterval(refreshInterval);
-      if (notificationListener) {
-        notificationListener.remove();
-      }
-    };
+      setNotifications(data);
+      const count = data.filter(n => !n.read).length;
+      setUnreadCount(count);
+      await Notifications.setBadgeCountAsync(count);
+    } catch {
+      // Silently ignore — bell should never crash the header
+    } finally {
+      if (isMounted.current) setLoading(false);
+    }
   }, []);
 
-  const handlePushNotification = () => {
-    setNotificationCount(prev => prev + 1);
-    loadNotifications(); // Refresh notifications when new push arrives
-  };
+  const startPolling = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => loadNotifications(true), POLL_INTERVAL_MS);
+  }, [loadNotifications]);
 
-  const loadNotifications = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
 
-      // Check authentication first
-      const isAuthenticated = await checkAuthStatus();
-      if (!isAuthenticated) {
-        setNotifications([]);
-        setNotificationCount(0);
-        return;
+  // Initial load + polling lifecycle
+  useEffect(() => {
+    isMounted.current = true;
+    loadNotifications();
+    startPolling();
+
+    // Listen for push notifications received while app is open
+    pushListenerRef.current = addNotificationReceivedListener(() => {
+      loadNotifications(true);
+    });
+
+    // Pause polling when app goes background, resume when foregrounded
+    const sub = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active' && appState.current !== 'active') {
+        loadNotifications(true);
+        startPolling();
+      } else if (nextState !== 'active') {
+        stopPolling();
       }
+      appState.current = nextState;
+    });
 
-      // Fetch notifications
-      const data = await fetchNotifications();
+    return () => {
+      isMounted.current = false;
+      stopPolling();
+      sub.remove();
+      if (pushListenerRef.current) pushListenerRef.current.remove();
+    };
+  }, [loadNotifications, startPolling, stopPolling]);
 
-      // Enhance notifications with profile pictures
-      const notificationsWithProfiles = await Promise.all(
-        data.map(async (notification) => {
-          try {
-            const token = await AsyncStorage.getItem('accessToken');
-            if (!token) return notification;
-
-            const response = await axios.get(
-              `${API_URL}/profiles/by_user/${notification.sender.id}/`,
-              { 
-                headers: { Authorization: `Bearer ${token}` },
-                timeout: 10000
-              }
-            );
-            
-            return {
-              ...notification,
-              sender: {
-                ...notification.sender,
-                profile_picture: response.data?.picture || DEFAULT_PROFILE_IMAGE,
-              },
-            };
-          } catch (err) {
-            console.error('Profile fetch error:', err);
-            return {
-              ...notification,
-              sender: {
-                ...notification.sender,
-                profile_picture: DEFAULT_PROFILE_IMAGE,
-              },
-            };
-          }
-        })
-      );
-
-      // Update state
-      setNotifications(notificationsWithProfiles);
-      const unreadCount = notificationsWithProfiles.filter(n => !n.read).length;
-      setNotificationCount(unreadCount);
-      
-      // Update app badge count
-      await Notifications.setBadgeCountAsync(unreadCount);
-
-    } catch (error) {
-      console.error('Notification load error:', error);
-      if (error.message === 'Session expired - please login again') {
-        Alert.alert(
-          'Session Expired',
-          'Please login again',
-          [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
-        );
-      } else {
-        setError('Failed to load notifications');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleMarkAsRead = async (notificationId) => {
-    try {
-      await markNotificationAsRead(notificationId);
-      setNotifications(prev =>
-        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
-      );
-      setNotificationCount(prev => prev - 1);
-    } catch (error) {
-      console.error('Mark as read error:', error);
-      setError('Failed to mark notification as read');
-    }
-  };
-
-  const handleNotificationPress = (notification) => {
-    handleMarkAsRead(notification.id);
-    setShowNotifications(false);
-  
-    if (notification.comment) {
-      navigation.navigate('PostDetail', {
-        postId: notification.post.id,
-        highlightCommentId: notification.comment.id
-      });
-    } else if (notification.post) {
-      navigation.navigate('PostDetail', {
-        postId: notification.post.id
-      });
-    }
-  };
-
-  const renderNotificationItem = ({ item }) => (
-    <TouchableOpacity
-      style={[
-        styles.notificationItem,
-        !item.read && styles.unreadItem
-      ]}
-      onPress={() => handleNotificationPress(item)}
-    >
-      <Image
-        source={{ uri: item.sender.profile_picture || DEFAULT_PROFILE_IMAGE }}
-        style={styles.avatar}
-      />
-      <View style={styles.notificationContent}>
-        <Text style={styles.username}>{item.sender.username}</Text>
-        <Text style={styles.notificationText}>{item.message}</Text>
-        <Text style={styles.notificationTime}>
-          {new Date(item.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit'
-          })}
-        </Text>
-      </View>
-    </TouchableOpacity>
+  // Refresh immediately when user navigates back to a screen containing the bell
+  useFocusEffect(
+    useCallback(() => {
+      loadNotifications(true);
+    }, [loadNotifications])
   );
 
-  return (
-    <View style={styles.container}>
-      <TouchableOpacity
-        onPress={() => setShowNotifications(true)}
-        style={styles.bellContainer}
+  const handleMarkAsRead = useCallback(async (id) => {
+    try {
+      await markNotificationAsRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleMarkAllRead = useCallback(async () => {
+    const unread = notifications.filter(n => !n.read);
+    if (!unread.length) return;
+    setMarkingAll(true);
+    try {
+      await Promise.all(unread.map(n => markNotificationAsRead(n.id)));
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setUnreadCount(0);
+      await Notifications.setBadgeCountAsync(0);
+    } catch {
+      // ignore
+    } finally {
+      setMarkingAll(false);
+    }
+  }, [notifications]);
+
+  const handleNotificationPress = useCallback((item) => {
+    handleMarkAsRead(item.id);
+    setShowPanel(false);
+    if (item.post) {
+      navigation.navigate('PostDetail', {
+        postId: item.post.id,
+        ...(item.related_comment ? { highlightCommentId: item.related_comment } : {}),
+      });
+    }
+  }, [handleMarkAsRead, navigation]);
+
+  const renderItem = useCallback(({ item }) => {
+    const icon = TYPE_ICON[item.notification_type] ?? { name: 'notifications', color: colors.primary };
+    return (
+      <Pressable
+        style={[styles.item, !item.read && styles.itemUnread]}
+        onPress={() => handleNotificationPress(item)}
+        android_ripple={{ color: colors.border }}
       >
-        <MaterialIcons name="notifications" size={24} color="azure" />
-        {notificationCount > 0 && (
+        <View style={styles.avatarWrap}>
+          <Image
+            source={item.sender?.profile_picture
+              ? { uri: item.sender.profile_picture }
+              : DEFAULT_AVATAR}
+            defaultSource={DEFAULT_AVATAR}
+            style={styles.avatar}
+          />
+          <View style={[styles.typeIcon, { backgroundColor: icon.color }]}>
+            <Ionicons name={icon.name} size={10} color="#fff" />
+          </View>
+        </View>
+
+        <View style={styles.itemBody}>
+          <Text style={styles.itemMessage} numberOfLines={2}>{item.message}</Text>
+          <Text style={styles.itemTime}>{timeAgo(item.created_at)}</Text>
+        </View>
+
+        {!item.read && <View style={styles.unreadDot} />}
+      </Pressable>
+    );
+  }, [handleNotificationPress]);
+
+  return (
+    <View>
+      {/* Bell icon with badge */}
+      <TouchableOpacity
+        style={styles.bell}
+        onPress={() => { setShowPanel(true); loadNotifications(); }}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="notifications-outline" size={24} color="#fff" />
+        {unreadCount > 0 && (
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>{notificationCount}</Text>
+            <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
           </View>
         )}
       </TouchableOpacity>
 
+      {/* Notifications panel */}
       <Modal
-        visible={showNotifications}
+        visible={showPanel}
         animationType="slide"
-        onRequestClose={() => setShowNotifications(false)}
+        onRequestClose={() => setShowPanel(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>Notifications</Text>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setShowNotifications(false)}
-            >
-              <Feather name="x" size={24} color="#000" />
+        <LinearGradient colors={[colors.surface, colors.bg]} style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>Notifications</Text>
+          <View style={styles.headerActions}>
+            {unreadCount > 0 && (
+              <TouchableOpacity
+                style={styles.markAllBtn}
+                onPress={handleMarkAllRead}
+                disabled={markingAll}
+              >
+                {markingAll
+                  ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Text style={styles.markAllText}>Mark all read</Text>
+                }
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => setShowPanel(false)} style={styles.closeBtn}>
+              <Ionicons name="close" size={24} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
+        </LinearGradient>
 
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" />
-            </View>
-          ) : error ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-              <TouchableOpacity
-                style={styles.retryButton}
-                onPress={loadNotifications}
-              >
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </TouchableOpacity>
+        <View style={styles.modalBody}>
+          {loading && notifications.length === 0 ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color={colors.primary} />
             </View>
           ) : (
             <FlatList
               data={notifications}
               keyExtractor={item => item.id.toString()}
-              renderItem={renderNotificationItem}
+              renderItem={renderItem}
+              contentContainerStyle={notifications.length === 0 && styles.emptyContent}
+              showsVerticalScrollIndicator={false}
+              onRefresh={() => loadNotifications()}
+              refreshing={loading}
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
-                  <Text>No new notifications</Text>
+                  <MaterialIcons name="notifications-none" size={52} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>You're all caught up</Text>
+                  <Text style={styles.emptySubtext}>New notifications will appear here</Text>
                 </View>
               }
             />
@@ -267,93 +254,137 @@ const NotificationsBell = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
+  bell: {
     position: 'relative',
-  },
-  bellContainer: {
-    position: 'relative',
-    paddingHorizontal: 10,
+    paddingHorizontal: spacing.sm,
   },
   badge: {
     position: 'absolute',
-    top: -5,
+    top: -4,
     right: 2,
-    backgroundColor: 'red',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    backgroundColor: colors.error,
+    borderRadius: radius.full,
+    minWidth: 18,
+    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: colors.surface,
   },
   badgeText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '700',
   },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  header: {
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xl + spacing.sm,
+    paddingBottom: spacing.md,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+  modalTitle: {
+    ...typography.h2,
+    color: colors.textPrimary,
   },
-  closeButton: {
-    padding: 8,
-  },
-  notificationItem: {
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    gap: spacing.sm,
   },
-  unreadItem: {
-    backgroundColor: '#f8f9fa',
+  markAllBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
+  markAllText: {
+    color: colors.primary,
+    ...typography.label,
   },
-  notificationContent: {
+  closeBtn: {
+    padding: spacing.xs,
+  },
+  modalBody: {
     flex: 1,
+    backgroundColor: colors.bg,
   },
-  username: {
-    fontWeight: '600',
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 4,
-  },
-  notificationText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  notificationTime: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
-  loadingContainer: {
+  centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
+    gap: spacing.sm,
+  },
+  itemUnread: {
+    backgroundColor: colors.card,
+  },
+  avatarWrap: {
+    position: 'relative',
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  typeIcon: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.bg,
+  },
+  itemBody: {
+    flex: 1,
+  },
+  itemMessage: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 20,
+  },
+  itemTime: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 3,
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  emptyContent: {
+    flex: 1,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    paddingVertical: spacing.xxl * 2,
+    gap: spacing.sm,
+  },
+  emptyText: {
+    ...typography.h3,
+    color: colors.textSecondary,
+  },
+  emptySubtext: {
+    ...typography.body,
+    color: colors.textMuted,
+    textAlign: 'center',
   },
 });
 

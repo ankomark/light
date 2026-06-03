@@ -7,12 +7,11 @@ import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-import { API_URL } from '../services/api';
+import { API_URL, getAccessToken } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/50';
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 // Cloudinary URL transformation helper
 const getOptimizedUrl = (url, type = 'image') => {
@@ -49,12 +48,12 @@ const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
 
     const optimizedProfile = artistProfile?.picture 
         ? processProfilePicture(artistProfile.picture, 50)
-        : DEFAULT_PROFILE_IMAGE;
+        : null;
 
     useEffect(() => {
         const fetchArtistProfile = async () => {
             try {
-                const token = await AsyncStorage.getItem('accessToken');
+                const token = await getAccessToken();
                 if (!token) return;
                 
                 const response = await axios.get(
@@ -67,7 +66,7 @@ const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
                 if (error.response?.status !== 404) {
                     console.error('Error fetching artist profile:', error);
                 }
-                setArtistProfile({ picture: DEFAULT_PROFILE_IMAGE });
+                setArtistProfile({ picture: null });
             }
         };
 
@@ -101,7 +100,7 @@ const TrackItem = ({ track, currentUserId, onDelete, onRefresh }) => {
                     text: "Delete", 
                     onPress: async () => {
                         try {
-                            const token = await AsyncStorage.getItem('accessToken');
+                            const token = await getAccessToken();
                             await axios.delete(`${API_URL}/tracks/${track.id}/`, {
                                 headers: { Authorization: `Bearer ${token}` }
                             });
@@ -237,17 +236,11 @@ return (
             {/* Header Section */}
             <View style={styles.header}>
                 <View style={styles.artistContainer}>
-                     <Image 
-                        source={{ 
-                            uri: profileImageError ? DEFAULT_PROFILE_IMAGE : optimizedProfile,
-                            cache: 'force-cache'
-                        }} 
+                     <Image
+                        source={profileImageError || !optimizedProfile ? DEFAULT_AVATAR : { uri: optimizedProfile, cache: 'force-cache' }}
                         style={styles.artistImage}
-                        defaultSource={{ uri: DEFAULT_PROFILE_IMAGE }}
-                        onError={() => {
-                            console.log('Failed to load artist profile image');
-                            setProfileImageError(true);
-                        }}
+                        defaultSource={DEFAULT_AVATAR}
+                        onError={() => setProfileImageError(true)}
                     />
                     <Text style={styles.artistText}>{track.artist.username}</Text>
                 </View>

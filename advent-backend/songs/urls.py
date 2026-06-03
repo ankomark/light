@@ -16,6 +16,16 @@ from .views import (
     PostCommentViewSet,
     PostSaveViewSet, 
     NotificationViewSet,
+    DeviceTokenViewSet,
+    ConversationViewSet,
+    ExploreViewSet,
+    VerifyEmailView,
+    ResendVerificationView,
+    ForgotPasswordView,
+    ResetPasswordView,
+    CreatePaymentIntentView,
+    StoryViewSet,
+    ReportViewSet,
     ChurchViewSet, 
     VideoStudioViewSet,
     ChoirViewSet,
@@ -31,7 +41,8 @@ from .views import (
     LiveEventViewSet,
     AvatarUploadView,
     TrackUploadView,
-    SocialPostUploadView
+    SocialPostUploadView,
+    CloudinarySignView,
 
 
 
@@ -62,6 +73,11 @@ router.register(r'marketplace/cart', CartViewSet, basename='cart')
 router.register(r'marketplace/orders', OrderViewSet, basename='orders')
 router.register(r'marketplace/wishlist', WishlistViewSet, basename='wishlist')
 router.register(r'live-events', LiveEventViewSet, basename='live-events')
+router.register(r'device-tokens', DeviceTokenViewSet, basename='device-tokens')
+router.register(r'conversations', ConversationViewSet, basename='conversations')
+router.register(r'explore', ExploreViewSet, basename='explore')
+router.register(r'stories', StoryViewSet, basename='stories')
+router.register(r'reports', ReportViewSet, basename='reports')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
@@ -78,6 +94,13 @@ products_router = NestedSimpleRouter(router, r'marketplace/products', lookup='pr
 products_router.register(r'reviews', ProductReviewViewSet, basename='product-reviews')
 
 urlpatterns = [
+    path('upload/sign/', CloudinarySignView.as_view(), name='cloudinary-sign'),
+    path('auth/verify-email/', VerifyEmailView.as_view(), name='verify-email'),
+    path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
+    path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
+    path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
+    path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
+    path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),
     # Existing routes
     path('signup/', SignUpView.as_view(), name='signup'),
     path('tracks/<int:pk>/download/', TrackViewSet.as_view({'get': 'download'}), name='track-download'),

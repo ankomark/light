@@ -11,15 +11,13 @@ import {
   Image,
   Alert
 } from 'react-native';
-import { fetchComments, postComment } from '../services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchComments, postComment, getAccessToken, API_URL } from '../services/api';
 import axios from 'axios';
-import { API_URL } from '../services/api';
 import { useFocusEffect } from '@react-navigation/native';
 
 
 const { width, height } = Dimensions.get('window');
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/50';
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
     const flatListRef = useRef(null);
@@ -37,7 +35,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
             const commentsWithProfiles = await Promise.all(
                 data.map(async (comment) => {
                     try {
-                        const token = await AsyncStorage.getItem('accessToken');
+                        const token = await getAccessToken();
                         if (!token) return comment;
 
                         const response = await axios.get(
@@ -48,7 +46,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                             ...comment,
                             user: {
                                 ...comment.user,
-                                profile_picture: response.data?.picture || DEFAULT_PROFILE_IMAGE,
+                                profile_picture: response.data?.picture || null,
                             },
                         };
                     } catch (error) {
@@ -57,7 +55,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                             ...comment,
                             user: {
                                 ...comment.user,
-                                profile_picture: DEFAULT_PROFILE_IMAGE,
+                                profile_picture: null,
                             },
                         };
                     }
@@ -102,7 +100,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
 
     const fetchUserProfile = async () => {
         try {
-            const token = await AsyncStorage.getItem('accessToken');
+            const token = await getAccessToken();
             if (!token) return;
 
             const response = await axios.get(`${API_URL}/profiles/me/`, {
@@ -125,7 +123,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
         }
 
         try {
-            const token = await AsyncStorage.getItem('accessToken');
+            const token = await getAccessToken();
             if (!token) {
                 Alert.alert('Error', 'You need to be logged in to post a comment.');
                 return;
@@ -134,7 +132,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
             const postedComment = await postComment(trackId, newComment, token);
             postedComment.user = {
                 ...postedComment.user,
-                profile_picture: userProfile?.picture || DEFAULT_PROFILE_IMAGE,
+                profile_picture: userProfile?.picture || null,
             };
             setComments(prev => [...prev, postedComment]);
             setNewComment('');
@@ -191,7 +189,8 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                                     item.id === highlightedComment && styles.highlightedComment
                                 ]}>
                                     <Image
-                                        source={{ uri: item.user.profile_picture }}
+                                        source={item.user.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
+                                        defaultSource={DEFAULT_AVATAR}
                                         style={styles.userImage}
                                     />
                                     <View style={styles.commentContentContainer}>
@@ -211,7 +210,8 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                     
                     <View style={styles.commentInputSection}>
                         <Image
-                            source={{ uri: userProfile?.picture || DEFAULT_PROFILE_IMAGE }}
+                            source={userProfile?.picture ? { uri: userProfile.picture } : DEFAULT_AVATAR}
+                            defaultSource={DEFAULT_AVATAR}
                             style={styles.currentUserImage}
                         />
                         <TextInput

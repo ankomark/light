@@ -37,6 +37,9 @@ const GroupDetail = ({ route, navigation }) => {
   const [isAdmin, setIsAdmin] = useState(initialGroup?.is_admin || false);
   const [loading, setLoading] = useState(!initialGroup);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [postsPage, setPostsPage] = useState(1);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
   const [showMediaModal, setShowMediaModal] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showRequests, setShowRequests] = useState(false);
@@ -91,21 +94,42 @@ const GroupDetail = ({ route, navigation }) => {
     }
   };
 
-  // In loadPosts():
-const loadPosts = async () => {
-  try {
-    const postsData = await fetchGroupPosts(groupSlug);
-    setPosts(postsData.map(post => ({
-      ...post,
-      user: post.user || { username: 'Unknown' },
-      created_at: post.created_at || new Date().toISOString(),
-      attachments: post.attachments || []
-    })));
-  } catch (error) {
-    console.error('Failed to load posts:', error);
-    setPosts([]);
-  }
-};
+    const normPost = (post) => ({
+    ...post,
+    user: post.user || { username: 'Unknown' },
+    created_at: post.created_at || new Date().toISOString(),
+    attachments: post.attachments || [],
+  });
+
+  const loadPosts = async () => {
+    try {
+      const response = await fetchGroupPosts(groupSlug, 1);
+      const results = (response?.results ?? []).map(normPost);
+      setPosts(results);
+      setPostsPage(1);
+      setHasMorePosts(!!response?.next);
+    } catch (error) {
+      console.error('Failed to load posts:', error);
+      setPosts([]);
+    }
+  };
+
+  const loadMoreGroupPosts = async () => {
+    if (loadingMorePosts || !hasMorePosts) return;
+    setLoadingMorePosts(true);
+    try {
+      const nextPage = postsPage + 1;
+      const response = await fetchGroupPosts(groupSlug, nextPage);
+      const more = (response?.results ?? []).map(normPost);
+      setPosts(prev => [...prev, ...more]);
+      setPostsPage(nextPage);
+      setHasMorePosts(!!response?.next);
+    } catch {
+      // silent
+    } finally {
+      setLoadingMorePosts(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -137,24 +161,13 @@ const loadPosts = async () => {
 
   const handleJoinRequest = async () => {
     try {
-      const message = "Request to join group";
-      await requestJoinGroup(groupSlug, message);
-      
+      await requestJoinGroup(groupSlug, 'Request to join group');
+      // Poll for membership approval — cleared on unmount via useEffect cleanup
       const interval = setInterval(checkMembershipStatus, 10000);
       setMembershipCheckInterval(interval);
-      
-      setTimeout(() => {
-        clearInterval(interval);
-        setMembershipCheckInterval(null);
-      }, 300000);
-      
       return true;
     } catch (error) {
-      console.error('Failed to send join request:', error);
-      Alert.alert(
-        'Error',
-        error.error || error.message || 'Failed to send join request. Please try again.'
-      );
+      Alert.alert('Error', error.error || error.message || 'Failed to send join request.');
       throw error;
     }
   };
@@ -183,7 +196,6 @@ const loadPosts = async () => {
         attachments: newPost.attachments || []
       }, ...prevPosts];
       
-      console.log('Updated posts:', updatedPosts); // Debug log
       return updatedPosts;
     });
 
@@ -260,6 +272,13 @@ const loadPosts = async () => {
             }
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
+            onEndReached={loadMoreGroupPosts}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              loadingMorePosts
+                ? <ActivityIndicator size="small" color="#4F46E5" style={{ marginVertical: 12 }} />
+                : null
+            }
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}

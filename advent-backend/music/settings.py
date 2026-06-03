@@ -19,6 +19,20 @@ import cloudinary.api
 import dj_database_url
 from dotenv import load_dotenv
 load_dotenv()
+
+# ── Sentry (crash reporting) ──────────────────────────────────────────────────
+import sentry_sdk
+_SENTRY_DSN = os.getenv('SENTRY_DSN')
+if _SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        integrations=[
+            sentry_sdk.integrations.django.DjangoIntegration(transaction_style='url'),
+        ],
+        traces_sample_rate=0.1,
+        send_default_pii=False,
+        environment=os.getenv('DJANGO_ENV', 'production'),
+    )
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -187,6 +201,20 @@ STATIC_URL = 'static/'
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ── Email (set EMAIL_BACKEND=smtp in Railway to enable real sending) ──────────
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@adventlight.com')
+SITE_NAME = 'Advent Light'
+
+# ── Stripe (payment processing) ───────────────────────────────────────────────
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
+STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
 DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'

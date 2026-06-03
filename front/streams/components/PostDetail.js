@@ -16,7 +16,7 @@ import { API_URL } from '../services/api';
 import CommentAction from './CommentAction';
 import PostActions from '../components/PostActions';
 
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const getOptimizedUrl = (url, type = 'image') => {
   if (!url) return null;
@@ -35,7 +35,7 @@ const processPost = (post) => {
     thumbnailUrl: post.optimized_url || post.media_url,
     user: {
       ...post.user,
-      profile_picture: post.user?.profile_picture || DEFAULT_PROFILE_IMAGE
+      profile_picture: post.user?.profile_picture || null
     }
   };
 };
@@ -107,8 +107,8 @@ const PostDetail = ({ route, navigation }) => {
               await audioRef.current.stopAsync();
             }
           }, duration);
-        } catch (e) {
-          console.log('Audio play error:', e);
+        } catch {
+          // Audio failed — continue silently
         }
       }
     };
@@ -147,7 +147,6 @@ const PostDetail = ({ route, navigation }) => {
   };
 
   const handleMediaError = () => {
-    console.log('Media failed to load:', post.mediaUrl);
     setMediaError(true);
   };
 
@@ -180,15 +179,12 @@ const PostDetail = ({ route, navigation }) => {
           
           <View style={styles.userInfo}>
             <Image
-              source={{ uri: getOptimizedUrl(post.user.profile_picture, 'profile') }}
+              source={post.user.profile_picture ? { uri: getOptimizedUrl(post.user.profile_picture, 'profile') } : DEFAULT_AVATAR}
+              defaultSource={DEFAULT_AVATAR}
               style={styles.profileImage}
-              defaultSource={{ uri: DEFAULT_PROFILE_IMAGE }}
               onError={() => setPost(prev => ({
                 ...prev,
-                user: {
-                  ...prev.user,
-                  profile_picture: DEFAULT_PROFILE_IMAGE
-                }
+                user: { ...prev.user, profile_picture: null }
               }))}
             />
             <Text style={styles.username}>{post.user.username}</Text>

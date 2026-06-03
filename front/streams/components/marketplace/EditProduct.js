@@ -53,10 +53,7 @@ const EditProduct = () => {
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
-  if (!currentUser || !currentUser.id) {
-    console.log('Waiting for currentUser to be loaded...');
-    return;
-  }
+  if (!currentUser || !currentUser.id) return;
 
   const loadData = async () => {
     try {
@@ -67,22 +64,14 @@ const EditProduct = () => {
         fetchProductCategories()
       ]);
 
-      console.log('✅ Product data:', product);
-      console.log('✅ Current user:', currentUser);
+      if (!product) throw new Error('Product data is empty');
 
-      if (!product) {
-        throw new Error('Product data is empty');
-      }
-
-      // Extract seller ID from product
       const sellerId =
         product?.seller?.id ||
         product?.seller?.profile?.user_id ||
         product?.seller;
 
       const currentUserId = currentUser.id;
-
-      console.log('🔎 Seller ID:', sellerId, '| Current User ID:', currentUserId);
 
       if (!sellerId || sellerId !== currentUserId) {
         throw new Error(`You can only edit your own products. Seller ID: ${sellerId}, Your ID: ${currentUserId}`);

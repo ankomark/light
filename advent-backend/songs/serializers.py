@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import User
-from .models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
+from .models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
 import re
 from django.utils import timezone
 from datetime import timedelta
@@ -1293,6 +1293,70 @@ class SocialPostUploadSerializer(serializers.Serializer):
         required=True,
         help_text="Media file for post (image or video)"
     )
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    sender = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = Message
+        fields = ['id', 'sender', 'content', 'read', 'created_at']
+        read_only_fields = ['id', 'sender', 'read', 'created_at']
+
+
+class ConversationSerializer(serializers.ModelSerializer):
+    other_participant = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Conversation
+        fields = ['id', 'other_participant', 'last_message', 'unread_count', 'updated_at']
+
+    def get_other_participant(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        other = obj.participants.exclude(id=request.user.id).first()
+        return SimpleUserSerializer(other, context=self.context).data if other else None
+
+    def get_last_message(self, obj):
+        last = obj.messages.last()
+        return MessageSerializer(last).data if last else None
+
+    def get_unread_count(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return 0
+        return obj.messages.filter(read=False).exclude(sender=request.user).count()
+
+
+class StorySerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+    is_viewed = serializers.SerializerMethodField()
+    views_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Story
+        fields = ['id', 'user', 'media_url', 'media_file', 'content_type',
+                  'caption', 'created_at', 'expires_at', 'is_viewed', 'views_count']
+        read_only_fields = ['id', 'user', 'created_at', 'expires_at', 'is_viewed', 'views_count']
+
+    def get_is_viewed(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return False
+        return obj.views.filter(viewer=request.user).exists()
+
+    def get_views_count(self, obj):
+        return obj.views.count()
+
+
+class ReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Report
+        fields = ['id', 'content_type', 'object_id', 'reason', 'description', 'status', 'created_at']
+        read_only_fields = ['id', 'status', 'created_at']
 
 
 class CloudinaryURLValidator:

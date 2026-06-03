@@ -101,11 +101,10 @@
 
 // context/useAuth.js
 import { useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
-import { API_URL } from '../services/api';
-
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
+import { API_URL, storeTokens, clearTokens } from '../services/api';
+import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 
 export const useAuth = () => {
   const [currentUser, setCurrentUser] = useState(null);
@@ -113,19 +112,19 @@ export const useAuth = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   const processProfilePicture = (picture, size = 200) => {
-    if (!picture) return DEFAULT_PROFILE_IMAGE;
-    
+    if (!picture) return null;
+
     if (typeof picture === 'string') {
       if (picture.includes('cloudinary')) {
         return picture.replace('/upload/', `/upload/w_${size},h_${size},c_fill/`);
       }
-      return `https://res.cloudinary.com/YOUR_CLOUD_NAME/image/upload/w_${size},h_${size},c_fill/${picture}`;
+      return picture;
     }
-    
+
     if (picture?.secure_url) return picture.secure_url;
     if (picture?.url) return picture.url;
-    
-    return DEFAULT_PROFILE_IMAGE;
+
+    return null;
   };
 
   const fetchUserProfile = async (token) => {
@@ -148,8 +147,8 @@ export const useAuth = () => {
 
   const checkAuthStatus = async () => {
     try {
-      const accessToken = await AsyncStorage.getItem('accessToken');
-      const refreshToken = await AsyncStorage.getItem('refreshToken');
+      const accessToken = await SecureStore.getItemAsync('accessToken');
+      const refreshToken = await SecureStore.getItemAsync('refreshToken');
       
       if (!accessToken || !refreshToken) {
         setIsAuthenticated(false);
@@ -169,8 +168,8 @@ export const useAuth = () => {
             const response = await axios.post(`${API_URL}/auth/token/refresh/`, {
               refresh: refreshToken
             });
-            
-            await AsyncStorage.setItem('accessToken', response.data.access);
+
+            await storeTokens(response.data.access, refreshToken);
             const userData = await fetchUserProfile(response.data.access);
             setCurrentUser(userData);
             setIsAuthenticated(true);
@@ -191,7 +190,7 @@ export const useAuth = () => {
   };
 
   const clearAuthData = async () => {
-    await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+    await clearTokens();
     setCurrentUser(null);
     setIsAuthenticated(false);
   };
@@ -206,17 +205,16 @@ const login = async (username, password) => {
       throw new Error('Invalid response from server - missing tokens');
     }
 
-    // Store tokens securely
-    await AsyncStorage.multiSet([
-      ['accessToken', response.data.access],
-      ['refreshToken', response.data.refresh]
-    ]);
+    await storeTokens(response.data.access, response.data.refresh);
 
     // Fetch user profile
     const userData = await fetchUserProfile(response.data.access);
     setCurrentUser(userData);
     setIsAuthenticated(true);
-    
+
+    // Register push token in the background — don't block login
+    registerForPushNotifications().catch(() => {});
+
     return true; // Login success
   } catch (error) {
     console.error('Login failed:', error);
@@ -226,6 +224,7 @@ const login = async (username, password) => {
 };;
 
   const logout = async () => {
+    await unregisterPushToken().catch(() => {});
     await clearAuthData();
   };
 

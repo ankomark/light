@@ -16,11 +16,11 @@ import os
 # Custom User Model
 class User(AbstractUser):
     bio = models.TextField(blank=True)
-    # avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
     avatar = CloudinaryField('image', folder='avatars/', blank=True, null=True)
     followers = models.ManyToManyField(
         'self', symmetrical=False, related_name='followed_by', blank=True
     )
+    is_email_verified = models.BooleanField(default=False)
     # is_artist = models.BooleanField(default=False)
 
     groups = models.ManyToManyField(
@@ -38,6 +38,39 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.username
+
+
+class EmailVerification(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='verification_codes')
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def is_valid(self):
+        from django.utils import timezone
+        return not self.used and self.expires_at > timezone.now()
+
+    def __str__(self):
+        return f"{self.user.email} — {self.code}"
+
+
+class PasswordResetCode(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='password_reset_codes')
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def is_valid(self):
+        from django.utils import timezone
+        return not self.used and self.expires_at > timezone.now()
 
 
 # Track Model
@@ -173,6 +206,7 @@ class SocialPost(models.Model):
     )
     width = models.IntegerField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)
+    view_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -267,6 +301,76 @@ class PostSave(models.Model):
     class Meta:
         unique_together = ('post', 'user')
 
+class Story(models.Model):
+    CONTENT_TYPES = [('image', 'Image'), ('video', 'Video')]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='stories')
+    media_file = models.CharField(max_length=500, blank=True)  # Cloudinary public_id
+    media_url = models.URLField(max_length=1000, blank=True)
+    content_type = models.CharField(max_length=10, choices=CONTENT_TYPES, default='image')
+    caption = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name_plural = 'stories'
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            from datetime import timedelta
+            self.expires_at = timezone.now() + timedelta(hours=24)
+        super().save(*args, **kwargs)
+
+    def is_active(self):
+        return timezone.now() < self.expires_at
+
+    def __str__(self):
+        return f"{self.user.username}'s story ({self.created_at:%Y-%m-%d})"
+
+
+class StoryView(models.Model):
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='views')
+    viewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='story_views')
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('story', 'viewer')
+
+
+class Report(models.Model):
+    REASON_CHOICES = [
+        ('spam', 'Spam'),
+        ('hate', 'Hate Speech'),
+        ('violence', 'Violence or Threats'),
+        ('inappropriate', 'Inappropriate Content'),
+        ('misinformation', 'Misinformation'),
+        ('copyright', 'Copyright Violation'),
+        ('other', 'Other'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pending Review'),
+        ('reviewed', 'Under Review'),
+        ('resolved', 'Resolved'),
+        ('dismissed', 'Dismissed'),
+    ]
+
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports_filed')
+    content_type = models.CharField(max_length=20)
+    object_id = models.PositiveIntegerField()
+    reason = models.CharField(max_length=20, choices=REASON_CHOICES)
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('reporter', 'content_type', 'object_id')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Report by {self.reporter.username}: {self.content_type} #{self.object_id}"
+
+
 class Notification(models.Model):
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_notifications')
@@ -279,6 +383,49 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.sender.username} -> {self.recipient.username}: {self.message}"
+
+
+class Conversation(models.Model):
+    participants = models.ManyToManyField(User, related_name='conversations')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"Conversation {self.id}"
+
+
+class Message(models.Model):
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
+    content = models.TextField()
+    read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.sender.username}: {self.content[:50]}"
+
+
+class DeviceToken(models.Model):
+    PLATFORM_CHOICES = [('ios', 'iOS'), ('android', 'Android'), ('web', 'Web')]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='device_tokens')
+    token = models.CharField(max_length=500)
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES, default='android')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'token')
+
+    def __str__(self):
+        return f"{self.user.username} - {self.platform} - {self.token[:30]}..."
 
 
 class Church(models.Model):

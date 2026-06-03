@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, Alert } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import axios from 'axios';
-import { API_URL } from '../services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL, getAccessToken } from '../services/api';
+import ReportModal from './ReportModal';
 
 const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
   const [editedCaption, setEditedCaption] = useState(post.caption);
   const [loading, setLoading] = useState(false);
 
@@ -18,7 +19,7 @@ const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
 
     try {
       setLoading(true);
-      const token = await AsyncStorage.getItem('accessToken');
+      const token = await getAccessToken();
       const response = await axios.patch(
         `${API_URL}/social-posts/${post.id}/`,
         { caption: editedCaption },
@@ -49,7 +50,7 @@ const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
           onPress: async () => {
             try {
               setLoading(true);
-              const token = await AsyncStorage.getItem('accessToken');
+              const token = await getAccessToken();
               await axios.delete(`${API_URL}/social-posts/${post.id}/`, {
                 headers: { Authorization: `Bearer ${token}` }
               });
@@ -69,17 +70,32 @@ const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
     );
   };
 
-  if (!post.can_edit) return null;
-
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={() => setEditModalVisible(true)} style={styles.button}>
-        <MaterialIcons name="edit" size={24} color="#1DA1F2" />
-      </TouchableOpacity>
-      
-      <TouchableOpacity onPress={handleDeletePost} style={styles.button}>
-        <MaterialIcons name="delete" size={24} color="#ff4444" />
-      </TouchableOpacity>
+      {/* Report — always available for other people's posts */}
+      {!post.can_edit && (
+        <TouchableOpacity onPress={() => setReportVisible(true)} style={styles.button}>
+          <MaterialIcons name="flag" size={22} color="#FF9800" />
+        </TouchableOpacity>
+      )}
+
+      {post.can_edit && (
+        <>
+          <TouchableOpacity onPress={() => setEditModalVisible(true)} style={styles.button}>
+            <MaterialIcons name="edit" size={24} color="#1DA1F2" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDeletePost} style={styles.button}>
+            <MaterialIcons name="delete" size={24} color="#ff4444" />
+          </TouchableOpacity>
+        </>
+      )}
+
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        contentType="post"
+        objectId={post.id}
+      />
 
       {/* Edit Post Modal */}
       <Modal

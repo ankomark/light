@@ -57,3 +57,5 @@ Join our community of developers creating universal apps.
 # email = ankomark76@gmail.com
 # passward = mark3661.1
 # Project successfully linked (ID: ce25330b-30db-4e8c-b99b-c03d70772178) (modified app.json)
+
+#To activate: Add SENTRY_DSN to Railway env vars and EXPO_PUBLIC_SENTRY_DSN to EAS build config.

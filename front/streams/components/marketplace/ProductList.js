@@ -86,23 +86,42 @@ const ProductList = () => {
   const [products, setProducts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState(null);
+  const categoryParam = route.params?.categoryId ? { category: route.params.categoryId } : {};
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
     setError(null);
-
     try {
-      const params = route.params?.categoryId ? { category: route.params.categoryId } : {};
-      const data = await fetchProducts(params);
-      setProducts(data);
+      const data = await fetchProducts(1, categoryParam);
+      setProducts(data.results ?? []);
+      setPage(1);
+      setHasMore(!!data.next);
     } catch (err) {
-      console.error('ProductList loading error:', err);
       setError(err.message || 'Failed to load products');
     } finally {
       setLoading(false);
     }
   }, [route.params?.categoryId]);
+
+  const loadMoreProducts = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const data = await fetchProducts(nextPage, categoryParam);
+      setProducts(prev => [...prev, ...(data.results ?? [])]);
+      setPage(nextPage);
+      setHasMore(!!data.next);
+    } catch {
+      // silent — user can pull-to-refresh
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, page, route.params?.categoryId]);
 
   useEffect(() => {
     loadProducts();
@@ -164,8 +183,8 @@ const ProductList = () => {
           data={filteredProducts}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
-            <ProductCard 
-              product={item} 
+            <ProductCard
+              product={item}
               onPress={() => handleProductPress(item)}
               style={{ width: ITEM_WIDTH }}
             />
@@ -174,6 +193,13 @@ const ProductList = () => {
           columnWrapperStyle={styles.columnWrapper}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMoreProducts}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore
+              ? <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 12 }} />
+              : null
+          }
         />
       ) : (
         <EmptyState query={searchQuery} onClear={() => handleSearchChange('')} />

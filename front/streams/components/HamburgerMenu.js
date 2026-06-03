@@ -50,6 +50,8 @@ function HamburgerMenu() {
   };
 
   const menuItems = [
+    { name: 'Explore', icon: 'compass-outline', iconType: 'Ionicons', color: COLORS.secondary },
+    { name: 'Inbox', icon: 'chatbubbles-outline', iconType: 'Ionicons', color: COLORS.secondary },
     { name: 'Groups', icon: 'group', iconType: 'FontAwesome', color: COLORS.tertiary },
     { name: 'Churches', icon: 'church', iconType: 'MaterialCommunityIcons', color: COLORS.primary },
     { name: 'Choirs', icon: 'music-note', iconType: 'MaterialIcons', color: COLORS.accent },

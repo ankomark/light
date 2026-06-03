@@ -1,15 +1,14 @@
-import 'react-native-get-random-values'; 
+import 'react-native-get-random-values';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
-import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
 import { useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Added AsyncStorage
-import { API_URL } from '../services/api'; // Only import API_URL
+import { API_URL, getAccessToken } from '../services/api';
+import { uploadMedia } from '../services/cloudinary';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 const TrackUploadForm = () => {
   const navigation = useNavigation();
@@ -27,12 +26,6 @@ const TrackUploadForm = () => {
     image: ''
   });
 
-  // Cloudinary configuration
-  const CLOUD_NAME = 'dxdmo9j4v';
-  const AUDIO_UPLOAD_PRESET = 'audio_uploads';
-  const IMAGE_UPLOAD_PRESET = 'cover_images_preset';
-  const AUDIO_FOLDER = 'audio_uploads';
-  const IMAGE_FOLDER = 'cover_images';
   const MAX_AUDIO_SIZE_MB = 20;
   const MAX_IMAGE_SIZE_MB = 5;
 
@@ -106,7 +99,13 @@ const TrackUploadForm = () => {
         return;
       }
 
-      setTrackData({...trackData, coverImage: image});
+      // Compress cover image before upload
+      const compressed = await ImageManipulator.manipulateAsync(
+        image.uri,
+        [{ resize: { width: 800 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      setTrackData({...trackData, coverImage: { ...image, uri: compressed.uri }});
       setStatusMessages(prev => ({ 
         ...prev, 
         image: `Selected: ${image.fileName || 'cover'} (${fileSizeMB.toFixed(1)}MB)` 
@@ -146,36 +145,8 @@ const TrackUploadForm = () => {
     }
   };
 
-  const uploadToCloudinary = async (file, resourceType, folder) => {
-    const isAudio = resourceType === 'video';
-    const uploadPreset = isAudio ? AUDIO_UPLOAD_PRESET : IMAGE_UPLOAD_PRESET;
-
-    const formData = new FormData();
-    formData.append('file', {
-      uri: file.uri,
-      name: file.name || `${uuidv4()}.${isAudio ? 'mp3' : 'jpg'}`,
-      type: file.mimeType || (isAudio ? 'audio/mpeg' : 'image/jpeg')
-    });
-    formData.append('upload_preset', uploadPreset);
-    formData.append('folder', folder);
-    formData.append('cloud_name', CLOUD_NAME);
-
-    const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`,
-      {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Cloudinary upload failed: ${response.status}`);
-    }
-
-    return await response.json();
+  const uploadToCloudinary = async (file, type) => {
+    return uploadMedia(file, type);
   };
 
   const uploadTrack = async () => {
@@ -189,34 +160,25 @@ const TrackUploadForm = () => {
     try {
       // Upload audio to Cloudinary
       setStatusMessages(prev => ({ ...prev, audio: 'Uploading audio...' }));
-      const audioResponse = await uploadToCloudinary(
-        trackData.audioFile, 
-        'video', 
-        AUDIO_FOLDER
-      );
+      const audioResponse = await uploadToCloudinary(trackData.audioFile, 'audio');
 
       // Upload cover image if exists
       let coverResponse = null;
       if (trackData.coverImage) {
         setStatusMessages(prev => ({ ...prev, image: 'Uploading cover...' }));
-        coverResponse = await uploadToCloudinary(
-          trackData.coverImage, 
-          'image', 
-          IMAGE_FOLDER
-        );
+        coverResponse = await uploadToCloudinary(trackData.coverImage, 'cover');
       }
 
       // Prepare data for backend
       const trackPayload = {
         title: trackData.title,
-        audio_file: audioResponse.public_id,
-        cover_image: coverResponse?.public_id || null,
+        audio_file: audioResponse.publicId,
+        cover_image: coverResponse?.publicId || null,
         album: trackData.album || null,
         lyrics: trackData.lyrics || null
       };
 
-      // FIXED: Get token directly from AsyncStorage
-      const token = await AsyncStorage.getItem('accessToken');
+      const token = await getAccessToken().catch(() => null);
       if (!token) {
         throw new Error('Authentication token not found. Please log in again.');
       }

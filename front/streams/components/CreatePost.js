@@ -1,21 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import config from '../config';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  Image, 
-  TextInput, 
-  StyleSheet, 
-  ScrollView,
-  Alert,
-  Modal,  
-  Slider   
+import {
+  View, Text, TouchableOpacity, Image, TextInput, StyleSheet,
+  ScrollView, Alert, Modal, Slider
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { createSocialPost, fetchTracks } from '../services/api';
+import { uploadMedia } from '../services/cloudinary';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
 
 const CreatePost = ({ navigation }) => {
@@ -62,8 +55,6 @@ const CreatePost = ({ navigation }) => {
     });
     
       if (!result.canceled && result.assets.length > 0) {
-        console.log('PICKED MEDIA OBJECT →', result.assets[0]);
-        
         // Validate the selected media
         const selectedMedia = result.assets[0];
         
@@ -81,7 +72,17 @@ const CreatePost = ({ navigation }) => {
           return;
         }
         
-        setMedia(selectedMedia);
+        // Compress images before upload (expo-image-manipulator)
+        if (contentType === 'image') {
+          const compressed = await ImageManipulator.manipulateAsync(
+            selectedMedia.uri,
+            [{ resize: { width: 1080 } }],
+            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          setMedia({ ...selectedMedia, uri: compressed.uri });
+        } else {
+          setMedia(selectedMedia);
+        }
       }
     } catch (error) {
       console.error('Media picker error:', error);
@@ -218,45 +219,23 @@ const CreatePost = ({ navigation }) => {
 };
 
 const uploadToCloudinary = async (mediaFile, type) => {
-  const formData = new FormData();
-  
-  // Prepare file object
-  const file = {
-    uri: mediaFile.uri,
-    name: mediaFile.fileName || `post_${Date.now()}.${type === 'video' ? 'mp4' : 'jpg'}`,
-    type: mediaFile.mimeType || (type === 'video' ? 'video/mp4' : 'image/jpeg')
-  };
-
-  formData.append('file', file);
-  formData.append('upload_preset', config.cloudinary.presets.socialImages);
-  formData.append('folder', 'social_media');
-
-  // Determine endpoint
-  const endpoint = type === 'video' ? 'video/upload' : 'image/upload';
-  
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${config.cloudinary.cloudName}/${endpoint}`,
+  const uploadType = type === 'video' ? 'social-video' : 'social-image';
+  const result = await uploadMedia(
     {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    }
+      uri: mediaFile.uri,
+      name: mediaFile.fileName ?? `post_${Date.now()}.${type === 'video' ? 'mp4' : 'jpg'}`,
+      mimeType: mediaFile.mimeType ?? (type === 'video' ? 'video/mp4' : 'image/jpeg'),
+    },
+    uploadType
   );
-
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error?.message || 'Cloudinary upload failed');
-  }
-
-  const result = await response.json();
-  
-  // Log original and processed public_id for debugging
-  console.log('Original public_id:', result.public_id);
-  console.log('Processed public_id:', result.public_id.split('/').pop());
-  
-  return result;
+  // Normalise to the shape the rest of CreatePost expects
+  return {
+    public_id: result.publicId,
+    secure_url: result.url,
+    width: result.width,
+    height: result.height,
+    duration: result.duration,
+  };
 };
 
   return (

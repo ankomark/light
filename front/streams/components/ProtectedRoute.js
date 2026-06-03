@@ -1,13 +1,13 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAccessToken } from '../services/api';
 
 const ProtectedRoute = ({ children }) => {
   const navigation = useNavigation();
 
   const checkAuthentication = async () => {
-    const token = await AsyncStorage.getItem('accessToken');
+    const token = await getAccessToken().catch(() => null);
     if (!token) {
       navigation.navigate('Login'); // Redirect to Login if not authenticated
     }

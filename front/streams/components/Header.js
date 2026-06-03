@@ -52,6 +52,10 @@ const Header = () => {
                     <TouchableOpacity onPress={() => navigation.navigate('Music')}>
                         <MaterialIcons name="music-note" size={24} color="white" />
                     </TouchableOpacity>
+
+                    <TouchableOpacity onPress={() => navigation.navigate('Explore')}>
+                        <Ionicons name="search-outline" size={24} color="white" />
+                    </TouchableOpacity>
                     
                     <TouchableOpacity onPress={() => navigation.navigate('bible')}>
                         <Ionicons name="book-outline" size={24} color="white" />
@@ -76,8 +80,8 @@ const Header = () => {
                                 <Image
                                     source={{ uri: currentUser?.profile_picture }}
                                     style={styles.profilePicture}
-                                    defaultSource={{ uri: 'https://via.placeholder.com/150' }}
-                                    onError={() => console.log("Error loading profile image")}
+                                    defaultSource={require('../assets/avatar-placeholder.jpg')}
+                                    onError={() => {}}
                                 />
                             </TouchableOpacity>
                         </>

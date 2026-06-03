@@ -1,0 +1,229 @@
+import React, { useState, useRef, useCallback } from 'react';
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
+  Alert,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { apiRequest } from '../services/api';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+
+const CODE_LENGTH = 6;
+
+const verifyEmail = (code) => apiRequest('post', '/auth/verify-email/', { code });
+const resendCode = () => apiRequest('post', '/auth/resend-verification/');
+
+const EmailVerificationScreen = () => {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const email = route.params?.email ?? '';
+
+  const [code, setCode] = useState(['', '', '', '', '', '']);
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const inputs = useRef([]);
+  const cooldownRef = useRef(null);
+
+  const startCooldown = useCallback(() => {
+    setResendCooldown(60);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown(prev => {
+        if (prev <= 1) { clearInterval(cooldownRef.current); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  const handleCodeChange = (text, index) => {
+    const digit = text.replace(/\D/g, '').slice(-1);
+    const next = [...code];
+    next[index] = digit;
+    setCode(next);
+    if (digit && index < CODE_LENGTH - 1) {
+      inputs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleKeyPress = (e, index) => {
+    if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0) {
+      inputs.current[index - 1]?.focus();
+      const next = [...code];
+      next[index - 1] = '';
+      setCode(next);
+    }
+  };
+
+  const handleVerify = async () => {
+    const fullCode = code.join('');
+    if (fullCode.length < CODE_LENGTH) {
+      Alert.alert('Incomplete', 'Please enter all 6 digits.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await verifyEmail(fullCode);
+      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+    } catch (err) {
+      const msg = err.response?.data?.error ?? 'Invalid or expired code. Please try again.';
+      Alert.alert('Verification Failed', msg);
+      setCode(['', '', '', '', '', '']);
+      inputs.current[0]?.focus();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (resendCooldown > 0 || resending) return;
+    setResending(true);
+    try {
+      await resendCode();
+      Alert.alert('Sent!', 'A new code has been sent to your email.');
+      startCooldown();
+    } catch {
+      Alert.alert('Error', 'Could not resend code. Please try again.');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+        </TouchableOpacity>
+
+        <View style={styles.iconWrap}>
+          <Ionicons name="mail-open-outline" size={56} color={colors.primary} />
+        </View>
+
+        <Text style={styles.title}>Check your email</Text>
+        <Text style={styles.subtitle}>
+          We sent a 6-digit code to{'\n'}
+          <Text style={styles.email}>{email || 'your email address'}</Text>
+        </Text>
+
+        {/* OTP input boxes */}
+        <View style={styles.codeRow}>
+          {code.map((digit, i) => (
+            <TextInput
+              key={i}
+              ref={r => (inputs.current[i] = r)}
+              style={[styles.codeBox, digit && styles.codeBoxFilled]}
+              value={digit}
+              onChangeText={t => handleCodeChange(t, i)}
+              onKeyPress={e => handleKeyPress(e, i)}
+              keyboardType="number-pad"
+              maxLength={1}
+              selectTextOnFocus
+              caretHidden
+            />
+          ))}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
+          onPress={handleVerify}
+          disabled={loading}
+          activeOpacity={0.8}
+        >
+          {loading
+            ? <ActivityIndicator color={colors.white} />
+            : <Text style={styles.buttonText}>Verify Email</Text>
+          }
+        </TouchableOpacity>
+
+        <View style={styles.resendRow}>
+          <Text style={styles.resendLabel}>Didn't get the code?  </Text>
+          <TouchableOpacity onPress={handleResend} disabled={resendCooldown > 0 || resending}>
+            {resending
+              ? <ActivityIndicator size="small" color={colors.primary} />
+              : <Text style={[styles.resendLink, resendCooldown > 0 && styles.resendDisabled]}>
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend'}
+                </Text>
+            }
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          style={styles.skipBtn}
+          onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+        >
+          <Text style={styles.skipText}>Skip for now</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};
+
+const styles = StyleSheet.create({
+  flex: { flex: 1, backgroundColor: colors.bg },
+  container: {
+    flexGrow: 1,
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
+    backgroundColor: colors.bg,
+  },
+  backBtn: { alignSelf: 'flex-start', marginBottom: spacing.xl },
+  iconWrap: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: colors.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+    ...shadows.md,
+  },
+  title: { ...typography.h1, color: colors.textPrimary, textAlign: 'center', marginBottom: spacing.sm },
+  subtitle: { ...typography.body, color: colors.textSecondary, textAlign: 'center', lineHeight: 24 },
+  email: { color: colors.primary, fontWeight: '600' },
+  codeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginVertical: spacing.xl,
+  },
+  codeBox: {
+    width: 46,
+    height: 56,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    textAlign: 'center',
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  codeBoxFilled: { borderColor: colors.primary },
+  button: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    height: 52,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...shadows.md,
+  },
+  buttonDisabled: { opacity: 0.6 },
+  buttonText: { ...typography.button, color: colors.white },
+  resendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  resendLabel: { ...typography.body, color: colors.textSecondary },
+  resendLink: { ...typography.body, color: colors.primary, fontWeight: '600' },
+  resendDisabled: { color: colors.textMuted },
+  skipBtn: { marginTop: spacing.xl },
+  skipText: { ...typography.label, color: colors.textMuted },
+});
+
+export default EmailVerificationScreen;

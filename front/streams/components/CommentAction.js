@@ -11,11 +11,9 @@ import {
   Alert
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { commentOnPost, fetchSocialPostComments } from '../services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../services/api';
+import { commentOnPost, fetchSocialPostComments, getAccessToken, API_URL } from '../services/api';
 
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded }) => {
   const [comments, setComments] = useState([]);
@@ -60,7 +58,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
 
   const fetchUserProfile = async () => {
     try {
-      const token = await AsyncStorage.getItem('accessToken');
+      const token = await getAccessToken();
       if (!token) return;
 
       const response = await fetch(`${API_URL}/profiles/me/`, {
@@ -149,7 +147,8 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
               renderItem={({ item }) => (
                 <View style={styles.commentItem}>
                   <Image
-                    source={{ uri: item.user.profile_picture || DEFAULT_PROFILE_IMAGE }}
+                    source={item.user.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
+                    defaultSource={DEFAULT_AVATAR}
                     style={styles.avatar}
                   />
                   <View style={styles.commentContent}>
@@ -169,7 +168,8 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
 
           <View style={styles.inputContainer}>
             <Image
-              source={{ uri: userProfile?.picture || DEFAULT_PROFILE_IMAGE }}
+              source={userProfile?.picture ? { uri: userProfile.picture } : DEFAULT_AVATAR}
+              defaultSource={DEFAULT_AVATAR}
               style={styles.userAvatar}
             />
             <TextInput

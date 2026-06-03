@@ -21,6 +21,9 @@ const TrackList = () => {
   const [tracks, setTracks] = useState([]);
   const [filteredTracks, setFilteredTracks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
@@ -40,34 +43,47 @@ const TrackList = () => {
     return url;
   }, []);
 
+  const processTrack = useCallback((track) => ({
+    ...track,
+    cover_image: getOptimizedMediaUrl(track.cover_image, 'image'),
+    audio_file: getOptimizedMediaUrl(track.audio_file, 'audio'),
+  }), [getOptimizedMediaUrl]);
+
   const loadTracks = useCallback(async () => {
     try {
       setRefreshing(true);
-      const data = await fetchTracks();
-      
-      // Process tracks with optimized media URLs
-      const processedTracks = data.map(track => ({
-        ...track,
-        cover_image: getOptimizedMediaUrl(track.cover_image, 'image'),
-        audio_file: getOptimizedMediaUrl(track.audio_file, 'audio')
-      }));
-
-      // Sort by creation date (newest first)
-      const sortedTracks = [...processedTracks].sort((a, b) => 
-        new Date(b.created_at) - new Date(a.created_at)
-      );
-      
-      setTracks(sortedTracks);
-      setFilteredTracks(sortedTracks);
       setError(null);
+      const response = await fetchTracks(1);
+      const results = (response?.results ?? []).map(processTrack);
+      setTracks(results);
+      setFilteredTracks(results);
+      setPage(1);
+      setHasMore(!!response?.next);
     } catch (err) {
-      console.error('Failed to load tracks:', err);
-      setError(err.response?.data?.message || err.message || "Failed to load tracks");
+      setError(err.response?.data?.message || err.message || 'Failed to load tracks');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [getOptimizedMediaUrl]);
+  }, [processTrack]);
+
+  const loadMoreTracks = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const response = await fetchTracks(nextPage);
+      const more = (response?.results ?? []).map(processTrack);
+      setTracks(prev => [...prev, ...more]);
+      setFilteredTracks(prev => [...prev, ...more]);
+      setPage(nextPage);
+      setHasMore(!!response?.next);
+    } catch {
+      // silent
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, page, processTrack]);
 
   // Load data on focus and initial mount
   useFocusEffect(
@@ -135,7 +151,7 @@ const TrackList = () => {
         data={filteredTracks}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
-          <TrackItem 
+          <TrackItem
             track={item}
             onDelete={(deletedId) => {
               setTracks(prev => prev.filter(t => t.id !== deletedId));
@@ -152,6 +168,13 @@ const TrackList = () => {
             colors={['#1DB954']}
             tintColor="#1DB954"
           />
+        }
+        onEndReached={loadMoreTracks}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          loadingMore
+            ? <ActivityIndicator size="small" color="#1DB954" style={{ marginVertical: 12 }} />
+            : null
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>

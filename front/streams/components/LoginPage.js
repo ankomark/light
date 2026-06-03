@@ -1,133 +1,202 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../services/api';
+import { API_URL, storeTokens } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const LoginPage = () => {
-    const [formData, setFormData] = useState({ username: '', password: '' });
-    const [error, setError] = useState('');
-    const navigation = useNavigation();
-    const { login } = useAuth();
+  const [formData, setFormData] = useState({ username: '', password: '' });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const navigation = useNavigation();
+  const { login } = useAuth();
 
-    const handleChange = (name, value) => {
-        setFormData({ ...formData, [name]: value });
-    };
+  const handleChange = (name, value) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (error) setError('');
+  };
 
-    const handleSubmit = async () => {
-        try {
-            // 1. Login to get tokens
-            const response = await axios.post(`${API_URL}/auth/token/`, formData);
-            const { access, refresh } = response.data;
-            
-            // 2. Save tokens
-            await AsyncStorage.setItem('accessToken', access);
-            await AsyncStorage.setItem('refreshToken', refresh);
-            
-            // 3. Check profile status
-            try {
-                const profileRes = await axios.get(`${API_URL}/profiles/me/`, {
-                    headers: { Authorization: `Bearer ${access}` }
-                });
-                
-                // 4. Navigate based on profile existence
-                navigation.navigate(profileRes.data ? 'Home' : 'CreateProfile');
-                
-            } catch (profileError) {
-                // Handle 404 (profile doesn't exist)
-                if (profileError.response?.status === 404) {
-                    navigation.navigate('CreateProfile');
-                } else {
-                    // Handle other errors
-                    console.error('Profile check error:', profileError);
-                    setError('Error checking profile status');
-                    Alert.alert('Error', 'Failed to check profile status');
-                }
-            }
-            
-        } catch (error) {
-            setError('Invalid username or password');
-            Alert.alert('Login Failed', 'Invalid username or password');
-        }
-    };
+  const handleSubmit = async () => {
+    if (!formData.username.trim() || !formData.password) {
+      setError('Please fill in all fields');
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/auth/token/`, formData);
+      const { access, refresh } = response.data;
+      await storeTokens(access, refresh);
+      try {
+        const profileRes = await axios.get(`${API_URL}/profiles/me/`, {
+          headers: { Authorization: `Bearer ${access}` },
+        });
+        navigation.navigate(profileRes.data ? 'Home' : 'CreateProfile');
+      } catch (profileError) {
+        navigation.navigate(profileError.response?.status === 404 ? 'CreateProfile' : 'Home');
+      }
+    } catch {
+      setError('Invalid username or password');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return (
-        <View style={styles.container}>
-            <Text style={styles.title}>Log In</Text>
-            <View style={styles.form}>
-                <TextInput
-                    style={styles.input}
-                    placeholder="Username"
-                    autoCompleteType="username"
-                    value={formData.username}
-                    onChangeText={(text) => handleChange('username', text)}
-                    required
-                />
-                <TextInput
-                    style={styles.input}
-                    placeholder="Password"
-                    autoCompleteType="password"
-                    secureTextEntry={true}
-                    value={formData.password}
-                    onChangeText={(text) => handleChange('password', text)}
-                    required
-                />
-                <TouchableOpacity style={styles.button} onPress={handleSubmit}>
-                    <Text style={styles.buttonText}>Log In</Text>
-                </TouchableOpacity>
-            </View>
-            {error && <Text style={styles.error}>{error}</Text>}
+  return (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+
+        <Text style={styles.title}>Welcome Back</Text>
+        <Text style={styles.subtitle}>Sign in to your Advent Light account</Text>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Username</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="person-outline" size={18} color={colors.placeholder} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Enter your username"
+              placeholderTextColor={colors.placeholder}
+              value={formData.username}
+              onChangeText={v => handleChange('username', v)}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
         </View>
-    );
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Password</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="lock-closed-outline" size={18} color={colors.placeholder} style={styles.inputIcon} />
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Enter your password"
+              placeholderTextColor={colors.placeholder}
+              value={formData.password}
+              onChangeText={v => handleChange('password', v)}
+              secureTextEntry={!showPassword}
+            />
+            <TouchableOpacity onPress={() => setShowPassword(p => !p)} style={styles.eyeBtn}>
+              <Ionicons
+                name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                size={20}
+                color={colors.placeholder}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
+          onPress={handleSubmit}
+          disabled={loading}
+          activeOpacity={0.8}
+        >
+          {loading
+            ? <ActivityIndicator color={colors.white} />
+            : <Text style={styles.buttonText}>Log In</Text>
+          }
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.signupRow} onPress={() => navigation.navigate('SignUp')}>
+          <Text style={styles.signupText}>Don't have an account? </Text>
+          <Text style={styles.signupLink}>Sign Up</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
 };
 
 const styles = StyleSheet.create({
+  flex: { flex: 1, backgroundColor: colors.bg },
   container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
+    flexGrow: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xxl,
+    backgroundColor: colors.bg,
+  },
+  logo: {
+    width: 120,
+    height: 60,
+    alignSelf: 'center',
+    marginBottom: spacing.md,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
+    ...typography.h1,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
   },
-  form: {
-    width: '100%',
+  subtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.xl,
   },
-  input: {
-    height: 50,
-    borderColor: '#ccc',
+  inputGroup: { marginBottom: spacing.md },
+  label: {
+    ...typography.label,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.inputBg,
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    backgroundColor: '#fff',
-    marginBottom: 15,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+  },
+  inputIcon: { marginRight: spacing.xs },
+  input: {
+    flex: 1,
+    height: 50,
+    color: colors.textPrimary,
     fontSize: 16,
+  },
+  eyeBtn: { padding: spacing.xs },
+  error: {
+    color: colors.error,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
   button: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    paddingVertical: 15,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    height: 52,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: spacing.sm,
+    ...shadows.md,
   },
+  buttonDisabled: { opacity: 0.6 },
   buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...typography.button,
+    color: colors.white,
   },
-  error: {
-    color: 'red',
-    fontSize: 14,
-    marginBottom: 10,
-    textAlign: 'center',
+  signupRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: spacing.lg,
   },
+  signupText: { color: colors.textSecondary, fontSize: 15 },
+  signupLink: { color: colors.primary, fontSize: 15, fontWeight: '600' },
 });
 
 export default LoginPage;

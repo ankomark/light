@@ -16,6 +16,8 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404 
 from rest_framework.pagination import PageNumberPagination
+import time as time_module
+from cloudinary.utils import api_sign_request as cloudinary_sign_request
 from django.db import transaction
 from django.contrib.auth.decorators import login_required
 from rest_framework.exceptions import PermissionDenied
@@ -26,7 +28,8 @@ from django.views.decorators.cache import cache_control
 from cloudinary.uploader import upload
 from cloudinary.uploader import destroy 
 from cloudinary.exceptions import Error as CloudinaryError
-from .models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
+from .models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
+from .push import notify_user
 from .serializers import (
     UserSerializer,
     TrackSerializer,
@@ -60,7 +63,12 @@ from .serializers import (
     LiveEventSerializer,
     AvatarUploadSerializer,
     TrackUploadSerializer,
-    SocialPostUploadSerializer
+    SocialPostUploadSerializer,
+    ConversationSerializer,
+    MessageSerializer,
+    StorySerializer,
+    ReportSerializer,
+    SimpleUserSerializer,
 )
 import logging
 import time
@@ -70,6 +78,50 @@ from django.db.models import Count
 from datetime import timedelta
 logger = logging.getLogger(__name__)
 
+
+
+class StandardPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+    def get_paginated_response(self, data):
+        return Response({
+            'count': self.page.paginator.count,
+            'next': self.get_next_link(),
+            'previous': self.get_previous_link(),
+            'results': data,
+        })
+
+
+class CloudinarySignView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    FOLDER_MAP = {
+        'audio': 'audio_uploads',
+        'image': 'social_media/images',
+        'video': 'social_media/videos',
+        'profile': 'profile_images',
+        'cover': 'cover_images',
+        'avatar': 'avatars',
+    }
+
+    def post(self, request):
+        upload_type = request.data.get('type', 'image')
+        folder = self.FOLDER_MAP.get(upload_type, 'uploads')
+        timestamp = int(time_module.time())
+        params_to_sign = {'timestamp': timestamp, 'folder': folder}
+        api_secret = cloudinary.config().api_secret
+        if not api_secret:
+            return Response({'error': 'Cloudinary not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        signature = cloudinary_sign_request(params_to_sign, api_secret)
+        return Response({
+            'signature': signature,
+            'timestamp': timestamp,
+            'api_key': cloudinary.config().api_key,
+            'cloud_name': cloudinary.config().cloud_name,
+            'folder': folder,
+        })
 
 
 class AvatarUploadView(APIView):
@@ -166,19 +218,145 @@ class TrackUploadView(APIView):
                 )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+def _send_verification_email(user):
+    """Generate a 6-digit code and email it to the user. Returns the code."""
+    import random
+    from django.core.mail import send_mail
+    from django.utils import timezone
+    from datetime import timedelta
+
+    code = f"{random.randint(0, 999999):06d}"
+    expires_at = timezone.now() + timedelta(minutes=15)
+    EmailVerification.objects.create(user=user, code=code, expires_at=expires_at)
+
+    send_mail(
+        subject=f"{settings.SITE_NAME} — Verify your email",
+        message=(
+            f"Hi {user.username},\n\n"
+            f"Your verification code is: {code}\n\n"
+            f"This code expires in 15 minutes.\n\n"
+            f"If you didn't create an account, you can ignore this email.\n\n"
+            f"— {settings.SITE_NAME} Team"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=True,
+    )
+    return code
+
+
 class SignUpView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        print("Request data received:", request.data)  # Debug log
-
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
-            return Response({"message": "User registered successfully"}, status=status.HTTP_201_CREATED)
-        
-        print("Serializer errors:", serializer.errors)  # Debug log
+            user = serializer.save()
+            _send_verification_email(user)
+            return Response(
+                {"message": "Account created. Please check your email to verify."},
+                status=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        code = request.data.get('code', '').strip()
+        if not code:
+            return Response({'error': 'Code is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        verification = EmailVerification.objects.filter(
+            user=request.user, code=code, used=False
+        ).first()
+
+        if not verification or not verification.is_valid():
+            return Response({'error': 'Invalid or expired code'}, status=status.HTTP_400_BAD_REQUEST)
+
+        verification.used = True
+        verification.save()
+        request.user.is_email_verified = True
+        request.user.save(update_fields=['is_email_verified'])
+        return Response({'message': 'Email verified successfully'})
+
+
+class ResendVerificationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.is_email_verified:
+            return Response({'message': 'Email already verified'})
+        _send_verification_email(request.user)
+        return Response({'message': 'Verification code sent'})
+
+
+class ForgotPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        import random
+        from django.core.mail import send_mail
+        from datetime import timedelta
+
+        email = request.data.get('email', '').strip()
+        if not email:
+            return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            # Return success even for unknown emails (prevents email enumeration)
+            return Response({'message': 'If that email exists, a reset code has been sent.'})
+
+        code = f"{random.randint(0, 999999):06d}"
+        expires_at = timezone.now() + timedelta(minutes=15)
+        PasswordResetCode.objects.create(user=user, code=code, expires_at=expires_at)
+
+        send_mail(
+            subject=f"{settings.SITE_NAME} — Password Reset Code",
+            message=(
+                f"Hi {user.username},\n\n"
+                f"Your password reset code is: {code}\n\n"
+                f"This code expires in 15 minutes.\n\n"
+                f"If you didn't request this, you can ignore this email.\n\n"
+                f"— {settings.SITE_NAME} Team"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+        return Response({'message': 'If that email exists, a reset code has been sent.'})
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip()
+        code = request.data.get('code', '').strip()
+        new_password = request.data.get('new_password', '')
+
+        if not all([email, code, new_password]):
+            return Response({'error': 'email, code, and new_password are required'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(new_password) < 8:
+            return Response({'error': 'Password must be at least 8 characters'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response({'error': 'Invalid code'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reset = PasswordResetCode.objects.filter(user=user, code=code, used=False).first()
+        if not reset or not reset.is_valid():
+            return Response({'error': 'Invalid or expired code'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reset.used = True
+        reset.save()
+        user.set_password(new_password)
+        user.save()
+        return Response({'message': 'Password reset successfully. Please log in with your new password.'})
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -246,12 +424,14 @@ class UserViewSet(viewsets.ModelViewSet):
         else:
             user_to_follow.followers.add(current_user)
             action = 'followed'
+            msg = f"{current_user.username} started following you"
             Notification.objects.create(
                 recipient=user_to_follow,
                 sender=current_user,
-                message=f"{current_user.username} started following you",
+                message=msg,
                 notification_type='follow'
             )
+            notify_user(user_to_follow, 'follow', msg)
 
         # Return updated counts
         return Response({
@@ -317,6 +497,7 @@ class TrackViewSet(viewsets.ModelViewSet):
     queryset = Track.objects.all().order_by('-created_at')
     serializer_class = TrackSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
 
 
     def update(self, request, *args, **kwargs):
@@ -391,14 +572,15 @@ class TrackViewSet(viewsets.ModelViewSet):
             })
         Like.objects.create(user=user, track=track)
         likes_count = track.likes.count()
-        # Create notification
+        msg = f"{user.username} liked your track {track.title}"
         Notification.objects.create(
             recipient=track.artist,
             sender=user,
-            message=f"{user.username} liked your track {track.title}",
+            message=msg,
             notification_type='like',
             track=track
         )
+        notify_user(track.artist, 'like', msg)
         return Response({
             "status": "Track liked",
             "likes_count": likes_count,
@@ -489,16 +671,23 @@ class ProfileViewSet(viewsets.ModelViewSet):
     def create_profile(self, request):
         if hasattr(request.user, 'profile'):
             return Response({'detail': 'Profile already exists for this user.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Pass the request to the serializer context
         serializer = ProfileSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            print("Serializer data is valid:", serializer.validated_data)  # Debug log
-            serializer.save()  # Save will now correctly handle user
-            print("Profile created successfully")  # Debug log
+            serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        print("Serializer errors:", serializer.errors)  # Debug log
+    @action(detail=False, methods=['patch'], permission_classes=[permissions.IsAuthenticated])
+    def update_me(self, request):
+        """Update current user's own profile."""
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({'detail': 'Profile not found. Create one first.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = ProfileSerializer(profile, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -598,13 +787,15 @@ class CommentViewSet(viewsets.ModelViewSet):
         comment = serializer.save(user=self.request.user, track=track)  # <-- This line was missing
 
         if comment.user != track.artist:
+            msg = f"{self.request.user.username} commented on your track {track.title}"
             Notification.objects.create(
                 recipient=track.artist,
                 sender=self.request.user,
-                message=f"{self.request.user.username} commented on your track {track.title}",
+                message=msg,
                 notification_type='comment',
                 track=track
             )
+            notify_user(track.artist, 'comment', msg)
 class LikeViewSet(viewsets.ModelViewSet):
     queryset = Like.objects.all()
     serializer_class = LikeSerializer
@@ -630,6 +821,7 @@ class FavoriteTracksView(APIView):
         return Response(serializer.data, status=200)
 
 class SocialPostViewSet(viewsets.ModelViewSet):
+    pagination_class = StandardPagination
     queryset = SocialPost.objects.select_related(
         'user', 
         # 'user__avatar',  
@@ -694,11 +886,32 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             })
     
     def get_queryset(self):
-        return SocialPost.objects.annotate(
-            # Add annotations for counts to reduce queries
+        qs = SocialPost.objects.annotate(
             likes_count=Count('likes', distinct=True),
             comments_count=Count('comments', distinct=True)
         ).select_related('user', 'song').order_by('-created_at')
+        tag = self.request.query_params.get('tag')
+        if tag:
+            qs = qs.filter(tags__icontains=tag)
+        return qs
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def viewed(self, request, pk=None):
+        """Increment view count — idempotent, fire-and-forget."""
+        SocialPost.objects.filter(pk=pk).update(view_count=models.F('view_count') + 1)
+        return Response({'status': 'ok'})
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def insights(self, request, pk=None):
+        post = self.get_object()
+        if post.user != request.user:
+            return Response({'error': 'Insights only available for your own posts'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({
+            'likes': post.likes.count(),
+            'comments': post.comments.count(),
+            'saves': post.saves.count(),
+            'views': post.view_count,
+        })
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -793,13 +1006,15 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             
             # Create notification only when liking (not unliking)
             if user != post.user:  # Don't notify self
+                msg = f"{user.username} liked your post"
                 Notification.objects.create(
                     recipient=post.user,
                     sender=user,
-                    message=f"{user.username} liked your post",
+                    message=msg,
                     notification_type='like',
                     post=post
                 )
+                notify_user(post.user, 'like', msg)
         
         # Get updated like count
         likes_count = PostLike.objects.filter(post=post).count()
@@ -820,14 +1035,16 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             
             # Create notification if commenter is not the post owner
             if request.user != post.user:
+                msg = f"{request.user.username} commented on your post"
                 Notification.objects.create(
                     recipient=post.user,
                     sender=request.user,
-                    message=f"{request.user.username} commented on your post",
+                    message=msg,
                     notification_type='comment',
                     post=post
                 )
-            
+                notify_user(post.user, 'comment', msg)
+
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -956,13 +1173,15 @@ class PostCommentViewSet(viewsets.ModelViewSet):
         comment = serializer.save(user=self.request.user, post=post)
         # Create notification only if comment author is not the post owner
         if comment.user != post.user:
+            msg = f"{self.request.user.username} commented on your post"
             Notification.objects.create(
                 recipient=post.user,
                 sender=self.request.user,
-                message=f"{self.request.user.username} commented on your post",
+                message=msg,
                 notification_type='comment',
                 post=post
             )
+            notify_user(post.user, 'comment', msg)
 
 
 class PostSaveViewSet(viewsets.ModelViewSet):
@@ -972,6 +1191,332 @@ class PostSaveViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return self.queryset.filter(user=self.request.user)
+
+class StoryViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = StorySerializer
+    http_method_names = ['get', 'post', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        return Story.objects.filter(
+            expires_at__gt=timezone.now()
+        ).select_related('user__profile').prefetch_related('views')
+
+    def perform_create(self, serializer):
+        serializer.save(
+            user=self.request.user,
+            expires_at=timezone.now() + timedelta(hours=24),
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        story = self.get_object()
+        if story.user != request.user:
+            return Response({'error': 'Not your story'}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=['get'])
+    def feed(self, request):
+        """Stories from followed users, grouped by user. Own stories first."""
+        following_ids = list(request.user.followed_by.values_list('id', flat=True))
+        following_ids.append(request.user.id)
+
+        stories = Story.objects.filter(
+            user_id__in=following_ids,
+            expires_at__gt=timezone.now(),
+        ).select_related('user__profile').prefetch_related('views').order_by('user_id', '-created_at')
+
+        # Group by user
+        grouped = {}
+        for story in stories:
+            uid = story.user_id
+            if uid not in grouped:
+                grouped[uid] = {'user': story.user, 'stories': [], 'has_unviewed': False}
+            grouped[uid]['stories'].append(story)
+            if not story.views.filter(viewer=request.user).exists():
+                grouped[uid]['has_unviewed'] = True
+
+        # Own stories first, then following
+        result = []
+        own = grouped.pop(request.user.id, None)
+        if own:
+            result.append(own)
+        result.extend(grouped.values())
+
+        output = [
+            {
+                'user': SimpleUserSerializer(g['user'], context={'request': request}).data,
+                'stories': StorySerializer(g['stories'], many=True, context={'request': request}).data,
+                'has_unviewed': g['has_unviewed'],
+            }
+            for g in result
+        ]
+        return Response(output)
+
+    @action(detail=True, methods=['post'])
+    def view_story(self, request, pk=None):
+        story = self.get_object()
+        StoryView.objects.get_or_create(story=story, viewer=request.user)
+        return Response({'status': 'viewed'})
+
+
+class ReportViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request):
+        content_type = request.data.get('content_type', '').lower()
+        object_id = request.data.get('object_id')
+        reason = request.data.get('reason', '')
+        description = request.data.get('description', '')
+
+        valid_types = {'post', 'user', 'track', 'comment', 'group'}
+        if content_type not in valid_types:
+            return Response({'error': f'content_type must be one of {list(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)
+        if not object_id:
+            return Response({'error': 'object_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not reason:
+            return Response({'error': 'reason is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        _, created = Report.objects.get_or_create(
+            reporter=request.user,
+            content_type=content_type,
+            object_id=object_id,
+            defaults={'reason': reason, 'description': description},
+        )
+        if not created:
+            return Response({'message': 'Already reported'})
+        return Response({'message': 'Content reported successfully'}, status=status.HTTP_201_CREATED)
+
+
+class CreatePaymentIntentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        import stripe
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        if not stripe.api_key:
+            return Response(
+                {'error': 'Payment processing is not configured'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        order_id = request.data.get('order_id')
+        if not order_id:
+            return Response({'error': 'order_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            order = Order.objects.get(id=order_id, user=request.user)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Convert to smallest currency unit (cents for USD/EUR, etc.)
+        amount_cents = int(float(order.total_amount) * 100)
+        currency = request.data.get('currency', 'usd').lower()
+
+        intent = stripe.PaymentIntent.create(
+            amount=amount_cents,
+            currency=currency,
+            metadata={
+                'order_id': str(order.id),
+                'user_id': str(request.user.id),
+            },
+        )
+        return Response({
+            'client_secret': intent.client_secret,
+            'publishable_key': settings.STRIPE_PUBLISHABLE_KEY,
+            'amount': float(order.total_amount),
+            'currency': currency,
+        })
+
+
+class ExploreViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def trending_posts(self, request):
+        week_ago = timezone.now() - timedelta(days=7)
+        posts = SocialPost.objects.annotate(
+            engagement=Count('likes', distinct=True) + Count('comments', distinct=True)
+        ).filter(
+            created_at__gte=week_ago
+        ).select_related('user').order_by('-engagement')[:30]
+        serializer = SocialPostSerializer(posts, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def suggested_users(self, request):
+        following_ids = list(request.user.followed_by.values_list('id', flat=True))
+        users = User.objects.exclude(
+            id=request.user.id
+        ).exclude(
+            id__in=following_ids
+        ).annotate(
+            followers_count=Count('followers', distinct=True)
+        ).select_related('profile').order_by('-followers_count')[:12]
+        serializer = SimpleUserSerializer(users, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def trending_hashtags(self, request):
+        """Return the most-used hashtags in the last 7 days."""
+        week_ago = timezone.now() - timedelta(days=7)
+        posts_with_tags = SocialPost.objects.filter(
+            created_at__gte=week_ago, tags__gt=''
+        ).values_list('tags', flat=True)
+
+        counts = {}
+        for tag_str in posts_with_tags:
+            for tag in tag_str.split():
+                tag = tag.strip().lower()
+                if tag:
+                    counts[tag] = counts.get(tag, 0) + 1
+
+        top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:20]
+        return Response([{'tag': t, 'count': c} for t, c in top])
+
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        query = request.query_params.get('q', '').strip()
+        if len(query) < 2:
+            return Response({'users': [], 'posts': [], 'tracks': [], 'groups': []})
+        users = User.objects.filter(
+            Q(username__icontains=query) | Q(profile__bio__icontains=query)
+        ).select_related('profile').distinct()[:10]
+        posts = SocialPost.objects.filter(
+            Q(caption__icontains=query) | Q(location__icontains=query)
+        ).select_related('user').order_by('-created_at')[:20]
+        tracks = Track.objects.filter(
+            Q(title__icontains=query) | Q(album__icontains=query)
+        ).select_related('artist').order_by('-created_at')[:10]
+        groups = Group.objects.filter(
+            Q(name__icontains=query) | Q(description__icontains=query)
+        ).order_by('-created_at')[:10]
+        return Response({
+            'users': SimpleUserSerializer(users, many=True, context={'request': request}).data,
+            'posts': SocialPostSerializer(posts, many=True, context={'request': request}).data,
+            'tracks': TrackSerializer(tracks, many=True, context={'request': request}).data,
+            'groups': GroupSerializer(groups, many=True, context={'request': request}).data,
+        })
+
+
+class ConversationViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ConversationSerializer
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    def get_queryset(self):
+        return Conversation.objects.filter(
+            participants=self.request.user
+        ).prefetch_related(
+            'participants__profile',
+            'messages__sender__profile',
+        )
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx['request'] = self.request
+        return ctx
+
+    def create(self, request):
+        """Get or create a 1-to-1 conversation with another user."""
+        other_id = request.data.get('user_id')
+        if not other_id:
+            return Response({'error': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            other_user = User.objects.get(id=other_id)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        if other_user == request.user:
+            return Response({'error': 'Cannot message yourself'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Find existing conversation between exactly these two users
+        conversation = (
+            Conversation.objects
+            .filter(participants=request.user)
+            .filter(participants=other_user)
+            .first()
+        )
+        if not conversation:
+            conversation = Conversation.objects.create()
+            conversation.participants.add(request.user, other_user)
+
+        serializer = self.get_serializer(conversation)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def messages(self, request, pk=None):
+        conversation = self.get_object()
+        if not conversation.participants.filter(id=request.user.id).exists():
+            return Response({'error': 'Not a participant'}, status=status.HTTP_403_FORBIDDEN)
+        msgs = conversation.messages.select_related('sender__profile').all()
+        return Response(MessageSerializer(msgs, many=True).data)
+
+    @action(detail=True, methods=['post'])
+    def send_message(self, request, pk=None):
+        conversation = self.get_object()
+        if not conversation.participants.filter(id=request.user.id).exists():
+            return Response({'error': 'Not a participant'}, status=status.HTTP_403_FORBIDDEN)
+        content = request.data.get('content', '').strip()
+        if not content:
+            return Response({'error': 'Message cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
+
+        message = Message.objects.create(
+            conversation=conversation,
+            sender=request.user,
+            content=content,
+        )
+        # Touch conversation so ordering by updated_at works
+        Conversation.objects.filter(pk=conversation.pk).update(updated_at=message.created_at)
+
+        # Push notification to the other participant
+        other = conversation.participants.exclude(id=request.user.id).first()
+        if other:
+            notify_user(
+                other,
+                'message',
+                f"{request.user.username}: {content[:80]}",
+                data={'conversationId': conversation.id},
+            )
+
+        return Response(MessageSerializer(message).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        conversation = self.get_object()
+        conversation.messages.filter(read=False).exclude(sender=request.user).update(read=True)
+        return Response({'status': 'ok'})
+
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        count = Message.objects.filter(
+            conversation__participants=request.user,
+            read=False,
+        ).exclude(sender=request.user).count()
+        return Response({'unread_count': count})
+
+
+class DeviceTokenViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['post'])
+    def register(self, request):
+        token = request.data.get('token', '').strip()
+        platform = request.data.get('platform', 'android')
+        if not token:
+            return Response({'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
+        DeviceToken.objects.update_or_create(
+            user=request.user,
+            token=token,
+            defaults={'platform': platform, 'is_active': True},
+        )
+        return Response({'status': 'registered'})
+
+    @action(detail=False, methods=['post'])
+    def unregister(self, request):
+        token = request.data.get('token', '').strip()
+        if token:
+            DeviceToken.objects.filter(user=request.user, token=token).update(is_active=False)
+        return Response({'status': 'unregistered'})
+
 
 class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
@@ -1325,14 +1870,15 @@ class GroupViewSet(viewsets.ModelViewSet):
         
         # Notify group admins
         admins = GroupMember.objects.filter(group=group, is_admin=True)
+        msg = f"{request.user.username} requested to join {group.name}"
         for admin in admins:
             Notification.objects.create(
                 recipient=admin.user,
                 sender=request.user,
-                message=f"{request.user.username} requested to join {group.name}",
+                message=msg,
                 notification_type='group_join_request',
-                # group=group
             )
+            notify_user(admin.user, 'group_join_request', msg)
         
         serializer = GroupJoinRequestSerializer(join_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1409,6 +1955,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     queryset = GroupPost.objects.all()
     serializer_class = GroupPostSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
     parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
@@ -1526,6 +2073,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all().order_by('-created_at')
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = StandardPagination
     lookup_field = 'slug'
 
     def get_queryset(self):
