@@ -784,8 +784,16 @@ class Order(models.Model):
         ('REFUNDED', 'Refunded'),
     ]
     
+    PAYMENT_STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('PAID', 'Paid'),
+        ('FAILED', 'Failed'),
+    ]
+
     buyer = models.ForeignKey('User', on_delete=models.CASCADE, related_name='purchases')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    # Authoritative payment state — only ever set to PAID by the Stripe webhook.
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='PENDING')
     shipping_address = models.TextField(blank=True)
     payment_method = models.CharField(max_length=50, blank=True)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)

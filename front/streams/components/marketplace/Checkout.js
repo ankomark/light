@@ -70,9 +70,9 @@ const StripeCheckout = ({ order, onSuccess }) => {
           Alert.alert('Payment Failed', error.message);
         }
       } else {
-        // Payment succeeded — update order on backend
-        await apiRequest('patch', `/marketplace/orders/${order.id}/update-status/`, {
-          status: 'confirmed',
+        // Payment succeeded on the client. Persist the shipping address; the
+        // order's paid/processing state is set server-side by the Stripe webhook.
+        await apiRequest('post', `/marketplace/orders/${order.id}/set-shipping/`, {
           shipping_address: shippingAddress,
         });
         onSuccess(order.id);

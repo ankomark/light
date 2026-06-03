@@ -43,6 +43,7 @@ from .views import (
     TrackUploadView,
     SocialPostUploadView,
     CloudinarySignView,
+    StripeWebhookView,
 
 
 
@@ -101,6 +102,7 @@ urlpatterns = [
     path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
     path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
     path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),
+    path('marketplace/stripe-webhook/', StripeWebhookView.as_view(), name='stripe-webhook'),
     # Existing routes
     path('signup/', SignUpView.as_view(), name='signup'),
     path('tracks/<int:pk>/download/', TrackViewSet.as_view({'get': 'download'}), name='track-download'),

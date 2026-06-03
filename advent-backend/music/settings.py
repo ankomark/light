@@ -215,6 +215,8 @@ SITE_NAME = 'Advent Light'
 # ── Stripe (payment processing) ───────────────────────────────────────────────
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
+# Set from the Stripe dashboard webhook endpoint signing secret (whsec_...).
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
 DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
