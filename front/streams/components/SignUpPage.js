@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../services/api';
+import { API_URL, API_BASE } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const SignUpPage = () => {
@@ -31,7 +31,18 @@ const SignUpPage = () => {
       await axios.post(`${API_URL}/auth/signup/`, formData);
       navigation.navigate('EmailVerification', { email: formData.email });
     } catch (err) {
-      setError(err.response?.data?.message || err.response?.data?.username?.[0] || 'Error signing up. Please try again.');
+      console.log('[signup] POST', `${API_URL}/auth/signup/`, '->', err.message, err.response?.status, err.response?.data);
+      const data = err.response?.data;
+      let msg;
+      if (err.response) {
+        // Server responded — surface the real validation/server message.
+        msg = data?.message || data?.username?.[0] || data?.email?.[0]
+          || data?.password?.[0] || data?.detail || `Server error (${err.response.status})`;
+      } else {
+        // No response — couldn't reach the backend at all.
+        msg = `Can't reach the server at ${API_BASE}. Is the backend running and on the same network?`;
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }

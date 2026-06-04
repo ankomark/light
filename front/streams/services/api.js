@@ -12,13 +12,20 @@ const PROD_API_BASE = 'https://web-production-f266.up.railway.app';
 const resolveApiBase = () => {
   if (process.env.EXPO_PUBLIC_API_BASE) return process.env.EXPO_PUBLIC_API_BASE;
   if (__DEV__) {
-    const host = (Constants.expoConfig?.hostUri || '').split(':')[0];
+    const hostUri =
+      Constants.expoConfig?.hostUri ||
+      Constants.expoGoConfig?.debuggerHost ||
+      Constants.manifest2?.extra?.expoGo?.debuggerHost ||
+      Constants.manifest?.debuggerHost ||
+      '';
+    const host = hostUri.split(':')[0];
     if (host) return `http://${host}:8000`;
   }
   return PROD_API_BASE;
 };
 
 export const API_BASE = resolveApiBase();
+if (__DEV__) console.log('[api] Using API_BASE =', API_BASE);
 axios.defaults.timeout = 30000;
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 export const API_URL = `${API_BASE}/api`;
