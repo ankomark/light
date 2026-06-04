@@ -401,6 +401,27 @@ class ResetPasswordView(APIView):
         return Response({'message': 'Password reset successfully. Please log in with your new password.'})
 
 
+class LogoutView(APIView):
+    """Revoke a refresh token by blacklisting it. AllowAny: possession of a
+    valid refresh token is sufficient (and the auth header is stripped for
+    /auth/ routes client-side anyway)."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from rest_framework_simplejwt.exceptions import TokenError
+
+        refresh = request.data.get('refresh')
+        if not refresh:
+            return Response({'error': 'refresh token is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            RefreshToken(refresh).blacklist()
+        except TokenError:
+            # Already expired/blacklisted/invalid — the goal (revoked) holds.
+            pass
+        return Response({'message': 'Logged out'}, status=status.HTTP_205_RESET_CONTENT)
+
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
@@ -929,6 +950,13 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         tag = self.request.query_params.get('tag')
         if tag:
             qs = qs.filter(tags__icontains=tag)
+        # Personalised home feed: posts from people you follow (+ your own).
+        # Falls back to the global feed when you don't follow anyone yet, so
+        # new users never see an empty timeline.
+        if self.request.query_params.get('feed') == 'following' and self.request.user.is_authenticated:
+            followed_ids = list(self.request.user.followed_by.values_list('id', flat=True))
+            if followed_ids:
+                qs = qs.filter(Q(user_id__in=followed_ids) | Q(user=self.request.user))
         return qs
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])

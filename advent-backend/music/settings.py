@@ -90,6 +90,7 @@ INSTALLED_APPS = [
     'django_extensions',
     'songs',
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'rest_framework.authtoken',
     'cloudinary',

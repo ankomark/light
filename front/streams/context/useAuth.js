@@ -225,6 +225,11 @@ const login = async (username, password) => {
 
   const logout = async () => {
     await unregisterPushToken().catch(() => {});
+    // Revoke the refresh token server-side (best-effort) before clearing.
+    const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
+    if (refresh) {
+      await axios.post(`${API_URL}/auth/logout/`, { refresh }).catch(() => {});
+    }
     await clearAuthData();
   };
 

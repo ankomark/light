@@ -764,7 +764,7 @@ const SocialFeed = () => {
       isRefresh ? setRefreshing(true) : setLoading(true);
       setError(null);
 
-      const response = await fetchSocialPosts(1);
+      const response = await fetchSocialPosts(1, 'following');
       const raw = response?.results ?? [];
       const valid = raw.filter(p => p.user && typeof p.user === 'object');
       const processed = valid.map(p => processPost(p, followStates));
@@ -795,7 +795,7 @@ const SocialFeed = () => {
     setLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const response = await fetchSocialPosts(nextPage);
+      const response = await fetchSocialPosts(nextPage, 'following');
       const raw = response?.results ?? [];
       const processed = raw
         .filter(p => p.user && typeof p.user === 'object')
