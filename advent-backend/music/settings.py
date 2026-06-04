@@ -183,14 +183,21 @@ SIMPLE_JWT = {
 }
 
 DATABASE_URL = os.getenv('DATABASE_URL')
+# Set DB_USE_PGBOUNCER=True when DATABASE_URL points at a transaction-mode
+# pooler (Supabase pooler on port 6543, or PgBouncer). In that mode Django must
+# NOT hold persistent connections or use server-side cursors, since the pooler
+# multiplexes a connection per transaction across many clients.
+USE_PGBOUNCER = os.getenv('DB_USE_PGBOUNCER', '') == 'True'
 if DATABASE_URL:
     DATABASES = {
         'default': dj_database_url.config(
             default=DATABASE_URL,
-            conn_max_age=600,
+            conn_max_age=0 if USE_PGBOUNCER else int(os.getenv('DB_CONN_MAX_AGE', '600')),
             ssl_require=True,  # Essential for Supabase
         )
     }
+    if USE_PGBOUNCER:
+        DATABASES['default']['DISABLE_SERVER_SIDE_CURSORS'] = True
 else:
     # Local dev fallback when DATABASE_URL isn't set — use a local SQLite file
     # so `runserver`/`migrate`/admin work without the production database.
