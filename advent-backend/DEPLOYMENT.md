@@ -27,7 +27,7 @@ Pin Python to **3.12** (Django 5.2 does not support 3.14).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DJANGO_DEBUG` | `False` | Set `True` for local dev (also enables the throwaway dev secret key). **Never `True` in production.** |
+| `DJANGO_DEBUG` | `True` locally (no `DATABASE_URL`), else `False` | Auto-on for local dev, off in production. Override explicitly with `True`/`False`. **Never `True` in production** (set `DJANGO_DEBUG=False` there if you want it explicit). |
 | `LOG_LEVEL` | `INFO` | Root log level (stdout). |
 | `DB_USE_PGBOUNCER` | `False` | Set `True` when `DATABASE_URL` points at a transaction-mode pooler (see below). |
 | `DB_CONN_MAX_AGE` | `600` | Persistent-connection lifetime (seconds) when not pooling. |
@@ -102,11 +102,13 @@ Deletes expired stories and their Cloudinary assets. Use `--dry-run` to preview.
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-# In advent-backend/.env add at least:  DJANGO_DEBUG=True
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py runserver
 ```
+
+With no `DATABASE_URL` set, the app runs in DEBUG mode against a local SQLite
+file and uses a throwaway dev secret key — no extra env setup needed.
 
 Run the test suite (no external services needed — SQLite + eager tasks):
 

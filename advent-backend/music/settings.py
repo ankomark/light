@@ -40,7 +40,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DJANGO_DEBUG', '') == 'True'
+# Defaults: ON for local dev (no DATABASE_URL), OFF in production (DATABASE_URL
+# is always set there). Override explicitly with DJANGO_DEBUG=True/False.
+DEBUG = os.getenv('DJANGO_DEBUG', 'False' if os.getenv('DATABASE_URL') else 'True') == 'True'
 
 # SECURITY: the secret key comes from the environment. A throwaway dev key is
 # allowed only when DEBUG is on; production (DEBUG off) must set DJANGO_SECRET_KEY.
