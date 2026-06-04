@@ -22,7 +22,7 @@ const TrackList = () => {
   const [filteredTracks, setFilteredTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -188,7 +188,7 @@ const TrackList = () => {
       
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => navigation.navigate('UploadTrack', { onUploadSuccess: handleNewTrack })}
+        onPress={() => navigation.navigate('UploadTrack')}
       >
         <MaterialIcons name="add" size={28} color="white" />
       </TouchableOpacity>

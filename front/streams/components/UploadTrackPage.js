@@ -5,6 +5,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
+import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL, getAccessToken } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
