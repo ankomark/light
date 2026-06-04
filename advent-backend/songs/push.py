@@ -68,11 +68,19 @@ def send_expo_push(tokens, title, body, data=None):
 
 
 def notify_user(recipient, notification_type, message, data=None):
-    """Send a push notification to all active devices of a recipient user."""
+    """Send a push notification to all active devices of a recipient user.
+
+    The token lookup is cheap and stays synchronous; the network round-trip to
+    Expo is offloaded to a background thread so it never blocks the request.
+    """
     from .models import DeviceToken
+    from .tasks import run_in_background
+
     tokens = list(
         DeviceToken.objects.filter(user=recipient, is_active=True)
         .values_list("token", flat=True)
     )
+    if not tokens:
+        return
     title = NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Advent Light")
-    send_expo_push(tokens, title, message, data)
+    run_in_background(send_expo_push, tokens, title, message, data)

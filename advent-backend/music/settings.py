@@ -118,6 +118,23 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.MultiPartParser',
         'rest_framework.parsers.FormParser',
     ),
+    # Rate limiting. Global anon/user rates are a generous backstop against
+    # abuse; the tight 'auth'/'password_reset'/'email_verify' scopes guard the
+    # brute-forceable credential endpoints. NOTE: counts live in the default
+    # (local-memory) cache, so they are per-process — add a shared cache
+    # (Redis/Memcached) for cluster-wide enforcement.
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '60/min',
+        'user': '300/min',
+        'auth': '10/min',
+        'password_reset': '5/hour',
+        'email_verify': '10/hour',
+    },
 }
 ROOT_URLCONF = 'music.urls'
 

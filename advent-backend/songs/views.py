@@ -16,6 +16,7 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404 
 from rest_framework.pagination import PageNumberPagination
+from rest_framework_simplejwt.views import TokenObtainPairView
 import time as time_module
 from cloudinary.utils import api_sign_request as cloudinary_sign_request
 from django.db import transaction
@@ -30,6 +31,7 @@ from cloudinary.uploader import destroy
 from cloudinary.exceptions import Error as CloudinaryError
 from .models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist
 from .push import notify_user
+from .tasks import run_in_background
 from .serializers import (
     UserSerializer,
     TrackSerializer,
@@ -257,7 +259,8 @@ def _send_verification_email(user):
     expires_at = timezone.now() + timedelta(minutes=15)
     EmailVerification.objects.create(user=user, code=code, expires_at=expires_at)
 
-    send_mail(
+    run_in_background(
+        send_mail,
         subject=f"{settings.SITE_NAME} — Verify your email",
         message=(
             f"Hi {user.username},\n\n"
@@ -268,13 +271,19 @@ def _send_verification_email(user):
         ),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[user.email],
-        fail_silently=True,
+        fail_silently=False,
     )
     return code
 
 
+class ThrottledTokenObtainPairView(TokenObtainPairView):
+    """Login endpoint with a tight per-IP rate limit to deter credential stuffing."""
+    throttle_scope = 'auth'
+
+
 class SignUpView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = UserSerializer(data=request.data)
@@ -290,6 +299,7 @@ class SignUpView(APIView):
 
 class VerifyEmailView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_scope = 'email_verify'
 
     def post(self, request):
         code = request.data.get('code', '').strip()
@@ -312,6 +322,7 @@ class VerifyEmailView(APIView):
 
 class ResendVerificationView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_scope = 'email_verify'
 
     def post(self, request):
         if request.user.is_email_verified:
@@ -322,6 +333,7 @@ class ResendVerificationView(APIView):
 
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = 'password_reset'
 
     def post(self, request):
         import random
@@ -342,7 +354,8 @@ class ForgotPasswordView(APIView):
         expires_at = timezone.now() + timedelta(minutes=15)
         PasswordResetCode.objects.create(user=user, code=code, expires_at=expires_at)
 
-        send_mail(
+        run_in_background(
+            send_mail,
             subject=f"{settings.SITE_NAME} — Password Reset Code",
             message=(
                 f"Hi {user.username},\n\n"
@@ -353,13 +366,14 @@ class ForgotPasswordView(APIView):
             ),
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
-            fail_silently=True,
+            fail_silently=False,
         )
         return Response({'message': 'If that email exists, a reset code has been sent.'})
 
 
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = 'password_reset'
 
     def post(self, request):
         email = request.data.get('email', '').strip()
