@@ -17,6 +17,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.views import TokenObtainPairView
 import time as time_module
+import cloudinary
 from cloudinary.utils import api_sign_request as cloudinary_sign_request
 from django.db import transaction
 from django.contrib.auth.decorators import login_required
