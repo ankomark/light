@@ -1,61 +1,53 @@
-<!-- # Welcome to your Expo app 👋
+# Advent Light — mobile app (Expo / React Native)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The frontend for Advent Light, a Seventh-day Adventist social, media, and
+marketplace app. Built with Expo (SDK 53), React Native, and React Navigation.
+The Django backend lives in `../advent-backend` (see its `DEPLOYMENT.md`).
 
-## Get started
+## Prerequisites
 
-1. Install dependencies
+- Node.js 18+
+- A development build (this project uses native modules — Stripe, SecureStore,
+  notifications — so a dev build is recommended over plain Expo Go).
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Setup
 
 ```bash
-npm run reset-project
+npm install
+npx expo start --dev-client
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Then open the app on a device/emulator from the Expo CLI output.
 
-## Learn more
+## Environment variables
 
-To learn more about developing your project with Expo, look at the following resources:
+Provide as `EXPO_PUBLIC_*` vars (EAS build config, or a local `.env`):
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- `EXPO_PUBLIC_SENTRY_DSN` — crash reporting (production builds only).
+- `EXPO_PUBLIC_STRIPE_KEY` — Stripe publishable key for marketplace checkout.
 
-## Join the community
+The API base URL is set in `services/api.js` (`API_BASE`).
 
-Join our community of developers creating universal apps.
+## Building (EAS)
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions. -->
+See `eas.json`:
 
+```bash
+eas build --platform android
+eas build --platform ios
+```
 
+EAS project id is in `app.json` (`ce25330b-30db-4e8c-b99b-c03d70772178`).
 
+## Project layout
 
-## expo project details
-# user name = ankomark
-# email = ankomark76@gmail.com
-# passward = mark3661.1
-# Project successfully linked (ID: ce25330b-30db-4e8c-b99b-c03d70772178) (modified app.json)
+- `App.js` — navigation stack (~55 screens), Sentry + ErrorBoundary wrappers.
+- `components/` — screens & UI (feed, stories, marketplace, groups, chat, …).
+- `pages/` — Groups sub-app and directory pages.
+- `services/` — `api.js` (axios + token auth), `cloudinary.js` (signed uploads), `pushNotifications.js`.
+- `context/useAuth.js` — auth lifecycle.
+- `constants/theme.js` — design tokens (dark navy theme).
 
-#To activate: Add SENTRY_DSN to Railway env vars and EXPO_PUBLIC_SENTRY_DSN to EAS build config.
+## Backend
+
+API and deployment details: `../advent-backend/DEPLOYMENT.md`.
