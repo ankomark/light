@@ -6,13 +6,15 @@ from django.conf.urls.static import static
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
-from songs.views import SignUpView, ThrottledTokenObtainPairView, LogoutView
+from songs.views import SignUpView, ThrottledTokenObtainPairView, LogoutView, health_check
 
 urlpatterns = [
+    path('', health_check, name='health-root'),
     path('admin/', admin.site.urls),
-    
+
     # API endpoints
     path('api/', include([
+        path('health/', health_check, name='health'),
         # Authentication
         path('auth/', include([
             path('signup/', SignUpView.as_view(), name='signup'),

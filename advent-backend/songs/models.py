@@ -7,9 +7,13 @@ from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 from urllib.parse import urlparse, parse_qs
+from datetime import timedelta
 import re
+import logging
 from cloudinary.models import CloudinaryField
 import os
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -210,6 +214,10 @@ class SocialPost(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        # Feed queries order by -created_at; index it for fast pagination.
+        indexes = [models.Index(fields=['-created_at'])]
+
     def __str__(self):
         return f"{self.user.username}'s {self.content_type} post"
 
@@ -315,6 +323,8 @@ class Story(models.Model):
     class Meta:
         ordering = ['-created_at']
         verbose_name_plural = 'stories'
+        # The story feed filters on expires_at > now on every load.
+        indexes = [models.Index(fields=['expires_at'])]
 
     def save(self, *args, **kwargs):
         if not self.expires_at:
@@ -380,6 +390,14 @@ class Notification(models.Model):
     post = models.ForeignKey(SocialPost, null=True, blank=True, on_delete=models.CASCADE)
     track = models.ForeignKey(Track, null=True, blank=True, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Hot paths: unread_count filters (recipient, read); list orders by
+        # -created_at per recipient. Both polled every ~15s by the client.
+        indexes = [
+            models.Index(fields=['recipient', 'read']),
+            models.Index(fields=['recipient', '-created_at']),
+        ]
 
     def __str__(self):
         return f"{self.sender.username} -> {self.recipient.username}: {self.message}"

@@ -5,7 +5,6 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from django.core.cache import cache
-from django.contrib.auth.models import User
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from rest_framework.permissions import AllowAny
@@ -122,6 +121,12 @@ class IsOwnerOrReadOnly(BasePermission):
                 return getattr(obj, name) == request.user
         # No recognizable owner field — deny writes rather than fail open.
         return False
+
+
+def health_check(request):
+    """Liveness probe for load balancers / uptime monitors. Plain Django view
+    so it bypasses DRF auth, throttling and content negotiation."""
+    return JsonResponse({'status': 'ok'})
 
 
 class CloudinarySignView(APIView):
