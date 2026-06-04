@@ -169,13 +169,24 @@ SIMPLE_JWT = {
     # 'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
 }
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default=os.getenv('DATABASE_URL'),
-        conn_max_age=600,
-        ssl_require=True  # Essential for Supabase
-    )
-}
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True,  # Essential for Supabase
+        )
+    }
+else:
+    # Local dev fallback when DATABASE_URL isn't set — use a local SQLite file
+    # so `runserver`/`migrate`/admin work without the production database.
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
