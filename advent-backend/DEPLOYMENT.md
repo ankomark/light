@@ -36,7 +36,7 @@ Pin Python to **3.12** (Django 5.2 does not support 3.14).
 
 1. **Set the env vars above** in Railway (at minimum `DJANGO_SECRET_KEY`, `DATABASE_URL`, Cloudinary, Stripe).
 2. **Run migrations** on every deploy: `python manage.py migrate`.
-   - Pending migrations include `0021` (Order.payment_status), `0022` (indexes + drops two unused columns), and the `token_blacklist` tables.
+   - Pending migrations include `0021` (Order.payment_status), `0022` (indexes + drops two unused columns), `0023` (pg_trgm search indexes — see below), and the `token_blacklist` tables.
    - Run `migrate` against the **direct** Postgres connection (port 5432), not the pooler.
 3. **Collect static** if serving admin assets: `python manage.py collectstatic --noinput` (Whitenoise serves them).
 4. Start: `gunicorn music.wsgi` (see `Procfile`).
@@ -60,6 +60,22 @@ Supabase provides a built-in pooler — you do not need to run PgBouncer yoursel
    cursors, required for transaction-mode pooling).
 3. Keep a **direct** (5432) URL handy for running `migrate` (DDL/advisory locks
    don't work through a transaction pooler).
+
+## Search (pg_trgm) — Postgres only
+
+Text search/filtering uses `icontains` (`ILIKE '%...%'`). Migration `0023`
+enables the `pg_trgm` extension and creates trigram **GIN indexes** on the
+searched columns (usernames, post captions/location/tags, track title/album,
+group name/description), which makes those `ILIKE` queries index-backed instead
+of full table scans — no query changes needed.
+
+- It's applied automatically by `migrate`. The extension + indexes are
+  **Postgres-only**; on SQLite (local/CI) the migration is a no-op, so tests are
+  unaffected.
+- `migrate` runs `CREATE EXTENSION IF NOT EXISTS pg_trgm`, which needs a role
+  allowed to create extensions. On Supabase this is normally permitted; if it
+  fails on permissions, enable **pg_trgm** first via the Supabase dashboard
+  (Database → Extensions), then re-run `migrate`.
 
 ## Scheduled jobs (cron)
 
