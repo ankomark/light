@@ -13,6 +13,7 @@ queue later.
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+from django.conf import settings
 from django.db import close_old_connections
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,15 @@ def run_in_background(fn, *args, **kwargs):
     Exceptions are logged, never propagated. DB connections opened by the task
     are reaped afterwards so pooled threads don't hold stale connections.
     """
+    # Under tests we run inline: real threads + in-memory SQLite don't share a
+    # database, and eager execution makes assertions deterministic.
+    if getattr(settings, 'TASKS_ALWAYS_EAGER', False):
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            logger.exception("Background task %s failed", getattr(fn, '__name__', repr(fn)))
+        return
+
     def _wrapped():
         try:
             fn(*args, **kwargs)
