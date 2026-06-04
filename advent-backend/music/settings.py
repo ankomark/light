@@ -247,29 +247,39 @@ CLOUDINARY_UPLOAD_OPTIONS = {
     'timeout': 30000  # 30 seconds timeout
 }
 
-# In your settings.py
+# Log to stdout only (Railway captures it); level is env-tunable. No file
+# handler — writing debug.log on every request fills disk and slows I/O.
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '[{levelname}] {name}: {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-        },
-        'file': {
-            'level': 'DEBUG',
-            'class': 'logging.FileHandler',
-            'filename': 'debug.log',
+            'formatter': 'simple',
         },
     },
     'loggers': {
         '': {  # root logger
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
+            'handlers': ['console'],
+            'level': LOG_LEVEL,
             'propagate': True,
         },
         'django': {
-            'handlers': ['console', 'file'],
-            'level': 'INFO',
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        # SQL query logging stays off in production.
+        'django.db.backends': {
+            'handlers': ['console'],
+            'level': 'WARNING',
             'propagate': False,
         },
     },

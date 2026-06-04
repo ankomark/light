@@ -799,8 +799,7 @@ class CommentViewSet(viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
-    pagination_class = PageNumberPagination
-    page_size = 20
+    pagination_class = StandardPagination
 
     def get_queryset(self):
         track_id = self.kwargs.get('track_pk')
@@ -1180,6 +1179,7 @@ class PostCommentViewSet(viewsets.ModelViewSet):
     queryset = PostComment.objects.all()
     serializer_class = PostCommentSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    pagination_class = StandardPagination
 
     def get_queryset(self):
         post_id = self.kwargs.get('post_pk')
@@ -1483,6 +1483,7 @@ class ExploreViewSet(viewsets.ViewSet):
 class ConversationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ConversationSerializer
+    pagination_class = StandardPagination
     http_method_names = ['get', 'post', 'head', 'options']
 
     def get_queryset(self):
@@ -1529,7 +1530,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
         conversation = self.get_object()
         if not conversation.participants.filter(id=request.user.id).exists():
             return Response({'error': 'Not a participant'}, status=status.HTTP_403_FORBIDDEN)
-        msgs = conversation.messages.select_related('sender__profile').all()
+        # Bound the response: return the most recent 100 messages in
+        # chronological order (older history can be loaded later if needed).
+        recent = conversation.messages.select_related('sender__profile').order_by('-created_at')[:100]
+        msgs = sorted(recent, key=lambda m: m.created_at)
         return Response(MessageSerializer(msgs, many=True).data)
 
     @action(detail=True, methods=['post'])
@@ -1603,6 +1607,7 @@ class DeviceTokenViewSet(viewsets.ViewSet):
 class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardPagination
 
     def get_queryset(self):
         return Notification.objects.filter(recipient=self.request.user)\
@@ -1644,6 +1649,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
     queryset = Church.objects.all()
     serializer_class = ChurchSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = StandardPagination
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -1688,6 +1694,7 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
     queryset = Videostudio.objects.all().order_by('-created_at')
     serializer_class = VideoStudioSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = StandardPagination
 
      
     def create(self, request, *args, **kwargs):
@@ -1735,6 +1742,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
     queryset = Choir.objects.all().order_by('-created_at')
     serializer_class = ChoirSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = StandardPagination
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1855,6 +1863,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     queryset = Group.objects.all().order_by('-created_at')
     serializer_class = GroupSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
     lookup_field = 'slug'
     parser_classes = [MultiPartParser, FormParser]
 
@@ -2103,6 +2112,7 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
     queryset = GroupJoinRequest.objects.all()
     serializer_class = GroupJoinRequestSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
 
     def get_queryset(self):
         return GroupJoinRequest.objects.filter(
@@ -2471,10 +2481,6 @@ class LiveEventViewSet(viewsets.ModelViewSet):
                 Q(end_time__gte=twenty_four_hours_ago) |  # Changed from start_time
                 Q(end_time__isnull=True, start_time__gte=twenty_four_hours_ago)
             )
-        
-        # Add debug logging
-        logger.info(f"Final queryset SQL: {str(queryset.query)}")
-        logger.info(f"Found {queryset.count()} events")
         
         return queryset.select_related('user')
     

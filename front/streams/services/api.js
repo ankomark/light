@@ -302,11 +302,13 @@ export const likePost = async (postId) => {
   
   // Comment Endpoints
   export const fetchPostComments = async (postId) => {
-    return apiRequest('get', `/social-posts/${postId}/comments/`);
+    const res = await apiRequest('get', `/social-posts/${postId}/comments/`);
+    return res?.results ?? res;
   };
-  
+
   export const fetchTrackComments = async (trackId) => {
-    return apiRequest('get', `/tracks/${trackId}/comments/`);
+    const res = await apiRequest('get', `/tracks/${trackId}/comments/`);
+    return res?.results ?? res;
   };
   
   // Notification Endpoints
@@ -315,19 +317,22 @@ export const likePost = async (postId) => {
   };
 // Notification endpoints
 export const fetchNotifications = async () => {
-  return apiRequest('get', '/notifications/');
+  const res = await apiRequest('get', '/notifications/');
+  return res?.results ?? res;
 };
 
 export const markNotificationAsRead = async (notificationId) => {
   return apiRequest('post', `/notifications/${notificationId}/mark_as_read/`);
 };
 export const fetchSocialPostComments = async (postId) => {
-  return await apiRequest('get', `/social-posts/${postId}/comments/`);
+  const res = await apiRequest('get', `/social-posts/${postId}/comments/`);
+  return res?.results ?? res;
 };
 
 // nitaona
 export const fetchComments = async (trackId) => {  // Renamed from fetchTrackComments
-  return apiRequest('get', `/tracks/${trackId}/comments/`);
+  const res = await apiRequest('get', `/tracks/${trackId}/comments/`);
+  return res?.results ?? res;
 };
 
 export const postComment = async (trackId, content) => {
@@ -384,7 +389,8 @@ export const toggleFavorite = async (hymnId) => {
 
 export const fetchChurches = async (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
-  return apiRequest('get', `/churches/?${queryString}`);
+  const res = await apiRequest('get', `/churches/?${queryString}`);
+  return res?.results ?? res;
 };
 
 export const fetchChurchById = async (id) => {
@@ -417,7 +423,8 @@ export const deleteChurch = async (id) => {
 // ==================== VIDEO STUDIOS ====================
 export const fetchVideoStudios = async (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
-  return apiRequest('get', `/video-studios/?${queryString}`);
+  const res = await apiRequest('get', `/video-studios/?${queryString}`);
+  return res?.results ?? res;
 };
 
 export const fetchVideoStudioById = async (id) => {
@@ -485,7 +492,8 @@ export const deleteAudioStudio = async (id) => {
 // ==================== CHOIRS ====================
 export const fetchChoirs = async (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
-  return apiRequest('get', `/choirs/?${queryString}`);
+  const res = await apiRequest('get', `/choirs/?${queryString}`);
+  return res?.results ?? res;
 };
 
 export const fetchChoirById = async (id) => {
@@ -571,7 +579,7 @@ export const fetchGroups = async (retries = 3, delay = 1000) => {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const data = await apiRequest('get', '/groups/');
-      return data;
+      return data?.results ?? data;
     } catch (error) {
       if (attempt === retries) {
         console.error('Failed to fetch groups after retries:', error);
@@ -651,7 +659,8 @@ export const deleteGroup = async (groupSlug) => {
   return { success: true };
 };
 export const fetchGroupJoinRequests = async (slug) => {
-  return apiRequest('get', `/groups/${slug}/join-requests/`);
+  const res = await apiRequest('get', `/groups/${slug}/join-requests/`);
+  return res?.results ?? res;
 };
 
 export const approveJoinRequest = async (requestId) => {
@@ -1250,7 +1259,10 @@ export const getCloudinarySignature = (type) =>
   apiRequest('post', '/upload/sign/', { type });
 
 // ── Direct Messaging ──────────────────────────────────────────────────────────
-export const fetchConversations = () => apiRequest('get', '/conversations/');
+export const fetchConversations = async () => {
+  const res = await apiRequest('get', '/conversations/');
+  return res?.results ?? res;
+};
 
 export const getOrCreateConversation = (userId) =>
   apiRequest('post', '/conversations/', { user_id: userId });

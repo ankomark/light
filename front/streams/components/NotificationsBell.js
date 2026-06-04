@@ -6,7 +6,7 @@ import {
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchNotifications, markNotificationAsRead, checkAuthStatus } from '../services/api';
+import { fetchNotifications, markNotificationAsRead, checkAuthStatus, fetchUnreadNotificationCount } from '../services/api';
 import { addNotificationReceivedListener } from '../services/pushNotifications';
 import * as Notifications from 'expo-notifications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -53,8 +53,17 @@ const NotificationsBell = ({ navigation }) => {
       const data = await fetchNotifications();
       if (!isMounted.current) return;
 
-      setNotifications(data);
-      const count = data.filter(n => !n.read).length;
+      setNotifications(Array.isArray(data) ? data : []);
+      // The list is paginated (first page only), so derive the badge from the
+      // dedicated unread-count endpoint rather than from the visible items.
+      let count;
+      try {
+        const res = await fetchUnreadNotificationCount();
+        count = res?.unread_count ?? (Array.isArray(data) ? data.filter(n => !n.read).length : 0);
+      } catch {
+        count = Array.isArray(data) ? data.filter(n => !n.read).length : 0;
+      }
+      if (!isMounted.current) return;
       setUnreadCount(count);
       await Notifications.setBadgeCountAsync(count);
     } catch {
