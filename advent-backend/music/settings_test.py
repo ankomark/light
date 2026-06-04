@@ -3,7 +3,12 @@
 Usage:
     python manage.py test songs --settings=music.settings_test
 """
-from .settings import *  # noqa: F401,F403
+import os
+
+# Satisfy the production SECRET_KEY requirement before importing base settings.
+os.environ.setdefault('DJANGO_SECRET_KEY', 'test-only-key-not-secret')
+
+from .settings import *  # noqa: E402,F401,F403
 
 # In-memory SQLite — no Supabase/Postgres or test-DB-create privilege needed.
 DATABASES = {

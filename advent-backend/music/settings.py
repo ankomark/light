@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
@@ -38,10 +39,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 
-SECRET_KEY = 'django-insecure-sm4_o$%#fl*t((*#4tgmzp=@d%djqaxuva=t#u9#i$^p*ex8jf'
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = os.getenv('DJANGO_DEBUG', '') == 'True'
+
+# SECURITY: the secret key comes from the environment. A throwaway dev key is
+# allowed only when DEBUG is on; production (DEBUG off) must set DJANGO_SECRET_KEY.
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-dev-only-key-change-me'
+    else:
+        raise ImproperlyConfigured(
+            'DJANGO_SECRET_KEY environment variable must be set in production.'
+        )
 
 
 ALLOWED_HOSTS = [
@@ -70,7 +80,9 @@ CORS_ALLOW_METHODS =[
     'POST',
     'PUT',
 ]
-CORS_ALLOW_ALL_ORIGINS = True  # Disable this
+# Restrict cross-origin requests to the explicit allowlist below. (Native
+# mobile requests aren't subject to CORS; this guards the web build / API.)
+CORS_ALLOW_ALL_ORIGINS = False
 # Application definition
 CORS_ALLOWED_ORIGINS = [
     'https://web-production-f266.up.railway.app',
