@@ -11,7 +11,7 @@ export const colors = {
   textPrimary: '#E0E1DD',
   textSecondary: '#A9BCD0',
   textMuted: '#6C757D',
-  placeholder: '#4A6080',
+  placeholder: '#8295B5',
 
   error: '#E53935',
   success: '#43A047',
