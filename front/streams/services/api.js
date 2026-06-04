@@ -1,8 +1,24 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
 import { extractYoutubeId } from '../utils/youtubeUtils';
 
-export const API_BASE = 'https://web-production-f266.up.railway.app';
+const PROD_API_BASE = 'https://web-production-f266.up.railway.app';
+
+// In development, talk to the Django dev server on this machine. The host IP is
+// taken from Expo's packager URI (the same IP the device uses to reach Metro),
+// so it works on a physical device or emulator without hardcoding a LAN IP.
+// Override anytime by setting EXPO_PUBLIC_API_BASE (e.g. http://10.0.2.2:8000).
+const resolveApiBase = () => {
+  if (process.env.EXPO_PUBLIC_API_BASE) return process.env.EXPO_PUBLIC_API_BASE;
+  if (__DEV__) {
+    const host = (Constants.expoConfig?.hostUri || '').split(':')[0];
+    if (host) return `http://${host}:8000`;
+  }
+  return PROD_API_BASE;
+};
+
+export const API_BASE = resolveApiBase();
 axios.defaults.timeout = 30000;
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 export const API_URL = `${API_BASE}/api`;

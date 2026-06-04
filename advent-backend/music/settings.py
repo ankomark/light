@@ -63,8 +63,13 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
     '.railway.app',
     '10.0.2.2'
-   
+
 ]
+
+# In development, accept requests from any device/emulator IP on the LAN so the
+# Expo app can reach `runserver` regardless of this machine's current address.
+if DEBUG:
+    ALLOWED_HOSTS = ['*']
 
 CORS_ALLOW_HEADERS =[
     'access-control-allow-origin',
