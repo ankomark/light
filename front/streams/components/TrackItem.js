@@ -3,7 +3,7 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicat
 import { BlurView } from 'expo-blur';
 import Likes from './LikeButton';
 import Comments from './Comments';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
@@ -11,12 +11,13 @@ import axios from 'axios';
 import { API_URL, getAccessToken, toggleTrackFavorite } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer } from '../context/PlayerContext';
+import AddToPlaylistModal from './AddToPlaylistModal';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
-const TrackItem = ({ track, onDelete, onRefresh, onPlay }) => {
+const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist }) => {
   const navigation = useNavigation();
   const { currentTrack, isPlaying, isLoading, isBuffering, playTrack, togglePlay } = usePlayer();
   const isOwner = track.is_owner;
@@ -28,6 +29,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay }) => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
   const [lyricsVisible, setLyricsVisible] = useState(false);
+  const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
 
   const hasLyrics = typeof track.lyrics === 'string' && track.lyrics.trim().length > 0;
 
@@ -228,6 +230,16 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay }) => {
             </>
           )}
 
+          {onRemoveFromPlaylist && (
+            <TouchableOpacity style={styles.iconBtn} onPress={onRemoveFromPlaylist} hitSlop={HIT}>
+              <MaterialCommunityIcons name="playlist-remove" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setPlaylistModalVisible(true)} hitSlop={HIT}>
+            <MaterialCommunityIcons name="playlist-plus" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+
           {isDownloading ? (
             <View style={styles.downloadProgress}>
               <ActivityIndicator size="small" color={colors.primary} />
@@ -244,6 +256,13 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay }) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      <AddToPlaylistModal
+        visible={playlistModalVisible}
+        onClose={() => setPlaylistModalVisible(false)}
+        trackId={track.id}
+        trackTitle={track.title}
+      />
 
       {/* Floating lyrics page */}
       <Modal

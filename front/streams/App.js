@@ -63,6 +63,8 @@ import CreateStoryScreen from './components/CreateStoryScreen';
 import UserProfileScreen from './components/UserProfileScreen';
 import Profile from './components/Profile';
 import NowPlaying from './components/NowPlaying';
+import PlaylistsScreen from './components/PlaylistsScreen';
+import PlaylistDetail from './components/PlaylistDetail';
 import { navigationRef, navigate } from './services/navigationRef';
 
 
@@ -141,6 +143,8 @@ const App = () => {
                 <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: true, title: 'Profile' }} />
                 <Stack.Screen name="Profile" component={ProfileWrapper} />
                 <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom' }} />
+                <Stack.Screen name="Playlists" component={PlaylistsScreen} options={{ headerShown: true, title: 'Playlists', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD' }} />
+                <Stack.Screen name="PlaylistDetail" component={PlaylistDetail} options={{ headerShown: true, title: 'Playlist', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD' }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: true }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnList} options={{ title: 'Hymnal' }}/>

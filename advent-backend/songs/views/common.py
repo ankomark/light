@@ -36,6 +36,7 @@ from ..serializers import (
     UserSerializer,
     TrackSerializer,
     PlaylistSerializer,
+    PlaylistListSerializer,
     ProfileSerializer,
     CommentSerializer,
     LikeSerializer,

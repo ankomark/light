@@ -65,6 +65,7 @@ function HamburgerMenu() {
   const menuItems = [
     { name: 'Explore', icon: 'compass-outline', iconType: 'Ionicons', color: COLORS.secondary },
     { name: 'Favorites', icon: 'heart', iconType: 'Ionicons', color: COLORS.accent },
+    { name: 'Playlists', icon: 'playlist-music', iconType: 'MaterialCommunityIcons', color: COLORS.tertiary },
     { name: 'Inbox', icon: 'chatbubbles-outline', iconType: 'Ionicons', color: COLORS.secondary },
     { name: 'Groups', icon: 'group', iconType: 'FontAwesome', color: COLORS.tertiary },
     { name: 'Churches', icon: 'church', iconType: 'MaterialCommunityIcons', color: COLORS.primary },

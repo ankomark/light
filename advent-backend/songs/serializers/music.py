@@ -62,11 +62,45 @@ class TrackSerializer(serializers.ModelSerializer):
 
 
 class PlaylistSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+    # Slim owner ref (the full UserSerializer drags in the whole social-posts
+    # payload, which is wasteful for a playlist).
+    user = SimpleUserSerializer(read_only=True)
     tracks = TrackSerializer(many=True, read_only=True)
+    track_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Playlist
-        fields = ('id', 'name', 'user', 'tracks', 'created_at', 'updated_at')
+        fields = ('id', 'name', 'user', 'tracks', 'track_count', 'created_at', 'updated_at')
+
+    def get_track_count(self, obj):
+        count = getattr(obj, 'tracks_total', None)
+        return count if count is not None else obj.tracks.count()
+
+
+class PlaylistListSerializer(serializers.ModelSerializer):
+    """Lightweight playlist for list views: counts + a few cover thumbnails,
+    no nested track payloads."""
+    track_count = serializers.SerializerMethodField()
+    cover_images = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Playlist
+        fields = ('id', 'name', 'track_count', 'cover_images', 'created_at', 'updated_at')
+
+    def get_track_count(self, obj):
+        count = getattr(obj, 'tracks_total', None)
+        return count if count is not None else obj.tracks.count()
+
+    def get_cover_images(self, obj):
+        # Up to 4 covers for a collage; reads the prefetched tracks cache.
+        field = CloudinaryFieldSerializer()
+        urls = []
+        for track in list(obj.tracks.all())[:4]:
+            if track.cover_image:
+                url = field.to_representation(track.cover_image)
+                if url:
+                    urls.append(url)
+        return urls
 
 
 

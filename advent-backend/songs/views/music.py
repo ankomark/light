@@ -303,8 +303,44 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     serializer_class = PlaylistSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
 
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return Playlist.objects.none()
+        return (
+            Playlist.objects
+            .filter(user=user)
+            .select_related('user__profile')
+            .prefetch_related('tracks__artist__profile')
+            .annotate(tracks_total=Count('tracks', distinct=True))
+            .order_by('-created_at')
+        )
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return PlaylistListSerializer
+        return PlaylistSerializer
+
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='add-track')
+    def add_track(self, request, pk=None):
+        playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
+        track = get_object_or_404(Track, id=request.data.get('track_id'))
+        playlist.tracks.add(track)
+        return Response(
+            PlaylistSerializer(playlist, context=self.get_serializer_context()).data
+        )
+
+    @action(detail=True, methods=['post'], url_path='remove-track')
+    def remove_track(self, request, pk=None):
+        playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
+        track = get_object_or_404(Track, id=request.data.get('track_id'))
+        playlist.tracks.remove(track)
+        return Response(
+            PlaylistSerializer(playlist, context=self.get_serializer_context()).data
+        )
 
 
 

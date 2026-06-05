@@ -235,6 +235,32 @@ export const fetchTracks = async (page = 1, search = '') => {
   return apiRequest('get', '/tracks/', null, { params });
 };
 
+// Playlist endpoints (all scoped to the authenticated user on the backend).
+export const fetchPlaylists = async () => {
+  const data = await apiRequest('get', '/playlists/');
+  return Array.isArray(data) ? data : data?.results ?? [];
+};
+
+export const fetchPlaylist = async (id) => {
+  return apiRequest('get', `/playlists/${id}/`);
+};
+
+export const createPlaylist = async (name) => {
+  return apiRequest('post', '/playlists/', { name });
+};
+
+export const deletePlaylist = async (id) => {
+  return apiRequest('delete', `/playlists/${id}/`);
+};
+
+export const addTrackToPlaylist = async (id, trackId) => {
+  return apiRequest('post', `/playlists/${id}/add-track/`, { track_id: trackId });
+};
+
+export const removeTrackFromPlaylist = async (id, trackId) => {
+  return apiRequest('post', `/playlists/${id}/remove-track/`, { track_id: trackId });
+};
+
 export const createTrack = async (formData) => {
   return apiRequest('post', '/tracks/upload/', formData, {
     headers: {
