@@ -16,19 +16,45 @@ export const usePlayer = () => {
   return ctx;
 };
 
+const REPEAT_MODES = ['off', 'all', 'one'];
+
+// Fisher-Yates shuffle of an array (returns a new array).
+const shuffled = (arr) => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
 /**
- * Global single-instance audio player.
+ * Global single-instance audio player with a play queue.
  *
- * Only one track is ever loaded/playing at a time. Tracks across any screen
- * (TrackList, Favorites, …) share this provider, so starting a new track
- * automatically stops the previous one. Playback continues in the background;
- * full lock-screen media controls are a TODO (would need a native module such
- * as react-native-track-player).
+ * Only one track is ever loaded/playing at a time. The queue lives entirely in
+ * JS on top of expo-av, so it works as an OTA update with no native rebuild.
+ * Lock-screen / notification controls are intentionally out of scope for now
+ * (that layer needs a native module such as react-native-track-player and will
+ * be added separately).
+ *
+ * Queue model: `queueRef` holds the tracks in their original order; `orderRef`
+ * is a list of indices into the queue describing playback order (identity when
+ * shuffle is off, randomized otherwise); `posRef` is the cursor within
+ * `orderRef`. All queue data is kept in refs so the playback-status callback
+ * reads current values without stale closures.
  */
 export const PlayerProvider = ({ children }) => {
   const soundRef = useRef(null);
   const currentIdRef = useRef(null);
   const seekingRef = useRef(false);
+
+  // Queue state (refs are the source of truth; mirrored to React state for UI).
+  const queueRef = useRef([]);
+  const orderRef = useRef([]);
+  const posRef = useRef(-1);
+  const repeatRef = useRef('off');
+  const shuffleRef = useRef(false);
+  const advanceRef = useRef(() => {});
 
   const [currentTrack, setCurrentTrack] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -36,6 +62,10 @@ export const PlayerProvider = ({ children }) => {
   const [isBuffering, setIsBuffering] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
+  const [repeatMode, setRepeatMode] = useState('off');
+  const [shuffle, setShuffle] = useState(false);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrev, setHasPrev] = useState(false);
 
   // Configure background / silent-mode playback once.
   useEffect(() => {
@@ -54,6 +84,15 @@ export const PlayerProvider = ({ children }) => {
     };
   }, []);
 
+  const syncNavState = useCallback(() => {
+    const order = orderRef.current;
+    const pos = posRef.current;
+    const repeat = repeatRef.current;
+    const multi = order.length > 1;
+    setHasNext(order.length > 0 && (pos < order.length - 1 || (repeat === 'all' && multi)));
+    setHasPrev(order.length > 0 && (pos > 0 || (repeat === 'all' && multi)));
+  }, []);
+
   const onStatus = useCallback((status) => {
     if (!status.isLoaded) return;
     if (status.durationMillis) setDurationMs(status.durationMillis);
@@ -61,36 +100,14 @@ export const PlayerProvider = ({ children }) => {
     setIsPlaying(Boolean(status.isPlaying));
     if (!seekingRef.current) setPositionMs(status.positionMillis || 0);
     if (status.didJustFinish) {
-      soundRef.current
-        ?.setStatusAsync({ shouldPlay: false, positionMillis: 0 })
-        .catch(() => {});
-      setPositionMs(0);
-      setIsPlaying(false);
+      advanceRef.current();
     }
   }, []);
 
-  /**
-   * Play a track. If it's already the active track, this toggles play/pause.
-   * `track` must include an `audio_file` URI; `cover_image`, `title`, `artist`
-   * are used by the mini-player UI.
-   */
-  const playTrack = useCallback(
+  /** Tear down any current sound and load + play the given track. */
+  const loadAndPlay = useCallback(
     async (track) => {
       if (!track?.audio_file) return;
-
-      // Same track -> toggle play/pause instead of reloading.
-      if (currentIdRef.current === track.id && soundRef.current) {
-        try {
-          const status = await soundRef.current.getStatusAsync();
-          if (status.isLoaded) {
-            if (status.isPlaying) await soundRef.current.pauseAsync();
-            else await soundRef.current.playAsync();
-          }
-        } catch {}
-        return;
-      }
-
-      // New track -> tear down the old sound and load the new one.
       setIsLoading(true);
       setCurrentTrack(track);
       currentIdRef.current = track.id;
@@ -108,7 +125,7 @@ export const PlayerProvider = ({ children }) => {
           { shouldPlay: true, progressUpdateIntervalMillis: 500 },
           onStatus
         );
-        // A newer playTrack call may have superseded us while awaiting.
+        // A newer load may have superseded us while awaiting.
         if (currentIdRef.current !== track.id) {
           sound.unloadAsync().catch(() => {});
           return;
@@ -122,6 +139,140 @@ export const PlayerProvider = ({ children }) => {
     },
     [onStatus]
   );
+
+  /** Load the track at the given cursor position within the playback order. */
+  const loadAt = useCallback(
+    (pos) => {
+      const order = orderRef.current;
+      if (pos < 0 || pos >= order.length) return;
+      posRef.current = pos;
+      syncNavState();
+      loadAndPlay(queueRef.current[order[pos]]);
+    },
+    [loadAndPlay, syncNavState]
+  );
+
+  /**
+   * Replace the queue with `tracks` and start playing at `startIndex`.
+   * `opts.shuffle` (optional) overrides the current shuffle mode.
+   */
+  const playQueue = useCallback(
+    (tracks, startIndex = 0, opts = {}) => {
+      if (!Array.isArray(tracks) || tracks.length === 0) return;
+      const useShuffle = opts.shuffle != null ? opts.shuffle : shuffleRef.current;
+      if (opts.shuffle != null) {
+        shuffleRef.current = useShuffle;
+        setShuffle(useShuffle);
+      }
+
+      queueRef.current = tracks;
+      const indices = tracks.map((_, i) => i);
+      if (useShuffle) {
+        // Keep the chosen track first, shuffle the rest.
+        const rest = shuffled(indices.filter((i) => i !== startIndex));
+        orderRef.current = [startIndex, ...rest];
+        loadAt(0);
+      } else {
+        orderRef.current = indices;
+        loadAt(startIndex);
+      }
+    },
+    [loadAt]
+  );
+
+  /**
+   * Play a single track. If it's already the active track, toggles play/pause;
+   * otherwise it becomes a one-item queue. (List screens should call playQueue
+   * so next/previous can traverse the surrounding list.)
+   */
+  const playTrack = useCallback(
+    async (track) => {
+      if (!track?.audio_file) return;
+      if (currentIdRef.current === track.id && soundRef.current) {
+        try {
+          const status = await soundRef.current.getStatusAsync();
+          if (status.isLoaded) {
+            if (status.isPlaying) await soundRef.current.pauseAsync();
+            else await soundRef.current.playAsync();
+          }
+        } catch {}
+        return;
+      }
+      playQueue([track], 0);
+    },
+    [playQueue]
+  );
+
+  const playNext = useCallback(() => {
+    const order = orderRef.current;
+    const pos = posRef.current;
+    if (order.length === 0) return;
+    if (pos < order.length - 1) loadAt(pos + 1);
+    else if (repeatRef.current === 'all') loadAt(0);
+  }, [loadAt]);
+
+  const playPrevious = useCallback(() => {
+    const order = orderRef.current;
+    const pos = posRef.current;
+    if (order.length === 0) return;
+    if (pos > 0) loadAt(pos - 1);
+    else if (repeatRef.current === 'all') loadAt(order.length - 1);
+    else soundRef.current?.setPositionAsync(0).catch(() => {}); // restart current
+  }, [loadAt]);
+
+  // What happens when a track finishes on its own.
+  advanceRef.current = () => {
+    if (repeatRef.current === 'one') {
+      soundRef.current
+        ?.setStatusAsync({ shouldPlay: true, positionMillis: 0 })
+        .catch(() => {});
+      return;
+    }
+    const order = orderRef.current;
+    const pos = posRef.current;
+    if (pos < order.length - 1) {
+      loadAt(pos + 1);
+    } else if (repeatRef.current === 'all' && order.length > 0) {
+      loadAt(0);
+    } else {
+      // End of queue: stop at the start, paused.
+      soundRef.current
+        ?.setStatusAsync({ shouldPlay: false, positionMillis: 0 })
+        .catch(() => {});
+      setPositionMs(0);
+      setIsPlaying(false);
+    }
+  };
+
+  const toggleShuffle = useCallback(() => {
+    const next = !shuffleRef.current;
+    shuffleRef.current = next;
+    setShuffle(next);
+
+    const order = orderRef.current;
+    if (order.length > 0) {
+      const currentQueueIdx = order[posRef.current]; // index into queueRef
+      if (next) {
+        const rest = shuffled(
+          queueRef.current.map((_, i) => i).filter((i) => i !== currentQueueIdx)
+        );
+        orderRef.current = [currentQueueIdx, ...rest];
+        posRef.current = 0;
+      } else {
+        orderRef.current = queueRef.current.map((_, i) => i);
+        posRef.current = currentQueueIdx;
+      }
+      syncNavState();
+    }
+  }, [syncNavState]);
+
+  const cycleRepeat = useCallback(() => {
+    const idx = REPEAT_MODES.indexOf(repeatRef.current);
+    const next = REPEAT_MODES[(idx + 1) % REPEAT_MODES.length];
+    repeatRef.current = next;
+    setRepeatMode(next);
+    syncNavState();
+  }, [syncNavState]);
 
   const togglePlay = useCallback(async () => {
     const s = soundRef.current;
@@ -169,12 +320,17 @@ export const PlayerProvider = ({ children }) => {
     const s = soundRef.current;
     soundRef.current = null;
     currentIdRef.current = null;
+    queueRef.current = [];
+    orderRef.current = [];
+    posRef.current = -1;
     if (s) await s.unloadAsync().catch(() => {});
     setCurrentTrack(null);
     setIsPlaying(false);
     setIsBuffering(false);
     setPositionMs(0);
     setDurationMs(0);
+    setHasNext(false);
+    setHasPrev(false);
   }, []);
 
   const value = {
@@ -184,8 +340,17 @@ export const PlayerProvider = ({ children }) => {
     isBuffering,
     positionMs,
     durationMs,
+    repeatMode,
+    shuffle,
+    hasNext,
+    hasPrev,
     playTrack,
+    playQueue,
+    playNext,
+    playPrevious,
     togglePlay,
+    toggleShuffle,
+    cycleRepeat,
     skip,
     beginSeek,
     seekTo,

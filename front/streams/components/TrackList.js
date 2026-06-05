@@ -13,8 +13,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchTracks } from "../services/api";
 import TrackItem from "./TrackItem";
 import SearchBar from "./SearchBar";
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { usePlayer } from '../context/PlayerContext';
 import { colors } from '../constants/theme';
 
 const TrackList = () => {
@@ -26,11 +27,25 @@ const TrackList = () => {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
+  const { playQueue } = usePlayer();
 
   // The active search term drives server-side filtering. A ref mirrors it so
   // loadMore / focus reloads read the latest value without stale closures.
   const searchRef = useRef('');
   const debounceRef = useRef(null);
+
+  // Minimal playable shape for the queue (mini-player reads these fields).
+  const buildQueue = useCallback(
+    () => tracks.map(t => ({
+      id: t.id,
+      title: t.title,
+      album: t.album,
+      artist: t.artist,
+      cover_image: t.cover_image,
+      audio_file: t.audio_file,
+    })),
+    [tracks]
+  );
 
   // Memoized Cloudinary transformation function
   const getOptimizedMediaUrl = useCallback((url, type = 'image') => {
@@ -143,13 +158,35 @@ const TrackList = () => {
   return (
     <View style={styles.container}>
       <SearchBar onSearch={handleSearch} />
-      
+
+      {tracks.length > 0 && (
+        <View style={styles.queueBar}>
+          <TouchableOpacity
+            style={styles.queueBtn}
+            onPress={() => playQueue(buildQueue(), 0, { shuffle: false })}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="play" size={16} color="white" />
+            <Text style={styles.queueBtnText}>Play all</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.queueBtn, styles.shuffleBtn]}
+            onPress={() => playQueue(buildQueue(), 0, { shuffle: true })}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="shuffle" size={16} color={colors.primary} />
+            <Text style={styles.shuffleBtnText}>Shuffle</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
         data={tracks}
         keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
+        renderItem={({ item, index }) => (
           <TrackItem
             track={item}
+            onPlay={() => playQueue(buildQueue(), index)}
             onDelete={(deletedId) => {
               setTracks(prev => prev.filter(t => t.id !== deletedId));
             }}
@@ -223,6 +260,37 @@ const styles = StyleSheet.create({
   retryText: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  queueBar: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  queueBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  queueBtnText: {
+    color: 'white',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  shuffleBtn: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  shuffleBtnText: {
+    color: colors.primary,
+    fontWeight: '700',
+    fontSize: 13,
   },
   trackList: {
     paddingTop: 6,

@@ -35,8 +35,15 @@ const MiniPlayer = () => {
     isBuffering,
     positionMs,
     durationMs,
+    repeatMode,
+    shuffle,
+    hasNext,
+    hasPrev,
     togglePlay,
-    skip,
+    playNext,
+    playPrevious,
+    toggleShuffle,
+    cycleRepeat,
     beginSeek,
     seekTo,
     closePlayer,
@@ -87,6 +94,19 @@ const MiniPlayer = () => {
 
   return (
     <View style={styles.wrap}>
+      <View style={styles.topRow}>
+        <TouchableOpacity onPress={toggleShuffle} hitSlop={HIT}>
+          <Ionicons name="shuffle" size={18} color={shuffle ? colors.primary : colors.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={cycleRepeat} hitSlop={HIT}>
+          <MaterialIcons
+            name={repeatMode === 'one' ? 'repeat-one' : 'repeat'}
+            size={18}
+            color={repeatMode !== 'off' ? colors.primary : colors.textMuted}
+          />
+        </TouchableOpacity>
+      </View>
+
       <Slider
         style={styles.slider}
         minimumValue={0}
@@ -130,8 +150,8 @@ const MiniPlayer = () => {
         </View>
 
         <View style={styles.controls}>
-          <TouchableOpacity onPress={() => skip(-10000)} hitSlop={HIT} disabled={busy}>
-            <MaterialIcons name="replay-10" size={24} color={colors.textSecondary} />
+          <TouchableOpacity onPress={playPrevious} hitSlop={HIT} disabled={!hasPrev}>
+            <MaterialIcons name="skip-previous" size={26} color={hasPrev ? colors.textSecondary : colors.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -152,8 +172,8 @@ const MiniPlayer = () => {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => skip(10000)} hitSlop={HIT} disabled={busy}>
-            <MaterialIcons name="forward-10" size={24} color={colors.textSecondary} />
+          <TouchableOpacity onPress={playNext} hitSlop={HIT} disabled={!hasNext}>
+            <MaterialIcons name="skip-next" size={26} color={hasNext ? colors.textSecondary : colors.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={closePlayer} hitSlop={HIT} style={styles.closeBtn}>
@@ -179,6 +199,12 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm,
     ...shadows.lg,
+  },
+  topRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xs,
   },
   slider: { width: '100%', height: 28 },
   row: { flexDirection: 'row', alignItems: 'center', marginTop: -4 },

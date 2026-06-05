@@ -16,9 +16,9 @@ import { colors, spacing, radius, typography, shadows } from '../constants/theme
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
-const TrackItem = ({ track, onDelete, onRefresh }) => {
+const TrackItem = ({ track, onDelete, onRefresh, onPlay }) => {
   const navigation = useNavigation();
-  const { currentTrack, isPlaying, isLoading, isBuffering, playTrack } = usePlayer();
+  const { currentTrack, isPlaying, isLoading, isBuffering, playTrack, togglePlay } = usePlayer();
   const isOwner = track.is_owner;
 
   const [profileImageError, setProfileImageError] = useState(false);
@@ -46,6 +46,17 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
   const showSpinner = isActive && (isLoading || isBuffering);
 
   const handlePlay = () => {
+    // Already the active track -> just toggle play/pause.
+    if (isActive) {
+      togglePlay();
+      return;
+    }
+    // A list screen can supply onPlay to start the whole list as a queue
+    // (so next/previous traverse it). Otherwise play this track on its own.
+    if (onPlay) {
+      onPlay();
+      return;
+    }
     playTrack({
       id: track.id,
       title: track.title,
