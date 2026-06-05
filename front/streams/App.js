@@ -132,7 +132,7 @@ const App = () => {
                 <Stack.Screen name="SignUp" component={SignUpPage} />
                 <Stack.Screen name="Login" component={LoginPage} />
                 <Stack.Screen name="CreateProfile" component={CreateProfile} />
-                <Stack.Screen name="Favorites" component={FavoritesPage} />
+                <Stack.Screen name="Favorites" component={FavoritesWrapper} />
                 <Stack.Screen name="UploadTrack" component={UploadTrackPage} options={{ headerShown: true }} />
                 <Stack.Screen name="SocialFeed" component={SocialFeedWrapper} />
                 <Stack.Screen name="PostDetail" component={PostDetail} />
@@ -251,6 +251,15 @@ const TrackListWrapper = ({ navigation }) => (
     <View style={{ flex: 1 }}>
         <Header navigation={navigation} />
         <TrackList />
+    </View>
+);
+
+const FavoritesWrapper = ({ navigation }) => (
+    <View style={{ flex: 1 }}>
+        <Header navigation={navigation} />
+        <ErrorBoundary fallbackMessage="Favorites couldn't load.">
+          <FavoritesPage />
+        </ErrorBoundary>
     </View>
 );
 

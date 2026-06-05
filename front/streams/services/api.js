@@ -323,6 +323,13 @@ export const likePost = async (postId) => {
     return apiRequest('post', `/tracks/${trackId}/toggle-favorite/`);
   };
 
+  // The current user's favorited tracks. Backend returns a plain array
+  // (TrackViewSet.get_favorites -> Track.objects.filter(likes__user=user)).
+  export const getFavoriteTracks = async () => {
+    const res = await apiRequest('get', '/tracks/favorites/');
+    return res?.results ?? res ?? [];
+  };
+
   
   export const favoriteTrack = async (trackId) => {
     return apiRequest('post', `/tracks/${trackId}/favorite/`);

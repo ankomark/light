@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Animated,
+  Easing,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -42,6 +44,36 @@ const MiniPlayer = () => {
 
   const [seekValue, setSeekValue] = useState(null);
 
+  // Spinning "vinyl" cover while playing. Freezes on pause and resumes from the
+  // same angle (we keep advancing a single value toward the next full turn
+  // rather than looping/resetting, so there's no jump).
+  const angle = useRef(new Animated.Value(0)).current;
+  const targetRef = useRef(0);
+  const animRef = useRef(null);
+
+  useEffect(() => {
+    const run = () => {
+      targetRef.current += 1;
+      animRef.current = Animated.timing(angle, {
+        toValue: targetRef.current,
+        duration: 6000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      });
+      animRef.current.start(({ finished }) => {
+        if (finished) run();
+      });
+    };
+    if (isPlaying) run();
+    else animRef.current?.stop();
+    return () => animRef.current?.stop();
+  }, [isPlaying, angle]);
+
+  const rotate = angle.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   if (!currentTrack) return null;
 
   const cover = currentTrack.cover_image;
@@ -76,13 +108,16 @@ const MiniPlayer = () => {
       />
 
       <View style={styles.row}>
-        {cover ? (
-          <Image source={{ uri: cover }} style={styles.cover} />
-        ) : (
-          <View style={[styles.cover, styles.coverPlaceholder]}>
-            <Ionicons name="musical-notes" size={20} color={colors.textMuted} />
-          </View>
-        )}
+        <Animated.View style={[styles.coverWrap, { transform: [{ rotate }] }]}>
+          {cover ? (
+            <Image source={{ uri: cover }} style={styles.cover} />
+          ) : (
+            <View style={[styles.cover, styles.coverPlaceholder]}>
+              <Ionicons name="musical-notes" size={20} color={colors.textMuted} />
+            </View>
+          )}
+          <View style={styles.coverHole} />
+        </Animated.View>
 
         <View style={styles.meta}>
           <Text style={styles.title} numberOfLines={1}>
@@ -147,13 +182,28 @@ const styles = StyleSheet.create({
   },
   slider: { width: '100%', height: 28 },
   row: { flexDirection: 'row', alignItems: 'center', marginTop: -4 },
+  coverWrap: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cover: {
     width: 44,
     height: 44,
-    borderRadius: radius.sm,
+    borderRadius: 22,
     backgroundColor: colors.card,
   },
   coverPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  coverHole: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   meta: { flex: 1, marginHorizontal: spacing.sm },
   title: { ...typography.label, color: colors.textPrimary },
   sub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },

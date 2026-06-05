@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable } from 'react-native';
+import { BlurView } from 'expo-blur';
 import Likes from './LikeButton';
 import Comments from './Comments';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -29,6 +30,9 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
+  const [lyricsVisible, setLyricsVisible] = useState(false);
+
+  const hasLyrics = typeof track.lyrics === 'string' && track.lyrics.trim().length > 0;
 
   const optimizedCover = track.cover_image?.includes('cloudinary')
     ? track.cover_image.replace('/upload/', '/upload/w_200,h_200,c_fill,q_auto,f_auto/')
@@ -154,6 +158,10 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
 
   return (
     <View style={[styles.card, isActive && styles.cardActive]}>
+      {/* Frosted-glass backdrop that blends into the screen background */}
+      <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+      <View style={[StyleSheet.absoluteFill, styles.glassTint]} pointerEvents="none" />
+
       {/* Main row: cover + play overlay, title/artist, play button */}
       <View style={styles.mainRow}>
         <TouchableOpacity style={styles.coverWrap} onPress={handlePlay} activeOpacity={0.85}>
@@ -208,6 +216,11 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
         <View style={styles.actionLeft}>
           <Likes trackId={track.id} initialLikes={track.likes_count} initialIsLiked={track.is_liked} />
           <Comments trackId={track.id} />
+          {hasLyrics && (
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setLyricsVisible(true)} hitSlop={HIT}>
+              <MaterialIcons name="lyrics" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.actionRight}>
@@ -238,21 +251,57 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Floating lyrics page */}
+      <Modal
+        visible={lyricsVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setLyricsVisible(false)}
+      >
+        <View style={styles.lyricsOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setLyricsVisible(false)} />
+          <View style={styles.lyricsSheet}>
+            <View style={styles.lyricsHandle} />
+            <View style={styles.lyricsHeader}>
+              <View style={styles.lyricsHeaderText}>
+                <Text style={styles.lyricsTitle} numberOfLines={1}>{track.title}</Text>
+                <Text style={styles.lyricsArtist} numberOfLines={1}>{track.artist?.username}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setLyricsVisible(false)} hitSlop={HIT} style={styles.lyricsClose}>
+                <Ionicons name="close" size={26} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.lyricsBody}
+              contentContainerStyle={styles.lyricsContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.lyricsText}>
+                {track.lyrics?.trim() || 'No lyrics added for this track.'}
+              </Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.sm,
     marginVertical: spacing.xs,
     marginHorizontal: spacing.sm,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
     ...shadows.sm,
   },
+  // Faint bluish veil over the blur so the card reads as glass tinted toward
+  // the deep-blue background instead of a hard opaque panel.
+  glassTint: { backgroundColor: 'rgba(16,46,80,0.30)' },
   cardActive: { borderColor: colors.primary },
   mainRow: { flexDirection: 'row', alignItems: 'center' },
   coverWrap: { borderRadius: radius.md, overflow: 'hidden' },
@@ -286,6 +335,51 @@ const styles = StyleSheet.create({
   iconBtn: { padding: spacing.xs },
   downloadProgress: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.xs },
   downloadText: { color: colors.textSecondary, fontSize: 12 },
+
+  // Floating lyrics page
+  lyricsOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  lyricsSheet: {
+    height: '82%',
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.lg,
+  },
+  lyricsHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  lyricsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  lyricsHeaderText: { flex: 1, marginRight: spacing.sm },
+  lyricsTitle: { ...typography.h3, color: colors.textPrimary },
+  lyricsArtist: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  lyricsClose: { padding: spacing.xs },
+  lyricsBody: { flex: 1 },
+  lyricsContent: { paddingVertical: spacing.lg },
+  lyricsText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 26,
+  },
 });
 
 export default TrackItem;
