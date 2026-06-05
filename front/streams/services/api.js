@@ -318,6 +318,11 @@ export const likePost = async (postId) => {
     return apiRequest('post', `/tracks/${trackId}/toggle-like/`); // Change to hyphen
   };
 
+  // Favorite == like server-side (both toggle a Like row). Returns a status.
+  export const toggleTrackFavorite = async (trackId) => {
+    return apiRequest('post', `/tracks/${trackId}/toggle-favorite/`);
+  };
+
   
   export const favoriteTrack = async (trackId) => {
     return apiRequest('post', `/tracks/${trackId}/favorite/`);
