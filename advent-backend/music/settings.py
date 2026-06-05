@@ -59,6 +59,7 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = [
     'web-production-f266.up.railway.app',
     '192.168.1.126',
+    '192.168.8.9',
     'localhost',
     '127.0.0.1',
     '.railway.app',
