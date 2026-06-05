@@ -1,4 +1,5 @@
 from .common import *  # noqa: F401,F403
+from django.db.models import Exists, OuterRef
 
 
 class CloudinarySignView(APIView):
@@ -136,6 +137,37 @@ class TrackViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = StandardPagination
 
+    def get_queryset(self):
+        """Optimized track list.
+
+        - select_related('artist__profile') so the serializer's artist +
+          avatar don't trigger a query per row.
+        - annotate likes_total (one COUNT instead of a query per row) and
+          liked_by_me (per-user, avoids the is_liked N+1).
+        - optional ?search= over title / album / artist username.
+        """
+        user = self.request.user
+        qs = (
+            Track.objects
+            .select_related('artist__profile')
+            .annotate(likes_total=Count('likes', distinct=True))
+        )
+        if user and user.is_authenticated:
+            qs = qs.annotate(
+                liked_by_me=Exists(
+                    Like.objects.filter(track=OuterRef('pk'), user=user)
+                )
+            )
+
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(
+                Q(title__icontains=search)
+                | Q(album__icontains=search)
+                | Q(artist__username__icontains=search)
+            )
+
+        return qs.order_by('-created_at')
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()

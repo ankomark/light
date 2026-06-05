@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable } from 'react-native';
 import { BlurView } from 'expo-blur';
 import Likes from './LikeButton';
@@ -10,7 +10,6 @@ import * as Sharing from 'expo-sharing';
 import axios from 'axios';
 import { API_URL, getAccessToken, toggleTrackFavorite } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
-import { useAuth } from '../context/useAuth';
 import { usePlayer } from '../context/PlayerContext';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
@@ -18,12 +17,10 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 const TrackItem = ({ track, onDelete, onRefresh }) => {
-  const { processProfilePicture } = useAuth();
   const navigation = useNavigation();
   const { currentTrack, isPlaying, isLoading, isBuffering, playTrack } = usePlayer();
   const isOwner = track.is_owner;
 
-  const [artistProfile, setArtistProfile] = useState(null);
   const [profileImageError, setProfileImageError] = useState(false);
   const [isFavorite, setIsFavorite] = useState(Boolean(track.is_liked));
   const [favBusy, setFavBusy] = useState(false);
@@ -40,29 +37,13 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
   const optimizedAudio = track.audio_file?.includes('cloudinary')
     ? track.audio_file.replace('/upload/', '/upload/q_auto/')
     : track.audio_file;
-  const optimizedProfile = artistProfile?.picture ? processProfilePicture(artistProfile.picture, 50) : null;
+  // The artist avatar already ships with the track payload
+  // (DetailedUserSerializer.profile_picture) — no per-row request needed.
+  const artistAvatar = track.artist?.profile_picture || null;
 
   const isActive = currentTrack?.id === track.id;
   const showPause = isActive && isPlaying;
   const showSpinner = isActive && (isLoading || isBuffering);
-
-  useEffect(() => {
-    let active = true;
-    const fetchArtistProfile = async () => {
-      try {
-        const token = await getAccessToken();
-        if (!token) return;
-        const response = await axios.get(`${API_URL}/profiles/by_user/${track.artist.id}/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (active) setArtistProfile(response.data);
-      } catch (error) {
-        if (active) setArtistProfile({ picture: null });
-      }
-    };
-    if (track?.artist?.id) fetchArtistProfile();
-    return () => { active = false; };
-  }, [track.artist?.id]);
 
   const handlePlay = () => {
     playTrack({
@@ -185,7 +166,7 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
           </Text>
           <View style={styles.artistRow}>
             <Image
-              source={profileImageError || !optimizedProfile ? DEFAULT_AVATAR : { uri: optimizedProfile, cache: 'force-cache' }}
+              source={profileImageError || !artistAvatar ? DEFAULT_AVATAR : { uri: artistAvatar, cache: 'force-cache' }}
               style={styles.avatar}
               defaultSource={DEFAULT_AVATAR}
               onError={() => setProfileImageError(true)}

@@ -229,8 +229,10 @@ export const checkProfileExistence = async () => {
 };
 
 // Track endpoints
-export const fetchTracks = async (page = 1) => {
-  return apiRequest('get', '/tracks/', null, { params: { page, page_size: 20 } });
+export const fetchTracks = async (page = 1, search = '') => {
+  const params = { page, page_size: 20 };
+  if (search) params.search = search;
+  return apiRequest('get', '/tracks/', null, { params });
 };
 
 export const createTrack = async (formData) => {

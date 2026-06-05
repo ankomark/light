@@ -30,13 +30,24 @@ class TrackSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Title cannot be empty")
         return value.strip()
      def get_favorite(self, obj):
-        user = self.context['request'].user
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not (user and user.is_authenticated):
+            return False
         return Like.objects.filter(user=user, track=obj).exists()
      def get_likes_count(self, obj):
-      return obj.likes.count()
+        # Prefer the annotation set by TrackViewSet.get_queryset to avoid a
+        # COUNT query per row; fall back to a live count for other call sites.
+        count = getattr(obj, 'likes_total', None)
+        return count if count is not None else obj.likes.count()
      def get_is_liked(self, obj):
-        user = self.context['request'].user
-        if user.is_authenticated:
+        # Prefer the per-user annotation (liked_by_me) to avoid an N+1 query.
+        liked = getattr(obj, 'liked_by_me', None)
+        if liked is not None:
+            return liked
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user and user.is_authenticated:
             return obj.likes.filter(user=user).exists()
         return False
   
@@ -44,8 +55,9 @@ class TrackSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         return request and obj.artist == request.user
      def get_is_favorite(self, obj):
-        user = self.context['request'].user
-        return user.is_authenticated and obj.favorites.filter(id=user.id).exists()
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        return bool(user and user.is_authenticated and obj.favorites.filter(id=user.id).exists())
 
 
 

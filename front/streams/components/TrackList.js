@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { 
   View, 
   Text, 
@@ -19,7 +19,6 @@ import { colors } from '../constants/theme';
 
 const TrackList = () => {
   const [tracks, setTracks] = useState([]);
-  const [filteredTracks, setFilteredTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -27,6 +26,11 @@ const TrackList = () => {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
+
+  // The active search term drives server-side filtering. A ref mirrors it so
+  // loadMore / focus reloads read the latest value without stale closures.
+  const searchRef = useRef('');
+  const debounceRef = useRef(null);
 
   // Memoized Cloudinary transformation function
   const getOptimizedMediaUrl = useCallback((url, type = 'image') => {
@@ -49,14 +53,13 @@ const TrackList = () => {
     audio_file: getOptimizedMediaUrl(track.audio_file, 'audio'),
   }), [getOptimizedMediaUrl]);
 
-  const loadTracks = useCallback(async () => {
+  const loadTracks = useCallback(async (search = searchRef.current) => {
     try {
       setRefreshing(true);
       setError(null);
-      const response = await fetchTracks(1);
+      const response = await fetchTracks(1, search);
       const results = (response?.results ?? []).map(processTrack);
       setTracks(results);
-      setFilteredTracks(results);
       setPage(1);
       setHasMore(!!response?.next);
     } catch (err) {
@@ -72,10 +75,9 @@ const TrackList = () => {
     setLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const response = await fetchTracks(nextPage);
+      const response = await fetchTracks(nextPage, searchRef.current);
       const more = (response?.results ?? []).map(processTrack);
       setTracks(prev => [...prev, ...more]);
-      setFilteredTracks(prev => [...prev, ...more]);
       setPage(nextPage);
       setHasMore(!!response?.next);
     } catch {
@@ -85,10 +87,10 @@ const TrackList = () => {
     }
   }, [loadingMore, hasMore, page, processTrack]);
 
-  // Load data on focus and initial mount
+  // Load data on focus and initial mount (preserving any active search).
   useFocusEffect(
     useCallback(() => {
-      loadTracks();
+      loadTracks(searchRef.current);
     }, [loadTracks])
   );
 
@@ -98,26 +100,21 @@ const TrackList = () => {
       cover_image: getOptimizedMediaUrl(newTrack.cover_image, 'image'),
       audio_file: getOptimizedMediaUrl(newTrack.audio_file, 'audio')
     };
-    
+
     setTracks(prev => [optimizedTrack, ...prev]);
-    setFilteredTracks(prev => [optimizedTrack, ...prev]);
   }, [getOptimizedMediaUrl]);
 
+  // Server-side search: debounce keystrokes so we hit the API once the user
+  // pauses, then reload page 1 with the new term.
   const handleSearch = useCallback((searchTerm) => {
-    if (!searchTerm) {
-      setFilteredTracks(tracks);
-      return;
-    }
-    
-    const filtered = tracks.filter((track) =>
-      track.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (track.album && track.album.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-    setFilteredTracks(filtered);
-  }, [tracks]);
+    const term = (searchTerm ?? '').trim();
+    searchRef.current = term;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => loadTracks(term), 350);
+  }, [loadTracks]);
 
   const handleRefresh = useCallback(() => {
-    loadTracks();
+    loadTracks(searchRef.current);
   }, [loadTracks]);
 
   if (loading && !refreshing) {
@@ -148,14 +145,13 @@ const TrackList = () => {
       <SearchBar onSearch={handleSearch} />
       
       <FlatList
-        data={filteredTracks}
+        data={tracks}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <TrackItem
             track={item}
             onDelete={(deletedId) => {
               setTracks(prev => prev.filter(t => t.id !== deletedId));
-              setFilteredTracks(prev => prev.filter(t => t.id !== deletedId));
             }}
             onRefresh={loadTracks}
           />
@@ -178,7 +174,9 @@ const TrackList = () => {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No tracks found</Text>
+            <Text style={styles.emptyText}>
+              {searchRef.current ? `No tracks match "${searchRef.current}"` : 'No tracks found'}
+            </Text>
           </View>
         }
         initialNumToRender={5}
