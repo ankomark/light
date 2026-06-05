@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import PlayControls from './PlayControls';
 import Likes from './LikeButton';
 import Comments from './Comments';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -11,6 +10,7 @@ import axios from 'axios';
 import { API_URL, getAccessToken, toggleTrackFavorite } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
+import { usePlayer } from '../context/PlayerContext';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -19,6 +19,7 @@ const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 const TrackItem = ({ track, onDelete, onRefresh }) => {
   const { processProfilePicture } = useAuth();
   const navigation = useNavigation();
+  const { currentTrack, isPlaying, isLoading, isBuffering, playTrack } = usePlayer();
   const isOwner = track.is_owner;
 
   const [artistProfile, setArtistProfile] = useState(null);
@@ -30,12 +31,16 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
   const [downloadError, setDownloadError] = useState(null);
 
   const optimizedCover = track.cover_image?.includes('cloudinary')
-    ? track.cover_image.replace('/upload/', '/upload/w_600,h_600,c_fill,q_auto,f_auto/')
+    ? track.cover_image.replace('/upload/', '/upload/w_200,h_200,c_fill,q_auto,f_auto/')
     : track.cover_image;
   const optimizedAudio = track.audio_file?.includes('cloudinary')
     ? track.audio_file.replace('/upload/', '/upload/q_auto/')
     : track.audio_file;
   const optimizedProfile = artistProfile?.picture ? processProfilePicture(artistProfile.picture, 50) : null;
+
+  const isActive = currentTrack?.id === track.id;
+  const showPause = isActive && isPlaying;
+  const showSpinner = isActive && (isLoading || isBuffering);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +59,17 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
     if (track?.artist?.id) fetchArtistProfile();
     return () => { active = false; };
   }, [track.artist?.id]);
+
+  const handlePlay = () => {
+    playTrack({
+      id: track.id,
+      title: track.title,
+      album: track.album,
+      artist: track.artist,
+      cover_image: optimizedCover,
+      audio_file: optimizedAudio,
+    });
+  };
 
   const handleToggleFavorite = async () => {
     if (favBusy) return;
@@ -137,57 +153,75 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
   };
 
   return (
-    <View style={styles.card}>
-      {/* Artist header */}
-      <View style={styles.header}>
-        <View style={styles.artistRow}>
-          <Image
-            source={profileImageError || !optimizedProfile ? DEFAULT_AVATAR : { uri: optimizedProfile, cache: 'force-cache' }}
-            style={styles.avatar}
-            defaultSource={DEFAULT_AVATAR}
-            onError={() => setProfileImageError(true)}
-          />
-          <Text style={styles.artistName} numberOfLines={1}>{track.artist?.username}</Text>
-        </View>
+    <View style={[styles.card, isActive && styles.cardActive]}>
+      {/* Main row: cover + play overlay, title/artist, play button */}
+      <View style={styles.mainRow}>
+        <TouchableOpacity style={styles.coverWrap} onPress={handlePlay} activeOpacity={0.85}>
+          {optimizedCover ? (
+            <Image source={{ uri: optimizedCover }} style={styles.cover} />
+          ) : (
+            <View style={[styles.cover, styles.coverPlaceholder]}>
+              <Ionicons name="musical-notes" size={26} color={colors.textMuted} />
+            </View>
+          )}
+          {isActive && (
+            <View style={styles.coverBadge}>
+              <Ionicons name={showPause ? 'volume-high' : 'pause'} size={14} color={colors.white} />
+            </View>
+          )}
+        </TouchableOpacity>
 
-        {isOwner && (
-          <View style={styles.ownerActions}>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('EditTrack', { track })} hitSlop={HIT}>
-              <MaterialIcons name="edit" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={handleDelete} hitSlop={HIT}>
-              <MaterialIcons name="delete-outline" size={18} color={colors.error} />
-            </TouchableOpacity>
+        <TouchableOpacity style={styles.info} onPress={handlePlay} activeOpacity={0.7}>
+          <Text style={[styles.title, isActive && styles.titleActive]} numberOfLines={1}>
+            {track.title}
+          </Text>
+          <View style={styles.artistRow}>
+            <Image
+              source={profileImageError || !optimizedProfile ? DEFAULT_AVATAR : { uri: optimizedProfile, cache: 'force-cache' }}
+              style={styles.avatar}
+              defaultSource={DEFAULT_AVATAR}
+              onError={() => setProfileImageError(true)}
+            />
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {track.artist?.username}
+              {!!track.album && `  ·  ${track.album}`}
+            </Text>
           </View>
-        )}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.playButton} onPress={handlePlay} activeOpacity={0.85}>
+          {showSpinner ? (
+            <ActivityIndicator color={colors.white} size="small" />
+          ) : (
+            <Ionicons
+              name={showPause ? 'pause' : 'play'}
+              size={22}
+              color={colors.white}
+              style={!showPause && { marginLeft: 2 }}
+            />
+          )}
+        </TouchableOpacity>
       </View>
 
-      {/* Cover art */}
-      <View style={styles.coverWrap}>
-        {optimizedCover ? (
-          <Image source={{ uri: optimizedCover }} style={styles.cover} />
-        ) : (
-          <View style={[styles.cover, styles.coverPlaceholder]}>
-            <Ionicons name="musical-notes" size={56} color={colors.textMuted} />
-          </View>
-        )}
-      </View>
-
-      {/* Title + album */}
-      <Text style={styles.title} numberOfLines={1}>{track.title}</Text>
-      {!!track.album && <Text style={styles.album} numberOfLines={1}>{track.album}</Text>}
-
-      {/* Player */}
-      <PlayControls track={{ ...track, audio_file: optimizedAudio }} />
-
-      {/* Action bar */}
+      {/* Compact action bar */}
       <View style={styles.actionBar}>
         <View style={styles.actionLeft}>
-          <Likes trackId={track.id} initialLikes={track.likes_count} />
+          <Likes trackId={track.id} initialLikes={track.likes_count} initialIsLiked={track.is_liked} />
           <Comments trackId={track.id} />
         </View>
 
         <View style={styles.actionRight}>
+          {isOwner && (
+            <>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('EditTrack', { track })} hitSlop={HIT}>
+                <MaterialIcons name="edit" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iconBtn} onPress={handleDelete} hitSlop={HIT}>
+                <MaterialIcons name="delete-outline" size={18} color={colors.error} />
+              </TouchableOpacity>
+            </>
+          )}
+
           {isDownloading ? (
             <View style={styles.downloadProgress}>
               <ActivityIndicator size="small" color={colors.primary} />
@@ -195,12 +229,12 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
             </View>
           ) : (
             <TouchableOpacity style={styles.iconBtn} onPress={handleDownload} hitSlop={HIT}>
-              <MaterialIcons name={downloadError ? 'error-outline' : 'file-download'} size={22} color={downloadError ? colors.error : colors.textSecondary} />
+              <MaterialIcons name={downloadError ? 'error-outline' : 'file-download'} size={20} color={downloadError ? colors.error : colors.textSecondary} />
             </TouchableOpacity>
           )}
 
           <TouchableOpacity style={styles.iconBtn} onPress={handleToggleFavorite} hitSlop={HIT} disabled={favBusy}>
-            <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={24} color={isFavorite ? colors.error : colors.textSecondary} />
+            <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={22} color={isFavorite ? colors.error : colors.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -212,29 +246,43 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
-    padding: spacing.md,
-    marginVertical: spacing.sm,
+    padding: spacing.sm,
+    marginVertical: spacing.xs,
     marginHorizontal: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    ...shadows.md,
+    ...shadows.sm,
   },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
-  artistRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  avatar: { width: 34, height: 34, borderRadius: 17, marginRight: spacing.sm, backgroundColor: colors.surface },
-  artistName: { ...typography.label, color: colors.textPrimary, flexShrink: 1 },
-  ownerActions: { flexDirection: 'row', gap: spacing.sm },
-  coverWrap: { borderRadius: radius.md, overflow: 'hidden', ...shadows.sm },
-  cover: { width: '100%', aspectRatio: 1, borderRadius: radius.md, backgroundColor: colors.surface },
+  cardActive: { borderColor: colors.primary },
+  mainRow: { flexDirection: 'row', alignItems: 'center' },
+  coverWrap: { borderRadius: radius.md, overflow: 'hidden' },
+  cover: { width: 60, height: 60, borderRadius: radius.md, backgroundColor: colors.surface },
   coverPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  title: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.md },
-  album: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  coverBadge: {
+    position: 'absolute', top: 4, right: 4,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  info: { flex: 1, marginHorizontal: spacing.sm },
+  title: { ...typography.label, fontSize: 15, color: colors.textPrimary },
+  titleActive: { color: colors.primary },
+  artistRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  avatar: { width: 18, height: 18, borderRadius: 9, marginRight: spacing.xs, backgroundColor: colors.surface },
+  subtitle: { ...typography.caption, color: colors.textSecondary, flexShrink: 1 },
+  playButton: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: colors.primary, shadowOpacity: 0.4, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 }, elevation: 5,
+  },
   actionBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border,
+    marginTop: spacing.sm, paddingTop: spacing.xs, borderTopWidth: 1, borderTopColor: colors.border,
   },
-  actionLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
-  actionRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  actionLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  actionRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   iconBtn: { padding: spacing.xs },
   downloadProgress: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.xs },
   downloadText: { color: colors.textSecondary, fontSize: 12 },

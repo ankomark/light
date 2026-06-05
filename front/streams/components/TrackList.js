@@ -227,7 +227,8 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   trackList: {
-    paddingBottom: 20,
+    paddingTop: 6,
+    paddingBottom: 110,
   },
   emptyContainer: {
     flex: 1,
@@ -242,7 +243,7 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 20,
-    bottom: 20,
+    bottom: 96,
     backgroundColor: '#1DB954',
     width: 56,
     height: 56,

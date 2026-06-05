@@ -63,6 +63,8 @@ import CreateStoryScreen from './components/CreateStoryScreen';
 
 
 import { useAuth } from './context/useAuth';
+import { PlayerProvider } from './context/PlayerContext';
+import MiniPlayer from './components/MiniPlayer';
 import { addNotificationResponseListener } from './services/pushNotifications';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -113,6 +115,7 @@ const App = () => {
     return (
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
       <AuthInitializer>
+      <PlayerProvider>
 
         <NavigationContainer ref={navigationRef}>
             <Stack.Navigator
@@ -174,7 +177,9 @@ const App = () => {
               
 
             </Stack.Navigator>
+            <MiniPlayer />
         </NavigationContainer>
+      </PlayerProvider>
       </AuthInitializer>
       </ErrorBoundary>
     );

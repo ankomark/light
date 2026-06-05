@@ -15,7 +15,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.yourcompany.yourapp",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["audio"]
       }
     },
     "android": {

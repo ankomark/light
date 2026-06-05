@@ -28,6 +28,7 @@ const FavoritesPage = () => {
                     data={favoriteTracks}
                     keyExtractor={(track) => track.id.toString()}
                     renderItem={({ item }) => <TrackItem track={item} />}
+                    contentContainerStyle={{ paddingBottom: 110 }}
                 />
             ) : (
                 <Text style={styles.noFavorites}>No favorite tracks yet!</Text>
