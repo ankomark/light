@@ -13,18 +13,12 @@ const { width } = Dimensions.get('window');
 
 const Header = () => {
     const navigation = useNavigation();
-    const { 
-        currentUser, 
-        isAuthenticated, 
-        isLoading, 
-        logout,
-        updateUser 
+    const {
+        currentUser,
+        isAuthenticated,
+        isLoading,
+        updateUser
     } = useAuth();  // Use the auth hook
-
-    const handleLogout = async () => {
-        await logout();
-        navigation.navigate('Home');
-    };
 
     return (
         <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -68,23 +62,14 @@ const Header = () => {
                     </TouchableOpacity>
 
                     {isAuthenticated ? (
-                        <>
-                            <TouchableOpacity 
-                                onPress={handleLogout} 
-                                style={styles.logoutButton}
-                            >
-                                <Text style={styles.logoutButtonText}>Log Out</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
-                                <Image
-                                    source={{ uri: currentUser?.profile_picture }}
-                                    style={styles.profilePicture}
-                                    defaultSource={require('../assets/avatar-placeholder.jpg')}
-                                    onError={() => {}}
-                                />
-                            </TouchableOpacity>
-                        </>
+                        <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+                            <Image
+                                source={{ uri: currentUser?.profile_picture }}
+                                style={styles.profilePicture}
+                                defaultSource={require('../assets/avatar-placeholder.jpg')}
+                                onError={() => {}}
+                            />
+                        </TouchableOpacity>
                     ) : (
                         <>
                             <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>

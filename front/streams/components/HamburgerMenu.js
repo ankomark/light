@@ -20,6 +20,7 @@ import {
   Feather
 } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../context/useAuth';
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,6 +39,7 @@ const COLORS = {
 
 function HamburgerMenu() {
   const navigation = useNavigation();
+  const { isAuthenticated, logout } = useAuth();
   const [menuVisible, setMenuVisible] = useState(false);
 
   const toggleMenu = () => {
@@ -47,6 +49,15 @@ function HamburgerMenu() {
   const navigateTo = (screen) => {
     setMenuVisible(false);
     navigation.navigate(screen.replace(/\s+/g, ''));
+  };
+
+  const handleLogout = async () => {
+    setMenuVisible(false);
+    try {
+      await logout();
+    } finally {
+      navigation.navigate('Home');
+    }
   };
 
   const menuItems = [
@@ -116,6 +127,24 @@ function HamburgerMenu() {
                 <Ionicons name="chevron-forward" size={20} color={COLORS.light} />
               </Pressable>
             ))}
+
+            {isAuthenticated && (
+              <Pressable
+                onPress={handleLogout}
+                android_ripple={{ color: '#f5c6cb' }}
+                style={({ pressed }) => [
+                  styles.menuItem,
+                  styles.logoutItem,
+                  { backgroundColor: pressed ? '#FFE9E9' : COLORS.cardBg },
+                ]}
+              >
+                <View style={styles.menuItemLeft}>
+                  <MaterialIcons name="logout" size={22} color={COLORS.accent} />
+                  <Text style={[styles.menuText, styles.logoutText]}>Log Out</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.accent} />
+              </Pressable>
+            )}
           </ScrollView>
         </SafeAreaView>
       </Modal>
@@ -181,6 +210,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.dark,
     fontWeight: '500',
+  },
+  logoutItem: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+  },
+  logoutText: {
+    color: COLORS.accent,
+    fontWeight: '700',
   },
 });
 
