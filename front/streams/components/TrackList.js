@@ -135,7 +135,7 @@ const TrackList = () => {
   if (loading && !refreshing) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#1DB954" />
+        <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.loadingText}>Loading tracks...</Text>
       </View>
     );
@@ -198,15 +198,15 @@ const TrackList = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            colors={['#1DB954']}
-            tintColor="#1DB954"
+            colors={[colors.primary]}
+            tintColor={colors.primary}
           />
         }
         onEndReached={loadMoreTracks}
         onEndReachedThreshold={0.5}
         ListFooterComponent={
           loadingMore
-            ? <ActivityIndicator size="small" color="#1DB954" style={{ marginVertical: 12 }} />
+            ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 12 }} />
             : null
         }
         ListEmptyComponent={
@@ -234,8 +234,8 @@ const TrackList = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#06245fff',
-    borderRadius:15
+    backgroundColor: colors.bg,
+    borderRadius: 15,
   },
   center: {
     flex: 1,
@@ -245,15 +245,15 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 10,
-    color: '#666',
+    color: colors.textSecondary,
   },
   error: {
-    color: '#ff3333',
+    color: colors.error,
     marginBottom: 20,
     textAlign: 'center',
   },
   retryButton: {
-    backgroundColor: '#1DB954',
+    backgroundColor: colors.primary,
     padding: 10,
     borderRadius: 5,
   },
@@ -303,14 +303,14 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   emptyText: {
-    color: '#666',
+    color: colors.textMuted,
     fontSize: 16,
   },
   fab: {
     position: 'absolute',
     right: 20,
     bottom: 96,
-    backgroundColor: '#1DB954',
+    backgroundColor: colors.primary,
     width: 56,
     height: 56,
     borderRadius: 28,

@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { API_URL, getAccessToken } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
 const TrackUploadForm = () => {
   const navigation = useNavigation();
@@ -243,7 +244,7 @@ const TrackUploadForm = () => {
               value={trackData.title}
               onChangeText={(text) => setTrackData({...trackData, title: text})}
               placeholder="Enter track title"
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.placeholder}
               editable={!isUploading}
             />
           </View>
@@ -316,7 +317,7 @@ const TrackUploadForm = () => {
               value={trackData.album}
               onChangeText={(text) => setTrackData({...trackData, album: text})}
               placeholder="Enter album name"
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.placeholder}
               editable={!isUploading}
             />
           </View>
@@ -328,7 +329,7 @@ const TrackUploadForm = () => {
               value={trackData.lyrics}
               onChangeText={(text) => setTrackData({...trackData, lyrics: text})}
               placeholder="Enter lyrics"
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.placeholder}
               multiline
               numberOfLines={6}
               editable={!isUploading}
@@ -344,7 +345,7 @@ const TrackUploadForm = () => {
             disabled={isUploading}
           >
             {isUploading ? (
-              <ActivityIndicator color="#fff" size="small" />
+              <ActivityIndicator color={colors.white} size="small" />
             ) : (
               <Text style={styles.submitButtonText}>Upload Track</Text>
             )}
@@ -358,72 +359,70 @@ const TrackUploadForm = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.bg,
   },
   scrollContainer: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: spacing.md,
+    paddingBottom: spacing.xl,
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.md,
   },
   header: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#2c3e50',
-    marginBottom: 24,
+    ...typography.h2,
+    color: colors.textPrimary,
+    marginBottom: spacing.lg,
     textAlign: 'center',
   },
   formGroup: {
-    marginBottom: 20,
+    marginBottom: spacing.md + 4,
   },
   label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#34495e',
-    marginBottom: 8,
+    ...typography.label,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
   },
   input: {
     height: 50,
     borderWidth: 1,
-    borderColor: '#e0e6ed',
-    borderRadius: 8,
-    paddingHorizontal: 16,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
     fontSize: 16,
-    color: '#2c3e50',
-    backgroundColor: '#f8fafc',
+    color: colors.textPrimary,
+    backgroundColor: colors.inputBg,
   },
   textArea: {
     height: 150,
     borderWidth: 1,
-    borderColor: '#e0e6ed',
-    borderRadius: 8,
-    padding: 16,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
     fontSize: 16,
-    color: '#2c3e50',
-    backgroundColor: '#f8fafc',
+    color: colors.textPrimary,
+    backgroundColor: colors.inputBg,
     textAlignVertical: 'top',
   },
   button: {
-    backgroundColor: '#4a6da7',
+    backgroundColor: colors.surface,
     padding: 14,
-    borderRadius: 8,
+    borderRadius: radius.md,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   buttonText: {
-    color: '#fff',
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: '500',
   },
   buttonDisabled: {
-    backgroundColor: '#b5c4e3',
+    opacity: 0.5,
   },
   statusMessage: {
     fontSize: 14,
@@ -431,44 +430,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   statusInfo: {
-    color: '#7f8c8d',
+    color: colors.textMuted,
   },
   statusSuccess: {
-    color: '#27ae60',
+    color: colors.success,
   },
   previewControls: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 12,
+    marginTop: spacing.sm + 4,
     gap: 10,
   },
   previewButton: {
-    backgroundColor: '#1DB954',
+    backgroundColor: colors.surface,
     padding: 10,
-    borderRadius: 6,
+    borderRadius: radius.sm,
     flex: 1,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
   previewButtonText: {
-    color: '#fff',
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '500',
   },
   submitButton: {
-    backgroundColor: '#191414',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    padding: spacing.md,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
+    marginTop: spacing.md,
+    ...shadows.sm,
   },
   submitButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '600',
   },
   submitButtonDisabled: {
-    backgroundColor: '#555',
+    opacity: 0.6,
   },
 });
 
