@@ -645,7 +645,7 @@ const processPost = (post, existingFollowStates = {}) => {
   };
 };
 
-const PostMedia = React.memo(({ item, videoRefs, isFocused }) => {
+const PostMedia = React.memo(function PostMedia({ item, videoRefs, isFocused }) {
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -928,7 +928,14 @@ const SocialFeed = () => {
     }
     return (
       <View style={styles.postHeader}>
-        <View style={styles.userInfo}>
+        <TouchableOpacity
+          style={styles.userInfo}
+          activeOpacity={0.7}
+          onPress={() => item.user?.id && navigation.navigate('UserProfile', {
+            userId: item.user.id,
+            username: item.user.username,
+          })}
+        >
           <Image
             source={
               item.user.profile_picture && item.user.profile_picture !== AVATAR_FAILED
@@ -949,7 +956,7 @@ const SocialFeed = () => {
               {typeof item.user.followers_count === 'number' ? item.user.followers_count : 0} followers
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.headerActions}>
           {currentUser?.id !== item.user.id && (
             <FollowButton 
@@ -967,7 +974,7 @@ const SocialFeed = () => {
         </View>
       </View>
     );
-  }, [currentUser?.id, handleFollowChange, handlePostUpdate, handlePostDelete]);
+  }, [currentUser?.id, handleFollowChange, handlePostUpdate, handlePostDelete, navigation]);
 
   const renderPostFooter = useCallback(({ item }) => (
     <View style={styles.postFooter}>

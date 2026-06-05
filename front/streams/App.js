@@ -60,6 +60,8 @@ import ExploreScreen from './components/ExploreScreen';
 import EmailVerificationScreen from './components/EmailVerificationScreen';
 import StoryViewer from './components/StoryViewer';
 import CreateStoryScreen from './components/CreateStoryScreen';
+import UserProfileScreen from './components/UserProfileScreen';
+import Profile from './components/Profile';
 
 
 import { useAuth } from './context/useAuth';
@@ -136,6 +138,8 @@ const App = () => {
                 <Stack.Screen name="UploadTrack" component={UploadTrackPage} options={{ headerShown: true }} />
                 <Stack.Screen name="SocialFeed" component={SocialFeedWrapper} />
                 <Stack.Screen name="PostDetail" component={PostDetail} />
+                <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: true, title: 'Profile' }} />
+                <Stack.Screen name="Profile" component={ProfileWrapper} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: true }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnList} options={{ title: 'Hymnal' }}/>
@@ -346,6 +350,15 @@ const SocialFeedWrapper = ({ navigation }) => (
     <View style={{ flex: 1 }}>
         <Header navigation={navigation} />
         <SocialFeed navigation={navigation} />
+    </View>
+);
+
+const ProfileWrapper = ({ navigation }) => (
+    <View style={{ flex: 1 }}>
+        <Header navigation={navigation} />
+        <ErrorBoundary fallbackMessage="Your profile couldn't load.">
+            <Profile />
+        </ErrorBoundary>
     </View>
 );
 export default Sentry.wrap(App);

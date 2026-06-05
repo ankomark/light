@@ -159,6 +159,9 @@ export const apiRequest = async (method, endpoint, data = null, options = {}) =>
   } catch (error) {
     const errorDetails = {
       requestId,
+      method: method?.toUpperCase(),
+      endpoint,
+      url,
       name: error.name,
       message: error.message,
       code: error.code,
@@ -393,6 +396,24 @@ export const fetchFollowingCount = async (userId) => {
 
 export const followUser = async (userId) => {
   return apiRequest('post', `/users/${userId}/follow/`);
+};
+
+// Public user profile: returns the user with nested profile (bio, location,
+// picture_url), followers/following counts, is_following flag and social_posts.
+export const fetchUserById = async (userId) => {
+  return apiRequest('get', `/users/${userId}/`);
+};
+
+// Paginated list of a given user's social posts.
+export const fetchUserPosts = async (userId, page = 1) => {
+  return apiRequest('get', `/users/${userId}/social_posts/`, null, {
+    params: { page, page_size: 18 },
+  });
+};
+
+// A user's profile only (lighter than fetchUserById — no posts payload).
+export const fetchProfileByUser = async (userId) => {
+  return apiRequest('get', `/profiles/by_user/${userId}/`);
 };
 // Utility endpoints
 export const checkAuthStatus = async () => {

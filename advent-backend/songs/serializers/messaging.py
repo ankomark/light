@@ -1,12 +1,28 @@
 from .common import *  # noqa: F401,F403
-from .music import TrackSerializer
-from .social import SocialPostSerializer
+
+
+class NotificationPostSerializer(serializers.ModelSerializer):
+    """Lightweight post reference for notifications.
+
+    Intentionally avoids the full SocialPostSerializer, whose nested
+    ``song -> artist -> social_posts -> song ...`` chain recurses infinitely.
+    """
+    class Meta:
+        model = SocialPost
+        fields = ['id', 'content_type', 'caption', 'created_at']
+
+
+class NotificationTrackSerializer(serializers.ModelSerializer):
+    """Lightweight track reference for notifications (no nested artist)."""
+    class Meta:
+        model = Track
+        fields = ['id', 'title', 'slug']
 
 
 class NotificationSerializer(serializers.ModelSerializer):
     sender = DetailedUserSerializer(read_only=True)
-    post = SocialPostSerializer(read_only=True, required=False)
-    track = TrackSerializer(read_only=True, required=False)
+    post = NotificationPostSerializer(read_only=True, required=False)
+    track = NotificationTrackSerializer(read_only=True, required=False)
     related_comment = serializers.SerializerMethodField()
 
     class Meta:

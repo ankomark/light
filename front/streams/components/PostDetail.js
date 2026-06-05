@@ -177,7 +177,14 @@ const PostDetail = ({ route, navigation }) => {
             <Feather name="arrow-left" size={24} color="#1DA1F2" />
           </TouchableOpacity>
           
-          <View style={styles.userInfo}>
+          <TouchableOpacity
+            style={styles.userInfo}
+            activeOpacity={0.7}
+            onPress={() => post.user?.id && navigation.navigate('UserProfile', {
+              userId: post.user.id,
+              username: post.user.username,
+            })}
+          >
             <Image
               source={post.user.profile_picture ? { uri: getOptimizedUrl(post.user.profile_picture, 'profile') } : DEFAULT_AVATAR}
               defaultSource={DEFAULT_AVATAR}
@@ -188,7 +195,7 @@ const PostDetail = ({ route, navigation }) => {
               }))}
             />
             <Text style={styles.username}>{post.user.username}</Text>
-          </View>
+          </TouchableOpacity>
           
           <PostActions 
             post={post} 
@@ -300,12 +307,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    color: '#333',
   },
   image: {
     width: '100%',
