@@ -1,132 +1,95 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  Alert,
-  StyleSheet,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  ScrollView,
-  Platform
+  View, Text, TextInput, Alert, StyleSheet, TouchableOpacity,
+  KeyboardAvoidingView, ScrollView, Platform, ActivityIndicator,
 } from 'react-native';
-import axios from 'axios';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL, getAccessToken } from '../services/api';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { apiRequest } from '../services/api';
+import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
-const EditTrackScreen = ({ route }) => {
-  const { track } = route.params;
+const EditTrackScreen = () => {
   const navigation = useNavigation();
-  const [title, setTitle] = useState(track.title);
+  const { track } = useRoute().params;
+
+  const [title, setTitle] = useState(track.title || '');
   const [album, setAlbum] = useState(track.album || '');
   const [lyrics, setLyrics] = useState(track.lyrics || '');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const handleUpdate = async () => {
     if (!title.trim()) {
-      Alert.alert('Error', 'Track title is required');
+      Alert.alert('Required', 'Track title is required');
       return;
     }
-
-    setIsSubmitting(true);
-    
+    setSaving(true);
     try {
-      const token = await getAccessToken();
-      const formData = new FormData();
-      
-      formData.append('title', title.trim());
-      formData.append('album', album.trim());
-      formData.append('lyrics', lyrics.trim());
-      
-      // Include the existing audio file in the update
-      // This assumes track.audio_file is the URL to the existing file
-      // You might need to fetch it as a blob first if your backend requires the actual file
-      const audioFile = {
-        uri: track.audio_file,
-        name: 'audio.mp3',
-        type: 'audio/mp3'
-      };
-      formData.append('audio_file', audioFile);
-
-      const response = await axios.put(
-        `${API_URL}/tracks/${track.id}/`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      );
-
-      Alert.alert('Success', 'Track updated successfully');
-      
-      // Navigate back with refresh indicator
-      navigation.navigate('Tracks', { 
-        shouldRefresh: true 
+      // Metadata-only PATCH — no audio re-upload, so it's fast and responsive.
+      await apiRequest('patch', `/tracks/${track.id}/`, {
+        title: title.trim(),
+        album: album.trim(),
+        lyrics: lyrics.trim(),
       });
+      // TrackList reloads on focus, so just go back.
+      navigation.goBack();
     } catch (error) {
-      console.error('Update error:', error.response?.data || error.message);
-      const errorMessage = error.response?.data?.message || 
-                         error.response?.data?.error || 
-                         'Failed to update track. Please try again.';
-      Alert.alert('Error', errorMessage);
+      Alert.alert('Error', error.message || 'Failed to update track. Please try again.');
     } finally {
-      setIsSubmitting(false);
+      setSaving(false);
     }
   };
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.flex}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 85 : 0}
     >
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.header}>Edit Track</Text>
 
+        <Text style={styles.label}>Title</Text>
         <TextInput
           style={styles.input}
           value={title}
           onChangeText={setTitle}
-          placeholder="Track Title *"
-          placeholderTextColor="#888"
+          placeholder="Track title"
+          placeholderTextColor={colors.placeholder}
           maxLength={100}
         />
 
+        <Text style={styles.label}>Album</Text>
         <TextInput
           style={styles.input}
           value={album}
           onChangeText={setAlbum}
-          placeholder="Album Name"
-          placeholderTextColor="#888"
+          placeholder="Album name"
+          placeholderTextColor={colors.placeholder}
           maxLength={100}
         />
 
+        <Text style={styles.label}>Lyrics</Text>
         <TextInput
-          style={[styles.input, styles.lyricsInput]}
+          style={[styles.input, styles.lyrics]}
           value={lyrics}
           onChangeText={setLyrics}
-          placeholder="Lyrics"
-          placeholderTextColor="#888"
+          placeholder="Add lyrics..."
+          placeholderTextColor={colors.placeholder}
           multiline
           textAlignVertical="top"
-          scrollEnabled={false}
-          maxLength={2000}
+          maxLength={5000}
         />
 
         <TouchableOpacity
-          style={[styles.button, isSubmitting && styles.disabledButton]}
+          style={[styles.button, saving && styles.buttonDisabled]}
           onPress={handleUpdate}
-          disabled={isSubmitting}
+          disabled={saving}
+          activeOpacity={0.85}
         >
-          <Text style={styles.buttonText}>
-            {isSubmitting ? 'Updating...' : 'Update Track'}
-          </Text>
+          {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Save Changes</Text>}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.cancel} onPress={() => navigation.goBack()} disabled={saving}>
+          <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -134,50 +97,34 @@ const EditTrackScreen = ({ route }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  content: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  header: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 30,
-    color: '#333',
-    textAlign: 'center',
-  },
+  flex: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  header: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.lg, textAlign: 'center' },
+  label: { ...typography.label, color: colors.textSecondary, marginBottom: spacing.xs, marginTop: spacing.sm },
   input: {
+    backgroundColor: colors.inputBg,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 15,
-    marginBottom: 15,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    color: colors.textPrimary,
     fontSize: 16,
-    color: '#333',
-    backgroundColor: '#f9f9f9',
+    marginBottom: spacing.sm,
   },
-  lyricsInput: {
-    height: 150,
-    textAlignVertical: 'top',
-  },
+  lyrics: { minHeight: 140, textAlignVertical: 'top' },
   button: {
-    backgroundColor: '#1DB954',
-    borderRadius: 8,
-    padding: 16,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    height: 52,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: spacing.lg,
+    ...shadows.md,
   },
-  disabledButton: {
-    backgroundColor: '#90EE90',
-  },
-  buttonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  buttonDisabled: { opacity: 0.6 },
+  buttonText: { ...typography.button, color: colors.white },
+  cancel: { alignItems: 'center', marginTop: spacing.md, padding: spacing.sm },
+  cancelText: { color: colors.textSecondary, fontSize: 15 },
 });
 
 export default EditTrackScreen;

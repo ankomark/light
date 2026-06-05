@@ -152,7 +152,7 @@ const TrackItem = ({ track, onDelete, onRefresh }) => {
 
         {isOwner && (
           <View style={styles.ownerActions}>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('EditTrack', { track, onRefresh })} hitSlop={HIT}>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('EditTrack', { track })} hitSlop={HIT}>
               <MaterialIcons name="edit" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconBtn} onPress={handleDelete} hitSlop={HIT}>

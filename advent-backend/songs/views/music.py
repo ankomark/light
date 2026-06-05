@@ -283,10 +283,12 @@ class CommentViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
+        # Explicit ordering so pagination is consistent (silences DRF's
+        # UnorderedObjectListWarning).
         track_id = self.kwargs.get('track_pk')
         if track_id:
-            return Comment.objects.filter(track_id=track_id)
-        return Comment.objects.all()
+            return Comment.objects.filter(track_id=track_id).order_by('-created_at')
+        return Comment.objects.all().order_by('-created_at')
 
     def perform_create(self, serializer):
         track_id = self.kwargs.get('track_pk')
