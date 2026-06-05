@@ -56,7 +56,9 @@ function HamburgerMenu() {
     try {
       await logout();
     } finally {
-      navigation.navigate('Home');
+      // Reset the stack so the user lands on Login and can't navigate back
+      // into authenticated screens.
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     }
   };
 
