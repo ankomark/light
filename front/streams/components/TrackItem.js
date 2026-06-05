@@ -64,6 +64,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay }) => {
       artist: track.artist,
       cover_image: optimizedCover,
       audio_file: optimizedAudio,
+      lyrics: track.lyrics,
     });
   };
 

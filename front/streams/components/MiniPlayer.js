@@ -13,6 +13,7 @@ import Slider from '@react-native-community/slider';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius, shadows, typography } from '../constants/theme';
 import { usePlayer } from '../context/PlayerContext';
+import { navigate } from '../services/navigationRef';
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
@@ -128,26 +129,32 @@ const MiniPlayer = () => {
       />
 
       <View style={styles.row}>
-        <Animated.View style={[styles.coverWrap, { transform: [{ rotate }] }]}>
-          {cover ? (
-            <Image source={{ uri: cover }} style={styles.cover} />
-          ) : (
-            <View style={[styles.cover, styles.coverPlaceholder]}>
-              <Ionicons name="musical-notes" size={20} color={colors.textMuted} />
-            </View>
-          )}
-          <View style={styles.coverHole} />
-        </Animated.View>
+        <TouchableOpacity
+          style={styles.expandArea}
+          activeOpacity={0.8}
+          onPress={() => navigate('NowPlaying')}
+        >
+          <Animated.View style={[styles.coverWrap, { transform: [{ rotate }] }]}>
+            {cover ? (
+              <Image source={{ uri: cover }} style={styles.cover} />
+            ) : (
+              <View style={[styles.cover, styles.coverPlaceholder]}>
+                <Ionicons name="musical-notes" size={20} color={colors.textMuted} />
+              </View>
+            )}
+            <View style={styles.coverHole} />
+          </Animated.View>
 
-        <View style={styles.meta}>
-          <Text style={styles.title} numberOfLines={1}>
-            {currentTrack.title}
-          </Text>
-          <Text style={styles.sub} numberOfLines={1}>
-            {currentTrack.artist?.username || 'Unknown artist'}
-            {durationMs > 0 ? `  ·  ${formatTime(positionMs)} / ${formatTime(durationMs)}` : ''}
-          </Text>
-        </View>
+          <View style={styles.meta}>
+            <Text style={styles.title} numberOfLines={1}>
+              {currentTrack.title}
+            </Text>
+            <Text style={styles.sub} numberOfLines={1}>
+              {currentTrack.artist?.username || 'Unknown artist'}
+              {durationMs > 0 ? `  ·  ${formatTime(positionMs)} / ${formatTime(durationMs)}` : ''}
+            </Text>
+          </View>
+        </TouchableOpacity>
 
         <View style={styles.controls}>
           <TouchableOpacity onPress={playPrevious} hitSlop={HIT} disabled={!hasPrev}>
@@ -208,6 +215,7 @@ const styles = StyleSheet.create({
   },
   slider: { width: '100%', height: 28 },
   row: { flexDirection: 'row', alignItems: 'center', marginTop: -4 },
+  expandArea: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   coverWrap: {
     width: 44,
     height: 44,

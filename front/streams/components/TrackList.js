@@ -43,6 +43,7 @@ const TrackList = () => {
       artist: t.artist,
       cover_image: t.cover_image,
       audio_file: t.audio_file,
+      lyrics: t.lyrics,
     })),
     [tracks]
   );

@@ -62,6 +62,8 @@ import StoryViewer from './components/StoryViewer';
 import CreateStoryScreen from './components/CreateStoryScreen';
 import UserProfileScreen from './components/UserProfileScreen';
 import Profile from './components/Profile';
+import NowPlaying from './components/NowPlaying';
+import { navigationRef, navigate } from './services/navigationRef';
 
 
 import { useAuth } from './context/useAuth';
@@ -101,14 +103,12 @@ const HymnalAppWrapper = ({ navigation }) => (
 
 
 const App = () => {
-  const navigationRef = React.useRef(null);
-
   // Handle notification taps when app is killed or in background
   React.useEffect(() => {
     const sub = addNotificationResponseListener(response => {
       const data = response.notification.request.content.data;
-      if (data?.postId && navigationRef.current) {
-        navigationRef.current.navigate('PostDetail', { postId: data.postId });
+      if (data?.postId) {
+        navigate('PostDetail', { postId: data.postId });
       }
     });
     return () => sub.remove();
@@ -140,6 +140,7 @@ const App = () => {
                 <Stack.Screen name="PostDetail" component={PostDetail} />
                 <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: true, title: 'Profile' }} />
                 <Stack.Screen name="Profile" component={ProfileWrapper} />
+                <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom' }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: true }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnList} options={{ title: 'Hymnal' }}/>
