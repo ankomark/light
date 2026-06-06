@@ -7,6 +7,9 @@ import React, {
   useCallback,
 } from 'react';
 import { Audio } from 'expo-av';
+import {
+  makeOrder, reshuffleOrder, nextPos, prevPos, canNext, canPrev,
+} from '../utils/queueLogic';
 
 const PlayerContext = createContext(null);
 
@@ -17,16 +20,6 @@ export const usePlayer = () => {
 };
 
 const REPEAT_MODES = ['off', 'all', 'one'];
-
-// Fisher-Yates shuffle of an array (returns a new array).
-const shuffled = (arr) => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
 
 /**
  * Global single-instance audio player with a play queue.
@@ -85,12 +78,11 @@ export const PlayerProvider = ({ children }) => {
   }, []);
 
   const syncNavState = useCallback(() => {
-    const order = orderRef.current;
+    const len = orderRef.current.length;
     const pos = posRef.current;
     const repeat = repeatRef.current;
-    const multi = order.length > 1;
-    setHasNext(order.length > 0 && (pos < order.length - 1 || (repeat === 'all' && multi)));
-    setHasPrev(order.length > 0 && (pos > 0 || (repeat === 'all' && multi)));
+    setHasNext(canNext(len, pos, repeat));
+    setHasPrev(canPrev(len, pos, repeat));
   }, []);
 
   const onStatus = useCallback((status) => {
@@ -166,16 +158,9 @@ export const PlayerProvider = ({ children }) => {
       }
 
       queueRef.current = tracks;
-      const indices = tracks.map((_, i) => i);
-      if (useShuffle) {
-        // Keep the chosen track first, shuffle the rest.
-        const rest = shuffled(indices.filter((i) => i !== startIndex));
-        orderRef.current = [startIndex, ...rest];
-        loadAt(0);
-      } else {
-        orderRef.current = indices;
-        loadAt(startIndex);
-      }
+      const { order, pos } = makeOrder(tracks.length, startIndex, useShuffle);
+      orderRef.current = order;
+      loadAt(pos);
     },
     [loadAt]
   );
@@ -204,19 +189,13 @@ export const PlayerProvider = ({ children }) => {
   );
 
   const playNext = useCallback(() => {
-    const order = orderRef.current;
-    const pos = posRef.current;
-    if (order.length === 0) return;
-    if (pos < order.length - 1) loadAt(pos + 1);
-    else if (repeatRef.current === 'all') loadAt(0);
+    const p = nextPos(orderRef.current.length, posRef.current, repeatRef.current);
+    if (p !== null) loadAt(p);
   }, [loadAt]);
 
   const playPrevious = useCallback(() => {
-    const order = orderRef.current;
-    const pos = posRef.current;
-    if (order.length === 0) return;
-    if (pos > 0) loadAt(pos - 1);
-    else if (repeatRef.current === 'all') loadAt(order.length - 1);
+    const p = prevPos(orderRef.current.length, posRef.current, repeatRef.current);
+    if (p !== null) loadAt(p);
     else soundRef.current?.setPositionAsync(0).catch(() => {}); // restart current
   }, [loadAt]);
 
@@ -228,12 +207,9 @@ export const PlayerProvider = ({ children }) => {
         .catch(() => {});
       return;
     }
-    const order = orderRef.current;
-    const pos = posRef.current;
-    if (pos < order.length - 1) {
-      loadAt(pos + 1);
-    } else if (repeatRef.current === 'all' && order.length > 0) {
-      loadAt(0);
+    const p = nextPos(orderRef.current.length, posRef.current, repeatRef.current);
+    if (p !== null) {
+      loadAt(p);
     } else {
       // End of queue: stop at the start, paused.
       soundRef.current
@@ -252,16 +228,9 @@ export const PlayerProvider = ({ children }) => {
     const order = orderRef.current;
     if (order.length > 0) {
       const currentQueueIdx = order[posRef.current]; // index into queueRef
-      if (next) {
-        const rest = shuffled(
-          queueRef.current.map((_, i) => i).filter((i) => i !== currentQueueIdx)
-        );
-        orderRef.current = [currentQueueIdx, ...rest];
-        posRef.current = 0;
-      } else {
-        orderRef.current = queueRef.current.map((_, i) => i);
-        posRef.current = currentQueueIdx;
-      }
+      const result = reshuffleOrder(queueRef.current.length, currentQueueIdx, next);
+      orderRef.current = result.order;
+      posRef.current = result.pos;
       syncNavState();
     }
   }, [syncNavState]);

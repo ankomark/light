@@ -324,23 +324,28 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    def _serialize_fresh(self, playlist):
+        # Re-fetch a plain instance: the object from get_queryset() carries a
+        # tracks_total annotation captured before the M2M change, which would
+        # make track_count stale in the response.
+        fresh = Playlist.objects.get(pk=playlist.pk)
+        return Response(
+            PlaylistSerializer(fresh, context=self.get_serializer_context()).data
+        )
+
     @action(detail=True, methods=['post'], url_path='add-track')
     def add_track(self, request, pk=None):
         playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
         track = get_object_or_404(Track, id=request.data.get('track_id'))
         playlist.tracks.add(track)
-        return Response(
-            PlaylistSerializer(playlist, context=self.get_serializer_context()).data
-        )
+        return self._serialize_fresh(playlist)
 
     @action(detail=True, methods=['post'], url_path='remove-track')
     def remove_track(self, request, pk=None):
         playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
         track = get_object_or_404(Track, id=request.data.get('track_id'))
         playlist.tracks.remove(track)
-        return Response(
-            PlaylistSerializer(playlist, context=self.get_serializer_context()).data
-        )
+        return self._serialize_fresh(playlist)
 
 
 

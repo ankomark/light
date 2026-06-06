@@ -1,0 +1,30 @@
+name: frontend-tests
+
+on:
+  push:
+    paths:
+      - 'front/streams/**'
+      - '.github/workflows/frontend-tests.yml'
+  pull_request:
+    paths:
+      - 'front/streams/**'
+      - '.github/workflows/frontend-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: front/streams
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Pure unit tests (queue logic) run on the built-in node test runner —
+      # no install needed since they have no third-party dependencies.
+      - name: Run unit tests
+        run: node --test "utils/__tests__/**/*.test.js"

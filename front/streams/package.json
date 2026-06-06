@@ -8,7 +8,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "node --test \"utils/__tests__/**/*.test.js\""
   },
   "dependencies": {
     "@date-io/date-fns": "^3.2.1",
