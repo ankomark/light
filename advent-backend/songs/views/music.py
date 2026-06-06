@@ -265,30 +265,8 @@ class TrackViewSet(viewsets.ModelViewSet):
         return Response({
             'download_url': CloudinaryFieldSerializer().to_representation(track.audio_file)
         })
-    @action(detail=True, methods=['post'])
-    def favorites(self, request):
-   
-        user = request.user
-        if not user.is_authenticated:
-            return Response({'detail': 'Authentication required'}, status=401)
-
-        favorite_tracks = user.favorite_tracks.all()
-        serializer = self.get_serializer(favorite_tracks, many=True)
-        return Response(serializer.data)
-    @action(detail=True, methods=['post'], url_path='toggle-favorite')
-    def toggle_favorite(self, request, pk=None):
-        track = self.get_object()
-        user = request.user
-
-        existing_like = Like.objects.filter(user=user, track=track).first()
-        if existing_like:
-            existing_like.delete()
-            return Response({"status": "Track unfavorited"}, status=status.HTTP_200_OK)
-        
-        Like.objects.create(user=user, track=track)
-        return Response({"status": "Track favorited"}, status=status.HTTP_200_OK)
-
-
+    # "Favorites" == liked tracks. Toggling a favorite is just toggle_like; this
+    # endpoint lists the current user's liked tracks for the Favorites screen.
     @action(detail=False, methods=['get'], url_path='favorites')
     def get_favorites(self, request):
         user = request.user

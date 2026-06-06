@@ -349,23 +349,14 @@ export const likePost = async (postId) => {
     return apiRequest('post', `/tracks/${trackId}/toggle-like/`); // Change to hyphen
   };
 
-  // Favorite == like server-side (both toggle a Like row). Returns a status.
-  export const toggleTrackFavorite = async (trackId) => {
-    return apiRequest('post', `/tracks/${trackId}/toggle-favorite/`);
-  };
-
-  // The current user's favorited tracks. Backend returns a plain array
-  // (TrackViewSet.get_favorites -> Track.objects.filter(likes__user=user)).
+  // Favorite == like in this app: a "favorite" is a track the user has liked,
+  // so toggleTrackLike is the single source of truth. This returns the current
+  // user's liked tracks for the Favorites screen (backend returns a plain array).
   export const getFavoriteTracks = async () => {
     const res = await apiRequest('get', '/tracks/favorites/');
     return res?.results ?? res ?? [];
   };
 
-  
-  export const favoriteTrack = async (trackId) => {
-    return apiRequest('post', `/tracks/${trackId}/favorite/`);
-  };
-  
   // Comment Endpoints
   export const fetchPostComments = async (postId) => {
     const res = await apiRequest('get', `/social-posts/${postId}/comments/`);
@@ -1382,7 +1373,6 @@ export default {
   sharePost,
   downloadPostMedia,
   toggleTrackLike,
-  favoriteTrack,
   fetchPostComments,
   fetchTrackComments,
   fetchUnreadNotificationCount,

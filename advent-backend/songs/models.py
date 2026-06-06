@@ -88,14 +88,14 @@ class Track(models.Model):
     cover_image = CloudinaryField('image', folder='covers/', blank=True, null=True)
     lyrics = models.TextField(blank=True, null=True)
     slug = models.SlugField(unique=True)
-    is_favorite = models.BooleanField(default=False)
     views = models.PositiveIntegerField(default=0)
     downloads = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # A user's "favorites" are the tracks they've liked (the Like model);
+    # there is no separate favorite relation.
     class Meta:
         ordering = ['-created_at']
-    # favorites = models.ManyToManyField(User, related_name='favorite_tracks', blank=True)
 
     def __str__(self):
         return f"{self.title} by {self.artist.username}"

@@ -8,7 +8,7 @@ import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import axios from 'axios';
-import { API_URL, getAccessToken, toggleTrackFavorite } from '../services/api';
+import { API_URL, getAccessToken } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer } from '../context/PlayerContext';
 import AddToPlaylistModal from './AddToPlaylistModal';
@@ -23,8 +23,6 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
   const isOwner = track.is_owner;
 
   const [profileImageError, setProfileImageError] = useState(false);
-  const [isFavorite, setIsFavorite] = useState(Boolean(track.is_liked));
-  const [favBusy, setFavBusy] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
@@ -68,21 +66,6 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
       audio_file: optimizedAudio,
       lyrics: track.lyrics,
     });
-  };
-
-  const handleToggleFavorite = async () => {
-    if (favBusy) return;
-    const next = !isFavorite;
-    setIsFavorite(next); // optimistic
-    setFavBusy(true);
-    try {
-      await toggleTrackFavorite(track.id);
-    } catch (error) {
-      setIsFavorite(!next); // revert on failure
-      Alert.alert('Error', 'Could not update favorite. Please try again.');
-    } finally {
-      setFavBusy(false);
-    }
   };
 
   const handleDelete = () => {
@@ -250,10 +233,6 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
               <MaterialIcons name={downloadError ? 'error-outline' : 'file-download'} size={20} color={downloadError ? colors.error : colors.textSecondary} />
             </TouchableOpacity>
           )}
-
-          <TouchableOpacity style={styles.iconBtn} onPress={handleToggleFavorite} hitSlop={HIT} disabled={favBusy}>
-            <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={22} color={isFavorite ? colors.error : colors.textSecondary} />
-          </TouchableOpacity>
         </View>
       </View>
 

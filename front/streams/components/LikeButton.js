@@ -1,7 +1,6 @@
 
-import React, { useState,useEffect } from 'react';
-import { TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { likePost } from '../services/api'; // API to handle like updates
+import React, { useState, useEffect } from 'react';
+import { TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
 import { toggleTrackLike } from '../services/api';
 const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
     const [likes, setLikes] = useState(initialLikes);
@@ -19,11 +18,6 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
             if (response && typeof response.likes_count === 'number') {
               setLikes(response.likes_count);
               setIsLiked(response.is_liked);
-              
-              // Optional feedback
-              if (response.is_liked) {
-                Alert.alert('Liked!', 'You liked this track', { duration: 1000 });
-              }
             }
           } catch (error) {
             Alert.alert('Error', error.message || 'Failed to update like status');
@@ -38,7 +32,7 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
         testID="like-button"
     >
         <Text style={[styles.likeText, isLiked && styles.liked]}>
-        {isLiked ? '👍' : '🤍'} {likes}
+        {isLiked ? '❤️' : '🤍'} {likes}
         </Text>
     </TouchableOpacity>
     );

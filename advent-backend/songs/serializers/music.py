@@ -4,7 +4,6 @@ from .common import *  # noqa: F401,F403
 class TrackSerializer(serializers.ModelSerializer):
      likes_count = serializers.SerializerMethodField()
      is_liked = serializers.SerializerMethodField()
-    #  favorite = serializers.SerializerMethodField()
      # Lightweight artist ref. The full UserSerializer caused infinite recursion
      # (track.artist -> social_posts -> post.song -> track.artist -> ...), and
      # DetailedUserSerializer still ran a followers COUNT per row (an N+1).
@@ -30,12 +29,6 @@ class TrackSerializer(serializers.ModelSerializer):
         if not value or not value.strip():
             raise serializers.ValidationError("Title cannot be empty")
         return value.strip()
-     def get_favorite(self, obj):
-        request = self.context.get('request')
-        user = getattr(request, 'user', None)
-        if not (user and user.is_authenticated):
-            return False
-        return Like.objects.filter(user=user, track=obj).exists()
      def get_likes_count(self, obj):
         # Prefer the annotation set by TrackViewSet.get_queryset to avoid a
         # COUNT query per row; fall back to a live count for other call sites.
@@ -55,10 +48,6 @@ class TrackSerializer(serializers.ModelSerializer):
      def get_is_owner(self, obj):
         request = self.context.get('request')
         return request and obj.artist == request.user
-     def get_is_favorite(self, obj):
-        request = self.context.get('request')
-        user = getattr(request, 'user', None)
-        return bool(user and user.is_authenticated and obj.favorites.filter(id=user.id).exists())
 
 
 
