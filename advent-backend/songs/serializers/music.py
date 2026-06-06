@@ -5,11 +5,12 @@ class TrackSerializer(serializers.ModelSerializer):
      likes_count = serializers.SerializerMethodField()
      is_liked = serializers.SerializerMethodField()
     #  favorite = serializers.SerializerMethodField()
-     # Lightweight artist ref. Using the full UserSerializer here caused an
-     # infinite serialization loop (track.artist -> social_posts -> post.song
-     # -> track.artist -> ...). DetailedUserSerializer exposes the only fields
-     # the clients read (id, username, profile_picture) and breaks the cycle.
-     artist = DetailedUserSerializer(read_only=True)
+     # Lightweight artist ref. The full UserSerializer caused infinite recursion
+     # (track.artist -> social_posts -> post.song -> track.artist -> ...), and
+     # DetailedUserSerializer still ran a followers COUNT per row (an N+1).
+     # SimpleUserSerializer exposes exactly what clients read (id, username,
+     # profile_picture) with no per-row queries.
+     artist = SimpleUserSerializer(read_only=True)
      is_owner = serializers.SerializerMethodField() 
      audio_file = CloudinaryFieldSerializer()
      cover_image = CloudinaryFieldSerializer(required=False)

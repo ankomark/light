@@ -1,73 +1,71 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
 const {
   shuffle, makeOrder, reshuffleOrder, nextPos, prevPos, canNext, canPrev,
 } = require('../queueLogic');
 
-// Deterministic rng: always returns 0, so Fisher-Yates becomes a fixed reversal
-// of the tail — enough to assert "current stays first, rest reordered".
+// Deterministic rng: always returns 0 so Fisher-Yates is a fixed permutation —
+// enough to assert "current stays first, rest reordered".
 const zeroRng = () => 0;
+const sorted = (a) => [...a].sort((x, y) => x - y);
 
 test('shuffle preserves the multiset of elements', () => {
   const out = shuffle([0, 1, 2, 3, 4], zeroRng);
-  assert.deepEqual([...out].sort((a, b) => a - b), [0, 1, 2, 3, 4]);
-  assert.equal(out.length, 5);
+  expect(sorted(out)).toEqual([0, 1, 2, 3, 4]);
+  expect(out).toHaveLength(5);
 });
 
 test('makeOrder (no shuffle) is identity with pos at startIndex', () => {
-  assert.deepEqual(makeOrder(4, 2, false), { order: [0, 1, 2, 3], pos: 2 });
+  expect(makeOrder(4, 2, false)).toEqual({ order: [0, 1, 2, 3], pos: 2 });
 });
 
 test('makeOrder (shuffle) keeps the chosen track first at pos 0', () => {
   const { order, pos } = makeOrder(4, 2, true, zeroRng);
-  assert.equal(pos, 0);
-  assert.equal(order[0], 2);
-  assert.deepEqual([...order].sort((a, b) => a - b), [0, 1, 2, 3]);
+  expect(pos).toBe(0);
+  expect(order[0]).toBe(2);
+  expect(sorted(order)).toEqual([0, 1, 2, 3]);
 });
 
 test('reshuffleOrder off restores identity with pos at the current track', () => {
-  // currently playing queue index 3 -> identity order, cursor lands on it
-  assert.deepEqual(reshuffleOrder(5, 3, false), { order: [0, 1, 2, 3, 4], pos: 3 });
+  expect(reshuffleOrder(5, 3, false)).toEqual({ order: [0, 1, 2, 3, 4], pos: 3 });
 });
 
 test('reshuffleOrder on keeps current first', () => {
   const { order, pos } = reshuffleOrder(5, 3, true, zeroRng);
-  assert.equal(pos, 0);
-  assert.equal(order[0], 3);
-  assert.deepEqual([...order].sort((a, b) => a - b), [0, 1, 2, 3, 4]);
+  expect(pos).toBe(0);
+  expect(order[0]).toBe(3);
+  expect(sorted(order)).toEqual([0, 1, 2, 3, 4]);
 });
 
 test('nextPos advances, stops at end when repeat off', () => {
-  assert.equal(nextPos(3, 0, 'off'), 1);
-  assert.equal(nextPos(3, 1, 'off'), 2);
-  assert.equal(nextPos(3, 2, 'off'), null);
+  expect(nextPos(3, 0, 'off')).toBe(1);
+  expect(nextPos(3, 1, 'off')).toBe(2);
+  expect(nextPos(3, 2, 'off')).toBeNull();
 });
 
 test('nextPos loops to 0 at end when repeat all', () => {
-  assert.equal(nextPos(3, 2, 'all'), 0);
+  expect(nextPos(3, 2, 'all')).toBe(0);
 });
 
 test('nextPos on empty queue is null', () => {
-  assert.equal(nextPos(0, 0, 'all'), null);
+  expect(nextPos(0, 0, 'all')).toBeNull();
 });
 
 test('prevPos goes back, null at start when repeat off', () => {
-  assert.equal(prevPos(3, 2, 'off'), 1);
-  assert.equal(prevPos(3, 0, 'off'), null);
+  expect(prevPos(3, 2, 'off')).toBe(1);
+  expect(prevPos(3, 0, 'off')).toBeNull();
 });
 
 test('prevPos wraps to last when repeat all', () => {
-  assert.equal(prevPos(3, 0, 'all'), 2);
+  expect(prevPos(3, 0, 'all')).toBe(2);
 });
 
 test('canNext / canPrev reflect bounds and repeat-all (needs >1 track)', () => {
-  assert.equal(canNext(3, 0, 'off'), true);
-  assert.equal(canNext(3, 2, 'off'), false);
-  assert.equal(canNext(3, 2, 'all'), true);
-  assert.equal(canNext(1, 0, 'all'), false); // single track: nowhere to go
+  expect(canNext(3, 0, 'off')).toBe(true);
+  expect(canNext(3, 2, 'off')).toBe(false);
+  expect(canNext(3, 2, 'all')).toBe(true);
+  expect(canNext(1, 0, 'all')).toBe(false); // single track: nowhere to go
 
-  assert.equal(canPrev(3, 2, 'off'), true);
-  assert.equal(canPrev(3, 0, 'off'), false);
-  assert.equal(canPrev(3, 0, 'all'), true);
-  assert.equal(canPrev(1, 0, 'all'), false);
+  expect(canPrev(3, 2, 'off')).toBe(true);
+  expect(canPrev(3, 0, 'off')).toBe(false);
+  expect(canPrev(3, 0, 'all')).toBe(true);
+  expect(canPrev(1, 0, 'all')).toBe(false);
 });

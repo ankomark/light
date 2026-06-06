@@ -5,10 +5,12 @@ Run with the project's test settings:
     python manage.py test songs.tests.test_music --settings=music.settings_test
 """
 from django.core.cache import cache
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from songs.models import User, Track, Playlist, Like, SocialPost, Notification
+from songs.models import User, Track, Playlist, Like, SocialPost, Notification, Profile
 
 
 def make_track(artist, title='Song', album='', audio='audio/sample'):
@@ -179,3 +181,68 @@ class NotificationSerializationTests(APITestCase):
         # Slim refs: track has no nested artist, post carries only basic fields.
         self.assertNotIn('artist', note['track'])
         self.assertNotIn('tracks', note['post'])
+
+
+class QueryCountTests(APITestCase):
+    """Lock in the N+1 fixes: the number of DB queries for a list endpoint must
+    stay constant as the number of rows grows. An N+1 regression (a query per
+    row) would make the count grow and fail these tests."""
+
+    def setUp(self):
+        cache.clear()
+        self.viewer = User.objects.create_user(username='viewer', password='pw12345!')
+        self.a1 = User.objects.create_user(username='a1', password='pw12345!')
+        self.a2 = User.objects.create_user(username='a2', password='pw12345!')
+        # Artists need profiles so artist__profile (the join we added) is exercised.
+        Profile.objects.create(user=self.a1)
+        Profile.objects.create(user=self.a2)
+
+    def _query_count(self, url):
+        with CaptureQueriesContext(connection) as ctx:
+            res = self.client.get(url)
+            self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return len(ctx.captured_queries)
+
+    def test_track_list_query_count_is_constant(self):
+        self.client.force_authenticate(self.viewer)
+        for i in range(3):
+            make_track(self.a1, title=f'A{i}')
+            make_track(self.a2, title=f'B{i}')
+
+        self.client.get('/api/tracks/')  # warm up any one-time queries
+        small = self._query_count('/api/tracks/')
+
+        # Double the rows (and spread across artists/likes).
+        for i in range(6):
+            t = make_track(self.a1, title=f'C{i}')
+            Like.objects.create(user=self.viewer, track=t)
+        large = self._query_count('/api/tracks/')
+
+        self.assertEqual(
+            small, large,
+            f'Track list query count grew with rows ({small} -> {large}); N+1 reintroduced.'
+        )
+        # Gross-regression guard: a per-row query would blow past this.
+        self.assertLessEqual(small, 6)
+
+    def test_playlist_list_query_count_is_constant(self):
+        self.client.force_authenticate(self.viewer)
+        Profile.objects.create(user=self.viewer)
+        tracks = [make_track(self.a1, title=f'T{i}') for i in range(4)]
+        first = Playlist.objects.create(user=self.viewer, name='First')
+        first.tracks.add(*tracks)
+
+        self.client.get('/api/playlists/')  # warm up
+        small = self._query_count('/api/playlists/')
+
+        # More playlists, each with tracks -> must not add per-playlist queries.
+        for k in range(3):
+            extra = Playlist.objects.create(user=self.viewer, name=f'Extra{k}')
+            extra.tracks.add(*tracks)
+        large = self._query_count('/api/playlists/')
+
+        self.assertEqual(
+            small, large,
+            f'Playlist list query count grew with rows ({small} -> {large}); N+1 reintroduced.'
+        )
+        self.assertLessEqual(small, 6)
