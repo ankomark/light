@@ -1,34 +1,73 @@
 from .common import *  # noqa: F401,F403
+from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField
 
 
 class SocialPostViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
-    queryset = SocialPost.objects.select_related(
-        'user', 
-        # 'user__avatar',  
-        'song',
-        'song__artist'
-    ).prefetch_related(
-        'likes',
-        'likes__user',
-        'comments',
-        'comments__user',
-        'saves'
-    ).order_by('-created_at')
-    queryset = SocialPost.objects.all().order_by('-created_at')
+    queryset = SocialPost.objects.all()
     serializer_class = SocialPostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+
     def get_queryset(self):
-        user_queryset = User.objects.annotate(
-            followers_count=Count('followers', distinct=True)
+        """Feed query with all per-post data resolved in a single round trip.
+
+        - The post's user is prefetched WITH its profile and a followers_count
+          annotation (avatar + follower count, no per-row query).
+        - likes/comments counts and the current user's liked/saved state are
+          annotated (no N+1).
+        - ?feed=following limits to people the user follows (+ their own posts).
+        - ?search= matches caption / username / location / tags.
+        """
+        user = self.request.user
+
+        # Author follower count as a correlated subquery (computed in the main
+        # query — no per-post COUNT). Injected into the user payload by
+        # SocialPostSerializer.to_representation.
+        author_followers = (
+            User.objects.filter(pk=OuterRef('user_id'))
+            .annotate(n=Count('followers'))
+            .values('n')[:1]
         )
-        return SocialPost.objects.annotate(
-            likes_count=Count('likes', distinct=True),
-            comments_count=Count('comments', distinct=True)
-        ).select_related('song').prefetch_related(
-            Prefetch('user', queryset=user_queryset)  # Prefetch with annotation
-        ).order_by('-created_at')
+        qs = (
+            SocialPost.objects
+            .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile')
+            .annotate(
+                likes_total=Count('likes', distinct=True),
+                comments_total=Count('comments', distinct=True),
+                author_followers_count=Subquery(author_followers, output_field=IntegerField()),
+            )
+            .order_by('-created_at')
+        )
+
+        if user.is_authenticated:
+            qs = qs.annotate(
+                liked_by_me=Exists(PostLike.objects.filter(post=OuterRef('pk'), user=user)),
+                saved_by_me=Exists(PostSave.objects.filter(post=OuterRef('pk'), user=user)),
+            )
+
+        tag = self.request.query_params.get('tag')
+        if tag:
+            qs = qs.filter(tags__icontains=tag)
+
+        # Personalised home feed: posts from people you follow (+ your own).
+        # Falls back to the global feed when you follow no one yet, so new
+        # users never see an empty timeline.
+        if self.request.query_params.get('feed') == 'following' and user.is_authenticated:
+            followed_ids = list(user.followed_by.values_list('id', flat=True))
+            if followed_ids:
+                qs = qs.filter(Q(user_id__in=followed_ids) | Q(user=user))
+
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(
+                Q(caption__icontains=search)
+                | Q(user__username__icontains=search)
+                | Q(location__icontains=search)
+                | Q(tags__icontains=search)
+            )
+
+        return qs
     # Add this to ensure request context is available in serializers
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -61,23 +100,6 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                 "non_field_errors": [f"Failed to create post: {str(e)}"]
             })
     
-    def get_queryset(self):
-        qs = SocialPost.objects.annotate(
-            likes_count=Count('likes', distinct=True),
-            comments_count=Count('comments', distinct=True)
-        ).select_related('user', 'song').order_by('-created_at')
-        tag = self.request.query_params.get('tag')
-        if tag:
-            qs = qs.filter(tags__icontains=tag)
-        # Personalised home feed: posts from people you follow (+ your own).
-        # Falls back to the global feed when you don't follow anyone yet, so
-        # new users never see an empty timeline.
-        if self.request.query_params.get('feed') == 'following' and self.request.user.is_authenticated:
-            followed_ids = list(self.request.user.followed_by.values_list('id', flat=True))
-            if followed_ids:
-                qs = qs.filter(Q(user_id__in=followed_ids) | Q(user=self.request.user))
-        return qs
-
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def viewed(self, request, pk=None):
         """Increment view count — idempotent, fire-and-forget."""

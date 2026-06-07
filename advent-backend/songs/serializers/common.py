@@ -267,8 +267,10 @@ class DetailedUserSerializer(serializers.ModelSerializer):
             )
             return None
     def get_followers_count(self, obj):
-        # Use annotated value if available, else count
-        return getattr(obj, 'followers_count', obj.followers.count())
+        # Annotation-only: callers that need this (e.g. the feed) annotate
+        # followers_count; we avoid a per-object COUNT here to prevent an N+1
+        # during list serialization. Falls back to 0 when not annotated.
+        return getattr(obj, 'followers_count', 0)
 
 
 

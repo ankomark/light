@@ -34,6 +34,15 @@ class SocialPostSerializer(serializers.ModelSerializer):
             'media_file': {'write_only': True}
         }
     
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Inject the author's follower count from the feed's subquery annotation
+        # (DetailedUserSerializer is annotation-only to avoid an N+1).
+        fc = getattr(instance, 'author_followers_count', None)
+        if fc is not None and isinstance(data.get('user'), dict):
+            data['user']['followers_count'] = fc
+        return data
+
     def get_can_edit(self, obj):
         try:
             request = self.context.get('request')
@@ -213,19 +222,30 @@ class SocialPostSerializer(serializers.ModelSerializer):
         except Exception as e:
             logger.error(f"Error fixing auto upload URL {url}: {str(e)}")
             return url
+    # Each of these prefers an annotation set by SocialPostViewSet.get_queryset
+    # (one query for the whole page) and falls back to a per-object query for
+    # other call sites (e.g. retrieve, nested serialization).
     def get_likes_count(self, obj):
-        return obj.likes.count()
+        count = getattr(obj, 'likes_total', None)
+        return count if count is not None else obj.likes.count()
 
     def get_comments_count(self, obj):
-        return obj.comments.count()
+        count = getattr(obj, 'comments_total', None)
+        return count if count is not None else obj.comments.count()
 
     def get_is_liked(self, obj):
+        liked = getattr(obj, 'liked_by_me', None)
+        if liked is not None:
+            return liked
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             return obj.likes.filter(user=request.user).exists()
         return False
 
     def get_is_saved(self, obj):
+        saved = getattr(obj, 'saved_by_me', None)
+        if saved is not None:
+            return saved
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             return obj.saves.filter(user=request.user).exists()

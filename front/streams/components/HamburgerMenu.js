@@ -1,54 +1,79 @@
 import React, { useState } from 'react';
 import {
-  View,
-  TouchableOpacity,
-  StyleSheet,
-  Dimensions,
-  Text,
-  ScrollView,
-  Modal,
-  SafeAreaView,
-  Platform,
-  Pressable,
-  StatusBar,
+  View, Text, TouchableOpacity, StyleSheet, Image, Modal,
+  ScrollView, Pressable, Platform, StatusBar,
 } from 'react-native';
-import {
-  Ionicons,
-  MaterialIcons,
-  FontAwesome,
-  MaterialCommunityIcons,
-  Feather
-} from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
+import { colors, spacing, radius, typography } from '../constants/theme';
 
-const { width, height } = Dimensions.get('window');
+const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
-const COLORS = {
-  primary: '#1D478B',
-  secondary: '#2E8B57',
-  tertiary: '#6A5ACD',
-  accent: '#FF6347',
-  dark: '#222',
-  light: '#888',
-  white: '#fff',
-  bgGradientStart: '#E0F7FA',
-  bgGradientEnd: '#FCE4EC',
-  cardBg: '#fff',
-};
+// label = what the user sees; route = the registered screen name; set/icon = glyph.
+const SECTIONS = [
+  {
+    title: 'Discover',
+    items: [
+      { label: 'Explore', route: 'Explore', set: 'ion', icon: 'compass-outline' },
+      { label: 'Media', route: 'MediaScreen', set: 'mci', icon: 'radio' },
+      { label: 'Articles', route: 'Articles', set: 'mci', icon: 'newspaper-variant-outline' },
+      { label: 'Live', route: 'LiveHomeScreen', set: 'mci', icon: 'broadcast' },
+    ],
+  },
+  {
+    title: 'Music',
+    items: [
+      { label: 'Favorites', route: 'Favorites', set: 'ion', icon: 'heart-outline' },
+      { label: 'Playlists', route: 'Playlists', set: 'mci', icon: 'playlist-music-outline' },
+      { label: 'Choirs', route: 'Choirs', set: 'mci', icon: 'account-music-outline' },
+      { label: 'Studios', route: 'Studios', set: 'mci', icon: 'video-outline' },
+    ],
+  },
+  {
+    title: 'Community',
+    items: [
+      { label: 'Messages', route: 'Inbox', set: 'ion', icon: 'chatbubbles-outline' },
+      { label: 'Groups', route: 'Groups', set: 'mci', icon: 'account-group-outline' },
+      { label: 'Churches', route: 'Churches', set: 'mci', icon: 'church' },
+      { label: 'Unions & Conferences', route: 'Unions&Conferences', set: 'mci', icon: 'octagram-outline' },
+    ],
+  },
+  {
+    title: 'Shop',
+    items: [
+      { label: 'Marketplace', route: 'MarketplaceHome', set: 'mci', icon: 'storefront-outline' },
+      { label: 'Cart', route: 'Cart', set: 'mci', icon: 'cart-outline' },
+    ],
+  },
+  {
+    title: 'More',
+    items: [
+      { label: 'Settings', route: 'Settings', set: 'ion', icon: 'settings-outline' },
+      { label: 'Help', route: 'Help', set: 'ion', icon: 'help-circle-outline' },
+      { label: 'About', route: 'About', set: 'mci', icon: 'information-outline' },
+    ],
+  },
+];
+
+const Glyph = ({ set, name, color, size }) =>
+  set === 'mci'
+    ? <MaterialCommunityIcons name={name} size={size} color={color} />
+    : <Ionicons name={name} size={size} color={color} />;
 
 function HamburgerMenu() {
   const navigation = useNavigation();
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, currentUser, logout } = useAuth();
   const [menuVisible, setMenuVisible] = useState(false);
 
-  const toggleMenu = () => {
-    setMenuVisible(!menuVisible);
-  };
+  const activeRoute = useNavigationState((s) => s?.routes?.[s.index]?.name);
 
-  const navigateTo = (screen) => {
+  const close = () => setMenuVisible(false);
+
+  const go = (route) => {
     setMenuVisible(false);
-    navigation.navigate(screen.replace(/\s+/g, ''));
+    navigation.navigate(route);
   };
 
   const handleLogout = async () => {
@@ -56,173 +81,199 @@ function HamburgerMenu() {
     try {
       await logout();
     } finally {
-      // Reset the stack so the user lands on Login and can't navigate back
-      // into authenticated screens.
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     }
   };
 
-  const menuItems = [
-    { name: 'Explore', icon: 'compass-outline', iconType: 'Ionicons', color: COLORS.secondary },
-    { name: 'Favorites', icon: 'heart', iconType: 'Ionicons', color: COLORS.accent },
-    { name: 'Playlists', icon: 'playlist-music', iconType: 'MaterialCommunityIcons', color: COLORS.tertiary },
-    { name: 'Inbox', icon: 'chatbubbles-outline', iconType: 'Ionicons', color: COLORS.secondary },
-    { name: 'Groups', icon: 'group', iconType: 'FontAwesome', color: COLORS.tertiary },
-    { name: 'Churches', icon: 'church', iconType: 'MaterialCommunityIcons', color: COLORS.primary },
-    { name: 'Choirs', icon: 'music-note', iconType: 'MaterialIcons', color: COLORS.accent },
-    { name: 'LiveHomeScreen', icon: 'broadcast', iconType: 'MaterialCommunityIcons', color: 'red'},
-    { name: 'Unions&Conferences', icon: 'account-group', iconType: 'MaterialCommunityIcons', color: COLORS.primary },
-    { name: 'MediaScreen', icon: 'radio', iconType: 'MaterialCommunityIcons', color: COLORS.secondary },
-    { name: 'Studios', icon: 'video', iconType: 'Feather', color: COLORS.accent },
-    { name: 'Articles', icon: 'newspaper', iconType: 'MaterialCommunityIcons', color: COLORS.tertiary },
-    { name: 'MarketplaceHome', icon: 'shopping-cart', iconType: 'Feather', color: COLORS.accent },
-    { name: 'Cart', icon: 'shopping-cart', iconType: 'Feather', color: COLORS.primary },
-    { name: 'Settings', icon: 'settings', iconType: 'Feather', color: COLORS.light },
-    { name: 'About', icon: 'info', iconType: 'Feather', color: COLORS.light },
-    { name: 'Help', icon: 'help-circle', iconType: 'Feather', color: COLORS.light },
-  ];
-
-  const getIconComponent = (iconType, iconName, color, size) => {
-    switch (iconType) {
-      case 'MaterialIcons':
-        return <MaterialIcons name={iconName} size={size} color={color} />;
-      case 'FontAwesome':
-        return <FontAwesome name={iconName} size={size} color={color} />;
-      case 'MaterialCommunityIcons':
-        return <MaterialCommunityIcons name={iconName} size={size} color={color} />;
-      case 'Feather':
-        return <Feather name={iconName} size={size} color={color} />;
-      default:
-        return <Ionicons name={iconName} size={size} color={color} />;
-    }
-  };
-
   return (
-    <View style={styles.container}>
-      <TouchableOpacity onPress={toggleMenu} style={styles.menuButton}>
-        <Ionicons name="menu" size={width * 0.07} color="aliceblue" />
+    <View>
+      <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton} accessibilityRole="button" accessibilityLabel="Open menu">
+        <Ionicons name="menu" size={26} color={colors.white} />
       </TouchableOpacity>
 
-      <Modal visible={menuVisible} animationType="slide" onRequestClose={toggleMenu}  statusBarTranslucent={true}>
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>📂 Navigation Menu</Text>
-            <TouchableOpacity onPress={toggleMenu} style={styles.closeButton}>
-              <Ionicons name="close-circle" size={30} color={COLORS.accent} />
+      <Modal visible={menuVisible} animationType="slide" onRequestClose={close} statusBarTranslucent>
+        <View style={[styles.container, { paddingTop: TOP_PAD }]}>
+          {/* Header: profile (or welcome) + close */}
+          <View style={styles.header}>
+            {isAuthenticated ? (
+              <TouchableOpacity
+                style={styles.profile}
+                activeOpacity={0.8}
+                onPress={() => go('Profile')}
+              >
+                <Image
+                  source={currentUser?.profile_picture ? { uri: currentUser.profile_picture } : DEFAULT_AVATAR}
+                  defaultSource={DEFAULT_AVATAR}
+                  style={styles.avatar}
+                />
+                <View style={styles.profileText}>
+                  <Text style={styles.username} numberOfLines={1}>
+                    {currentUser?.username || 'Your profile'}
+                  </Text>
+                  <Text style={styles.profileHint}>View profile</Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.profile}>
+                <View style={styles.brandBadge}>
+                  <Ionicons name="sparkles" size={20} color={colors.accent} />
+                </View>
+                <View style={styles.profileText}>
+                  <Text style={styles.username}>Welcome</Text>
+                  <Text style={styles.profileHint}>Sign in to get started</Text>
+                </View>
+              </View>
+            )}
+
+            <TouchableOpacity onPress={close} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close menu">
+              <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={styles.scrollContainer}>
-            {menuItems.map((item, index) => (
-              <Pressable
-                key={index}
-                onPress={() => navigateTo(item.name)}
-                android_ripple={{ color: '#ddd' }}
-                style={({ pressed }) => [
-                  styles.menuItem,
-                  { backgroundColor: pressed ? '#F0F8FF' : COLORS.cardBg }
-                ]}
-              >
-                <View style={styles.menuItemLeft}>
-                  {getIconComponent(item.iconType, item.icon, item.color, 22)}
-                  <Text style={styles.menuText}>{item.name}</Text>
+          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+            {SECTIONS.map((section) => (
+              <View key={section.title} style={styles.section}>
+                <Text style={styles.sectionTitle}>{section.title.toUpperCase()}</Text>
+                <View style={styles.group}>
+                  {section.items.map((item, i) => {
+                    const active = activeRoute === item.route;
+                    return (
+                      <Pressable
+                        key={item.route}
+                        onPress={() => go(item.route)}
+                        android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
+                        accessibilityRole="button"
+                        accessibilityLabel={item.label}
+                        accessibilityState={{ selected: active }}
+                        style={({ pressed }) => [
+                          styles.row,
+                          i < section.items.length - 1 && styles.rowDivider,
+                          pressed && styles.rowPressed,
+                        ]}
+                      >
+                        <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
+                          <Glyph set={item.set} name={item.icon} size={20} color={active ? colors.accent : colors.textSecondary} />
+                        </View>
+                        <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
+                          {item.label}
+                        </Text>
+                        {active
+                          ? <View style={styles.activeDot} />
+                          : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
+                      </Pressable>
+                    );
+                  })}
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.light} />
-              </Pressable>
+              </View>
             ))}
 
             {isAuthenticated && (
               <Pressable
                 onPress={handleLogout}
-                android_ripple={{ color: '#f5c6cb' }}
-                style={({ pressed }) => [
-                  styles.menuItem,
-                  styles.logoutItem,
-                  { backgroundColor: pressed ? '#FFE9E9' : COLORS.cardBg },
-                ]}
+                android_ripple={{ color: 'rgba(229,57,53,0.15)' }}
+                style={({ pressed }) => [styles.logout, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Log out"
               >
-                <View style={styles.menuItemLeft}>
-                  <MaterialIcons name="logout" size={22} color={COLORS.accent} />
-                  <Text style={[styles.menuText, styles.logoutText]}>Log Out</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.accent} />
+                <MaterialCommunityIcons name="logout" size={20} color={colors.error} />
+                <Text style={styles.logoutText}>Log Out</Text>
               </Pressable>
             )}
+
+            <View style={{ height: spacing.xl }} />
           </ScrollView>
-        </SafeAreaView>
+        </View>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    // padding: 10,
-  },
-  menuButton: {
-    elevation: 3,
-    shadowColor: 'white',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 1, height: 2 },
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor:'black',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: COLORS.primary,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  closeButton: {
-    padding: 5,
-  },
-  scrollContainer: {
-    padding: 10,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 6,
-    padding: 15,
-    borderRadius: 12,
-    elevation: 1,
-    backgroundColor: COLORS.cardBg,
-    shadowColor: '#999',
-    shadowOffset: { width: 1, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-  },
-  menuItemLeft: {
+  menuButton: { padding: 2 },
+  container: { flex: 1, backgroundColor: colors.bg },
+
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 15,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  menuText: {
-    fontSize: 16,
-    color: COLORS.dark,
-    fontWeight: '500',
+  profile: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: spacing.sm },
+  avatar: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border,
   },
-  logoutItem: {
-    marginTop: 14,
-    borderWidth: 1,
-    borderColor: COLORS.accent,
+  brandBadge: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
   },
-  logoutText: {
-    color: COLORS.accent,
+  profileText: { flex: 1 },
+  username: { ...typography.h3, color: colors.textPrimary },
+  profileHint: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
+  closeBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  scroll: { paddingTop: spacing.sm },
+  section: { marginTop: spacing.md },
+  sectionTitle: {
+    ...typography.caption,
+    color: colors.textMuted,
+    letterSpacing: 1.2,
     fontWeight: '700',
+    marginLeft: spacing.lg,
+    marginBottom: spacing.xs,
   },
+  group: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    marginHorizontal: spacing.md,
+    overflow: 'hidden',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  rowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  rowPressed: { backgroundColor: 'rgba(255,255,255,0.04)' },
+  iconWrap: {
+    width: 36, height: 36, borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  iconWrapActive: { backgroundColor: 'rgba(244,162,97,0.15)' },
+  rowLabel: { ...typography.body, color: colors.textPrimary, flex: 1, fontWeight: '500' },
+  rowLabelActive: { color: colors.accent, fontWeight: '700' },
+  activeDot: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: colors.accent,
+  },
+
+  logout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  logoutText: { ...typography.button, color: colors.error, fontWeight: '700' },
 });
 
 export default HamburgerMenu;
