@@ -4,6 +4,7 @@ import {
   ActivityIndicator, TextInput, Alert,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { fetchPlaylists, createPlaylist, addTrackToPlaylist } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
@@ -12,6 +13,7 @@ import { colors, spacing, radius, typography, shadows } from '../constants/theme
  * a new playlist and add it there. Self-contained: loads playlists on open.
  */
 const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
+  const navigation = useNavigation();
   const [playlists, setPlaylists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -36,19 +38,28 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
     }
   }, [visible, load]);
 
+  // Confirmation with a "View" button that jumps straight into the playlist
+  // so the user sees the song they just added (and can play it).
+  const confirmAdded = useCallback((playlistId, name, message) => {
+    Alert.alert('Added', message, [
+      { text: 'View', onPress: () => navigation.navigate('PlaylistDetail', { playlistId, name }) },
+      { text: 'OK', style: 'cancel' },
+    ]);
+  }, [navigation]);
+
   const addTo = useCallback(async (playlist) => {
     if (busyId) return;
     setBusyId(playlist.id);
     try {
       await addTrackToPlaylist(playlist.id, trackId);
       onClose?.();
-      Alert.alert('Added', `Added to "${playlist.name}".`);
+      confirmAdded(playlist.id, playlist.name, `Added to "${playlist.name}".`);
     } catch {
       Alert.alert('Error', 'Could not add the track. Please try again.');
     } finally {
       setBusyId(null);
     }
-  }, [busyId, trackId, onClose]);
+  }, [busyId, trackId, onClose, confirmAdded]);
 
   const createAndAdd = useCallback(async () => {
     const name = newName.trim();
@@ -58,13 +69,13 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
       const created = await createPlaylist(name);
       await addTrackToPlaylist(created.id, trackId);
       onClose?.();
-      Alert.alert('Added', `Created "${name}" and added the track.`);
+      confirmAdded(created.id, name, `Created "${name}" and added the track.`);
     } catch {
       Alert.alert('Error', 'Could not create the playlist. Please try again.');
     } finally {
       setCreating(false);
     }
-  }, [newName, creating, trackId, onClose]);
+  }, [newName, creating, trackId, onClose, confirmAdded]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

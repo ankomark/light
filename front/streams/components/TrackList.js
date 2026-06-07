@@ -13,7 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchTracks } from "../services/api";
 import TrackItem from "./TrackItem";
 import SearchBar from "./SearchBar";
-import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer } from '../context/PlayerContext';
 import { colors } from '../constants/theme';
@@ -160,26 +160,36 @@ const TrackList = () => {
     <View style={styles.container}>
       <SearchBar onSearch={handleSearch} />
 
-      {tracks.length > 0 && (
-        <View style={styles.queueBar}>
-          <TouchableOpacity
-            style={styles.queueBtn}
-            onPress={() => playQueue(buildQueue(), 0, { shuffle: false })}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="play" size={16} color="white" />
-            <Text style={styles.queueBtnText}>Play all</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.queueBtn, styles.shuffleBtn]}
-            onPress={() => playQueue(buildQueue(), 0, { shuffle: true })}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="shuffle" size={16} color={colors.primary} />
-            <Text style={styles.shuffleBtnText}>Shuffle</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <View style={styles.queueBar}>
+        {tracks.length > 0 && (
+          <>
+            <TouchableOpacity
+              style={styles.queueBtn}
+              onPress={() => playQueue(buildQueue(), 0, { shuffle: false })}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="play" size={16} color="white" />
+              <Text style={styles.queueBtnText}>Play all</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.queueBtn, styles.shuffleBtn]}
+              onPress={() => playQueue(buildQueue(), 0, { shuffle: true })}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="shuffle" size={16} color={colors.primary} />
+              <Text style={styles.shuffleBtnText}>Shuffle</Text>
+            </TouchableOpacity>
+          </>
+        )}
+        <TouchableOpacity
+          style={[styles.queueBtn, styles.playlistsBtn]}
+          onPress={() => navigation.navigate('Playlists')}
+          activeOpacity={0.85}
+        >
+          <MaterialCommunityIcons name="playlist-music" size={16} color={colors.primary} />
+          <Text style={styles.shuffleBtnText}>Playlists</Text>
+        </TouchableOpacity>
+      </View>
 
       <FlatList
         data={tracks}
@@ -287,6 +297,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.10)',
     borderWidth: 1,
     borderColor: colors.primary,
+  },
+  playlistsBtn: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    marginLeft: 'auto', // push to the right edge
   },
   shuffleBtnText: {
     color: colors.primary,
