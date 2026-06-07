@@ -4,6 +4,7 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_URL, getAccessToken } from '../services/api';
 import ReportModal from './ReportModal';
+import { colors, spacing, radius, typography } from '../constants/theme';
 
 const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -75,17 +76,17 @@ const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
       {/* Report — always available for other people's posts */}
       {!post.can_edit && (
         <TouchableOpacity onPress={() => setReportVisible(true)} style={styles.button}>
-          <MaterialIcons name="flag" size={22} color="#FF9800" />
+          <MaterialIcons name="flag" size={22} color={colors.warning} />
         </TouchableOpacity>
       )}
 
       {post.can_edit && (
         <>
           <TouchableOpacity onPress={() => setEditModalVisible(true)} style={styles.button}>
-            <MaterialIcons name="edit" size={24} color="#1DA1F2" />
+            <MaterialIcons name="edit" size={24} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity onPress={handleDeletePost} style={styles.button}>
-            <MaterialIcons name="delete" size={24} color="#ff4444" />
+            <MaterialIcons name="delete" size={24} color={colors.error} />
           </TouchableOpacity>
         </>
       )}
@@ -105,20 +106,21 @@ const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
         onRequestClose={() => setEditModalVisible(false)}
       >
         <View style={styles.modalContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => setEditModalVisible(false)}
             style={styles.modalCloseButton}
           >
-            <Feather name="x" size={24} color="#000" />
+            <Feather name="x" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
-          
+
           <Text style={styles.modalTitle}>Edit Post</Text>
-          
+
           <TextInput
             style={styles.editInput}
             value={editedCaption}
             onChangeText={setEditedCaption}
             placeholder="Edit your caption..."
+            placeholderTextColor={colors.placeholder}
             multiline
             numberOfLines={4}
           />
@@ -151,48 +153,44 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     paddingTop: 50,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   modalCloseButton: {
     position: 'absolute',
     top: 10,
     right: 15,
     zIndex: 1,
+    padding: spacing.xs,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    ...typography.h2,
+    color: colors.textPrimary,
     marginBottom: 20,
     textAlign: 'center',
   },
   editInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: colors.border,
+    borderRadius: radius.md,
     padding: 15,
     marginBottom: 20,
     minHeight: 100,
     fontSize: 16,
+    color: colors.textPrimary,
+    backgroundColor: colors.inputBg,
+    textAlignVertical: 'top',
   },
   saveButton: {
-    backgroundColor: '#1DA1F2',
+    backgroundColor: colors.primary,
     padding: 15,
-    borderRadius: 8,
+    borderRadius: radius.md,
     alignItems: 'center',
   },
   saveButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: 'bold',
     fontSize: 16,
   },
-  videoThumbnail: {
-  width: '100%',
-  height: '100%',
-  resizeMode: 'cover',
-},
-videoContainer: {
-  position: 'relative',
-},
 });
 
 export default PostActions;

@@ -56,3 +56,11 @@ The picture — what's already built
 
   Start with Phase 1 — it fixes a real correctness bug (the fake following feed), removes the biggest performance liability, and is fully testable on the backend (where we already
   have the harness). It's the highest professional-impact, lowest-risk slice.
+
+
+
+
+
+
+
+  "continue the social feed video experience"

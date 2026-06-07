@@ -299,11 +299,16 @@ export const createSocialPost = async (postData) => {
 };
 
 // Paginated social posts — returns { count, next, previous, results }
-export const fetchSocialPosts = async (page = 1, feed = null) => {
+export const fetchSocialPosts = async (page = 1, feed = null, search = '') => {
   const retry = async (attempt = 1) => {
     try {
       const response = await apiRequest('get', '/social-posts/', null, {
-        params: { page, page_size: 20, ...(feed ? { feed } : {}) },
+        params: {
+          page,
+          page_size: 20,
+          ...(feed ? { feed } : {}),
+          ...(search ? { search } : {}),
+        },
       });
       // response is { count, next, previous, results }
       if (!response?.results) throw new Error('Invalid response format from server');
