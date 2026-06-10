@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Image, TextInput, StyleSheet,
-  ScrollView, Alert, Modal, Slider
+  ScrollView, Alert, Modal
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -10,6 +11,15 @@ import { createSocialPost, fetchTracks } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
+
+// Display aspect ratio from the picked media's real dimensions, clamped so very
+// tall/wide images still sit nicely in the card. Falls back to square.
+const clampAspect = (w, h) => {
+  if (!w || !h) return 1;
+  const r = w / h;
+  if (!isFinite(r) || r <= 0) return 1;
+  return Math.min(1.91, Math.max(0.56, r));
+};
 
 const CreatePost = ({ navigation }) => {
   const [contentType, setContentType] = useState('image');
@@ -19,11 +29,47 @@ const CreatePost = ({ navigation }) => {
   const [selectedSong, setSelectedSong] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showSongModal, setShowSongModal] = useState(false);
+  const [showTrimModal, setShowTrimModal] = useState(false);
   const [playbackStatus, setPlaybackStatus] = useState(null);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(30);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const soundRef = useRef(null);
+  const previewTimerRef = useRef(null);
   const [localAudio, setLocalAudio] = useState(null);
+
+  const MAX_CLIP = 30; // seconds — the trimmed audio clip is capped at 30s
+
+  // Library tracks expose the audio at `audio_file`; local picks use `audio_url`.
+  const songAudioUri = (song) => song?.audio_file || song?.audio_url || null;
+
+  // Local picks get a string id like `local-1700…`; library tracks have a numeric id.
+  const isLocalSong = (song) => String(song?.id ?? '').startsWith('local-');
+
+  // Library tracks serialize `artist` as a nested user object; local picks use a
+  // plain string. Normalise to a display/storage string either way.
+  const artistName = (song) =>
+    typeof song?.artist === 'string'
+      ? song.artist
+      : song?.artist?.username || 'Unknown Artist';
+
+  // Stop preview playback and clear any pending auto-stop timer.
+  const stopPreview = async () => {
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+    setIsPreviewing(false);
+    try {
+      if (soundRef.current) await soundRef.current.stopAsync();
+    } catch {}
+  };
+
+  // Unload audio + clear timers when leaving the screen.
+  useEffect(() => () => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    if (soundRef.current) soundRef.current.unloadAsync().catch(() => {});
+  }, []);
 
   // Request media library permissions
   useEffect(() => {
@@ -37,7 +83,11 @@ const CreatePost = ({ navigation }) => {
 
   useEffect(() => {
     if (contentType === 'image') {
-      fetchTracks().then(setTracks).catch(() => setTracks([]));
+      // fetchTracks returns a paginated { results, next, ... } object; unwrap to
+      // an array (tolerating a bare array) so the song picker can map over it.
+      fetchTracks()
+        .then(data => setTracks(Array.isArray(data) ? data : data?.results ?? []))
+        .catch(() => setTracks([]));
     }
   }, [contentType]);
 
@@ -96,48 +146,62 @@ const CreatePost = ({ navigation }) => {
       copyToCacheDirectory: true,
     });
 
-    if (result.type === 'success') {
-      const audioFile = {
-        uri: result.uri,
-        name: result.name,
-        type: result.mimeType,
-        size: result.size,
-      };
-      setLocalAudio(audioFile);
-      setSelectedSong({
-        id: `local-${Date.now()}`,  // Create a unique ID for local files
-        title: result.name.replace(/\.[^/.]+$/, ""),  // Remove file extension
-        artist: 'Local File',
-        audio_url: result.uri,
-      });
-      setShowSongModal(true);
-    }
+    // Expo SDK 53 returns { canceled, assets:[...] }; tolerate the legacy
+    // { type:'success', uri,... } shape too.
+    if (result.canceled) return;
+    const asset = result.assets?.[0] ?? (result.type === 'success' ? result : null);
+    if (!asset?.uri) return;
+
+    const name = asset.name || `audio_${Date.now()}.mp3`;
+    setLocalAudio({
+      uri: asset.uri,
+      name,
+      type: asset.mimeType || 'audio/mpeg',
+      size: asset.size,
+    });
+    // Open the trim editor (loads the audio for preview + trimming).
+    handleTrimSong({
+      id: `local-${Date.now()}`,
+      title: name.replace(/\.[^/.]+$/, ''),
+      artist: 'Local File',
+      audio_url: asset.uri,
+    });
   } catch (error) {
     console.error('Error picking audio:', error);
     Alert.alert('Error', 'Failed to pick audio file');
   }
 };
   const handleTrimSong = async (song) => {
+    const uri = songAudioUri(song);
+    if (!uri) {
+      Alert.alert('Error', 'This song has no playable audio');
+      return;
+    }
     setSelectedSong(song);
-    setShowSongModal(true);
-    
+    setShowSongModal(false);   // close the library list
+    setShowTrimModal(true);    // open the trim editor
+    setPlaybackStatus(null);
+    setTrimStart(0);
+
     try {
+      await stopPreview();
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
+        soundRef.current = null;
       }
-      
+
       const { sound } = await Audio.Sound.createAsync(
-        { uri: song.audio_url },
+        { uri },
         { shouldPlay: false }
       );
       soundRef.current = sound;
-      
+
       const status = await sound.getStatusAsync();
       setPlaybackStatus(status);
-      
-      // Set default trim range (first 30 seconds or full song if shorter)
-      const maxDuration = Math.min(30, status.durationMillis / 1000);
-      setTrimEnd(maxDuration);
+
+      // Default trim range: first 30s (or the whole song if it's shorter).
+      const songSeconds = (status.durationMillis || 0) / 1000;
+      setTrimEnd(Math.min(MAX_CLIP, songSeconds || MAX_CLIP));
     } catch (error) {
       console.error('Error loading song:', error);
       Alert.alert('Error', 'Failed to load song for trimming');
@@ -146,18 +210,37 @@ const CreatePost = ({ navigation }) => {
 
   const previewTrimmedSong = async () => {
     if (!soundRef.current) return;
-    
     try {
+      await stopPreview();
       await soundRef.current.setPositionAsync(trimStart * 1000);
       await soundRef.current.playAsync();
-      
-      // Stop after trimmed duration
-      setTimeout(async () => {
-        await soundRef.current.stopAsync();
-      }, (trimEnd - trimStart) * 1000);
+      setIsPreviewing(true);
+      // Auto-stop at the end of the trimmed window.
+      previewTimerRef.current = setTimeout(() => {
+        stopPreview();
+      }, Math.max(0, (trimEnd - trimStart) * 1000));
     } catch (error) {
       console.error('Preview error:', error);
+      setIsPreviewing(false);
     }
+  };
+
+  // Keep the trim window valid: start ≥ 0, end > start, and clip ≤ MAX_CLIP.
+  const onChangeTrimStart = (value) => {
+    const songSeconds = (playbackStatus?.durationMillis || 0) / 1000;
+    const start = Math.max(0, Math.min(value, Math.max(0, songSeconds - 0.5)));
+    setTrimStart(start);
+    setTrimEnd((prevEnd) => {
+      const maxEnd = Math.min(start + MAX_CLIP, songSeconds || start + MAX_CLIP);
+      const minEnd = Math.min(start + 1, maxEnd);
+      return Math.max(minEnd, Math.min(prevEnd, maxEnd));
+    });
+  };
+
+  const onChangeTrimEnd = (value) => {
+    const songSeconds = (playbackStatus?.durationMillis || 0) / 1000;
+    const maxEnd = Math.min(trimStart + MAX_CLIP, songSeconds || trimStart + MAX_CLIP);
+    setTrimEnd(Math.max(trimStart + 1, Math.min(value, maxEnd)));
   };
 
   const handlePost = async () => {
@@ -168,29 +251,28 @@ const CreatePost = ({ navigation }) => {
 
   setIsUploading(true);
   try {
+    await stopPreview();
     const uploadResult = await uploadToCloudinary(media, contentType);
-    
-    let songData = null;
+
+    // Denormalised song fields persisted on the post (work for both library
+    // tracks and local uploads). Only images carry an accompanying song.
+    let songData = {};
     if (contentType === 'image' && selectedSong) {
-      // For local files, we might want to upload the audio first
-      if (selectedSong.id.startsWith('local-') && localAudio) {
+      const isLocal = isLocalSong(selectedSong);
+      let audioUrl = songAudioUri(selectedSong);
+      if (isLocal && localAudio) {
         const audioUploadResult = await uploadToCloudinary(localAudio, 'audio');
+        audioUrl = audioUploadResult.secure_url;
+      }
+      if (audioUrl) {
         songData = {
-          title: selectedSong.title,
-          artist: selectedSong.artist,
-          audio_url: audioUploadResult.secure_url,
-          start_time: trimStart,
-          end_time: trimEnd
-        };
-      } else {
-        // For tracks from the library
-        songData = {
-          id: selectedSong.id,
-          title: selectedSong.title,
-          artist: selectedSong.artist,
-          audio_url: selectedSong.audio_url,
-          start_time: trimStart,
-          end_time: trimEnd
+          song_audio_url: audioUrl,
+          song_title: selectedSong.title || '',
+          song_artist: artistName(selectedSong),
+          song_start_time: Number(trimStart.toFixed(2)),
+          song_end_time: Number(trimEnd.toFixed(2)),
+          // Reference the library Track when there is one (skip for local audio).
+          ...(!isLocal && { song_id: selectedSong.id }),
         };
       }
     }
@@ -201,13 +283,13 @@ const CreatePost = ({ navigation }) => {
       content_type: contentType,
       width: uploadResult.width,
       height: uploadResult.height,
-      ...(contentType === 'video' && media.duration && { 
+      ...(contentType === 'video' && media.duration && {
         duration: Math.floor(media.duration / 1000)
       }),
-      ...(songData && { song: songData })
+      ...songData,
     };
 
-    const response = await createSocialPost(postData);
+    await createSocialPost(postData);
     Alert.alert('Success', 'Post created successfully!');
     navigation.goBack();
   } catch (error) {
@@ -219,12 +301,16 @@ const CreatePost = ({ navigation }) => {
 };
 
 const uploadToCloudinary = async (mediaFile, type) => {
-  const uploadType = type === 'video' ? 'social-video' : 'social-image';
+  const uploadType =
+    type === 'video' ? 'social-video' : type === 'audio' ? 'audio' : 'social-image';
+  const ext = type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'jpg';
+  const defaultMime =
+    type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/mpeg' : 'image/jpeg';
   const result = await uploadMedia(
     {
       uri: mediaFile.uri,
-      name: mediaFile.fileName ?? `post_${Date.now()}.${type === 'video' ? 'mp4' : 'jpg'}`,
-      mimeType: mediaFile.mimeType ?? (type === 'video' ? 'video/mp4' : 'image/jpeg'),
+      name: mediaFile.fileName ?? mediaFile.name ?? `post_${Date.now()}.${ext}`,
+      mimeType: mediaFile.mimeType ?? mediaFile.type ?? defaultMime,
     },
     uploadType
   );
@@ -273,19 +359,20 @@ const uploadToCloudinary = async (mediaFile, type) => {
         </TouchableOpacity>
       </View>
 
-      {/* Media Preview */}
+      {/* Media Preview — sized to the media's real aspect ratio so portrait /
+          landscape images fill the card without letterbox bars. */}
       {media ? (
         <View style={styles.mediaPreviewContainer}>
           {contentType === 'image' ? (
             <Image
               source={{ uri: media.uri }}
-              style={styles.mediaPreview}
-              resizeMode="contain"
+              style={[styles.mediaPreview, { aspectRatio: clampAspect(media.width, media.height) }]}
+              resizeMode="cover"
             />
           ) : (
             <Video
               source={{ uri: media.uri }}
-              style={styles.mediaPreview}
+              style={[styles.mediaPreview, { aspectRatio: clampAspect(media.width, media.height) }]}
               useNativeControls
               resizeMode="contain"
               isLooping
@@ -352,8 +439,8 @@ const uploadToCloudinary = async (mediaFile, type) => {
     {selectedSong && (
       <View style={styles.selectedSongContainer}>
         <Text style={styles.songTitle}>{selectedSong.title}</Text>
-        <Text style={styles.songArtist}>{selectedSong.artist}</Text>
-        {selectedSong.id.startsWith('local-') && (
+        <Text style={styles.songArtist}>{artistName(selectedSong)}</Text>
+        {isLocalSong(selectedSong) && (
           <Text style={styles.localFileTag}>(Local File)</Text>
         )}
         <Text style={styles.trimInfo}>
@@ -362,15 +449,17 @@ const uploadToCloudinary = async (mediaFile, type) => {
         <View style={styles.songActionButtons}>
           <TouchableOpacity
             style={styles.editSongButton}
-            onPress={() => selectedSong.id.startsWith('local-') ? pickLocalAudio() : setShowSongModal(true)}
+            onPress={() => isLocalSong(selectedSong) ? pickLocalAudio() : handleTrimSong(selectedSong)}
           >
             <Feather name="edit" size={16} color="#1DA1F2" />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.removeSongButton}
-            onPress={() => {
+            onPress={async () => {
+              await stopPreview();
               setSelectedSong(null);
               setLocalAudio(null);
+              setPlaybackStatus(null);
             }}
           >
             <Feather name="x-circle" size={16} color="#FF4444" />
@@ -421,7 +510,7 @@ const uploadToCloudinary = async (mediaFile, type) => {
                 <MaterialIcons name="music-note" size={24} color="#666" />
                 <View style={styles.songInfo}>
                   <Text style={styles.songTitle}>{track.title}</Text>
-                  <Text style={styles.songArtist}>{track.artist}</Text>
+                  <Text style={styles.songArtist}>{artistName(track)}</Text>
                 </View>
                 <Feather name="chevron-right" size={20} color="#666" />
               </TouchableOpacity>
@@ -431,17 +520,16 @@ const uploadToCloudinary = async (mediaFile, type) => {
       </Modal>
 
       {/* Song Trimming Modal */}
-      {/* Song Trimming Modal */}
-{selectedSong && playbackStatus && (
+{showTrimModal && selectedSong && playbackStatus && (
   <Modal
-    visible={!!selectedSong}
+    visible={showTrimModal}
     animationType="slide"
     transparent={false}
-    onRequestClose={() => setSelectedSong(null)}
+    onRequestClose={async () => { await stopPreview(); setShowTrimModal(false); }}
   >
     <View style={styles.modalContainer}>
       <View style={styles.modalHeader}>
-        <TouchableOpacity onPress={() => setSelectedSong(null)}>
+        <TouchableOpacity onPress={async () => { await stopPreview(); setShowTrimModal(false); }}>
           <Feather name="x" size={24} color="#1DA1F2" />
         </TouchableOpacity>
         <Text style={styles.modalTitle}>Trim Song</Text>
@@ -449,16 +537,13 @@ const uploadToCloudinary = async (mediaFile, type) => {
       </View>
 
       <View style={styles.trimContainer}>
-        {/* Safely render song title */}
         <Text style={styles.songTitle}>
           {selectedSong.title || 'Untitled Song'}
         </Text>
-        
-        {/* Safely render artist name */}
         <Text style={styles.songArtist}>
-          {selectedSong.artist || 'Unknown Artist'}
+          {artistName(selectedSong)}
         </Text>
-        
+
         <View style={styles.trimControls}>
           <Text style={styles.trimLabel}>
             Start: {trimStart.toFixed(1)}s
@@ -466,56 +551,48 @@ const uploadToCloudinary = async (mediaFile, type) => {
           <Slider
             style={styles.slider}
             minimumValue={0}
-            maximumValue={Math.min(playbackStatus.durationMillis / 1000, 60)}
+            maximumValue={Math.max(1, (playbackStatus.durationMillis || 0) / 1000)}
             value={trimStart}
-            onValueChange={setTrimStart}
+            onValueChange={onChangeTrimStart}
             minimumTrackTintColor="#1DA1F2"
             maximumTrackTintColor="#ddd"
             thumbTintColor="#1DA1F2"
             step={0.1}
           />
-          
+
           <Text style={styles.trimLabel}>
-            End: {trimEnd.toFixed(1)}s (max 30s)
+            End: {trimEnd.toFixed(1)}s (max {MAX_CLIP}s clip)
           </Text>
           <Slider
             style={styles.slider}
             minimumValue={trimStart + 1}
-            maximumValue={Math.min(trimStart + 30, playbackStatus.durationMillis / 1000)}
+            maximumValue={Math.min(trimStart + MAX_CLIP, (playbackStatus.durationMillis || 0) / 1000)}
             value={trimEnd}
-            onValueChange={setTrimEnd}
+            onValueChange={onChangeTrimEnd}
             minimumTrackTintColor="#1DA1F2"
             maximumTrackTintColor="#ddd"
             thumbTintColor="#1DA1F2"
             step={0.1}
           />
-          
+
           <Text style={styles.trimDuration}>
             Duration: {(trimEnd - trimStart).toFixed(1)} seconds
           </Text>
         </View>
-        
+
         <TouchableOpacity
           style={styles.previewButton}
-          onPress={previewTrimmedSong}
+          onPress={isPreviewing ? stopPreview : previewTrimmedSong}
         >
-          <Feather name="play" size={20} color="white" />
-          <Text style={styles.previewButtonText}>Preview</Text>
+          <Feather name={isPreviewing ? 'square' : 'play'} size={20} color="white" />
+          <Text style={styles.previewButtonText}>
+            {isPreviewing ? 'Stop' : 'Preview'}
+          </Text>
         </TouchableOpacity>
-        
+
         <TouchableOpacity
           style={styles.confirmButton}
-          onPress={() => {
-            setShowSongModal(false);
-            // Ensure we're only saving the necessary song data
-            setSelectedSong({
-              id: selectedSong.id,
-              title: selectedSong.title,
-              artist: selectedSong.artist,
-              audio_url: selectedSong.audio_url
-              // Don't include any nested objects
-            });
-          }}
+          onPress={async () => { await stopPreview(); setShowTrimModal(false); }}
         >
           <Text style={styles.confirmButtonText}>Confirm Selection</Text>
         </TouchableOpacity>
@@ -589,9 +666,8 @@ const styles = StyleSheet.create({
   },
   mediaPreview: {
     width: '100%',
-    height: 300,
     borderRadius: 8,
-    backgroundColor: '#eee'
+    backgroundColor: '#000'
   },
   changeMediaButton: {
     position: 'absolute',

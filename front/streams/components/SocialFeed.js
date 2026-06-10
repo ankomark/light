@@ -8,11 +8,13 @@ import {
   ActivityIndicator,
   Alert,
   TouchableOpacity,
+  Pressable,
 } from 'react-native';
 import { Video, Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
+import { usePlayer } from '../context/PlayerContext';
 import SearchBaar from '../components/SearchBaar';
 import { fetchSocialPosts } from '../services/api';
 import FollowButton from '../components/FollowButton';
@@ -21,10 +23,20 @@ import CommentAction from './CommentAction';
 import { DownloadButton, SaveButton, LikeButton } from './SocialActions';
 import { PostSkeleton } from './SkeletonLoader';
 import StoriesBar from './StoriesBar';
+import AudioVisualizer from './AudioVisualizer';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const AVATAR_FAILED = '__failed__';
+
+// Size media to the post's real dimensions, clamped so neither ultra-wide nor
+// ultra-tall posts blow out the feed. Falls back to square when unknown.
+const mediaAspectRatio = (width, height) => {
+  if (!width || !height) return 1;
+  const r = width / height;
+  if (!isFinite(r) || r <= 0) return 1;
+  return Math.min(1.91, Math.max(0.56, r));
+};
 
 const processPost = (post, existingFollowStates = {}) => {
   if (!post.user || typeof post.user !== 'object') {
@@ -64,10 +76,14 @@ const processPost = (post, existingFollowStates = {}) => {
   };
 };
 
-const PostMedia = React.memo(function PostMedia({ item, videoRefs, isFocused }) {
+const PostMedia = React.memo(function PostMedia({
+  item, videoRefs, isFocused, isMuted, onToggleMute,
+  isAudioActive, isAudioPlaying, onToggleAudio,
+}) {
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const aspectRatio = mediaAspectRatio(item.width, item.height);
 
   useEffect(() => {
     setCurrentUrl(item.mediaUrl);
@@ -118,20 +134,40 @@ const PostMedia = React.memo(function PostMedia({ item, videoRefs, isFocused }) 
         <Video
           ref={ref => ref && (videoRefs.current[item.id] = ref)}
           source={{ uri: currentUrl }}
-          style={styles.media}
-          useNativeControls
+          style={[styles.media, { aspectRatio }]}
           resizeMode="contain"
           isLooping
-          shouldPlay={false}
+          shouldPlay={isFocused}
+          isMuted={isMuted}
           onError={handleError}
           onLoad={handleLoad}
         />
+        {isFocused && !isLoading && (
+          <TouchableOpacity
+            style={styles.muteButton}
+            onPress={onToggleMute}
+            activeOpacity={0.8}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <MaterialIcons
+              name={isMuted ? 'volume-off' : 'volume-up'}
+              size={18}
+              color={colors.white}
+            />
+          </TouchableOpacity>
+        )}
       </View>
     );
   }
 
+  const hasAudio = item.content_type === 'image' && !!item.song_audio_url;
+
   return (
-    <View style={styles.mediaContainer}>
+    <Pressable
+      style={styles.mediaContainer}
+      onPress={hasAudio ? () => onToggleAudio?.(item) : undefined}
+      disabled={!hasAudio}
+    >
       {isLoading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#1DA1F2" />
@@ -139,12 +175,27 @@ const PostMedia = React.memo(function PostMedia({ item, videoRefs, isFocused }) 
       )}
       <Image
         source={{ uri: currentUrl }}
-        style={[styles.media, isLoading && { opacity: 0 }]}
-        resizeMode="contain"
+        style={[styles.media, { aspectRatio }, isLoading && { opacity: 0 }]}
+        resizeMode="cover"
         onError={handleError}
         onLoad={handleLoad}
       />
-    </View>
+
+      {/* Accompanying-audio affordances (image posts with a song). */}
+      {hasAudio && isAudioActive && isAudioPlaying && (
+        <View style={styles.audioVizPill} pointerEvents="none">
+          <MaterialIcons name="music-note" size={16} color={colors.white} />
+          <AudioVisualizer playing height={20} />
+        </View>
+      )}
+      {hasAudio && isAudioActive && !isAudioPlaying && (
+        <View style={styles.audioPausedOverlay} pointerEvents="none">
+          <View style={styles.audioPlayBadge}>
+            <MaterialIcons name="play-arrow" size={40} color={colors.white} />
+          </View>
+        </View>
+      )}
+    </Pressable>
   );
 });
 
@@ -164,8 +215,24 @@ const SocialFeed = () => {
   const videoRefs = useRef({});
   const audioRef = useRef(null);
   const { currentUser } = useAuth();
+  const { pause: pauseMusic } = usePlayer();
   const lastFetchTimeRef = useRef(0);
   const [currentlyPlayingPostId, setCurrentlyPlayingPostId] = useState(null);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false); // play/pause of attached song
+  const playingSongPostIdRef = useRef(null); // mirrors the attached-song post id
+
+  // Video autoplay: the in-view video post drives muted autoplay; mute is shared
+  // across all feed videos so the user's choice persists as they scroll.
+  const [focusedVideoId, setFocusedVideoId] = useState(null);
+  const focusedVideoIdRef = useRef(null);
+  const [isMuted, setIsMuted] = useState(true);
+
+  // Stable refs so the (necessarily stable) viewability handler always calls the
+  // latest versions without being re-created mid-scroll.
+  const playSongRef = useRef(() => {});
+  const stopSongRef = useRef(() => {});
+  const pauseMusicRef = useRef(() => {});
+  pauseMusicRef.current = pauseMusic;
 
   // Search & feed are resolved server-side. Refs avoid stale closures in the
   // debounced loaders; topPostIdRef powers the lightweight "new posts" check.
@@ -287,37 +354,21 @@ const SocialFeed = () => {
     useCallback(() => {
       const now = Date.now();
       if (now - lastFetchTimeRef.current > 120000) loadPosts();
+      // Leaving the screen: pause the focused video and stop attached-song audio.
+      return () => {
+        focusedVideoIdRef.current = null;
+        setFocusedVideoId(null);
+        stopSongRef.current?.();
+      };
     }, [loadPosts])
   );
 
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
+  useEffect(() => () => {
+    clearTimeout(debounceRef.current);
+    if (audioRef.current) audioRef.current.unloadAsync().catch(() => {});
+  }, []);
 
-  const playSong = async (post) => {
-    if (!post?.song?.audio_url || currentlyPlayingPostId === post.id) return;
-    try {
-      if (audioRef.current) await stopSong();
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: post.song.audio_url },
-        { shouldPlay: false }
-      );
-      audioRef.current = sound;
-      setCurrentlyPlayingPostId(post.id);
-      const startPosition = (post.song.start_time || 0) * 1000;
-      await sound.playFromPositionAsync(startPosition);
-      if (post.song.end_time) {
-        const duration = (post.song.end_time - (post.song.start_time || 0)) * 1000;
-        setTimeout(async () => {
-          if (audioRef.current && currentlyPlayingPostId === post.id) {
-            await stopSong();
-          }
-        }, duration);
-      }
-    } catch {
-      // Audio failed — continue silently
-    }
-  };
-
-  const stopSong = async () => {
+  const stopSong = useCallback(async () => {
     if (audioRef.current) {
       try {
         await audioRef.current.stopAsync();
@@ -325,20 +376,111 @@ const SocialFeed = () => {
       } catch {
       } finally {
         audioRef.current = null;
+        playingSongPostIdRef.current = null;
         setCurrentlyPlayingPostId(null);
+        setIsAudioPlaying(false);
       }
     }
-  };
+  }, []);
 
-  const onViewableItemsChanged = useRef(({ changed }) => {
-    changed.forEach(item => {
-      if (item.isViewable && 
-          item.item.content_type === 'image' && 
-          item.item.song?.audio_url) {
-        playSong(item.item);
-      } else if (!item.isViewable && 
-                currentlyPlayingPostId === item.item.id) {
-        stopSong();
+  // Plays a post's trimmed audio clip (image posts only), starting at
+  // song_start_time and auto-stopping at song_end_time. A focused video always
+  // wins over attached-song audio, so callers gate this on there being no video.
+  const playSong = useCallback(async (post) => {
+    if (!post?.song_audio_url || playingSongPostIdRef.current === post.id) return;
+    try {
+      if (audioRef.current) await stopSong();
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: post.song_audio_url },
+        { shouldPlay: false, isLooping: true }
+      );
+      audioRef.current = sound;
+      playingSongPostIdRef.current = post.id;
+      setCurrentlyPlayingPostId(post.id);
+      setIsAudioPlaying(true);
+      const start = post.song_start_time || 0;
+      await sound.playFromPositionAsync(start * 1000);
+      if (post.song_end_time && post.song_end_time > start) {
+        // Loop the trimmed window: jump back to the start when the clip ends.
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (
+            status.isLoaded &&
+            status.positionMillis >= post.song_end_time * 1000 &&
+            playingSongPostIdRef.current === post.id
+          ) {
+            sound.setPositionAsync(start * 1000).catch(() => {});
+          }
+        });
+      }
+    } catch {
+      // Audio failed — continue silently
+    }
+  }, [stopSong]);
+
+  playSongRef.current = playSong;
+  stopSongRef.current = stopSong;
+
+  // Tap-on-image handler: pause/resume the post's accompanying audio. If the clip
+  // isn't loaded yet (e.g. tapped before autoplay kicked in), start it.
+  const toggleSongPlayback = useCallback(async (post) => {
+    if (playingSongPostIdRef.current !== post.id || !audioRef.current) {
+      playSongRef.current?.(post);
+      return;
+    }
+    try {
+      const status = await audioRef.current.getStatusAsync();
+      if (!status.isLoaded) return;
+      if (status.isPlaying) {
+        await audioRef.current.pauseAsync();
+        setIsAudioPlaying(false);
+      } else {
+        await audioRef.current.playAsync();
+        setIsAudioPlaying(true);
+      }
+    } catch {}
+  }, []);
+
+  // Toggle the shared mute for feed videos. Unmuting means real audio, so we
+  // silence anything else first: the global music player and attached-song clips.
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (!next) {
+        pauseMusicRef.current?.();
+        stopSongRef.current?.();
+      }
+      return next;
+    });
+  }, []);
+
+  // Stable (never re-created) so FlatList doesn't warn about a changing handler.
+  // Reads live values through refs/stable setters instead of closing over state.
+  const onViewableItemsChanged = useRef(({ viewableItems, changed }) => {
+    // The first viewable video post becomes the autoplay target.
+    const focusVideo = viewableItems.find(
+      v => v.isViewable && v.item?.content_type === 'video'
+    );
+    const newFocus = focusVideo ? focusVideo.item.id : null;
+    if (newFocus !== focusedVideoIdRef.current) {
+      focusedVideoIdRef.current = newFocus;
+      setFocusedVideoId(newFocus);
+      // A video taking focus overrides any attached-song audio.
+      if (newFocus != null) stopSongRef.current?.();
+    }
+
+    changed.forEach((entry) => {
+      const post = entry.item;
+      if (!post) return;
+      if (entry.isViewable) {
+        if (
+          post.content_type === 'image' &&
+          post.song_audio_url &&
+          focusedVideoIdRef.current == null
+        ) {
+          playSongRef.current?.(post);
+        }
+      } else if (playingSongPostIdRef.current === post.id) {
+        stopSongRef.current?.();
       }
     });
   }).current;
@@ -373,8 +515,23 @@ const SocialFeed = () => {
   }, []);
 
   const handlePostUpdate = useCallback(updatedPost => {
-    setPosts(prev => prev.map(post => 
-      post.id === updatedPost.id ? updatedPost : post
+    // Editing a post only changes text (caption/tags/location) — never the media
+    // or author. The PATCH response can return null optimized_url/media_url, which
+    // would blank the image, so we keep the already-rendered media + processed
+    // user and overlay just the edited fields.
+    setPosts(prev => prev.map(post =>
+      post.id === updatedPost.id
+        ? {
+            ...post,
+            ...updatedPost,
+            user: post.user,
+            mediaUrl: post.mediaUrl,
+            thumbnailUrl: post.thumbnailUrl,
+            media_url: post.media_url,
+            optimized_url: post.optimized_url,
+            media_file: post.media_file,
+          }
+        : post
     ));
   }, []);
 
@@ -478,14 +635,20 @@ const SocialFeed = () => {
   const renderItem = useCallback(({ item }) => (
     <View style={styles.postContainer}>
       {renderPostHeader({ item })}
-      <PostMedia 
-        item={item} 
+      <PostMedia
+        item={item}
         videoRefs={videoRefs}
-        isFocused={currentlyPlayingPostId === item.id} 
+        isFocused={focusedVideoId === item.id}
+        isMuted={isMuted}
+        onToggleMute={toggleMute}
+        isAudioActive={currentlyPlayingPostId === item.id}
+        isAudioPlaying={currentlyPlayingPostId === item.id ? isAudioPlaying : false}
+        onToggleAudio={toggleSongPlayback}
       />
       {renderPostFooter({ item })}
     </View>
-  ), [renderPostHeader, renderPostFooter, currentlyPlayingPostId]);
+  ), [renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
+      currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback]);
 
   const renderEmptyComponent = useCallback(() => {
     if (loading) return null;
@@ -759,6 +922,49 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1,
+  },
+
+  muteButton: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    zIndex: 2,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  audioVizPill: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+
+  audioPausedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  audioPlayBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   errorMediaContainer: {

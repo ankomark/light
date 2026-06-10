@@ -24,9 +24,10 @@ class SocialPostSerializer(serializers.ModelSerializer):
         model = SocialPost
         fields = [
             'id', 'user', 'content_type', 'media_file', 'media_url', 'song','song_id',
-            # 'song_start_time', 'song_end_time',
+            'song_audio_url', 'song_title', 'song_artist',
+            'song_start_time', 'song_end_time',
             'caption', 'tags', 'location', 'duration', 'width', 'height',
-            'created_at', 'updated_at', 'likes_count', 'comments_count', 
+            'created_at', 'updated_at', 'likes_count', 'comments_count',
             'is_liked', 'is_saved', 'can_edit','optimized_url'
         ]
         read_only_fields = ['user', 'created_at', 'updated_at']
@@ -256,6 +257,20 @@ class SocialPostSerializer(serializers.ModelSerializer):
             duration = data.get('duration')
             if duration and duration > timedelta(minutes=1):
                 raise serializers.ValidationError("Video cannot exceed 1 minute")
+
+        # Validate the accompanying-audio trim window (seconds). Cap the clip at
+        # 30s so the feed only plays the short section the user picked.
+        start = data.get('song_start_time')
+        end = data.get('song_end_time')
+        if start is not None or end is not None:
+            start = start or 0
+            if end is None:
+                raise serializers.ValidationError("song_end_time is required when trimming audio")
+            if start < 0 or end <= start:
+                raise serializers.ValidationError("Invalid audio trim range")
+            if end - start > 30:
+                raise serializers.ValidationError("Audio clip cannot exceed 30 seconds")
+            data['song_start_time'] = start
         return data
 
     
@@ -271,10 +286,21 @@ class SocialPostSerializer(serializers.ModelSerializer):
         return SocialPost.objects.create(**validated_data)
 
     def update(self, instance, validated_data):
-        """Update an existing social post"""
-        # Don't allow updating media_file after creation
-        validated_data.pop('media_file', None)
-        return super().update(instance, validated_data)
+        """Update an existing social post.
+
+        Save ONLY the changed columns. Re-saving the whole row rewrites the
+        CloudinaryField and mangles the stored media_file (it gains an
+        'auto/upload/' prefix), which 404s the media after the next reload.
+        Restricting the write to the edited fields leaves media_file untouched.
+        """
+        validated_data.pop('media_file', None)  # media is set once, at creation
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        update_fields = list(validated_data.keys())
+        if update_fields:
+            update_fields.append('updated_at')
+            instance.save(update_fields=update_fields)
+        return instance
 
 
 

@@ -108,6 +108,108 @@ class FeedAnnotationTests(APITestCase):
         self.assertFalse(p['is_liked'])
 
 
+class SongTrimTests(APITestCase):
+    """Creating an image post with a trimmed accompanying audio clip."""
+
+    def setUp(self):
+        cache.clear()
+        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.client.force_authenticate(self.alice)
+
+    def _payload(self, start, end):
+        return {
+            'content_type': 'image',
+            'caption': 'with song',
+            'song_audio_url': 'https://res.cloudinary.com/demo/video/upload/song.mp3',
+            'song_title': 'Hymn',
+            'song_artist': 'Choir',
+            'song_start_time': start,
+            'song_end_time': end,
+        }
+
+    def test_create_persists_trim_window(self):
+        res = self.client.post('/api/social-posts/', self._payload(5, 25), format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        post = SocialPost.objects.get(id=res.data['id'])
+        self.assertEqual(post.song_start_time, 5)
+        self.assertEqual(post.song_end_time, 25)
+        self.assertEqual(post.song_audio_url, self._payload(5, 25)['song_audio_url'])
+        # And the feed returns the trim fields for client playback.
+        feed = self.client.get('/api/social-posts/')
+        results = feed.data['results'] if isinstance(feed.data, dict) else feed.data
+        item = next(p for p in results if p['id'] == post.id)
+        self.assertEqual(item['song_start_time'], 5)
+        self.assertEqual(item['song_end_time'], 25)
+
+    def test_clip_longer_than_30s_rejected(self):
+        res = self.client.post('/api/social-posts/', self._payload(0, 40), format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_inverted_range_rejected(self):
+        res = self.client.post('/api/social-posts/', self._payload(20, 10), format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class EditPreservesMediaTests(APITestCase):
+    """Editing a post's caption must not mutate/corrupt its stored media_file
+    (regression: image went 'media unavailable' after edit + relogin)."""
+
+    def setUp(self):
+        cache.clear()
+        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.client.force_authenticate(self.alice)
+
+    def test_edit_caption_keeps_media_file(self):
+        post = SocialPost.objects.create(
+            user=self.alice, content_type='image',
+            media_file='social_media/sample_abc123',
+        )
+        before = str(SocialPost.objects.get(id=post.id).media_file)
+
+        res = self.client.patch(
+            f'/api/social-posts/{post.id}/', {'caption': 'edited caption'}, format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.data)
+
+        refreshed = SocialPost.objects.get(id=post.id)
+        self.assertEqual(refreshed.caption, 'edited caption')
+        self.assertEqual(
+            str(refreshed.media_file), before,
+            'Editing the caption changed the stored media_file (media will 404 after relogin).'
+        )
+
+
+class HealMediaMigrationTests(APITestCase):
+    """The 0026 data migration strips leading 'auto/upload/' from media_file."""
+
+    def test_heal_strips_leading_prefix(self):
+        import importlib
+        from django.apps import apps as global_apps
+
+        user = User.objects.create_user(username='h', password='pw12345!')
+        post = SocialPost.objects.create(
+            user=user, content_type='image', media_file='social_media/xyz',
+        )
+        table = SocialPost._meta.db_table
+        # Force a (doubly) corrupted value straight into the column.
+        with connection.cursor() as cur:
+            cur.execute(
+                f"UPDATE {table} SET media_file = %s WHERE id = %s",
+                ['auto/upload/auto/upload/social_media/xyz', post.id],
+            )
+
+        mig = importlib.import_module('songs.migrations.0026_heal_corrupted_media_file')
+        # heal() only needs schema_editor.connection; a real schema editor can't be
+        # opened inside the test's transaction on sqlite, so stand in for it.
+        editor = type('SE', (), {'connection': connection})()
+        mig.heal(global_apps, editor)
+
+        with connection.cursor() as cur:
+            cur.execute(f"SELECT media_file FROM {table} WHERE id = %s", [post.id])
+            healed = cur.fetchone()[0]
+        self.assertEqual(healed, 'social_media/xyz')
+
+
 class FeedQueryCountTests(APITestCase):
     """N+1 guard: the feed must use a constant number of queries regardless of
     how many posts are on the page."""

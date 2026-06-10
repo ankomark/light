@@ -199,6 +199,14 @@ class SocialPost(models.Model):
         null=True
     )
     song = models.ForeignKey(Track, null=True, blank=True, on_delete=models.SET_NULL)
+    # Denormalised playback info for an image post's accompanying audio. Covers
+    # both library tracks (song FK set) and user-uploaded local audio (no Track).
+    # Times are in seconds; the trimmed clip is capped at 30s by the serializer.
+    song_audio_url = models.URLField(max_length=500, blank=True, null=True)
+    song_title = models.CharField(max_length=200, blank=True)
+    song_artist = models.CharField(max_length=200, blank=True)
+    song_start_time = models.FloatField(null=True, blank=True)
+    song_end_time = models.FloatField(null=True, blank=True)
 
     caption = models.TextField(blank=True)
     tags = models.CharField(max_length=200, blank=True)

@@ -254,6 +254,17 @@ export const PlayerProvider = ({ children }) => {
     } catch {}
   }, []);
 
+  /** Pause playback if a track is currently playing (no-op otherwise). Used by
+   *  other surfaces (e.g. the feed's video player) to avoid overlapping audio. */
+  const pause = useCallback(async () => {
+    const s = soundRef.current;
+    if (!s) return;
+    try {
+      const status = await s.getStatusAsync();
+      if (status.isLoaded && status.isPlaying) await s.pauseAsync();
+    } catch {}
+  }, []);
+
   const skip = useCallback(
     async (deltaMs) => {
       const s = soundRef.current;
@@ -318,6 +329,7 @@ export const PlayerProvider = ({ children }) => {
     playNext,
     playPrevious,
     togglePlay,
+    pause,
     toggleShuffle,
     cycleRepeat,
     skip,
