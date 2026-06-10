@@ -10,6 +10,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
     media_url = serializers.SerializerMethodField()
+    media_items = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
     optimized_url = serializers.SerializerMethodField()
     song_id = serializers.PrimaryKeyRelatedField(
@@ -23,16 +24,19 @@ class SocialPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = SocialPost
         fields = [
-            'id', 'user', 'content_type', 'media_file', 'media_url', 'song','song_id',
+            'id', 'user', 'content_type', 'media_file', 'media_url', 'media_items',
+            'gallery', 'song','song_id',
             'song_audio_url', 'song_title', 'song_artist',
             'song_start_time', 'song_end_time',
+            'video_start_time', 'video_end_time',
             'caption', 'tags', 'location', 'duration', 'width', 'height',
             'created_at', 'updated_at', 'likes_count', 'comments_count',
             'is_liked', 'is_saved', 'can_edit','optimized_url'
         ]
         read_only_fields = ['user', 'created_at', 'updated_at']
         extra_kwargs = {
-            'media_file': {'write_only': True}
+            'media_file': {'write_only': True},
+            'gallery': {'write_only': True},
         }
     
     def to_representation(self, instance):
@@ -53,23 +57,64 @@ class SocialPostSerializer(serializers.ModelSerializer):
             return None  # or safe fallback
 
    
+    def _extract_public_id(self, obj):
+        """Best-effort Cloudinary public_id from media_file (string, resource, or
+        a delivery URL), stripping any version, extension, or stray prefix."""
+        import re
+        mf = obj.media_file
+        if isinstance(mf, str):
+            pid = mf
+        elif hasattr(mf, 'url'):
+            url = mf.url
+            pid = url.split('/upload/')[-1] if '/upload/' in url else url
+        else:
+            return None
+        pid = str(pid)
+        while pid.startswith('auto/upload/'):
+            pid = pid[len('auto/upload/'):]
+        pid = re.sub(r'^v\d+/', '', pid)              # drop version segment
+        last = pid.split('/')[-1]
+        if '.' in last:                               # drop extension
+            pid = pid[: pid.rfind('.')]
+        return pid or None
+
+    def _video_url(self, public_id, start=None, end=None, compress=False):
+        """Cloudinary video delivery URL, optionally trimmed to [start, end]
+        (seconds) and compressed (downscaled + q_auto:eco)."""
+        if not public_id:
+            return None
+        base = f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}"
+        parts = []
+        if start is not None and end is not None and end > start:
+            parts.append(f"so_{round(float(start), 2)}")
+            parts.append(f"eo_{round(float(end), 2)}")
+        if compress:
+            parts += ["w_720", "c_limit", "q_auto:eco"]
+        else:
+            parts.append("q_auto")
+        return f"{base}/video/upload/{','.join(parts)}/{public_id}.mp4"
+
     def get_media_url(self, obj):
         if not obj.media_file:
             return None
-            
+
         try:
-            # Handle both FileField and raw strings
+            if obj.content_type == 'video':
+                return self._video_url(
+                    self._extract_public_id(obj),
+                    obj.video_start_time, obj.video_end_time, compress=False,
+                )
+
+            # Image — handle both FileField and raw strings.
             if hasattr(obj.media_file, 'url'):
                 url = obj.media_file.url
-                # Convert auto/upload URLs to proper delivery URLs
                 if '/auto/upload/' in url:
                     return self._convert_auto_url(url, obj.content_type)
                 return url
-                
+
             if isinstance(obj.media_file, str):
-                ext = '.jpg' if obj.content_type == 'image' else '.mp4'
-                return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/{obj.content_type}/upload/{obj.media_file}{ext}"
-                
+                return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/image/upload/{obj.media_file}.jpg"
+
         except Exception as e:
             logger.error(f"URL generation error for post {obj.id}: {str(e)}")
             return None
@@ -103,11 +148,51 @@ class SocialPostSerializer(serializers.ModelSerializer):
             if obj.content_type == 'image':
                 return f"{base_url}/image/upload/w_600,h_600,c_fill,q_auto,f_auto/{public_id}{ext}"
             else:
-                return f"{base_url}/video/upload/q_auto,f_auto/{public_id}{ext}"
-                
+                return self._video_url(
+                    self._extract_public_id(obj),
+                    obj.video_start_time, obj.video_end_time, compress=True,
+                )
+
         except Exception as e:
             logger.error(f"Optimized URL error: {str(e)}")
             return None
+
+    def _image_urls(self, public_id, width=None, height=None):
+        """Build delivery + optimized URLs for an image public_id (gallery item)."""
+        if not public_id:
+            return None
+        base = f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}"
+        # Strip any accidental 'auto/upload/' prefix (legacy corruption guard).
+        public_id = str(public_id)
+        while public_id.startswith('auto/upload/'):
+            public_id = public_id[len('auto/upload/'):]
+        return {
+            'media_url': f"{base}/image/upload/{public_id}.jpg",
+            'optimized_url': f"{base}/image/upload/w_1080,q_auto,f_auto/{public_id}.jpg",
+            'width': width,
+            'height': height,
+        }
+
+    def get_media_items(self, obj):
+        """Ordered media for the post. A 1–4 image carousel comes from `gallery`;
+        legacy/single posts fall back to a one-item list from media_file so the
+        client can always render a uniform pager."""
+        gallery = obj.gallery if isinstance(obj.gallery, list) else []
+        items = [
+            self._image_urls(it.get('public_id'), it.get('width'), it.get('height'))
+            for it in gallery if isinstance(it, dict) and it.get('public_id')
+        ]
+        items = [it for it in items if it]
+        if items:
+            return items
+        # Fallback: single media (image or video) from media_file.
+        return [{
+            'media_url': self.get_media_url(obj),
+            'optimized_url': self.get_optimized_url(obj),
+            'width': obj.width,
+            'height': obj.height,
+        }]
+
     def to_internal_value(self, data):
         internal_data = super().to_internal_value(data)
         
@@ -257,6 +342,28 @@ class SocialPostSerializer(serializers.ModelSerializer):
             duration = data.get('duration')
             if duration and duration > timedelta(minutes=1):
                 raise serializers.ValidationError("Video cannot exceed 1 minute")
+
+        # Video trim window (seconds): valid range, capped at 30s.
+        vs = data.get('video_start_time')
+        ve = data.get('video_end_time')
+        if vs is not None or ve is not None:
+            vs = vs or 0
+            if ve is None or ve <= vs or vs < 0:
+                raise serializers.ValidationError("Invalid video trim range")
+            if ve - vs > 30:
+                raise serializers.ValidationError("Trimmed video cannot exceed 30 seconds")
+            data['video_start_time'] = vs
+
+        # Image carousel: 1–4 images, each carrying a Cloudinary public_id.
+        gallery = data.get('gallery')
+        if gallery is not None:
+            if not isinstance(gallery, list):
+                raise serializers.ValidationError("gallery must be a list")
+            if len(gallery) > 4:
+                raise serializers.ValidationError("A post can have at most 4 images")
+            for it in gallery:
+                if not isinstance(it, dict) or not it.get('public_id'):
+                    raise serializers.ValidationError("Each gallery item needs a public_id")
 
         # Validate the accompanying-audio trim window (seconds). Cap the clip at
         # 30s so the feed only plays the short section the user picked.

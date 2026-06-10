@@ -1,88 +1,70 @@
-// components/SearchBar.js
-import React, { useState, useRef } from 'react';
-import { Animated, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { colors, radius } from '../constants/theme';
 
-const SearchBaar = ({ onSearch }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+/**
+ * Clean, always-visible search field: leading search icon, themed pill, a focus
+ * highlight, and a clear (×) button once there's text.
+ */
+const SearchBaar = ({ onSearch, placeholder = 'Search...' }) => {
   const [query, setQuery] = useState('');
-  const widthAnim = useRef(new Animated.Value(40)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const [focused, setFocused] = useState(false);
 
-  const toggleSearch = () => {
-    Animated.parallel([
-      Animated.timing(widthAnim, {
-        toValue: isExpanded ? 40 : 200,
-        duration: 300,
-        useNativeDriver: false,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: isExpanded ? 0 : 1,
-        duration: 200,
-        useNativeDriver: false,
-      })
-    ]).start(() => {
-      if (isExpanded) {
-        setQuery('');
-        onSearch('');
-      }
-      setIsExpanded(!isExpanded);
-    });
+  const handleChange = (text) => {
+    setQuery(text);
+    onSearch?.(text);
+  };
+
+  const clear = () => {
+    setQuery('');
+    onSearch?.('');
   };
 
   return (
-    <Animated.View style={[styles.container, { width: widthAnim }]}>
-      <Animated.View style={{ flex: 1, opacity: opacityAnim }}>
-        <TextInput
-          style={styles.input}
-          placeholder="Search posts..."
-          placeholderTextColor="aliceblue"
-          value={query}
-          onChangeText={(text) => {
-            setQuery(text);
-            onSearch(text);
-          }}
-          autoFocus={true}
-        />
-      </Animated.View>
-      <TouchableOpacity onPress={toggleSearch}>
-        <Feather 
-          name={isExpanded ? "x" : "search"} 
-          size={24} 
-          color="white" 
-        />
-      </TouchableOpacity>
-    </Animated.View>
+    <View style={[styles.container, focused && styles.containerFocused]}>
+      <Feather name="search" size={18} color={focused ? colors.primary : colors.textMuted} />
+      <TextInput
+        style={styles.input}
+        placeholder={placeholder}
+        placeholderTextColor={colors.placeholder}
+        value={query}
+        onChangeText={handleChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        returnKeyType="search"
+        autoCapitalize="none"
+        autoCorrect={false}
+        selectionColor={colors.primary}
+      />
+      {query.length > 0 && (
+        <TouchableOpacity onPress={clear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Feather name="x-circle" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    height: 40,
-    backgroundColor: '#1DA1F2',
-    borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    overflow: 'hidden',
-    color: 'aliceblue',
-    position: 'absolute',  // Add this
-    top: 0,               // Add this
-    right: 300,             // Add this
-    zIndex: 1000,          // Add this
-    left:2,
-    
+    gap: 8,
+    height: 42,
+    paddingHorizontal: 14,
+    borderRadius: radius.full,
+    backgroundColor: colors.inputBg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  containerFocused: {
+    borderColor: colors.primary,
   },
   input: {
     flex: 1,
-    marginLeft: 8,
-    fontSize: 16,
-    color: 'aliceblue',
+    fontSize: 15,
+    color: colors.textPrimary,
     paddingVertical: 0,
   },
 });

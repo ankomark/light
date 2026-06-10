@@ -199,6 +199,10 @@ class SocialPost(models.Model):
         null=True
     )
     song = models.ForeignKey(Track, null=True, blank=True, on_delete=models.SET_NULL)
+    # Carousel of 1–4 images for image posts: list of {public_id, width, height}.
+    # Empty for legacy/single-image posts (which fall back to media_file) and for
+    # video posts. media_file mirrors the first image for backward compatibility.
+    gallery = models.JSONField(default=list, blank=True)
     # Denormalised playback info for an image post's accompanying audio. Covers
     # both library tracks (song FK set) and user-uploaded local audio (no Track).
     # Times are in seconds; the trimmed clip is capped at 30s by the serializer.
@@ -207,6 +211,10 @@ class SocialPost(models.Model):
     song_artist = models.CharField(max_length=200, blank=True)
     song_start_time = models.FloatField(null=True, blank=True)
     song_end_time = models.FloatField(null=True, blank=True)
+    # Video trim window (seconds). Delivery is trimmed to [start, end] and
+    # compressed via Cloudinary URL transforms; capped at 30s by the serializer.
+    video_start_time = models.FloatField(null=True, blank=True)
+    video_end_time = models.FloatField(null=True, blank=True)
 
     caption = models.TextField(blank=True)
     tags = models.CharField(max_length=200, blank=True)

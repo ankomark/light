@@ -21,8 +21,11 @@ const SIGN_TYPES = {
 /**
  * Upload a file to Cloudinary using a backend-generated signature.
  * No API secrets or upload presets are sent from the client.
+ *
+ * Uses XMLHttpRequest (not fetch) so upload progress can be reported via the
+ * optional `onProgress(fraction)` callback (0..1).
  */
-export const uploadMedia = async (file, type) => {
+export const uploadMedia = async (file, type, onProgress) => {
   const resourceType = RESOURCE_TYPES[type];
   if (!resourceType) throw new Error(`Unknown upload type: ${type}`);
 
@@ -46,30 +49,45 @@ export const uploadMedia = async (file, type) => {
   formData.append('api_key', api_key);
   formData.append('folder', folder);
 
-  // 3. Upload directly to Cloudinary — signed, no upload_preset
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${cloud_name}/${resourceType}/upload`,
-    {
-      method: 'POST',
-      body: formData,
-      headers: { 'Content-Type': 'multipart/form-data' },
+  // 3. Upload directly to Cloudinary — signed, no upload_preset. XHR exposes
+  //    upload progress (fetch does not). Don't set Content-Type: the engine adds
+  //    the multipart boundary automatically.
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloud_name}/${resourceType}/upload`);
+
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(e.loaded / e.total);
+      };
     }
-  );
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message ?? `Cloudinary upload failed: ${response.status}`);
-  }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          onProgress?.(1);
+          resolve({
+            publicId: data.public_id,
+            url: data.secure_url,
+            resourceType,
+            width: data.width,
+            height: data.height,
+            duration: data.duration,
+          });
+        } catch {
+          reject(new Error('Invalid response from Cloudinary'));
+        }
+      } else {
+        let message = `Cloudinary upload failed: ${xhr.status}`;
+        try { message = JSON.parse(xhr.responseText)?.error?.message ?? message; } catch {}
+        reject(new Error(message));
+      }
+    };
 
-  const data = await response.json();
-  return {
-    publicId: data.public_id,
-    url: data.secure_url,
-    resourceType,
-    width: data.width,
-    height: data.height,
-    duration: data.duration,
-  };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.send(formData);
+  });
 };
 
 export const getOptimizedUrl = (publicId, type, cloudName) => {

@@ -15,7 +15,7 @@ import { commentOnPost, fetchSocialPostComments, getAccessToken, API_URL } from 
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
-const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded }) => {
+const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, currentUserAvatar }) => {
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(autoOpen || false);
   const [newComment, setNewComment] = useState('');
@@ -23,6 +23,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
   const [loading, setLoading] = useState(false);
   const internalFlatListRef = useRef(null);
   const activeFlatListRef = flatListRef || internalFlatListRef;
+  const profileFetchedRef = useRef(false);
 
   useEffect(() => {
     if (autoOpen) {
@@ -50,12 +51,6 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
     }
   };
 
-  useEffect(() => {
-    if (showComments) {
-      fetchComments();
-    }
-  }, [showComments]);
-
   const fetchUserProfile = async () => {
     try {
       const token = await getAccessToken();
@@ -71,9 +66,17 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
     }
   };
 
+  // Load comments — and the input avatar — only when the modal is opened. This
+  // used to fetch /profiles/me/ on mount for EVERY post in the feed, firing one
+  // duplicate request per card and slowing the whole feed.
   useEffect(() => {
-    fetchUserProfile();
-  }, []);
+    if (!showComments) return;
+    fetchComments();
+    if (!currentUserAvatar && !profileFetchedRef.current) {
+      profileFetchedRef.current = true;
+      fetchUserProfile();
+    }
+  }, [showComments]);
 
   const handlePostComment = async () => {
     if (!newComment.trim()) {
@@ -168,7 +171,11 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
 
           <View style={styles.inputContainer}>
             <Image
-              source={userProfile?.picture ? { uri: userProfile.picture } : DEFAULT_AVATAR}
+              source={
+                currentUserAvatar || userProfile?.picture
+                  ? { uri: currentUserAvatar || userProfile.picture }
+                  : DEFAULT_AVATAR
+              }
               defaultSource={DEFAULT_AVATAR}
               style={styles.userAvatar}
             />

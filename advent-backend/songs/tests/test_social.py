@@ -210,6 +210,128 @@ class HealMediaMigrationTests(APITestCase):
         self.assertEqual(healed, 'social_media/xyz')
 
 
+class GalleryTests(APITestCase):
+    """1–4 image carousel posts: gallery persistence + media_items output."""
+
+    def setUp(self):
+        cache.clear()
+        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.client.force_authenticate(self.alice)
+
+    def test_create_carousel_returns_media_items(self):
+        gallery = [
+            {'public_id': 'social_media/a', 'width': 1080, 'height': 1350},
+            {'public_id': 'social_media/b', 'width': 1080, 'height': 1080},
+            {'public_id': 'social_media/c', 'width': 1080, 'height': 720},
+        ]
+        res = self.client.post('/api/social-posts/', {
+            'content_type': 'image',
+            'caption': 'trip',
+            'media_file': 'social_media/a',
+            'gallery': gallery,
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+
+        post = SocialPost.objects.get(id=res.data['id'])
+        self.assertEqual(len(post.gallery), 3)
+
+        feed = self.client.get('/api/social-posts/')
+        results = feed.data['results'] if isinstance(feed.data, dict) else feed.data
+        item = next(p for p in results if p['id'] == post.id)
+        self.assertEqual(len(item['media_items']), 3)
+        self.assertTrue(item['media_items'][0]['media_url'].endswith('social_media/a.jpg'))
+        self.assertNotIn('gallery', item)  # write-only
+
+    def test_single_image_without_gallery_yields_one_media_item(self):
+        res = self.client.post('/api/social-posts/', {
+            'content_type': 'image',
+            'media_file': 'social_media/solo',
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        feed = self.client.get('/api/social-posts/')
+        results = feed.data['results'] if isinstance(feed.data, dict) else feed.data
+        item = next(p for p in results if p['id'] == res.data['id'])
+        self.assertEqual(len(item['media_items']), 1)
+
+    def test_more_than_four_images_rejected(self):
+        gallery = [{'public_id': f'social_media/{i}'} for i in range(5)]
+        res = self.client.post('/api/social-posts/', {
+            'content_type': 'image', 'media_file': 'social_media/0', 'gallery': gallery,
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class SavedPostsListTests(APITestCase):
+    """The saved-posts listing (Favorites > Posts) returns the user's saves with
+    the nested post + media_items."""
+
+    def setUp(self):
+        cache.clear()
+        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.post = SocialPost.objects.create(user=self.bob, content_type='image', media_file='social_media/x')
+        self.client.force_authenticate(self.alice)
+
+    def test_saved_posts_listing(self):
+        # Save it, then it should appear in /post-saves/ with the nested post.
+        self.client.post(f'/api/social-posts/{self.post.id}/save_post/')
+        res = self.client.get('/api/post-saves/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        rows = res.data['results'] if isinstance(res.data, dict) else res.data
+        self.assertEqual(len(rows), 1)
+        post = rows[0]['post']
+        self.assertEqual(post['id'], self.post.id)
+        self.assertTrue(len(post['media_items']) >= 1)
+
+    def test_only_my_saves(self):
+        # Bob saves it; Alice's listing stays empty.
+        self.client.force_authenticate(self.bob)
+        self.client.post(f'/api/social-posts/{self.post.id}/save_post/')
+        self.client.force_authenticate(self.alice)
+        res = self.client.get('/api/post-saves/')
+        rows = res.data['results'] if isinstance(res.data, dict) else res.data
+        self.assertEqual(len(rows), 0)
+
+
+class VideoTrimTests(APITestCase):
+    """Video posts: trim window persists and is baked into the delivery URL
+    (so_/eo_ offsets) with compression on the optimized URL."""
+
+    def setUp(self):
+        cache.clear()
+        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.client.force_authenticate(self.alice)
+
+    def _create(self, start, end):
+        return self.client.post('/api/social-posts/', {
+            'content_type': 'video',
+            'media_file': 'social_media/clip',
+            'video_start_time': start,
+            'video_end_time': end,
+            'duration': int(end - start),
+        }, format='json')
+
+    def test_trim_baked_into_urls(self):
+        res = self._create(10, 35)
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        post = SocialPost.objects.get(id=res.data['id'])
+        self.assertEqual(post.video_start_time, 10)
+        self.assertEqual(post.video_end_time, 35)
+
+        feed = self.client.get('/api/social-posts/')
+        results = feed.data['results'] if isinstance(feed.data, dict) else feed.data
+        item = next(p for p in results if p['id'] == post.id)
+        url = item['media_items'][0]['optimized_url']
+        self.assertIn('so_10', url)
+        self.assertIn('eo_35', url)
+        self.assertIn('q_auto:eco', url)   # compressed
+        self.assertIn('w_720', url)        # downscaled
+
+    def test_clip_over_30s_rejected(self):
+        res = self._create(0, 45)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+
 class FeedQueryCountTests(APITestCase):
     """N+1 guard: the feed must use a constant number of queries regardless of
     how many posts are on the page."""

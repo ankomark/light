@@ -9,8 +9,10 @@ import {
   Alert,
   TouchableOpacity,
   Pressable,
+  Dimensions,
 } from 'react-native';
 import { Video, Audio } from 'expo-av';
+import { BlurView } from 'expo-blur';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
@@ -28,14 +30,34 @@ import { colors, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const AVATAR_FAILED = '__failed__';
+const CARD_W = Dimensions.get('window').width - 24; // postContainer marginHorizontal 12 each side
 
-// Size media to the post's real dimensions, clamped so neither ultra-wide nor
-// ultra-tall posts blow out the feed. Falls back to square when unknown.
+// Compact relative time, e.g. "now", "5m", "3h", "2d", "4w", or a date.
+const timeAgo = (dateStr) => {
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days}d`;
+  const w = Math.floor(days / 7);
+  if (w < 5) return `${w}w`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+// Instagram-style aspect-ratio clamp: width:height between 1.91:1 (landscape)
+// and 4:5 (portrait, ratio 0.8). Media outside this range is center-cropped
+// (resizeMode="cover") rather than driving an arbitrary height — a 4:5 cap keeps
+// the tallest post at width/0.8 = 1.25×width, so it never runs past the screen.
 const mediaAspectRatio = (width, height) => {
   if (!width || !height) return 1;
   const r = width / height;
   if (!isFinite(r) || r <= 0) return 1;
-  return Math.min(1.91, Math.max(0.56, r));
+  return Math.min(1.91, Math.max(0.8, r));
 };
 
 const processPost = (post, existingFollowStates = {}) => {
@@ -62,6 +84,13 @@ const processPost = (post, existingFollowStates = {}) => {
     ? existingState.is_following
     : post.user?.is_following ?? false;
 
+  // 1–4 image carousel: prefer the per-item gallery URLs (media_items); fall
+  // back to the single optimized/media URL for legacy/video posts.
+  const itemUrls = (Array.isArray(post.media_items) ? post.media_items : [])
+    .map((it) => it?.optimized_url || it?.media_url)
+    .filter(Boolean);
+  const primaryUrl = itemUrls[0] || post.optimized_url || post.media_url;
+
   return {
     ...post,
     user: {
@@ -71,10 +100,46 @@ const processPost = (post, existingFollowStates = {}) => {
       followers_count: userFollowersCount,
       is_following: userIsFollowing
     },
-    mediaUrl: post.optimized_url || post.media_url,
-    thumbnailUrl: post.optimized_url || post.media_url
+    mediaUrl: primaryUrl,
+    thumbnailUrl: primaryUrl,
+    mediaItems: itemUrls.length ? itemUrls : (primaryUrl ? [primaryUrl] : []),
   };
 };
+
+// Swipeable image carousel for 1–4 image posts. All slides share one aspect
+// ratio so the card height is steady as you swipe; dots + a counter show progress.
+const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPressSlide }) {
+  const [index, setIndex] = useState(0);
+  return (
+    <View style={[styles.mediaContainer, { aspectRatio }]}>
+      <FlatList
+        data={urls}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        style={{ width: '100%', height: '100%' }}
+        keyExtractor={(_, i) => `slide_${i}`}
+        getItemLayout={(_, i) => ({ length: CARD_W, offset: CARD_W * i, index: i })}
+        onMomentumScrollEnd={(e) =>
+          setIndex(Math.round(e.nativeEvent.contentOffset.x / CARD_W))
+        }
+        renderItem={({ item: url }) => (
+          <Pressable onPress={onPressSlide} disabled={!onPressSlide} style={{ width: CARD_W, height: '100%' }}>
+            <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          </Pressable>
+        )}
+      />
+      <BlurView intensity={28} tint="dark" style={styles.carouselCounter} pointerEvents="none">
+        <Text style={styles.carouselCounterText}>{index + 1}/{urls.length}</Text>
+      </BlurView>
+      <View style={styles.carouselDots} pointerEvents="none">
+        {urls.map((_, i) => (
+          <View key={i} style={[styles.carouselDot, i === index && styles.carouselDotActive]} />
+        ))}
+      </View>
+    </View>
+  );
+});
 
 const PostMedia = React.memo(function PostMedia({
   item, videoRefs, isFocused, isMuted, onToggleMute,
@@ -83,6 +148,7 @@ const PostMedia = React.memo(function PostMedia({
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [manualPaused, setManualPaused] = useState(false); // tap-to-pause for video
   const aspectRatio = mediaAspectRatio(item.width, item.height);
 
   useEffect(() => {
@@ -90,6 +156,11 @@ const PostMedia = React.memo(function PostMedia({
     setIsLoading(true);
     setHasError(false);
   }, [item.id, item.mediaUrl]);
+
+  // Resume autoplay next time the video scrolls into focus.
+  useEffect(() => {
+    if (!isFocused) setManualPaused(false);
+  }, [isFocused]);
 
   const handleError = useCallback(() => {
     if (currentUrl !== item.media_url) {
@@ -125,7 +196,10 @@ const PostMedia = React.memo(function PostMedia({
 
   if (item.content_type === 'video') {
     return (
-      <View style={styles.mediaContainer}>
+      <Pressable
+        style={[styles.mediaContainer, { aspectRatio }]}
+        onPress={isFocused ? () => setManualPaused((p) => !p) : undefined}
+      >
         {isLoading && (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={colors.primary} />
@@ -135,13 +209,21 @@ const PostMedia = React.memo(function PostMedia({
           ref={ref => ref && (videoRefs.current[item.id] = ref)}
           source={{ uri: currentUrl }}
           style={[styles.media, { aspectRatio }]}
-          resizeMode="contain"
+          resizeMode="cover"
           isLooping
-          shouldPlay={isFocused}
+          shouldPlay={isFocused && !manualPaused}
           isMuted={isMuted}
           onError={handleError}
           onLoad={handleLoad}
         />
+        {/* Tap-to-pause indicator */}
+        {isFocused && !isLoading && manualPaused && (
+          <View style={styles.audioPausedOverlay} pointerEvents="none">
+            <BlurView intensity={32} tint="dark" style={styles.audioPlayBadge}>
+              <MaterialIcons name="play-arrow" size={40} color={colors.white} />
+            </BlurView>
+          </View>
+        )}
         {isFocused && !isLoading && (
           <TouchableOpacity
             style={styles.muteButton}
@@ -149,6 +231,7 @@ const PostMedia = React.memo(function PostMedia({
             activeOpacity={0.8}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
+            <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
             <MaterialIcons
               name={isMuted ? 'volume-off' : 'volume-up'}
               size={18}
@@ -156,11 +239,38 @@ const PostMedia = React.memo(function PostMedia({
             />
           </TouchableOpacity>
         )}
-      </View>
+      </Pressable>
     );
   }
 
   const hasAudio = item.content_type === 'image' && !!item.song_audio_url;
+  const galleryUrls = Array.isArray(item.mediaItems) ? item.mediaItems : [];
+
+  // Multi-image carousel (overlay the audio affordances on top of the pager).
+  if (galleryUrls.length > 1) {
+    return (
+      <View>
+        <FeedCarousel
+          urls={galleryUrls}
+          aspectRatio={aspectRatio}
+          onPressSlide={hasAudio ? () => onToggleAudio?.(item) : undefined}
+        />
+        {hasAudio && isAudioActive && isAudioPlaying && (
+          <BlurView intensity={28} tint="dark" style={styles.audioVizPill} pointerEvents="none">
+            <MaterialIcons name="music-note" size={16} color={colors.white} />
+            <AudioVisualizer playing height={20} />
+          </BlurView>
+        )}
+        {hasAudio && isAudioActive && !isAudioPlaying && (
+          <View style={styles.audioPausedOverlay} pointerEvents="none">
+            <BlurView intensity={32} tint="dark" style={styles.audioPlayBadge}>
+              <MaterialIcons name="play-arrow" size={40} color={colors.white} />
+            </BlurView>
+          </View>
+        )}
+      </View>
+    );
+  }
 
   return (
     <Pressable
@@ -209,6 +319,7 @@ const SocialFeed = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [feedType, setFeedType] = useState('following'); // 'following' | 'for_you'
   const [newPostsAvailable, setNewPostsAvailable] = useState(false);
+  const [topBarH, setTopBarH] = useState(0);
   const [error, setError] = useState(null);
   const [followStates, setFollowStates] = useState({});
   const navigation = useNavigation();
@@ -539,6 +650,20 @@ const SocialFeed = () => {
     setPosts(prev => prev.filter(post => post.id !== postId));
   }, []);
 
+  // Persist a post's saved/favorite state so it survives row re-mounts & refresh.
+  const handleSaveChange = useCallback((postId, isSaved) => {
+    setPosts(prev => prev.map(post =>
+      post.id === postId ? { ...post, is_saved: isSaved } : post
+    ));
+  }, []);
+
+  // Persist a post's like state + count so it survives row re-mounts & refresh.
+  const handleLikeChange = useCallback((postId, { is_liked, likes_count }) => {
+    setPosts(prev => prev.map(post =>
+      post.id === postId ? { ...post, is_liked, likes_count } : post
+    ));
+  }, []);
+
   const renderPostHeader = useCallback(({ item }) => {
     if (!item.user || typeof item.user !== 'object') {
       return null;
@@ -553,24 +678,29 @@ const SocialFeed = () => {
             username: item.user.username,
           })}
         >
-          <Image
-            source={
-              item.user.profile_picture && item.user.profile_picture !== AVATAR_FAILED
-                ? { uri: item.user.profile_picture }
-                : DEFAULT_AVATAR
-            }
-            defaultSource={DEFAULT_AVATAR}
-            style={styles.profileImage}
-            onError={() => setPosts(prev => prev.map(p =>
-              p.id === item.id
-                ? { ...p, user: { ...p.user, profile_picture: AVATAR_FAILED } }
-                : p
-            ))}
-          />
+          <View style={styles.avatarRing}>
+            <Image
+              source={
+                item.user.profile_picture && item.user.profile_picture !== AVATAR_FAILED
+                  ? { uri: item.user.profile_picture }
+                  : DEFAULT_AVATAR
+              }
+              defaultSource={DEFAULT_AVATAR}
+              style={styles.profileImage}
+              onError={() => setPosts(prev => prev.map(p =>
+                p.id === item.id
+                  ? { ...p, user: { ...p.user, profile_picture: AVATAR_FAILED } }
+                  : p
+              ))}
+            />
+          </View>
           <View style={styles.userTextContainer}>
-            <Text style={styles.username}>{String(item.user.username || 'Unknown user')}</Text>
-            <Text style={styles.followersText}>
-              {typeof item.user.followers_count === 'number' ? item.user.followers_count : 0} followers
+            <Text style={styles.username} numberOfLines={1}>
+              {String(item.user.username || 'Unknown user')}
+            </Text>
+            <Text style={styles.metaText} numberOfLines={1}>
+              {timeAgo(item.created_at)}
+              {item.location ? `  ·  ${item.location}` : ''}
             </Text>
           </View>
         </TouchableOpacity>
@@ -596,41 +726,36 @@ const SocialFeed = () => {
   const renderPostFooter = useCallback(({ item }) => (
     <View style={styles.postFooter}>
       <View style={styles.actions}>
-        <LikeButton 
-          postId={item.id} 
-          initialLikes={item.likes_count || 0} 
-          isLiked={item.is_liked || false} 
-        />
-        <CommentAction 
-          postId={item.id} 
-          commentCount={item.comments_count || 0} 
-        />
-        <DownloadButton 
-          publicId={item.media_file} 
-          contentType={item.content_type} 
-        />
-        <SaveButton 
-          postId={item.id} 
-          initialSaved={item.is_saved || false} 
+        <View style={styles.actionsLeft}>
+          <LikeButton
+            postId={item.id}
+            initialLikes={item.likes_count || 0}
+            isLiked={item.is_liked || false}
+            onLikeChange={(d) => handleLikeChange(item.id, d)}
+          />
+          <CommentAction
+            postId={item.id}
+            commentCount={item.comments_count || 0}
+            currentUserAvatar={currentUser?.profile_picture}
+          />
+          <DownloadButton
+            mediaUrl={item.mediaUrl}
+            contentType={item.content_type}
+          />
+        </View>
+        <SaveButton
+          postId={item.id}
+          initialSaved={item.is_saved || false}
+          onSaveChange={(val) => handleSaveChange(item.id, val)}
         />
       </View>
       <View style={styles.postInfo}>
-        {item.caption && <Text style={styles.caption} numberOfLines={3}>{item.caption}</Text>}
-        {item.location && (
-          <Text style={styles.location}>
-            <Feather name="map-pin" size={14} color={colors.textSecondary} /> {item.location}
-          </Text>
-        )}
-        <Text style={styles.timestamp}>
-          {new Date(item.created_at).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-          })}
-        </Text>
+        {item.caption ? (
+          <Text style={styles.caption} numberOfLines={3}>{item.caption}</Text>
+        ) : null}
       </View>
     </View>
-  ), []);
+  ), [currentUser?.profile_picture, handleSaveChange, handleLikeChange]);
 
   const renderItem = useCallback(({ item }) => (
     <View style={styles.postContainer}>
@@ -710,46 +835,61 @@ const SocialFeed = () => {
 
   return (
     <View style={styles.container}>
-      <StoriesBar navigation={navigation} />
-      <SearchBaar
-        onSearch={handleSearch}
-        placeholder="Search posts, users, locations..."
-      />
-
-      {/* Feed tabs (hidden while searching) */}
-      {!searchQuery.trim() && (
-        <View style={styles.tabs}>
+      {/* Frosted glass top bar: search + create, then feed tabs. Stays pinned;
+          the stories row lives in the list header so it scrolls away. */}
+      <BlurView
+        intensity={40}
+        tint="dark"
+        style={styles.topBar}
+        onLayout={(e) => setTopBarH(e.nativeEvent.layout.height)}
+      >
+        <View style={styles.searchRow}>
+          <View style={{ flex: 1 }}>
+            <SearchBaar
+              onSearch={handleSearch}
+              placeholder="Search posts, users, locations..."
+            />
+          </View>
           <TouchableOpacity
-            style={[styles.tab, feedType === 'following' && styles.tabActive]}
-            onPress={() => selectFeed('following')}
-            activeOpacity={0.8}
+            style={styles.createBtn}
+            onPress={() => navigation.navigate('CreatePost')}
+            activeOpacity={0.85}
           >
-            <Text style={[styles.tabText, feedType === 'following' && styles.tabTextActive]}>
-              Following
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, feedType === 'for_you' && styles.tabActive]}
-            onPress={() => selectFeed('for_you')}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.tabText, feedType === 'for_you' && styles.tabTextActive]}>
-              For You
-            </Text>
+            <MaterialIcons name="add" size={26} color={colors.white} />
           </TouchableOpacity>
         </View>
-      )}
 
-      <TouchableOpacity
-        style={styles.topFab}
-        onPress={() => navigation.navigate('CreatePost')}
-        activeOpacity={0.8}
-      >
-        <MaterialIcons name="add" size={28} color={colors.white} />
-      </TouchableOpacity>
+        {/* Feed tabs (hidden while searching) */}
+        {!searchQuery.trim() && (
+          <View style={styles.tabs}>
+            <TouchableOpacity
+              style={[styles.tab, feedType === 'following' && styles.tabActive]}
+              onPress={() => selectFeed('following')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabText, feedType === 'following' && styles.tabTextActive]}>
+                Following
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, feedType === 'for_you' && styles.tabActive]}
+              onPress={() => selectFeed('for_you')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabText, feedType === 'for_you' && styles.tabTextActive]}>
+                For You
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </BlurView>
 
       {newPostsAvailable && (
-        <TouchableOpacity style={styles.newPostsPill} onPress={handleShowNewPosts} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={[styles.newPostsPill, { top: topBarH + 8 }]}
+          onPress={handleShowNewPosts}
+          activeOpacity={0.85}
+        >
           <MaterialIcons name="arrow-upward" size={16} color={colors.white} />
           <Text style={styles.newPostsText}>New posts</Text>
         </TouchableOpacity>
@@ -759,6 +899,14 @@ const SocialFeed = () => {
         ref={flatListRef}
         data={posts}
         renderItem={renderItem}
+        ListHeaderComponent={
+          <View>
+            {/* Spacer so content starts below the absolute glass bar, then
+                scrolls up behind it for the frosted-glass effect. */}
+            <View style={{ height: topBarH }} />
+            <StoriesBar navigation={navigation} />
+          </View>
+        }
         ListEmptyComponent={renderEmptyComponent}
         keyExtractor={keyExtractor}
         contentContainerStyle={[
@@ -767,6 +915,7 @@ const SocialFeed = () => {
         ]}
         refreshing={refreshing}
         onRefresh={handleRefresh}
+        progressViewOffset={topBarH}
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
@@ -799,10 +948,38 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
 
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    backgroundColor: 'rgba(10,22,40,0.55)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  createBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.sm,
+  },
+
   tabs: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingBottom: 6,
+    paddingTop: 10,
     gap: 8,
   },
   tab: {
@@ -855,18 +1032,21 @@ const styles = StyleSheet.create({
 
   postContainer: {
     backgroundColor: colors.card,
-    borderRadius: 12,
-    marginVertical: 10,
+    borderRadius: 18,
+    marginVertical: 8,
     marginHorizontal: 12,
     overflow: 'hidden',
-    ...shadows.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    ...shadows.md,
   },
 
   postHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
   },
 
   userInfo: {
@@ -875,27 +1055,41 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  profileImage: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  avatarRing: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     marginRight: 10,
+    padding: 2,
+    borderWidth: 1.5,
+    borderColor: 'rgba(29,161,242,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  profileImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 21,
     backgroundColor: colors.surface,
   },
 
   userTextContainer: {
     justifyContent: 'center',
+    flex: 1,
   },
 
   username: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '700',
     color: colors.textPrimary,
+    letterSpacing: 0.2,
   },
 
-  followersText: {
+  metaText: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: colors.textMuted,
+    marginTop: 1,
   },
 
   headerActions: {
@@ -932,7 +1126,10 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,22,40,0.35)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -945,10 +1142,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
     borderRadius: radius.full,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,22,40,0.3)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
 
   audioPausedOverlay: {
@@ -959,12 +1159,51 @@ const styles = StyleSheet.create({
   },
 
   audioPlayBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,22,40,0.3)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  carouselCounter: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,22,40,0.3)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  carouselCounterText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  carouselDots: {
+    position: 'absolute',
+    bottom: 10,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  carouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  carouselDotActive: {
+    backgroundColor: colors.white,
   },
 
   errorMediaContainer: {
@@ -996,24 +1235,35 @@ const styles = StyleSheet.create({
   },
 
   postFooter: {
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
 
   actions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    alignItems: 'center',
+  },
+
+  actionsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 
   postInfo: {
-    marginTop: 8,
+    marginTop: 10,
   },
 
   caption: {
-    fontSize: 14.5,
+    fontSize: 14,
     color: colors.textPrimary,
     lineHeight: 20,
-    marginBottom: 6,
+  },
+
+  captionUser: {
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
 
   location: {

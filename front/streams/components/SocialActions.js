@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   TouchableOpacity, 
   Text, 
@@ -17,19 +17,38 @@ import * as Sharing from 'expo-sharing';
 import config from '../config';
 import { likePost, savePost } from '../services/api';
 
-export const LikeButton = ({ postId, initialLikes, isLiked }) => {
-  const [likes, setLikes] = useState(initialLikes);
-  const [liked, setLiked] = useState(isLiked);
+export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
+  const [likes, setLikes] = useState(initialLikes || 0);
+  const [liked, setLiked] = useState(!!isLiked);
   const [loading, setLoading] = useState(false);
 
+  // Reflect persisted values when the row re-mounts / the post updates.
+  useEffect(() => { setLikes(initialLikes || 0); }, [initialLikes]);
+  useEffect(() => { setLiked(!!isLiked); }, [isLiked]);
+
   const handleLike = async () => {
+    if (loading) return;
+    const prevLiked = liked;
+    const prevLikes = likes;
+    const nextLiked = !prevLiked;
+    const nextLikes = Math.max(0, prevLikes + (nextLiked ? 1 : -1));
+
+    setLiked(nextLiked);                                  // optimistic
+    setLikes(nextLikes);
+    onLikeChange?.({ is_liked: nextLiked, likes_count: nextLikes });
+    setLoading(true);
     try {
-      setLoading(true);
-      const updatedPost = await likePost(postId);
-      setLikes(updatedPost.likes_count);
-      setLiked(updatedPost.is_liked);
+      const res = await likePost(postId);
+      const cLiked = typeof res?.is_liked === 'boolean' ? res.is_liked : nextLiked;
+      const cLikes = typeof res?.likes_count === 'number' ? res.likes_count : nextLikes;
+      setLiked(cLiked);
+      setLikes(cLikes);
+      onLikeChange?.({ is_liked: cLiked, likes_count: cLikes });
     } catch (error) {
       console.error('Like error:', error);
+      setLiked(prevLiked);                                // rollback
+      setLikes(prevLikes);
+      onLikeChange?.({ is_liked: prevLiked, likes_count: prevLikes });
       Alert.alert('Error', 'Failed to like post. Please try again.');
     } finally {
       setLoading(false);
@@ -37,19 +56,20 @@ export const LikeButton = ({ postId, initialLikes, isLiked }) => {
   };
 
   return (
-    <TouchableOpacity 
-      style={styles.actionButton} 
+    <TouchableOpacity
+      style={styles.actionButton}
       onPress={handleLike}
       disabled={loading}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
       {loading ? (
         <ActivityIndicator size="small" color={liked ? "#e74c3c" : "#FFF"} />
       ) : (
         <>
-          <MaterialCommunityIcons 
-            name={liked ? "thumb-up" : "thumb-up-outline"} 
-            size={24} 
-            color={liked ? "#e74c3c" : "#FFF"} 
+          <MaterialCommunityIcons
+            name={liked ? "thumb-up" : "thumb-up-outline"}
+            size={24}
+            color={liked ? "#e74c3c" : "#FFF"}
           />
           <Text style={styles.actionText}>{likes}</Text>
         </>
@@ -58,17 +78,29 @@ export const LikeButton = ({ postId, initialLikes, isLiked }) => {
   );
 };
 
-export const SaveButton = ({ postId, initialSaved }) => {
-  const [saved, setSaved] = useState(initialSaved);
+export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
+  const [saved, setSaved] = useState(!!initialSaved);
   const [loading, setLoading] = useState(false);
 
+  // Reflect the persisted value when the row re-mounts / the post updates.
+  useEffect(() => { setSaved(!!initialSaved); }, [initialSaved]);
+
   const handleSave = async () => {
+    if (loading) return;
+    const previous = saved;
+    const next = !previous;
+    setSaved(next);           // optimistic
+    onSaveChange?.(next);     // persist to the feed immediately
+    setLoading(true);
     try {
-      setLoading(true);
-      const updatedPost = await savePost(postId);
-      setSaved(updatedPost.is_saved);
+      const res = await savePost(postId);
+      const confirmed = typeof res?.is_saved === 'boolean' ? res.is_saved : next;
+      setSaved(confirmed);
+      onSaveChange?.(confirmed);
     } catch (error) {
       console.error('Save error:', error);
+      setSaved(previous);     // rollback
+      onSaveChange?.(previous);
       Alert.alert('Error', 'Failed to save post. Please try again.');
     } finally {
       setLoading(false);
@@ -76,36 +108,44 @@ export const SaveButton = ({ postId, initialSaved }) => {
   };
 
   return (
-    <TouchableOpacity 
-      style={styles.actionButton} 
+    <TouchableOpacity
+      style={styles.actionButton}
       onPress={handleSave}
       disabled={loading}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
       {loading ? (
         <ActivityIndicator size="small" color={saved ? "#1DA1F2" : "#FFF"} />
       ) : (
-        <Feather 
-          name="bookmark" 
-          size={24} 
-          color={saved ? "#1DA1F2" : "#FFF"} 
+        <MaterialCommunityIcons
+          name={saved ? "bookmark" : "bookmark-outline"}
+          size={24}
+          color={saved ? "#1DA1F2" : "#FFF"}
         />
       )}
     </TouchableOpacity>
   );
 };
 
-export const DownloadButton = ({ publicId, contentType }) => {
+export const DownloadButton = ({ mediaUrl, publicId, contentType }) => {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const getCloudinaryUrl = () => {
-    const resourceType = contentType === 'video' ? 'video' : 'image';
-    return `https://res.cloudinary.com/${config.cloudinary.cloudName}/${resourceType}/upload/fl_attachment/${publicId}`;
+  // Prefer the delivery URL we already have (media_file is write-only on the API,
+  // so publicId is usually unavailable on the client); fall back to building one.
+  const resolveUrl = () => {
+    if (mediaUrl) return mediaUrl;
+    if (publicId) {
+      const resourceType = contentType === 'video' ? 'video' : 'image';
+      return `https://res.cloudinary.com/${config.cloudinary.cloudName}/${resourceType}/upload/${publicId}`;
+    }
+    return null;
   };
 
   const handleDownload = async () => {
-    if (!publicId) {
-      Alert.alert("Error", "No media file available");
+    const downloadUrl = resolveUrl();
+    if (!downloadUrl) {
+      Alert.alert("Error", "No media available to download");
       return;
     }
 
@@ -121,9 +161,8 @@ export const DownloadButton = ({ publicId, contentType }) => {
 
       // Prepare download
       const fileExtension = contentType === 'video' ? 'mp4' : 'jpg';
-      const fileName = `social_${Date.now()}.${fileExtension}`;
+      const fileName = `advent_${Date.now()}.${fileExtension}`;
       const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-      const downloadUrl = getCloudinaryUrl();
 
       // Start download with progress tracking
       const downloadResumable = FileSystem.createDownloadResumable(
@@ -131,43 +170,32 @@ export const DownloadButton = ({ publicId, contentType }) => {
         fileUri,
         {},
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          setProgress(totalBytesWritten / totalBytesExpectedToWrite);
+          if (totalBytesExpectedToWrite > 0) {
+            setProgress(totalBytesWritten / totalBytesExpectedToWrite);
+          }
         }
       );
 
-      const { uri } = await downloadResumable.downloadAsync();
-      
-      // Save to media library
-      const asset = await MediaLibrary.createAssetAsync(uri);
-      
-      // Try to organize in album
+      const result = await downloadResumable.downloadAsync();
+      if (!result?.uri) throw new Error('Download failed');
+
+      // Save to the device gallery
+      const asset = await MediaLibrary.createAssetAsync(result.uri);
       try {
-        await MediaLibrary.createAlbumAsync("Social App", asset, false);
+        await MediaLibrary.createAlbumAsync("Advent", asset, false);
       } catch (albumError) {
-        console.log('Saved to default gallery location');
+        // Saved to the default gallery location — fine.
       }
 
-      // Offer sharing
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          dialogTitle: 'Share Media',
-          mimeType: contentType === 'video' ? 'video/mp4' : 'image/jpeg'
-        });
-      } else {
-        Alert.alert(
-          "Success",
-          "Media saved to your device gallery",
-          [{ text: "OK" }]
-        );
-      }
+      Alert.alert("Saved", "Media saved to your gallery.");
     } catch (error) {
       console.error('Download error:', error);
-      
+
       let errorMessage = "Failed to download media";
-      if (error.message.includes('permission')) {
-        errorMessage = "Please enable storage permissions in settings";
-      } else if (error.message.includes('network')) {
-        errorMessage = "Network error - please check your connection";
+      if (error.message?.includes('permission')) {
+        errorMessage = "Please enable storage permission in settings";
+      } else if (error.message?.toLowerCase().includes('network')) {
+        errorMessage = "Network error — please check your connection";
       }
 
       Alert.alert("Error", errorMessage);

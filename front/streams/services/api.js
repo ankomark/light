@@ -362,6 +362,14 @@ export const likePost = async (postId) => {
     return res?.results ?? res ?? [];
   };
 
+  // The current user's saved/bookmarked posts. Each save wraps the post; return
+  // the posts themselves (already include media_items, is_saved, etc.).
+  export const fetchSavedPosts = async () => {
+    const res = await apiRequest('get', '/post-saves/');
+    const list = Array.isArray(res) ? res : res?.results ?? [];
+    return list.map((s) => s?.post).filter(Boolean);
+  };
+
   // Comment Endpoints
   export const fetchPostComments = async (postId) => {
     const res = await apiRequest('get', `/social-posts/${postId}/comments/`);

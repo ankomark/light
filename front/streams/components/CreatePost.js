@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Image, TextInput, StyleSheet,
-  ScrollView, Alert, Modal
+  ScrollView, Alert, Modal, Dimensions
 } from 'react-native';
 import AudioTrimmer from './AudioTrimmer';
+import ImageCropper from './ImageCropper';
+import VideoTrimmer from './VideoTrimmer';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -12,22 +14,31 @@ import { uploadMedia } from '../services/cloudinary';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
 
-// Display aspect ratio from the picked media's real dimensions, clamped so very
-// tall/wide images still sit nicely in the card. Falls back to square.
+// Instagram-style aspect-ratio clamp (matches the feed's mediaAspectRatio so the
+// preview is WYSIWYG): width:height between 1.91:1 (landscape) and 4:5 (portrait,
+// ratio 0.8). Outside that range the image is center-cropped via resizeMode
+// "cover"; the 4:5 floor caps height at 1.25×width so tall portraits never run
+// past the screen. Falls back to square when dimensions are unknown.
 const clampAspect = (w, h) => {
   if (!w || !h) return 1;
   const r = w / h;
   if (!isFinite(r) || r <= 0) return 1;
-  return Math.min(1.91, Math.max(0.56, r));
+  return Math.min(1.91, Math.max(0.8, r));
 };
+
+const PREVIEW_W = Dimensions.get('window').width - 40; // contentContainer padding 20 each side
 
 const CreatePost = ({ navigation }) => {
   const [contentType, setContentType] = useState('image');
-  const [media, setMedia] = useState(null);
+  const [media, setMedia] = useState(null);          // single video
+  const [images, setImages] = useState([]);          // 1–4 image carousel: [{uri,width,height}]
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const MAX_IMAGES = 4;
   const [caption, setCaption] = useState('');
   const [tracks, setTracks] = useState([]);
   const [selectedSong, setSelectedSong] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0); // 0..1 across all files
   const [showSongModal, setShowSongModal] = useState(false);
   const [showTrimModal, setShowTrimModal] = useState(false);
   const [playbackStatus, setPlaybackStatus] = useState(null);
@@ -38,6 +49,15 @@ const CreatePost = ({ navigation }) => {
   const soundRef = useRef(null);
   const previewTimerRef = useRef(null);
   const [localAudio, setLocalAudio] = useState(null);
+
+  // Image cropping
+  const [showCropper, setShowCropper] = useState(false);
+  const [cropTarget, setCropTarget] = useState(null); // { uri, width, height }
+  const originalAssetRef = useRef(null);              // last picked image (crop from original)
+
+  // Video trimming
+  const [showVideoTrimmer, setShowVideoTrimmer] = useState(false);
+  const [videoTrim, setVideoTrim] = useState({ start: 0, end: 30 }); // seconds
 
   // Live mirrors so the playback-status callback (set once) reads current values.
   const trimStartRef = useRef(0);
@@ -149,51 +169,119 @@ const CreatePost = ({ navigation }) => {
 
   const pickMedia = async () => {
     try {
-      const mediaTypesArray = [contentType === 'video' ? 'videos' : 'images'];
-    
-      const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: contentType === 'video'
-        ? ImagePicker.MediaTypeOptions.Videos
-        : ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false, // Don't crop or enforce aspect ratio
-      quality: 0.7,
-      allowsMultipleSelection: false,
-    });
-    
-      if (!result.canceled && result.assets.length > 0) {
-        // Validate the selected media
-        const selectedMedia = result.assets[0];
-        
-        if (contentType === 'video') {
-          // Check video duration (max 1 minute = 60000ms)
-          if (selectedMedia.duration && selectedMedia.duration > 60000) {
-            Alert.alert('Error', 'Video must be shorter than 1 minute');
-            return;
-          }
-        }
-        
-        // Check file size (max 10MB)
-        if (selectedMedia.fileSize && selectedMedia.fileSize > 50 * 1024 * 1024) {
-          Alert.alert('Error', 'File size must be less than 50MB');
+      if (contentType === 'video') {
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+          allowsEditing: false,
+          quality: 1,
+          allowsMultipleSelection: false,
+        });
+        if (result.canceled || !result.assets?.length) return;
+        const selected = result.assets[0];
+        // Any length is allowed — the user trims to ≤30s next. Only guard against
+        // an unreasonably large raw file (the full file still uploads).
+        if (selected.fileSize && selected.fileSize > 300 * 1024 * 1024) {
+          Alert.alert('Error', 'Video file is too large (max 300MB).');
           return;
         }
-        
-        // Compress images before upload (expo-image-manipulator)
-        if (contentType === 'image') {
-          const compressed = await ImageManipulator.manipulateAsync(
-            selectedMedia.uri,
-            [{ resize: { width: 1080 } }],
-            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-          );
-          setMedia({ ...selectedMedia, uri: compressed.uri });
-        } else {
-          setMedia(selectedMedia);
-        }
+        setMedia(selected);
+        const durSec = (selected.duration || 0) / 1000;
+        setVideoTrim({ start: 0, end: Math.min(30, durSec || 30) });
+        setShowVideoTrimmer(true);
+        return;
       }
+
+      // Images: select up to the remaining slots (max 4 total).
+      const remaining = MAX_IMAGES - images.length;
+      if (remaining <= 0) {
+        Alert.alert('Limit reached', `You can add up to ${MAX_IMAGES} images`);
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.7,
+        allowsMultipleSelection: true,
+        selectionLimit: remaining,
+      });
+      if (result.canceled || !result.assets?.length) return;
+
+      const picked = result.assets.slice(0, remaining);
+
+      // A single image picked into an empty post → offer the crop editor.
+      if (picked.length === 1 && images.length === 0) {
+        const sel = picked[0];
+        originalAssetRef.current = sel;
+        setCropTarget({ uri: sel.uri, width: sel.width, height: sel.height });
+        setShowCropper(true);
+        return;
+      }
+
+      // Otherwise just compress each and append to the carousel.
+      const compressed = await Promise.all(
+        picked.map(async (a) => {
+          try {
+            const out = await compressImage(a.uri, a.width);
+            return { uri: out.uri, width: out.width || a.width, height: out.height || a.height };
+          } catch {
+            return { uri: a.uri, width: a.width, height: a.height };
+          }
+        })
+      );
+      setImages((prev) => [...prev, ...compressed].slice(0, MAX_IMAGES));
     } catch (error) {
       console.error('Media picker error:', error);
       Alert.alert('Error', 'Failed to pick media. Please try again.');
     }
+  };
+
+  const removeImage = (index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Compress an image to a sane upload size (no upscaling).
+  const compressImage = async (uri, width) => {
+    const actions = width && width > 1080 ? [{ resize: { width: 1080 } }] : [];
+    return ImageManipulator.manipulateAsync(uri, actions, {
+      compress: 0.8,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+  };
+
+  // Cropper confirmed: compress the cropped output → single-image post.
+  // (Crop is only offered for single-image posts, so this replaces the carousel.)
+  const handleCropped = async ({ uri, width, height }) => {
+    setShowCropper(false);
+    try {
+      const out = await compressImage(uri, width);
+      setImages([{ uri: out.uri, width: out.width || width, height: out.height || height }]);
+    } catch (e) {
+      console.error('Post-crop compress failed:', e);
+      setImages([{ uri, width, height }]);
+    }
+  };
+
+  // Cropper cancelled. On a re-crop, keep the current image. On the very first
+  // pick, fall back to the original (uncropped) so the user can still post it.
+  const handleCropCancel = async () => {
+    setShowCropper(false);
+    if (images.length) return; // re-crop cancelled — keep what's already there
+    const asset = originalAssetRef.current;
+    if (!asset) return;
+    try {
+      const out = await compressImage(asset.uri, asset.width);
+      setImages([{ uri: out.uri, width: asset.width, height: asset.height }]);
+    } catch {
+      setImages([{ uri: asset.uri, width: asset.width, height: asset.height }]);
+    }
+  };
+
+  // Re-open the cropper from the originally picked image.
+  const reopenCropper = () => {
+    const asset = originalAssetRef.current;
+    if (!asset) { pickMedia(); return; }
+    setCropTarget({ uri: asset.uri, width: asset.width, height: asset.height });
+    setShowCropper(true);
   };
   const pickLocalAudio = async () => {
   try {
@@ -269,51 +357,87 @@ const CreatePost = ({ navigation }) => {
   };
 
   const handlePost = async () => {
-  if (!media) {
-    Alert.alert('Error', 'Please select a media file');
+  if (contentType === 'image' ? images.length === 0 : !media) {
+    Alert.alert('Error', contentType === 'image' ? 'Please add at least one image' : 'Please select a video');
     return;
   }
 
   setIsUploading(true);
+  setUploadProgress(0);
   try {
     await stopPreview();
-    const uploadResult = await uploadToCloudinary(media, contentType);
 
-    // Denormalised song fields persisted on the post (work for both library
-    // tracks and local uploads). Only images carry an accompanying song.
-    let songData = {};
-    if (contentType === 'image' && selectedSong) {
-      const isLocal = isLocalSong(selectedSong);
-      let audioUrl = songAudioUri(selectedSong);
-      if (isLocal && localAudio) {
-        const audioUploadResult = await uploadToCloudinary(localAudio, 'audio');
-        audioUrl = audioUploadResult.secure_url;
-      }
-      if (audioUrl) {
-        songData = {
-          song_audio_url: audioUrl,
-          song_title: selectedSong.title || '',
-          song_artist: artistName(selectedSong),
-          song_start_time: Number(trimStart.toFixed(2)),
-          song_end_time: Number(trimEnd.toFixed(2)),
-          // Reference the library Track when there is one (skip for local audio).
-          ...(!isLocal && { song_id: selectedSong.id }),
-        };
-      }
-    }
-
-    const postData = {
-      caption: caption.trim(),
-      media_file: uploadResult.public_id,
-      content_type: contentType,
-      width: uploadResult.width,
-      height: uploadResult.height,
-      ...(contentType === 'video' && media.duration && {
-        duration: Math.floor(media.duration / 1000)
-      }),
-      ...songData,
+    // Aggregate upload progress across every file (images + optional audio, or video).
+    const hasLocalAudio =
+      contentType === 'image' && selectedSong && isLocalSong(selectedSong) && !!localAudio;
+    const totalUploads = contentType === 'image' ? images.length + (hasLocalAudio ? 1 : 0) : 1;
+    let done = 0;
+    const fileProgress = (frac) =>
+      setUploadProgress(Math.min(0.99, (done + (frac || 0)) / totalUploads));
+    const fileDone = () => {
+      done += 1;
+      setUploadProgress(Math.min(0.99, done / totalUploads));
     };
 
+    let postData;
+    if (contentType === 'image') {
+      // Upload every image; build the gallery + mirror the first onto media_file.
+      const uploads = [];
+      for (const img of images) {
+        const r = await uploadToCloudinary(img, 'image', fileProgress);
+        uploads.push({ public_id: r.public_id, width: r.width, height: r.height });
+        fileDone();
+      }
+
+      // Accompanying song (denormalised; works for library + local audio).
+      let songData = {};
+      if (selectedSong) {
+        const isLocal = isLocalSong(selectedSong);
+        let audioUrl = songAudioUri(selectedSong);
+        if (isLocal && localAudio) {
+          const audioUploadResult = await uploadToCloudinary(localAudio, 'audio', fileProgress);
+          audioUrl = audioUploadResult.secure_url;
+          fileDone();
+        }
+        if (audioUrl) {
+          songData = {
+            song_audio_url: audioUrl,
+            song_title: selectedSong.title || '',
+            song_artist: artistName(selectedSong),
+            song_start_time: Number(trimStart.toFixed(2)),
+            song_end_time: Number(trimEnd.toFixed(2)),
+            ...(!isLocal && { song_id: selectedSong.id }),
+          };
+        }
+      }
+
+      postData = {
+        caption: caption.trim(),
+        content_type: 'image',
+        media_file: uploads[0].public_id,
+        width: uploads[0].width,
+        height: uploads[0].height,
+        gallery: uploads,
+        ...songData,
+      };
+    } else {
+      const uploadResult = await uploadToCloudinary(media, 'video', fileProgress);
+      fileDone();
+      const clip = Math.max(1, Math.round(videoTrim.end - videoTrim.start));
+      postData = {
+        caption: caption.trim(),
+        content_type: 'video',
+        media_file: uploadResult.public_id,
+        width: uploadResult.width,
+        height: uploadResult.height,
+        // Delivery is trimmed to this window + compressed by the backend/Cloudinary.
+        video_start_time: Number(videoTrim.start.toFixed(2)),
+        video_end_time: Number(videoTrim.end.toFixed(2)),
+        duration: clip,
+      };
+    }
+
+    setUploadProgress(1);
     await createSocialPost(postData);
     Alert.alert('Success', 'Post created successfully!');
     navigation.goBack();
@@ -325,7 +449,7 @@ const CreatePost = ({ navigation }) => {
   }
 };
 
-const uploadToCloudinary = async (mediaFile, type) => {
+const uploadToCloudinary = async (mediaFile, type, onProgress) => {
   const uploadType =
     type === 'video' ? 'social-video' : type === 'audio' ? 'audio' : 'social-image';
   const ext = type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'jpg';
@@ -337,7 +461,8 @@ const uploadToCloudinary = async (mediaFile, type) => {
       name: mediaFile.fileName ?? mediaFile.name ?? `post_${Date.now()}.${ext}`,
       mimeType: mediaFile.mimeType ?? mediaFile.type ?? defaultMime,
     },
-    uploadType
+    uploadType,
+    onProgress
   );
   // Normalise to the shape the rest of CreatePost expects
   return {
@@ -384,42 +509,87 @@ const uploadToCloudinary = async (mediaFile, type) => {
         </TouchableOpacity>
       </View>
 
-      {/* Media Preview — sized to the media's real aspect ratio so portrait /
-          landscape images fill the card without letterbox bars. */}
-      {media ? (
-        <View style={styles.mediaPreviewContainer}>
-          {contentType === 'image' ? (
-            <Image
-              source={{ uri: media.uri }}
-              style={[styles.mediaPreview, { aspectRatio: clampAspect(media.width, media.height) }]}
-              resizeMode="cover"
-            />
-          ) : (
+      {/* Media Preview — images render as a swipeable carousel (up to 4) at one
+          shared aspect ratio; video is a single preview. */}
+      {contentType === 'video' ? (
+        media ? (
+          <View style={styles.mediaPreviewContainer}>
             <Video
               source={{ uri: media.uri }}
               style={[styles.mediaPreview, { aspectRatio: clampAspect(media.width, media.height) }]}
               useNativeControls
-              resizeMode="contain"
+              resizeMode="cover"
               isLooping
               shouldPlay={false}
             />
-          )}
-          <TouchableOpacity
-            style={styles.changeMediaButton}
-            onPress={pickMedia}
-          >
-            <Feather name="edit" size={20} color="#fff" />
+            <TouchableOpacity style={styles.cropMediaButton} onPress={() => setShowVideoTrimmer(true)}>
+              <Feather name="scissors" size={18} color="#fff" />
+              <Text style={styles.cropMediaText}>Trim · {(videoTrim.end - videoTrim.start).toFixed(0)}s</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.changeMediaButton} onPress={pickMedia}>
+              <Feather name="edit" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
+            <Feather name="upload" size={32} color="#666" />
+            <Text style={styles.uploadText}>Select Video (any length · trim to 30s)</Text>
           </TouchableOpacity>
+        )
+      ) : images.length > 0 ? (
+        <View style={styles.mediaPreviewContainer}>
+          <View style={[styles.carouselWrap, { aspectRatio: clampAspect(images[0].width, images[0].height) }]}>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={(e) =>
+                setPreviewIndex(Math.round(e.nativeEvent.contentOffset.x / PREVIEW_W))
+              }
+            >
+              {images.map((img, i) => (
+                <View key={`${img.uri}_${i}`} style={{ width: PREVIEW_W, height: '100%' }}>
+                  <Image source={{ uri: img.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                  <TouchableOpacity style={styles.removeImageBtn} onPress={() => removeImage(i)}>
+                    <Feather name="x" size={16} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+            {images.length > 1 && (
+              <View style={styles.counterBadge}>
+                <Text style={styles.counterText}>{Math.min(previewIndex + 1, images.length)}/{images.length}</Text>
+              </View>
+            )}
+          </View>
+
+          {images.length > 1 && (
+            <View style={styles.dotsRow}>
+              {images.map((_, i) => (
+                <View key={i} style={[styles.dot, i === previewIndex && styles.dotActive]} />
+              ))}
+            </View>
+          )}
+
+          <View style={styles.imageActionsRow}>
+            {images.length === 1 && (
+              <TouchableOpacity style={styles.imageActionBtn} onPress={reopenCropper}>
+                <Feather name="crop" size={16} color="#1DA1F2" />
+                <Text style={styles.imageActionText}>Crop</Text>
+              </TouchableOpacity>
+            )}
+            {images.length < MAX_IMAGES && (
+              <TouchableOpacity style={styles.imageActionBtn} onPress={pickMedia}>
+                <Feather name="plus" size={16} color="#1DA1F2" />
+                <Text style={styles.imageActionText}>Add ({images.length}/{MAX_IMAGES})</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       ) : (
-        <TouchableOpacity 
-          style={styles.uploadButton}
-          onPress={pickMedia}
-        >
+        <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
           <Feather name="upload" size={32} color="#666" />
-          <Text style={styles.uploadText}>
-            Select {contentType === 'video' ? 'Video' : 'Image'}
-          </Text>
+          <Text style={styles.uploadText}>Select Images (up to {MAX_IMAGES})</Text>
         </TouchableOpacity>
       )}
 
@@ -502,9 +672,27 @@ const uploadToCloudinary = async (mediaFile, type) => {
         disabled={isUploading}
       >
         <Text style={styles.postButtonText}>
-          {isUploading ? 'Posting...' : 'Share Post'}
+          {isUploading ? `Posting… ${Math.round(uploadProgress * 100)}%` : 'Share Post'}
         </Text>
       </TouchableOpacity>
+
+      {/* Upload progress overlay */}
+      <Modal visible={isUploading} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.progressBackdrop}>
+          <View style={styles.progressCard}>
+            <Text style={styles.progressTitle}>
+              {uploadProgress >= 1 ? 'Finishing up…' : 'Posting…'}
+            </Text>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${Math.max(3, Math.round(uploadProgress * 100))}%` }]} />
+            </View>
+            <Text style={styles.progressPct}>{Math.round(uploadProgress * 100)}%</Text>
+            <Text style={styles.progressHint}>
+              {contentType === 'video' ? 'Uploading video' : `Uploading ${images.length} ${images.length === 1 ? 'image' : 'images'}`}
+            </Text>
+          </View>
+        </View>
+      </Modal>
 
       {/* Song Selection Modal */}
       <Modal
@@ -614,6 +802,52 @@ const uploadToCloudinary = async (mediaFile, type) => {
     </View>
   </Modal>
 )}
+
+      {/* Image Cropper */}
+      {showCropper && cropTarget && (
+        <ImageCropper
+          visible={showCropper}
+          uri={cropTarget.uri}
+          imageWidth={cropTarget.width}
+          imageHeight={cropTarget.height}
+          onCancel={handleCropCancel}
+          onCropped={handleCropped}
+        />
+      )}
+
+      {/* Video Trimmer */}
+      {showVideoTrimmer && media && contentType === 'video' && (
+        <Modal
+          visible={showVideoTrimmer}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => setShowVideoTrimmer(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setShowVideoTrimmer(false)}>
+                <Feather name="x" size={24} color="#1DA1F2" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Trim Video</Text>
+              <View style={{ width: 24 }} />
+            </View>
+            <View style={styles.trimContainer}>
+              <VideoTrimmer
+                uri={media.uri}
+                durationSec={(media.duration || 0) / 1000}
+                aspectRatio={clampAspect(media.width, media.height)}
+                onChange={(start, end) => setVideoTrim({ start, end })}
+              />
+              <TouchableOpacity
+                style={styles.confirmButton}
+                onPress={() => setShowVideoTrimmer(false)}
+              >
+                <Text style={styles.confirmButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
     </ScrollView>
   );
 };
@@ -691,6 +925,90 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 20,
   },
+  cropMediaButton: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#0008',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  cropMediaText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  carouselWrap: {
+    width: '100%',
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  removeImageBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#0009',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  counterBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: '#0009',
+  },
+  counterText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#ccc',
+  },
+  dotActive: {
+    backgroundColor: '#1DA1F2',
+  },
+  imageActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+    marginTop: 12,
+  },
+  imageActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1DA1F2',
+  },
+  imageActionText: {
+    color: '#1DA1F2',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   inputContainer: {
     marginBottom: 20,
   },
@@ -723,6 +1041,50 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  progressBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  progressCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 22,
+    alignItems: 'center',
+  },
+  progressTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#222',
+    marginBottom: 16,
+  },
+  progressTrack: {
+    width: '100%',
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#e6eaf0',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 5,
+    backgroundColor: '#1DA1F2',
+  },
+  progressPct: {
+    marginTop: 12,
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1DA1F2',
+    fontVariant: ['tabular-nums'],
+  },
+  progressHint: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#888',
   },
   videoThumbnail: {
   width: '100%',
