@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, Image, TextInput, StyleSheet,
   ScrollView, Alert, Modal
 } from 'react-native';
-import Slider from '@react-native-community/slider';
+import AudioTrimmer from './AudioTrimmer';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -34,11 +34,27 @@ const CreatePost = ({ navigation }) => {
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(30);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [previewPosMs, setPreviewPosMs] = useState(null); // playhead during preview
   const soundRef = useRef(null);
   const previewTimerRef = useRef(null);
   const [localAudio, setLocalAudio] = useState(null);
 
+  // Live mirrors so the playback-status callback (set once) reads current values.
+  const trimStartRef = useRef(0);
+  const trimEndRef = useRef(30);
+  const isPreviewingRef = useRef(false);
+  trimStartRef.current = trimStart;
+  trimEndRef.current = trimEnd;
+
   const MAX_CLIP = 30; // seconds — the trimmed audio clip is capped at 30s
+
+  // Format seconds as m:ss.
+  const fmtTime = (s) => {
+    const total = Math.max(0, Math.floor(s));
+    const m = Math.floor(total / 60);
+    const sec = String(total % 60).padStart(2, '0');
+    return `${m}:${sec}`;
+  };
 
   // Library tracks expose the audio at `audio_file`; local picks use `audio_url`.
   const songAudioUri = (song) => song?.audio_file || song?.audio_url || null;
@@ -53,16 +69,56 @@ const CreatePost = ({ navigation }) => {
       ? song.artist
       : song?.artist?.username || 'Unknown Artist';
 
-  // Stop preview playback and clear any pending auto-stop timer.
+  // Drives the playhead and loops playback within the selected [start, end]
+  // window (never jumps back to 0). Set once on the sound; reads live refs.
+  const onPreviewStatus = (status) => {
+    if (!status.isLoaded || !isPreviewingRef.current) return;
+    const pos = status.positionMillis || 0;
+    const startMs = trimStartRef.current * 1000;
+    const endMs = trimEndRef.current * 1000;
+    if (pos >= endMs - 20) {
+      soundRef.current?.setPositionAsync(startMs).catch(() => {});
+      setPreviewPosMs(startMs);
+    } else {
+      setPreviewPosMs(pos);
+    }
+  };
+
+  // Play the selected region, looping it.
+  const startPreview = async () => {
+    if (!soundRef.current) return;
+    try {
+      isPreviewingRef.current = true;
+      setIsPreviewing(true);
+      await soundRef.current.setPositionAsync(trimStartRef.current * 1000);
+      setPreviewPosMs(trimStartRef.current * 1000);
+      await soundRef.current.playAsync();
+    } catch {
+      isPreviewingRef.current = false;
+      setIsPreviewing(false);
+    }
+  };
+
+  // Stop preview playback and hide the playhead.
   const stopPreview = async () => {
+    isPreviewingRef.current = false;
     if (previewTimerRef.current) {
       clearTimeout(previewTimerRef.current);
       previewTimerRef.current = null;
     }
     setIsPreviewing(false);
+    setPreviewPosMs(null);
     try {
-      if (soundRef.current) await soundRef.current.stopAsync();
+      if (soundRef.current) await soundRef.current.pauseAsync();
     } catch {}
+  };
+
+  // The trimmer reports the window in ms; mirror to seconds (state + refs).
+  const onTrimChange = (startMs, endMs) => {
+    trimStartRef.current = startMs / 1000;
+    trimEndRef.current = endMs / 1000;
+    setTrimStart(startMs / 1000);
+    setTrimEnd(endMs / 1000);
   };
 
   // Unload audio + clear timers when leaving the screen.
@@ -192,7 +248,8 @@ const CreatePost = ({ navigation }) => {
 
       const { sound } = await Audio.Sound.createAsync(
         { uri },
-        { shouldPlay: false }
+        { shouldPlay: false, progressUpdateIntervalMillis: 50, isLooping: true },
+        onPreviewStatus
       );
       soundRef.current = sound;
 
@@ -201,46 +258,14 @@ const CreatePost = ({ navigation }) => {
 
       // Default trim range: first 30s (or the whole song if it's shorter).
       const songSeconds = (status.durationMillis || 0) / 1000;
-      setTrimEnd(Math.min(MAX_CLIP, songSeconds || MAX_CLIP));
+      const end = Math.min(MAX_CLIP, songSeconds || MAX_CLIP);
+      trimStartRef.current = 0;
+      trimEndRef.current = end;
+      setTrimEnd(end);
     } catch (error) {
       console.error('Error loading song:', error);
       Alert.alert('Error', 'Failed to load song for trimming');
     }
-  };
-
-  const previewTrimmedSong = async () => {
-    if (!soundRef.current) return;
-    try {
-      await stopPreview();
-      await soundRef.current.setPositionAsync(trimStart * 1000);
-      await soundRef.current.playAsync();
-      setIsPreviewing(true);
-      // Auto-stop at the end of the trimmed window.
-      previewTimerRef.current = setTimeout(() => {
-        stopPreview();
-      }, Math.max(0, (trimEnd - trimStart) * 1000));
-    } catch (error) {
-      console.error('Preview error:', error);
-      setIsPreviewing(false);
-    }
-  };
-
-  // Keep the trim window valid: start ≥ 0, end > start, and clip ≤ MAX_CLIP.
-  const onChangeTrimStart = (value) => {
-    const songSeconds = (playbackStatus?.durationMillis || 0) / 1000;
-    const start = Math.max(0, Math.min(value, Math.max(0, songSeconds - 0.5)));
-    setTrimStart(start);
-    setTrimEnd((prevEnd) => {
-      const maxEnd = Math.min(start + MAX_CLIP, songSeconds || start + MAX_CLIP);
-      const minEnd = Math.min(start + 1, maxEnd);
-      return Math.max(minEnd, Math.min(prevEnd, maxEnd));
-    });
-  };
-
-  const onChangeTrimEnd = (value) => {
-    const songSeconds = (playbackStatus?.durationMillis || 0) / 1000;
-    const maxEnd = Math.min(trimStart + MAX_CLIP, songSeconds || trimStart + MAX_CLIP);
-    setTrimEnd(Math.max(trimStart + 1, Math.min(value, maxEnd)));
   };
 
   const handlePost = async () => {
@@ -537,56 +562,45 @@ const uploadToCloudinary = async (mediaFile, type) => {
       </View>
 
       <View style={styles.trimContainer}>
-        <Text style={styles.songTitle}>
+        <Text style={styles.songTitle} numberOfLines={1}>
           {selectedSong.title || 'Untitled Song'}
         </Text>
-        <Text style={styles.songArtist}>
+        <Text style={styles.songArtist} numberOfLines={1}>
           {artistName(selectedSong)}
         </Text>
 
-        <View style={styles.trimControls}>
-          <Text style={styles.trimLabel}>
-            Start: {trimStart.toFixed(1)}s
-          </Text>
-          <Slider
-            style={styles.slider}
-            minimumValue={0}
-            maximumValue={Math.max(1, (playbackStatus.durationMillis || 0) / 1000)}
-            value={trimStart}
-            onValueChange={onChangeTrimStart}
-            minimumTrackTintColor="#1DA1F2"
-            maximumTrackTintColor="#ddd"
-            thumbTintColor="#1DA1F2"
-            step={0.1}
-          />
-
-          <Text style={styles.trimLabel}>
-            End: {trimEnd.toFixed(1)}s (max {MAX_CLIP}s clip)
-          </Text>
-          <Slider
-            style={styles.slider}
-            minimumValue={trimStart + 1}
-            maximumValue={Math.min(trimStart + MAX_CLIP, (playbackStatus.durationMillis || 0) / 1000)}
-            value={trimEnd}
-            onValueChange={onChangeTrimEnd}
-            minimumTrackTintColor="#1DA1F2"
-            maximumTrackTintColor="#ddd"
-            thumbTintColor="#1DA1F2"
-            step={0.1}
-          />
-
-          <Text style={styles.trimDuration}>
-            Duration: {(trimEnd - trimStart).toFixed(1)} seconds
-          </Text>
+        {/* Time read-out: start · selected length · end */}
+        <View style={styles.trimTimes}>
+          <Text style={styles.trimTimeText}>{fmtTime(trimStart)}</Text>
+          <View style={styles.trimDurationPill}>
+            <Text style={styles.trimDurationPillText}>
+              {(trimEnd - trimStart).toFixed(1)}s
+            </Text>
+          </View>
+          <Text style={styles.trimTimeText}>{fmtTime(trimEnd)}</Text>
         </View>
+
+        <AudioTrimmer
+          durationMs={playbackStatus.durationMillis || 0}
+          startMs={trimStart * 1000}
+          endMs={trimEnd * 1000}
+          playheadMs={previewPosMs}
+          maxClipMs={MAX_CLIP * 1000}
+          minClipMs={1000}
+          onChange={onTrimChange}
+        />
+
+        <Text style={styles.trimHint}>
+          Drag the edges to trim · drag the middle to move · max {MAX_CLIP}s
+        </Text>
 
         <TouchableOpacity
           style={styles.previewButton}
-          onPress={isPreviewing ? stopPreview : previewTrimmedSong}
+          onPress={isPreviewing ? stopPreview : startPreview}
         >
-          <Feather name={isPreviewing ? 'square' : 'play'} size={20} color="white" />
+          <Feather name={isPreviewing ? 'pause' : 'play'} size={20} color="white" />
           <Text style={styles.previewButtonText}>
-            {isPreviewing ? 'Stop' : 'Preview'}
+            {isPreviewing ? 'Pause' : 'Play selection'}
           </Text>
         </TouchableOpacity>
 
@@ -800,6 +814,37 @@ modalContainer: {
   },
   trimContainer: {
     padding: 20,
+  },
+  trimTimes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 18,
+    marginBottom: 10,
+  },
+  trimTimeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555',
+    fontVariant: ['tabular-nums'],
+  },
+  trimDurationPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#1DA1F2',
+  },
+  trimDurationPillText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  trimHint: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 4,
   },
   trimControls: {
     marginVertical: 20,
