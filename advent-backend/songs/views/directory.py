@@ -1,6 +1,42 @@
 from .common import *  # noqa: F401,F403
 
 
+class MediaStationViewSet(viewsets.ModelViewSet):
+    queryset = MediaStation.objects.all()
+    serializer_class = MediaStationSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = StandardPagination
+
+    def get_queryset(self):
+        qs = MediaStation.objects.all()
+        station_type = self.request.query_params.get('type')
+        if station_type in ('TV', 'Radio', 'Podcast'):
+            qs = qs.filter(type=station_type)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by_id != request.user.id:
+            return Response(
+                {"error": "You can only edit stations you created."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.created_by_id != request.user.id:
+            return Response(
+                {"error": "You can only delete stations you created."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class ChurchViewSet(viewsets.ModelViewSet):
     queryset = Church.objects.all()
     serializer_class = ChurchSerializer

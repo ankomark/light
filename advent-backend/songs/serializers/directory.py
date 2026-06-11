@@ -1,6 +1,28 @@
 from .common import *  # noqa: F401,F403
 
 
+class MediaStationSerializer(serializers.ModelSerializer):
+    is_owner = serializers.SerializerMethodField()
+    created_by_username = serializers.CharField(
+        source='created_by.username', read_only=True, default=None
+    )
+
+    class Meta:
+        model = MediaStation
+        fields = [
+            'id', 'name', 'type', 'logo',
+            'website', 'youtube', 'facebook', 'instagram', 'whatsapp',
+            'created_by', 'created_by_username', 'is_owner', 'created_at',
+        ]
+        read_only_fields = ('created_by', 'created_at')
+
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        return bool(
+            request and request.user.is_authenticated and obj.created_by_id == request.user.id
+        )
+
+
 class ChurchSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)

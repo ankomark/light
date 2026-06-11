@@ -486,6 +486,32 @@ class Church(models.Model):
         ordering = ['-created_at']
 
 
+class MediaStation(models.Model):
+    STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
+
+    name = models.CharField(max_length=200)
+    type = models.CharField(max_length=10, choices=STATION_TYPES, default='TV')
+    # Logo is stored as a small base64 data URI (or blank to use a default icon).
+    logo = models.TextField(blank=True)
+    website = models.URLField(max_length=500, blank=True)
+    youtube = models.URLField(max_length=500, blank=True)
+    facebook = models.URLField(max_length=500, blank=True)
+    instagram = models.URLField(max_length=500, blank=True)
+    whatsapp = models.URLField(max_length=500, blank=True)
+    # Null for seeded/built-in stations (system-owned, read-only to everyone).
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='media_stations'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 class Videostudio(models.Model):
     SERVICE_TYPES = (
         ('music_video', 'Music Video Production'),

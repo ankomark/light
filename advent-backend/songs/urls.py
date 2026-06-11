@@ -26,7 +26,8 @@ from .views import (
     CreatePaymentIntentView,
     StoryViewSet,
     ReportViewSet,
-    ChurchViewSet, 
+    ChurchViewSet,
+    MediaStationViewSet,
     VideoStudioViewSet,
     ChoirViewSet,
     GroupViewSet,
@@ -62,7 +63,8 @@ router.register(r'post-likes', PostLikeViewSet)
 router.register(r'post-comments', PostCommentViewSet)
 router.register(r'post-saves', PostSaveViewSet)
 router.register(r'notifications', NotificationViewSet, basename='notifications')
-router.register(r'churches', ChurchViewSet, basename='churches') 
+router.register(r'churches', ChurchViewSet, basename='churches')
+router.register(r'media-stations', MediaStationViewSet, basename='media-stations')
 router.register(r'video-studios', VideoStudioViewSet, basename='video-studios')
 router.register(r'choirs', ChoirViewSet, basename='choirs')
 router.register(r'groups', GroupViewSet, basename='groups')
