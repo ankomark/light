@@ -1,388 +1,238 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  FlatList, 
-  TouchableOpacity, 
-  StyleSheet, 
-  TextInput,
-  Keyboard,
-  ActivityIndicator
+import React, { useState, useMemo, useCallback } from 'react';
+import {
+  View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput, Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import hymnsData from '../assets/hymns.json';
-import { getVerse, getSectionInfo } from '../utils/hymnUtils';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { HYMNALS, HYMNAL_ORDER } from '../utils/hymnals';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const HymnList = ({ navigation }) => {
-  const [hymns, setHymns] = useState([]);
-  const [sections, setSections] = useState([]);
-  const [activeSection, setActiveSection] = useState(null);
+  const [lang, setLang] = useState('en');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [filteredHymns, setFilteredHymns] = useState([]);
 
-  useEffect(() => {
-    // Load hymns data
-    setHymns(hymnsData.hymns);
-    
-    // Create sections
-    setSections(hymnsData.sections || []);
-    
-    // Initial filtered hymns (all hymns)
-    setFilteredHymns(hymnsData.hymns);
-  }, []);
+  const hymnal = HYMNALS[lang];
+  const hymns = hymnal.data.hymns;
 
-  // Filter hymns based on section and search query
-  useEffect(() => {
-    setIsSearching(true);
-    
-    let results = hymns;
-    
-    // Apply section filter
-    if (activeSection) {
-      results = results.filter(hymn => hymn.Section === activeSection);
-    }
-    
-    // Apply search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      results = results.filter(hymn => {
-        // 1. Check hymn number (converted to string)
-        if (hymn.Number.toString().includes(query)) return true;
-        
-        // 2. Check title
-        if (hymn.Title.toLowerCase().includes(query)) return true;
-        
-        // 3. Check refrain
-        if (hymn.Refrain && hymn.Refrain.toLowerCase().includes(query)) return true;
-        
-        // 4. Check verses
-        for (let i = 1; i <= 7; i++) {
-          const verse = getVerse(hymn, i);
-          if (verse && verse.toLowerCase().includes(query)) return true;
-        }
-        
-        // 5. Check section name
-        const section = getSectionInfo(sections, hymn.Section);
-        if (section.title.toLowerCase().includes(query)) return true;
-        
-        return false;
-      });
-    }
-    
-    setFilteredHymns(results);
-    setIsSearching(false);
-  }, [hymns, sections, activeSection, searchQuery]);
+  const filteredHymns = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return hymns;
+    return hymns.filter((h) => {
+      if (String(h.number).includes(q)) return true;
+      if (h.title && h.title.toLowerCase().includes(q)) return true;
+      if (h.refrain && h.refrain.toLowerCase().includes(q)) return true;
+      return h.verses?.some((v) => v.toLowerCase().includes(q));
+    });
+  }, [hymns, searchQuery]);
 
-  const currentSection = sections.find(s => s.id === activeSection);
+  const openHymn = useCallback((hymn) => {
+    Keyboard.dismiss();
+    navigation.navigate('HymnDetail', { hymn, hymnalName: hymnal.name, lang });
+  }, [navigation, hymnal.name, lang]);
 
-  const renderHymnItem = ({ item }) => {
-    // Get preview text from refrain or first verse
-    const previewText = item.Refrain 
-      ? item.Refrain.split('\n')[0]
-      : getVerse(item, 1)?.split('\n')[0] || '';
-
-    // Highlight number if it matches search
-    const numberText = item.Number.toString();
-    const isNumberMatch = searchQuery && numberText.includes(searchQuery);
-    
+  const renderHymnItem = useCallback(({ item }) => {
+    const preview = (item.refrain || item.verses?.[0] || '').split('\n')[0];
+    const numberMatch = searchQuery && String(item.number).includes(searchQuery.trim());
     return (
-      <TouchableOpacity 
-        style={styles.hymnItem}
-        onPress={() => {
-          Keyboard.dismiss();
-          navigation.navigate('HymnDetail', { 
-            hymn: item,
-            section: getSectionInfo(sections, item.Section) 
-          });
-        }}
-      >
-        <Text style={[
-          styles.hymnNumber,
-          isNumberMatch && styles.highlightedNumber
-        ]}>
-          {item.Number}.
-        </Text>
+      <TouchableOpacity style={styles.hymnItem} onPress={() => openHymn(item)} activeOpacity={0.8}>
+        <View style={[styles.numberBadge, numberMatch && styles.numberBadgeMatch]}>
+          <Text style={styles.numberText}>{item.number}</Text>
+        </View>
         <View style={styles.hymnContent}>
-          <Text style={styles.hymnTitle}>{item.Title}</Text>
-          <Text style={styles.hymnSection}>
-            {getSectionInfo(sections, item.Section).title}
-          </Text>
-          {previewText ? (
-            <Text style={styles.hymnPreview} numberOfLines={1}>
-              {previewText}
-            </Text>
+          <Text style={styles.hymnTitle} numberOfLines={1}>{item.title}</Text>
+          {preview ? (
+            <Text style={styles.hymnPreview} numberOfLines={1}>{preview}</Text>
           ) : null}
         </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
       </TouchableOpacity>
     );
-  };
-
-  const clearSearch = () => {
-    setSearchQuery('');
-    Keyboard.dismiss();
-  };
+  }, [openHymn, searchQuery]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-    <View style={styles.container}>
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerIcon}>
+          <Ionicons name="musical-notes" size={20} color={colors.primary} />
+        </View>
+        <View style={styles.headerText}>
+          <Text style={styles.headerTitle}>Hymnal</Text>
+          <Text style={styles.headerSubtitle}>{hymnal.name} · {hymns.length} hymns</Text>
+        </View>
+      </View>
+
+      {/* Language switcher — segmented control */}
+      <View style={styles.langRow}>
+        {HYMNAL_ORDER.map((code) => {
+          const active = code === lang;
+          return (
+            <TouchableOpacity
+              key={code}
+              style={[styles.langSeg, active && styles.langSegActive]}
+              onPress={() => { setLang(code); Keyboard.dismiss(); }}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[styles.langSegText, active && styles.langSegTextActive]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}
+              >
+                {HYMNALS[code].label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Search */}
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={18} color={colors.placeholder} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by number, title, or lyrics..."
-          placeholderTextColor="#888"
+          placeholder="Search by number, title, or lyrics…"
+          placeholderTextColor={colors.placeholder}
           value={searchQuery}
           onChangeText={setSearchQuery}
           autoCorrect={false}
           autoCapitalize="none"
-          keyboardType="number-pad"
         />
         {searchQuery ? (
-          <TouchableOpacity onPress={clearSearch} style={styles.searchClear}>
-            <Ionicons name="close-circle" size={22} color="#888" />
+          <TouchableOpacity onPress={() => { setSearchQuery(''); Keyboard.dismiss(); }}>
+            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
           </TouchableOpacity>
-        ) : (
-          <View style={styles.searchIcon}>
-            <Ionicons name="search" size={20} color="#888" />
-          </View>
-        )}
+        ) : null}
       </View>
 
-      {/* Search Results Info */}
-      {searchQuery && (
-        <View style={styles.resultsInfo}>
-          <Text style={styles.resultsText}>
-            {filteredHymns.length} {filteredHymns.length === 1 ? 'hymn' : 'hymns'} found for "{searchQuery}"
-          </Text>
-        </View>
-      )}
+      {searchQuery ? (
+        <Text style={styles.resultsText}>
+          {filteredHymns.length} {filteredHymns.length === 1 ? 'result' : 'results'}
+        </Text>
+      ) : null}
 
-      {/* Section header */}
-      {currentSection && !searchQuery && (
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{currentSection.title}</Text>
-          <Text style={styles.sectionDescription}>{currentSection.description}</Text>
-        </View>
-      )}
-
-      {/* Sections filter */}
-      {!searchQuery && (
-        <FlatList
-          horizontal
-          data={sections}
-          keyExtractor={item => item.id.toString()}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[
-                styles.sectionButton,
-                activeSection === item.id && styles.activeSection
-              ]}
-              onPress={() => {
-                setActiveSection(activeSection === item.id ? null : item.id);
-                Keyboard.dismiss();
-              }}
-            >
-              <Text style={[
-                styles.sectionText,
-                activeSection === item.id && styles.activeSectionText
-              ]}>
-                {item.title}
-              </Text>
-            </TouchableOpacity>
-          )}
-          contentContainerStyle={styles.sectionsContainer}
-          showsHorizontalScrollIndicator={false}
-        />
-      )}
-
-      {/* Loading indicator */}
-      {isSearching && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color="#1D478B" />
-        </View>
-      )}
-
-      {/* Hymns list */}
-      {!isSearching && (
-        <FlatList
-          data={filteredHymns}
-          keyExtractor={item => item._id.toString()}
-          renderItem={renderHymnItem}
-          contentContainerStyle={styles.listContainer}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="musical-notes" size={40} color="#ccc" />
-              <Text style={styles.emptyText}>No hymns found</Text>
-              <Text style={styles.emptySubtext}>Try a different search term</Text>
-            </View>
-          }
-          keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="handled"
-        />
-      )}
-    </View>
+      <FlatList
+        data={filteredHymns}
+        keyExtractor={(item) => `${lang}_${item.number}`}
+        renderItem={renderHymnItem}
+        contentContainerStyle={styles.listContent}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={15}
+        windowSize={10}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Ionicons name="musical-notes-outline" size={44} color={colors.textMuted} />
+            <Text style={styles.emptyText}>No hymns found</Text>
+            <Text style={styles.emptySub}>Try a different number or word</Text>
+          </View>
+        }
+      />
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-    safeArea: {
-  flex: 1,
- backgroundColor:'#7C807F',
-},
-  container: {
-    flex: 1,
-    backgroundColor: '#1f2937',
-  },
-  searchContainer: {
+  safeArea: { flex: 1, backgroundColor: colors.bg },
+
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1F1F1F',
-    borderRadius: 12,
-    marginTop: 10,
-    marginHorizontal: 20,
-    paddingHorizontal: 12,
-    height: 50,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 5,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
   },
-  searchInput: {
+  headerIcon: {
+    width: 40, height: 40, borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  headerText: { flex: 1 },
+  headerTitle: { ...typography.h2, color: colors.textPrimary },
+  headerSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
+
+  langRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: radius.full,
+    padding: 4,
+    gap: 4,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+  },
+  langSeg: {
     flex: 1,
-    fontSize: 16,
-    color: '#fff',
-    height: '100%',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  searchIcon: {
-    marginLeft: 8,
+  langSegActive: {
+    backgroundColor: colors.primary,
+    ...shadows.sm,
   },
-  searchClear: {
-    padding: 5,
+  langSegText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
-  resultsInfo: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
+  langSegTextActive: { color: colors.white },
+
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.card,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.md,
+    height: 46,
   },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
   resultsText: {
-    color: '#aaa',
-    fontStyle: 'italic',
+    ...typography.caption,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
   },
-  sectionHeader: {
-    padding: 16,
-    backgroundColor: 'E5BC57',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2C2C2C',
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#F8F8F8',
-  },
-  sectionDescription: {
-    fontSize: 14,
-    color: '#aaa',
-    marginTop: 4,
-  },
-  sectionsContainer: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    backgroundColor: '#121212',
-  },
-  sectionButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginRight: 10,
-    borderRadius: 20,
-    backgroundColor: '#2A2A2A',
-  },
-  activeSection: {
-    backgroundColor: '#1D478B',
-  },
-  sectionText: {
-    color: '#ccc',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  activeSectionText: {
-    color: '#fff',
-  },
-  listContainer: {
-    paddingBottom: 20,
-    paddingHorizontal: 10,
-  },
+
+  listContent: { padding: spacing.md, paddingBottom: spacing.xxl },
   hymnItem: {
     flexDirection: 'row',
-    padding: 16,
-    marginVertical: 6,
-    marginHorizontal: 8,
-    backgroundColor: '#1E1E1E',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 2,
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    padding: spacing.sm + 2,
+    marginBottom: spacing.sm,
+    ...shadows.sm,
   },
-  hymnNumber: {
-    fontWeight: 'bold',
-    marginRight: 12,
-    color: '#61dafb',
-    width: 36,
-    fontSize: 16,
-    textAlign: 'right',
-  },
-  highlightedNumber: {
-    color: '#fff',
-    backgroundColor: '#1D478B',
-    borderRadius: 4,
+  numberBadge: {
+    minWidth: 40, height: 40, borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: spacing.sm,
     paddingHorizontal: 6,
-    overflow: 'hidden',
   },
-  hymnContent: {
-    flex: 1,
-  },
-  hymnTitle: {
-    fontWeight: '600',
-    fontSize: 16,
-    color: '#fff',
-    marginBottom: 4,
-  },
-  hymnSection: {
-    fontSize: 13,
-    color: '#bbb',
-    marginBottom: 4,
-    fontStyle: 'italic',
-  },
-  hymnPreview: {
-    color: '#ccc',
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  loadingContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyText: {
-    fontSize: 18,
-    color: '#bbb',
-    marginTop: 15,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 5,
-  }
-});
+  numberBadgeMatch: { backgroundColor: colors.primary },
+  numberText: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
+  hymnContent: { flex: 1, marginRight: spacing.sm },
+  hymnTitle: { ...typography.label, color: colors.textPrimary, fontWeight: '600' },
+  hymnPreview: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
 
+  empty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xxl,
+    gap: spacing.xs,
+  },
+  emptyText: { ...typography.body, color: colors.textSecondary, marginTop: spacing.sm },
+  emptySub: { ...typography.caption, color: colors.textMuted },
+});
 
 export default HymnList;

@@ -34,6 +34,10 @@ import HamburgerMenu from './components/HamburgerMenu';
 import Conferences from './pages/Conferences';
 import MediaScreen from './pages/MediaScreen';
 import AdventistMedia from './pages/AdventistMedia';
+import Articles from './pages/Articles';
+import PublicationDetail from './pages/PublicationDetail';
+import ChapterReader from './pages/ChapterReader';
+import PublicationEditor from './pages/PublicationEditor';
 import Churches from './pages/Churches';
 import Choirs from './pages/Choirs';
 import Studios from './pages/Studios';
@@ -156,6 +160,10 @@ const App = () => {
                 <Stack.Screen name="Unions&Conferences" component={Conferences} />
                 <Stack.Screen name="MediaScreen" component={MediaScreen} />
                 <Stack.Screen name="AdventistMedia" component={ AdventistMedia} />
+                <Stack.Screen name="Articles" component={Articles} />
+                <Stack.Screen name="PublicationDetail" component={PublicationDetail} />
+                <Stack.Screen name="ChapterReader" component={ChapterReader} />
+                <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
                 <Stack.Screen name="Churches" component={Churches} />
                 <Stack.Screen name="Studios" component={Studios} />
                 <Stack.Screen name="Choirs" component={Choirs} />

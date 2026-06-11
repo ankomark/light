@@ -1044,3 +1044,77 @@ class LiveEvent(models.Model):
             return response.status_code == 200
         except:
             return False
+
+
+class Publication(models.Model):
+    """A long-form article / book that a user publishes. Content lives in
+    ordered Chapters (markdown). Drafts are visible only to the author."""
+    STATUS_CHOICES = [('draft', 'Draft'), ('published', 'Published')]
+    CATEGORY_CHOICES = [
+        ('devotional', 'Devotional'),
+        ('doctrine', 'Doctrine'),
+        ('testimony', 'Testimony'),
+        ('health', 'Health'),
+        ('prophecy', 'Prophecy'),
+        ('family', 'Family'),
+        ('history', 'History'),
+        ('other', 'Other'),
+    ]
+
+    title = models.CharField(max_length=200)
+    summary = models.TextField(blank=True)
+    # Cover stored as a small base64 data URI (or blank to use a default).
+    cover = models.TextField(blank=True)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft')
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='publications')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+
+class Chapter(models.Model):
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='chapters')
+    order = models.PositiveIntegerField(default=1)
+    title = models.CharField(max_length=200, blank=True)
+    body = models.TextField(blank=True)  # markdown
+
+    class Meta:
+        ordering = ['order', 'id']
+
+    def __str__(self):
+        return f"{self.publication_id} · {self.order}. {self.title}"
+
+
+class PublicationLike(models.Model):
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='publication_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('publication', 'user')
+
+
+class PublicationBookmark(models.Model):
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='bookmarks')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='publication_bookmarks')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('publication', 'user')
+
+
+class ReadingProgress(models.Model):
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='progresses')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reading_progress')
+    last_chapter = models.PositiveIntegerField(default=0)  # chapter index
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('publication', 'user')

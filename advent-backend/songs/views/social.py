@@ -576,3 +576,115 @@ class ExploreViewSet(viewsets.ViewSet):
             'groups': GroupSerializer(groups, many=True, context={'request': request}).data,
         })
 
+
+class PublicationViewSet(viewsets.ModelViewSet):
+    """Long-form articles/books. Published items are public; drafts are visible
+    only to their author. Only the author can edit/delete."""
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = StandardPagination
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return PublicationListSerializer
+        return PublicationDetailSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = (
+            Publication.objects
+            .select_related('author', 'author__profile')
+            .prefetch_related('chapters')
+            .annotate(
+                chapter_count_anno=Count('chapters', distinct=True),
+                likes_total=Count('likes', distinct=True),
+            )
+        )
+        if user.is_authenticated:
+            qs = qs.annotate(
+                liked_by_me=Exists(PublicationLike.objects.filter(publication=OuterRef('pk'), user=user)),
+                bookmarked_by_me=Exists(PublicationBookmark.objects.filter(publication=OuterRef('pk'), user=user)),
+            )
+
+        if self.request.query_params.get('mine') and user.is_authenticated:
+            qs = qs.filter(author=user)
+        elif user.is_authenticated:
+            # Everyone sees published; authors also see their own drafts.
+            qs = qs.filter(Q(status='published') | Q(author=user))
+        else:
+            qs = qs.filter(status='published')
+
+        if self.request.query_params.get('saved') and user.is_authenticated:
+            qs = qs.filter(bookmarks__user=user)
+
+        author_id = self.request.query_params.get('author')
+        if author_id:
+            qs = qs.filter(author_id=author_id)
+
+        category = self.request.query_params.get('category')
+        if category and category != 'all':
+            qs = qs.filter(category=category)
+
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(Q(title__icontains=search) | Q(summary__icontains=search))
+
+        return qs.order_by('-created_at')
+
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def like(self, request, pk=None):
+        pub = self.get_object()
+        obj, created = PublicationLike.objects.get_or_create(publication=pub, user=request.user)
+        if not created:
+            obj.delete()
+        return Response({'is_liked': created, 'likes_count': pub.likes.count()})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def bookmark(self, request, pk=None):
+        pub = self.get_object()
+        obj, created = PublicationBookmark.objects.get_or_create(publication=pub, user=request.user)
+        if not created:
+            obj.delete()
+        return Response({'is_bookmarked': created})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def progress(self, request, pk=None):
+        pub = self.get_object()
+        try:
+            chapter = int(request.data.get('chapter', 0))
+        except (TypeError, ValueError):
+            chapter = 0
+        ReadingProgress.objects.update_or_create(
+            publication=pub, user=request.user, defaults={'last_chapter': max(0, chapter)}
+        )
+        return Response({'last_read_chapter': max(0, chapter)})
+
+    def update(self, request, *args, **kwargs):
+        if self.get_object().author_id != request.user.id:
+            return Response({"error": "You can only edit your own publications."},
+                            status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.author_id != request.user.id:
+            return Response({"error": "You can only delete your own publications."},
+                            status=status.HTTP_403_FORBIDDEN)
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['get'])
+    def mine(self, request):
+        qs = self.filter_queryset(
+            Publication.objects.filter(author=request.user)
+            .select_related('author', 'author__profile')
+            .annotate(chapter_count_anno=Count('chapters', distinct=True))
+            .order_by('-created_at')
+        )
+        page = self.paginate_queryset(qs)
+        ser = PublicationListSerializer(page if page is not None else qs, many=True,
+                                        context=self.get_serializer_context())
+        return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
+

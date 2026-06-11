@@ -19,6 +19,7 @@ from .views import (
     DeviceTokenViewSet,
     ConversationViewSet,
     ExploreViewSet,
+    PublicationViewSet,
     VerifyEmailView,
     ResendVerificationView,
     ForgotPasswordView,
@@ -65,6 +66,7 @@ router.register(r'post-saves', PostSaveViewSet)
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'churches', ChurchViewSet, basename='churches')
 router.register(r'media-stations', MediaStationViewSet, basename='media-stations')
+router.register(r'publications', PublicationViewSet, basename='publications')
 router.register(r'video-studios', VideoStudioViewSet, basename='video-studios')
 router.register(r'choirs', ChoirViewSet, basename='choirs')
 router.register(r'groups', GroupViewSet, basename='groups')

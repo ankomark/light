@@ -13,6 +13,22 @@ const { width } = Dimensions.get('window');
 const GRID_ITEM = (width - spacing.md * 2 - spacing.xs) / 2;
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
+/**
+ * Build a still-image thumbnail for a post. For videos we ask Cloudinary for a
+ * single extracted frame (so_0 = first frame) as a JPG, so the grid shows a
+ * poster image instead of a blank <Image> that can't render an .mp4.
+ */
+const getPostThumb = (post) => {
+  const url = post.optimized_url || post.media_url;
+  if (!url) return null;
+  if (post.content_type === 'video') {
+    return url
+      .replace('/video/upload/', '/video/upload/so_0,w_600,h_600,c_fill/')
+      .replace(/\.(mp4|mov|webm|m4v)$/i, '.jpg');
+  }
+  return url;
+};
+
 // ── API helpers ───────────────────────────────────────────────────────────────
 const fetchTrending = () => apiRequest('get', '/explore/trending_posts/');
 const fetchSuggested = () => apiRequest('get', '/explore/suggested_users/');
@@ -34,16 +50,24 @@ const SuggestedUser = ({ user, onPress }) => (
 );
 
 const TrendingPostCard = ({ post, onPress }) => {
-  const media = post.optimized_url || post.media_url;
+  const thumb = getPostThumb(post);
+  const isVideo = post.content_type === 'video';
   return (
     <TouchableOpacity style={styles.gridCard} onPress={() => onPress(post)} activeOpacity={0.85}>
-      {media ? (
-        <Image source={{ uri: media }} style={styles.gridImage} resizeMode="cover" />
+      {thumb ? (
+        <Image source={{ uri: thumb }} style={styles.gridImage} resizeMode="cover" />
       ) : (
         <View style={[styles.gridImage, styles.gridPlaceholder]}>
-          <MaterialIcons name="photo" size={32} color={colors.textMuted} />
+          <MaterialIcons name={isVideo ? 'videocam' : 'photo'} size={32} color={colors.textMuted} />
         </View>
       )}
+
+      {isVideo && (
+        <View style={styles.playBadge}>
+          <Ionicons name="play" size={14} color="#fff" />
+        </View>
+      )}
+
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.7)']}
         style={styles.gridOverlay}
@@ -338,6 +362,17 @@ const styles = StyleSheet.create({
   },
   gridImage: { width: '100%', height: '100%' },
   gridPlaceholder: { justifyContent: 'center', alignItems: 'center' },
+  playBadge: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   gridOverlay: {
     position: 'absolute',
     bottom: 0,

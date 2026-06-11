@@ -522,6 +522,64 @@ export const updateChurch = async (id, formData) => {
 export const deleteChurch = async (id) => {
   return apiRequest('delete', `/churches/${id}/`);
 };
+
+// ==================== MEDIA STATIONS ====================
+// Shared, backend-owned. Each row carries `is_owner` so the UI can show
+// edit/delete only to the creator. Logo is a base64 data URI (JSON).
+export const fetchMediaStations = async (page = 1, type = 'All') => {
+  const params = { page, page_size: 100 };
+  if (type && type !== 'All') params.type = type;
+  return apiRequest('get', '/media-stations/', null, { params });
+};
+
+export const createMediaStation = async (data) => {
+  return apiRequest('post', '/media-stations/', data);
+};
+
+export const updateMediaStation = async (id, data) => {
+  return apiRequest('patch', `/media-stations/${id}/`, data);
+};
+
+export const deleteMediaStation = async (id) => {
+  return apiRequest('delete', `/media-stations/${id}/`);
+};
+
+// ==================== PUBLICATIONS (Articles / Books) ====================
+// Long-form publications with nested chapters (markdown). Published items are
+// public; drafts are visible only to their author. Author-only edit/delete.
+export const fetchPublications = async (params = {}) => {
+  return apiRequest('get', '/publications/', null, { params: { page_size: 50, ...params } });
+};
+
+export const fetchMyPublications = async () => {
+  return apiRequest('get', '/publications/mine/', null, { params: { page_size: 50 } });
+};
+
+export const fetchPublication = async (id) => {
+  return apiRequest('get', `/publications/${id}/`);
+};
+
+export const createPublication = async (data) => {
+  return apiRequest('post', '/publications/', data);
+};
+
+export const updatePublication = async (id, data) => {
+  return apiRequest('patch', `/publications/${id}/`, data);
+};
+
+export const deletePublication = async (id) => {
+  return apiRequest('delete', `/publications/${id}/`);
+};
+
+// Publication engagement
+export const togglePublicationLike = async (id) =>
+  apiRequest('post', `/publications/${id}/like/`);
+
+export const togglePublicationBookmark = async (id) =>
+  apiRequest('post', `/publications/${id}/bookmark/`);
+
+export const saveReadingProgress = async (id, chapter) =>
+  apiRequest('post', `/publications/${id}/progress/`, { chapter });
 // ==================== VIDEO STUDIOS ====================
 export const fetchVideoStudios = async (params = {}) => {
   const queryString = new URLSearchParams(params).toString();

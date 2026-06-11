@@ -1,200 +1,154 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ScrollView, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getAllVerses } from '../utils/hymnUtils';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const HymnDetail = ({ route }) => {
-    const navigation = useNavigation();
-  const { hymn, section } = route.params;
-  const [isFavorite, setIsFavorite] = useState(hymn.Favorited === 1);
-
-  const toggleFavorite = () => {
-    setIsFavorite(!isFavorite);
-    // Here you would update your JSON data or state management
-  };
-
-  const renderVerse = (verse) => {
-    if (!verse.text || verse.text.trim() === '') return null;
-    
-    return (
-      <View key={`verse-${verse.number}`} style={styles.hymnDetailVerseContainer}>
-        <Text style={styles.hymnDetailVerseNumber}>Verse {verse.number}</Text>
-        {verse.text.split('\n').map((line, i) => (
-          <Text key={`line-${i}`} style={styles.hymnDetailVerseText}>
-            {line}
-          </Text>
-        ))}
-      </View>
-    );
-  };
-
-  const verses = getAllVerses(hymn);
+  const navigation = useNavigation();
+  const { hymn, hymnalName } = route.params;
+  const verses = Array.isArray(hymn.verses) ? hymn.verses : [];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-
-    <ScrollView style={styles.hymnDetailContainer}>
-       <TouchableOpacity 
-        onPress={() => navigation.goBack()}
-        style={styles.hymnDetailBackButton}
-      >
-        <Ionicons name="arrow-back" size={28} color="#F0F6FC" />
-      </TouchableOpacity>
-      {/* Section info header */}
-      {section && (
-        <View style={styles.hymnDetailSectionHeader}>
-          <Text style={styles.hymnDetailSectionTitle}>{section.title}</Text>
-          <Text style={styles.hymnDetailSectionDescription}>{section.description}</Text>
-        </View>
-      )}
-
-      <View style={styles.hymnDetailHeader}>
-        <View style={styles.hymnDetailHymnHeader}>
-          <Text style={styles.hymnDetailHymnNumber}>Hymn #{hymn.Number}</Text>
-          <Text style={styles.hymnDetailTitle}>{hymn.Title}</Text>
-        </View>
-        <TouchableOpacity onPress={toggleFavorite} style={styles.hymnDetailFavoriteButton}>
-          <Ionicons 
-            name={isFavorite ? "heart" : "heart-outline"} 
-            size={28} 
-            color={isFavorite ? "#e74c3c" : "#aaa"} 
-          />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* Top bar */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
+        <Text style={styles.topBarTitle} numberOfLines={1}>{hymnalName || 'Hymnal'}</Text>
+        <View style={styles.iconBtn} />
       </View>
 
-      {hymn.Refrain && (
-        <View style={styles.hymnDetailRefrainContainer}>
-          <View style={styles.hymnDetailRefrainLabelContainer}>
-            <Ionicons name="musical-notes" size={20} color="#8e44ad" />
-            <Text style={styles.hymnDetailRefrainLabel}>Refrain</Text>
-          </View>
-          <View style={styles.hymnDetailRefrainTextContainer}>
-            {hymn.Refrain.split('\n').map((line, i) => (
-              <Text key={`refrain-${i}`} style={styles.hymnDetailRefrainText}>
-                {line}
-              </Text>
-            ))}
-          </View>
-        </View>
-      )}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Title block */}
+        <Text style={styles.hymnNumber}>HYMN {hymn.number}</Text>
+        <Text style={styles.hymnTitle}>{hymn.title}</Text>
+        <View style={styles.titleRule} />
 
-      {verses.map(renderVerse)}
-    </ScrollView>
+        {/* Verses, with the refrain repeated after each (as it's sung) */}
+        {verses.map((verse, idx) => (
+          <View key={`verse-${idx}`}>
+            <View style={styles.verseBlock}>
+              <Text style={styles.verseNumber}>{idx + 1}</Text>
+              <View style={styles.verseTextWrap}>
+                {verse.split('\n').map((line, i) => (
+                  <Text key={i} style={styles.verseLine}>{line}</Text>
+                ))}
+              </View>
+            </View>
+
+            {hymn.refrain ? (
+              <View style={styles.refrainBlock}>
+                <View style={styles.refrainLabelRow}>
+                  <Ionicons name="musical-notes" size={15} color={colors.accent} />
+                  <Text style={styles.refrainLabel}>Refrain</Text>
+                </View>
+                {hymn.refrain.split('\n').map((line, i) => (
+                  <Text key={i} style={styles.refrainLine}>{line}</Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ))}
+
+        <View style={{ height: spacing.xl }} />
+      </ScrollView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-     safeArea: {
-  flex: 1,
-  backgroundColor: 'aliceblue',//our container bg
-},
-  hymnDetailContainer: {
-    flex: 1,
-    backgroundColor: '#0D1117', // dark background
-  },
-   hymnDetailBackButton: {
-    position: 'absolute',
-    top: 20,
-    left: 20,
-    zIndex: 10,
-    padding: 10,
-  },
+  safeArea: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
+  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl },
 
-  hymnDetailSectionHeader: {
-    padding: 20,
-    backgroundColor: '#4D6530',//ant blue
-    borderBottomWidth: 1,
-    borderBottomColor: '#30363D',
-  },
-  hymnDetailSectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    textAlign: 'center',
-  },
-  hymnDetailSectionDescription: {
-    fontSize: 14,
-    color: '#C9D1D9',
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  hymnDetailHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#21262D',
-  },
-  hymnDetailHymnHeader: {
-    flex: 1,
-  },
-  hymnDetailHymnNumber: {
-    fontSize: 16,
-    color: '#8B949E',
-    marginBottom: 5,
-  },
-  hymnDetailTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#F0F6FC',
-    lineHeight: 32,
-  },
-  hymnDetailFavoriteButton: {
-    padding: 5,
-    marginLeft: 10,
-  },
-  hymnDetailRefrainContainer: {
-    backgroundColor: '#2E2B50',
-    borderRadius: 10,
-    marginHorizontal: 20,
-    marginTop: 15,
-    padding: 16,
-    borderLeftWidth: 5,
-    borderLeftColor: '#A970FF', // purple accent
-  },
-  hymnDetailRefrainLabelContainer: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
   },
-  hymnDetailRefrainLabel: {
-    marginLeft: 8,
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#A970FF',
-    fontStyle: 'italic',
-  },
-  hymnDetailRefrainTextContainer: {
-    paddingLeft: 26,
-  },
-  hymnDetailRefrainText: {
-    fontSize: 16,
-    lineHeight: 26,
-    color: '#D2D6DC',
+  topBarTitle: { ...typography.h3, color: colors.textPrimary, flex: 1, textAlign: 'center' },
+  iconBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+
+  hymnNumber: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '800',
+    letterSpacing: 1,
     textAlign: 'center',
+    marginTop: spacing.lg,
+  },
+  hymnTitle: {
+    ...typography.h1,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  titleRule: {
+    width: 56, height: 3, borderRadius: 2,
+    backgroundColor: colors.accent,
+    alignSelf: 'center',
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+  },
+
+  verseBlock: {
+    flexDirection: 'row',
+    marginBottom: spacing.md,
+  },
+  verseNumber: {
+    ...typography.h3,
+    color: colors.primary,
+    fontWeight: '800',
+    width: 28,
+  },
+  verseTextWrap: { flex: 1 },
+  verseLine: {
+    fontSize: 18,
+    lineHeight: 30,
+    color: colors.textPrimary,
+  },
+
+  refrainBlock: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    marginLeft: 28,
+    ...shadows.sm,
+  },
+  refrainLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: spacing.xs,
+  },
+  refrainLabel: {
+    ...typography.caption,
+    color: colors.accent,
+    fontWeight: '700',
     fontStyle: 'italic',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  hymnDetailVerseContainer: {
-    marginHorizontal: 20,
-    marginBottom: 25,
-    paddingBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#21262D',
-  },
-  hymnDetailVerseNumber: {
-    fontWeight: 'bold',
-    color: '#58A6FF', // light blue accent
-    marginBottom: 8,
-    fontSize: 16,
-  },
-  hymnDetailVerseText: {
-    fontSize: 16,
-    lineHeight: 26,
-    color: '#C9D1D9',
+  refrainLine: {
+    fontSize: 17,
+    lineHeight: 28,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
   },
 });
 

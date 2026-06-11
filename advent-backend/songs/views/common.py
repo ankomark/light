@@ -29,7 +29,7 @@ from django.views.decorators.cache import cache_control
 from cloudinary.uploader import upload
 from cloudinary.uploader import destroy 
 from cloudinary.exceptions import Error as CloudinaryError
-from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation
+from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress
 from ..push import notify_user
 from ..tasks import run_in_background
 from ..serializers import (
@@ -48,6 +48,9 @@ from ..serializers import (
     NotificationSerializer,
     ChurchSerializer,
     MediaStationSerializer,
+    PublicationListSerializer,
+    PublicationDetailSerializer,
+    ChapterSerializer,
     VideoStudioSerializer,  
     ChoirSerializer, 
     GroupSerializer, 
