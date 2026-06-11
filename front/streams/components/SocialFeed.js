@@ -705,8 +705,8 @@ const SocialFeed = () => {
           </View>
         </TouchableOpacity>
         <View style={styles.headerActions}>
-          {currentUser?.id !== item.user.id && (
-            <FollowButton 
+          {currentUser?.id !== item.user.id && !item.user.is_following && (
+            <FollowButton
               userId={item.user.id}
               initialFollowing={item.user.is_following}
               initialFollowersCount={item.user.followers_count}

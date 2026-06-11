@@ -44,6 +44,12 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             qs = qs.annotate(
                 liked_by_me=Exists(PostLike.objects.filter(post=OuterRef('pk'), user=user)),
                 saved_by_me=Exists(PostSave.objects.filter(post=OuterRef('pk'), user=user)),
+                # Does the current user follow this post's author? Computed in the
+                # main query (no per-post lookup); injected into the user payload
+                # by SocialPostSerializer.to_representation.
+                author_is_following=Exists(
+                    User.objects.filter(pk=OuterRef('user_id'), followers=user)
+                ),
             )
 
         tag = self.request.query_params.get('tag')

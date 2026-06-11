@@ -120,21 +120,31 @@ class UserViewSet(viewsets.ModelViewSet):
             "count": user.followed_by.count(),
             "user_id": user.id
         })
-    @action(detail=True, methods=['get'])
-    def followers(self, request, pk=None):
-        """Get list of followers"""
-        user = self.get_object()
-        followers = user.followers.all()
-        serializer = self.get_serializer(followers, many=True)
+    def _follow_list_response(self, queryset):
+        """Paginated, lightweight user list with each row's is_following flag."""
+        queryset = queryset.select_related('profile').order_by('username')
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = FollowListSerializer(
+                page, many=True, context=self.get_serializer_context()
+            )
+            return self.get_paginated_response(serializer.data)
+        serializer = FollowListSerializer(
+            queryset, many=True, context=self.get_serializer_context()
+        )
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
-    def following(self, request, pk=None):
-        """Get list of users this user follows"""
+    def followers(self, request, pk=None):
+        """Get the users who follow this user."""
         user = self.get_object()
-        following = user.followed_by.all()
-        serializer = self.get_serializer(following, many=True)
-        return Response(serializer.data)
+        return self._follow_list_response(user.followers.all())
+
+    @action(detail=True, methods=['get'])
+    def following(self, request, pk=None):
+        """Get the users this user follows."""
+        user = self.get_object()
+        return self._follow_list_response(user.followed_by.all())
 
 
 

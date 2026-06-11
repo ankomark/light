@@ -426,6 +426,20 @@ export const fetchFollowingCount = async (userId) => {
   return apiRequest('get', `/users/${userId}/following_count/`);
 };
 
+// Paginated list of users this user follows (each row includes is_following).
+export const fetchFollowing = async (userId, page = 1) => {
+  return apiRequest('get', `/users/${userId}/following/`, null, {
+    params: { page, page_size: 30 },
+  });
+};
+
+// Paginated list of users who follow this user (each row includes is_following).
+export const fetchFollowers = async (userId, page = 1) => {
+  return apiRequest('get', `/users/${userId}/followers/`, null, {
+    params: { page, page_size: 30 },
+  });
+};
+
 export const followUser = async (userId) => {
   return apiRequest('post', `/users/${userId}/follow/`);
 };

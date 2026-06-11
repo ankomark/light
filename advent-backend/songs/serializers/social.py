@@ -46,6 +46,11 @@ class SocialPostSerializer(serializers.ModelSerializer):
         fc = getattr(instance, 'author_followers_count', None)
         if fc is not None and isinstance(data.get('user'), dict):
             data['user']['followers_count'] = fc
+        # Inject whether the current user follows the author (feed annotation),
+        # so post cards can hide the Follow button for people already followed.
+        isf = getattr(instance, 'author_is_following', None)
+        if isf is not None and isinstance(data.get('user'), dict):
+            data['user']['is_following'] = isf
         return data
 
     def get_can_edit(self, obj):

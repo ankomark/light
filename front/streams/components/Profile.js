@@ -1,51 +1,222 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, Image, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, Image, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { fetchProfile } from '../services/api';
-import { useAuth } from '../context/useAuth';
+import { fetchProfile, fetchUserPosts } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
 const AVATAR_SIZE = 90;
-const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
-const AVATAR_FAILED = '__failed__';
-
-const StatBox = ({ value, label }) => (
-  <View style={styles.statBox}>
-    <Text style={styles.statValue}>{value ?? '—'}</Text>
-    <Text style={styles.statLabel}>{label}</Text>
-  </View>
+const GRID_COLS = 3;
+const GRID_GAP = 6;
+const GRID_PADDING = spacing.md;
+const TILE_SIZE = Math.floor(
+  (width - GRID_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS
 );
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+
+/** Build a still-image thumbnail for a post (videos -> first-frame jpg). */
+const getPostThumb = (post) => {
+  const url = post.optimized_url || post.media_url;
+  if (!url) return null;
+  if (post.content_type === 'video') {
+    return url
+      .replace('/video/upload/', '/video/upload/so_0,w_400,h_400,c_fill/')
+      .replace(/\.(mp4|mov|webm|m4v)$/i, '.jpg');
+  }
+  return url;
+};
+
+const StatBox = ({ value, label, onPress }) => {
+  const content = (
+    <>
+      <Text style={styles.statValue}>{value ?? '—'}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </>
+  );
+  if (onPress) {
+    return (
+      <TouchableOpacity style={styles.statBox} onPress={onPress} activeOpacity={0.7}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={styles.statBox}>{content}</View>;
+};
 
 const Profile = () => {
   const [profile, setProfile] = useState(null);
+  const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const navigation = useNavigation();
-  const { currentUser } = useAuth();
 
   const loadProfile = useCallback(async () => {
-    setLoading(true);
     try {
       const data = await fetchProfile();
       setProfile(data);
+      setAvatarFailed(false);
+
+      // Fetch this user's posts (images + videos) for the grid.
+      if (data?.user_id) {
+        try {
+          const res = await fetchUserPosts(data.user_id);
+          const list = Array.isArray(res) ? res : (res?.results ?? []);
+          setPosts(list);
+        } catch (postErr) {
+          console.error('Error fetching user posts:', postErr);
+          setPosts([]);
+        }
+      }
     } catch (error) {
       if (error.response?.status !== 401) {
         console.error('Error fetching profile:', error);
       }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadProfile();
+  }, [loadProfile]);
+
+  const renderHeader = useCallback(() => {
+    if (!profile) return null;
+    const avatarSource = profile.picture_url && !avatarFailed
+      ? { uri: profile.picture_url }
+      : DEFAULT_AVATAR;
+
+    return (
+      <View>
+        {/* Cover area */}
+        <LinearGradient colors={['#102E50', '#0A1628']} style={styles.cover} />
+
+        {/* Avatar + edit row */}
+        <View style={styles.avatarRow}>
+          <View style={styles.avatarWrapper}>
+            <Image
+              source={avatarSource}
+              defaultSource={DEFAULT_AVATAR}
+              style={styles.avatar}
+              onError={() => setAvatarFailed(true)}
+            />
+          </View>
+          <TouchableOpacity
+            style={styles.editBtn}
+            onPress={() => navigation.navigate('CreateProfile')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="pencil-outline" size={15} color={colors.white} />
+            <Text style={styles.editBtnText}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Name & username */}
+        <View style={styles.nameBlock}>
+          <Text style={styles.displayName}>{profile.username}</Text>
+          <Text style={styles.username}>@{profile.username}</Text>
+        </View>
+
+        {/* Stats row */}
+        <View style={styles.statsRow}>
+          <StatBox
+            value={profile.followers_count ?? 0}
+            label="Followers"
+            onPress={() => navigation.navigate('FollowList', {
+              userId: profile.user_id,
+              type: 'followers',
+              username: profile.username,
+            })}
+          />
+          <View style={styles.statDivider} />
+          <StatBox
+            value={profile.following_count ?? 0}
+            label="Following"
+            onPress={() => navigation.navigate('FollowList', {
+              userId: profile.user_id,
+              type: 'following',
+              username: profile.username,
+            })}
+          />
+          <View style={styles.statDivider} />
+          <StatBox value={profile.posts_count ?? posts.length} label="Posts" />
+        </View>
+
+        {/* Info cards */}
+        <View style={styles.infoSection}>
+          {profile.bio ? (
+            <View style={styles.infoCard}>
+              <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+              <Text style={styles.infoText}>{profile.bio}</Text>
+            </View>
+          ) : null}
+
+          {profile.location ? (
+            <View style={styles.infoCard}>
+              <Ionicons name="location-outline" size={18} color={colors.primary} />
+              <Text style={styles.infoText}>{profile.location}</Text>
+            </View>
+          ) : null}
+
+          {profile.birth_date ? (
+            <View style={styles.infoCard}>
+              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+              <Text style={styles.infoText}>
+                Born {new Date(profile.birth_date).toLocaleDateString('en-US', {
+                  year: 'numeric', month: 'long', day: 'numeric',
+                })}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <Text style={styles.sectionTitle}>Posts</Text>
+      </View>
+    );
+  }, [profile, avatarFailed, posts.length, navigation]);
+
+  const renderPost = useCallback(({ item }) => {
+    const thumb = getPostThumb(item);
+    return (
+      <TouchableOpacity
+        style={styles.tile}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
+      >
+        {thumb ? (
+          <Image source={{ uri: thumb }} style={styles.tileImage} resizeMode="cover" />
+        ) : (
+          <View style={[styles.tileImage, styles.tileFallback]}>
+            <Feather name="image" size={22} color={colors.textMuted} />
+          </View>
+        )}
+        {item.content_type === 'video' && (
+          <View style={styles.videoBadge}>
+            <Ionicons name="play" size={12} color={colors.white} />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }, [navigation]);
+
+  const renderEmptyPosts = useCallback(() => (
+    <View style={styles.postsEmpty}>
+      <MaterialIcons name="photo-library" size={40} color={colors.textMuted} />
+      <Text style={styles.postsEmptyText}>No posts yet</Text>
+    </View>
+  ), []);
 
   if (loading) {
     return (
@@ -70,94 +241,25 @@ const Profile = () => {
     );
   }
 
-  const avatarSource = profile.picture && !avatarFailed
-    ? { uri: profile.picture }
-    : DEFAULT_AVATAR;
-
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Cover area */}
-      <LinearGradient
-        colors={['#102E50', '#0A1628']}
-        style={styles.cover}
-      />
-
-      {/* Avatar + edit row */}
-      <View style={styles.avatarRow}>
-        <View style={styles.avatarWrapper}>
-          <Image
-            source={avatarSource}
-            defaultSource={DEFAULT_AVATAR}
-            style={styles.avatar}
-            onError={() => setAvatarFailed(true)}
-          />
-        </View>
-        <TouchableOpacity
-          style={styles.editBtn}
-          onPress={() => navigation.navigate('CreateProfile')}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="pencil-outline" size={15} color={colors.white} />
-          <Text style={styles.editBtnText}>Edit Profile</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Name & username */}
-      <View style={styles.nameBlock}>
-        <Text style={styles.displayName}>
-          {profile.user?.first_name && profile.user?.last_name
-            ? `${profile.user.first_name} ${profile.user.last_name}`
-            : profile.user?.username}
-        </Text>
-        <Text style={styles.username}>@{profile.user?.username}</Text>
-      </View>
-
-      {/* Stats row */}
-      <View style={styles.statsRow}>
-        <StatBox value={currentUser?.followers_count ?? 0} label="Followers" />
-        <View style={styles.statDivider} />
-        <StatBox value={currentUser?.following_count ?? 0} label="Following" />
-        <View style={styles.statDivider} />
-        <StatBox value={profile.posts_count ?? 0} label="Posts" />
-      </View>
-
-      {/* Info cards */}
-      <View style={styles.infoSection}>
-        {profile.bio ? (
-          <View style={styles.infoCard}>
-            <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
-            <Text style={styles.infoText}>{profile.bio}</Text>
-          </View>
-        ) : null}
-
-        {profile.location ? (
-          <View style={styles.infoCard}>
-            <Ionicons name="location-outline" size={18} color={colors.primary} />
-            <Text style={styles.infoText}>{profile.location}</Text>
-          </View>
-        ) : null}
-
-        {profile.birth_date ? (
-          <View style={styles.infoCard}>
-            <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-            <Text style={styles.infoText}>
-              Born {new Date(profile.birth_date).toLocaleDateString('en-US', {
-                year: 'numeric', month: 'long', day: 'numeric',
-              })}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-
-      {/* Empty posts placeholder */}
-      <View style={styles.postsSection}>
-        <Text style={styles.sectionTitle}>Posts</Text>
-        <View style={styles.postsEmpty}>
-          <MaterialIcons name="photo-library" size={40} color={colors.textMuted} />
-          <Text style={styles.postsEmptyText}>No posts yet</Text>
-        </View>
-      </View>
-    </ScrollView>
+    <FlatList
+      style={styles.container}
+      data={posts}
+      key={`grid-${GRID_COLS}`}
+      numColumns={GRID_COLS}
+      columnWrapperStyle={styles.gridRow}
+      keyExtractor={(item) => `my_post_${item.id}`}
+      renderItem={renderPost}
+      ListHeaderComponent={renderHeader}
+      ListEmptyComponent={renderEmptyPosts}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.listContent}
+      removeClippedSubviews
+      initialNumToRender={12}
+      windowSize={7}
+    />
   );
 };
 
@@ -166,6 +268,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bg,
   },
+  listContent: { paddingBottom: spacing.xxl },
   centered: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -286,19 +389,42 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     flex: 1,
   },
-  postsSection: {
-    marginHorizontal: spacing.md,
-    marginTop: spacing.lg,
-    marginBottom: spacing.xxl,
-  },
   sectionTitle: {
     ...typography.h3,
     color: colors.textPrimary,
-    marginBottom: spacing.md,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  gridRow: {
+    paddingHorizontal: GRID_PADDING,
+    gap: GRID_GAP,
+  },
+  tile: {
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    marginBottom: GRID_GAP,
+    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  tileImage: { width: '100%', height: '100%' },
+  tileFallback: { alignItems: 'center', justifyContent: 'center' },
+  videoBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: radius.full,
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   postsEmpty: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
+    marginHorizontal: spacing.md,
     paddingVertical: spacing.xxl,
     alignItems: 'center',
     gap: spacing.sm,

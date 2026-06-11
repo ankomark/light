@@ -72,12 +72,13 @@ from ..serializers import (
     StorySerializer,
     ReportSerializer,
     SimpleUserSerializer,
+    FollowListSerializer,
 )
 import logging
 import time
 from django.utils import timezone
 from django.conf import settings
-from django.db.models import Count
+from django.db.models import Count, Prefetch
 from datetime import timedelta
 logger = logging.getLogger(__name__)
 

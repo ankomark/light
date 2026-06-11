@@ -118,11 +118,16 @@ class ProfileSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source='user.id')
     picture_url = serializers.SerializerMethodField()
     username = serializers.ReadOnlyField(source='user.username')
-    
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    posts_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Profile
-        fields = ['bio', 'user_id','username', 'birth_date', 'location', 'is_public', 'picture','picture_url']
-        read_only_fields = ['user_id', 'username', 'picture_url']
+        fields = ['bio', 'user_id','username', 'birth_date', 'location', 'is_public', 'picture','picture_url',
+                  'followers_count', 'following_count', 'posts_count']
+        read_only_fields = ['user_id', 'username', 'picture_url',
+                            'followers_count', 'following_count', 'posts_count']
         extra_kwargs = {
             'picture': {'write_only': True}  # Only needed for uploads
         }
@@ -170,6 +175,16 @@ class ProfileSerializer(serializers.ModelSerializer):
         except Exception as e:
             logger.error(f"Error processing picture URL: {str(e)}", exc_info=True)
             return None
+
+    def get_followers_count(self, obj):
+        # obj.user.followers are the users who follow this profile's owner.
+        return obj.user.followers.count()
+
+    def get_following_count(self, obj):
+        return obj.user.followed_by.count()
+
+    def get_posts_count(self, obj):
+        return obj.user.social_posts.count()
 
     def create(self, validated_data):
         """Handles profile creation with request context"""
@@ -371,6 +386,22 @@ class SimpleUserSerializer(serializers.ModelSerializer):
         
         return None
 
+
+
+class FollowListSerializer(SimpleUserSerializer):
+    """Lightweight user row for followers/following lists, plus whether the
+    requesting user already follows this person (drives the Follow/Following
+    button in the list)."""
+    is_following = serializers.SerializerMethodField()
+
+    class Meta(SimpleUserSerializer.Meta):
+        fields = SimpleUserSerializer.Meta.fields + ['is_following']
+
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and request.user != obj:
+            return obj.followers.filter(id=request.user.id).exists()
+        return False
 
 
 class FileSizeValidator:
