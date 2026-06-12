@@ -26,21 +26,20 @@ class MediaStationSerializer(serializers.ModelSerializer):
 class ChurchSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
-    created_by_picture = CloudinaryFieldSerializer(source='created_by.profile.picture', read_only=True)
-    
-    
+    created_by_picture = serializers.SerializerMethodField()
+
     class Meta:
         model = Church
         fields = '__all__'
         read_only_fields = ('created_by', 'created_at', 'updated_at', 'id')
 
     def get_created_by_picture(self, obj):
-        # Ensure we're returning a complete URL
-        if hasattr(obj.created_by, 'profile') and obj.created_by.profile.picture:
+        # Null-safe: a creator may not have a profile or a picture set.
+        profile = getattr(obj.created_by, 'profile', None)
+        if profile and profile.picture:
             request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.created_by.profile.picture.url)
-            return obj.created_by.profile.picture.url
+            url = profile.picture.url
+            return request.build_absolute_uri(url) if request else url
         return None
 
 

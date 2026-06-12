@@ -43,6 +43,13 @@ const EditProduct = () => {
     condition: 'NEW',
     category: '',
     is_digital: false,
+    whatsapp_number: '',
+    contact_number: '',
+    location: '',
+    mpesa_number: '',
+    till_number: '',
+    bank_details: '',
+    payment_instructions: '',
   });
   const [categories, setCategories] = useState([]);
   const [existingImages, setExistingImages] = useState([]);
@@ -86,6 +93,13 @@ const EditProduct = () => {
         condition: product.condition || 'NEW',
         category: product.category?.name || product.category || '',
         is_digital: product.is_digital || false,
+        whatsapp_number: product.whatsapp_number || '',
+        contact_number: product.contact_number || '',
+        location: product.location || '',
+        mpesa_number: product.mpesa_number || '',
+        till_number: product.till_number || '',
+        bank_details: product.bank_details || '',
+        payment_instructions: product.payment_instructions || '',
       });
 
       setCategories(categoriesData || []);
@@ -165,6 +179,13 @@ const EditProduct = () => {
       data.append('condition', formData.condition);
       if (formData.category) data.append('category', formData.category);
       data.append('is_digital', formData.is_digital.toString());
+      data.append('whatsapp_number', formData.whatsapp_number);
+      data.append('contact_number', formData.contact_number);
+      data.append('location', formData.location);
+      data.append('mpesa_number', formData.mpesa_number);
+      data.append('till_number', formData.till_number);
+      data.append('bank_details', formData.bank_details);
+      data.append('payment_instructions', formData.payment_instructions);
       if (track) data.append('track', track.id);
 
       // Append new images
@@ -243,6 +264,66 @@ const EditProduct = () => {
         placeholder="Category*"
         value={formData.category}
         onChangeText={(text) => handleChange('category', text)}
+      />
+
+      <Text style={styles.sectionTitle}>Contact Information</Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="WhatsApp Number (e.g., +254712345678)"
+        value={formData.whatsapp_number}
+        onChangeText={(text) => handleChange('whatsapp_number', text)}
+        keyboardType="phone-pad"
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Contact Number (optional)"
+        value={formData.contact_number}
+        onChangeText={(text) => handleChange('contact_number', text)}
+        keyboardType="phone-pad"
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Location (optional)"
+        value={formData.location}
+        onChangeText={(text) => handleChange('location', text)}
+      />
+
+      <Text style={styles.sectionTitle}>Payment Details</Text>
+      <Text style={styles.subtitle}>How buyers pay you directly</Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="M-Pesa Number (e.g., 0712345678)"
+        value={formData.mpesa_number}
+        onChangeText={(text) => handleChange('mpesa_number', text)}
+        keyboardType="phone-pad"
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Till / Paybill Number (optional)"
+        value={formData.till_number}
+        onChangeText={(text) => handleChange('till_number', text)}
+        keyboardType="numbers-and-punctuation"
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Bank details (optional)"
+        value={formData.bank_details}
+        onChangeText={(text) => handleChange('bank_details', text)}
+      />
+
+      <TextInput
+        style={[styles.input, styles.textArea]}
+        placeholder="Other payment instructions (optional)"
+        value={formData.payment_instructions}
+        onChangeText={(text) => handleChange('payment_instructions', text)}
+        multiline
+        numberOfLines={3}
       />
 
       <Text style={styles.sectionTitle}>Product Images*</Text>

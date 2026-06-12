@@ -4,15 +4,15 @@ import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 const GroupRequestItem = ({ request, onApprove, onReject }) => {
   return (
     <View style={styles.container}>
-      <Image 
+      <Image
         source={
-          request.user?.profile?.picture
-            ? { uri: request.user.profile.picture }
+          // Backend exposes the resolved URL as `profile_picture`; `profile.picture`
+          // is write-only and never present in responses.
+          request.user?.profile_picture || request.user?.profile?.picture_url
+            ? { uri: request.user.profile_picture || request.user.profile.picture_url }
             : require('../assets/user-placeholder.png')
         }
         style={styles.avatar}
-        onError={(e) => console.error('Image load error:', e.nativeEvent.error)}
-        onLoad={() => console.log('Profile picture loaded successfully for request:', request.id)}
       />
       <View style={styles.info}>
         <Text style={styles.name}>{request.user?.username || 'Username'}</Text>

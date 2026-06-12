@@ -47,7 +47,9 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'seller', 'title', 'description', 'price', 'condition',
             'quantity', 'category', 'is_digital', 'is_available', 'created_at',
-            'updated_at', 'views', 'slug', 'images', 'is_owner', 'track','currency','whatsapp_number', 'contact_number', 'location',
+            'updated_at', 'views', 'slug', 'images', 'is_owner', 'track', 'currency',
+            'whatsapp_number', 'contact_number', 'location',
+            'mpesa_number', 'till_number', 'bank_details', 'payment_instructions',
         ]
         read_only_fields = ['seller', 'created_at', 'updated_at', 'views', 'slug']
 
@@ -173,16 +175,15 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     buyer = UserSerializer(read_only=True)
-    seller = UserSerializer(read_only=True)
-    
+
     class Meta:
         model = Order
         fields = [
-            'id', 'buyer', 'seller', 'status', 'shipping_address', 
-            'payment_method', 'total_amount', 'created_at', 'updated_at', 
+            'id', 'buyer', 'status', 'payment_status', 'shipping_address',
+            'payment_method', 'total_amount', 'created_at', 'updated_at',
             'transaction_id', 'items'
         ]
-        read_only_fields = ['buyer', 'seller', 'total_amount', 'created_at', 'updated_at']
+        read_only_fields = ['buyer', 'total_amount', 'created_at', 'updated_at']
 
 
 

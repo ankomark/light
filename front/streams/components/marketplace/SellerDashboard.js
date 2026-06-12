@@ -88,12 +88,12 @@ const SellerDashboard = () => {
         }
 
         const [productsData, ordersData] = await Promise.all([
-          fetchProducts({ seller_id: currentUser.id }),
+          fetchProducts(1, { seller: currentUser.id }),
           fetchOrders({ seller_id: currentUser.id })
         ]);
-        
-        setProducts(productsData || []);
-        setOrders(ordersData || []);
+
+        setProducts(productsData?.results || []);
+        setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
       } catch (error) {
         console.error('Error loading seller data:', error);
         Alert.alert('Error', 'Failed to load seller dashboard');
@@ -120,8 +120,8 @@ const SellerDashboard = () => {
           onPress: async () => {
             try {
               await deleteProduct(slug);
-              const productsData = await fetchProducts({ seller_id: currentUser?.id });
-              setProducts(productsData);
+              const productsData = await fetchProducts(1, { seller: currentUser?.id });
+              setProducts(productsData?.results || []);
               Alert.alert('Success', 'Product deleted successfully');
             } catch (error) {
               console.error('Error deleting product:', error);

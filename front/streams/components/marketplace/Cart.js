@@ -41,6 +41,7 @@ const Cart = () => {
   const [subtotal, setSubtotal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [checkingOut, setCheckingOut] = useState(false);
 
   // Load cart data
   const loadCartData = async () => {
@@ -132,11 +133,15 @@ const Cart = () => {
     }
 
     try {
+      setCheckingOut(true);
       const order = await checkoutCart();
       navigation.navigate('Checkout', { orderId: order.id });
     } catch (error) {
       console.error('Error during checkout:', error);
-      Alert.alert('Error', 'Failed to process checkout');
+      const msg = error.response?.data?.error || 'Failed to connect you with the seller';
+      Alert.alert('Error', msg);
+    } finally {
+      setCheckingOut(false);
     }
   };
 
@@ -174,8 +179,8 @@ const Cart = () => {
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <View style={styles.cartItem}>
-            <Image 
-              source={{ uri: item.product.images[0]?.image_url }} 
+            <Image
+              source={{ uri: item.product?.images?.[0]?.image_url || 'https://via.placeholder.com/80' }}
               style={styles.productImage}
               resizeMode="cover"
             />
@@ -214,29 +219,35 @@ const Cart = () => {
       />
 
       <View style={styles.summaryContainer}>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Subtotal:</Text>
-          <Text style={styles.summaryPrice}>{formatPrice(subtotal, currency)}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Shipping:</Text>
-          <Text style={styles.summaryPrice}>{formatPrice(200, currency)}</Text>
-        </View>
         <View style={[styles.summaryRow, styles.totalRow]}>
           <Text style={styles.totalLabel}>Total:</Text>
-          <Text style={styles.totalPrice}>{formatPrice(subtotal + 200, currency)}</Text>
+          <Text style={styles.totalPrice}>{formatPrice(subtotal, currency)}</Text>
         </View>
+        <Text style={styles.shippingNote}>
+          You pay each seller directly. Arrange payment & delivery with the seller at checkout.
+        </Text>
       </View>
 
-      <TouchableOpacity 
-        style={styles.checkoutButton}
+      <TouchableOpacity
+        style={[styles.checkoutButton, (!isOnline || checkingOut) && styles.checkoutButtonDisabled]}
         onPress={handleCheckout}
-        disabled={!isOnline}
+        disabled={!isOnline || checkingOut}
       >
         <Text style={styles.checkoutButtonText}>
-          {isOnline ? 'Proceed to Checkout' : 'Offline - Checkout Unavailable'}
+          {isOnline ? 'Continue to Sellers' : 'Offline - Unavailable'}
         </Text>
       </TouchableOpacity>
+
+      {checkingOut && (
+        <View style={styles.checkoutOverlay}>
+          <View style={styles.checkoutOverlayCard}>
+            <ActivityIndicator size="large" color="#1D478B" />
+            <Text style={styles.checkoutOverlayText}>
+              Connecting you with the seller in a few…
+            </Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -365,6 +376,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1D478B',
   },
+  shippingNote: {
+    fontSize: 12,
+    color: '#777',
+    marginTop: 8,
+    lineHeight: 17,
+  },
   checkoutButton: {
     backgroundColor: '#1D478B',
     padding: 16,
@@ -380,6 +397,27 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  checkoutOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkoutOverlayCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingVertical: 28,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    maxWidth: '80%',
+  },
+  checkoutOverlayText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+    textAlign: 'center',
   },
 });
 

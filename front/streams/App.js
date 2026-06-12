@@ -164,7 +164,7 @@ const App = () => {
                 <Stack.Screen name="PublicationDetail" component={PublicationDetail} />
                 <Stack.Screen name="ChapterReader" component={ChapterReader} />
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
-                <Stack.Screen name="Churches" component={Churches} />
+                <Stack.Screen name="Churches" component={Churches} options={{ headerShown: true, title: 'Churches', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
                 <Stack.Screen name="Studios" component={Studios} />
                 <Stack.Screen name="Choirs" component={Choirs} />
                 <Stack.Screen name="Groups" component={GroupListWrapper} />

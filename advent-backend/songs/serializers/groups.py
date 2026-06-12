@@ -85,8 +85,9 @@ class GroupMemberSerializer(serializers.ModelSerializer):
 
 
 class GroupJoinRequestSerializer(serializers.ModelSerializer):
-    # user = serializers.StringRelatedField(read_only=True)
-    user = UserSerializer(read_only=True)
+    # Use the lightweight user serializer: the full UserSerializer embeds the
+    # requester's entire social-post feed, which made this list slow and huge.
+    user = SimpleUserSerializer(read_only=True)
     group = serializers.StringRelatedField(read_only=True)
     
     class Meta:

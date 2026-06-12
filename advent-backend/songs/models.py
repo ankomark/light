@@ -475,7 +475,6 @@ class DeviceToken(models.Model):
 
 class Church(models.Model):
     name = models.CharField(max_length=200)
-    continent = models.CharField(max_length=100)
     country = models.CharField(max_length=100)
     county = models.CharField(max_length=100, blank=True, null=True)
     conference = models.CharField(max_length=200)
@@ -792,7 +791,14 @@ class Product(models.Model):
     whatsapp_number = models.CharField(max_length=20, blank=True, null=True)
     contact_number = models.CharField(max_length=20, blank=True, null=True)
     location = models.CharField(max_length=200, blank=True, null=True)
-    
+
+    # Seller-direct payment details (open-air market): the buyer pays the seller
+    # directly via these channels; the app does not process the payment.
+    mpesa_number = models.CharField(max_length=20, blank=True, null=True)
+    till_number = models.CharField(max_length=30, blank=True, null=True)
+    bank_details = models.CharField(max_length=255, blank=True, null=True)
+    payment_instructions = models.TextField(blank=True, null=True)
+
     # Link to tracks if this is a music-related product
     track = models.ForeignKey('Track', on_delete=models.SET_NULL, null=True, blank=True, related_name='marketplace_products')
     

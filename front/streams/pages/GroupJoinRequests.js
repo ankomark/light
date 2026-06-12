@@ -3,24 +3,35 @@ import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOp
 import { fetchGroupJoinRequests, approveJoinRequest, rejectJoinRequest } from '../services/api';
 import GroupRequestItem from './GroupRequestItem';
 
-const GroupJoinRequests = ({ groupSlug, onClose }) => {
+const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClose: onCloseProp }) => {
+  // This screen is reached via React Navigation (props are route/navigation) but
+  // can also be rendered directly with groupSlug/onClose props. Support both.
+  const groupSlug = groupSlugProp ?? route?.params?.groupSlug;
+  const onClose = onCloseProp ?? (() => navigation?.goBack());
+
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!groupSlug) {
+      setLoading(false);
+      return;
+    }
+    let active = true;
     const loadRequests = async () => {
       try {
         setLoading(true);
         const data = await fetchGroupJoinRequests(groupSlug);
-        setRequests(data);
+        if (active) setRequests(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error('Failed to load requests:', error);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
-    
+
     loadRequests();
+    return () => { active = false; };
   }, [groupSlug]);
 
   const handleApprove = async (requestId) => {
@@ -50,7 +61,7 @@ const GroupJoinRequests = ({ groupSlug, onClose }) => {
     >
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>send a Join Requests</Text>
+          <Text style={styles.title}>Join Requests</Text>
           <TouchableOpacity onPress={onClose}>
             <Text style={styles.closeButton}>Close</Text>
           </TouchableOpacity>

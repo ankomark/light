@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
-import { fetchProductById, addToCart } from '../../services/api';
+import { fetchProductById, addToCart, addToWishlist } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 
 const ProductDetail = () => {
@@ -25,6 +25,7 @@ const ProductDetail = () => {
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [wishlisted, setWishlisted] = useState(false);
   const { currentUser } = useAuth();
 
   useEffect(() => {
@@ -69,6 +70,27 @@ const ProductDetail = () => {
       Alert.alert('Error', error.message || 'Failed to add item to cart');
     }
   };
+
+  const handleAddToWishlist = async () => {
+    if (!currentUser) {
+      Alert.alert('Login Required', 'Please login to use your wishlist', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Login', onPress: () => navigation.navigate('Login') }
+      ]);
+      return;
+    }
+    try {
+      await addToWishlist(product.id);
+      setWishlisted(true);
+      Alert.alert('Success', 'Added to your wishlist');
+    } catch (error) {
+      console.error('Error adding to wishlist:', error);
+      Alert.alert('Error', error.message || 'Failed to add to wishlist');
+    }
+  };
+
+  const hasPaymentInfo = (p) =>
+    !!(p?.mpesa_number || p?.till_number || p?.bank_details || p?.payment_instructions);
 
   const handleShare = async () => {
     try {
@@ -194,10 +216,11 @@ const ProductDetail = () => {
 
         <View style={styles.sellerContainer}>
           <Text style={styles.sellerText}>Sold by: {product.seller?.username || 'Unknown Seller'}</Text>
-          <View style={styles.ratingContainer}>
-            <Icon name="star" size={16} color="#FFD700" />
-            <Text style={styles.ratingText}>4.5 (24 reviews)</Text>
-          </View>
+          {product.condition ? (
+            <View style={styles.conditionBadge}>
+              <Text style={styles.conditionText}>{product.condition}</Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Contact Information Section */}
@@ -225,6 +248,57 @@ const ProductDetail = () => {
             </View>
           )}
         </View>
+
+        {/* Payment Details — buyer pays the seller directly */}
+        {hasPaymentInfo(product) && (
+          <View style={styles.paymentContainer}>
+            <Text style={styles.sectionTitle}>Payment Details</Text>
+            <Text style={styles.paymentNote}>
+              Pay the seller directly using the details below, then arrange delivery with them.
+              Long-press a value to copy it.
+            </Text>
+
+            {product.mpesa_number ? (
+              <View style={styles.paymentRow}>
+                <Icon name="mobile" size={20} color="#2E8B57" style={styles.paymentIcon} />
+                <View style={styles.paymentTextWrap}>
+                  <Text style={styles.paymentLabel}>M-Pesa</Text>
+                  <Text style={styles.paymentValue} selectable>{product.mpesa_number}</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {product.till_number ? (
+              <View style={styles.paymentRow}>
+                <Icon name="credit-card" size={18} color="#2E8B57" style={styles.paymentIcon} />
+                <View style={styles.paymentTextWrap}>
+                  <Text style={styles.paymentLabel}>Till / Paybill</Text>
+                  <Text style={styles.paymentValue} selectable>{product.till_number}</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {product.bank_details ? (
+              <View style={styles.paymentRow}>
+                <Icon name="bank" size={18} color="#2E8B57" style={styles.paymentIcon} />
+                <View style={styles.paymentTextWrap}>
+                  <Text style={styles.paymentLabel}>Bank</Text>
+                  <Text style={styles.paymentValue} selectable>{product.bank_details}</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {product.payment_instructions ? (
+              <View style={styles.paymentRow}>
+                <Icon name="info-circle" size={18} color="#2E8B57" style={styles.paymentIcon} />
+                <View style={styles.paymentTextWrap}>
+                  <Text style={styles.paymentLabel}>Instructions</Text>
+                  <Text style={styles.paymentValue} selectable>{product.payment_instructions}</Text>
+                </View>
+              </View>
+            ) : null}
+          </View>
+        )}
 
         <Text style={styles.description}>{product.description || 'No description available'}</Text>
 
@@ -268,12 +342,12 @@ const ProductDetail = () => {
           <Text style={styles.cartButtonText}>Add to Cart</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.wishlistButton}
-          onPress={() => Alert.alert('Success', 'Added to wishlist')}
+          onPress={handleAddToWishlist}
         >
-          <Icon name="heart" size={20} color="#1D478B" />
-          <Text style={styles.wishlistButtonText}>Wishlist</Text>
+          <Icon name={wishlisted ? 'heart' : 'heart-o'} size={20} color="#1D478B" />
+          <Text style={styles.wishlistButtonText}>{wishlisted ? 'Wishlisted' : 'Wishlist'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -385,6 +459,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888',
     marginLeft: 4,
+  },
+  conditionBadge: {
+    backgroundColor: '#e7f3ff',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  conditionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D478B',
+    letterSpacing: 0.5,
+  },
+  paymentContainer: {
+    marginBottom: 16,
+    borderBottomWidth: 1,
+    borderColor: '#eee',
+    paddingBottom: 12,
+  },
+  paymentNote: {
+    fontSize: 13,
+    color: '#777',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  paymentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#f5fbf7',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  paymentIcon: {
+    marginRight: 12,
+    marginTop: 2,
+    width: 22,
+    textAlign: 'center',
+  },
+  paymentTextWrap: {
+    flex: 1,
+  },
+  paymentLabel: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 2,
+  },
+  paymentValue: {
+    fontSize: 16,
+    color: '#222',
+    fontWeight: '600',
   },
   // New styles for contact information
   contactInfoContainer: {

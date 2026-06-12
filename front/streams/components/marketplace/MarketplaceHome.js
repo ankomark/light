@@ -34,10 +34,12 @@ const MarketplaceHome = () => {
       try {
         const [categoriesData, productsData] = await Promise.all([
           fetchProductCategories(),
-          fetchProducts({ featured: true, limit: 8 })
+          fetchProducts(1) // fetchProducts(page, extraParams); returns { results, ... }
         ]);
-        setCategories(categoriesData);
-        setFeaturedProducts(productsData);
+        setCategories(
+          Array.isArray(categoriesData) ? categoriesData : (categoriesData?.results || [])
+        );
+        setFeaturedProducts((productsData?.results || []).slice(0, 8));
       } catch (error) {
         console.error('Error loading marketplace data:', error);
       } finally {
@@ -98,8 +100,8 @@ const MarketplaceHome = () => {
               style={styles.productCard}
               onPress={() => navigation.navigate('ProductDetail', { slug: item.slug })}
             >
-              <Image 
-                source={{ uri: item.images[0]?.image_url }} 
+              <Image
+                source={{ uri: item.images?.[0]?.image_url || 'https://via.placeholder.com/150' }}
                 style={styles.productImage}
                 resizeMode="cover"
               />

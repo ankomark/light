@@ -1,25 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  FlatList, 
-  StyleSheet, 
-  TouchableOpacity, 
-  TextInput, 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
   Alert,
   ActivityIndicator,
   ScrollView,
   Modal,
-  Dimensions,
-  Image
+  Image,
+  RefreshControl,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchChurches, createChurch, updateChurch, deleteChurch } from '../services/api';
 import { useAuth } from '../context/useAuth';
-const DEFAULT_PROFILE_IMAGE = 'https://via.placeholder.com/150';
-
-const { height } = Dimensions.get('window');
+const DEFAULT_PROFILE_IMAGE = require('../assets/user-placeholder.png');
 
 const Churches = () => {
   const { currentUser } = useAuth();
@@ -27,7 +27,6 @@ const Churches = () => {
   const [filteredChurches, setFilteredChurches] = useState([]);
   const [newChurch, setNewChurch] = useState({
     name: '',
-    continent: '',
     country: '',
     county: '',
     conference: '',
@@ -41,62 +40,67 @@ const Churches = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterValues, setFilterValues] = useState({
-    continent: '',
     country: '',
     conference: ''
   });
   const [showFilters, setShowFilters] = useState(false);
   const [image, setImage] = useState(null);
   const [editingChurch, setEditingChurch] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Load churches from API
-  useEffect(() => {
-    const loadChurches = async () => {
-      try {
-        setIsLoading(true);
-        const response = await fetchChurches();
-        setChurches(response);
-        setFilteredChurches(response);
-      } catch (error) {
-        Alert.alert('Error', 'Failed to load churches');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadChurches();
+  // Load churches from API (reused by initial load, pull-to-refresh, and mutations)
+  const loadChurches = useCallback(async () => {
+    try {
+      const response = await fetchChurches({ page_size: 100 });
+      const list = Array.isArray(response) ? response : [];
+      setChurches(list);
+      setFilteredChurches(list);
+      return list;
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load churches');
+      return null;
+    }
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      setIsLoading(true);
+      await loadChurches();
+      setIsLoading(false);
+    })();
+  }, [loadChurches]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadChurches();
+    setRefreshing(false);
+  }, [loadChurches]);
 
   // Filter churches based on search term and filters
   useEffect(() => {
     let results = churches;
-    
-    if (searchTerm) {
-      results = results.filter(church => 
-        church.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        church.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        church.pastor?.toLowerCase().includes(searchTerm.toLowerCase())
+    const term = searchTerm.trim().toLowerCase();
+
+    if (term) {
+      results = results.filter(church =>
+        church.name?.toLowerCase().includes(term) ||
+        church.location?.toLowerCase().includes(term) ||
+        church.pastor?.toLowerCase().includes(term)
       );
     }
-    
-    if (filterValues.continent) {
-      results = results.filter(church => 
-        church.continent.toLowerCase() === filterValues.continent.toLowerCase()
-      );
-    }
-    
+
     if (filterValues.country) {
-      results = results.filter(church => 
-        church.country.toLowerCase() === filterValues.country.toLowerCase()
+      results = results.filter(church =>
+        church.country?.toLowerCase() === filterValues.country.toLowerCase()
       );
     }
-    
+
     if (filterValues.conference) {
-      results = results.filter(church => 
-        church.conference.toLowerCase() === filterValues.conference.toLowerCase()
+      results = results.filter(church =>
+        church.conference?.toLowerCase() === filterValues.conference.toLowerCase()
       );
     }
-    
+
     setFilteredChurches(results);
   }, [searchTerm, filterValues, churches]);
 
@@ -129,11 +133,12 @@ const Churches = () => {
         }
       });
       
-      // Add image if selected
-      if (image) {
+      // Only upload a newly picked local image. When editing, `image` may hold
+      // the existing remote URL, which must not be re-sent as a file.
+      if (image && !/^https?:\/\//.test(image)) {
         const uriParts = image.split('.');
         const fileType = uriParts[uriParts.length - 1];
-        
+
         formData.append('image', {
           uri: image,
           name: `photo.${fileType}`,
@@ -150,14 +155,11 @@ const Churches = () => {
       }
 
       // Refresh churches
-      const response = await fetchChurches();
-      setChurches(response);
-      setFilteredChurches(response);
-      
+      await loadChurches();
+
       // Reset form
       setNewChurch({
         name: '',
-        continent: '',
         country: '',
         county: '',
         conference: '',
@@ -178,18 +180,17 @@ const Churches = () => {
   const handleEditChurch = (church) => {
     setEditingChurch(church);
     setNewChurch({
-      name: church.name,
-      continent: church.continent,
-      country: church.country,
-      county: church.county,
-      conference: church.conference,
-      district: church.district,
-      location: church.location,
-      members: church.members.toString(),
-      pastor: church.pastor,
-      contact: church.contact
+      name: church.name || '',
+      country: church.country || '',
+      county: church.county || '',
+      conference: church.conference || '',
+      district: church.district || '',
+      location: church.location || '',
+      members: church.members != null ? church.members.toString() : '',
+      pastor: church.pastor || '',
+      contact: church.contact || ''
     });
-    setImage(church.image);
+    setImage(church.image || null);
     setShowAddForm(true);
   };
 
@@ -207,9 +208,7 @@ const Churches = () => {
           onPress: async () => {
             try {
               await deleteChurch(id);
-              const response = await fetchChurches();
-              setChurches(response);
-              setFilteredChurches(response);
+              await loadChurches();
               Alert.alert('Success', 'Church deleted successfully!');
             } catch (error) {
               Alert.alert('Error', 'You can only delete churches you created');
@@ -225,7 +224,6 @@ const Churches = () => {
   const clearFilters = () => {
     setSearchTerm('');
     setFilterValues({
-      continent: '',
       country: '',
       conference: ''
     });
@@ -255,66 +253,88 @@ const Churches = () => {
   const renderItem = ({ item }) => {
     // Get creator info directly from church data
     const creatorName = item.created_by_username || 'Unknown';
-    const creatorImage = item.created_by_picture 
+    const creatorImage = item.created_by_picture
         ? { uri: item.created_by_picture }
-        : { uri: DEFAULT_PROFILE_IMAGE };
+        : DEFAULT_PROFILE_IMAGE;
+    const locationText = [item.location, item.district].filter(Boolean).join(', ');
 
     return (
       <View style={styles.churchCard}>
         <View style={styles.churchHeader}>
           <View style={styles.userInfo}>
-            <Image 
-              source={creatorImage} 
+            <Image
+              source={creatorImage}
               style={styles.profileImage}
-              defaultSource={{ uri: DEFAULT_PROFILE_IMAGE }}
-              onError={() => console.log('Error loading profile image')}
+              defaultSource={DEFAULT_PROFILE_IMAGE}
             />
             <View>
               <Text style={styles.username}>{creatorName}</Text>
+              <Text style={styles.byline}>Added this church</Text>
             </View>
           </View>
           <ChurchActions church={item} />
         </View>
-        
-        <Text style={styles.churchName}>{item.name}</Text>
-        
-        {item.image && (
-          <Image 
-            source={{ uri: item.image }} 
+
+        {item.image ? (
+          <Image
+            source={{ uri: item.image }}
             style={styles.churchImage}
             resizeMode="cover"
           />
+        ) : (
+          <View style={[styles.churchImage, styles.churchImagePlaceholder]}>
+            <MaterialIcons name="church" size={44} color="#9fb3c8" />
+          </View>
         )}
-        
+
+        <View style={styles.nameRow}>
+          <MaterialIcons name="church" size={20} color="#006064" />
+          <Text style={styles.churchName} numberOfLines={2}>{item.name}</Text>
+        </View>
+
         <View style={styles.churchDetails}>
-          <View style={styles.detailRow}>
-            <MaterialIcons name="location-on" size={16} color="#555" />
-            <Text style={styles.detailText}>{item.location}, {item.district}</Text>
-          </View>
-          
-          <View style={styles.detailRow}>
-            <MaterialIcons name="people" size={16} color="#555" />
-            <Text style={styles.detailText}>{item.members} members</Text>
-          </View>
-          
-          {item.pastor && (
+          {locationText ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="account-circle" size={16} color="#555" />
-              <Text style={styles.detailText}>Pastor: {item.pastor}</Text>
+              <MaterialIcons name="location-on" size={16} color="#00838f" />
+              <Text style={styles.detailText}>{locationText}</Text>
             </View>
-          )}
-          
-          {item.contact && (
+          ) : null}
+
+          <View style={styles.detailRow}>
+            <MaterialIcons name="people" size={16} color="#00838f" />
+            <Text style={styles.detailText}>
+              {Number(item.members || 0).toLocaleString()} members
+            </Text>
+          </View>
+
+          {item.pastor ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="phone" size={16} color="#555" />
+              <MaterialIcons name="account-circle" size={16} color="#00838f" />
+              <Text style={styles.detailText}>Pastor {item.pastor}</Text>
+            </View>
+          ) : null}
+
+          {item.contact ? (
+            <View style={styles.detailRow}>
+              <MaterialIcons name="phone" size={16} color="#00838f" />
               <Text style={styles.detailText}>{item.contact}</Text>
             </View>
-          )}
-          
-          <View style={styles.metaContainer}>
-            <Text style={styles.metaText}>{item.conference}</Text>
-            <Text style={styles.metaText}>{item.country}</Text>
-          </View>
+          ) : null}
+        </View>
+
+        <View style={styles.metaContainer}>
+          {item.conference ? (
+            <View style={styles.chip}>
+              <MaterialIcons name="account-balance" size={13} color="#006064" />
+              <Text style={styles.chipText}>{item.conference}</Text>
+            </View>
+          ) : null}
+          {item.country ? (
+            <View style={styles.chip}>
+              <MaterialIcons name="public" size={13} color="#006064" />
+              <Text style={styles.chipText}>{item.country}</Text>
+            </View>
+          ) : null}
         </View>
       </View>
     );
@@ -327,9 +347,18 @@ const Churches = () => {
       transparent={true}
       onRequestClose={() => setShowAddForm(false)}
     >
-      <View style={styles.modalOverlay}>
+      <KeyboardAvoidingView
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <View style={styles.modalContainer}>
-          <ScrollView style={styles.addForm}>
+          <ScrollView
+            style={styles.addForm}
+            contentContainerStyle={styles.addFormContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.formHeader}>
               <Text style={styles.formTitle}>
                 {editingChurch ? 'Edit Church' : 'Add New Church'}
@@ -340,7 +369,6 @@ const Churches = () => {
                   setEditingChurch(null);
                   setNewChurch({
                     name: '',
-                    continent: '',
                     country: '',
                     county: '',
                     conference: '',
@@ -363,13 +391,6 @@ const Churches = () => {
               placeholder="Church Name *"
               value={newChurch.name}
               onChangeText={text => setNewChurch({...newChurch, name: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Continent"
-              value={newChurch.continent}
-              onChangeText={text => setNewChurch({...newChurch, continent: text})}
             />
             
             <TextInput
@@ -457,7 +478,7 @@ const Churches = () => {
             </View>
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 
@@ -470,14 +491,16 @@ const Churches = () => {
   }
 
   // Get unique values for filter dropdowns
-  const continents = [...new Set(churches.map(church => church.continent))];
-  const countries = [...new Set(churches.map(church => church.country))];
-  const conferences = [...new Set(churches.map(church => church.conference))];
+  const countries = [...new Set(churches.map(church => church.country).filter(Boolean))];
+  const conferences = [...new Set(churches.map(church => church.conference).filter(Boolean))];
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Seventh-day Adventist Churches</Text>
-      
+      <Text style={styles.subtitle}>
+        {filteredChurches.length} {filteredChurches.length === 1 ? 'church' : 'churches'}
+      </Text>
+
       {/* Search and Filter Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
@@ -506,38 +529,7 @@ const Churches = () => {
       {showFilters && (
         <View style={styles.filtersPanel}>
           <Text style={styles.filterTitle}>Filter By:</Text>
-          
-          <View style={styles.filterGroup}>
-            <Text style={styles.filterLabel}>Continent:</Text>
-            <View style={styles.filterOptions}>
-              <TouchableOpacity 
-                style={[
-                  styles.filterOption, 
-                  !filterValues.continent && styles.filterOptionSelected
-                ]}
-                onPress={() => setFilterValues({...filterValues, continent: ''})}
-              >
-                <Text style={!filterValues.continent ? styles.filterOptionTextSelected : styles.filterOptionText}>
-                  All
-                </Text>
-              </TouchableOpacity>
-              {continents.map(continent => (
-                <TouchableOpacity 
-                  key={continent}
-                  style={[
-                    styles.filterOption, 
-                    filterValues.continent === continent && styles.filterOptionSelected
-                  ]}
-                  onPress={() => setFilterValues({...filterValues, continent})}
-                >
-                  <Text style={filterValues.continent === continent ? styles.filterOptionTextSelected : styles.filterOptionText}>
-                    {continent}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-          
+
           <View style={styles.filterGroup}>
             <Text style={styles.filterLabel}>Country:</Text>
             <View style={styles.filterOptions}>
@@ -614,8 +606,25 @@ const Churches = () => {
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#fff"
+            colors={['#006064']}
+          />
+        }
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No churches found matching your criteria</Text>
+          <View style={styles.emptyState}>
+            <MaterialIcons name="church" size={56} color="#3d567a" />
+            <Text style={styles.emptyText}>No churches found</Text>
+            <Text style={styles.emptySubtext}>
+              {searchTerm || filterValues.country || filterValues.conference
+                ? 'Try adjusting your search or filters'
+                : 'Be the first to add a church'}
+            </Text>
+          </View>
         }
       />
 
@@ -647,32 +656,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#e0f7fa',
   },
   title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    marginBottom: 2,
-    marginTop:15,
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 6,
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.1)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-    textDecorationLine: 'underline',
-    fontStyle:'italic',
-    color:'orange'
+    letterSpacing: 0.3,
+    color: '#FFA726',
+  },
+  subtitle: {
+    fontSize: 13,
+    textAlign: 'center',
+    color: '#cdd9e5',
+    marginTop: 2,
+    marginBottom: 10,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   searchInputContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'white',
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginTop:0,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   searchIcon: {
     marginRight: 8,
@@ -683,7 +693,12 @@ const styles = StyleSheet.create({
   },
   filterButton: {
     marginLeft: 10,
-    padding: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   filtersPanel: {
     backgroundColor: 'white',
@@ -741,86 +756,126 @@ const styles = StyleSheet.create({
   listContainer: {
     paddingBottom: 20,
   },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
   emptyText: {
     textAlign: 'center',
-    color: '#555',
-    marginTop: 20,
-    fontSize: 16,
+    color: '#E0E1DD',
+    marginTop: 14,
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  emptySubtext: {
+    textAlign: 'center',
+    color: '#90a4c4',
+    marginTop: 4,
+    fontSize: 14,
   },
   churchCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
   },
   churchHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   profileImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     marginRight: 10,
-    backgroundColor: '#eee', // Fallback color if image fails to load
+    backgroundColor: '#eee',
+    borderWidth: 2,
+    borderColor: '#e0f2f4',
   },
   username: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    color: '#006064',
+    fontWeight: '700',
+    fontSize: 15,
+    color: '#0b3d52',
+  },
+  byline: {
+    fontSize: 12,
+    color: '#90a4ae',
+    marginTop: 1,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
   },
   churchName: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    flex: 1,
+    fontSize: 19,
+    fontWeight: '700',
     color: '#006064',
-    marginBottom: 10,
   },
   churchActions: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 14,
   },
   churchImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 8,
-    marginVertical: 10,
+    height: 180,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  churchImagePlaceholder: {
+    backgroundColor: '#eef3f6',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   churchDetails: {
-    marginLeft: 8,
+    gap: 8,
   },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
   },
   detailText: {
-    color: '#555',
+    color: '#455a64',
     marginLeft: 8,
-    fontSize: 15,
+    fontSize: 14.5,
+    flex: 1,
   },
   metaContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-    paddingTop: 10,
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: '#eef2f4',
   },
-  metaText: {
-    color: '#777',
-    fontSize: 13,
-    fontStyle: 'italic',
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#e0f7fa',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+  },
+  chipText: {
+    color: '#006064',
+    fontSize: 12.5,
+    fontWeight: '600',
   },
   addButton: {
     backgroundColor: '#006064',
@@ -848,7 +903,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    height: height * 0.7,
+    // Percentage maxHeight (not a fixed pixel height) so the sheet shrinks to
+    // the space left above the keyboard instead of clipping the top fields.
+    maxHeight: '90%',
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -870,6 +927,9 @@ const styles = StyleSheet.create({
   },
   addForm: {
     flex: 1,
+  },
+  addFormContent: {
+    paddingBottom: 24,
   },
   input: {
     borderWidth: 1,

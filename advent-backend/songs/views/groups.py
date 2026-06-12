@@ -310,11 +310,17 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        return GroupJoinRequest.objects.filter(
+        qs = GroupJoinRequest.objects.filter(
             group__members__user=self.request.user,
             group__members__is_admin=True,
             status='pending'
-        )
+        ).select_related('user', 'user__profile', 'group').distinct()
+        # When reached via /groups/<slug>/join-requests/, scope to that group
+        # instead of returning every group the user administers.
+        group_slug = self.kwargs.get('group_slug')
+        if group_slug:
+            qs = qs.filter(group__slug=group_slug)
+        return qs
 
     @action(detail=True, methods=['post'], url_path='approve')
     def approve_request(self, request, pk=None):

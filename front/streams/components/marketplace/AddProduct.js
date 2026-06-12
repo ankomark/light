@@ -30,6 +30,10 @@ const AddProduct = () => {
     whatsapp_number: '',
     contact_number: '',
     location: '',
+    mpesa_number: '',
+    till_number: '',
+    bank_details: '',
+    payment_instructions: '',
   });
   const [currency, setCurrency] = useState('USD');
   const [images, setImages] = useState([]);
@@ -140,7 +144,11 @@ const AddProduct = () => {
       data.append('whatsapp_number', formData.whatsapp_number);
       data.append('contact_number', formData.contact_number);
       data.append('location', formData.location);
-      
+      data.append('mpesa_number', formData.mpesa_number);
+      data.append('till_number', formData.till_number);
+      data.append('bank_details', formData.bank_details);
+      data.append('payment_instructions', formData.payment_instructions);
+
       if (track) {
         data.append('track', track.id.toString());
       }
@@ -290,6 +298,43 @@ const AddProduct = () => {
         placeholder="Location (optional)"
         value={formData.location}
         onChangeText={(text) => handleChange('location', text)}
+      />
+
+      <Text style={styles.sectionTitle}>Payment Details</Text>
+      <Text style={styles.subtitle}>
+        How should buyers pay you? Buyers pay you directly — these details are shown on your listing.
+      </Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="M-Pesa Number (e.g., 0712345678)"
+        value={formData.mpesa_number}
+        onChangeText={(text) => handleChange('mpesa_number', text)}
+        keyboardType="phone-pad"
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Till / Paybill Number (optional)"
+        value={formData.till_number}
+        onChangeText={(text) => handleChange('till_number', text)}
+        keyboardType="numbers-and-punctuation"
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Bank details (optional)"
+        value={formData.bank_details}
+        onChangeText={(text) => handleChange('bank_details', text)}
+      />
+
+      <TextInput
+        style={[styles.input, styles.textArea]}
+        placeholder="Other payment instructions (optional)"
+        value={formData.payment_instructions}
+        onChangeText={(text) => handleChange('payment_instructions', text)}
+        multiline
+        numberOfLines={3}
       />
 
       <Text style={styles.sectionTitle}>Product Images*</Text>

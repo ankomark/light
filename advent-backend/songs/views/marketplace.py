@@ -215,8 +215,13 @@ class CartViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def add_item(self, request):
         product_id = request.data.get('product_id')
-        quantity = request.data.get('quantity', 1)
-        
+        try:
+            quantity = int(request.data.get('quantity', 1))
+        except (TypeError, ValueError):
+            return Response({"error": "Invalid quantity"}, status=status.HTTP_400_BAD_REQUEST)
+        if quantity < 1:
+            return Response({"error": "Quantity must be at least 1"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             product = Product.objects.get(id=product_id)
         except Product.DoesNotExist:
@@ -224,20 +229,20 @@ class CartViewSet(viewsets.ModelViewSet):
                 {"error": "Product not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        cart, created = Cart.objects.get_or_create(user=request.user)
+
+        cart, _ = Cart.objects.get_or_create(user=request.user)
         cart_item, created = CartItem.objects.get_or_create(
             cart=cart,
             product=product,
             defaults={'quantity': quantity}
         )
-        
+
         if not created:
-            cart_item.quantity += int(quantity)
-            cart_item.save()
-        
+            cart_item.quantity += quantity
+            cart_item.save(update_fields=['quantity'])
+
         return Response(
-            {"status": "Item added to cart"},
+            {"status": "Item added to cart", "quantity": cart_item.quantity},
             status=status.HTTP_200_OK
         )
     

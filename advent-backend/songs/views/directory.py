@@ -43,8 +43,27 @@ class ChurchViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
 
+    def _handle_image_upload(self, church):
+        """The serializer's `image` field is read-only, so the uploaded file is
+        handled here: push it to Cloudinary and store the resulting public_id."""
+        image_file = self.request.FILES.get('image')
+        if not image_file:
+            return
+        result = upload(
+            image_file,
+            folder='churches',
+            resource_type='image',
+            transformation=[
+                {'width': 1200, 'height': 800, 'crop': 'fill'},
+                {'quality': 'auto'},
+            ],
+        )
+        church.image = result['public_id']
+        church.save(update_fields=['image', 'updated_at'])
+
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        church = serializer.save(created_by=self.request.user)
+        self._handle_image_upload(church)
 
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
@@ -58,6 +77,9 @@ class ChurchViewSet(viewsets.ModelViewSet):
                 {"error": "You can only edit churches you created"},
                 status=status.HTTP_403_FORBIDDEN
             )
+        # Persist a newly uploaded image first; super().update() re-reads the
+        # instance and serializes it with the saved image.
+        self._handle_image_upload(instance)
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
