@@ -149,7 +149,7 @@ const Articles = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Articles &amp; Books</Text>
+        <Text style={styles.headerTitle}>Publish Books &amp; Articles</Text>
         <Text style={styles.headerSub}>Read and publish long-form writing</Text>
       </View>
 

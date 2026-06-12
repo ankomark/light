@@ -20,6 +20,17 @@ function timeAgo(dateStr) {
   return `${Math.floor(diff / 86400)}d`;
 }
 
+const previewText = (last) => {
+  if (!last) return 'No messages yet';
+  if (last.content) return last.content;
+  switch (last.message_type) {
+    case 'image': return '📷 Photo';
+    case 'file': return `📎 ${last.file_name || 'File'}`;
+    case 'audio': return '🎤 Voice note';
+    default: return 'Message';
+  }
+};
+
 const ConversationItem = ({ item, onPress }) => {
   const other = item.other_participant;
   const last = item.last_message;
@@ -48,7 +59,7 @@ const ConversationItem = ({ item, onPress }) => {
             style={[styles.preview, hasUnread && styles.previewBold]}
             numberOfLines={1}
           >
-            {last ? last.content : 'No messages yet'}
+            {previewText(last)}
           </Text>
           {hasUnread && (
             <View style={styles.badge}>

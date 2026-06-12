@@ -50,60 +50,35 @@ class ChurchSerializer(serializers.ModelSerializer):
 
 
 class VideoStudioSerializer(serializers.ModelSerializer):
-    created_by = UserSerializer(read_only=True)
-    logo = CloudinaryFieldSerializer(read_only=True)
-    cover_image = CloudinaryFieldSerializer(read_only=True)
-    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
-    created_by_picture = CloudinaryFieldSerializer(source='created_by.profile.picture', read_only=True)
-    service_types = serializers.ListField(child=serializers.ChoiceField(choices=Videostudio.SERVICE_TYPES),default=list)
-    
+    created_by = SimpleUserSerializer(read_only=True)
+    is_owner = serializers.SerializerMethodField()
+    service_types = serializers.ListField(
+        child=serializers.ChoiceField(choices=Videostudio.SERVICE_TYPES), default=list
+    )
+
     class Meta:
         model = Videostudio
         fields = '__all__'
         read_only_fields = ('created_by', 'is_verified')
-    
-    def get_logo_url(self, obj):
-        if obj.logo:
-            return self.context['request'].build_absolute_uri(obj.logo.url)
-        return None
-    
-    def get_cover_image_url(self, obj):
-        if obj.cover_image:
-            return self.context['request'].build_absolute_uri(obj.cover_image.url)
-        return None
 
-    def get_created_by_picture(self, obj):
-        # Add null checks for safety
-        if obj.created_by and hasattr(obj.created_by, 'profile') and obj.created_by.profile.picture:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.created_by.profile.picture.url)
-            return obj.created_by.profile.picture.url
-        return None
-
-    # ... rest of the serializer ...
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
 
 
 class ChoirSerializer(serializers.ModelSerializer):
-    created_by = UserSerializer(read_only=True)
-    profile_image = CloudinaryFieldSerializer(read_only=True)
-    cover_image = CloudinaryFieldSerializer(read_only=True)
-    
+    created_by = SimpleUserSerializer(read_only=True)
+    is_owner = serializers.SerializerMethodField()
+
     class Meta:
         model = Choir
         fields = '__all__'
         read_only_fields = ('created_by', 'members_count')
-    
-    def get_profile_image_url(self, obj):
-        if obj.profile_image:
-            return self.context['request'].build_absolute_uri(obj.profile_image.url)
-        return None
-    
-    def get_cover_image_url(self, obj):
-        if obj.cover_image:
-            return self.context['request'].build_absolute_uri(obj.cover_image.url)
-        return None
+
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
 
 

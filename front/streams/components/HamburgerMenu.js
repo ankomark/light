@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image, Modal,
-  ScrollView, Pressable, Platform, StatusBar,
+  ScrollView, Pressable, Platform, StatusBar, AppState,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
+import { fetchUnreadMessageCount } from '../services/api';
 import { colors, spacing, radius, typography } from '../constants/theme';
 
 const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
@@ -66,8 +67,27 @@ function HamburgerMenu() {
   const navigation = useNavigation();
   const { isAuthenticated, currentUser, logout } = useAuth();
   const [menuVisible, setMenuVisible] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   const activeRoute = useNavigationState((s) => s?.routes?.[s.index]?.name);
+
+  const refreshUnread = useCallback(() => {
+    if (!isAuthenticated) { setUnreadMessages(0); return; }
+    fetchUnreadMessageCount()
+      .then((r) => setUnreadMessages(r?.unread_count || 0))
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  // Poll the unread message count so the menu icon shows a badge, and refresh
+  // whenever the app returns to the foreground or the menu is opened.
+  useEffect(() => {
+    refreshUnread();
+    const interval = setInterval(refreshUnread, 30000);
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refreshUnread(); });
+    return () => { clearInterval(interval); sub.remove(); };
+  }, [refreshUnread]);
+
+  useEffect(() => { if (menuVisible) refreshUnread(); }, [menuVisible, refreshUnread]);
 
   const close = () => setMenuVisible(false);
 
@@ -89,6 +109,7 @@ function HamburgerMenu() {
     <View>
       <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton} accessibilityRole="button" accessibilityLabel="Open menu">
         <Ionicons name="menu" size={26} color={colors.white} />
+        {unreadMessages > 0 && <View style={styles.menuDot} />}
       </TouchableOpacity>
 
       <Modal visible={menuVisible} animationType="slide" onRequestClose={close} statusBarTranslucent>
@@ -157,9 +178,15 @@ function HamburgerMenu() {
                         <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
                           {item.label}
                         </Text>
-                        {active
-                          ? <View style={styles.activeDot} />
-                          : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
+                        {item.route === 'Inbox' && unreadMessages > 0 ? (
+                          <View style={styles.countBadge}>
+                            <Text style={styles.countBadgeText}>{unreadMessages > 99 ? '99+' : unreadMessages}</Text>
+                          </View>
+                        ) : active ? (
+                          <View style={styles.activeDot} />
+                        ) : (
+                          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                        )}
                       </Pressable>
                     );
                   })}
@@ -190,6 +217,17 @@ function HamburgerMenu() {
 
 const styles = StyleSheet.create({
   menuButton: { padding: 2 },
+  menuDot: {
+    position: 'absolute', top: 0, right: 0,
+    width: 10, height: 10, borderRadius: 5,
+    backgroundColor: colors.error, borderWidth: 1.5, borderColor: colors.bg,
+  },
+  countBadge: {
+    minWidth: 22, height: 22, borderRadius: 11,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  countBadgeText: { color: colors.white, fontSize: 11, fontWeight: '800' },
   container: { flex: 1, backgroundColor: colors.bg },
 
   header: {

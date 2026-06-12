@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image,
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -144,7 +145,6 @@ const PublicationEditor = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
           <Ionicons name="close" size={24} color={colors.textPrimary} />
@@ -153,7 +153,16 @@ const PublicationEditor = ({ route, navigation }) => {
         <View style={styles.iconBtn} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        enableOnAndroid
+        enableResetScrollToCoords={false}
+        extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
+        keyboardOpeningTime={0}
+      >
         {/* Cover */}
         <View style={styles.coverRow}>
           <TouchableOpacity style={styles.coverPicker} onPress={pickCover} activeOpacity={0.85}>
@@ -275,7 +284,7 @@ const PublicationEditor = ({ route, navigation }) => {
         </TouchableOpacity>
 
         <View style={{ height: spacing.xxl }} />
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Save bar */}
       <View style={styles.saveBar}>
@@ -296,7 +305,6 @@ const PublicationEditor = ({ route, navigation }) => {
           {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishBtnText}>Publish</Text>}
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };

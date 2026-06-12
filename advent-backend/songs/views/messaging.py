@@ -62,14 +62,27 @@ class ConversationViewSet(viewsets.ModelViewSet):
         conversation = self.get_object()
         if not conversation.participants.filter(id=request.user.id).exists():
             return Response({'error': 'Not a participant'}, status=status.HTTP_403_FORBIDDEN)
-        content = request.data.get('content', '').strip()
-        if not content:
+
+        content = (request.data.get('content') or '').strip()
+        message_type = request.data.get('message_type', 'text')
+        if message_type not in dict(Message.MESSAGE_TYPES):
+            message_type = 'text'
+        attachment = request.data.get('attachment', '') or ''
+        file_name = (request.data.get('file_name') or '')[:255]
+        duration = request.data.get('duration')
+
+        # A message must have either text or an attachment.
+        if not content and not attachment:
             return Response({'error': 'Message cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
 
         message = Message.objects.create(
             conversation=conversation,
             sender=request.user,
             content=content,
+            message_type=message_type,
+            attachment=attachment,
+            file_name=file_name,
+            duration=duration if isinstance(duration, (int, float)) else None,
         )
         # Touch conversation so ordering by updated_at works
         Conversation.objects.filter(pk=conversation.pk).update(updated_at=message.created_at)
@@ -77,10 +90,13 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # Push notification to the other participant
         other = conversation.participants.exclude(id=request.user.id).first()
         if other:
+            preview = content[:80] if content else {
+                'image': '📷 Photo', 'file': '📎 File', 'audio': '🎤 Voice note',
+            }.get(message_type, 'New message')
             notify_user(
                 other,
                 'message',
-                f"{request.user.username}: {content[:80]}",
+                f"{request.user.username}: {preview}",
                 data={'conversationId': conversation.id},
             )
 

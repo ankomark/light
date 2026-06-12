@@ -595,20 +595,13 @@ export const fetchMyVideoStudios = async () => {
   return apiRequest('get', '/video-studios/my_videostudios/');
 };
 
-export const createVideoStudio = async (formData) => {
-  return apiRequest('post', '/video-studios/', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
+// Video studios now use JSON (images are base64 data URIs), not multipart.
+export const createVideoStudio = async (data) => {
+  return apiRequest('post', '/video-studios/', data);
 };
 
-export const updateVideoStudio = async (id, formData) => {
-  return apiRequest('patch', `/video-studios/${id}/`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
+export const updateVideoStudio = async (id, data) => {
+  return apiRequest('patch', `/video-studios/${id}/`, data);
 };
 
 export const deleteVideoStudio = async (id) => {
@@ -664,28 +657,17 @@ export const fetchMyChoirs = async () => {
   return apiRequest('get', '/choirs/my_choirs/');
 };
 
-export const createChoir = async (formData) => {
-  return apiRequest('post', '/choirs/', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
+// Choirs now use JSON (images are base64 data URIs), not multipart.
+export const createChoir = async (data) => {
+  return apiRequest('post', '/choirs/', data);
 };
 
-export const updateChoir = async (id, formData) => {
-  return apiRequest('patch', `/choirs/${id}/`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
+export const updateChoir = async (id, data) => {
+  return apiRequest('patch', `/choirs/${id}/`, data);
 };
 
 export const deleteChoir = async (id) => {
   return apiRequest('delete', `/choirs/${id}/`);
-};
-
-export const addChoirMember = async (choirId, userId) => {
-  return apiRequest('post', `/choirs/${choirId}/add_member/`, { user_id: userId });
 };
 
 // ==================== SOLO ARTISTS ====================
@@ -801,8 +783,19 @@ export const requestJoinGroup = async (slug, message = "") => {
 
 
 export const fetchGroupPosts = async (slug, page = 1) => {
-  return apiRequest('get', `/groups/${slug}/posts/`, null, { params: { page, page_size: 20 } });
+  return apiRequest('get', `/groups/${slug}/posts/`, null, { params: { page, page_size: 30 } });
 };
+
+// Group chat: send a message (JSON, base64 attachments).
+// payload: { content?, message_type?, attachment?, file_name?, duration?, reply_to_id? }
+export const sendGroupMessage = async (slug, payload) =>
+  apiRequest('post', `/groups/${slug}/posts/`, payload);
+
+export const markGroupRead = async (slug) =>
+  apiRequest('post', `/groups/${slug}/mark-read/`);
+
+export const leaveGroup = async (slug) =>
+  apiRequest('post', `/groups/${slug}/leave/`);
 
 
 export const updateGroup = async (groupSlug, formData) => {
@@ -1430,8 +1423,10 @@ export const getOrCreateConversation = (userId) =>
 export const fetchMessages = (conversationId) =>
   apiRequest('get', `/conversations/${conversationId}/messages/`);
 
-export const sendMessage = (conversationId, content) =>
-  apiRequest('post', `/conversations/${conversationId}/send_message/`, { content });
+// payload: { content?, message_type?, attachment?, file_name?, duration? }
+export const sendMessage = (conversationId, payload) =>
+  apiRequest('post', `/conversations/${conversationId}/send_message/`,
+    typeof payload === 'string' ? { content: payload } : payload);
 
 export const markConversationRead = (conversationId) =>
   apiRequest('post', `/conversations/${conversationId}/mark_read/`);
@@ -1485,7 +1480,6 @@ export default {
   createChoir,
   updateChoir,
   deleteChoir,
-  addChoirMember,
   fetchSoloArtists,
   fetchSoloArtistById,
   fetchMySoloArtistProfile,

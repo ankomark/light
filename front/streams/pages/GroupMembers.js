@@ -24,7 +24,11 @@ const GroupMemberItem = ({ member }) => (
   </View>
 );
 
-const GroupMembers = ({ groupSlug, onClose }) => {
+const GroupMembers = (props) => {
+  // Works both as a navigation screen (route.params) and as an inline modal (props).
+  const groupSlug = props.groupSlug ?? props.route?.params?.groupSlug;
+  const onClose = props.onClose ?? (() => props.navigation?.goBack());
+
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

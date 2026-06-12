@@ -432,9 +432,20 @@ class Conversation(models.Model):
 
 
 class Message(models.Model):
+    MESSAGE_TYPES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('file', 'File'),
+        ('audio', 'Voice note'),
+    ]
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
-    content = models.TextField()
+    content = models.TextField(blank=True, default='')
+    message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
+    # Attachment stored as a base64 data URI (image/file/audio).
+    attachment = models.TextField(blank=True, default='')
+    file_name = models.CharField(max_length=255, blank=True, default='')
+    duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
     read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -442,7 +453,7 @@ class Message(models.Model):
         ordering = ['created_at']
 
     def __str__(self):
-        return f"{self.sender.username}: {self.content[:50]}"
+        return f"{self.sender.username}: {(self.content or self.message_type)[:50]}"
 
 
 class DeviceToken(models.Model):
@@ -532,11 +543,12 @@ class Videostudio(models.Model):
     location = models.CharField(max_length=300)
     contact_phone = models.CharField(max_length=20, blank=True, null=True)
     contact_email = models.EmailField(blank=True, null=True)
-    # logo = models.ImageField(upload_to='videostudios/logos/', blank=True, null=True)
-    # cover_image = models.ImageField(upload_to='videostudios/covers/', blank=True, null=True)
-    logo = CloudinaryField('image', folder='videostudios/logos/', blank=True, null=True)
-    cover_image = CloudinaryField('image', folder='videostudios/covers/', blank=True, null=True)
+    # Images stored as base64 data URIs (or blank to use a default).
+    logo = models.TextField(blank=True, default='')
+    cover_image = models.TextField(blank=True, default='')
     whatsapp_number = models.CharField(max_length=20, blank=True, null=True)
+    currency = models.CharField(max_length=8, blank=True, default='USD')
+    rate_description = models.CharField(max_length=200, blank=True, default='')
     service_types = models.JSONField(
         default=list,
         blank=True,
@@ -599,10 +611,9 @@ class Choir(models.Model):
     contact_email = models.EmailField(blank=True, null=True)
     genre = models.CharField(max_length=50, choices=GENRE_CHOICES, default='gospel')
     members_count = models.PositiveIntegerField(default=0)
-    # profile_image = models.ImageField(upload_to='choirs/profiles/', blank=True, null=True)
-    # cover_image = models.ImageField(upload_to='choirs/covers/', blank=True, null=True)
-    profile_image = CloudinaryField('image', folder='choirs/profiles/', blank=True, null=True)
-    cover_image = CloudinaryField('image', folder='choirs/covers/', blank=True, null=True)
+    # Images stored as base64 data URIs (or blank to use a default).
+    profile_image = models.TextField(blank=True, default='')
+    cover_image = models.TextField(blank=True, default='')
     founded_date = models.DateField(blank=True, null=True)
     youtube_link = models.URLField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
@@ -647,6 +658,7 @@ class GroupMember(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_memberships')
     is_admin = models.BooleanField(default=False)
     joined_at = models.DateTimeField(auto_now_add=True)
+    last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
 
     class Meta:
         unique_together = ('group', 'user')
@@ -674,14 +686,31 @@ class GroupJoinRequest(models.Model):
         return f"{self.user.username} -> {self.group.name} ({self.status})"
 
 class GroupPost(models.Model):
+    """A message in a group chat (text / image / file / voice / system notice)."""
+    MESSAGE_TYPES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('file', 'File'),
+        ('audio', 'Voice note'),
+        ('system', 'System'),
+    ]
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='posts')
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    content = models.TextField()
+    content = models.TextField(blank=True, default='')
+    message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
+    # Attachment stored as a base64 data URI (image/file/audio).
+    attachment = models.TextField(blank=True, default='')
+    file_name = models.CharField(max_length=255, blank=True, default='')
+    duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
+    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ['created_at']
+
     def __str__(self):
-        return f"Post in {self.group.name} by {self.user.username}"
+        return f"Message in {self.group.name} by {self.user.username}"
 
 class GroupPostAttachment(models.Model):
     ATTACHMENT_TYPES = (

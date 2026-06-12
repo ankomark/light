@@ -50,7 +50,10 @@ class MessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Message
-        fields = ['id', 'sender', 'content', 'read', 'created_at']
+        fields = [
+            'id', 'sender', 'content', 'message_type', 'attachment',
+            'file_name', 'duration', 'read', 'created_at',
+        ]
         read_only_fields = ['id', 'sender', 'read', 'created_at']
 
 
@@ -73,7 +76,17 @@ class ConversationSerializer(serializers.ModelSerializer):
 
     def get_last_message(self, obj):
         last = obj.messages.last()
-        return MessageSerializer(last).data if last else None
+        if not last:
+            return None
+        # Lightweight preview — never include the base64 attachment here.
+        return {
+            'id': last.id,
+            'content': last.content,
+            'message_type': last.message_type,
+            'file_name': last.file_name,
+            'sender_id': last.sender_id,
+            'created_at': last.created_at,
+        }
 
     def get_unread_count(self, obj):
         request = self.context.get('request')

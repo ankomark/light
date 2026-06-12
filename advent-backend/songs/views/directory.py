@@ -91,12 +91,6 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
      
-    def create(self, request, *args, **kwargs):
-        # Convert single service type to array if needed
-        if 'service_types' in request.data and isinstance(request.data['service_types'], str):
-            request.data._mutable = True
-            request.data['service_types'] = [request.data['service_types']]
-        return super().create(request, *args, **kwargs)
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 

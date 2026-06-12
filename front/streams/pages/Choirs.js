@@ -1,1089 +1,612 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  FlatList, 
-  StyleSheet, 
-  TouchableOpacity, 
-  TextInput, 
-  Alert,
-  ActivityIndicator,
-  ScrollView,
-  Modal,
-  Dimensions,
-  Image,
-  Linking
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert,
+  ActivityIndicator, Image, Linking, Modal, Platform, ScrollView,
 } from 'react-native';
-import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { 
-  fetchChoirs, 
-  fetchMyChoirs,
-  createChoir, 
-  updateChoir, 
-  deleteChoir,
-  addChoirMember,
-  toggleChoirActive, // Correct import
-  updateChoirMembers // Correct import
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import {
+  fetchChoirs, createChoir, updateChoir, deleteChoir,
+  toggleChoirActive, updateChoirMembers,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
-const { height } = Dimensions.get('window');
+const GENRES = [
+  { key: 'gospel', label: 'Gospel' },
+  { key: 'contemporary', label: 'Contemporary' },
+  { key: 'traditional', label: 'Traditional' },
+  { key: 'mixed', label: 'Mixed' },
+];
+const GENRE_LABEL = Object.fromEntries(GENRES.map((g) => [g.key, g.label]));
+const FILTERS = [{ key: 'all', label: 'All' }, ...GENRES];
 
-const GENRE_CHOICES = {
-  gospel: 'Gospel',
-  contemporary: 'Contemporary Christian',
-  traditional: 'Traditional Hymns',
-  mixed: 'Mixed Repertoire'
+const EMPTY = {
+  name: '', description: '', location: '', contact_phone: '', contact_email: '',
+  genre: 'gospel', youtube_link: '', founded_date: '',
 };
 
-const Choirs = () => {
-  const { currentUser, isLoading: authLoading } = useAuth();
-  const [choirs, setChoirs] = useState([]);
-  const [filteredChoirs, setFilteredChoirs] = useState([]);
-  const [editingMembersCount, setEditingMembersCount] = useState(false);
-  const [tempMembersCount, setTempMembersCount] = useState('');
-  const [newChoir, setNewChoir] = useState({
-    name: '',
-    description: '',
-    church: '',
-    location: '',
-    contact_phone: '',
-    contact_email: '',
-    genre: 'gospel',
-    members_count: 0,
-    youtube_link: '',
-    founded_date: ''
+const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+
+// Pick an image and return a compressed base64 data URI.
+async function pickBase64(aspect, width) {
+  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (status !== 'granted') {
+    Alert.alert('Permission required', 'Please enable photo library access.');
+    return null;
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    allowsEditing: true,
+    aspect,
+    quality: 0.8,
   });
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [profileImage, setProfileImage] = useState(null);
-  const [coverImage, setCoverImage] = useState(null);
-  const [editingChoir, setEditingChoir] = useState(null);
-  const [showMemberForm, setShowMemberForm] = useState(false);
-  const [newMemberId, setNewMemberId] = useState('');
+  if (result.canceled || !result.assets?.length) return null;
+  const processed = await manipulateAsync(
+    result.assets[0].uri,
+    [{ resize: { width } }],
+    { compress: 0.6, format: SaveFormat.JPEG, base64: true }
+  );
+  return `data:image/jpeg;base64,${processed.base64}`;
+}
 
-  // Load choirs from API
-  useEffect(() => {
-    const loadChoirs = async () => {
-      if (authLoading) return;
-      try {
-        setIsLoading(true);
-        const response = await fetchChoirs();
-        console.log('fetchChoirs Response:', response); // Debug API response
-        setChoirs(response);
-        setFilteredChoirs(response);
-      } catch (error) {
-        Alert.alert('Error', 'Failed to load choirs');
-        console.error('fetchChoirs Error:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+const Choirs = ({ navigation }) => {
+  const { currentUser } = useAuth();
+  const [choirs, setChoirs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState('');
+  const [genre, setGenre] = useState('all');
 
-    loadChoirs();
-  }, [authLoading]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(EMPTY);
+  const [profileImage, setProfileImage] = useState('');
+  const [coverImage, setCoverImage] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  // Filter choirs
-  useEffect(() => {
-    let results = choirs;
-    
-    if (searchTerm) {
-      results = results.filter(choir => 
-        choir.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        choir.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        GENRE_CHOICES[choir.genre]?.toLowerCase().includes(searchTerm.toLowerCase())
+  const [editMembersId, setEditMembersId] = useState(null);
+  const [membersDraft, setMembersDraft] = useState('');
+
+  const load = useCallback(async (isRefresh = false) => {
+    try {
+      if (isRefresh) setRefreshing(true); else setLoading(true);
+      const res = await fetchChoirs();
+      setChoirs(Array.isArray(res) ? res : (res?.results ?? []));
+    } catch (err) {
+      console.error('fetchChoirs error:', err);
+      Alert.alert('Error', 'Failed to load choirs');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    let list = choirs;
+    if (genre !== 'all') list = list.filter((c) => c.genre === genre);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((c) =>
+        c.name?.toLowerCase().includes(q) ||
+        c.location?.toLowerCase().includes(q) ||
+        GENRE_LABEL[c.genre]?.toLowerCase().includes(q)
       );
     }
-    
-    setFilteredChoirs(results);
-  }, [searchTerm, choirs]);
+    return list;
+  }, [choirs, genre, search]);
 
-  const pickProfileImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      setProfileImage(result.assets[0].uri);
-    }
+  // ── Form ──
+  const openCreate = () => {
+    setEditingId(null); setForm(EMPTY); setProfileImage(''); setCoverImage(''); setShowForm(true);
   };
-
-  const pickCoverImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 1,
+  const openEdit = (c) => {
+    setEditingId(c.id);
+    setForm({
+      name: c.name || '', description: c.description || '', location: c.location || '',
+      contact_phone: c.contact_phone || '', contact_email: c.contact_email || '',
+      genre: c.genre || 'gospel', youtube_link: c.youtube_link || '', founded_date: c.founded_date || '',
     });
-
-    if (!result.canceled) {
-      setCoverImage(result.assets[0].uri);
-    }
+    setProfileImage(c.profile_image || '');
+    setCoverImage(c.cover_image || '');
+    setShowForm(true);
   };
+  const closeForm = () => { setShowForm(false); setEditingId(null); setForm(EMPTY); setProfileImage(''); setCoverImage(''); };
 
-  const handleAddChoir = async () => {
-    if (!newChoir.name.trim() || !newChoir.location.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields');
+  const submit = async () => {
+    if (!form.name.trim() || !form.location.trim()) {
+      Alert.alert('Missing info', 'Choir name and location are required.');
       return;
     }
+    if (form.founded_date && !/^\d{4}-\d{2}-\d{2}$/.test(form.founded_date.trim())) {
+      Alert.alert('Invalid date', 'Founded date must be in YYYY-MM-DD format.');
+      return;
+    }
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      location: form.location.trim(),
+      contact_phone: form.contact_phone.trim(),
+      contact_email: form.contact_email.trim(),
+      genre: form.genre,
+      youtube_link: form.youtube_link.trim(),
+      profile_image: profileImage || '',
+      cover_image: coverImage || '',
+    };
+    if (form.founded_date.trim()) payload.founded_date = form.founded_date.trim();
 
     try {
-      const formData = new FormData();
-      
-      formData.append('name', newChoir.name);
-      formData.append('description', newChoir.description || '');
-      formData.append('location', newChoir.location);
-      formData.append('contact_phone', newChoir.contact_phone || '');
-      formData.append('contact_email', newChoir.contact_email || '');
-      formData.append('genre', newChoir.genre);
-      formData.append('youtube_link', newChoir.youtube_link || '');
-      formData.append('founded_date', newChoir.founded_date || '');
-      
-      if (profileImage) {
-        const uriParts = profileImage.split('.');
-        const fileType = uriParts[uriParts.length - 1];
-        formData.append('profile_image', {
-          uri: profileImage,
-          name: `profile.${fileType}`,
-          type: `image/${fileType}`,
-        });
-      }
-      
-      if (coverImage) {
-        const uriParts = coverImage.split('.');
-        const fileType = uriParts[uriParts.length - 1];
-        formData.append('cover_image', {
-          uri: coverImage,
-          name: `cover.${fileType}`,
-          type: `image/${fileType}`,
-        });
-      }
-
-      if (editingChoir) {
-        await updateChoir(editingChoir.id, formData);
-        Alert.alert('Success', 'Choir updated successfully!');
+      setSaving(true);
+      if (editingId) {
+        const updated = await updateChoir(editingId, payload);
+        setChoirs((prev) => prev.map((c) => (c.id === editingId ? updated : c)));
       } else {
-        await createChoir(formData);
-        Alert.alert('Success', 'Choir added successfully!');
+        const created = await createChoir(payload);
+        setChoirs((prev) => [created, ...prev]);
       }
-
-      const response = await fetchChoirs();
-      setChoirs(response);
-      setFilteredChoirs(response);
-      
-      setNewChoir({
-        name: '',
-        description: '',
-        church: '',
-        location: '',
-        contact_phone: '',
-        contact_email: '',
-        genre: 'gospel',
-        members_count: 0,
-        youtube_link: '',
-        founded_date: ''
-      });
-      setProfileImage(null);
-      setCoverImage(null);
-      setEditingChoir(null);
-      setShowAddForm(false);
-    } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to add choir');
-      console.error('handleAddChoir Error:', error);
+      closeForm();
+    } catch (err) {
+      const msg = err?.response?.data?.error || 'Could not save the choir. Please try again.';
+      Alert.alert('Error', msg);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleStartEditMembersCount = (choir) => {
-    setTempMembersCount(choir.members_count.toString());
-    setEditingChoir(choir);
-    setEditingMembersCount(true);
-  };
-
-  const handleSaveMembersCount = async () => {
-    if (!tempMembersCount || isNaN(tempMembersCount)) {
-      Alert.alert('Error', 'Please enter a valid number');
-      return;
-    }
-
-    try {
-      await updateChoirMembers(editingChoir.id, parseInt(tempMembersCount));
-      const response = await fetchChoirs();
-      setChoirs(response);
-      setFilteredChoirs(response);
-      setEditingMembersCount(false);
-      setEditingChoir(null);
-    } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to update members count');
-    }
-  };
-
-  const handleToggleActive = async (choir) => {
-    try {
-      console.log('Toggling active status for choir:', choir.id); // Debug API call
-      await toggleChoirActive(choir.id); // Use correct function name
-      const response = await fetchChoirs();
-      setChoirs(response);
-      setFilteredChoirs(response);
-    } catch (error) {
-      console.error('handleToggleActive Error:', error);
-      Alert.alert('Error', error.message || 'Failed to toggle active status');
-    }
-  };
-
-  const handleEditChoir = (choir) => {
-    setEditingChoir(choir);
-    setNewChoir({
-      name: choir.name,
-      description: choir.description || '',
-      church: choir.church || '',
-      location: choir.location,
-      contact_phone: choir.contact_phone || '',
-      contact_email: choir.contact_email || '',
-      genre: choir.genre,
-      members_count: choir.members_count || 0,
-      youtube_link: choir.youtube_link || '',
-      founded_date: choir.founded_date || ''
-    });
-    setProfileImage(choir.profile_image_url || null);
-    setCoverImage(choir.cover_image_url || null);
-    setShowAddForm(true);
-  };
-
-  const handleDeleteChoir = async (id) => {
-    Alert.alert(
-      'Confirm Delete',
-      'Are you sure you want to delete this choir?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
+  const onDelete = (c) => {
+    Alert.alert('Delete choir', `Delete “${c.name}”?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          const prev = choirs;
+          setChoirs((cur) => cur.filter((x) => x.id !== c.id));
+          try { await deleteChoir(c.id); }
+          catch { setChoirs(prev); Alert.alert('Error', 'Could not delete this choir.'); }
         },
-        {
-          text: 'Delete',
-          onPress: async () => {
-            try {
-              await deleteChoir(id);
-              const response = await fetchChoirs();
-              setChoirs(response);
-              setFilteredChoirs(response);
-              Alert.alert('Success', 'Choir deleted successfully!');
-            } catch (error) {
-              Alert.alert('Error', error.message || 'Failed to delete choir');
-            }
-          },
-          style: 'destructive',
-        },
-      ],
-      { cancelable: true }
-    );
+      },
+    ]);
   };
 
-  const openYoutubeLink = (url) => {
-    if (url) {
-      Linking.openURL(url).catch(err => {
-        Alert.alert('Error', 'Failed to open YouTube link');
-      });
-    }
-  };
-
-  const handleAddMember = async (choirId) => {
-    if (!newMemberId.trim()) {
-      Alert.alert('Error', 'Please enter a valid user ID');
-      return;
-    }
-
+  const onToggleActive = async (c) => {
     try {
-      await addChoirMember(choirId, newMemberId);
-      Alert.alert('Success', 'Member added successfully!');
-      const response = await fetchChoirs();
-      setChoirs(response);
-      setFilteredChoirs(response);
-      setNewMemberId('');
-      setShowMemberForm(false);
-    } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to add member');
+      const res = await toggleChoirActive(c.id);
+      setChoirs((prev) => prev.map((x) => (x.id === c.id ? { ...x, is_active: res.is_active } : x)));
+    } catch {
+      Alert.alert('Error', 'Could not update status.');
     }
   };
 
-  const ChoirActions = ({ choir, currentUser }) => {
-    const creatorId = choir.created_by?.id || choir.created_by || choir.creator_id;
-    const isCreator = currentUser && creatorId && (
-      creatorId === currentUser.id || 
-      creatorId === currentUser.user_id
-    );
-
-    if (!isCreator) return null;
-
-    return (
-      <View style={styles.choirActions}>
-        <TouchableOpacity 
-          onPress={() => handleEditChoir(choir)}
-          style={styles.actionButton}
-        >
-          <MaterialIcons name="edit" size={20} color="#006064" />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          onPress={() => handleDeleteChoir(choir.id)}
-          style={styles.actionButton}
-        >
-          <MaterialIcons name="delete" size={20} color="#e53935" />
-        </TouchableOpacity>
-      </View>
-    );
+  const saveMembers = async (c) => {
+    const n = parseInt(membersDraft, 10);
+    if (isNaN(n) || n < 0) { Alert.alert('Invalid', 'Enter a valid number.'); return; }
+    try {
+      const res = await updateChoirMembers(c.id, n);
+      setChoirs((prev) => prev.map((x) => (x.id === c.id ? { ...x, members_count: res.members_count } : x)));
+      setEditMembersId(null);
+    } catch {
+      Alert.alert('Error', 'Could not update members count.');
+    }
   };
 
+  // ── Card ──
   const renderItem = ({ item }) => {
-    const creatorId = item.created_by?.id || item.created_by || item.creator_id;
-    const isCreator = currentUser && creatorId && (
-      creatorId === currentUser.id || 
-      creatorId === currentUser.user_id
-    );
-
-    // console.log('renderItem - currentUser:', currentUser); // Debug
-    // console.log('renderItem - item.created_by:', item.created_by);
-    // console.log('renderItem - creatorId:', creatorId);
-    // console.log('renderItem - isCreator:', isCreator);
-    // console.log('renderItem - item.is_active:', item.is_active);
-
+    const owner = item.is_owner;
     return (
-      <View style={styles.choirCard}>
-        <View style={styles.choirHeader}>
-          {item.profile_image_url && (
-            <Image 
-              source={{ uri: item.profile_image_url }} 
-              style={styles.profileImage}
-            />
+      <View style={styles.card}>
+        {/* Cover banner */}
+        <View style={styles.banner}>
+          {item.cover_image ? (
+            <Image source={{ uri: item.cover_image }} style={styles.cover} />
+          ) : (
+            <LinearGradient colors={[colors.surface, colors.bg]} style={styles.cover} />
           )}
-          <View style={styles.choirHeaderInfo}>
-            <Text style={styles.choirName}>{item.name}</Text>
-            <Text style={styles.choirGenre}>{GENRE_CHOICES[item.genre]}</Text>
-            <Text style={styles.choirMembers}>{item.members_count} members</Text>
+          {owner && (
+            <View style={styles.ownerActions}>
+              <TouchableOpacity style={styles.ownerBtn} onPress={() => openEdit(item)} hitSlop={6}>
+                <MaterialIcons name="edit" size={18} color={colors.white} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.ownerBtn} onPress={() => onDelete(item)} hitSlop={6}>
+                <MaterialIcons name="delete-outline" size={19} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={[styles.statusPill, item.is_active ? styles.statusActive : styles.statusInactive]}>
+            <Text style={styles.statusText}>{item.is_active ? 'Active' : 'Inactive'}</Text>
           </View>
-          <ChoirActions choir={item} currentUser={currentUser} />
         </View>
-        
-        {item.cover_image_url && (
-          <Image 
-            source={{ uri: item.cover_image_url }} 
-            style={styles.coverImage}
-            resizeMode="cover"
+
+        {/* Header: avatar + name */}
+        <View style={styles.cardHeader}>
+          <Image
+            source={item.profile_image ? { uri: item.profile_image } : DEFAULT_AVATAR}
+            defaultSource={DEFAULT_AVATAR}
+            style={styles.avatar}
           />
-        )}
-        
-        {item.description && (
-          <Text style={styles.description}>{item.description}</Text>
-        )}
-        
-        <View style={styles.details}>
-          <View style={styles.detailRow}>
-            <MaterialIcons name="location-on" size={16} color="#555" />
-            <Text style={styles.detailText}>{item.location}</Text>
-          </View>
-          
-          {item.contact_phone && (
-            <View style={styles.detailRow}>
-              <MaterialIcons name="phone" size={16} color="#555" />
-              <Text style={styles.detailText}>{item.contact_phone}</Text>
-            </View>
-          )}
-          
-          {item.contact_email && (
-            <View style={styles.detailRow}>
-              <MaterialIcons name="email" size={16} color="#555" />
-              <Text style={styles.detailText}>{item.contact_email}</Text>
-            </View>
-          )}
-          
-          {item.founded_date && (
-            <View style={styles.detailRow}>
-              <MaterialIcons name="event" size={16} color="#555" />
-              <Text style={styles.detailText}>Founded: {new Date(item.founded_date).toLocaleDateString()}</Text>
-            </View>
-          )}
-          
-          {item.youtube_link && (
-            <TouchableOpacity 
-              style={styles.youtubeButton}
-              onPress={() => openYoutubeLink(item.youtube_link)}
-            >
-              <MaterialIcons name="play-circle" size={26} color="#e53935" />
-              <Text style={styles.youtubeText}>Visit our YouTube channel</Text>
-            </TouchableOpacity>
-          )}
-          
-          <View style={styles.metaContainer}>
-            <View style={styles.statusContainer}>
-              <Text style={styles.metaText}>
-                {item.is_active ? 'Active' : 'Inactive'}
-              </Text>
+          <View style={styles.headerInfo}>
+            <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+            <View style={styles.headerMeta}>
+              <Text style={styles.genreBadge}>{GENRE_LABEL[item.genre] || 'Choir'}</Text>
+              <Text style={styles.metaDot}>·</Text>
+              <Ionicons name="people-outline" size={13} color={colors.textMuted} />
+              <Text style={styles.membersText}> {item.members_count || 0}</Text>
             </View>
           </View>
-          
-          {isCreator && (
-            <View style={styles.creatorControls}>
-              {editingMembersCount && editingChoir?.id === item.id ? (
-                <View style={styles.editMembersContainer}>
-                  <TextInput
-                    style={styles.membersInput}
-                    value={tempMembersCount}
-                    onChangeText={setTempMembersCount}
-                    keyboardType="numeric"
-                    placeholder="Enter member count"
-                  />
-                  <View style={styles.editMembersButtonRow}>
-                    <TouchableOpacity 
-                      style={styles.saveButton}
-                      onPress={handleSaveMembersCount}
-                    >
-                      <MaterialIcons name="check" size={20} color="white" />
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.cancelButton}
-                      onPress={() => setEditingMembersCount(false)}
-                    >
-                      <MaterialIcons name="close" size={20} color="white" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : (
-                <TouchableOpacity 
-                  style={styles.editMembersButton}
-                  onPress={() => handleStartEditMembersCount(item)}
-                >
-                  <Text style={styles.editMembersText}>
-                    <MaterialIcons name="edit" size={16} color="#006064" /> 
-                    Members: {item.members_count}
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity 
-                style={[
-                  styles.activeToggleButton,
-                  item.is_active ? styles.activeButton : styles.inactiveButton
-                ]}
-                onPress={() => handleToggleActive(item)}
-              >
-                <MaterialIcons 
-                  name={item.is_active ? "toggle-on" : "toggle-off"} 
-                  size={24} 
-                  color="white" 
-                />
-                <Text style={styles.activeToggleText}>
-                  {item.is_active ? ' Active' : ' Inactive'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={styles.addMemberButton}
-                onPress={() => {
-                  setShowMemberForm(true);
-                  setEditingChoir(item);
-                }}
-              >
-                <MaterialIcons name="person-add" size={16} color="white" />
-                <Text style={styles.addMemberText}> Add Member</Text>
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
+
+        {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
+
+        <View style={styles.details}>
+          <Detail icon="location-outline" text={item.location} />
+          {item.contact_phone ? <Detail icon="call-outline" text={item.contact_phone} /> : null}
+          {item.contact_email ? <Detail icon="mail-outline" text={item.contact_email} /> : null}
+          {item.founded_date ? (
+            <Detail icon="calendar-outline" text={`Founded ${new Date(item.founded_date).toLocaleDateString()}`} />
+          ) : null}
+        </View>
+
+        {item.youtube_link ? (
+          <TouchableOpacity
+            style={styles.youtubeBtn}
+            onPress={() => Linking.openURL(item.youtube_link).catch(() => Alert.alert('Error', 'Could not open link.'))}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="logo-youtube" size={18} color="#FF0000" />
+            <Text style={styles.youtubeText}>YouTube channel</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* Owner controls */}
+        {owner && (
+          <View style={styles.ownerControls}>
+            {editMembersId === item.id ? (
+              <View style={styles.membersEdit}>
+                <TextInput
+                  style={styles.membersInput}
+                  value={membersDraft}
+                  onChangeText={setMembersDraft}
+                  keyboardType="numeric"
+                  placeholder="Members"
+                  placeholderTextColor={colors.placeholder}
+                  autoFocus
+                />
+                <TouchableOpacity style={styles.miniBtnPrimary} onPress={() => saveMembers(item)}>
+                  <MaterialIcons name="check" size={18} color={colors.white} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.miniBtn} onPress={() => setEditMembersId(null)}>
+                  <MaterialIcons name="close" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.ctrlBtn}
+                onPress={() => { setEditMembersId(item.id); setMembersDraft(String(item.members_count || 0)); }}
+              >
+                <MaterialIcons name="groups" size={16} color={colors.primary} />
+                <Text style={styles.ctrlText}>Members</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.ctrlBtn} onPress={() => onToggleActive(item)}>
+              <MaterialIcons name={item.is_active ? 'toggle-on' : 'toggle-off'} size={20} color={item.is_active ? colors.success : colors.textMuted} />
+              <Text style={styles.ctrlText}>{item.is_active ? 'Active' : 'Inactive'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
 
-  const renderAddForm = () => (
-    <Modal
-      visible={showAddForm}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowAddForm(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContainer}>
-          <ScrollView style={styles.addForm}>
-            <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>
-                {editingChoir ? 'Edit Choir' : 'Add New Choir'}
-              </Text>
-              <TouchableOpacity 
-                onPress={() => {
-                  setShowAddForm(false);
-                  setEditingChoir(null);
-                  setNewChoir({
-                    name: '',
-                    description: '',
-                    church: '',
-                    location: '',
-                    contact_phone: '',
-                    contact_email: '',
-                    genre: 'gospel',
-                    members_count: 0,
-                    youtube_link: '',
-                    founded_date: ''
-                  });
-                  setProfileImage(null);
-                  setCoverImage(null);
-                }}
-                style={styles.closeButton}
-              >
-                <MaterialIcons name="close" size={24} color="#555" />
-              </TouchableOpacity>
-            </View>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Choir Name *"
-              value={newChoir.name}
-              onChangeText={text => setNewChoir({...newChoir, name: text})}
-            />
-            
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Description"
-              value={newChoir.description}
-              onChangeText={text => setNewChoir({...newChoir, description: text})}
-              multiline
-              numberOfLines={4}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Location *"
-              value={newChoir.location}
-              onChangeText={text => setNewChoir({...newChoir, location: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Contact Phone"
-              value={newChoir.contact_phone}
-              onChangeText={text => setNewChoir({...newChoir, contact_phone: text})}
-              keyboardType="phone-pad"
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Contact Email"
-              value={newChoir.contact_email}
-              onChangeText={text => setNewChoir({...newChoir, contact_email: text})}
-              keyboardType="email-address"
-            />
-            
-            <Text style={styles.label}>Genre:</Text>
-            <View style={styles.genreOptions}>
-              {Object.entries(GENRE_CHOICES).map(([value, label]) => (
-                <TouchableOpacity
-                  key={value}
-                  style={[
-                    styles.genreOption,
-                    newChoir.genre === value && styles.genreOptionSelected
-                  ]}
-                  onPress={() => setNewChoir({...newChoir, genre: value})}
-                >
-                  <Text style={newChoir.genre === value ? styles.genreOptionTextSelected : styles.genreOptionText}>
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="YouTube Link (optional)"
-              value={newChoir.youtube_link}
-              onChangeText={text => setNewChoir({...newChoir, youtube_link: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Founded Date (YYYY-MM-DD)"
-              value={newChoir.founded_date}
-              onChangeText={text => setNewChoir({...newChoir, founded_date: text})}
-            />
-            
-            <TouchableOpacity style={styles.imagePicker} onPress={pickProfileImage}>
-              <MaterialIcons name="add-a-photo" size={24} color="#006064" />
-              <Text style={styles.imagePickerText}>
-                {profileImage ? 'Change Profile Image' : 'Add Profile Image'}
-              </Text>
-            </TouchableOpacity>
-            
-            {profileImage && (
-              <Image 
-                source={{ uri: profileImage }} 
-                style={styles.previewImage}
-                resizeMode="contain"
-              />
-            )}
-            
-            <TouchableOpacity style={styles.imagePicker} onPress={pickCoverImage}>
-              <MaterialIcons name="add-a-photo" size={24} color="#006064" />
-              <Text style={styles.imagePickerText}>
-                {coverImage ? 'Change Cover Image' : 'Add Cover Image'}
-              </Text>
-            </TouchableOpacity>
-            
-            {coverImage && (
-              <Image 
-                source={{ uri: coverImage }} 
-                style={styles.previewImage}
-                resizeMode="cover"
-              />
-            )}
-            
-            <View style={styles.formButtons}>
-              <TouchableOpacity 
-                style={styles.submitButton} 
-                onPress={handleAddChoir}
-              >
-                <Text style={styles.buttonText}>
-                  {editingChoir ? 'Update Choir' : 'Add Choir'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderMemberForm = () => (
-    <Modal
-      visible={showMemberForm}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowMemberForm(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={[styles.modalContainer, { height: height * 0.4 }]}>
-          <View style={styles.formHeader}>
-            <Text style={styles.formTitle}>Add Member to Choir</Text>
-            <TouchableOpacity 
-              onPress={() => setShowMemberForm(false)}
-              style={styles.closeButton}
-            >
-              <MaterialIcons name="close" size={24} color="#555" />
-            </TouchableOpacity>
-          </View>
-          
-          <TextInput
-            style={styles.input}
-            placeholder="User ID *"
-            value={newMemberId}
-            onChangeText={setNewMemberId}
-            keyboardType="numeric"
-          />
-          
-          <View style={styles.formButtons}>
-            <TouchableOpacity 
-              style={styles.submitButton} 
-              onPress={() => handleAddMember(editingChoir.id)}
-            >
-              <Text style={styles.buttonText}>Add Member</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  if (authLoading || isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#006064" />
-      </View>
-    );
+  if (loading) {
+    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.primary} /></View>;
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Choirs</Text>
-      
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <MaterialIcons name="search" size={20} color="#555" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search choirs..."
-            value={searchTerm}
-            onChangeText={setSearchTerm}
-          />
-          {searchTerm && (
-            <TouchableOpacity onPress={() => setSearchTerm('')}>
-              <MaterialIcons name="close" size={20} color="#555" />
-            </TouchableOpacity>
-          )}
-        </View>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Choirs</Text>
+        <Text style={styles.subtitle}>Discover Adventist choirs</Text>
       </View>
-      
+
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={18} color={colors.placeholder} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search choirs…"
+          placeholderTextColor={colors.placeholder}
+          value={search}
+          onChangeText={setSearch}
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')}>
+            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
+      </View>
+
       <FlatList
-        data={filteredChoirs}
+        data={filtered}
+        keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
-        keyExtractor={item => item.id.toString()}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        refreshing={refreshing}
+        onRefresh={() => load(true)}
+        ListHeaderComponent={
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.filterRow}>
+            {FILTERS.map((g) => {
+              const active = g.key === genre;
+              return (
+                <TouchableOpacity
+                  key={g.key}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                  onPress={() => setGenre(g.key)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{g.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        }
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No choirs found</Text>
+          <View style={styles.empty}>
+            <MaterialIcons name="library-music" size={46} color={colors.textMuted} />
+            <Text style={styles.emptyText}>No choirs found</Text>
+          </View>
         }
       />
 
       {currentUser && (
-        <TouchableOpacity 
-          style={styles.addButton} 
-          onPress={() => setShowAddForm(true)}
-        >
-          <MaterialIcons name="add" size={24} color="white" />
-          <Text style={styles.buttonText}>Add Your Choir</Text>
+        <TouchableOpacity style={styles.fab} onPress={openCreate} activeOpacity={0.9}>
+          <Ionicons name="add" size={20} color={colors.white} />
+          <Text style={styles.fabText}>Add Choir</Text>
         </TouchableOpacity>
       )}
 
-      {renderAddForm()}
-      {renderMemberForm()}
-    </View>
+      {/* Add / Edit form */}
+      <Modal visible={showForm} animationType="slide" onRequestClose={closeForm} statusBarTranslucent>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={closeForm} style={styles.iconBtn} hitSlop={10}>
+              <Ionicons name="close" size={24} color={colors.textPrimary} />
+            </TouchableOpacity>
+            <Text style={styles.topTitle}>{editingId ? 'Edit Choir' : 'New Choir'}</Text>
+            <View style={styles.iconBtn} />
+          </View>
+
+          <KeyboardAwareScrollView
+            style={styles.flex}
+            contentContainerStyle={styles.formContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            enableOnAndroid
+            enableResetScrollToCoords={false}
+            extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
+          >
+            {/* Cover + profile pickers */}
+            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickBase64([16, 9], 800); if (u) setCoverImage(u); }} activeOpacity={0.85}>
+              {coverImage ? (
+                <Image source={{ uri: coverImage }} style={styles.coverPreview} />
+              ) : (
+                <View style={styles.coverPlaceholder}>
+                  <Ionicons name="image-outline" size={26} color={colors.textMuted} />
+                  <Text style={styles.pickerHint}>Add cover image</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.profileRow}>
+              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickBase64([1, 1], 400); if (u) setProfileImage(u); }} activeOpacity={0.85}>
+                {profileImage ? (
+                  <Image source={{ uri: profileImage }} style={styles.profilePreview} />
+                ) : (
+                  <Ionicons name="camera-outline" size={24} color={colors.textMuted} />
+                )}
+              </TouchableOpacity>
+              <Text style={styles.profileHint}>Choir logo / photo (optional)</Text>
+            </View>
+
+            <Field label="Choir name *" value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder="e.g. Voices of Hope" />
+            <Field label="Description" value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder="Tell people about your choir" multiline />
+            <Field label="Location *" value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder="City, country" />
+
+            <Text style={styles.fieldLabel}>Genre</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.genreRow}>
+              {GENRES.map((g) => {
+                const active = form.genre === g.key;
+                return (
+                  <TouchableOpacity key={g.key} style={[styles.filterChip, active && styles.filterChipActive]} onPress={() => setForm({ ...form, genre: g.key })}>
+                    <Text style={[styles.filterText, active && styles.filterTextActive]}>{g.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <Field label="Contact phone" value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder="+254…" keyboardType="phone-pad" />
+            <Field label="Contact email" value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder="choir@email.com" keyboardType="email-address" />
+            <Field label="YouTube link" value={form.youtube_link} onChange={(t) => setForm({ ...form, youtube_link: t })} placeholder="https://youtube.com/…" keyboardType="url" />
+            <Field label="Founded date" value={form.founded_date} onChange={(t) => setForm({ ...form, founded_date: t })} placeholder="YYYY-MM-DD" />
+
+            <View style={{ height: spacing.xl }} />
+          </KeyboardAwareScrollView>
+
+          <View style={styles.saveBar}>
+            <TouchableOpacity style={[styles.saveBtn, styles.cancelBtn]} onPress={closeForm} disabled={saving}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={submit} disabled={saving}>
+              {saving ? <ActivityIndicator color={colors.white} /> : (
+                <Text style={styles.submitBtnText}>{editingId ? 'Save Changes' : 'Add Choir'}</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
+    </SafeAreaView>
   );
 };
 
+const Detail = ({ icon, text }) => (
+  <View style={styles.detailRow}>
+    <Ionicons name={icon} size={15} color={colors.textMuted} />
+    <Text style={styles.detailText} numberOfLines={1}>{text}</Text>
+  </View>
+);
+
+const Field = ({ label, value, onChange, placeholder, multiline, keyboardType }) => (
+  <>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    <TextInput
+      style={[styles.input, multiline && styles.multiline]}
+      value={value}
+      onChangeText={onChange}
+      placeholder={placeholder}
+      placeholderTextColor={colors.placeholder}
+      multiline={multiline}
+      keyboardType={keyboardType}
+      autoCapitalize={keyboardType === 'email-address' || keyboardType === 'url' ? 'none' : 'sentences'}
+      autoCorrect={false}
+    />
+  </>
+);
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: 'grey',
-    padding: 16,
+  container: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+
+  header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  title: { ...typography.h1, color: colors.textPrimary },
+  subtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    backgroundColor: colors.card, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border,
+    marginHorizontal: spacing.md, paddingHorizontal: spacing.md, height: 44,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#e0f7fa',
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
+
+  chipScroll: { flexGrow: 0 },
+  filterRow: { gap: spacing.sm, paddingVertical: spacing.sm, flexDirection: 'row' },
+  filterChip: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 15,
-    marginBottom: 16,
-    color: '#006064',
-    textAlign: 'center',
+  filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
+  filterTextActive: { color: colors.white },
+
+  listContent: { paddingHorizontal: spacing.md, paddingBottom: 96 },
+
+  card: {
+    backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden',
+    marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border,
   },
-  searchContainer: {
-    marginBottom: 16,
+  banner: { height: 120, backgroundColor: colors.surface },
+  cover: { width: '100%', height: '100%' },
+  ownerActions: { position: 'absolute', top: spacing.sm, right: spacing.sm, flexDirection: 'row', gap: spacing.xs },
+  ownerBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+  statusPill: { position: 'absolute', top: spacing.sm, left: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.full },
+  statusActive: { backgroundColor: 'rgba(67,160,71,0.9)' },
+  statusInactive: { backgroundColor: 'rgba(0,0,0,0.55)' },
+  statusText: { ...typography.caption, color: colors.white, fontWeight: '700', fontSize: 10.5 },
+
+  cardHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, marginTop: -22 },
+  avatar: {
+    width: 56, height: 56, borderRadius: 28, borderWidth: 3, borderColor: colors.card,
+    backgroundColor: colors.surface,
   },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  headerInfo: { flex: 1, marginLeft: spacing.sm, paddingTop: 22 },
+  name: { ...typography.h3, color: colors.textPrimary },
+  headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  genreBadge: { ...typography.caption, color: colors.accent, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10.5 },
+  metaDot: { color: colors.textMuted },
+  membersText: { ...typography.caption, color: colors.textMuted },
+
+  description: { ...typography.body, color: colors.textSecondary, paddingHorizontal: spacing.md, marginTop: spacing.sm, lineHeight: 20 },
+
+  details: { paddingHorizontal: spacing.md, marginTop: spacing.sm, gap: 6 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  detailText: { ...typography.caption, color: colors.textSecondary, flex: 1 },
+
+  youtubeBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    marginHorizontal: spacing.md, marginTop: spacing.sm,
+    backgroundColor: colors.surface, borderRadius: radius.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+    alignSelf: 'flex-start',
   },
-  searchIcon: {
-    marginRight: 8,
+  youtubeText: { ...typography.label, color: colors.textPrimary, fontWeight: '600' },
+
+  ownerControls: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginHorizontal: spacing.md, marginTop: spacing.md, marginBottom: spacing.md,
+    paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-  },
-  listContainer: {
-    paddingBottom: 20,
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#777',
-    marginTop: 20,
-    fontSize: 16,
-  },
-  choirCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  choirHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  profileImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginRight: 12,
-  },
-  choirHeaderInfo: {
-    flex: 1,
-  },
-  choirName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#006064',
-  },
-  choirGenre: {
-    fontSize: 14,
-    color: '#555',
-    marginTop: 4,
-  },
-  choirMembers: {
-    fontSize: 12,
-    color: '#777',
-    marginTop: 2,
-  },
-  choirActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    padding: 6,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 20,
-  },
-  coverImage: {
-    width: '100%',
-    height: 180,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  description: {
-    color: '#555',
-    marginBottom: 12,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  details: {
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    paddingTop: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  detailText: {
-    color: '#555',
-    marginLeft: 8,
-    fontSize: 14,
-  },
-  youtubeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  youtubeText: {
-    color: '#e53935',
-    marginLeft: 8,
-    fontWeight: '500',
-  },
-  metaContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  metaText: {
-    color: '#777',
-    fontSize: 12,
-    marginRight: 8,
-  },
-  addMemberButton: {
-    backgroundColor: '#006064',
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 10,
-    alignItems: 'center',
-  },
-  addMemberText: {
-    color: 'white',
-    fontWeight: '500',
-  },
-  addButton: {
-    backgroundColor: '#006064',
-    padding: 14,
-    borderRadius: 8,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  buttonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
-    marginLeft: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    height: '70%',
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 16,
-  },
-  formHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  formTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#006064',
-  },
-  closeButton: {
-    padding: 5,
-  },
-  addForm: {
-    flex: 1,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#b2ebf2',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    backgroundColor: '#f5fdff',
-    color: '#006064',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  label: {
-    color: '#555',
-    marginBottom: 8,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  genreOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 12,
-  },
-  genreOption: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#b2ebf2',
-    marginRight: 8,
-    marginBottom: 8,
-    backgroundColor: 'white',
-  },
-  genreOptionSelected: {
-    backgroundColor: '#006064',
-    borderColor: '#006064',
-  },
-  genreOptionText: {
-    color: '#555',
-    fontSize: 12,
-  },
-  genreOptionTextSelected: {
-    color: 'white',
-    fontSize: 12,
-  },
-  formButtons: {
-    marginTop: 20,
-  },
-  submitButton: {
-    backgroundColor: '#006064',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  imagePicker: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    backgroundColor: '#e0f7fa',
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  imagePickerText: {
-    marginLeft: 8,
-    color: '#006064',
-  },
-  previewImage: {
-    width: '100%',
-    height: 150,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  creatorControls: {
-    marginTop: 10,
-  },
-  editMembersContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
+  ctrlBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, borderRadius: radius.md, backgroundColor: colors.surface },
+  ctrlText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
+  membersEdit: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   membersInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#b2ebf2',
-    borderRadius: 8,
-    padding: 8,
-    backgroundColor: '#f5fdff',
+    width: 90, height: 38, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm, color: colors.textPrimary, backgroundColor: colors.inputBg,
   },
-  saveButton: {
-    marginLeft: 8,
-    backgroundColor: '#4CAF50',
-    padding: 8,
-    borderRadius: 8,
+  miniBtn: { width: 38, height: 38, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  miniBtnPrimary: { width: 38, height: 38, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
+
+  empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, gap: spacing.sm },
+  emptyText: { ...typography.body, color: colors.textMuted },
+
+  fab: {
+    position: 'absolute', bottom: spacing.lg, right: spacing.md,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2,
+    borderRadius: radius.full, ...shadows.lg,
   },
-  cancelButton: {
-    marginLeft: 8,
-    backgroundColor: '#f44336',
-    padding: 8,
-    borderRadius: 8,
+  fabText: { ...typography.button, color: colors.white },
+
+  // Form
+  topBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
   },
-  editMembersButton: {
-    backgroundColor: '#e0f7fa',
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 10,
+  topTitle: { ...typography.h3, color: colors.textPrimary },
+  iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  formContent: { padding: spacing.md },
+
+  coverPicker: { height: 150, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border },
+  coverPreview: { width: '100%', height: '100%' },
+  coverPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
+  pickerHint: { ...typography.caption, color: colors.textMuted },
+  profileRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.md },
+  profilePicker: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  profilePreview: { width: '100%', height: '100%' },
+  profileHint: { ...typography.caption, color: colors.textMuted, flex: 1 },
+
+  fieldLabel: { ...typography.label, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.md, marginBottom: spacing.xs },
+  input: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    color: colors.textPrimary, backgroundColor: colors.inputBg, fontSize: 15,
   },
-  editMembersText: {
-    color: '#006064',
-    textAlign: 'center',
+  multiline: { minHeight: 80, textAlignVertical: 'top' },
+  genreRow: { gap: spacing.sm, paddingVertical: spacing.xs },
+
+  saveBar: {
+    flexDirection: 'row', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface,
   },
-  activeToggleButton: {
-    padding: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  activeButton: {
-    backgroundColor: '#4CAF50',
-  },
-  inactiveButton: {
-    backgroundColor: '#f44336',
-  },
-  activeToggleText: {
-    color: 'white',
-  },
+  saveBtn: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.md, alignItems: 'center' },
+  cancelBtn: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  cancelBtnText: { ...typography.button, color: colors.textSecondary },
+  submitBtn: { backgroundColor: colors.primary },
+  submitBtnText: { ...typography.button, color: colors.white },
 });
 
 export default Choirs;
