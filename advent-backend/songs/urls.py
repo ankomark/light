@@ -28,6 +28,7 @@ from .views import (
     StoryViewSet,
     ReportViewSet,
     ChurchViewSet,
+    NoticeViewSet,
     MediaStationViewSet,
     VideoStudioViewSet,
     ChoirViewSet,
@@ -65,6 +66,7 @@ router.register(r'post-comments', PostCommentViewSet)
 router.register(r'post-saves', PostSaveViewSet)
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'churches', ChurchViewSet, basename='churches')
+router.register(r'notices', NoticeViewSet, basename='notices')
 router.register(r'media-stations', MediaStationViewSet, basename='media-stations')
 router.register(r'publications', PublicationViewSet, basename='publications')
 router.register(r'video-studios', VideoStudioViewSet, basename='video-studios')

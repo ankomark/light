@@ -496,6 +496,23 @@ class Church(models.Model):
         ordering = ['-created_at']
 
 
+class Notice(models.Model):
+    """Notice board posts. Read by everyone; only staff/admins may post
+    (admin-role gating to be expanded later — currently uses User.is_staff)."""
+    title = models.CharField(max_length=200)
+    body = models.TextField()
+    is_pinned = models.BooleanField(default=False)
+    created_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, related_name='notices')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_pinned', '-created_at']
+
+    def __str__(self):
+        return self.title
+
+
 class MediaStation(models.Model):
     STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
 

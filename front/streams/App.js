@@ -31,7 +31,7 @@ import BibleReader from './components/BibleReader';
 import HymnList from './components/HymnList';
 import HymnDetail from './components/HymnDetail';
 import HamburgerMenu from './components/HamburgerMenu';
-import Conferences from './pages/Conferences';
+import NoticeBoard from './pages/NoticeBoard';
 import MediaScreen from './pages/MediaScreen';
 import AdventistMedia from './pages/AdventistMedia';
 import Articles from './pages/Articles';
@@ -39,6 +39,7 @@ import PublicationDetail from './pages/PublicationDetail';
 import ChapterReader from './pages/ChapterReader';
 import PublicationEditor from './pages/PublicationEditor';
 import Churches from './pages/Churches';
+import About from './pages/About';
 import Choirs from './pages/Choirs';
 import Studios from './pages/Studios';
 import GroupList from './pages/GroupList';
@@ -157,7 +158,7 @@ const App = () => {
                 <Stack.Screen name="HymnDetail" component={HymnDetail}  options={({ route }) => ({ headerShown: false, title: route.params?.hymn?.title || 'Hymn Details' })}/>
                 <Stack.Screen name="bible" component={BibleReader} />
                 <Stack.Screen name="HamburgerMenu" component={HamburgerMenu} />
-                <Stack.Screen name="Unions&Conferences" component={Conferences} />
+                <Stack.Screen name="NoticeBoard" component={NoticeBoard} options={{ headerShown: true, title: 'Notice Board', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
                 <Stack.Screen name="MediaScreen" component={MediaScreen} />
                 <Stack.Screen name="AdventistMedia" component={ AdventistMedia} />
                 <Stack.Screen name="Articles" component={Articles} />
@@ -165,6 +166,7 @@ const App = () => {
                 <Stack.Screen name="ChapterReader" component={ChapterReader} />
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
                 <Stack.Screen name="Churches" component={Churches} options={{ headerShown: true, title: 'Churches', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
+                <Stack.Screen name="About" component={About} />
                 <Stack.Screen name="Studios" component={Studios} />
                 <Stack.Screen name="Choirs" component={Choirs} />
                 <Stack.Screen name="Groups" component={GroupListWrapper} />

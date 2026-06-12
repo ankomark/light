@@ -37,6 +37,22 @@ class MediaStationViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class NoticeViewSet(viewsets.ModelViewSet):
+    """Notice board: anyone signed in can read; only staff/admins can post.
+    Admin-role gating is interim (User.is_staff) and will be expanded later."""
+    queryset = Notice.objects.all()
+    serializer_class = NoticeSerializer
+    pagination_class = StandardPagination
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+
 class ChurchViewSet(viewsets.ModelViewSet):
     queryset = Church.objects.all()
     serializer_class = ChurchSerializer

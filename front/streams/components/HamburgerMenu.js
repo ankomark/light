@@ -38,7 +38,7 @@ const SECTIONS = [
       { label: 'Messages', route: 'Inbox', set: 'ion', icon: 'chatbubbles-outline' },
       { label: 'Groups', route: 'Groups', set: 'mci', icon: 'account-group-outline' },
       { label: 'Churches', route: 'Churches', set: 'mci', icon: 'church' },
-      { label: 'Unions & Conferences', route: 'Unions&Conferences', set: 'mci', icon: 'octagram-outline' },
+      { label: 'Notice Board', route: 'NoticeBoard', set: 'mci', icon: 'bulletin-board' },
     ],
   },
   {

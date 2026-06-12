@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from ..models import User
-from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation
+from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice
 import re
 from django.utils import timezone
 from datetime import timedelta
@@ -118,15 +118,16 @@ class ProfileSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source='user.id')
     picture_url = serializers.SerializerMethodField()
     username = serializers.ReadOnlyField(source='user.username')
+    is_staff = serializers.ReadOnlyField(source='user.is_staff')
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     posts_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
-        fields = ['bio', 'user_id','username', 'birth_date', 'location', 'is_public', 'picture','picture_url',
+        fields = ['bio', 'user_id','username', 'is_staff', 'birth_date', 'location', 'is_public', 'picture','picture_url',
                   'followers_count', 'following_count', 'posts_count']
-        read_only_fields = ['user_id', 'username', 'picture_url',
+        read_only_fields = ['user_id', 'username', 'is_staff', 'picture_url',
                             'followers_count', 'following_count', 'posts_count']
         extra_kwargs = {
             'picture': {'write_only': True}  # Only needed for uploads

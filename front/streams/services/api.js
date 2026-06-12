@@ -811,6 +811,21 @@ export const deleteGroup = async (groupSlug) => {
   await apiRequest('delete', `/groups/${groupSlug}/`);
   return { success: true };
 };
+
+// ==================== NOTICE BOARD ====================
+// Read by any signed-in user; only staff/admins can post (enforced server-side).
+export const fetchNotices = async (page = 1) => {
+  const res = await apiRequest('get', '/notices/', null, { params: { page, page_size: 100 } });
+  return res?.results ?? res;
+};
+
+export const createNotice = async ({ title, body, is_pinned = false }) => {
+  return apiRequest('post', '/notices/', { title, body, is_pinned });
+};
+
+export const deleteNotice = async (id) => {
+  return apiRequest('delete', `/notices/${id}/`);
+};
 export const fetchGroupJoinRequests = async (slug) => {
   const res = await apiRequest('get', `/groups/${slug}/join-requests/`);
   return res?.results ?? res;
@@ -1496,6 +1511,9 @@ export default {
   approveJoinRequest,
   rejectJoinRequest,
   fetchGroupMembers,
+  fetchNotices,
+  createNotice,
+  deleteNotice,
   fetchProductCategories,
   fetchProducts,
   fetchProductById,

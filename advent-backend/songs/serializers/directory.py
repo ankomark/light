@@ -23,6 +23,27 @@ class MediaStationSerializer(serializers.ModelSerializer):
         )
 
 
+class NoticeSerializer(serializers.ModelSerializer):
+    created_by_username = serializers.CharField(
+        source='created_by.username', read_only=True, default=None
+    )
+    can_manage = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notice
+        fields = [
+            'id', 'title', 'body', 'is_pinned',
+            'created_by', 'created_by_username', 'can_manage',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['created_by', 'created_at', 'updated_at']
+
+    def get_can_manage(self, obj):
+        request = self.context.get('request')
+        # Admin gating is interim (User.is_staff); richer roles come later.
+        return bool(request and request.user.is_authenticated and request.user.is_staff)
+
+
 class ChurchSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
