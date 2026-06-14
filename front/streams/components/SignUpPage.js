@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL, API_BASE } from '../services/api';
+import { useAuth } from '../context/useAuth';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const SignUpPage = () => {
@@ -15,21 +16,40 @@ const SignUpPage = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const navigation = useNavigation();
+  const { login } = useAuth();
 
   const handleChange = (name, value) => {
     setFormData(prev => ({ ...prev, [name]: value }));
     if (error) setError('');
   };
 
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
   const handleSubmit = async () => {
     if (!formData.username.trim() || !formData.email.trim() || !formData.password) {
       setError('Please fill in all fields');
       return;
     }
+    if (!isValidEmail(formData.email.trim())) {
+      setError('Please enter a valid email address (you’ll need it to recover your account).');
+      return;
+    }
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
     setLoading(true);
     try {
-      await axios.post(`${API_URL}/auth/signup/`, formData);
-      navigation.navigate('EmailVerification', { email: formData.email });
+      const email = formData.email.trim();
+      await axios.post(`${API_URL}/auth/signup/`, { ...formData, email });
+      // Sign the new user in (so the authenticated verify endpoint works), then
+      // route based on status: verify email if required, else create profile.
+      const { isVerified } = await login(formData.username.trim(), formData.password);
+      navigation.reset(
+        isVerified
+          ? { index: 0, routes: [{ name: 'CreateProfile' }] }
+          : { index: 0, routes: [{ name: 'EmailVerification', params: { email } }] }
+      );
     } catch (err) {
       console.log('[signup] POST', `${API_URL}/auth/signup/`, '->', err.message, err.response?.status, err.response?.data);
       const data = err.response?.data;

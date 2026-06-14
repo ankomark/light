@@ -310,6 +310,20 @@ class UserSerializer(serializers.ModelSerializer):
             'password': {'write_only': True},
             'email': {'required': True}
         }
+
+    def validate_email(self, value):
+        # Email is the account-recovery key, so it must be present and unique
+        # (case-insensitive). Django's EmailField already validates the format.
+        value = (value or '').strip().lower()
+        if not value:
+            raise serializers.ValidationError("Email is required.")
+        qs = User.objects.filter(email__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
     def get_profile_picture(self, obj):
         """Get optimized profile picture URL from associated profile"""
         if hasattr(obj, 'profile') and obj.profile.picture:

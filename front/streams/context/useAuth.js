@@ -44,15 +44,41 @@ const fetchUserProfile = async (token) => {
   };
 };
 
+// Lightweight status that works even before a profile exists — drives the
+// authenticated / email-verified / has-profile routing decisions.
+const fetchAuthStatus = async (token) => {
+  const response = await axios.get(`${API_URL}/auth/status/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data; // { id, username, email, is_email_verified, has_profile }
+};
+
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const clearAuthData = async () => {
     await clearTokens();
     setCurrentUser(null);
     setIsAuthenticated(false);
+    setIsEmailVerified(false);
+  };
+
+  // Apply an /auth/status/ payload: set flags and load the profile if present.
+  const applyStatus = async (token, statusData) => {
+    setIsAuthenticated(true);
+    setIsEmailVerified(!!statusData.is_email_verified);
+    if (statusData.has_profile) {
+      try {
+        setCurrentUser(await fetchUserProfile(token));
+      } catch {
+        setCurrentUser(null);
+      }
+    } else {
+      setCurrentUser(null);
+    }
   };
 
   const checkAuthStatus = async () => {
@@ -66,11 +92,9 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      // Verify if the access token is still valid.
+      // Verify the access token via the status endpoint (works without a profile).
       try {
-        const userData = await fetchUserProfile(accessToken);
-        setCurrentUser(userData);
-        setIsAuthenticated(true);
+        await applyStatus(accessToken, await fetchAuthStatus(accessToken));
       } catch (error) {
         // If the access token is invalid, try to refresh it.
         if (error.response?.status === 401) {
@@ -78,20 +102,12 @@ export const AuthProvider = ({ children }) => {
             const response = await axios.post(`${API_URL}/auth/token/refresh/`, {
               refresh: refreshToken,
             });
-
             await storeTokens(response.data.access, refreshToken);
-            const userData = await fetchUserProfile(response.data.access);
-            setCurrentUser(userData);
-            setIsAuthenticated(true);
+            await applyStatus(response.data.access, await fetchAuthStatus(response.data.access));
           } catch (refreshError) {
             console.error('Token refresh failed:', refreshError);
             await clearAuthData();
           }
-        } else if (error.response?.status === 404) {
-          // Valid token but no profile yet (e.g. signed up, profile not created).
-          // Still authenticated — let them through to create their profile.
-          setCurrentUser(null);
-          setIsAuthenticated(true);
         } else {
           throw error;
         }
@@ -121,22 +137,20 @@ export const AuthProvider = ({ children }) => {
       throw error;
     }
 
-    // Valid tokens => authenticated, even if a profile hasn't been created yet.
-    // A brand-new user has tokens but no profile and should reach CreateProfile.
-    let hasProfile = false;
+    // Valid tokens => authenticated. Status tells us where to route the user
+    // (verify email first, then create profile, then home).
+    let status = { is_email_verified: false, has_profile: false };
     try {
-      const userData = await fetchUserProfile(access);
-      setCurrentUser(userData);
-      hasProfile = true;
+      status = await fetchAuthStatus(access);
     } catch {
-      setCurrentUser(null);
+      // Couldn't load status — treat as authenticated-but-unverified/no-profile.
     }
-    setIsAuthenticated(true);
+    await applyStatus(access, status);
 
     // Register push token in the background — don't block login.
     registerForPushNotifications().catch(() => {});
 
-    return { hasProfile };
+    return { isVerified: !!status.is_email_verified, hasProfile: !!status.has_profile };
   };
 
   const logout = async () => {
@@ -149,15 +163,15 @@ export const AuthProvider = ({ children }) => {
     await clearAuthData();
   };
 
-  // Refresh the cached current user (e.g. after editing a profile).
+  // Refresh cached user + verification status (e.g. after editing a profile
+  // or verifying email). Returns the latest { isVerified, hasProfile }.
   const updateUser = async () => {
     try {
       const token = await SecureStore.getItemAsync('accessToken');
       if (!token) return null;
-      const userData = await fetchUserProfile(token);
-      setCurrentUser(userData);
-      setIsAuthenticated(true);
-      return userData;
+      const status = await fetchAuthStatus(token);
+      await applyStatus(token, status);
+      return { isVerified: !!status.is_email_verified, hasProfile: !!status.has_profile };
     } catch (error) {
       console.error('Error updating user data:', error);
       return null;
@@ -172,6 +186,7 @@ export const AuthProvider = ({ children }) => {
     () => ({
       currentUser,
       isAuthenticated,
+      isEmailVerified,
       isLoading,
       login,
       logout,
@@ -179,7 +194,7 @@ export const AuthProvider = ({ children }) => {
       processProfilePicture,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentUser, isAuthenticated, isLoading],
+    [currentUser, isAuthenticated, isEmailVerified, isLoading],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

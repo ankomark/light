@@ -30,11 +30,9 @@ const LoginPage = () => {
     try {
       // Route through the shared auth provider so isAuthenticated/currentUser
       // update app-wide (otherwise Home bounces back here).
-      const { hasProfile } = await login(formData.username.trim(), formData.password);
-      navigation.reset({
-        index: 0,
-        routes: [{ name: hasProfile ? 'Home' : 'CreateProfile' }],
-      });
+      const { isVerified, hasProfile } = await login(formData.username.trim(), formData.password);
+      const target = !isVerified ? 'EmailVerification' : (hasProfile ? 'Home' : 'CreateProfile');
+      navigation.reset({ index: 0, routes: [{ name: target }] });
     } catch {
       setError('Invalid username or password');
     } finally {
@@ -103,6 +101,13 @@ const LoginPage = () => {
             ? <ActivityIndicator color={colors.white} />
             : <Text style={styles.buttonText}>Log In</Text>
           }
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.forgotRow}
+          onPress={() => navigation.navigate('ForgotPassword')}
+        >
+          <Text style={styles.forgotText}>Forgot password?</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.signupRow} onPress={() => navigation.navigate('SignUp')}>
@@ -183,6 +188,15 @@ const styles = StyleSheet.create({
   buttonText: {
     ...typography.button,
     color: colors.white,
+  },
+  forgotRow: {
+    alignSelf: 'center',
+    marginTop: spacing.md,
+  },
+  forgotText: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '600',
   },
   signupRow: {
     flexDirection: 'row',

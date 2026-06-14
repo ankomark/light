@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 # Custom User Model
 class User(AbstractUser):
+    # Email is the account-recovery key, so it must be unique.
+    email = models.EmailField('email address', unique=True)
     bio = models.TextField(blank=True)
     avatar = CloudinaryField('image', folder='avatars/', blank=True, null=True)
     followers = models.ManyToManyField(

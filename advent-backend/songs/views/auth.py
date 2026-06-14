@@ -161,6 +161,29 @@ class ResetPasswordView(APIView):
 
 
 
+class AuthStatusView(APIView):
+    """Lightweight status for the signed-in user — works whether or not a
+    profile exists yet, so the app can gate on email verification and route
+    new users to verification / profile creation."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        require_verification = getattr(settings, 'REQUIRE_EMAIL_VERIFICATION', False)
+        # When verification isn't required (no SMTP yet), report everyone as
+        # "verified" so the app never gates on it.
+        effective_verified = user.is_email_verified or not require_verification
+        return Response({
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'is_email_verified': effective_verified,
+            'email_verified_actual': user.is_email_verified,
+            'verification_required': require_verification,
+            'has_profile': hasattr(user, 'profile') and user.profile is not None,
+        })
+
+
 class LogoutView(APIView):
     """Revoke a refresh token by blacklisting it. AllowAny: possession of a
     valid refresh token is sufficient (and the auth header is stripped for

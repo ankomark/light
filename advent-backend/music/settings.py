@@ -268,6 +268,11 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@adventlight.com')
 SITE_NAME = 'Advent Light'
 
+# Gate email-verification enforcement behind a flag so the app never locks
+# users out before real SMTP is configured. Turn this on (with a working
+# EMAIL_BACKEND) once you're ready to require verification.
+REQUIRE_EMAIL_VERIFICATION = os.getenv('REQUIRE_EMAIL_VERIFICATION', 'False') == 'True'
+
 # ── Stripe (payment processing) ───────────────────────────────────────────────
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')

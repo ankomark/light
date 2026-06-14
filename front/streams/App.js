@@ -63,6 +63,8 @@ import InboxScreen from './components/InboxScreen';
 import ChatScreen from './components/ChatScreen';
 import ExploreScreen from './components/ExploreScreen';
 import EmailVerificationScreen from './components/EmailVerificationScreen';
+import ForgotPasswordScreen from './components/ForgotPasswordScreen';
+import ResetPasswordScreen from './components/ResetPasswordScreen';
 import StoryViewer from './components/StoryViewer';
 import CreateStoryScreen from './components/CreateStoryScreen';
 import UserProfileScreen from './components/UserProfileScreen';
@@ -188,6 +190,8 @@ const App = () => {
                 <Stack.Screen name="Chat" component={ChatScreen} />
                 <Stack.Screen name="Explore" component={ExploreWrapper} />
                 <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
+                <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+                <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
                 <Stack.Screen name="StoryViewer" component={StoryViewer} options={{ headerShown: false, animation: 'fade' }} />
                 <Stack.Screen name="CreateStory" component={CreateStoryScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="LiveHomeScreen" component={LiveHomeScreenWrapper} />

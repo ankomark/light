@@ -7,6 +7,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { apiRequest } from '../services/api';
+import { useAuth } from '../context/useAuth';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const CODE_LENGTH = 6;
@@ -17,7 +18,13 @@ const resendCode = () => apiRequest('post', '/auth/resend-verification/');
 const EmailVerificationScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
+  const { updateUser, logout } = useAuth();
   const email = route.params?.email ?? '';
+
+  const handleExit = async () => {
+    await logout();
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  };
 
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -64,7 +71,10 @@ const EmailVerificationScreen = () => {
     setLoading(true);
     try {
       await verifyEmail(fullCode);
-      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      // Refresh shared auth state, then route forward based on profile presence.
+      const status = await updateUser();
+      const target = status?.hasProfile ? 'Home' : 'CreateProfile';
+      navigation.reset({ index: 0, routes: [{ name: target }] });
     } catch (err) {
       const msg = err.response?.data?.error ?? 'Invalid or expired code. Please try again.';
       Alert.alert('Verification Failed', msg);
@@ -95,7 +105,7 @@ const EmailVerificationScreen = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleExit}>
           <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
 
@@ -151,12 +161,6 @@ const EmailVerificationScreen = () => {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.skipBtn}
-          onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
-        >
-          <Text style={styles.skipText}>Skip for now</Text>
-        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );

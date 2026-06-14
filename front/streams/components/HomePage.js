@@ -30,14 +30,18 @@ import { useAuth } from "../context/useAuth";
 import { useNavigation } from '@react-navigation/native';
 
 const HomePage = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading } = useAuth();
   const navigation = useNavigation();
 
   React.useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (isLoading) return;
+    if (!isAuthenticated) {
       navigation.navigate('Login');
+    } else if (!isEmailVerified) {
+      // Email verification is required before app access.
+      navigation.reset({ index: 0, routes: [{ name: 'EmailVerification' }] });
     }
-  }, [isAuthenticated, isLoading]);
+  }, [isAuthenticated, isEmailVerified, isLoading]);
 
   if (isLoading) {
     return (
