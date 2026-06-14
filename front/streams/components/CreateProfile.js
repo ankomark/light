@@ -12,9 +12,11 @@ import { fetchProfile, updateProfile, getAccessToken, API_URL } from '../service
 import axios from 'axios';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useAuth } from '../context/useAuth';
 
 const CreateProfile = () => {
   const navigation = useNavigation();
+  const { updateUser } = useAuth();
   const [isEditMode, setIsEditMode] = useState(false);
   const [checkingProfile, setCheckingProfile] = useState(true);
   const [profileData, setProfileData] = useState({
@@ -165,7 +167,9 @@ const CreateProfile = () => {
         });
         Alert.alert('Profile Created!', 'Your profile has been successfully set up');
       }
-      navigation.navigate('Home');
+      // Refresh the shared auth state so the new/updated profile shows app-wide.
+      await updateUser();
+      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (error) {
       console.error('Profile creation error:', error.response?.data || error);
       

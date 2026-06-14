@@ -74,7 +74,7 @@ import PlaylistDetail from './components/PlaylistDetail';
 import { navigationRef, navigate } from './services/navigationRef';
 
 
-import { useAuth } from './context/useAuth';
+import { useAuth, AuthProvider } from './context/useAuth';
 import { PlayerProvider } from './context/PlayerContext';
 import MiniPlayer from './components/MiniPlayer';
 import { addNotificationResponseListener } from './services/pushNotifications';
@@ -124,6 +124,7 @@ const App = () => {
 
     return (
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
+      <AuthProvider>
       <AuthInitializer>
       <PlayerProvider>
 
@@ -202,6 +203,7 @@ const App = () => {
         </NavigationContainer>
       </PlayerProvider>
       </AuthInitializer>
+      </AuthProvider>
       </ErrorBoundary>
     );
 };

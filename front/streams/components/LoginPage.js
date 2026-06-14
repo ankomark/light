@@ -4,9 +4,7 @@ import {
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
-import { API_URL, storeTokens } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -30,17 +28,13 @@ const LoginPage = () => {
     }
     setLoading(true);
     try {
-      const response = await axios.post(`${API_URL}/auth/token/`, formData);
-      const { access, refresh } = response.data;
-      await storeTokens(access, refresh);
-      try {
-        const profileRes = await axios.get(`${API_URL}/profiles/me/`, {
-          headers: { Authorization: `Bearer ${access}` },
-        });
-        navigation.navigate(profileRes.data ? 'Home' : 'CreateProfile');
-      } catch (profileError) {
-        navigation.navigate(profileError.response?.status === 404 ? 'CreateProfile' : 'Home');
-      }
+      // Route through the shared auth provider so isAuthenticated/currentUser
+      // update app-wide (otherwise Home bounces back here).
+      const { hasProfile } = await login(formData.username.trim(), formData.password);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: hasProfile ? 'Home' : 'CreateProfile' }],
+      });
     } catch {
       setError('Invalid username or password');
     } finally {
