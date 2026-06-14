@@ -26,8 +26,9 @@ const ForgotPasswordScreen = () => {
     try {
       await forgotPassword(trimmed);
       setSent(true);
-    } catch {
-      setError('Something went wrong. Please try again.');
+    } catch (err) {
+      // Surface the backend message (e.g. "No account is registered with this email").
+      setError(err.response?.data?.error || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -52,7 +53,7 @@ const ForgotPasswordScreen = () => {
         {sent ? (
           <>
             <Text style={styles.subtitle}>
-              We sent a 6-digit code to{'\n'}
+              Check email spam folder We sent a 6-digit code to{'\n'}
               <Text style={styles.highlight}>{email.trim()}</Text>
             </Text>
             <TouchableOpacity

@@ -12,8 +12,8 @@ def _send_verification_email(user):
     expires_at = timezone.now() + timedelta(minutes=15)
     EmailVerification.objects.create(user=user, code=code, expires_at=expires_at)
 
-    run_in_background(
-        send_mail,
+    # Synchronous so the caller can surface a real SMTP failure (raises on error).
+    send_mail(
         subject=f"{settings.SITE_NAME} — Verify your email",
         message=(
             f"Hi {user.username},\n\n"
@@ -44,7 +44,12 @@ class SignUpView(APIView):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            _send_verification_email(user)
+            # Account is created regardless; a failed verification email can be
+            # resent later (and verification is gated off until SMTP is ready).
+            try:
+                _send_verification_email(user)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Verification email failed at signup for %s: %s", user.email, exc)
             return Response(
                 {"message": "Account created. Please check your email to verify."},
                 status=status.HTTP_201_CREATED
@@ -84,7 +89,14 @@ class ResendVerificationView(APIView):
     def post(self, request):
         if request.user.is_email_verified:
             return Response({'message': 'Email already verified'})
-        _send_verification_email(request.user)
+        try:
+            _send_verification_email(request.user)
+        except Exception as exc:  # noqa: BLE001 — surface the real send failure
+            logger.error("Resend verification email failed for %s: %s", request.user.email, exc)
+            return Response(
+                {'error': 'We could not send the verification email right now. Please try again shortly.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         return Response({'message': 'Verification code sent'})
 
 
@@ -105,28 +117,42 @@ class ForgotPasswordView(APIView):
         try:
             user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
-            # Return success even for unknown emails (prevents email enumeration)
-            return Response({'message': 'If that email exists, a reset code has been sent.'})
+            # Product choice: give clear feedback for a community app. (This trades
+            # off email-enumeration protection — switch back to a generic success
+            # message if that ever becomes a concern.)
+            return Response(
+                {'error': 'No account is registered with this email address.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         code = f"{random.randint(0, 999999):06d}"
         expires_at = timezone.now() + timedelta(minutes=15)
         PasswordResetCode.objects.create(user=user, code=code, expires_at=expires_at)
 
-        run_in_background(
-            send_mail,
-            subject=f"{settings.SITE_NAME} — Password Reset Code",
-            message=(
-                f"Hi {user.username},\n\n"
-                f"Your password reset code is: {code}\n\n"
-                f"This code expires in 15 minutes.\n\n"
-                f"If you didn't request this, you can ignore this email.\n\n"
-                f"— {settings.SITE_NAME} Team"
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
-        return Response({'message': 'If that email exists, a reset code has been sent.'})
+        # Send synchronously so a real SMTP failure surfaces to the user instead
+        # of a false "code sent" (auth emails must be reliable, not fire-and-forget).
+        try:
+            send_mail(
+                subject=f"{settings.SITE_NAME} — Password Reset Code",
+                message=(
+                    f"Hi {user.username},\n\n"
+                    f"Your password reset code is: {code}\n\n"
+                    f"This code expires in 15 minutes.\n\n"
+                    f"If you didn't request this, you can ignore this email.\n\n"
+                    f"— {settings.SITE_NAME} Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface the real send failure
+            logger.error("Password reset email failed for %s: %s", user.email, exc)
+            return Response(
+                {'error': 'We could not send the reset email right now. Please try again shortly.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({'message': 'A reset code has been sent to your email.'})
 
 
 
