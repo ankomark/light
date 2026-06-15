@@ -29,9 +29,9 @@ def follow(follower, followee):
 class FeedFilterTests(APITestCase):
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
-        self.carol = User.objects.create_user(username='carol', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@test.co', password='pw12345!')
+        self.carol = User.objects.create_user(username='carol', email='carol@test.co', password='pw12345!')
         follow(self.alice, self.bob)  # alice follows bob (not carol)
 
         self.bob_post = make_post(self.bob, caption='bob post')
@@ -61,8 +61,8 @@ class FeedFilterTests(APITestCase):
 class FeedSearchTests(APITestCase):
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@test.co', password='pw12345!')
         self.p_caption = make_post(self.alice, caption='Sabbath blessing')
         self.p_user = make_post(self.bob, caption='hello')
         self.p_loc = make_post(self.alice, caption='trip', location='Nairobi')
@@ -83,8 +83,8 @@ class FeedSearchTests(APITestCase):
 class FeedAnnotationTests(APITestCase):
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@test.co', password='pw12345!')
         self.post = make_post(self.bob, caption='hi')
         PostLike.objects.create(post=self.post, user=self.alice)
         PostComment.objects.create(post=self.post, user=self.alice, content='nice')
@@ -113,7 +113,7 @@ class SongTrimTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
         self.client.force_authenticate(self.alice)
 
     def _payload(self, start, end):
@@ -156,7 +156,7 @@ class EditPreservesMediaTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
         self.client.force_authenticate(self.alice)
 
     def test_edit_caption_keeps_media_file(self):
@@ -186,7 +186,7 @@ class HealMediaMigrationTests(APITestCase):
         import importlib
         from django.apps import apps as global_apps
 
-        user = User.objects.create_user(username='h', password='pw12345!')
+        user = User.objects.create_user(username='h', email='h@test.co', password='pw12345!')
         post = SocialPost.objects.create(
             user=user, content_type='image', media_file='social_media/xyz',
         )
@@ -215,7 +215,7 @@ class GalleryTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
         self.client.force_authenticate(self.alice)
 
     def test_create_carousel_returns_media_items(self):
@@ -267,8 +267,8 @@ class SavedPostsListTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@test.co', password='pw12345!')
         self.post = SocialPost.objects.create(user=self.bob, content_type='image', media_file='social_media/x')
         self.client.force_authenticate(self.alice)
 
@@ -299,7 +299,7 @@ class VideoTrimTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
         self.client.force_authenticate(self.alice)
 
     def _create(self, start, end):
@@ -338,9 +338,9 @@ class FeedQueryCountTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.viewer = User.objects.create_user(username='viewer', password='pw12345!')
-        self.a1 = User.objects.create_user(username='a1', password='pw12345!')
-        self.a2 = User.objects.create_user(username='a2', password='pw12345!')
+        self.viewer = User.objects.create_user(username='viewer', email='viewer@test.co', password='pw12345!')
+        self.a1 = User.objects.create_user(username='a1', email='a1@test.co', password='pw12345!')
+        self.a2 = User.objects.create_user(username='a2', email='a2@test.co', password='pw12345!')
         Profile.objects.create(user=self.a1)
         Profile.objects.create(user=self.a2)
 

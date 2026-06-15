@@ -51,16 +51,4 @@ EAS project id is in `app.json` (`ce25330b-30db-4e8c-b99b-c03d70772178`).
 ## Backend
 
 API and deployment details: `../advent-backend/DEPLOYMENT.md`.
-$env:EXPO_TOKEN ="yhrwClME7aMjBB-tcsC8IUcUKznHBxJqUGne2gw7"
-
-https://www.pinterest.com/pin/975803444279995709/
-https://www.pinterest.com/pin/1127729562941207508/
-https://www.pinterest.com/pin/800866746281526473/
-https://www.pinterest.com/pin/965529607596960818/
-https://www.pinterest.com/pin/756393699936091271/
-https://www.pinterest.com/pin/530087818651978837/
-https://www.pinterest.com/pin/184295809750570491/
-https://www.pinterest.com/pin/900368150507555809/
-https://www.pinterest.com/pin/802203752410830266/
-https://www.pinterest.com/pin/611504455688872140/
-https://www.pinterest.com/pin/1118581626198563084/
+    

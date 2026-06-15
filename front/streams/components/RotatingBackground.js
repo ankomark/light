@@ -3,15 +3,16 @@ import { Animated, Image, StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import ScreenVignette from './ScreenVignette';
 
-// Wallpapers (sourced from Pinterest). For production these should be re-hosted
-// on your own CDN/Cloudinary rather than hot-linked from i.pinimg.com.
+// Wallpapers re-hosted on our own Cloudinary (folder: wallpapers), served from
+// its CDN with on-the-fly optimization: f_auto (WebP/AVIF where supported),
+// q_auto (smart compression), c_limit/w_1080 (cap size, never upscale).
+const CLD = 'https://res.cloudinary.com/dxdmo9j4v/image/upload/f_auto,q_auto,c_limit,w_1080/wallpapers';
 const DEFAULT_IMAGES = [
-  'https://i.pinimg.com/1200x/4e/2a/0a/4e2a0a5b1137350051c7374a8abb7dda.jpg',
-  'https://i.pinimg.com/1200x/06/d3/e8/06d3e808f5e1b81d053bfd35a45f9235.jpg',
-  'https://i.pinimg.com/736x/1b/1e/35/1b1e35f6a8ab71705ad5febbde0a6be7.jpg',
-  'https://i.pinimg.com/736x/09/c6/1a/09c61af99914b680452f591dafafc9b0.jpg',
-  'https://i.pinimg.com/736x/13/3e/bf/133ebf7d5ff84348b2e6455c2be913ef.jpg',
-  
+  `${CLD}/s366jodfjqsiikqn39ps.jpg`,
+  `${CLD}/f0y17m0ksh6a2tbq33f6.jpg`,
+  `${CLD}/jyd6lms0aunhdjo68xuw.jpg`,
+  `${CLD}/cvw0s1bab1zxoy024zg6.jpg`,
+  `${CLD}/run4ngtxwlslhn0ontn9.jpg`,
 ];
 
 /**

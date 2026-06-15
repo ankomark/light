@@ -229,6 +229,11 @@ class SocialPost(models.Model):
     width = models.IntegerField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)
     view_count = models.PositiveIntegerField(default=0)
+    # Denormalised engagement counters, kept in sync by signals on PostLike /
+    # PostComment. The feed reads these directly instead of running two DISTINCT
+    # COUNT joins per query — the main scalability win for large datasets.
+    likes_count = models.PositiveIntegerField(default=0)
+    comments_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

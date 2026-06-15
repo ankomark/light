@@ -317,12 +317,11 @@ class SocialPostSerializer(serializers.ModelSerializer):
     # (one query for the whole page) and falls back to a per-object query for
     # other call sites (e.g. retrieve, nested serialization).
     def get_likes_count(self, obj):
-        count = getattr(obj, 'likes_total', None)
-        return count if count is not None else obj.likes.count()
+        # Denormalised field kept in sync by signals; no per-post COUNT.
+        return getattr(obj, 'likes_count', 0)
 
     def get_comments_count(self, obj):
-        count = getattr(obj, 'comments_total', None)
-        return count if count is not None else obj.comments.count()
+        return getattr(obj, 'comments_count', 0)
 
     def get_is_liked(self, obj):
         liked = getattr(obj, 'liked_by_me', None)

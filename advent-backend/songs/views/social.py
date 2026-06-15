@@ -1,5 +1,20 @@
 from .common import *  # noqa: F401,F403
 from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField
+from django.conf import settings
+from django.core.cache import cache
+
+
+def _feed_version(user_id):
+    """Per-user cache version; bumping it invalidates that user's feed cache
+    keys without needing wildcard deletes (works on Redis and LocMem)."""
+    return cache.get(f'feedver:{user_id}', 1)
+
+
+def _bump_feed_version(user_id):
+    try:
+        cache.incr(f'feedver:{user_id}')
+    except ValueError:
+        cache.set(f'feedver:{user_id}', 2, None)
 
 
 class SocialPostViewSet(viewsets.ModelViewSet):
@@ -33,8 +48,8 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             SocialPost.objects
             .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile')
             .annotate(
-                likes_total=Count('likes', distinct=True),
-                comments_total=Count('comments', distinct=True),
+                # likes_count / comments_count are denormalised columns kept in
+                # sync by signals — no more two DISTINCT COUNT joins per feed query.
                 author_followers_count=Subquery(author_followers, output_field=IntegerField()),
             )
             .order_by('-created_at')
@@ -89,6 +104,8 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             if post.media_file:
                 logger.info(f"Created post ID {post.id} with media_file: {post.media_file}")
                 logger.info(f"Media type: {post.content_type}, Size: {post.width}x{post.height}")
+            # Invalidate the author's cached feed so their new post shows at once.
+            _bump_feed_version(self.request.user.id)
             return post
 
         except ValidationError as ve:
@@ -189,13 +206,39 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
     # Keep all your existing methods but add this optimization:
     def list(self, request, *args, **kwargs):
-        # Add pagination and field selection
-        page = self.paginate_queryset(self.get_queryset())
+        user = request.user
+        params = request.query_params
+        search = (params.get('search') or '').strip()
+        feed = params.get('feed', '')
+        tag = params.get('tag', '')
+        first_page = not params.get('cursor')
+        bypass = params.get('fresh') in ('1', 'true', 'True')
+        ttl = getattr(settings, 'FEED_CACHE_SECONDS', 0)
+
+        # Short-lived per-user cache of the feed's first page — the part hit on
+        # every cold app/screen open. Searches and deeper (cursor) pages aren't
+        # cached, and pull-to-refresh sends ?fresh=1 to bypass the read so it's
+        # always live. (Per-user like/save state can be up to TTL seconds stale
+        # on a non-refresh reload; the client updates those optimistically.)
+        cache_key = None
+        if ttl and user.is_authenticated and first_page and not search:
+            cache_key = f'feed:v1:{user.id}:{_feed_version(user.id)}:{feed}:{tag}'
+            if not bypass:
+                cached = cache.get(cache_key)
+                if cached is not None:
+                    return Response(cached)
+
+        paginator = FeedCursorPagination()
+        qs = self.get_queryset()
+        page = paginator.paginate_queryset(qs, request, view=self)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        
-        serializer = self.get_serializer(self.get_queryset(), many=True)
+            resp = paginator.get_paginated_response(serializer.data)
+            if cache_key is not None:
+                cache.set(cache_key, resp.data, ttl)
+            return resp
+
+        serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])

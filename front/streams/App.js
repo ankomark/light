@@ -76,12 +76,12 @@ import NowPlaying from './components/NowPlaying';
 import PlaylistsScreen from './components/PlaylistsScreen';
 import PlaylistDetail from './components/PlaylistDetail';
 import { navigationRef, navigate } from './services/navigationRef';
-import { API_BASE } from './services/api';
+import { API_BASE, PUBLIC_BASE } from './services/api';
 
 // Deep linking: a shared post URL (streams://post/123, or the web page
-// https://<api-host>/post/123) opens the app straight to that post.
+// https://<public-host>/post/123) opens the app straight to that post.
 const linking = {
-  prefixes: ['streams://', API_BASE, API_BASE.replace('https://', 'http://')],
+  prefixes: ['streams://', PUBLIC_BASE, API_BASE],
   config: {
     screens: {
       PostDetail: 'post/:postId',

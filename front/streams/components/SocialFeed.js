@@ -19,7 +19,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { usePlayer } from '../context/PlayerContext';
 import SearchBaar from '../components/SearchBaar';
-import { fetchSocialPosts } from '../services/api';
+import { fetchSocialPosts, cursorFromUrl } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
@@ -317,7 +317,7 @@ const SocialFeed = ({ showBackground = true }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
+  const [nextCursor, setNextCursor] = useState(null); // cursor for the next page
   const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [feedType, setFeedType] = useState('following'); // 'following' | 'for_you'
@@ -365,15 +365,16 @@ const SocialFeed = ({ showBackground = true }) => {
       if (isRefresh) setRefreshing(true); else setLoading(true);
       setError(null);
 
-      // Search is global; otherwise honor the selected feed tab.
+      // Search is global; otherwise honor the selected feed tab. Pull-to-refresh
+      // bypasses the server's short feed cache so it's always live.
       const search = searchRef.current;
-      const response = await fetchSocialPosts(1, search ? null : feedType, search);
+      const response = await fetchSocialPosts(null, search ? null : feedType, search, { fresh: isRefresh });
       const raw = response?.results ?? [];
       const valid = raw.filter(p => p.user && typeof p.user === 'object');
       const processed = valid.map(p => processPost(p, followStates));
 
       setPosts(processed);
-      setPage(1);
+      setNextCursor(cursorFromUrl(response?.next));
       setHasMore(!!response?.next);
       setNewPostsAvailable(false);
       lastFetchTimeRef.current = now;
@@ -395,25 +396,24 @@ const SocialFeed = ({ showBackground = true }) => {
   }, [followStates, feedType]);
 
   const loadMorePosts = useCallback(async () => {
-    if (loadingMore || !hasMore || loading) return;
+    if (loadingMore || !hasMore || loading || !nextCursor) return;
     setLoadingMore(true);
     try {
-      const nextPage = page + 1;
       const search = searchRef.current;
-      const response = await fetchSocialPosts(nextPage, search ? null : feedType, search);
+      const response = await fetchSocialPosts(nextCursor, search ? null : feedType, search);
       const raw = response?.results ?? [];
       const processed = raw
         .filter(p => p.user && typeof p.user === 'object')
         .map(p => processPost(p, followStates));
       setPosts(prev => [...prev, ...processed]);
-      setPage(nextPage);
+      setNextCursor(cursorFromUrl(response?.next));
       setHasMore(!!response?.next);
     } catch {
       // silent — user can pull-to-refresh
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, loading, page, followStates, feedType]);
+  }, [loadingMore, hasMore, loading, nextCursor, followStates, feedType]);
 
   const handleRefresh = useCallback(() => loadPosts(true), [loadPosts]);
 
@@ -445,7 +445,8 @@ const SocialFeed = ({ showBackground = true }) => {
   const checkForNewPosts = useCallback(async () => {
     if (refreshing || loading || searchRef.current) return;
     try {
-      const response = await fetchSocialPosts(1, feedType, '');
+      // fresh=1 so the poll sees new posts even within the cache window.
+      const response = await fetchSocialPosts(null, feedType, '', { fresh: true });
       const newest = response?.results?.[0];
       if (newest && topPostIdRef.current && newest.id !== topPostIdRef.current) {
         setNewPostsAvailable(true);
@@ -1291,6 +1292,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textPrimary,
     lineHeight: 20,
+    fontWeight: '700',
   },
 
   captionUser: {

@@ -12,9 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 
 const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the image
-// Wallpaper behind the header. Hot-linked from Pinterest like the rest of the
-// app's decorative imagery; re-host on your own CDN for production.
-const HEADER_IMAGE = 'https://i.pinimg.com/1200x/84/82/79/8482794f5f72ab497bec84be9ef541c9.jpg';
+// Wallpaper behind the header — re-hosted on our Cloudinary CDN, optimized.
+const HEADER_IMAGE = 'https://res.cloudinary.com/dxdmo9j4v/image/upload/f_auto,q_auto,c_limit,w_1080/wallpapers/bpqz33r3njhwouungnli.jpg';
 const INACTIVE = 'rgba(255,255,255,0.62)';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 

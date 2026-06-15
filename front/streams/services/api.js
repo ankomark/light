@@ -25,7 +25,13 @@ const resolveApiBase = () => {
 };
 
 export const API_BASE = resolveApiBase();
-if (__DEV__) console.log('[api] Using API_BASE =', API_BASE);
+
+// Public, internet-reachable base for links we hand to OTHER people (e.g. share
+// URLs / link previews). Unlike API_BASE this is NEVER the dev LAN IP — a shared
+// link must open for anyone, so it always points at the deployed host.
+export const PUBLIC_BASE = process.env.EXPO_PUBLIC_PUBLIC_BASE || PROD_API_BASE;
+
+if (__DEV__) console.log('[api] Using API_BASE =', API_BASE, '| PUBLIC_BASE =', PUBLIC_BASE);
 axios.defaults.timeout = 30000;
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 export const API_URL = `${API_BASE}/api`;
@@ -299,18 +305,29 @@ export const createSocialPost = async (postData) => {
 };
 
 // Paginated social posts — returns { count, next, previous, results }
-export const fetchSocialPosts = async (page = 1, feed = null, search = '') => {
+// Extract the opaque cursor token from a DRF next/previous URL.
+export const cursorFromUrl = (url) => {
+  if (!url) return null;
+  const m = /[?&]cursor=([^&]+)/.exec(url);
+  return m ? decodeURIComponent(m[1]) : null;
+};
+
+// Cursor-paginated feed. Pass cursor=null for the first page, then the cursor
+// from the previous response's `next` to page further. `fresh` bypasses the
+// server's short-lived feed cache (used by pull-to-refresh / new-post checks).
+export const fetchSocialPosts = async (cursor = null, feed = null, search = '', { fresh = false } = {}) => {
   const retry = async (attempt = 1) => {
     try {
       const response = await apiRequest('get', '/social-posts/', null, {
         params: {
-          page,
           page_size: 20,
+          ...(cursor ? { cursor } : {}),
           ...(feed ? { feed } : {}),
           ...(search ? { search } : {}),
+          ...(fresh ? { fresh: 1 } : {}),
         },
       });
-      // response is { count, next, previous, results }
+      // response is { next, previous, results } (cursor pagination omits count)
       if (!response?.results) throw new Error('Invalid response format from server');
       return response;
     } catch (error) {
@@ -318,11 +335,11 @@ export const fetchSocialPosts = async (page = 1, feed = null, search = '') => {
         await new Promise(r => setTimeout(r, 1000 * attempt));
         return retry(attempt + 1);
       }
-      
+
       throw error;
     }
   };
-  
+
   return retry();
 };
 

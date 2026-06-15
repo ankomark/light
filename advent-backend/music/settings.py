@@ -220,6 +220,30 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 
+# Cache: Redis in production (set REDIS_URL — Django 4+ ships a native Redis
+# backend; needs the `redis` package), in-process memory locally. The home feed
+# uses this for a short-lived first-page cache.
+REDIS_URL = os.getenv('REDIS_URL')
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'advent-local-cache',
+        }
+    }
+
+# Seconds to cache the feed's first page per user (0 disables). Kept short
+# because the payload carries per-user like/save state.
+FEED_CACHE_SECONDS = int(os.getenv('FEED_CACHE_SECONDS', '20'))
+
+
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
 

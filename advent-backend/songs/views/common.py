@@ -14,7 +14,7 @@ from django.http import FileResponse,Http404
 from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404 
-from rest_framework.pagination import PageNumberPagination
+from rest_framework.pagination import PageNumberPagination, CursorPagination
 from rest_framework_simplejwt.views import TokenObtainPairView
 import time as time_module
 import cloudinary
@@ -100,6 +100,22 @@ class StandardPagination(PageNumberPagination):
             'previous': self.get_previous_link(),
             'results': data,
         })
+
+
+class FeedCursorPagination(CursorPagination):
+    """Keyset/cursor pagination for the home feed.
+
+    Unlike PageNumberPagination (LIMIT/OFFSET — which gets slower the deeper you
+    page, since the DB must scan+skip all preceding rows), a cursor walks the
+    `-id` index directly: page N costs the same as page 1, and rows can't be
+    skipped/duplicated when new posts arrive mid-scroll. Ordering by the PK is
+    unique + monotonic (≈ newest-first) and index-backed.
+    """
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 50
+    ordering = '-id'
+    cursor_query_param = 'cursor'
 
 
 

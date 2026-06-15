@@ -34,6 +34,10 @@ CACHES = {
     }
 }
 
+# Disable the short-lived feed cache in tests so feed assertions are always
+# computed live (no cross-test cache bleed in the shared in-process LocMem).
+FEED_CACHE_SECONDS = 0
+
 # Don't let Sentry phone home during tests.
 import sentry_sdk  # noqa: E402
 sentry_sdk.init(dsn='')

@@ -16,7 +16,7 @@ import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import config from '../config';
-import { likePost, savePost, API_BASE } from '../services/api';
+import { likePost, savePost, PUBLIC_BASE } from '../services/api';
 
 // Brand gold for the "liked" state — ties the action into the app's gold
 // wordmark + medallion for a premium feel.
@@ -137,7 +137,7 @@ export const ShareButton = ({ postId, caption, username }) => {
   const handleShare = async () => {
     // Share the post's web page (NOT the raw media): it renders a rich preview
     // card with a thumbnail and deep-links back into the app to this exact post.
-    const link = `${API_BASE}/post/${postId}/`;
+    const link = `${PUBLIC_BASE}/post/${postId}/`;
     const parts = [];
     if (caption?.trim()) parts.push(caption.trim());
     parts.push(username ? `Shared from ${username} on Advent Light` : 'Shared via Advent Light');
