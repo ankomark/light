@@ -23,7 +23,7 @@ import { fetchSocialPosts } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
-import { DownloadButton, SaveButton, LikeButton } from './SocialActions';
+import { DownloadButton, SaveButton, LikeButton, ShareButton } from './SocialActions';
 import { PostSkeleton } from './SkeletonLoader';
 import StoriesBar from './StoriesBar';
 import AudioVisualizer from './AudioVisualizer';
@@ -740,6 +740,11 @@ const SocialFeed = ({ showBackground = true }) => {
             postId={item.id}
             commentCount={item.comments_count || 0}
             currentUserAvatar={currentUser?.profile_picture}
+          />
+          <ShareButton
+            postId={item.id}
+            caption={item.caption}
+            username={item.user?.username}
           />
           <DownloadButton
             mediaUrl={item.mediaUrl}

@@ -6,11 +6,14 @@ from django.conf.urls.static import static
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
-from songs.views import SignUpView, ThrottledTokenObtainPairView, LogoutView, health_check
+from songs.views import SignUpView, ThrottledTokenObtainPairView, LogoutView, health_check, post_share_page
 
 urlpatterns = [
     path('', health_check, name='health-root'),
     path('admin/', admin.site.urls),
+
+    # Public share/preview page for a post (rich link card + deep link into app).
+    path('post/<int:post_id>/', post_share_page, name='post-share-page'),
 
     # API endpoints
     path('api/', include([

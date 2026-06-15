@@ -11,8 +11,12 @@ import {
   Alert
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/useAuth';
 import { commentOnPost, fetchSocialPostComments, getAccessToken, API_URL } from '../services/api';
+import RotatingBackground from './RotatingBackground';
+import ScreenVignette from './ScreenVignette';
+import { colors, radius } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -190,13 +194,23 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
         animationType="slide"
         onRequestClose={() => setShowComments(false)}
       >
-        <View style={styles.modalContainer}>
-          <TouchableOpacity 
-            style={styles.closeButton}
-            onPress={() => setShowComments(false)}
-          >
-            <Feather name="x" size={24} color="#000" />
-          </TouchableOpacity>
+        <View style={styles.modalRoot}>
+          {/* Same rotating wallpaper + navy vignette as the feed, behind a
+              dark glass comments sheet. */}
+          <RotatingBackground intervalMs={60000} blurIntensity={5} tint="default" scrimColor="transparent" />
+          <ScreenVignette tintRgb="6,16,34" zIndex={1} />
+
+          <SafeAreaView edges={['top']} style={styles.content}>
+            <View style={styles.headerRow}>
+              <Text style={styles.headerTitle}>Comments</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowComments(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Feather name="x" size={24} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
 
           {loading && comments.length === 0 ? (
             <CommentSkeleton />
@@ -221,7 +235,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
               )}
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
-                  <Text>No comments yet</Text>
+                  <Text style={styles.emptyText}>No comments yet</Text>
                 </View>
               }
               onScrollToIndexFailed={handleScrollToIndexFailed}
@@ -246,19 +260,22 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
             <TextInput
               style={styles.input}
               placeholder="Write a comment..."
-              placeholderTextColor="#666"
+              placeholderTextColor={colors.placeholder}
               value={newComment}
               onChangeText={setNewComment}
               multiline
             />
-            <TouchableOpacity 
-              style={styles.postButton}
+            <TouchableOpacity
+              style={[styles.postButton, !newComment.trim() && styles.postButtonDisabled]}
               onPress={handlePostComment}
               disabled={!newComment.trim()}
+              accessibilityRole="button"
+              accessibilityLabel="Send comment"
             >
-              <Text style={styles.postText}>Post</Text>
+              <Feather name="send" size={20} color={colors.white} />
             </TouchableOpacity>
           </View>
+          </SafeAreaView>
         </View>
       </Modal>
     </>
@@ -276,23 +293,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#FFF',
   },
-  modalContainer: {
+  // Dark glass comments sheet over the rotating wallpaper.
+  modalRoot: {
     flex: 1,
-    padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg, // fallback behind the wallpaper
+  },
+  content: {
+    flex: 1,
+    zIndex: 2, // above the vignette (zIndex 1)
+    paddingHorizontal: 16,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginBottom: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    letterSpacing: 0.3,
   },
   closeButton: {
-    alignSelf: 'flex-end',
-    padding: 10,
-    marginBottom: 10,
+    padding: 4,
   },
   commentItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 12,
     padding: 12,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
+    backgroundColor: 'rgba(16,28,46,0.92)',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   commentItemPending: {
     opacity: 0.6,
@@ -304,7 +339,7 @@ const styles = StyleSheet.create({
   skeletonRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 12,
     padding: 12,
   },
   skeletonAvatar: {
@@ -312,66 +347,71 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     marginRight: 12,
-    backgroundColor: '#ececec',
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
   skeletonLine: {
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#ececec',
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     marginRight: 12,
+    backgroundColor: colors.surface,
   },
   commentContent: {
     flex: 1,
   },
   username: {
-    fontWeight: '600',
+    fontWeight: '700',
     marginBottom: 4,
-    color: '#333',
+    color: colors.textPrimary,
   },
   commentText: {
-    color: '#666',
+    color: colors.textSecondary,
     fontSize: 14,
+    lineHeight: 19,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
+    paddingVertical: 8,
+    paddingBottom: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.12)',
   },
   userAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     marginRight: 12,
+    backgroundColor: colors.surface,
   },
   input: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 9,
     marginRight: 8,
     fontSize: 14,
-    color: '#333',
+    color: colors.textPrimary,
+    backgroundColor: colors.inputBg,
+    maxHeight: 110,
   },
   postButton: {
-    backgroundColor: '#1DA1F2',
-    borderRadius: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    opacity: 1,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  postText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+  postButtonDisabled: {
+    opacity: 0.45,
   },
   loadingContainer: {
     flex: 1,
@@ -382,7 +422,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 40,
+  },
+  emptyText: {
+    color: colors.textSecondary,
+    fontSize: 15,
   },
 });
 

@@ -76,6 +76,18 @@ import NowPlaying from './components/NowPlaying';
 import PlaylistsScreen from './components/PlaylistsScreen';
 import PlaylistDetail from './components/PlaylistDetail';
 import { navigationRef, navigate } from './services/navigationRef';
+import { API_BASE } from './services/api';
+
+// Deep linking: a shared post URL (streams://post/123, or the web page
+// https://<api-host>/post/123) opens the app straight to that post.
+const linking = {
+  prefixes: ['streams://', API_BASE, API_BASE.replace('https://', 'http://')],
+  config: {
+    screens: {
+      PostDetail: 'post/:postId',
+    },
+  },
+};
 
 
 import { useAuth, AuthProvider } from './context/useAuth';
@@ -145,7 +157,7 @@ const App = () => {
       <AuthInitializer>
       <PlayerProvider>
 
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer ref={navigationRef} linking={linking}>
             <Stack.Navigator
                 initialRouteName="Home"
                 screenOptions={{

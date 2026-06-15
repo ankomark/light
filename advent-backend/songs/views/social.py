@@ -692,3 +692,150 @@ class PublicationViewSet(viewsets.ModelViewSet):
                                         context=self.get_serializer_context())
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
 
+
+# --- Public share / link-preview page -----------------------------------------
+import re as _re
+from django.conf import settings as _settings
+from django.http import HttpResponse, HttpResponseNotFound
+from django.shortcuts import get_object_or_404
+from django.utils.html import escape as _esc
+
+
+def _cloud_name():
+    return _settings.CLOUDINARY_STORAGE['CLOUD_NAME']
+
+
+def _post_public_id(post):
+    """Best-effort Cloudinary public_id for the post's media."""
+    mf = post.media_file
+    raw = mf if isinstance(mf, str) else (getattr(mf, 'url', '') or '')
+    pid = raw.split('/upload/')[-1] if '/upload/' in raw else raw
+    pid = _re.sub(r'^v\d+/', '', pid)            # strip version prefix
+    pid = _re.sub(r'\.[A-Za-z0-9]+$', '', pid)   # strip extension
+    return pid
+
+
+def _share_image(post):
+    """og:image — a 1200x630 social card. For videos this is a snapshot frame
+    (so_0) so the link preview shows a thumbnail instead of nothing."""
+    pid = _post_public_id(post)
+    if not pid:
+        return ''
+    cloud = _cloud_name()
+    if post.content_type == 'video':
+        return (f"https://res.cloudinary.com/{cloud}/video/upload/"
+                f"so_0,w_1200,h_630,c_fill,q_auto/{pid}.jpg")
+    return (f"https://res.cloudinary.com/{cloud}/image/upload/"
+            f"w_1200,h_630,c_fill,q_auto,f_jpg/{pid}.jpg")
+
+
+_SHARE_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<meta property="og:site_name" content="Advent Light">
+<meta property="og:type" content="__OGTYPE__">
+<meta property="og:title" content="__TITLE__">
+<meta property="og:description" content="__DESC__">
+<meta property="og:image" content="__IMAGE__">
+<meta property="og:url" content="__URL__">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="__TITLE__">
+<meta name="twitter:description" content="__DESC__">
+<meta name="twitter:image" content="__IMAGE__">__VIDEO_TAGS__
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:#0A1628; color:#E0E1DD; display:flex; min-height:100vh;
+    align-items:center; justify-content:center; padding:20px; }
+  .card { width:100%; max-width:420px; background:#102E50; border:1px solid #1E3A5F;
+    border-radius:20px; overflow:hidden; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .media { position:relative; width:100%; aspect-ratio:1200/630; background:#0D2340; }
+  .media img { width:100%; height:100%; object-fit:cover; display:block; }
+  .play { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  .play span { width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,.45);
+    display:flex; align-items:center; justify-content:center; }
+  .play svg { width:28px; height:28px; fill:#fff; margin-left:4px; }
+  .body { padding:18px 20px 22px; }
+  .user { font-weight:700; font-size:17px; margin:0 0 6px; }
+  .caption { color:#A9BCD0; font-size:14px; line-height:1.45; margin:0 0 18px; white-space:pre-wrap; }
+  .btn { display:block; text-align:center; text-decoration:none; background:#1DA1F2;
+    color:#fff; font-weight:700; padding:14px; border-radius:14px; }
+  .brand { text-align:center; color:#6C757D; font-size:12px; margin-top:14px; letter-spacing:1px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="media">__IMG_BLOCK____PLAY_BLOCK__</div>
+    <div class="body">
+      <p class="user">__USER__</p>__CAPTION_BLOCK__
+      <a class="btn" href="__DEEP__">Open in Advent Light</a>
+      <p class="brand">ADVENT LIGHT</p>
+    </div>
+  </div>
+  <script>
+    // Hand off to the app immediately; if it isn't installed, this page (with
+    // its thumbnail + button) stays as the fallback.
+    (function(){ try { window.location.href = "__DEEP__"; } catch (e) {} })();
+  </script>
+</body>
+</html>"""
+
+
+def post_share_page(request, post_id):
+    """Public, crawler-friendly preview page for a single post.
+
+    Serves Open Graph/Twitter tags (so shared links render a rich card with a
+    thumbnail) and deep-links into the app via the `streams://post/<id>` scheme.
+    """
+    try:
+        post = get_object_or_404(SocialPost.objects.select_related('user'), id=post_id)
+    except Exception:
+        return HttpResponseNotFound('Post not found')
+
+    username = post.user.username if post.user else 'Someone'
+    caption = (post.caption or '').strip()
+    title = f"{username} on Advent Light"
+    description = caption or f"See {username}'s post on Advent Light."
+    image = _share_image(post)
+    deep_link = f"streams://post/{post.id}"
+    is_video = post.content_type == 'video'
+
+    video_tags = ''
+    if is_video:
+        video_url = (f"https://res.cloudinary.com/{_cloud_name()}/video/upload/"
+                     f"q_auto/{_post_public_id(post)}.mp4")
+        video_tags = (
+            f'\n<meta property="og:video" content="{_esc(video_url)}">'
+            f'\n<meta property="og:video:secure_url" content="{_esc(video_url)}">'
+            f'\n<meta property="og:video:type" content="video/mp4">'
+        )
+
+    img_block = f'<img src="{_esc(image)}" alt="">' if image else ''
+    play_block = (
+        '<div class="play"><span><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/>'
+        '</svg></span></div>' if is_video else ''
+    )
+    caption_block = f'\n      <p class="caption">{_esc(caption)}</p>' if caption else ''
+
+    html = (
+        _SHARE_PAGE
+        .replace('__OGTYPE__', 'video.other' if is_video else 'article')
+        .replace('__VIDEO_TAGS__', video_tags)
+        .replace('__IMG_BLOCK__', img_block)
+        .replace('__PLAY_BLOCK__', play_block)
+        .replace('__CAPTION_BLOCK__', caption_block)
+        .replace('__USER__', _esc(username))
+        .replace('__TITLE__', _esc(title))
+        .replace('__DESC__', _esc(description[:200]))
+        .replace('__IMAGE__', _esc(image))
+        .replace('__URL__', _esc(request.build_absolute_uri()))
+        .replace('__DEEP__', _esc(deep_link))
+    )
+
+    resp = HttpResponse(html)
+    resp['Cache-Control'] = 'public, max-age=300'
+    return resp

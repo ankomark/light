@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  TouchableOpacity, 
-  Text, 
-  StyleSheet, 
+import {
+  TouchableOpacity,
+  Text,
+  StyleSheet,
   Alert,
   View,
-  ActivityIndicator
+  ActivityIndicator,
+  Share
 } from 'react-native';
 import { 
   MaterialCommunityIcons,
@@ -15,7 +16,11 @@ import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import config from '../config';
-import { likePost, savePost } from '../services/api';
+import { likePost, savePost, API_BASE } from '../services/api';
+
+// Brand gold for the "liked" state — ties the action into the app's gold
+// wordmark + medallion for a premium feel.
+const LIKE_GOLD = '#E8C66B';
 
 export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
   const [likes, setLikes] = useState(initialLikes || 0);
@@ -63,15 +68,16 @@ export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
       {loading ? (
-        <ActivityIndicator size="small" color={liked ? "#e74c3c" : "#FFF"} />
+        <ActivityIndicator size="small" color={liked ? LIKE_GOLD : "#FFF"} />
       ) : (
         <>
           <MaterialCommunityIcons
-            name={liked ? "thumb-up" : "thumb-up-outline"}
+            name={liked ? "heart" : "heart-outline"}
             size={24}
-            color={liked ? "#e74c3c" : "#FFF"}
+            color={liked ? LIKE_GOLD : "#FFF"}
+            style={liked ? styles.likeGlow : undefined}
           />
-          <Text style={styles.actionText}>{likes}</Text>
+          <Text style={[styles.actionText, liked && { color: LIKE_GOLD }]}>{likes}</Text>
         </>
       )}
     </TouchableOpacity>
@@ -123,6 +129,42 @@ export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
           color={saved ? "#1DA1F2" : "#FFF"}
         />
       )}
+    </TouchableOpacity>
+  );
+};
+
+export const ShareButton = ({ postId, caption, username }) => {
+  const handleShare = async () => {
+    // Share the post's web page (NOT the raw media): it renders a rich preview
+    // card with a thumbnail and deep-links back into the app to this exact post.
+    const link = `${API_BASE}/post/${postId}/`;
+    const parts = [];
+    if (caption?.trim()) parts.push(caption.trim());
+    parts.push(username ? `Shared from ${username} on Advent Light` : 'Shared via Advent Light');
+    parts.push(link);
+    const message = parts.join('\n\n');
+
+    try {
+      await Share.share(
+        // On iOS, url is surfaced separately; on Android it's folded into message.
+        { message, url: link },
+        { dialogTitle: 'Share post' }
+      );
+    } catch (error) {
+      // Sharing dismissed or failed — nothing to do.
+      console.warn('Share error:', error?.message);
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={styles.actionButton}
+      onPress={handleShare}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      accessibilityRole="button"
+      accessibilityLabel="Share post"
+    >
+      <Feather name="share-2" size={24} color="#FFF" />
     </TouchableOpacity>
   );
 };
@@ -241,6 +283,12 @@ const styles = StyleSheet.create({
     color: '#FFF',
     minWidth: 20,
     textAlign: 'center',
+  },
+  // Soft gold halo around the filled heart when liked.
+  likeGlow: {
+    textShadowColor: 'rgba(232,198,107,0.7)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   progressContainer: {
     flexDirection: 'row',
