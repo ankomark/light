@@ -374,10 +374,14 @@ class PostCommentViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
+        # select_related pulls each comment's author (+ profile for the avatar)
+        # in the same query, so a page of comments is a couple of queries instead
+        # of one-per-row. Ordering/index come from PostComment.Meta.
+        qs = PostComment.objects.select_related('user', 'user__profile')
         post_id = self.kwargs.get('post_pk')
         if post_id:
-            return PostComment.objects.filter(post__id=post_id)
-        return super().get_queryset()
+            qs = qs.filter(post__id=post_id)
+        return qs
 
     def perform_create(self, serializer):
         post_id = self.kwargs.get('post_pk')

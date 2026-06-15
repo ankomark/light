@@ -1,19 +1,36 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  TextInput, 
-  StyleSheet, 
-  Modal, 
-  FlatList, 
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  Modal,
+  FlatList,
   Image,
   Alert
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useAuth } from '../context/useAuth';
 import { commentOnPost, fetchSocialPostComments, getAccessToken, API_URL } from '../services/api';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+
+// Lightweight placeholder rows shown only on the very first load (no cache yet),
+// so the sheet feels instant instead of blocking on a "Loading..." message.
+const CommentSkeleton = () => (
+  <View style={{ paddingTop: 4 }}>
+    {[0, 1, 2, 3, 4].map((i) => (
+      <View key={i} style={styles.skeletonRow}>
+        <View style={styles.skeletonAvatar} />
+        <View style={{ flex: 1 }}>
+          <View style={[styles.skeletonLine, { width: '35%' }]} />
+          <View style={[styles.skeletonLine, { width: '80%', marginTop: 6 }]} />
+        </View>
+      </View>
+    ))}
+  </View>
+);
 
 const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, currentUserAvatar }) => {
   const [comments, setComments] = useState([]);
@@ -24,6 +41,12 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
   const internalFlatListRef = useRef(null);
   const activeFlatListRef = flatListRef || internalFlatListRef;
   const profileFetchedRef = useRef(false);
+  const commentsRef = useRef([]);
+  const { currentUser } = useAuth();
+
+  // Mirror comments into a ref so async callbacks can read the latest list
+  // without being re-created (and going stale) on every change.
+  useEffect(() => { commentsRef.current = comments; }, [comments]);
 
   useEffect(() => {
     if (autoOpen) {
@@ -37,19 +60,23 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
     }
   }, [comments]);
 
-  // FIX: Only one API call, no profile fetch loop!
-  const fetchComments = async () => {
+  // Stale-while-revalidate: only show the skeleton on a true cold load (no
+  // comments cached yet). On reopen we keep showing the cached list and refresh
+  // silently in the background, so the sheet never blocks.
+  const fetchComments = useCallback(async () => {
+    const hadCache = commentsRef.current.length > 0;
     try {
-      setLoading(true);
+      if (!hadCache) setLoading(true);
       const data = await fetchSocialPostComments(postId);
-      setComments(data); // Use backend data directly
+      setComments(Array.isArray(data) ? data : (data ?? []));
     } catch (error) {
-      Alert.alert('Error', 'Failed to load comments');
+      // Only surface an error if there's nothing to show.
+      if (!hadCache) Alert.alert('Error', 'Failed to load comments');
       console.error('Comments fetch error:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [postId]);
 
   const fetchUserProfile = async () => {
     try {
@@ -78,17 +105,50 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
     }
   }, [showComments]);
 
+  // Optimistic post: the comment appears at the top instantly (TikTok-style),
+  // then we reconcile in place with the server's response — no full reload.
   const handlePostComment = async () => {
-    if (!newComment.trim()) {
+    const content = newComment.trim();
+    if (!content) {
       Alert.alert('Error', 'Comment cannot be empty');
       return;
     }
 
+    const tempId = `temp-${Date.now()}`;
+    const optimistic = {
+      id: tempId,
+      content,
+      pending: true,
+      user: {
+        username: currentUser?.username || 'You',
+        profile_picture:
+          currentUserAvatar || currentUser?.profile_picture || userProfile?.picture || null,
+      },
+    };
+
+    setComments((prev) => [optimistic, ...prev]);
+    setNewComment('');
+    requestAnimationFrame(() =>
+      activeFlatListRef.current?.scrollToOffset?.({ offset: 0, animated: true })
+    );
+
     try {
-      await commentOnPost(postId, newComment);
-      await fetchComments();
-      setNewComment('');
+      const created = await commentOnPost(postId, content);
+      if (created && created.id) {
+        // Swap the temp row for the real one in place (keeps its position).
+        setComments((prev) =>
+          prev.map((c) =>
+            c.id === tempId ? { ...created, user: created.user || optimistic.user } : c
+          )
+        );
+      } else {
+        // Unknown response shape — reconcile quietly without a blocking spinner.
+        fetchComments();
+      }
     } catch (error) {
+      // Roll back and restore the text so the user can retry.
+      setComments((prev) => prev.filter((c) => c.id !== tempId));
+      setNewComment(content);
       Alert.alert('Error', 'Failed to post comment');
       console.error('Comment post error:', error);
     }
@@ -138,26 +198,25 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
             <Feather name="x" size={24} color="#000" />
           </TouchableOpacity>
 
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <Text>Loading comments...</Text>
-            </View>
+          {loading && comments.length === 0 ? (
+            <CommentSkeleton />
           ) : (
             <FlatList
               ref={activeFlatListRef}
               data={comments}
               keyExtractor={(item) => item.id.toString()}
               renderItem={({ item }) => (
-                <View style={styles.commentItem}>
+                <View style={[styles.commentItem, item.pending && styles.commentItemPending]}>
                   <Image
-                    source={item.user.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
+                    source={item.user?.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
                     defaultSource={DEFAULT_AVATAR}
                     style={styles.avatar}
                   />
                   <View style={styles.commentContent}>
-                    <Text style={styles.username}>{item.user.username}</Text>
+                    <Text style={styles.username}>{item.user?.username}</Text>
                     <Text style={styles.commentText}>{item.content}</Text>
                   </View>
+                  {item.pending && <Feather name="clock" size={14} color="#999" style={styles.pendingIcon} />}
                 </View>
               )}
               ListEmptyComponent={
@@ -166,6 +225,11 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
                 </View>
               }
               onScrollToIndexFailed={handleScrollToIndexFailed}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={7}
+              removeClippedSubviews
+              keyboardShouldPersistTaps="handled"
             />
           )}
 
@@ -229,6 +293,31 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
+  },
+  commentItemPending: {
+    opacity: 0.6,
+  },
+  pendingIcon: {
+    marginLeft: 8,
+    alignSelf: 'center',
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    padding: 12,
+  },
+  skeletonAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: '#ececec',
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ececec',
   },
   avatar: {
     width: 40,

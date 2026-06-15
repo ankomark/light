@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet, Modal, TextInput, Alert } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_URL, getAccessToken } from '../services/api';
@@ -9,6 +9,7 @@ import { colors, spacing, radius, typography } from '../constants/theme';
 const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
   const [editedCaption, setEditedCaption] = useState(post.caption);
   const [loading, setLoading] = useState(false);
 
@@ -73,23 +74,54 @@ const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Report — always available for other people's posts */}
+      {/* Report — stays as a direct flag button on other people's posts. */}
       {!post.can_edit && (
         <TouchableOpacity onPress={() => setReportVisible(true)} style={styles.button}>
           <MaterialIcons name="flag" size={22} color={colors.warning} />
         </TouchableOpacity>
       )}
 
+      {/* Author: a single "..." trigger opening a tap-to-open Edit/Delete sheet. */}
       {post.can_edit && (
-        <>
-          <TouchableOpacity onPress={() => setEditModalVisible(true)} style={styles.button}>
-            <MaterialIcons name="edit" size={24} color={colors.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleDeletePost} style={styles.button}>
-            <MaterialIcons name="delete" size={24} color={colors.error} />
-          </TouchableOpacity>
-        </>
+        <TouchableOpacity
+          onPress={() => setMenuVisible(true)}
+          style={styles.button}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Post options"
+        >
+          <MaterialIcons name="more-horiz" size={24} color={colors.textSecondary} />
+        </TouchableOpacity>
       )}
+
+      {/* Author action sheet: Edit / Delete. */}
+      <Modal
+        visible={menuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <View style={styles.sheetRoot}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuVisible(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <TouchableOpacity
+              style={styles.sheetItem}
+              onPress={() => { setMenuVisible(false); setEditModalVisible(true); }}
+            >
+              <MaterialIcons name="edit" size={22} color={colors.primary} />
+              <Text style={styles.sheetLabel}>Edit post</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.sheetItem}
+              onPress={() => { setMenuVisible(false); handleDeletePost(); }}
+            >
+              <MaterialIcons name="delete" size={22} color={colors.error} />
+              <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>Delete post</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <ReportModal
         visible={reportVisible}
@@ -147,7 +179,46 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   button: {
-    marginLeft: 15,
+    marginLeft: 8,
+    padding: 4,
+  },
+  // Action sheet
+  sheetRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: colors.overlay,
+  },
+  sheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingBottom: 28,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  sheetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 22,
+  },
+  sheetLabel: {
+    fontSize: 16,
+    color: colors.textPrimary,
+    fontWeight: '600',
+  },
+  sheetLabelDestructive: {
+    color: colors.error,
   },
   modalContainer: {
     flex: 1,

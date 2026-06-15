@@ -427,9 +427,32 @@ class PostLikeSerializer(serializers.ModelSerializer):
 
 
 
+class CommentUserSerializer(serializers.ModelSerializer):
+    """Minimal user payload for comment rows.
+
+    The full UserSerializer serializes the user's profile, ENTIRE post history
+    (get_social_posts) and three count queries — fine for a profile screen, but
+    catastrophic across a comment list (it N+1s per comment). Comments only need
+    the avatar + name, so we keep this tiny.
+    """
+    profile_picture = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'profile_picture']
+
+    def get_profile_picture(self, obj):
+        profile = getattr(obj, 'profile', None)
+        if profile and profile.picture:
+            return ProfileSerializer(profile, context=self.context).data.get('picture_url')
+        return None
+
+
 class PostCommentSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    post = SocialPostSerializer(read_only=True)
+    user = CommentUserSerializer(read_only=True)
+    # Just the id — the previous nested SocialPostSerializer re-serialized the
+    # whole post (media, counts, author) on every single comment.
+    post = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = PostComment

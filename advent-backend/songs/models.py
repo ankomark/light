@@ -319,6 +319,13 @@ class PostComment(models.Model):
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        # Newest first (matches the app's optimistic top-insert), and the
+        # composite index makes "comments for a post, newest first + paginate"
+        # an index-only range scan instead of a full table sort.
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['post', '-created_at'], name='postcomment_post_created_idx')]
+
 class PostSave(models.Model):
     post = models.ForeignKey(SocialPost, on_delete=models.CASCADE, related_name='saves')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='saved_posts')
