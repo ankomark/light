@@ -53,7 +53,10 @@ const HomePage = () => {
 
   return (
     <View style={styles.container}>
-      <SocialFeed/> 
+      {/* The shared RotatingBackground lives in HomePageWrapper (behind the nav
+          bar too), so the feed renders transparent over it instead of painting
+          its own background. */}
+      <SocialFeed showBackground={false} />
     </View>
   );
 };
@@ -64,6 +67,6 @@ const styles = StyleSheet.create({
   container: {
     display:'flex',
     flex: 1,
-    backgroundColor: "#102E50",
+    backgroundColor: "transparent",
   },
 });

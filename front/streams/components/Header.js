@@ -2,13 +2,19 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/useAuth';
 import NotificationsBell from './NotificationsBell';
 import HamburgerMenu from '../components/HamburgerMenu';
+import ScreenVignette from './ScreenVignette';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 
-const HEADER_BG = colors.surface; // deep blue (#102E50)
+const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the image
+// Wallpaper behind the header. Hot-linked from Pinterest like the rest of the
+// app's decorative imagery; re-host on your own CDN for production.
+const HEADER_IMAGE = 'https://i.pinimg.com/1200x/84/82/79/8482794f5f72ab497bec84be9ef541c9.jpg';
 const INACTIVE = 'rgba(255,255,255,0.62)';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -29,7 +35,7 @@ const NavItem = ({ set: Set = Ionicons, active, inactive, label, isActive, onPre
   </TouchableOpacity>
 );
 
-const Header = () => {
+const Header = ({ transparentBg = false }) => {
   const navigation = useNavigation();
   const { currentUser, isAuthenticated } = useAuth();
 
@@ -38,14 +44,52 @@ const Header = () => {
   const isOn = (name) => activeRoute === name;
 
   return (
-    <SafeAreaView edges={['top']} style={styles.safeArea}>
-      <StatusBar backgroundColor={HEADER_BG} barStyle="light-content" />
+    <View style={[styles.root, transparentBg && styles.rootTransparent]}>
+      {/* Background wallpaper (extends under the status bar) + glass blur and a
+          legibility scrim so the nav icons/labels stay readable over it. When
+          transparentBg is set, a parent supplies a shared wallpaper that spans
+          the nav bar and the screen below, so we skip our own image and let it
+          show through the glass instead. */}
+      {!transparentBg && (
+        <Image source={{ uri: HEADER_IMAGE }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      )}
+      <BlurView
+        intensity={24}
+        tint="dark"
+        experimentalBlurMethod="dimezisBlurView"
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+      {/* Dark-blue glass: deeper toward the nav row so the labels read cleanly. */}
+      <LinearGradient
+        colors={['rgba(11, 38, 87, 0.5)', 'rgba(6, 28, 68, 0.8)']}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+      {/* Curved-glass edge vignette in navy for a premium, recessed-edge feel. */}
+      <ScreenVignette strength={0.8} side={32} vertical={35} tintRgb="6,16,34" zIndex={4} />
 
-      <View style={styles.header}>
-        {/* Top row: brand + menu */}
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
+        <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+
+        <View style={styles.header}>
+        {/* Top row: brand cluster (medallion + title) on the left, menu right. */}
         <View style={styles.topRow}>
-          <Image source={require('../assets/logo.png')} style={styles.logo} />
-          <Text style={styles.title}>ADVENT LIGHT</Text>
+          <View style={styles.brand}>
+            {/* Brand mark set in a gold-rimmed ivory medallion — a coin/seal look
+                that lifts the emblem off the dark glass for a luxury feel. */}
+            <LinearGradient
+              colors={['#F4DE9B', '#C99A2E', '#8C6A1A', '#E7C871']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.logoRing}
+            >
+              <View style={styles.logoDisc}>
+                <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+              </View>
+            </LinearGradient>
+            <Text style={styles.title}>ADVENT LIGHT</Text>
+          </View>
           <View style={styles.menuContainer}>
             <HamburgerMenu />
           </View>
@@ -111,18 +155,26 @@ const Header = () => {
           )}
         </View>
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: { backgroundColor: HEADER_BG },
+  // Deep-blue fallback shows if the wallpaper fails to load; overflow clips the
+  // absolute-fill image/blur to the header's measured height.
+  root: { backgroundColor: HEADER_BG, overflow: 'hidden' },
+  // Home screen: let the parent's shared wallpaper show through the glass.
+  rootTransparent: { backgroundColor: 'transparent' },
+  // zIndex 5 keeps the brand + nav above the navy vignette (zIndex 4), so the
+  // vignette frames the wallpaper without dimming the icons/labels.
+  safeArea: { backgroundColor: 'transparent', zIndex: 5 },
   header: {
-    backgroundColor: HEADER_BG,
-    paddingHorizontal: 14,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 18,
     paddingBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.12)',
+    borderBottomColor: 'rgba(11, 6, 83, 0.18)',
   },
   topRow: {
     flexDirection: 'row',
@@ -130,13 +182,47 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
-  logo: { width: 64, height: 38, resizeMode: 'contain' },
+  // Gold metallic rim (the gradient is the ring; padding sets its thickness).
+  logoRing: {
+    width: 32,
+    height: 42,
+    borderRadius: 26,
+    padding: 3.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 7,
+  },
+  // Ivory seal face the emblem sits on.
+  logoDisc: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 23.5,
+    backgroundColor: '#FBF7EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  logo: { width: 36, height: 24 },
+  // Medallion + title sit together as one left-aligned brand lockup.
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   title: {
     color: colors.accent,
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginLeft: 10,
+    fontFamily: 'Cinzel_700Bold',
+    fontSize: 24,
+    // Wider tracking gives Cinzel its engraved, monument-like premium feel.
+    letterSpacing: 2.5,
+    // Blue-theme glow/drop shadow for depth.
+    textShadowColor: 'rgba(13,71,161,0.9)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
   },
   menuContainer: { marginLeft: 'auto' },
   bottomRow: {

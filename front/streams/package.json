@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@date-io/date-fns": "^3.2.1",
+    "@expo-google-fonts/cinzel": "^0.4.2",
     "@expo/vector-icons": "^14.1.0",
     "@react-native-async-storage/async-storage": "2.1.2",
     "@react-native-community/blur": "^4.4.1",

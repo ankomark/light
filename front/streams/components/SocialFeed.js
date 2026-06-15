@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Video, Audio } from 'expo-av';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
@@ -26,6 +27,8 @@ import { DownloadButton, SaveButton, LikeButton } from './SocialActions';
 import { PostSkeleton } from './SkeletonLoader';
 import StoriesBar from './StoriesBar';
 import AudioVisualizer from './AudioVisualizer';
+import RotatingBackground from './RotatingBackground';
+import ScreenVignette from './ScreenVignette';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -309,7 +312,7 @@ const PostMedia = React.memo(function PostMedia({
   );
 });
 
-const SocialFeed = () => {
+const SocialFeed = ({ showBackground = true }) => {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -835,14 +838,33 @@ const SocialFeed = () => {
 
   return (
     <View style={styles.container}>
-      {/* Frosted glass top bar: search + create, then feed tabs. Stays pinned;
+      {/* Rotating wallpaper behind the feed — light blur, no color overlay.
+          Skipped when a parent already provides a shared background (e.g. the
+          Home screen, where one wallpaper spans the nav bar and the feed). */}
+      {showBackground && (
+        <RotatingBackground intervalMs={60000} blurIntensity={5} tint="default" scrimColor="transparent" />
+      )}
+
+      {/* Frosted glass top bar: the rotating wallpaper shows through the blur,
+          with a soft top-down scrim keeping search + tabs legible. Stays pinned;
           the stories row lives in the list header so it scrolls away. */}
+      {/* NOTE: in Expo Go on Android, real background blur is unavailable, so
+          BlurView falls back to a translucent tint — keep the intensity low so
+          the wallpaper behind it stays visible (a dev build gives true blur). */}
       <BlurView
-        intensity={40}
+        intensity={18}
         tint="dark"
+        experimentalBlurMethod="dimezisBlurView"
         style={styles.topBar}
         onLayout={(e) => setTopBarH(e.nativeEvent.layout.height)}
       >
+        {/* Dark-blue glass scrim — same recipe as the app header, deeper toward
+            the tabs so the search + tabs read cleanly over the wallpaper. */}
+        <LinearGradient
+          colors={['rgba(8,22,46,0.5)', 'rgba(8,20,40,0.68)']}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
         <View style={styles.searchRow}>
           <View style={{ flex: 1 }}>
             <SearchBaar
@@ -935,6 +957,11 @@ const SocialFeed = () => {
           <PostSkeleton />
         </View>
       )}
+
+      {/* Navy curved-glass edge vignette — matches the app header. zIndex 20
+          lifts it above the frosted top bar (zIndex 10) so the same edge framing
+          wraps the top bar too. */}
+      <ScreenVignette tintRgb="6,16,34" zIndex={20} />
     </View>
   );
 };
@@ -945,7 +972,7 @@ const SocialFeed = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: 'transparent', // RotatingBackground shows through behind the cards
   },
 
   topBar: {
@@ -956,9 +983,9 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingHorizontal: 12,
     paddingBottom: 8,
-    backgroundColor: 'rgba(10,22,40,0.55)',
+    backgroundColor: 'transparent',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: 'rgba(11,6,83,0.18)',
     overflow: 'hidden',
     zIndex: 10,
   },

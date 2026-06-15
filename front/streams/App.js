@@ -22,6 +22,8 @@ import FavoritesPage from './components/FavoritesPage';
 import CreateProfile from './components/CreateProfile';
 import Header from './components/Header'; // Move the import to the top
 import SocialFeed from './components/SocialFeed';
+import RotatingBackground from './components/RotatingBackground';
+import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold } from '@expo-google-fonts/cinzel';
 import CreatePost from './components/CreatePost';
 import Music from './components/Music';
 import EditTrackScreen from './components/EditTrackScreen';
@@ -113,6 +115,9 @@ const HymnalAppWrapper = ({ navigation }) => (
 
 
 const App = () => {
+  // Load the Cinzel display font used for the app's brand title.
+  const [fontsLoaded] = useFonts({ Cinzel_600SemiBold, Cinzel_700Bold });
+
   // Handle notification taps when app is killed or in background
   React.useEffect(() => {
     const sub = addNotificationResponseListener(response => {
@@ -123,6 +128,16 @@ const App = () => {
     });
     return () => sub.remove();
   }, []);
+
+  // Hold first paint until the brand font is ready so the title doesn't flash
+  // in a fallback face and reflow.
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#102E50' }}>
+        <ActivityIndicator size="large" color="#1DA1F2" />
+      </View>
+    );
+  }
 
     return (
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
@@ -259,7 +274,11 @@ const ExploreWrapper = ({ navigation }) => (
 // Wrapper components for each screen to include the Header
 const HomePageWrapper = ({ navigation }) => (
     <View style={{ flex: 1 }}>
-        <Header navigation={navigation} />
+        {/* One shared rotating wallpaper behind both the nav bar and the feed,
+            so the background flows continuously from the header into the feed.
+            Header + feed render transparent over it. */}
+        <RotatingBackground intervalMs={60000} blurIntensity={5} tint="default" scrimColor="transparent" />
+        <Header navigation={navigation} transparentBg />
         <ErrorBoundary fallbackMessage="The feed couldn't load. Pull down to retry.">
           <HomePage />
         </ErrorBoundary>
