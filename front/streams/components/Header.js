@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import GlassView from './GlassView';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/useAuth';
 import NotificationsBell from './NotificationsBell';
@@ -52,7 +52,7 @@ const Header = ({ transparentBg = false }) => {
       {!transparentBg && (
         <Image source={{ uri: HEADER_IMAGE }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       )}
-      <BlurView
+      <GlassView
         intensity={24}
         tint="dark"
         experimentalBlurMethod="dimezisBlurView"

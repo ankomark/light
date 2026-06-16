@@ -15,6 +15,8 @@ export default Music
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    // Transparent so the Music tab's wallpaper (rendered in MusicPageWrapper)
+    // shows through. Falls back to the dark scene bg where there's no wallpaper.
+    backgroundColor: 'transparent',
   },
 });

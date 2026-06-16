@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable } from 'react-native';
-import { BlurView } from 'expo-blur';
+import GlassView from './GlassView';
 import Likes from './LikeButton';
 import Comments from './Comments';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -137,7 +137,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
   return (
     <View style={[styles.card, isActive && styles.cardActive]}>
       {/* Frosted-glass backdrop that blends into the screen background */}
-      <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+      <GlassView intensity={28} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
       <View style={[StyleSheet.absoluteFill, styles.glassTint]} pointerEvents="none" />
 
       {/* Main row: cover + play overlay, title/artist, play button */}

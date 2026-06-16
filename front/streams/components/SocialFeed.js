@@ -12,7 +12,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Video, Audio } from 'expo-av';
-import { BlurView } from 'expo-blur';
+import GlassView from './GlassView';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -132,9 +132,9 @@ const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPre
           </Pressable>
         )}
       />
-      <BlurView intensity={28} tint="dark" style={styles.carouselCounter} pointerEvents="none">
+      <GlassView intensity={28} tint="dark" style={styles.carouselCounter} pointerEvents="none">
         <Text style={styles.carouselCounterText}>{index + 1}/{urls.length}</Text>
-      </BlurView>
+      </GlassView>
       <View style={styles.carouselDots} pointerEvents="none">
         {urls.map((_, i) => (
           <View key={i} style={[styles.carouselDot, i === index && styles.carouselDotActive]} />
@@ -222,9 +222,9 @@ const PostMedia = React.memo(function PostMedia({
         {/* Tap-to-pause indicator */}
         {isFocused && !isLoading && manualPaused && (
           <View style={styles.audioPausedOverlay} pointerEvents="none">
-            <BlurView intensity={32} tint="dark" style={styles.audioPlayBadge}>
+            <GlassView intensity={32} tint="dark" style={styles.audioPlayBadge}>
               <MaterialIcons name="play-arrow" size={40} color={colors.white} />
-            </BlurView>
+            </GlassView>
           </View>
         )}
         {isFocused && !isLoading && (
@@ -234,7 +234,7 @@ const PostMedia = React.memo(function PostMedia({
             activeOpacity={0.8}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+            <GlassView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
             <MaterialIcons
               name={isMuted ? 'volume-off' : 'volume-up'}
               size={18}
@@ -259,16 +259,16 @@ const PostMedia = React.memo(function PostMedia({
           onPressSlide={hasAudio ? () => onToggleAudio?.(item) : undefined}
         />
         {hasAudio && isAudioActive && isAudioPlaying && (
-          <BlurView intensity={28} tint="dark" style={styles.audioVizPill} pointerEvents="none">
+          <GlassView intensity={28} tint="dark" style={styles.audioVizPill} pointerEvents="none">
             <MaterialIcons name="music-note" size={16} color={colors.white} />
             <AudioVisualizer playing height={20} />
-          </BlurView>
+          </GlassView>
         )}
         {hasAudio && isAudioActive && !isAudioPlaying && (
           <View style={styles.audioPausedOverlay} pointerEvents="none">
-            <BlurView intensity={32} tint="dark" style={styles.audioPlayBadge}>
+            <GlassView intensity={32} tint="dark" style={styles.audioPlayBadge}>
               <MaterialIcons name="play-arrow" size={40} color={colors.white} />
-            </BlurView>
+            </GlassView>
           </View>
         )}
       </View>
@@ -848,7 +848,7 @@ const SocialFeed = ({ showBackground = true }) => {
           Skipped when a parent already provides a shared background (e.g. the
           Home screen, where one wallpaper spans the nav bar and the feed). */}
       {showBackground && (
-        <RotatingBackground intervalMs={60000} blurIntensity={5} tint="default" scrimColor="transparent" />
+        <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.28)" />
       )}
 
       {/* Frosted glass top bar: the rotating wallpaper shows through the blur,
@@ -857,7 +857,7 @@ const SocialFeed = ({ showBackground = true }) => {
       {/* NOTE: in Expo Go on Android, real background blur is unavailable, so
           BlurView falls back to a translucent tint — keep the intensity low so
           the wallpaper behind it stays visible (a dev build gives true blur). */}
-      <BlurView
+      <GlassView
         intensity={18}
         tint="dark"
         experimentalBlurMethod="dimezisBlurView"
@@ -910,7 +910,7 @@ const SocialFeed = ({ showBackground = true }) => {
             </TouchableOpacity>
           </View>
         )}
-      </BlurView>
+      </GlassView>
 
       {newPostsAvailable && (
         <TouchableOpacity

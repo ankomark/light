@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, View } from 'react-native';
-import { BlurView } from 'expo-blur';
 import ScreenVignette from './ScreenVignette';
+
+// Opaque base behind the wallpaper so a transition/cold-load gap is dark — never
+// the grey navigator scene.
+const BASE_BG = '#0A1628';
 
 // Wallpapers re-hosted on our own Cloudinary (folder: wallpapers), served from
 // its CDN with on-the-fly optimization: f_auto (WebP/AVIF where supported),
@@ -17,21 +20,24 @@ const DEFAULT_IMAGES = [
 
 /**
  * Full-screen background that crossfades through a set of wallpapers on an
- * interval, blurred and dimmed so foreground content stays readable.
+ * interval. Reusable per screen — pass a single-item `images` array for a static
+ * wallpaper, or several to rotate.
+ *
+ * Note: no live BlurView here. expo-blur can't render inside react-native-screens'
+ * transition snapshots on Android, so a full-screen BlurView flashes solid grey
+ * during navigation. For a blurred look, bake it into the image URL instead
+ * (Cloudinary `e_blur:N`).
  *
  * Props:
- *  - images: string[]            (defaults to the bundled Pinterest set)
+ *  - images: string[]            (defaults to the bundled wallpaper set)
  *  - intervalMs: number          (how long each image shows; default 7000)
- *  - blurIntensity: number 0-100 ("blur to 50%"; default 50)
- *  - tint: 'light' | 'dark'      (blur tint; default 'light')
- *  - scrimColor: string          (overlay over the blur for legibility)
+ *  - scrimColor: string          (dim overlay over the image for legibility)
+ *  - vignette / vignetteStrength (curved-glass edge darkening)
  */
 const RotatingBackground = ({
   images = DEFAULT_IMAGES,
   intervalMs = 7000,
-  blurIntensity = 50,
-  tint = 'light',
-  scrimColor = 'rgba(255,255,255,0.5)',
+  scrimColor = 'transparent',
   vignette = true,          // darken the wallpaper edges (curved-glass look)
   vignetteStrength = 0.5,
 }) => {
@@ -65,7 +71,7 @@ const RotatingBackground = ({
   }, [list.length, intervalMs, opacity]);
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: BASE_BG }]} pointerEvents="none">
       {/* Stable bottom layer */}
       <Image source={{ uri: list[bottom] }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       {/* Top layer fades the next image in over the bottom */}
@@ -74,16 +80,10 @@ const RotatingBackground = ({
         style={[StyleSheet.absoluteFill, { opacity }]}
         resizeMode="cover"
       />
-      {/* Blur ("blur to 50%"). experimentalBlurMethod enables real blur on
-          Android (ignored on iOS). */}
-      <BlurView
-        intensity={blurIntensity}
-        tint={tint}
-        experimentalBlurMethod="dimezisBlurView"
-        style={StyleSheet.absoluteFill}
-      />
       {/* Legibility scrim */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: scrimColor }]} />
+      {scrimColor !== 'transparent' && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: scrimColor }]} />
+      )}
       {/* Curved-glass edge vignette on the wallpaper itself */}
       {vignette && <ScreenVignette strength={vignetteStrength} />}
     </View>

@@ -245,7 +245,9 @@ const TrackList = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    // Transparent so a parent wallpaper shows through; where there's none, the
+    // dark scene bg (same colors.bg) shows, so other usages look unchanged.
+    backgroundColor: 'transparent',
     borderRadius: 15,
   },
   center: {

@@ -9,7 +9,7 @@ Sentry.init({
 });
 
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import TrackList from './components/TrackList';
 import Comments from './components/Comments';
@@ -89,6 +89,20 @@ const linking = {
   },
 };
 
+// React Navigation's default theme background is light grey (rgb(242,242,242)),
+// which flashes through during transitions now that screens are transparent.
+// Use the app's dark background so transitions/blank frames are dark, not grey.
+const navTheme = {
+  ...DefaultTheme,
+  colors: { ...DefaultTheme.colors, background: '#0A1628' },
+};
+
+// Per-tab wallpapers. Home/SocialFeed keeps the rotating set (in RotatingBackground's
+// defaults); other tabs pass their own here. TODO: replace these placeholders with
+// the real artwork for each tab (Cloudinary URLs).
+const CLD_W = 'https://res.cloudinary.com/dxdmo9j4v/image/upload/f_auto,q_auto,c_limit,w_1080/wallpapers';
+const MUSIC_WALLPAPERS = [`${CLD_W}/bpqz33r3njhwouungnli.jpg`];
+
 
 import { useAuth, AuthProvider } from './context/useAuth';
 import { PlayerProvider } from './context/PlayerContext';
@@ -157,11 +171,12 @@ const App = () => {
       <AuthInitializer>
       <PlayerProvider>
 
-        <NavigationContainer ref={navigationRef} linking={linking}>
+        <NavigationContainer ref={navigationRef} linking={linking} theme={navTheme}>
             <Stack.Navigator
                 initialRouteName="Home"
                 screenOptions={{
                     headerShown: false, // Hide default header
+                    contentStyle: { backgroundColor: '#0A1628' }, // dark scene bg, not grey
                 }}
             >
                 <Stack.Screen name="Home" component={HomePageWrapper} />
@@ -289,7 +304,7 @@ const HomePageWrapper = ({ navigation }) => (
         {/* One shared rotating wallpaper behind both the nav bar and the feed,
             so the background flows continuously from the header into the feed.
             Header + feed render transparent over it. */}
-        <RotatingBackground intervalMs={60000} blurIntensity={5} tint="default" scrimColor="transparent" />
+        <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.28)" />
         <Header navigation={navigation} transparentBg />
         <ErrorBoundary fallbackMessage="The feed couldn't load. Pull down to retry.">
           <HomePage />
@@ -298,8 +313,9 @@ const HomePageWrapper = ({ navigation }) => (
 );
 
 const MusicPageWrapper = ({ navigation }) => (
-    <View style={{ flex: 1 }}>
-        <Header navigation={navigation} />
+    <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+        <RotatingBackground images={MUSIC_WALLPAPERS} scrimColor="rgba(10,22,40,0.45)" />
+        <Header navigation={navigation} transparentBg />
         <Music />
     </View>
 );
