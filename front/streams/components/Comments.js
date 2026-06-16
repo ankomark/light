@@ -1,23 +1,41 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  TextInput, 
-  StyleSheet, 
-  FlatList, 
-  Modal, 
-  Dimensions, 
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  FlatList,
+  Modal,
   Image,
   Alert
 } from 'react-native';
-import { fetchComments, postComment, getAccessToken, API_URL } from '../services/api';
-import axios from 'axios';
+import { Feather } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import axios from 'axios';
+import { fetchComments, postComment, getAccessToken, API_URL } from '../services/api';
+import { useAuth } from '../context/useAuth';
+import RotatingBackground from './RotatingBackground';
+import ScreenVignette from './ScreenVignette';
+import { colors } from '../constants/theme';
 
-
-const { width, height } = Dimensions.get('window');
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+
+// Placeholder rows on first (cold) load so the sheet feels instant.
+const CommentSkeleton = () => (
+  <View style={{ paddingTop: 4 }}>
+    {[0, 1, 2, 3, 4].map((i) => (
+      <View key={i} style={styles.skeletonRow}>
+        <View style={styles.skeletonAvatar} />
+        <View style={{ flex: 1 }}>
+          <View style={[styles.skeletonLine, { width: '35%' }]} />
+          <View style={[styles.skeletonLine, { width: '80%', marginTop: 6 }]} />
+        </View>
+      </View>
+    ))}
+  </View>
+);
 
 const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
     const flatListRef = useRef(null);
@@ -27,6 +45,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
     const [newComment, setNewComment] = useState('');
     const [showComments, setShowComments] = useState(autoOpen);
     const [userProfile, setUserProfile] = useState(null);
+    const { currentUser } = useAuth();
 
     const fetchCommentData = async () => {
         try {
@@ -53,10 +72,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                         console.error('Error fetching profile picture:', error);
                         return {
                             ...comment,
-                            user: {
-                                ...comment.user,
-                                profile_picture: null,
-                            },
+                            user: { ...comment.user, profile_picture: null },
                         };
                     }
                 })
@@ -86,10 +102,10 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                 const index = comments.findIndex(c => c.id === highlightCommentId);
                 if (index !== -1) {
                     setTimeout(() => {
-                        flatListRef.current?.scrollToIndex({ 
+                        flatListRef.current?.scrollToIndex({
                             index,
                             viewOffset: 50,
-                            animated: true 
+                            animated: true
                         });
                         setHighlightedComment(highlightCommentId);
                     }, 500);
@@ -116,33 +132,45 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
         fetchUserProfile();
     }, []);
 
+    // Optimistic post: the comment appears immediately, reconciles with the
+    // server response in place; rolls back on failure.
     const handlePostComment = async () => {
-        if (!newComment.trim()) {
+        const content = newComment.trim();
+        if (!content) {
             Alert.alert('Error', 'Comment cannot be empty');
             return;
         }
+        const token = await getAccessToken();
+        if (!token) {
+            Alert.alert('Error', 'You need to be logged in to post a comment.');
+            return;
+        }
+
+        const tempId = `temp-${Date.now()}`;
+        const optimistic = {
+            id: tempId,
+            content,
+            pending: true,
+            user: {
+                username: currentUser?.username || 'You',
+                profile_picture: userProfile?.picture || currentUser?.profile_picture || null,
+            },
+        };
+        setComments(prev => [...prev, optimistic]);
+        setNewComment('');
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 200);
 
         try {
-            const token = await getAccessToken();
-            if (!token) {
-                Alert.alert('Error', 'You need to be logged in to post a comment.');
-                return;
-            }
-
-            const postedComment = await postComment(trackId, newComment, token);
-            postedComment.user = {
-                ...postedComment.user,
+            const posted = await postComment(trackId, content, token);
+            posted.user = {
+                ...posted.user,
                 profile_picture: userProfile?.picture || null,
             };
-            setComments(prev => [...prev, postedComment]);
-            setNewComment('');
-            
-            // Scroll to the new comment
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, 300);
+            setComments(prev => prev.map(c => (c.id === tempId ? posted : c)));
         } catch (error) {
             console.error('Failed to post comment:', error);
+            setComments(prev => prev.filter(c => c.id !== tempId));
+            setNewComment(content);
             Alert.alert('Error', 'Failed to post comment');
         }
     };
@@ -157,79 +185,97 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
 
     return (
         <View style={styles.commentsSection}>
-            <TouchableOpacity onPress={toggleComments} style={styles.avatarButton}>
-                <Text style={styles.avatarButtonText}>
-                    💬 {comments.length}
-                </Text>
+            <TouchableOpacity onPress={toggleComments} style={styles.triggerButton}>
+                <Feather name="message-circle" size={18} color="#fff" />
+                <Text style={styles.triggerText}>{comments.length}</Text>
             </TouchableOpacity>
-            
+
             <Modal
                 visible={showComments}
                 animationType="slide"
-                transparent={false}
                 onRequestClose={toggleComments}
             >
-                <View style={styles.modalContainer}>
-                    <TouchableOpacity onPress={toggleComments} style={styles.closeButton}>
-                        <Text style={styles.closeButtonText}>↩️</Text>
-                    </TouchableOpacity>
-                    
-                    {loading ? (
-                        <View style={styles.loadingContainer}>
-                            <Text>Loading comments...</Text>
+                <View style={styles.modalRoot}>
+                    {/* Same rotating wallpaper + navy vignette as the feed comments. */}
+                    <RotatingBackground intervalMs={60000} scrimColor="transparent" />
+                    <ScreenVignette tintRgb="6,16,34" zIndex={1} />
+
+                    <SafeAreaView edges={['top']} style={styles.content}>
+                        <View style={styles.headerRow}>
+                            <Text style={styles.headerTitle}>Comments</Text>
+                            <TouchableOpacity
+                                onPress={toggleComments}
+                                style={styles.closeButton}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <Feather name="x" size={24} color={colors.textPrimary} />
+                            </TouchableOpacity>
                         </View>
-                    ) : (
-                        <FlatList
-                            ref={flatListRef}
-                            data={comments}
-                            keyExtractor={item => item.id.toString()}
-                            renderItem={({ item }) => (
-                                <View style={[
-                                    styles.commentItem,
-                                    item.id === highlightedComment && styles.highlightedComment
-                                ]}>
-                                    <Image
-                                        source={item.user.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
-                                        defaultSource={DEFAULT_AVATAR}
-                                        style={styles.userImage}
-                                    />
-                                    <View style={styles.commentContentContainer}>
-                                        <Text style={styles.commentUser}>{item.user.username}</Text>
-                                        <Text style={styles.commentContent}>{item.content}</Text>
+
+                        {loading && comments.length === 0 ? (
+                            <CommentSkeleton />
+                        ) : (
+                            <FlatList
+                                ref={flatListRef}
+                                data={comments}
+                                keyExtractor={item => item.id.toString()}
+                                renderItem={({ item }) => (
+                                    <View style={[
+                                        styles.commentItem,
+                                        item.pending && styles.commentItemPending,
+                                        item.id === highlightedComment && styles.highlightedComment,
+                                    ]}>
+                                        <Image
+                                            source={item.user?.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
+                                            defaultSource={DEFAULT_AVATAR}
+                                            style={styles.avatar}
+                                        />
+                                        <View style={styles.commentContent}>
+                                            <Text style={styles.username}>{item.user?.username}</Text>
+                                            <Text style={styles.commentText}>{item.content}</Text>
+                                        </View>
+                                        {item.pending && <Feather name="clock" size={14} color="#999" style={styles.pendingIcon} />}
                                     </View>
-                                </View>
-                            )}
-                            ListEmptyComponent={
-                                <View style={styles.emptyContainer}>
-                                    <Text>No comments yet</Text>
-                                </View>
-                            }
-                            onScrollToIndexFailed={handleScrollToIndexFailed}
-                        />
-                    )}
-                    
-                    <View style={styles.commentInputSection}>
-                        <Image
-                            source={userProfile?.picture ? { uri: userProfile.picture } : DEFAULT_AVATAR}
-                            defaultSource={DEFAULT_AVATAR}
-                            style={styles.currentUserImage}
-                        />
-                        <TextInput
-                            style={styles.commentInput}
-                            value={newComment}
-                            onChangeText={setNewComment}
-                            placeholder="Write a comment..."
-                            placeholderTextColor="#999"
-                            multiline
-                        />
-                        <TouchableOpacity 
-                            onPress={handlePostComment}
-                            style={styles.commentPostButton}
-                            disabled={!newComment.trim()}
-                        >
-                            <Text style={styles.buttonText}>Post</Text>
-                        </TouchableOpacity>
-                    </View>
+                                )}
+                                ListEmptyComponent={
+                                    <View style={styles.emptyContainer}>
+                                        <Text style={styles.emptyText}>No comments yet</Text>
+                                    </View>
+                                }
+                                onScrollToIndexFailed={handleScrollToIndexFailed}
+                                initialNumToRender={10}
+                                maxToRenderPerBatch={10}
+                                windowSize={7}
+                                removeClippedSubviews
+                                keyboardShouldPersistTaps="handled"
+                            />
+                        )}
+
+                        <View style={styles.inputContainer}>
+                            <Image
+                                source={userProfile?.picture ? { uri: userProfile.picture } : DEFAULT_AVATAR}
+                                defaultSource={DEFAULT_AVATAR}
+                                style={styles.userAvatar}
+                            />
+                            <TextInput
+                                style={styles.input}
+                                value={newComment}
+                                onChangeText={setNewComment}
+                                placeholder="Write a comment..."
+                                placeholderTextColor={colors.placeholder}
+                                multiline
+                            />
+                            <TouchableOpacity
+                                onPress={handlePostComment}
+                                style={[styles.postButton, !newComment.trim() && styles.postButtonDisabled]}
+                                disabled={!newComment.trim()}
+                                accessibilityRole="button"
+                                accessibilityLabel="Send comment"
+                            >
+                                <Feather name="send" size={20} color={colors.white} />
+                            </TouchableOpacity>
+                        </View>
+                    </SafeAreaView>
                 </View>
             </Modal>
         </View>
@@ -241,123 +287,156 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingHorizontal: 10,
   },
-  avatarButton: {
+  triggerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     alignSelf: 'flex-start',
-    backgroundColor: '#0c2756',
+    backgroundColor: 'rgba(12,39,86,0.85)',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 20,
-    elevation: 2,
   },
-  avatarButtonText: {
+  triggerText: {
     color: '#ffffff',
     fontSize: 14,
+    fontWeight: '600',
   },
-  modalContainer: {
+
+  // Dark glass comments sheet over the rotating wallpaper.
+  modalRoot: {
     flex: 1,
-    backgroundColor: '#0f4b74ff',
-    paddingTop: 40,
+    backgroundColor: colors.bg,
+  },
+  content: {
+    flex: 1,
+    zIndex: 2,
     paddingHorizontal: 16,
   },
-  closeButton: {
-    alignSelf: 'flex-end',
-    marginBottom: 10,
-    padding: 4,
-  },
-  closeButtonText: {
-    color: '#ff4d4d',
-    fontSize: 26,
-    fontWeight: 'bold',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  headerRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginBottom: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    letterSpacing: 0.3,
+  },
+  closeButton: {
+    padding: 4,
   },
   commentItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 12,
     padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    backgroundColor: 'rgba(16,28,46,0.92)',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  commentItemPending: {
+    opacity: 0.6,
   },
   highlightedComment: {
-    backgroundColor: '#e0f7fa',
     borderLeftWidth: 3,
-    borderLeftColor: '#00bcd4',
+    borderLeftColor: colors.primary,
   },
-  userImage: {
+  pendingIcon: {
+    marginLeft: 8,
+    alignSelf: 'center',
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: colors.surface,
+  },
+  commentContent: {
+    flex: 1,
+  },
+  username: {
+    fontWeight: '700',
+    marginBottom: 4,
+    color: colors.textPrimary,
+  },
+  commentText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingBottom: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  userAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: colors.surface,
+  },
+  input: {
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    marginRight: 8,
+    fontSize: 14,
+    color: colors.textPrimary,
+    backgroundColor: colors.inputBg,
+    maxHeight: 110,
+  },
+  postButton: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    marginRight: 12,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  commentContentContainer: {
-    flex: 1,
+  postButtonDisabled: {
+    opacity: 0.45,
   },
-  commentUser: {
-    fontWeight: '600',
-    fontSize: 15,
-    color: '#333',
-    marginBottom: 2,
-  },
-  commentContent: {
-    fontSize: 14,
-    color: '#555',
-    lineHeight: 20,
-  },
-  commentInputSection: {
+  skeletonRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#ddd',
-    marginTop: 8,
-    gap: 8,
+    marginBottom: 12,
+    padding: 12,
   },
-  currentUserImage: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    marginTop: 6,
+  skeletonAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
-  commentInput: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 100,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    fontSize: 14,
-    backgroundColor: '#fff',
-    color: '#000',
-    borderColor: '#ccc',
-    borderWidth: 1,
-  },
-  commentPostButton: {
-    backgroundColor: '#007bff',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+  skeletonLine: {
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
   emptyContainer: {
-    padding: 20,
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    color: colors.textSecondary,
+    fontSize: 15,
   },
 });
-
 
 export default Comments;

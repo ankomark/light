@@ -98,10 +98,15 @@ const navTheme = {
 };
 
 // Per-tab wallpapers. Home/SocialFeed keeps the rotating set (in RotatingBackground's
-// defaults); other tabs pass their own here. TODO: replace these placeholders with
-// the real artwork for each tab (Cloudinary URLs).
+// defaults); other tabs pass their own here (re-hosted on Cloudinary, optimized).
 const CLD_W = 'https://res.cloudinary.com/dxdmo9j4v/image/upload/f_auto,q_auto,c_limit,w_1080/wallpapers';
-const MUSIC_WALLPAPERS = [`${CLD_W}/bpqz33r3njhwouungnli.jpg`];
+const MUSIC_WALLPAPERS = [
+  `${CLD_W}/wg19rbjnqphztrcsan0b.jpg`,
+  `${CLD_W}/fjcbdllwljh0dvglousp.jpg`,
+  `${CLD_W}/jxggwl3ltobv4l0o8sqq.jpg`,
+  `${CLD_W}/ikinna96rzqdle0ztcoy.jpg`,
+  `${CLD_W}/gvwuacmn04nq1b25axs1.jpg`,
+];
 
 
 import { useAuth, AuthProvider } from './context/useAuth';
@@ -314,7 +319,7 @@ const HomePageWrapper = ({ navigation }) => (
 
 const MusicPageWrapper = ({ navigation }) => (
     <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-        <RotatingBackground images={MUSIC_WALLPAPERS} scrimColor="rgba(10,22,40,0.45)" />
+        <RotatingBackground images={MUSIC_WALLPAPERS} intervalMs={60000} scrimColor="rgba(10,22,40,0.45)" />
         <Header navigation={navigation} transparentBg />
         <Music />
     </View>
