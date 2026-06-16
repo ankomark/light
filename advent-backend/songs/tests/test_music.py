@@ -20,8 +20,8 @@ def make_track(artist, title='Song', album='', audio='audio/sample'):
 class PlaylistAPITests(APITestCase):
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@test.co', password='pw12345!')
         self.track = make_track(self.alice, title='Amazing Grace')
 
     def test_create_playlist_sets_owner(self):
@@ -105,8 +105,8 @@ class PlaylistAPITests(APITestCase):
 class TrackListTests(APITestCase):
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@test.co', password='pw12345!')
         self.grace = make_track(self.alice, title='Amazing Grace', album='Hymns')
         self.great = make_track(self.bob, title='How Great Thou Art', album='Classics')
 
@@ -150,8 +150,8 @@ class NotificationSerializationTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@test.co', password='pw12345!')
 
     def test_notifications_list_with_song_post_does_not_recurse(self):
         track = make_track(self.bob, title='Doxology')
@@ -190,9 +190,9 @@ class QueryCountTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.viewer = User.objects.create_user(username='viewer', password='pw12345!')
-        self.a1 = User.objects.create_user(username='a1', password='pw12345!')
-        self.a2 = User.objects.create_user(username='a2', password='pw12345!')
+        self.viewer = User.objects.create_user(username='viewer', email='viewer@test.co', password='pw12345!')
+        self.a1 = User.objects.create_user(username='a1', email='a1@test.co', password='pw12345!')
+        self.a2 = User.objects.create_user(username='a2', email='a2@test.co', password='pw12345!')
         # Artists need profiles so artist__profile (the join we added) is exercised.
         Profile.objects.create(user=self.a1)
         Profile.objects.create(user=self.a2)

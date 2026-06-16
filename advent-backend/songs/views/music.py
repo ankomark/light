@@ -334,18 +334,20 @@ class CommentViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        # Explicit ordering so pagination is consistent (silences DRF's
-        # UnorderedObjectListWarning).
+        # select_related pulls the author (+ profile for the avatar) in one query
+        # so a page of comments doesn't N+1. Explicit ordering keeps pagination
+        # consistent (silences DRF's UnorderedObjectListWarning).
+        qs = Comment.objects.select_related('user', 'user__profile').order_by('-created_at')
         track_id = self.kwargs.get('track_pk')
         if track_id:
-            return Comment.objects.filter(track_id=track_id).order_by('-created_at')
-        return Comment.objects.all().order_by('-created_at')
+            qs = qs.filter(track_id=track_id)
+        return qs
 
     def perform_create(self, serializer):
         track_id = self.kwargs.get('track_pk')
         track = get_object_or_404(Track, id=track_id)
-        serializer.save(user=self.request.user, track=track)
-        comment = serializer.save(user=self.request.user, track=track)  # <-- This line was missing
+        # Single save — this used to call save() twice (a redundant write).
+        comment = serializer.save(user=self.request.user, track=track)
 
         if comment.user != track.artist:
             msg = f"{self.request.user.username} commented on your track {track.title}"

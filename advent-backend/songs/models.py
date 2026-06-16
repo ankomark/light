@@ -132,6 +132,12 @@ class Comment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        # Newest first + a composite index so "a track's comments, newest first
+        # + paginate" is an index range scan instead of a full table sort.
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['track', '-created_at'], name='trackcomment_track_created_idx')]
+
     def __str__(self):
         return f'Comment by {self.user.username} on {self.track.title}'
 

@@ -50,34 +50,10 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
     const fetchCommentData = async () => {
         try {
             setLoading(true);
+            // The serializer now includes user.profile_picture, so this is a
+            // single request — no more per-comment profile lookups (N+1).
             const data = await fetchComments(trackId);
-            const commentsWithProfiles = await Promise.all(
-                data.map(async (comment) => {
-                    try {
-                        const token = await getAccessToken();
-                        if (!token) return comment;
-
-                        const response = await axios.get(
-                            `${API_URL}/profiles/by_user/${comment.user.id}/`,
-                            { headers: { Authorization: `Bearer ${token}` } }
-                        );
-                        return {
-                            ...comment,
-                            user: {
-                                ...comment.user,
-                                profile_picture: response.data?.picture || null,
-                            },
-                        };
-                    } catch (error) {
-                        console.error('Error fetching profile picture:', error);
-                        return {
-                            ...comment,
-                            user: { ...comment.user, profile_picture: null },
-                        };
-                    }
-                })
-            );
-            setComments(commentsWithProfiles);
+            setComments(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error('Failed to fetch comments:', error);
             Alert.alert('Error', 'Failed to load comments');

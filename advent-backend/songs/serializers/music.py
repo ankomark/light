@@ -95,8 +95,12 @@ class PlaylistListSerializer(serializers.ModelSerializer):
 
 
 class CommentSerializer(serializers.ModelSerializer):
-    user = DetailedUserSerializer(read_only=True) 
-    track = TrackSerializer(read_only=True)
+    # SimpleUserSerializer (id, username, profile_picture) avoids the per-comment
+    # cost of DetailedUserSerializer; track is just its id, not the full nested
+    # track re-serialized on every row.
+    user = SimpleUserSerializer(read_only=True)
+    track = serializers.PrimaryKeyRelatedField(read_only=True)
+
     class Meta:
         model = Comment
         fields = ('id', 'content', 'user', 'track', 'created_at', 'updated_at')
