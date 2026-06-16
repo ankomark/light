@@ -8,6 +8,8 @@ import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { fetchUserById, followUser, getOrCreateConversation } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import RotatingBackground from './RotatingBackground';
+import ScreenVignette from './ScreenVignette';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -84,9 +86,15 @@ const UserProfileScreen = () => {
     loadProfile();
   }, [loadProfile]);
 
-  // Keep the header title in sync with the loaded username.
+  // Keep the header title in sync with the loaded username, and theme the
+  // native header dark so it sits cohesively over the wallpaper.
   useEffect(() => {
-    navigation.setOptions?.({ title: user?.username || initialUsername || 'Profile' });
+    navigation.setOptions?.({
+      title: user?.username || initialUsername || 'Profile',
+      headerStyle: { backgroundColor: '#0A1628' },
+      headerTintColor: colors.textPrimary,
+      headerShadowVisible: false,
+    });
   }, [navigation, user?.username, initialUsername]);
 
   const handleRefresh = useCallback(() => {
@@ -139,7 +147,7 @@ const UserProfileScreen = () => {
 
     return (
       <View>
-        <LinearGradient colors={['#102E50', '#0A1628']} style={styles.cover} />
+        <LinearGradient colors={['rgba(16,46,80,0.55)', 'rgba(10,22,40,0.2)']} style={styles.cover} />
 
         <View style={styles.avatarRow}>
           <View style={styles.avatarWrapper}>
@@ -289,28 +297,35 @@ const UserProfileScreen = () => {
   }
 
   return (
-    <FlatList
-      style={styles.container}
-      data={posts}
-      key={`grid-${GRID_COLS}`}
-      numColumns={GRID_COLS}
-      keyExtractor={(item) => `up_post_${item.id}`}
-      renderItem={renderPost}
-      ListHeaderComponent={renderHeader}
-      ListEmptyComponent={renderEmptyPosts}
-      refreshing={refreshing}
-      onRefresh={handleRefresh}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={styles.listContent}
-      removeClippedSubviews
-      initialNumToRender={12}
-      windowSize={7}
-    />
+    <View style={styles.root}>
+      {/* Luxury backdrop: rotating wallpaper + navy vignette behind the profile. */}
+      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.5)" />
+      <ScreenVignette tintRgb="6,16,34" zIndex={1} />
+
+      <FlatList
+        style={styles.container}
+        data={posts}
+        key={`grid-${GRID_COLS}`}
+        numColumns={GRID_COLS}
+        keyExtractor={(item) => `up_post_${item.id}`}
+        renderItem={renderPost}
+        ListHeaderComponent={renderHeader}
+        ListEmptyComponent={renderEmptyPosts}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+        removeClippedSubviews
+        initialNumToRender={12}
+        windowSize={7}
+      />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: '#0A1628' },
+  container: { flex: 1, backgroundColor: 'transparent', zIndex: 2 },
   listContent: { paddingBottom: spacing.xxl },
   centered: {
     flex: 1, backgroundColor: colors.bg,
@@ -337,7 +352,7 @@ const styles = StyleSheet.create({
   avatarWrapper: {
     borderRadius: AVATAR_SIZE / 2,
     borderWidth: 3,
-    borderColor: colors.bg,
+    borderColor: 'rgba(232,198,107,0.6)', // soft gold ring
     ...shadows.lg,
   },
   avatar: {
@@ -365,14 +380,18 @@ const styles = StyleSheet.create({
   editBtnText: { ...typography.label, color: colors.white },
 
   nameBlock: { paddingHorizontal: spacing.md, marginTop: spacing.sm },
-  displayName: { ...typography.h2, color: colors.textPrimary },
+  displayName: {
+    ...typography.h2, color: colors.textPrimary,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
   handle: { ...typography.body, color: colors.textSecondary, marginTop: 2 },
 
   statsRow: {
     flexDirection: 'row',
     marginHorizontal: spacing.md, marginTop: spacing.md,
-    backgroundColor: colors.card, borderRadius: radius.lg,
-    paddingVertical: spacing.md, ...shadows.sm,
+    backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
+    paddingVertical: spacing.md,
   },
   statBox: { flex: 1, alignItems: 'center' },
   statValue: { ...typography.h3, color: colors.textPrimary },
@@ -382,13 +401,15 @@ const styles = StyleSheet.create({
   infoSection: { marginHorizontal: spacing.md, marginTop: spacing.md, gap: spacing.sm },
   infoCard: {
     flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm,
-    backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md, ...shadows.sm,
+    backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.md, padding: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
   },
   infoText: { ...typography.body, color: colors.textPrimary, flex: 1 },
 
   sectionTitle: {
     ...typography.h3, color: colors.textPrimary,
     marginHorizontal: spacing.md, marginTop: spacing.lg, marginBottom: spacing.sm,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
   tile: {
     width: TILE_SIZE, height: TILE_SIZE, marginBottom: GRID_GAP,
@@ -402,9 +423,10 @@ const styles = StyleSheet.create({
     width: 22, height: 22, alignItems: 'center', justifyContent: 'center',
   },
   postsEmpty: {
-    backgroundColor: colors.card, borderRadius: radius.lg,
+    backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.lg,
     marginHorizontal: spacing.md, paddingVertical: spacing.xxl,
-    alignItems: 'center', gap: spacing.sm, ...shadows.sm,
+    alignItems: 'center', gap: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
   },
   postsEmptyText: { ...typography.body, color: colors.textMuted },
 });
