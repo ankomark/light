@@ -28,6 +28,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
   const [downloadError, setDownloadError] = useState(null);
   const [lyricsVisible, setLyricsVisible] = useState(false);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
 
   const hasLyrics = typeof track.lyrics === 'string' && track.lyrics.trim().length > 0;
 
@@ -203,14 +204,10 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
 
         <View style={styles.actionRight}>
           {isOwner && (
-            <>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('EditTrack', { track })} hitSlop={HIT}>
-                <MaterialIcons name="edit" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={handleDelete} hitSlop={HIT}>
-                <MaterialIcons name="delete-outline" size={18} color={colors.error} />
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setMenuVisible(true)} hitSlop={HIT}
+              accessibilityRole="button" accessibilityLabel="Track options">
+              <MaterialIcons name="more-horiz" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
           )}
 
           {onRemoveFromPlaylist && (
@@ -275,6 +272,35 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
           </View>
         </View>
       </Modal>
+
+      {/* Owner action sheet: Edit / Delete (tap the "..." to open). */}
+      <Modal
+        visible={menuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <View style={styles.sheetRoot}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuVisible(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <TouchableOpacity
+              style={styles.sheetItem}
+              onPress={() => { setMenuVisible(false); navigation.navigate('EditTrack', { track }); }}
+            >
+              <MaterialIcons name="edit" size={22} color={colors.primary} />
+              <Text style={styles.sheetLabel}>Edit track</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.sheetItem}
+              onPress={() => { setMenuVisible(false); handleDelete(); }}
+            >
+              <MaterialIcons name="delete-outline" size={22} color={colors.error} />
+              <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>Delete track</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -326,6 +352,27 @@ const styles = StyleSheet.create({
   iconBtn: { padding: spacing.xs },
   downloadProgress: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.xs },
   downloadText: { color: colors.textSecondary, fontSize: 12 },
+
+  // Owner action sheet (Edit / Delete)
+  sheetRoot: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
+  sheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingBottom: 28,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  sheetHandle: {
+    alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.border, marginTop: 8, marginBottom: 6,
+  },
+  sheetItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingVertical: 15, paddingHorizontal: 22,
+  },
+  sheetLabel: { fontSize: 16, color: colors.textPrimary, fontWeight: '600' },
+  sheetLabelDestructive: { color: colors.error },
 
   // Floating lyrics page
   lyricsOverlay: {
