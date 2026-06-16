@@ -101,7 +101,7 @@ const Profile = () => {
     return (
       <View>
         {/* Cover area */}
-        <LinearGradient colors={['#102E50', '#0A1628']} style={styles.cover} />
+        <LinearGradient colors={['rgba(16,46,80,0.55)', 'rgba(10,22,40,0.2)']} style={styles.cover} />
 
         {/* Avatar + edit row */}
         <View style={styles.avatarRow}>
@@ -266,7 +266,7 @@ const Profile = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: 'transparent',
   },
   listContent: { paddingBottom: spacing.xxl },
   centered: {
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
   avatarWrapper: {
     borderRadius: AVATAR_SIZE / 2,
     borderWidth: 3,
-    borderColor: colors.bg,
+    borderColor: 'rgba(232,198,107,0.6)', // soft gold ring
     ...shadows.lg,
   },
   avatar: {
@@ -337,6 +337,7 @@ const styles = StyleSheet.create({
   displayName: {
     ...typography.h2,
     color: colors.textPrimary,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
   username: {
     ...typography.body,
@@ -347,10 +348,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginHorizontal: spacing.md,
     marginTop: spacing.md,
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.85)',
     borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     paddingVertical: spacing.md,
-    ...shadows.sm,
   },
   statBox: {
     flex: 1,
@@ -379,10 +381,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing.sm,
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.85)',
     borderRadius: radius.md,
     padding: spacing.md,
-    ...shadows.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   infoText: {
     ...typography.body,
@@ -395,6 +398,7 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
     marginTop: spacing.lg,
     marginBottom: spacing.sm,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
   gridRow: {
     paddingHorizontal: GRID_PADDING,
@@ -422,13 +426,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   postsEmpty: {
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.85)',
     borderRadius: radius.lg,
     marginHorizontal: spacing.md,
     paddingVertical: spacing.xxl,
     alignItems: 'center',
     gap: spacing.sm,
-    ...shadows.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   postsEmptyText: {
     ...typography.body,
