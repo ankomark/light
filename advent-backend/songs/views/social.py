@@ -1,7 +1,30 @@
 from .common import *  # noqa: F401,F403
-from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField
+from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F
 from django.conf import settings
 from django.core.cache import cache
+
+
+def feed_post_queryset(user):
+    """SocialPost queryset with all per-post data the serializer needs resolved
+    in the main query (author + profile + song via select_related; follower
+    count, liked/saved/following via annotations). Reused by the feed, Explore
+    trending, and search so none of them N+1 over the serializer's fields."""
+    author_followers = (
+        User.objects.filter(pk=OuterRef('user_id'))
+        .annotate(n=Count('followers')).values('n')[:1]
+    )
+    qs = (
+        SocialPost.objects
+        .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile')
+        .annotate(author_followers_count=Subquery(author_followers, output_field=IntegerField()))
+    )
+    if getattr(user, 'is_authenticated', False):
+        qs = qs.annotate(
+            liked_by_me=Exists(PostLike.objects.filter(post=OuterRef('pk'), user=user)),
+            saved_by_me=Exists(PostSave.objects.filter(post=OuterRef('pk'), user=user)),
+            author_is_following=Exists(User.objects.filter(pk=OuterRef('user_id'), followers=user)),
+        )
+    return qs
 
 
 def _feed_version(user_id):
@@ -35,37 +58,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         - ?search= matches caption / username / location / tags.
         """
         user = self.request.user
-
-        # Author follower count as a correlated subquery (computed in the main
-        # query — no per-post COUNT). Injected into the user payload by
-        # SocialPostSerializer.to_representation.
-        author_followers = (
-            User.objects.filter(pk=OuterRef('user_id'))
-            .annotate(n=Count('followers'))
-            .values('n')[:1]
-        )
-        qs = (
-            SocialPost.objects
-            .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile')
-            .annotate(
-                # likes_count / comments_count are denormalised columns kept in
-                # sync by signals — no more two DISTINCT COUNT joins per feed query.
-                author_followers_count=Subquery(author_followers, output_field=IntegerField()),
-            )
-            .order_by('-created_at')
-        )
-
-        if user.is_authenticated:
-            qs = qs.annotate(
-                liked_by_me=Exists(PostLike.objects.filter(post=OuterRef('pk'), user=user)),
-                saved_by_me=Exists(PostSave.objects.filter(post=OuterRef('pk'), user=user)),
-                # Does the current user follow this post's author? Computed in the
-                # main query (no per-post lookup); injected into the user payload
-                # by SocialPostSerializer.to_representation.
-                author_is_following=Exists(
-                    User.objects.filter(pk=OuterRef('user_id'), followers=user)
-                ),
-            )
+        # Shared annotated queryset (no N+1 in the serializer); likes_count /
+        # comments_count are denormalised columns, so no DISTINCT COUNT joins.
+        qs = feed_post_queryset(user).order_by('-created_at')
 
         tag = self.request.query_params.get('tag')
         if tag:
@@ -559,17 +554,33 @@ class ExploreViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def trending_posts(self, request):
+        """Top photos/videos from the last 7 days, ranked by a weighted score of
+        likes + comments + views (all denormalised columns — no aggregation, no
+        N+1). Cached briefly per user (the ranking is global; the per-user
+        liked/saved state rides along and is at most TTL seconds stale)."""
+        cache_key = f'explore:trending:{request.user.id}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
         week_ago = timezone.now() - timedelta(days=7)
-        posts = SocialPost.objects.annotate(
-            engagement=Count('likes', distinct=True) + Count('comments', distinct=True)
-        ).filter(
-            created_at__gte=week_ago
-        ).select_related('user').order_by('-engagement')[:30]
-        serializer = SocialPostSerializer(posts, many=True, context={'request': request})
-        return Response(serializer.data)
+        posts = (
+            feed_post_queryset(request.user)
+            .filter(created_at__gte=week_ago)
+            .annotate(trend_score=F('likes_count') * 10 + F('comments_count') * 6 + F('view_count'))
+            .order_by('-trend_score', '-created_at')[:30]
+        )
+        data = SocialPostSerializer(posts, many=True, context={'request': request}).data
+        cache.set(cache_key, data, 120)
+        return Response(data)
 
     @action(detail=False, methods=['get'])
     def suggested_users(self, request):
+        cache_key = f'explore:suggested:{request.user.id}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
         following_ids = list(request.user.followed_by.values_list('id', flat=True))
         users = User.objects.exclude(
             id=request.user.id
@@ -578,8 +589,9 @@ class ExploreViewSet(viewsets.ViewSet):
         ).annotate(
             followers_count=Count('followers', distinct=True)
         ).select_related('profile').order_by('-followers_count')[:12]
-        serializer = SimpleUserSerializer(users, many=True, context={'request': request})
-        return Response(serializer.data)
+        data = SimpleUserSerializer(users, many=True, context={'request': request}).data
+        cache.set(cache_key, data, 300)
+        return Response(data)
 
     @action(detail=False, methods=['get'])
     def trending_hashtags(self, request):
@@ -607,9 +619,9 @@ class ExploreViewSet(viewsets.ViewSet):
         users = User.objects.filter(
             Q(username__icontains=query) | Q(profile__bio__icontains=query)
         ).select_related('profile').distinct()[:10]
-        posts = SocialPost.objects.filter(
+        posts = feed_post_queryset(request.user).filter(
             Q(caption__icontains=query) | Q(location__icontains=query)
-        ).select_related('user').order_by('-created_at')[:20]
+        ).order_by('-created_at')[:20]
         tracks = Track.objects.filter(
             Q(title__icontains=query) | Q(album__icontains=query)
         ).select_related('artist').order_by('-created_at')[:10]

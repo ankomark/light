@@ -145,8 +145,7 @@ const ExploreScreen = ({ navigation }) => {
   }, [navigation]);
 
   const openUser = useCallback((user) => {
-    // Navigate to the user's profile — for now use UserProfile logic
-    navigation.navigate('Home');
+    navigation.navigate('UserProfile', { userId: user.id, username: user.username });
   }, [navigation]);
 
   // ── Discover mode (no query) ──
@@ -296,17 +295,17 @@ const ExploreScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(13,35,64,0.78)',
     borderRadius: radius.full,
     marginHorizontal: spacing.md,
     marginVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
     height: 44,
   },
   searchIcon: { marginRight: spacing.xs },
@@ -326,16 +325,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
     marginTop: spacing.sm,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   // Suggested people
   suggestedRow: { paddingHorizontal: spacing.md, gap: spacing.sm },
   suggestedCard: {
     width: 100,
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.85)',
     borderRadius: radius.lg,
     padding: spacing.sm,
     alignItems: 'center',
-    ...shadows.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   suggestedAvatar: {
     width: 56,
@@ -359,6 +362,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     overflow: 'hidden',
     backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   gridImage: { width: '100%', height: '100%' },
   gridPlaceholder: { justifyContent: 'center', alignItems: 'center' },
@@ -391,8 +396,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    backgroundColor: 'rgba(16,28,46,0.82)',
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     gap: spacing.sm,
   },
   resultAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.surface },

@@ -296,8 +296,10 @@ const GroupListWrapper = ({ navigation }) => (
 );
 
 const ExploreWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    {/* Social-feed wallpapers behind Explore (swap for bespoke art later). */}
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Explore couldn't load.">
       <ExploreScreen navigation={navigation} />
     </ErrorBoundary>

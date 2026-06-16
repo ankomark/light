@@ -16,6 +16,8 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../services/api';
 import CommentAction from './CommentAction';
 import PostActions from '../components/PostActions';
+import RotatingBackground from './RotatingBackground';
+import ScreenVignette from './ScreenVignette';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -181,6 +183,11 @@ const PostDetail = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
+      {/* Luxury backdrop: rotating wallpaper + navy vignette behind glass cards. */}
+      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.5)" />
+      <ScreenVignette tintRgb="6,16,34" zIndex={1} />
+
+      <View style={styles.content}>
       {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
@@ -329,6 +336,7 @@ const PostDetail = ({ route, navigation }) => {
         onCommentsLoaded={handleCommentsLoaded}
         onCommentPosted={updateCommentsCount}
       />
+      </View>
     </View>
   );
 };
@@ -336,7 +344,11 @@ const PostDetail = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: '#0A1628',
+  },
+  content: {
+    flex: 1,
+    zIndex: 2, // above the vignette (zIndex 1)
   },
   centered: {
     flex: 1,
@@ -359,8 +371,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.bg,
+    borderBottomColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(8,20,40,0.55)',
   },
   topBarTitle: {
     ...typography.h3,
@@ -389,12 +401,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileImage: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: 'rgba(232,198,107,0.55)', // soft gold ring
   },
   authorText: {
     marginLeft: spacing.sm,
@@ -412,9 +424,16 @@ const styles = StyleSheet.create({
   },
 
   mediaFrame: {
-    width: SCREEN_WIDTH,
+    width: SCREEN_WIDTH - spacing.md * 2,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
     backgroundColor: colors.black,
     alignSelf: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    ...shadows.md,
   },
   media: {
     width: '100%',
@@ -448,8 +467,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: 'rgba(16,28,46,0.85)',
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   statChip: {
     flexDirection: 'row',
@@ -467,8 +492,13 @@ const styles = StyleSheet.create({
   },
 
   captionCard: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm + 2,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    backgroundColor: 'rgba(16,28,46,0.85)',
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   caption: {
     ...typography.body,
@@ -486,10 +516,10 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
     marginTop: spacing.md,
     padding: spacing.sm + 2,
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.85)',
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   songIcon: {
     width: 38,
