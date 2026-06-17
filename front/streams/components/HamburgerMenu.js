@@ -67,6 +67,7 @@ const ADMIN_SECTION = {
     { label: 'Reports', route: 'AdminReports', set: 'mci', icon: 'flag-outline' },
     { label: 'Users', route: 'AdminUsers', set: 'mci', icon: 'account-cog-outline' },
     { label: 'Content', route: 'AdminContent', set: 'mci', icon: 'file-document-multiple-outline' },
+    { label: 'Audit Log', route: 'AdminLogs', set: 'mci', icon: 'history' },
   ],
 };
 

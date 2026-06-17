@@ -11,7 +11,7 @@ from .models import (
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('id', 'username', 'email', 'admin_role', 'is_suspended', 'is_active', 'is_superuser', 'date_joined')
+    list_display = ('id', 'username', 'email', 'admin_role', 'is_suspended', 'suspended_until', 'strikes', 'is_active', 'is_superuser', 'date_joined')
     list_filter = ('admin_role', 'is_suspended', 'is_active', 'is_superuser', 'is_email_verified')
     search_fields = ('username', 'email')
     list_editable = ('admin_role', 'is_suspended')
@@ -20,7 +20,7 @@ class UserAdmin(admin.ModelAdmin):
 
 @admin.register(Report)
 class ReportAdmin(admin.ModelAdmin):
-    list_display = ('id', 'reporter', 'content_type', 'object_id', 'reason', 'status', 'created_at')
+    list_display = ('id', 'reporter', 'content_type', 'object_id', 'reason', 'status', 'assigned_to', 'created_at')
     list_filter = ('status', 'reason', 'content_type')
     search_fields = ('reporter__username', 'description')
     ordering = ('-created_at',)

@@ -460,7 +460,7 @@ class StoryViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Story.objects.filter(
-            expires_at__gt=timezone.now()
+            expires_at__gt=timezone.now(), is_removed=False
         ).select_related('user__profile').prefetch_related('views')
 
     def perform_create(self, serializer):
@@ -484,6 +484,7 @@ class StoryViewSet(viewsets.ModelViewSet):
         stories = Story.objects.filter(
             user_id__in=following_ids,
             expires_at__gt=timezone.now(),
+            is_removed=False,
         ).select_related('user__profile').prefetch_related('views').order_by('user_id', '-created_at')
 
         # Group by user

@@ -1,12 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, Alert, Image,
+  ActivityIndicator, Alert, Image, Modal, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   fetchAdminReports, resolveReport, dismissReport, removeReportTarget,
+  assignReport, addReportNote,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
@@ -50,6 +51,8 @@ const AdminReports = () => {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [noteFor, setNoteFor] = useState(null);   // report being annotated
+  const [noteText, setNoteText] = useState('');
 
   const load = useCallback(async (status) => {
     setLoading(true);
@@ -65,12 +68,25 @@ const AdminReports = () => {
 
   useFocusEffect(useCallback(() => { load(filter); }, [load, filter]));
 
+  // Resolve/dismiss/remove drop the row from this status-filtered list.
   const act = async (id, fn) => {
     setBusyId(id);
     try {
       await fn();
-      // Drop it from the current (status-filtered) list optimistically.
       setReports((prev) => prev.filter((r) => r.id !== id));
+    } catch {
+      Alert.alert('Error', 'Action failed. Please try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Assign/note keep the row but update it in place.
+  const update = async (id, fn) => {
+    setBusyId(id);
+    try {
+      const updated = await fn();
+      setReports((prev) => prev.map((r) => (r.id === id ? updated : r)));
     } catch {
       Alert.alert('Error', 'Action failed. Please try again.');
     } finally {
@@ -89,39 +105,74 @@ const AdminReports = () => {
     );
   };
 
+  const openNote = (item) => { setNoteFor(item); setNoteText(item.moderator_notes || ''); };
+  const saveNote = async () => {
+    const item = noteFor;
+    setNoteFor(null);
+    await update(item.id, () => addReportNote(item.id, noteText.trim()));
+  };
+
   const renderItem = ({ item }) => {
     const busy = busyId === item.id;
     const canRemove = REMOVABLE.has(item.content_type) && !item.target?.is_removed;
+    const dup = item.duplicate_count || 1;
     return (
       <View style={styles.card}>
         <View style={styles.cardHead}>
           <View style={styles.reasonPill}><Text style={styles.reasonText}>{item.reason}</Text></View>
+          {dup > 1 && (
+            <View style={styles.dupPill}>
+              <Ionicons name="people" size={11} color="#FFD27A" />
+              <Text style={styles.dupText}>{dup} reports</Text>
+            </View>
+          )}
           <Text style={styles.metaText}>{item.content_type} #{item.object_id}</Text>
         </View>
 
         <TargetPreview target={item.target} />
 
         {item.description ? <Text style={styles.desc}>“{item.description}”</Text> : null}
-        <Text style={styles.reporter}>Reported by @{item.reporter?.username || 'unknown'}</Text>
+
+        <View style={styles.subRow}>
+          <Text style={styles.reporter}>Reported by @{item.reporter?.username || 'unknown'}</Text>
+          {item.assigned_to && (
+            <Text style={styles.assigned}>· assigned @{item.assigned_to.username}</Text>
+          )}
+        </View>
+        {item.moderator_notes ? (
+          <Text style={styles.note}>📝 {item.moderator_notes}</Text>
+        ) : null}
 
         {busy ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.sm }} />
         ) : (
-          <View style={styles.actions}>
-            <TouchableOpacity style={[styles.btn, styles.btnResolve]} onPress={() => act(item.id, () => resolveReport(item.id))}>
-              <Ionicons name="checkmark-circle-outline" size={16} color="#0A1628" />
-              <Text style={styles.btnTextDark}>Resolve</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => act(item.id, () => dismissReport(item.id))}>
-              <Text style={styles.btnTextLight}>Dismiss</Text>
-            </TouchableOpacity>
-            {canRemove && (
-              <TouchableOpacity style={[styles.btn, styles.btnRemove]} onPress={() => confirmRemove(item)}>
-                <Ionicons name="trash-outline" size={16} color={colors.white} />
-                <Text style={styles.btnTextLight}>Remove</Text>
+          <>
+            <View style={styles.actions}>
+              <TouchableOpacity style={[styles.btn, styles.btnResolve]} onPress={() => act(item.id, () => resolveReport(item.id))}>
+                <Ionicons name="checkmark-circle-outline" size={16} color="#0A1628" />
+                <Text style={styles.btnTextDark}>Resolve</Text>
               </TouchableOpacity>
-            )}
-          </View>
+              <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => act(item.id, () => dismissReport(item.id))}>
+                <Text style={styles.btnTextLight}>Dismiss</Text>
+              </TouchableOpacity>
+              {canRemove && (
+                <TouchableOpacity style={[styles.btn, styles.btnRemove]} onPress={() => confirmRemove(item)}>
+                  <Ionicons name="trash-outline" size={16} color={colors.white} />
+                  <Text style={styles.btnTextLight}>Remove</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={styles.actionsSecondary}>
+              <TouchableOpacity style={styles.linkBtn} onPress={() => update(item.id, () => assignReport(item.id))}>
+                <Ionicons name="person-outline" size={14} color={colors.accent} />
+                <Text style={styles.linkText}>{item.assigned_to ? 'Unassign' : 'Assign to me'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.linkBtn} onPress={() => openNote(item)}>
+                <Ionicons name="create-outline" size={14} color={colors.accent} />
+                <Text style={styles.linkText}>{item.moderator_notes ? 'Edit note' : 'Add note'}</Text>
+              </TouchableOpacity>
+            </View>
+          </>
         )}
       </View>
     );
@@ -161,6 +212,28 @@ const AdminReports = () => {
           }
         />
       )}
+
+      {/* Internal note editor */}
+      <Modal visible={!!noteFor} transparent animationType="fade" onRequestClose={() => setNoteFor(null)}>
+        <View style={styles.noteBackdrop}>
+          <View style={styles.noteCard}>
+            <Text style={styles.noteTitle}>Internal note</Text>
+            <TextInput
+              style={styles.noteInput}
+              placeholder="Visible to moderators only…"
+              placeholderTextColor={colors.placeholder}
+              value={noteText}
+              onChangeText={setNoteText}
+              multiline
+              autoFocus
+            />
+            <View style={styles.noteActions}>
+              <TouchableOpacity onPress={() => setNoteFor(null)}><Text style={styles.noteCancel}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.noteSave} onPress={saveNote}><Text style={styles.noteSaveText}>Save</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -188,13 +261,19 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
     padding: spacing.md, marginBottom: spacing.sm, ...shadows.sm,
   },
-  cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
   reasonPill: {
     paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.full,
     backgroundColor: 'rgba(224,36,94,0.18)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(224,36,94,0.5)',
   },
   reasonText: { ...typography.caption, color: '#FF6B9A', fontWeight: '700', textTransform: 'capitalize' },
-  metaText: { ...typography.caption, color: colors.textMuted },
+  dupPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.full,
+    backgroundColor: 'rgba(244,162,97,0.18)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.5)',
+  },
+  dupText: { ...typography.caption, color: '#FFD27A', fontWeight: '700', fontSize: 11 },
+  metaText: { ...typography.caption, color: colors.textMuted, marginLeft: 'auto' },
   targetCard: {
     backgroundColor: 'rgba(10,22,40,0.6)', borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
@@ -210,8 +289,14 @@ const styles = StyleSheet.create({
   targetBody: { ...typography.caption, color: colors.textSecondary },
   targetGone: { ...typography.caption, color: colors.textMuted, fontStyle: 'italic', marginBottom: spacing.sm },
   desc: { ...typography.caption, color: colors.textSecondary, fontStyle: 'italic', marginBottom: spacing.xs },
+  subRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   reporter: { ...typography.caption, color: colors.textMuted },
+  assigned: { ...typography.caption, color: colors.accent },
+  note: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  actionsSecondary: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.sm, paddingTop: spacing.xs },
+  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  linkText: { ...typography.caption, color: colors.accent, fontWeight: '600' },
   btn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md,
@@ -226,6 +311,22 @@ const styles = StyleSheet.create({
   btnTextLight: { ...typography.caption, color: colors.white, fontWeight: '700' },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl * 1.5, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textSecondary },
+
+  noteBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: spacing.lg },
+  noteCard: {
+    backgroundColor: '#0E2038', borderRadius: radius.lg, padding: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  noteTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
+  noteInput: {
+    minHeight: 90, color: colors.textPrimary, fontSize: 15, textAlignVertical: 'top',
+    backgroundColor: colors.inputBg, borderRadius: radius.md, padding: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  noteActions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: spacing.lg, marginTop: spacing.md },
+  noteCancel: { ...typography.label, color: colors.textSecondary, fontWeight: '700' },
+  noteSave: { backgroundColor: colors.accent, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.md },
+  noteSaveText: { ...typography.label, color: '#0A1628', fontWeight: '800' },
 });
 
 export default AdminReports;

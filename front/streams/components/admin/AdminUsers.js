@@ -8,7 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/useAuth';
 import { isSuperAdmin } from '../../utils/roles';
 import {
-  fetchAdminUsers, suspendUser, unsuspendUser, banUser, unbanUser, setUserRole,
+  fetchAdminUsers, suspendUser, unsuspendUser, banUser, unbanUser, setUserRole, warnUser,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
@@ -70,6 +70,16 @@ const AdminUsers = () => {
     ]);
   };
 
+  const promptSuspend = () => {
+    Alert.alert('Suspend user', `How long should @${selected.username} be suspended?`, [
+      { text: '1 day', onPress: () => run((id) => suspendUser(id, '', 1)) },
+      { text: '7 days', onPress: () => run((id) => suspendUser(id, '', 7)) },
+      { text: '30 days', onPress: () => run((id) => suspendUser(id, '', 30)) },
+      { text: 'Indefinite', onPress: () => run((id) => suspendUser(id, '', 0)) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.row} onPress={() => setSelected(item)} activeOpacity={0.85}>
       <Image
@@ -84,7 +94,8 @@ const AdminUsers = () => {
       <View style={styles.badges}>
         {item.admin_role ? <Text style={[styles.tag, styles.tagRole]}>{ROLE_LABEL[item.admin_role] || item.admin_role}</Text> : null}
         {!item.is_active ? <Text style={[styles.tag, styles.tagBan]}>Banned</Text>
-          : item.is_suspended ? <Text style={[styles.tag, styles.tagSusp]}>Suspended</Text> : null}
+          : item.is_currently_suspended ? <Text style={[styles.tag, styles.tagSusp]}>Suspended</Text> : null}
+        {item.strikes > 0 ? <Text style={[styles.tag, styles.tagStrike]}>{item.strikes}⚠</Text> : null}
       </View>
     </TouchableOpacity>
   );
@@ -136,15 +147,24 @@ const AdminUsers = () => {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.sheetName}>@{selected.username}</Text>
                     <Text style={styles.sheetEmail}>{selected.email}</Text>
+                    <Text style={styles.sheetMeta}>
+                      {selected.strikes || 0} strike{selected.strikes === 1 ? '' : 's'}
+                      {selected.is_currently_suspended
+                        ? selected.suspended_until
+                          ? ` · suspended until ${new Date(selected.suspended_until).toLocaleDateString()}`
+                          : ' · suspended (indefinite)'
+                        : ''}
+                    </Text>
                   </View>
                 </View>
 
                 {busy && <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.sm }} />}
 
+                <SheetBtn icon="alert-circle-outline" label="Warn (add strike)" onPress={() => run((id) => warnUser(id, ''))} disabled={busy} />
                 {selected.is_suspended ? (
                   <SheetBtn icon="play-circle-outline" label="Unsuspend" onPress={() => run(unsuspendUser)} disabled={busy} />
                 ) : (
-                  <SheetBtn icon="pause-circle-outline" label="Suspend" onPress={() => run((id) => suspendUser(id, ''))} disabled={busy} />
+                  <SheetBtn icon="pause-circle-outline" label="Suspend…" onPress={promptSuspend} disabled={busy} />
                 )}
                 {selected.is_active ? (
                   <SheetBtn icon="ban-outline" label="Ban (disable login)" danger onPress={() => run((id) => banUser(id, ''))} disabled={busy} />
@@ -204,6 +224,7 @@ const styles = StyleSheet.create({
   tagRole: { color: '#0A1628', backgroundColor: colors.accent },
   tagSusp: { color: colors.white, backgroundColor: colors.warning },
   tagBan: { color: colors.white, backgroundColor: colors.error },
+  tagStrike: { color: colors.white, backgroundColor: 'rgba(229,57,53,0.7)' },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textSecondary },
 
@@ -218,6 +239,7 @@ const styles = StyleSheet.create({
   sheetAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.surface },
   sheetName: { ...typography.h3, color: colors.textPrimary },
   sheetEmail: { ...typography.caption, color: colors.textMuted, marginTop: 1 },
+  sheetMeta: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
   sheetBtn: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     paddingVertical: spacing.md, paddingHorizontal: spacing.sm, borderRadius: radius.md,

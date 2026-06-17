@@ -338,7 +338,7 @@ class CommentViewSet(viewsets.ModelViewSet):
         # select_related pulls the author (+ profile for the avatar) in one query
         # so a page of comments doesn't N+1. Explicit ordering keeps pagination
         # consistent (silences DRF's UnorderedObjectListWarning).
-        qs = Comment.objects.select_related('user', 'user__profile').order_by('-created_at')
+        qs = Comment.objects.select_related('user', 'user__profile').filter(is_removed=False).order_by('-created_at')
         track_id = self.kwargs.get('track_pk')
         if track_id:
             qs = qs.filter(track_id=track_id)

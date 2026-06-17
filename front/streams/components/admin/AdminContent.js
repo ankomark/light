@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Image, Alert,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
+  Image, Alert, ScrollView, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -12,19 +13,25 @@ const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 const TYPES = [
   { key: 'post', label: 'Posts' },
   { key: 'track', label: 'Tracks' },
-  { key: 'comment', label: 'Comments' },
+  { key: 'comment', label: 'Post comments' },
+  { key: 'trackcomment', label: 'Track comments' },
+  { key: 'group', label: 'Groups' },
+  { key: 'story', label: 'Stories' },
 ];
 
 const AdminContent = () => {
   const [type, setType] = useState('post');
+  const [query, setQuery] = useState('');
+  const [removedOnly, setRemovedOnly] = useState(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const debounceRef = useRef(null);
 
-  const load = useCallback(async (t) => {
+  const load = useCallback(async (t, q, removed) => {
     setLoading(true);
     try {
-      const res = await fetchAdminContent(t);
+      const res = await fetchAdminContent(t, q, removed ? 'true' : '');
       setItems(res?.results || (Array.isArray(res) ? res : []));
     } catch {
       setItems([]);
@@ -33,7 +40,16 @@ const AdminContent = () => {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(type); }, [load, type]));
+  useFocusEffect(useCallback(() => { load(type, query.trim(), removedOnly); }, [load, type, removedOnly]));  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onChangeQuery = (text) => {
+    setQuery(text);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => load(type, text.trim(), removedOnly), 400);
+  };
+
+  const switchType = (t) => { setType(t); setQuery(''); load(t, '', removedOnly); };
+  const toggleRemoved = () => { const v = !removedOnly; setRemovedOnly(v); load(type, query.trim(), v); };
 
   const toggle = async (item) => {
     const willRemove = !item.is_removed;
@@ -60,7 +76,7 @@ const AdminContent = () => {
 
   const renderItem = ({ item }) => {
     const author = item.author;
-    const text = item.caption || item.content || item.title || `#${item.id}`;
+    const text = item.caption || item.content || item.title || item.name || `#${item.id}`;
     return (
       <View style={[styles.card, item.is_removed && styles.cardRemoved]}>
         <View style={styles.head}>
@@ -96,16 +112,38 @@ const AdminContent = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Content</Text>
-      <View style={styles.filterRow}>
+
+      {/* Type pills — horizontally scrollable (6 types) */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         {TYPES.map((tp) => {
           const active = type === tp.key;
           return (
             <TouchableOpacity key={tp.key} style={[styles.pill, active && styles.pillActive]}
-              onPress={() => setType(tp.key)} activeOpacity={0.85}>
+              onPress={() => switchType(tp.key)} activeOpacity={0.85}>
               <Text style={[styles.pillText, active && styles.pillTextActive]}>{tp.label}</Text>
             </TouchableOpacity>
           );
         })}
+      </ScrollView>
+
+      {/* Search + removed-only toggle */}
+      <View style={styles.toolRow}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color={colors.placeholder} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search…"
+            placeholderTextColor={colors.placeholder}
+            value={query}
+            onChangeText={onChangeQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+        <TouchableOpacity style={[styles.toggle, removedOnly && styles.toggleActive]} onPress={toggleRemoved} activeOpacity={0.85}>
+          <Ionicons name={removedOnly ? 'eye-off' : 'eye-off-outline'} size={15} color={removedOnly ? '#0A1628' : colors.textSecondary} />
+          <Text style={[styles.toggleText, removedOnly && styles.toggleTextActive]}>Removed</Text>
+        </TouchableOpacity>
       </View>
 
       {loading ? (
@@ -117,7 +155,7 @@ const AdminContent = () => {
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-          onRefresh={() => load(type)}
+          onRefresh={() => load(type, query.trim(), removedOnly)}
           refreshing={loading}
           ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>Nothing here</Text></View>}
         />
@@ -142,6 +180,23 @@ const styles = StyleSheet.create({
   pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   pillText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   pillTextActive: { color: '#0A1628' },
+  toolRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, alignItems: 'center' },
+  searchBar: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    backgroundColor: 'rgba(13,35,64,0.78)', borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: spacing.md, height: 40,
+  },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 14 },
+  toggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.md, height: 40, borderRadius: radius.full,
+    backgroundColor: 'rgba(16,28,46,0.82)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  toggleActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  toggleText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  toggleTextActive: { color: '#0A1628' },
   list: { padding: spacing.md, paddingBottom: spacing.xxl },
   card: {
     backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.lg,

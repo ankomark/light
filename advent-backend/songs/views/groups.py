@@ -24,9 +24,9 @@ class GroupViewSet(viewsets.ModelViewSet):
                 Q(is_private=False) |  # Show all public groups
                 Q(creator=self.request.user) |  # Show groups user created
                 Q(members__user=self.request.user)  # Show groups user is member of
-            ).distinct().order_by('-created_at')
+            ).filter(is_removed=False).distinct().order_by('-created_at')
         # For unauthenticated users (if needed)
-        return Group.objects.filter(is_private=False).order_by('-created_at')
+        return Group.objects.filter(is_private=False, is_removed=False).order_by('-created_at')
 
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:

@@ -1482,16 +1482,28 @@ export const dismissReport = (id) =>
 export const removeReportTarget = (id, reason = '') =>
   apiRequest('post', `/admin/reports/${id}/remove_target/`, { reason });
 
+export const assignReport = (id) =>
+  apiRequest('post', `/admin/reports/${id}/assign/`);
+
+export const addReportNote = (id, note) =>
+  apiRequest('post', `/admin/reports/${id}/add_note/`, { note });
+
+export const fetchAdminLogs = (action = '') =>
+  apiRequest('get', '/admin/logs/', null, { params: action ? { action } : {} });
+
 export const fetchAdminUsers = (q = '', role = '') =>
   apiRequest('get', '/admin/users/', null, {
     params: { ...(q ? { q } : {}), ...(role ? { role } : {}) },
   });
 
-export const suspendUser = (id, reason = '') =>
-  apiRequest('post', `/admin/users/${id}/suspend/`, { reason });
+export const suspendUser = (id, reason = '', days = 0) =>
+  apiRequest('post', `/admin/users/${id}/suspend/`, { reason, days });
 
 export const unsuspendUser = (id) =>
   apiRequest('post', `/admin/users/${id}/unsuspend/`);
+
+export const warnUser = (id, reason = '') =>
+  apiRequest('post', `/admin/users/${id}/warn/`, { reason });
 
 export const banUser = (id, reason = '') =>
   apiRequest('post', `/admin/users/${id}/ban/`, { reason });
@@ -1502,9 +1514,9 @@ export const unbanUser = (id) =>
 export const setUserRole = (id, role) =>
   apiRequest('post', `/admin/users/${id}/set_role/`, { role });
 
-export const fetchAdminContent = (type = 'post', removed = '') =>
+export const fetchAdminContent = (type = 'post', q = '', removed = '') =>
   apiRequest('get', '/admin/content/', null, {
-    params: { type, ...(removed ? { removed } : {}) },
+    params: { type, ...(q ? { q } : {}), ...(removed ? { removed } : {}) },
   });
 
 export const removeContent = (type, id, reason = '') =>

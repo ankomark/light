@@ -12,7 +12,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'admin_role',
-            'is_active', 'is_suspended', 'suspension_reason', 'suspended_at',
+            'is_active', 'is_suspended', 'is_currently_suspended',
+            'suspension_reason', 'suspended_at', 'suspended_until', 'strikes',
             'is_email_verified', 'is_superuser',
             'posts_count', 'followers_count', 'profile_picture', 'date_joined',
         ]
@@ -34,14 +35,29 @@ class AdminReportSerializer(serializers.ModelSerializer):
     """A report plus a lightweight preview of the content it targets, so the
     moderator can see what they're acting on without extra round-trips."""
     reporter = SimpleUserSerializer(read_only=True)
+    assigned_to = SimpleUserSerializer(read_only=True)
+    resolved_by = SimpleUserSerializer(read_only=True)
     target = serializers.SerializerMethodField()
+    duplicate_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Report
         fields = [
             'id', 'reporter', 'content_type', 'object_id', 'reason',
             'description', 'status', 'created_at', 'target',
+            'assigned_to', 'moderator_notes', 'resolved_by', 'resolved_at',
+            'duplicate_count',
         ]
+
+    def get_duplicate_count(self, obj):
+        # How many reports (incl. this one) target the same content — surfaces
+        # "5 people reported this" in the queue. Prefer an annotation if present.
+        val = getattr(obj, 'dup_count', None)
+        if val is not None:
+            return val
+        return Report.objects.filter(
+            content_type=obj.content_type, object_id=obj.object_id
+        ).count()
 
     def get_target(self, obj):
         ct, oid = obj.content_type, obj.object_id
@@ -126,3 +142,27 @@ class AdminContentCommentSerializer(serializers.ModelSerializer):
     class Meta:
         model = PostComment
         fields = ['id', 'content', 'post', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentTrackCommentSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='user', read_only=True)
+
+    class Meta:
+        model = Comment
+        fields = ['id', 'content', 'track', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentGroupSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='creator', read_only=True)
+
+    class Meta:
+        model = Group
+        fields = ['id', 'name', 'description', 'is_private', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentStorySerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='user', read_only=True)
+
+    class Meta:
+        model = Story
+        fields = ['id', 'caption', 'content_type', 'is_removed', 'created_at', 'author']

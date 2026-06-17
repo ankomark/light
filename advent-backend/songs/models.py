@@ -42,6 +42,11 @@ class User(AbstractUser):
     is_suspended = models.BooleanField(default=False)
     suspension_reason = models.CharField(max_length=255, blank=True, default='')
     suspended_at = models.DateTimeField(null=True, blank=True)
+    # When set, a suspension auto-expires at this time (temporary suspension).
+    # Null while suspended means indefinite.
+    suspended_until = models.DateTimeField(null=True, blank=True)
+    # Escalating moderation warnings (warn -> temp suspend -> ban).
+    strikes = models.PositiveIntegerField(default=0)
 
     @property
     def is_super_admin(self):
@@ -50,6 +55,17 @@ class User(AbstractUser):
     @property
     def is_platform_admin(self):
         return self.is_super_admin or self.admin_role == 'moderator'
+
+    @property
+    def is_currently_suspended(self):
+        """True only while a suspension is active — a past `suspended_until`
+        means it has lapsed, so the user is treated as free again."""
+        if not self.is_suspended:
+            return False
+        if self.suspended_until is not None:
+            from django.utils import timezone
+            return self.suspended_until > timezone.now()
+        return True
 
     groups = models.ManyToManyField(
         Group,
@@ -153,6 +169,8 @@ class Comment(models.Model):
     content = models.TextField()
     track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='comments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
+    # Soft moderation takedown — hidden from public track-comment lists.
+    is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -381,6 +399,8 @@ class Story(models.Model):
     media_url = models.URLField(max_length=1000, blank=True)
     content_type = models.CharField(max_length=10, choices=CONTENT_TYPES, default='image')
     caption = models.CharField(max_length=200, blank=True)
+    # Soft moderation takedown — hidden from the public story feed.
+    is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
 
@@ -435,6 +455,11 @@ class Report(models.Model):
     reason = models.CharField(max_length=20, choices=REASON_CHOICES)
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    # Moderation workflow: assignment, internal notes, and resolution record.
+    assigned_to = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='assigned_reports')
+    moderator_notes = models.TextField(blank=True, default='')
+    resolved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='resolved_reports')
+    resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -719,6 +744,8 @@ class Group(models.Model):
     # cover_image = models.ImageField(upload_to='group_covers/', blank=True, null=True)
     cover_image = CloudinaryField('image', folder='group_covers/', blank=True, null=True)
     is_private = models.BooleanField(default=True)
+    # Soft moderation takedown — hidden from public group listings.
+    is_removed = models.BooleanField(default=False)
     slug = models.SlugField(unique=True, max_length=100)
 
     def save(self, *args, **kwargs):

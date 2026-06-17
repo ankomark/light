@@ -1,12 +1,21 @@
 from .common import *  # noqa: F401,F403  (DRF symbols, models, StandardPagination, Q, timezone, timedelta)
+from django.db.models import OuterRef, Subquery
 from ..models import AdminActionLog
 from ..serializers import (
     AdminUserSerializer,
     AdminReportSerializer,
+    AdminActionLogSerializer,
     AdminContentPostSerializer,
     AdminContentTrackSerializer,
     AdminContentCommentSerializer,
+    AdminContentTrackCommentSerializer,
+    AdminContentGroupSerializer,
+    AdminContentStorySerializer,
 )
+
+# Strikes at/after which a warning auto-escalates to a temporary suspension.
+STRIKE_SUSPEND_THRESHOLD = 3
+STRIKE_SUSPEND_DAYS = 7
 
 
 # ── Permissions ──────────────────────────────────────────────────────────────
@@ -24,7 +33,15 @@ class IsSuperAdmin(BasePermission):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-_CONTENT_MODELS = {'post': SocialPost, 'comment': PostComment, 'track': Track}
+# Soft-removable content types (also the targets `remove_target` can act on).
+_CONTENT_MODELS = {
+    'post': SocialPost,
+    'comment': PostComment,       # comments on social posts
+    'track': Track,
+    'trackcomment': Comment,      # comments on tracks
+    'group': Group,
+    'story': Story,
+}
 
 
 def log_admin_action(actor, action, target_type='', target_id=None, reason=''):
@@ -35,6 +52,27 @@ def log_admin_action(actor, action, target_type='', target_id=None, reason=''):
         )
     except Exception:
         logger.exception('Failed to write AdminActionLog')
+
+
+def notify_moderation(user, subject, message):
+    """Tell a user about a moderation action — in-app push + email. Best-effort:
+    a failure here must never break the moderator's action."""
+    try:
+        notify_user(user, 'system', message)
+    except Exception:
+        logger.exception('Moderation push failed')
+    try:
+        from django.core.mail import send_mail
+        if user.email:
+            send_mail(
+                subject=f"{getattr(settings, 'SITE_NAME', 'Advent Light')} — {subject}",
+                message=f"Hi {user.username},\n\n{message}\n\n— {getattr(settings, 'SITE_NAME', 'Advent Light')} Team",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=True,
+            )
+    except Exception:
+        logger.exception('Moderation email failed')
 
 
 def _soft_remove(content_type, object_id, removed=True):
@@ -99,10 +137,25 @@ class AdminReportViewSet(viewsets.GenericViewSet):
     serializer_class = AdminReportSerializer
 
     def get_queryset(self):
-        qs = Report.objects.select_related('reporter').order_by('-created_at')
+        # Annotate how many reports target the same content (the "5 people
+        # reported this" badge) with one correlated subquery instead of N+1.
+        dup = (
+            Report.objects
+            .filter(content_type=OuterRef('content_type'), object_id=OuterRef('object_id'))
+            .order_by().values('content_type', 'object_id')
+            .annotate(c=Count('*')).values('c')[:1]
+        )
+        qs = (
+            Report.objects
+            .select_related('reporter', 'assigned_to', 'resolved_by')
+            .annotate(dup_count=Subquery(dup))
+            .order_by('-created_at')
+        )
         status_f = self.request.query_params.get('status')
         if status_f in dict(Report.STATUS_CHOICES):
             qs = qs.filter(status=status_f)
+        if self.request.query_params.get('assigned') == 'me':
+            qs = qs.filter(assigned_to=self.request.user)
         return qs
 
     def list(self, request):
@@ -115,8 +168,28 @@ class AdminReportViewSet(viewsets.GenericViewSet):
     def _set_status(self, request, pk, new_status, action_name):
         report = get_object_or_404(Report, pk=pk)
         report.status = new_status
-        report.save(update_fields=['status'])
+        report.resolved_by = request.user
+        report.resolved_at = timezone.now()
+        report.save(update_fields=['status', 'resolved_by', 'resolved_at'])
         log_admin_action(request.user, action_name, 'report', report.id)
+        return Response(self.get_serializer(report).data)
+
+    @action(detail=True, methods=['post'])
+    def assign(self, request, pk=None):
+        # Toggle assignment to the acting moderator (claim / release).
+        report = get_object_or_404(Report, pk=pk)
+        report.assigned_to = None if report.assigned_to_id == request.user.id else request.user
+        report.save(update_fields=['assigned_to'])
+        log_admin_action(request.user, 'assign_report', 'report', report.id,
+                         reason='claimed' if report.assigned_to_id else 'released')
+        return Response(self.get_serializer(report).data)
+
+    @action(detail=True, methods=['post'])
+    def add_note(self, request, pk=None):
+        report = get_object_or_404(Report, pk=pk)
+        report.moderator_notes = (request.data.get('note') or '')[:2000]
+        report.save(update_fields=['moderator_notes'])
+        log_admin_action(request.user, 'note_report', 'report', report.id)
         return Response(self.get_serializer(report).data)
 
     @action(detail=True, methods=['post'])
@@ -134,7 +207,9 @@ class AdminReportViewSet(viewsets.GenericViewSet):
             return Response({'error': 'Target not found or not removable'},
                             status=status.HTTP_400_BAD_REQUEST)
         report.status = 'resolved'
-        report.save(update_fields=['status'])
+        report.resolved_by = request.user
+        report.resolved_at = timezone.now()
+        report.save(update_fields=['status', 'resolved_by', 'resolved_at'])
         log_admin_action(request.user, f'remove_{report.content_type}',
                          report.content_type, report.object_id,
                          reason=request.data.get('reason', ''))
@@ -169,11 +244,21 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user = get_object_or_404(User, pk=pk)
         if user.id == request.user.id:
             return Response({'error': "You can't suspend yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        reason = (request.data.get('reason') or '')[:255]
+        # Optional ?days=N for a temporary suspension; omitted/0 => indefinite.
+        try:
+            days = int(request.data.get('days') or 0)
+        except (TypeError, ValueError):
+            days = 0
         user.is_suspended = True
-        user.suspension_reason = (request.data.get('reason') or '')[:255]
+        user.suspension_reason = reason
         user.suspended_at = timezone.now()
-        user.save(update_fields=['is_suspended', 'suspension_reason', 'suspended_at'])
-        log_admin_action(request.user, 'suspend_user', 'user', user.id, reason=user.suspension_reason)
+        user.suspended_until = (timezone.now() + timedelta(days=days)) if days > 0 else None
+        user.save(update_fields=['is_suspended', 'suspension_reason', 'suspended_at', 'suspended_until'])
+        span = f"for {days} day(s)" if days > 0 else "indefinitely"
+        notify_moderation(user, 'Account suspended',
+                          f"Your account has been suspended {span}." + (f" Reason: {reason}" if reason else ''))
+        log_admin_action(request.user, 'suspend_user', 'user', user.id, reason=reason or span)
         return Response(self.get_serializer(user).data)
 
     @action(detail=True, methods=['post'])
@@ -182,8 +267,37 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user.is_suspended = False
         user.suspension_reason = ''
         user.suspended_at = None
-        user.save(update_fields=['is_suspended', 'suspension_reason', 'suspended_at'])
+        user.suspended_until = None
+        user.save(update_fields=['is_suspended', 'suspension_reason', 'suspended_at', 'suspended_until'])
+        notify_moderation(user, 'Suspension lifted', 'Your account suspension has been lifted. Welcome back!')
         log_admin_action(request.user, 'unsuspend_user', 'user', user.id)
+        return Response(self.get_serializer(user).data)
+
+    @action(detail=True, methods=['post'])
+    def warn(self, request, pk=None):
+        """Issue a warning (strike). Auto-escalates to a temporary suspension at
+        the strike threshold."""
+        user = get_object_or_404(User, pk=pk)
+        if user.id == request.user.id:
+            return Response({'error': "You can't warn yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        reason = (request.data.get('reason') or '')[:255]
+        user.strikes = (user.strikes or 0) + 1
+        fields = ['strikes']
+        escalated = False
+        if user.strikes >= STRIKE_SUSPEND_THRESHOLD and not user.is_currently_suspended:
+            user.is_suspended = True
+            user.suspension_reason = f'Auto-suspended after {user.strikes} strikes'
+            user.suspended_at = timezone.now()
+            user.suspended_until = timezone.now() + timedelta(days=STRIKE_SUSPEND_DAYS)
+            fields += ['is_suspended', 'suspension_reason', 'suspended_at', 'suspended_until']
+            escalated = True
+        user.save(update_fields=fields)
+        msg = f"You've received a warning (strike {user.strikes})." + (f" Reason: {reason}" if reason else '')
+        if escalated:
+            msg += f" Your account is now suspended for {STRIKE_SUSPEND_DAYS} days."
+        notify_moderation(user, 'Warning', msg)
+        log_admin_action(request.user, 'warn_user', 'user', user.id,
+                         reason=f'strike {user.strikes}' + (f' — {reason}' if reason else ''))
         return Response(self.get_serializer(user).data)
 
     @action(detail=True, methods=['post'])
@@ -195,7 +309,10 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             return Response({'error': "You can't ban a super admin."}, status=status.HTTP_400_BAD_REQUEST)
         user.is_active = False
         user.save(update_fields=['is_active'])
-        log_admin_action(request.user, 'ban_user', 'user', user.id, reason=request.data.get('reason', ''))
+        reason = request.data.get('reason', '')
+        notify_moderation(user, 'Account banned',
+                          'Your account has been banned and you can no longer sign in.' + (f" Reason: {reason}" if reason else ''))
+        log_admin_action(request.user, 'ban_user', 'user', user.id, reason=reason)
         return Response(self.get_serializer(user).data)
 
     @action(detail=True, methods=['post'])
@@ -239,24 +356,37 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     pagination_class = StandardPagination
     serializer_class = AdminContentPostSerializer
 
+    # type -> (select_related field, serializer, [search lookups])
     _CONFIG = {
-        'post': ('user', AdminContentPostSerializer),
-        'track': ('artist', AdminContentTrackSerializer),
-        'comment': ('user', AdminContentCommentSerializer),
+        'post':         ('user',   AdminContentPostSerializer,        ['caption__icontains', 'user__username__icontains']),
+        'track':        ('artist', AdminContentTrackSerializer,       ['title__icontains', 'album__icontains', 'artist__username__icontains']),
+        'comment':      ('user',   AdminContentCommentSerializer,     ['content__icontains', 'user__username__icontains']),
+        'trackcomment': ('user',   AdminContentTrackCommentSerializer,['content__icontains', 'user__username__icontains']),
+        'group':        ('creator', AdminContentGroupSerializer,      ['name__icontains', 'description__icontains']),
+        'story':        ('user',   AdminContentStorySerializer,       ['caption__icontains', 'user__username__icontains']),
     }
 
     def list(self, request):
         ctype = request.query_params.get('type', 'post')
         cfg = self._CONFIG.get(ctype)
         if not cfg:
-            return Response({'error': 'type must be post|track|comment'}, status=status.HTTP_400_BAD_REQUEST)
-        rel, ser_cls = cfg
+            return Response({'error': f'type must be one of {list(self._CONFIG)}'}, status=status.HTTP_400_BAD_REQUEST)
+        rel, ser_cls, search_fields = cfg
         qs = _CONTENT_MODELS[ctype].objects.select_related(rel).order_by('-created_at')
+
         removed = request.query_params.get('removed')
         if removed == 'true':
             qs = qs.filter(is_removed=True)
         elif removed == 'false':
             qs = qs.filter(is_removed=False)
+
+        q = (request.query_params.get('q') or '').strip()
+        if q:
+            cond = Q()
+            for field in search_fields:
+                cond |= Q(**{field: q})
+            qs = qs.filter(cond)
+
         return _paginated(self, qs, ser_cls)
 
     @action(detail=False, methods=['post'])
@@ -276,3 +406,21 @@ class AdminContentViewSet(viewsets.GenericViewSet):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         log_admin_action(request.user, f'restore_{ctype}', ctype, oid)
         return Response({'status': 'restored'})
+
+
+# ── Audit log viewer ─────────────────────────────────────────────────────────
+class AdminLogViewSet(viewsets.GenericViewSet):
+    """Read-only audit trail of every moderation action."""
+    permission_classes = [IsModerator]
+    pagination_class = StandardPagination
+    serializer_class = AdminActionLogSerializer
+
+    def get_queryset(self):
+        qs = AdminActionLog.objects.select_related('actor').order_by('-created_at')
+        action_f = self.request.query_params.get('action')
+        if action_f:
+            qs = qs.filter(action=action_f)
+        return qs
+
+    def list(self, request):
+        return _paginated(self, self.get_queryset(), AdminActionLogSerializer)

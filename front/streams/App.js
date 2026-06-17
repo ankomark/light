@@ -61,6 +61,7 @@ import AdminDashboard from './components/admin/AdminDashboard';
 import AdminReports from './components/admin/AdminReports';
 import AdminUsers from './components/admin/AdminUsers';
 import AdminContent from './components/admin/AdminContent';
+import AdminLogs from './components/admin/AdminLogs';
 import { isAdmin } from './utils/roles';
 import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
@@ -240,6 +241,7 @@ const App = () => {
                 <Stack.Screen name="AdminReports" component={AdminReportsWrapper} />
                 <Stack.Screen name="AdminUsers" component={AdminUsersWrapper} />
                 <Stack.Screen name="AdminContent" component={AdminContentWrapper} />
+                <Stack.Screen name="AdminLogs" component={AdminLogsWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxScreen} />
@@ -454,6 +456,7 @@ const AdminDashboardWrapper = adminWrap(AdminDashboard);
 const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);
+const AdminLogsWrapper = adminWrap(AdminLogs);
 const OrderDetailWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1 }}>
     <Header navigation={navigation} />

@@ -96,7 +96,8 @@ class IsNotSuspended(BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
         u = request.user
-        return not (u and u.is_authenticated and getattr(u, 'is_suspended', False))
+        # Honour temporary suspensions: a lapsed `suspended_until` no longer blocks.
+        return not (u and u.is_authenticated and getattr(u, 'is_currently_suspended', False))
 
 
 class StandardPagination(PageNumberPagination):
