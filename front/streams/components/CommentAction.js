@@ -16,7 +16,7 @@ import { useAuth } from '../context/useAuth';
 import { commentOnPost, fetchSocialPostComments, getAccessToken, API_URL } from '../services/api';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
-import { colors, radius } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -36,7 +36,7 @@ const CommentSkeleton = () => (
   </View>
 );
 
-const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, currentUserAvatar }) => {
+const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, currentUserAvatar, triggerVariant = 'icon' }) => {
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(autoOpen || false);
   const [newComment, setNewComment] = useState('');
@@ -181,13 +181,37 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
 
   return (
     <>
-      <TouchableOpacity 
-        style={styles.actionButton} 
-        onPress={() => setShowComments(true)}
-      >
-        <Feather name="message-circle" size={24} color="#FFF" />
-        <Text style={styles.actionText}>{commentCount}</Text>
-      </TouchableOpacity>
+      {triggerVariant === 'bar' ? (
+        // Full-width luxury comments bar (used on the post detail screen). Lifts
+        // above the home indicator via the bottom safe-area edge.
+        <SafeAreaView edges={['bottom']} style={styles.commentBarWrap}>
+          <TouchableOpacity
+            style={styles.commentBar}
+            onPress={() => setShowComments(true)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="View comments"
+          >
+            <View style={styles.commentBarIcon}>
+              <Feather name="message-circle" size={18} color={colors.accent} />
+            </View>
+            <Text style={styles.commentBarText} numberOfLines={1}>
+              {commentCount > 0
+                ? `View all ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}`
+                : 'Be the first to comment'}
+            </Text>
+            <Feather name="chevron-right" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        </SafeAreaView>
+      ) : (
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => setShowComments(true)}
+        >
+          <Feather name="message-circle" size={24} color="#FFF" />
+          <Text style={styles.actionText}>{commentCount}</Text>
+        </TouchableOpacity>
+      )}
 
       <Modal
         visible={showComments}
@@ -292,6 +316,40 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 14,
     color: '#FFF',
+  },
+  // Luxury full-width comments bar (post detail).
+  commentBarWrap: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(8,20,40,0.6)',
+  },
+  commentBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(16,28,46,0.9)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    ...shadows.sm,
+  },
+  commentBarIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(244,162,97,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentBarText: {
+    flex: 1,
+    ...typography.label,
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
   // Dark glass comments sheet over the rotating wallpaper.
   modalRoot: {

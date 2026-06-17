@@ -12,6 +12,7 @@ import {
 import { Video } from 'expo-av';
 import { Audio } from 'expo-av';
 import axios from 'axios';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../services/api';
 import CommentAction from './CommentAction';
@@ -187,7 +188,7 @@ const PostDetail = ({ route, navigation }) => {
       <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.5)" />
       <ScreenVignette tintRgb="6,16,34" zIndex={1} />
 
-      <View style={styles.content}>
+      <SafeAreaView style={styles.content} edges={['top']}>
       {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
@@ -335,8 +336,9 @@ const PostDetail = ({ route, navigation }) => {
         autoOpen={shouldOpenComments}
         onCommentsLoaded={handleCommentsLoaded}
         onCommentPosted={updateCommentsCount}
+        triggerVariant="bar"
       />
-      </View>
+      </SafeAreaView>
     </View>
   );
 };

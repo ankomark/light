@@ -226,15 +226,22 @@ const BibleReader = () => {
       );
     }
     return (
-      <ScrollView style={styles.reader} showsVerticalScrollIndicator={false}>
-        <Text style={styles.readerTitle}>{selectedBook.name} {selectedChapter}</Text>
-        <View style={styles.titleRule} />
-        {verses.map((verse, index) => (
-          <Text key={index} style={styles.verseLine}>
-            <Text style={styles.verseNumber}>{verse.verse} </Text>
-            {verse.text.replace(/\s*\n\s*/g, ' ').trim()}
-          </Text>
-        ))}
+      <ScrollView
+        style={styles.reader}
+        contentContainerStyle={styles.readerContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Glass "page" so the scripture stays crisp over the wallpaper. */}
+        <View style={styles.readerPanel}>
+          <Text style={styles.readerTitle}>{selectedBook.name} {selectedChapter}</Text>
+          <View style={styles.titleRule} />
+          {verses.map((verse, index) => (
+            <Text key={index} style={styles.verseLine}>
+              <Text style={styles.verseNumber}>{verse.verse} </Text>
+              {verse.text.replace(/\s*\n\s*/g, ' ').trim()}
+            </Text>
+          ))}
+        </View>
 
         {/* Prev / Next chapter navigation */}
         <View style={styles.chapterNav}>
@@ -277,7 +284,7 @@ const BibleReader = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.topBar}>
         {onBack ? (
           <TouchableOpacity style={styles.backBtn} onPress={onBack} hitSlop={10}>
@@ -303,17 +310,20 @@ const BibleReader = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   body: { flex: 1 },
 
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(13,35,64,0.78)',
   },
   backBtn: {
     width: 38,
@@ -322,7 +332,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   titleWrap: { flex: 1, alignItems: 'center', paddingHorizontal: spacing.sm },
-  topTitle: { ...typography.h3, color: colors.textPrimary },
+  topTitle: {
+    ...typography.h3, color: colors.textPrimary,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
   topSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
 
   // Search
@@ -330,10 +343,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(13,35,64,0.78)',
     borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
     marginHorizontal: spacing.md,
     marginTop: spacing.md,
     marginBottom: spacing.sm,
@@ -353,6 +366,9 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
     marginTop: spacing.md,
     marginBottom: spacing.sm,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   bookGrid: {
     flexDirection: 'row',
@@ -362,16 +378,16 @@ const styles = StyleSheet.create({
   bookCard: {
     width: (width - spacing.md * 2 - spacing.sm) / 2,
     margin: spacing.xs,
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.82)',
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     ...shadows.sm,
   },
   bookName: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
-  bookMeta: { ...typography.caption, color: colors.textMuted, marginTop: 4 },
+  bookMeta: { ...typography.caption, color: colors.textSecondary, marginTop: 4 },
 
   // Chapters
   pickPrompt: {
@@ -379,6 +395,9 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: spacing.md,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   chipGrid: { padding: spacing.md },
   chipRow: { gap: spacing.sm, marginBottom: spacing.sm },
@@ -386,16 +405,28 @@ const styles = StyleSheet.create({
     width: CHIP_SIZE,
     height: CHIP_SIZE,
     borderRadius: radius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: 'rgba(16,28,46,0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadows.sm,
   },
   chipText: { ...typography.h3, color: colors.textPrimary, fontWeight: '600' },
 
   // Reader
-  reader: { flex: 1, paddingHorizontal: spacing.lg },
+  reader: { flex: 1 },
+  readerContent: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  readerPanel: {
+    backgroundColor: 'rgba(11,24,42,0.92)',
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
+    ...shadows.md,
+  },
   readerTitle: {
     ...typography.h1,
     color: colors.textPrimary,
@@ -441,7 +472,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     ...shadows.sm,
   },
-  navBtnDisabled: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  navBtnDisabled: {
+    backgroundColor: 'rgba(16,28,46,0.7)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
   navBtnText: { ...typography.label, color: colors.white, fontWeight: '700' },
   navBtnTextDisabled: { color: colors.textMuted },
 
@@ -453,8 +488,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxl,
     paddingHorizontal: spacing.lg,
   },
-  loadingText: { ...typography.body, color: colors.textSecondary },
-  emptyText: { ...typography.body, color: colors.textMuted, textAlign: 'center' },
+  loadingText: {
+    ...typography.body, color: colors.textSecondary,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
+  emptyText: {
+    ...typography.body, color: colors.textSecondary, textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
   retryBtn: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,

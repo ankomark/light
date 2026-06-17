@@ -1,18 +1,16 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
+  View, Text, TouchableOpacity, StyleSheet, SectionList,
   Modal, Image, ActivityIndicator, AppState, Pressable,
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchNotifications, markNotificationAsRead, checkAuthStatus, fetchUnreadNotificationCount } from '../services/api';
 import { addNotificationReceivedListener } from '../services/pushNotifications';
 import * as Notifications from 'expo-notifications';
+import RotatingBackground from './RotatingBackground';
+import ScreenVignette from './ScreenVignette';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
-import axios from 'axios';
-import { API_URL } from '../services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const POLL_INTERVAL_MS = 15000;
@@ -24,6 +22,17 @@ const TYPE_ICON = {
   group_join_request: { name: 'people', color: colors.accent },
 };
 
+// TikTok-style category filters across the top of the panel.
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'like', label: 'Likes' },
+  { key: 'comment', label: 'Comments' },
+  { key: 'follow', label: 'Follows' },
+];
+
+// Sections are rendered in this order; empty ones are dropped.
+const SECTION_ORDER = ['Today', 'Yesterday', 'This Week', 'This Month', 'Earlier'];
+
 function timeAgo(dateStr) {
   const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
   if (diff < 60) return `${diff}s ago`;
@@ -32,12 +41,26 @@ function timeAgo(dateStr) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+// Bucket a notification into a TikTok-like time section.
+function sectionLabel(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dayMs = 86400000;
+  if (d.getTime() >= startOfToday) return 'Today';
+  if (d.getTime() >= startOfToday - dayMs) return 'Yesterday';
+  if (d.getTime() >= startOfToday - 7 * dayMs) return 'This Week';
+  if (d.getTime() >= startOfToday - 30 * dayMs) return 'This Month';
+  return 'Earlier';
+}
+
 const NotificationsBell = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showPanel, setShowPanel] = useState(false);
   const [loading, setLoading] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
+  const [filter, setFilter] = useState('all');
   const appState = useRef(AppState.currentState);
   const pollRef = useRef(null);
   const pushListenerRef = useRef(null);
@@ -148,24 +171,58 @@ const NotificationsBell = ({ navigation }) => {
     }
   }, [notifications]);
 
+  // Take the user to the exact thing the notification is about.
   const handleNotificationPress = useCallback((item) => {
     handleMarkAsRead(item.id);
     setShowPanel(false);
+    const type = item.notification_type;
+
     if (item.post) {
+      // Comment → open the post, auto-open comments, and scroll to the comment.
       navigation.navigate('PostDetail', {
         postId: item.post.id,
-        ...(item.related_comment ? { highlightCommentId: item.related_comment } : {}),
+        ...(type === 'comment' && item.related_comment_id
+          ? { commentId: item.related_comment_id, shouldOpenComments: true }
+          : {}),
       });
+    } else if (type === 'follow' && item.sender?.id) {
+      navigation.navigate('UserProfile', {
+        userId: item.sender.id,
+        username: item.sender.username,
+      });
+    } else if (item.track) {
+      navigation.navigate('Tracks');
     }
   }, [handleMarkAsRead, navigation]);
+
+  // Apply the active filter, then bucket into time sections (TikTok-style).
+  const sections = useMemo(() => {
+    const filtered = notifications.filter(n => {
+      if (filter === 'all') return true;
+      if (filter === 'follow') {
+        return n.notification_type === 'follow' || n.notification_type === 'group_join_request';
+      }
+      return n.notification_type === filter;
+    });
+
+    const groups = {};
+    filtered.forEach(n => {
+      const label = sectionLabel(n.created_at);
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(n);
+    });
+
+    return SECTION_ORDER
+      .filter(label => groups[label]?.length)
+      .map(label => ({ title: label, data: groups[label] }));
+  }, [notifications, filter]);
 
   const renderItem = useCallback(({ item }) => {
     const icon = TYPE_ICON[item.notification_type] ?? { name: 'notifications', color: colors.primary };
     return (
       <Pressable
-        style={[styles.item, !item.read && styles.itemUnread]}
+        style={({ pressed }) => [styles.item, !item.read && styles.itemUnread, pressed && styles.itemPressed]}
         onPress={() => handleNotificationPress(item)}
-        android_ripple={{ color: colors.border }}
       >
         <View style={styles.avatarWrap}>
           <Image
@@ -182,6 +239,9 @@ const NotificationsBell = ({ navigation }) => {
 
         <View style={styles.itemBody}>
           <Text style={styles.itemMessage} numberOfLines={2}>{item.message}</Text>
+          {item.related_comment ? (
+            <Text style={styles.itemSnippet} numberOfLines={1}>“{item.related_comment}”</Text>
+          ) : null}
           <Text style={styles.itemTime}>{timeAgo(item.created_at)}</Text>
         </View>
 
@@ -189,6 +249,10 @@ const NotificationsBell = ({ navigation }) => {
       </Pressable>
     );
   }, [handleNotificationPress]);
+
+  const renderSectionHeader = useCallback(({ section }) => (
+    <Text style={styles.sectionHeader}>{section.title}</Text>
+  ), []);
 
   return (
     <View>
@@ -212,50 +276,78 @@ const NotificationsBell = ({ navigation }) => {
         animationType="slide"
         onRequestClose={() => setShowPanel(false)}
       >
-        <LinearGradient colors={[colors.surface, colors.bg]} style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>Notifications</Text>
-          <View style={styles.headerActions}>
-            {unreadCount > 0 && (
-              <TouchableOpacity
-                style={styles.markAllBtn}
-                onPress={handleMarkAllRead}
-                disabled={markingAll}
-              >
-                {markingAll
-                  ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <Text style={styles.markAllText}>Mark all read</Text>
-                }
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={() => setShowPanel(false)} style={styles.closeBtn}>
-              <Ionicons name="close" size={24} color={colors.textPrimary} />
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
+        <View style={styles.modalRoot}>
+          {/* Shared luxury backdrop — rotating wallpaper + navy edge vignette. */}
+          <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.62)" />
+          <ScreenVignette tintRgb="6,16,34" zIndex={1} />
 
-        <View style={styles.modalBody}>
-          {loading && notifications.length === 0 ? (
-            <View style={styles.centered}>
-              <ActivityIndicator size="large" color={colors.primary} />
+          <View style={styles.modalContent}>
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Activity</Text>
+              <View style={styles.headerActions}>
+                {unreadCount > 0 && (
+                  <TouchableOpacity
+                    style={styles.markAllBtn}
+                    onPress={handleMarkAllRead}
+                    disabled={markingAll}
+                  >
+                    {markingAll
+                      ? <ActivityIndicator size="small" color={colors.accent} />
+                      : <Text style={styles.markAllText}>Mark all read</Text>
+                    }
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => setShowPanel(false)} style={styles.closeBtn}>
+                  <Ionicons name="close" size={24} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
             </View>
-          ) : (
-            <FlatList
-              data={notifications}
-              keyExtractor={item => item.id.toString()}
-              renderItem={renderItem}
-              contentContainerStyle={notifications.length === 0 && styles.emptyContent}
-              showsVerticalScrollIndicator={false}
-              onRefresh={() => loadNotifications()}
-              refreshing={loading}
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <MaterialIcons name="notifications-none" size={52} color={colors.textMuted} />
-                  <Text style={styles.emptyText}>You're all caught up</Text>
-                  <Text style={styles.emptySubtext}>New notifications will appear here</Text>
-                </View>
-              }
-            />
-          )}
+
+            {/* Filter pills */}
+            <View style={styles.filterRow}>
+              {FILTERS.map(f => {
+                const active = filter === f.key;
+                return (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[styles.pill, active && styles.pillActive]}
+                    onPress={() => setFilter(f.key)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.pillText, active && styles.pillTextActive]}>{f.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {loading && notifications.length === 0 ? (
+              <View style={styles.centered}>
+                <ActivityIndicator size="large" color={colors.accent} />
+              </View>
+            ) : (
+              <SectionList
+                sections={sections}
+                keyExtractor={item => item.id.toString()}
+                renderItem={renderItem}
+                renderSectionHeader={renderSectionHeader}
+                stickySectionHeadersEnabled={false}
+                contentContainerStyle={sections.length === 0 ? styles.emptyContent : styles.listContent}
+                showsVerticalScrollIndicator={false}
+                onRefresh={() => loadNotifications()}
+                refreshing={loading}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <MaterialIcons name="notifications-none" size={52} color={colors.textSecondary} />
+                    <Text style={styles.emptyText}>You're all caught up</Text>
+                    <Text style={styles.emptySubtext}>
+                      {filter === 'all' ? 'New notifications will appear here' : 'Nothing here under this filter'}
+                    </Text>
+                  </View>
+                }
+              />
+            )}
+          </View>
         </View>
       </Modal>
     </View>
@@ -286,17 +378,31 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+
+  // ── Panel ──────────────────────────────────────────────────────────────
+  modalRoot: {
+    flex: 1,
+    backgroundColor: '#0A1628',
+  },
+  modalContent: {
+    flex: 1,
+    zIndex: 2, // above the rotating wallpaper + vignette
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xl + spacing.sm,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
   },
   modalTitle: {
-    ...typography.h2,
+    ...typography.h1,
     color: colors.textPrimary,
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   headerActions: {
     flexDirection: 'row',
@@ -308,42 +414,96 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   markAllText: {
-    color: colors.primary,
+    color: colors.accent,
     ...typography.label,
+    fontWeight: '700',
   },
   closeBtn: {
     padding: spacing.xs,
   },
-  modalBody: {
-    flex: 1,
-    backgroundColor: colors.bg,
+
+  // ── Filter pills ───────────────────────────────────────────────────────
+  filterRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  pill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(16,28,46,0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  pillActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+    ...shadows.sm,
+  },
+  pillText: {
+    ...typography.label,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  pillTextActive: {
+    color: '#0A1628',
+    fontWeight: '700',
+  },
+
+  // ── List ───────────────────────────────────────────────────────────────
+  listContent: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xxl,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  sectionHeader: {
+    ...typography.caption,
+    color: colors.accent,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm + 4,
     paddingVertical: spacing.sm + 2,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.bg,
+    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(16,28,46,0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     gap: spacing.sm,
+    ...shadows.sm,
   },
   itemUnread: {
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(23,42,68,0.9)',
+    borderColor: 'rgba(244,162,97,0.45)',
+  },
+  itemPressed: {
+    opacity: 0.8,
   },
   avatarWrap: {
     position: 'relative',
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: 'rgba(232,198,107,0.4)',
   },
   typeIcon: {
     position: 'absolute',
@@ -355,7 +515,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: colors.bg,
+    borderColor: '#0A1628',
   },
   itemBody: {
     flex: 1,
@@ -365,19 +525,25 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     lineHeight: 20,
   },
+  itemSnippet: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
   itemTime: {
     ...typography.caption,
     color: colors.textMuted,
     marginTop: 3,
   },
   unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.primary,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: colors.accent,
   },
   emptyContent: {
-    flex: 1,
+    flexGrow: 1,
   },
   emptyContainer: {
     flex: 1,
@@ -388,11 +554,14 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     ...typography.h3,
-    color: colors.textSecondary,
+    color: colors.textPrimary,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   emptySubtext: {
     ...typography.body,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     textAlign: 'center',
   },
 });

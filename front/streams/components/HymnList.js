@@ -50,7 +50,7 @@ const HymnList = ({ navigation }) => {
   }, [openHymn, searchQuery]);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={[]}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerIcon}>
@@ -133,7 +133,7 @@ const HymnList = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.bg },
+  safeArea: { flex: 1, backgroundColor: 'transparent' },
 
   header: {
     flexDirection: 'row',
@@ -144,17 +144,22 @@ const styles = StyleSheet.create({
   },
   headerIcon: {
     width: 40, height: 40, borderRadius: radius.md,
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(16,28,46,0.8)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
     marginRight: spacing.sm,
   },
   headerText: { flex: 1 },
-  headerTitle: { ...typography.h2, color: colors.textPrimary },
+  headerTitle: {
+    ...typography.h2, color: colors.textPrimary,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
   headerSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
 
   langRow: {
     flexDirection: 'row',
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(16,28,46,0.8)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
     borderRadius: radius.full,
     padding: 4,
     gap: 4,
@@ -185,10 +190,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(13,35,64,0.78)',
     borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
     marginHorizontal: spacing.md,
     marginTop: spacing.xs,
     paddingHorizontal: spacing.md,
@@ -197,7 +202,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
   resultsText: {
     ...typography.caption,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
   },
@@ -206,8 +211,10 @@ const styles = StyleSheet.create({
   hymnItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.82)',
     borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     padding: spacing.sm + 2,
     marginBottom: spacing.sm,
     ...shadows.sm,
@@ -215,6 +222,8 @@ const styles = StyleSheet.create({
   numberBadge: {
     minWidth: 40, height: 40, borderRadius: radius.sm,
     backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(244,162,97,0.35)',
     alignItems: 'center', justifyContent: 'center',
     marginRight: spacing.sm,
     paddingHorizontal: 6,

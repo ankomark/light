@@ -204,9 +204,9 @@ const App = () => {
                 <Stack.Screen name="PlaylistDetail" component={PlaylistDetail} options={{ headerShown: true, title: 'Playlist', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD' }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: true }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
-                <Stack.Screen name="Hymns" component={HymnList} options={{ title: 'Hymnal' }}/>
+                <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>
                 <Stack.Screen name="HymnDetail" component={HymnDetail}  options={({ route }) => ({ headerShown: false, title: route.params?.hymn?.title || 'Hymn Details' })}/>
-                <Stack.Screen name="bible" component={BibleReader} />
+                <Stack.Screen name="bible" component={BibleWrapper} />
                 <Stack.Screen name="HamburgerMenu" component={HamburgerMenu} />
                 <Stack.Screen name="NoticeBoard" component={NoticeBoard} options={{ headerShown: true, title: 'Notice Board', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
                 <Stack.Screen name="MediaScreen" component={MediaScreen} />
@@ -292,6 +292,22 @@ const GroupListWrapper = ({ navigation }) => (
     <ErrorBoundary fallbackMessage="Groups couldn't load.">
       <GroupList navigation={navigation} />
     </ErrorBoundary>
+  </View>
+);
+
+const HymnsWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <HymnList navigation={navigation} />
+  </View>
+);
+
+const BibleWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <BibleReader navigation={navigation} />
   </View>
 );
 

@@ -24,24 +24,40 @@ class NotificationSerializer(serializers.ModelSerializer):
     post = NotificationPostSerializer(read_only=True, required=False)
     track = NotificationTrackSerializer(read_only=True, required=False)
     related_comment = serializers.SerializerMethodField()
+    related_comment_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
         fields = [
-            'id', 'sender', 'message', 'read', 
-            'notification_type', 'post', 'track', 
-            'created_at', 'related_comment'
+            'id', 'sender', 'message', 'read',
+            'notification_type', 'post', 'track',
+            'created_at', 'related_comment', 'related_comment_id'
         ]
-    
-    def get_related_comment(self, obj):
-        if obj.notification_type == 'comment':
+
+    def _triggering_comment(self, obj):
+        # Resolve the comment that triggered this notification once, then cache it
+        # on the instance so the two method fields below don't double-query.
+        if hasattr(obj, '_trig_comment'):
+            return obj._trig_comment
+        comment = None
+        if obj.notification_type == 'comment' and obj.post_id:
             from ..models import PostComment  # Import here to avoid circular imports
+            # Comments order by -created_at, so .first() is the most recent comment
+            # by this sender on the post — i.e. the one that raised the alert.
             comment = PostComment.objects.filter(
                 post=obj.post,
-                user=obj.sender
+                user=obj.sender,
             ).first()
-            return comment.content if comment else None
-        return None
+        obj._trig_comment = comment
+        return comment
+
+    def get_related_comment(self, obj):
+        comment = self._triggering_comment(obj)
+        return comment.content if comment else None
+
+    def get_related_comment_id(self, obj):
+        comment = self._triggering_comment(obj)
+        return comment.id if comment else None
 
 
 
