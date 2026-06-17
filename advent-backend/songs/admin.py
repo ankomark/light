@@ -5,8 +5,16 @@ from .models import (
     Church, Videostudio, Choir, Group, GroupMember, GroupJoinRequest,
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
-    Report, AdminActionLog,
+    Report, AdminActionLog, Appeal,
 )
+
+
+@admin.register(Appeal)
+class AppealAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'status', 'reviewed_by', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('user__username', 'message')
+    ordering = ('-created_at',)
 
 
 @admin.register(User)

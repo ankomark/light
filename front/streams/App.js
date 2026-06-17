@@ -62,6 +62,9 @@ import AdminReports from './components/admin/AdminReports';
 import AdminUsers from './components/admin/AdminUsers';
 import AdminContent from './components/admin/AdminContent';
 import AdminLogs from './components/admin/AdminLogs';
+import AdminAnalytics from './components/admin/AdminAnalytics';
+import AdminAppeals from './components/admin/AdminAppeals';
+import AppealScreen from './components/admin/AppealScreen';
 import { isAdmin } from './utils/roles';
 import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
@@ -242,6 +245,9 @@ const App = () => {
                 <Stack.Screen name="AdminUsers" component={AdminUsersWrapper} />
                 <Stack.Screen name="AdminContent" component={AdminContentWrapper} />
                 <Stack.Screen name="AdminLogs" component={AdminLogsWrapper} />
+                <Stack.Screen name="AdminAnalytics" component={AdminAnalyticsWrapper} />
+                <Stack.Screen name="AdminAppeals" component={AdminAppealsWrapper} />
+                <Stack.Screen name="Appeal" component={AppealWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxScreen} />
@@ -457,6 +463,18 @@ const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);
 const AdminLogsWrapper = adminWrap(AdminLogs);
+const AdminAnalyticsWrapper = adminWrap(AdminAnalytics);
+const AdminAppealsWrapper = adminWrap(AdminAppeals);
+
+// Appeal is available to any signed-in user (a suspended user can't reach admin
+// screens), so it gets the luxury backdrop without the RequireAdmin gate.
+const AppealWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.6)" />
+    <Header navigation={navigation} transparentBg />
+    <AppealScreen navigation={navigation} />
+  </View>
+);
 const OrderDetailWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1 }}>
     <Header navigation={navigation} />

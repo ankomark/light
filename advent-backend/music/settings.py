@@ -155,6 +155,10 @@ REST_FRAMEWORK = {
         'auth': '10/min',
         'password_reset': '5/hour',
         'email_verify': '10/hour',
+        # Abuse guards: appeal/report submission and admin bulk actions.
+        'appeals': '5/hour',
+        'reports': '20/hour',
+        'admin_bulk': '30/min',
     },
 }
 ROOT_URLCONF = 'music.urls'

@@ -1,5 +1,5 @@
 from .common import *  # noqa: F401,F403  (serializers, models, SimpleUserSerializer, timezone)
-from ..models import AdminActionLog
+from ..models import AdminActionLog, Appeal
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
@@ -116,6 +116,24 @@ class AdminActionLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AdminActionLog
         fields = ['id', 'actor', 'action', 'target_type', 'target_id', 'reason', 'created_at']
+
+
+class AppealSerializer(serializers.ModelSerializer):
+    """User-facing view of one's own appeal."""
+    class Meta:
+        model = Appeal
+        fields = ['id', 'message', 'status', 'review_notes', 'reviewed_at', 'created_at']
+        read_only_fields = ['id', 'status', 'review_notes', 'reviewed_at', 'created_at']
+
+
+class AdminAppealSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+    reviewed_by = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = Appeal
+        fields = ['id', 'user', 'message', 'status', 'reviewed_by', 'reviewed_at',
+                  'review_notes', 'created_at']
 
 
 # ── Content-management list serializers ──────────────────────────────────────

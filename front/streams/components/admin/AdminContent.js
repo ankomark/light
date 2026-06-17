@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
-  Image, Alert, ScrollView, TextInput,
+  Image, Alert, ScrollView, TextInput, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminContent, removeContent, restoreContent } from '../../services/api';
+import { fetchAdminContent, removeContent, restoreContent, bulkContent } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
@@ -26,6 +26,9 @@ const AdminContent = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const debounceRef = useRef(null);
 
   const load = useCallback(async (t, q, removed) => {
@@ -42,14 +45,43 @@ const AdminContent = () => {
 
   useFocusEffect(useCallback(() => { load(type, query.trim(), removedOnly); }, [load, type, removedOnly]));  // eslint-disable-line react-hooks/exhaustive-deps
 
+  const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
+
   const onChangeQuery = (text) => {
     setQuery(text);
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => load(type, text.trim(), removedOnly), 400);
   };
 
-  const switchType = (t) => { setType(t); setQuery(''); load(t, '', removedOnly); };
-  const toggleRemoved = () => { const v = !removedOnly; setRemovedOnly(v); load(type, query.trim(), v); };
+  const switchType = (t) => { setType(t); setQuery(''); exitSelect(); load(t, '', removedOnly); };
+  const toggleRemoved = () => { const v = !removedOnly; setRemovedOnly(v); exitSelect(); load(type, query.trim(), v); };
+
+  const toggleSelect = (id) => setSelected((prev) => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const runBulk = async (action) => {
+    if (selected.size === 0) return;
+    const ids = [...selected];
+    setBulkBusy(true);
+    try {
+      await bulkContent(type, ids, action);
+      setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, is_removed: action === 'remove' } : it)));
+      exitSelect();
+    } catch {
+      Alert.alert('Error', 'Bulk action failed.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const confirmBulkRemove = () =>
+    Alert.alert('Remove content', `Hide ${selected.size} ${type} item(s) from everyone?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => runBulk('remove') },
+    ]);
 
   const toggle = async (item) => {
     const willRemove = !item.is_removed;
@@ -77,9 +109,18 @@ const AdminContent = () => {
   const renderItem = ({ item }) => {
     const author = item.author;
     const text = item.caption || item.content || item.title || item.name || `#${item.id}`;
+    const checked = selected.has(item.id);
     return (
-      <View style={[styles.card, item.is_removed && styles.cardRemoved]}>
+      <Pressable
+        onPress={() => selectMode && toggleSelect(item.id)}
+        style={[styles.card, item.is_removed && styles.cardRemoved, checked && styles.cardSelected]}
+      >
         <View style={styles.head}>
+          {selectMode && (
+            <View style={[styles.checkbox, checked && styles.checkboxOn]}>
+              {checked && <Ionicons name="checkmark" size={13} color="#0A1628" />}
+            </View>
+          )}
           <Image
             source={author?.profile_picture ? { uri: author.profile_picture } : DEFAULT_AVATAR}
             defaultSource={DEFAULT_AVATAR}
@@ -90,7 +131,7 @@ const AdminContent = () => {
         </View>
         <Text style={styles.body} numberOfLines={3}>{text || '(no text)'}</Text>
 
-        {busyId === item.id ? (
+        {!selectMode && (busyId === item.id ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.sm }} />
         ) : (
           <TouchableOpacity
@@ -104,14 +145,19 @@ const AdminContent = () => {
               {item.is_removed ? 'Restore' : 'Remove'}
             </Text>
           </TouchableOpacity>
-        )}
-      </View>
+        ))}
+      </Pressable>
     );
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Content</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>Content</Text>
+        <TouchableOpacity onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
+          <Text style={styles.selectToggle}>{selectMode ? 'Cancel' : 'Select'}</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Type pills — horizontally scrollable (6 types) */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
@@ -153,12 +199,31 @@ const AdminContent = () => {
           data={items}
           keyExtractor={(item) => `${type}_${item.id}`}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, selectMode && selected.size > 0 && { paddingBottom: 96 }]}
           showsVerticalScrollIndicator={false}
           onRefresh={() => load(type, query.trim(), removedOnly)}
           refreshing={loading}
           ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>Nothing here</Text></View>}
         />
+      )}
+
+      {/* Bulk action bar */}
+      {selectMode && selected.size > 0 && (
+        <View style={styles.bulkBar}>
+          <Text style={styles.bulkCount}>{selected.size} selected</Text>
+          {bulkBusy ? (
+            <ActivityIndicator color={colors.accent} />
+          ) : (
+            <View style={styles.bulkBtns}>
+              <TouchableOpacity style={[styles.bulkBtn, styles.btnRestore]} onPress={() => runBulk('restore')}>
+                <Text style={styles.btnTextDark}>Restore</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.bulkBtn, styles.btnRemove]} onPress={confirmBulkRemove}>
+                <Text style={styles.btnTextLight}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       )}
     </View>
   );
@@ -167,10 +232,15 @@ const AdminContent = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  titleRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+  },
   title: {
-    ...typography.h1, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+    ...typography.h1, color: colors.textPrimary,
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
+  selectToggle: { ...typography.label, color: colors.accent, fontWeight: '700' },
   filterRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   pill: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full,
@@ -204,7 +274,14 @@ const styles = StyleSheet.create({
     padding: spacing.md, marginBottom: spacing.sm, ...shadows.sm,
   },
   cardRemoved: { opacity: 0.7, borderColor: 'rgba(229,57,53,0.4)' },
+  cardSelected: { borderColor: colors.accent, borderWidth: 1.5 },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, marginRight: spacing.xs,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface },
   author: { ...typography.caption, color: colors.textPrimary, fontWeight: '700' },
   removedPill: {
@@ -223,6 +300,16 @@ const styles = StyleSheet.create({
   btnTextDark: { ...typography.caption, color: '#0A1628', fontWeight: '800' },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textSecondary },
+  bulkBar: {
+    position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(14,32,56,0.97)', borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, ...shadows.md,
+  },
+  bulkCount: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
+  bulkBtns: { flexDirection: 'row', gap: spacing.sm },
+  bulkBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md },
 });
 
 export default AdminContent;

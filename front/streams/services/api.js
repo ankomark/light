@@ -1470,6 +1470,9 @@ export const fetchUnreadMessageCount = () =>
 export const fetchAdminDashboard = () =>
   apiRequest('get', '/admin/dashboard/');
 
+export const fetchAdminAnalytics = (days = 14) =>
+  apiRequest('get', '/admin/analytics/', null, { params: { days } });
+
 export const fetchAdminReports = (status = '') =>
   apiRequest('get', '/admin/reports/', null, { params: status ? { status } : {} });
 
@@ -1485,11 +1488,34 @@ export const removeReportTarget = (id, reason = '') =>
 export const assignReport = (id) =>
   apiRequest('post', `/admin/reports/${id}/assign/`);
 
+export const bulkReports = (ids, action) =>
+  apiRequest('post', '/admin/reports/bulk/', { ids, action });
+
+export const bulkContent = (type, ids, action) =>
+  apiRequest('post', '/admin/content/bulk/', { type, ids, action });
+
 export const addReportNote = (id, note) =>
   apiRequest('post', `/admin/reports/${id}/add_note/`, { note });
 
 export const fetchAdminLogs = (action = '') =>
   apiRequest('get', '/admin/logs/', null, { params: action ? { action } : {} });
+
+// Appeals — user-facing
+export const submitAppeal = (message) =>
+  apiRequest('post', '/appeals/', { message });
+
+export const fetchMyAppeal = () =>
+  apiRequest('get', '/appeals/mine/');
+
+// Appeals — admin
+export const fetchAdminAppeals = (status = 'pending') =>
+  apiRequest('get', '/admin/appeals/', null, { params: status ? { status } : {} });
+
+export const approveAppeal = (id, notes = '') =>
+  apiRequest('post', `/admin/appeals/${id}/approve/`, { notes });
+
+export const rejectAppeal = (id, notes = '') =>
+  apiRequest('post', `/admin/appeals/${id}/reject/`, { notes });
 
 export const fetchAdminUsers = (q = '', role = '') =>
   apiRequest('get', '/admin/users/', null, {

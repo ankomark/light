@@ -1,10 +1,13 @@
 from .common import *  # noqa: F401,F403  (DRF symbols, models, StandardPagination, Q, timezone, timedelta)
 from django.db.models import OuterRef, Subquery
-from ..models import AdminActionLog
+from django.db.models.functions import TruncDate
+from rest_framework.throttling import ScopedRateThrottle
+from ..models import AdminActionLog, Appeal
 from ..serializers import (
     AdminUserSerializer,
     AdminReportSerializer,
     AdminActionLogSerializer,
+    AdminAppealSerializer,
     AdminContentPostSerializer,
     AdminContentTrackSerializer,
     AdminContentCommentSerializer,
@@ -120,6 +123,9 @@ class AdminDashboardView(APIView):
                 'pending': Report.objects.filter(status='pending').count(),
                 'total': Report.objects.count(),
             },
+            'appeals': {
+                'pending': Appeal.objects.filter(status='pending').count(),
+            },
             'moderation': {
                 'suspended': User.objects.filter(is_suspended=True).count(),
                 'banned': User.objects.filter(is_active=False).count(),
@@ -127,6 +133,40 @@ class AdminDashboardView(APIView):
             },
             'recent_reports': AdminReportSerializer(recent_reports, many=True).data,
             'recent_users': AdminUserSerializer(recent_users, many=True).data,
+        })
+
+
+# ── Analytics (time-series) ──────────────────────────────────────────────────
+class AdminAnalyticsView(APIView):
+    permission_classes = [IsModerator]
+
+    def get(self, request):
+        try:
+            days = int(request.query_params.get('days') or 14)
+        except (TypeError, ValueError):
+            days = 14
+        days = max(7, min(days, 90))
+        now = timezone.now()
+        start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        def series(qs, field):
+            rows = (
+                qs.filter(**{f'{field}__gte': start})
+                .annotate(d=TruncDate(field)).values('d')
+                .annotate(c=Count('id')).order_by('d')
+            )
+            by = {r['d']: r['c'] for r in rows}
+            out = []
+            for i in range(days):
+                day = (start + timedelta(days=i)).date()
+                out.append({'date': day.isoformat(), 'count': by.get(day, 0)})
+            return out
+
+        return Response({
+            'days': days,
+            'signups': series(User.objects.all(), 'date_joined'),
+            'posts': series(SocialPost.objects.all(), 'created_at'),
+            'reports': series(Report.objects.all(), 'created_at'),
         })
 
 
@@ -191,6 +231,29 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         report.save(update_fields=['moderator_notes'])
         log_admin_action(request.user, 'note_report', 'report', report.id)
         return Response(self.get_serializer(report).data)
+
+    def get_throttles(self):
+        # Rate-limit only the bulk endpoint (the global ScopedRateThrottle reads
+        # this attribute); other actions keep the default user/anon throttles.
+        if self.action == 'bulk':
+            self.throttle_scope = 'admin_bulk'
+        return super().get_throttles()
+
+    @action(detail=False, methods=['post'])
+    def bulk(self, request):
+        """Resolve or dismiss many reports at once."""
+        ids = request.data.get('ids') or []
+        op = request.data.get('action')
+        if not isinstance(ids, list) or not ids:
+            return Response({'error': 'ids (a non-empty list) is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if op not in ('resolve', 'dismiss'):
+            return Response({'error': "action must be 'resolve' or 'dismiss'"}, status=status.HTTP_400_BAD_REQUEST)
+        new_status = 'resolved' if op == 'resolve' else 'dismissed'
+        count = Report.objects.filter(id__in=ids).update(
+            status=new_status, resolved_by=request.user, resolved_at=timezone.now(),
+        )
+        log_admin_action(request.user, f'bulk_{op}_reports', 'report', None, reason=f'{count} reports')
+        return Response({'updated': count})
 
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
@@ -406,6 +469,78 @@ class AdminContentViewSet(viewsets.GenericViewSet):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         log_admin_action(request.user, f'restore_{ctype}', ctype, oid)
         return Response({'status': 'restored'})
+
+    def get_throttles(self):
+        if self.action == 'bulk':
+            self.throttle_scope = 'admin_bulk'
+        return super().get_throttles()
+
+    @action(detail=False, methods=['post'])
+    def bulk(self, request):
+        """Remove or restore many items of one type at once."""
+        ctype = request.data.get('type')
+        ids = request.data.get('ids') or []
+        op = request.data.get('action')
+        Model = _CONTENT_MODELS.get(ctype)
+        if not Model:
+            return Response({'error': f'type must be one of {list(_CONTENT_MODELS)}'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(ids, list) or not ids:
+            return Response({'error': 'ids (a non-empty list) is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if op not in ('remove', 'restore'):
+            return Response({'error': "action must be 'remove' or 'restore'"}, status=status.HTTP_400_BAD_REQUEST)
+        count = Model.objects.filter(id__in=ids).update(is_removed=(op == 'remove'))
+        log_admin_action(request.user, f'bulk_{op}_{ctype}', ctype, None, reason=f'{count} items')
+        return Response({'updated': count})
+
+
+# ── Appeals queue ────────────────────────────────────────────────────────────
+class AdminAppealViewSet(viewsets.GenericViewSet):
+    permission_classes = [IsModerator]
+    pagination_class = StandardPagination
+    serializer_class = AdminAppealSerializer
+
+    def get_queryset(self):
+        qs = Appeal.objects.select_related('user', 'reviewed_by').order_by('-created_at')
+        status_f = self.request.query_params.get('status')
+        if status_f in dict(Appeal.STATUS_CHOICES):
+            qs = qs.filter(status=status_f)
+        return qs
+
+    def list(self, request):
+        return _paginated(self, self.get_queryset(), AdminAppealSerializer)
+
+    def _resolve(self, request, pk, new_status):
+        appeal = get_object_or_404(Appeal, pk=pk)
+        appeal.status = new_status
+        appeal.reviewed_by = request.user
+        appeal.reviewed_at = timezone.now()
+        appeal.review_notes = (request.data.get('notes') or '')[:2000]
+        appeal.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'review_notes'])
+        return appeal
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        appeal = self._resolve(request, pk, 'approved')
+        # Approving an appeal lifts the suspension.
+        u = appeal.user
+        u.is_suspended = False
+        u.suspension_reason = ''
+        u.suspended_at = None
+        u.suspended_until = None
+        u.save(update_fields=['is_suspended', 'suspension_reason', 'suspended_at', 'suspended_until'])
+        notify_moderation(u, 'Appeal approved',
+                          'Your appeal was approved and your suspension has been lifted. Welcome back!')
+        log_admin_action(request.user, 'approve_appeal', 'appeal', appeal.id)
+        return Response(self.get_serializer(appeal).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        appeal = self._resolve(request, pk, 'rejected')
+        notify_moderation(appeal.user, 'Appeal reviewed',
+                          'Your appeal has been reviewed and the moderation decision stands.'
+                          + (f" Note: {appeal.review_notes}" if appeal.review_notes else ''))
+        log_admin_action(request.user, 'reject_appeal', 'appeal', appeal.id)
+        return Response(self.get_serializer(appeal).data)
 
 
 # ── Audit log viewer ─────────────────────────────────────────────────────────

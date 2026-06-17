@@ -1,4 +1,40 @@
 from .common import *  # noqa: F401,F403
+from rest_framework.throttling import ScopedRateThrottle
+from ..models import Appeal
+from ..serializers import AppealSerializer
+
+
+class AppealViewSet(viewsets.GenericViewSet):
+    """A suspended user submits / views their own appeal."""
+    permission_classes = [IsAuthenticated]
+    serializer_class = AppealSerializer
+
+    def get_throttles(self):
+        # Throttle only submissions (not the cheap `mine` GET).
+        if self.action == 'create':
+            self.throttle_scope = 'appeals'
+        return super().get_throttles()
+
+    def create(self, request):
+        user = request.user
+        if not getattr(user, 'is_currently_suspended', False):
+            return Response({'error': 'There is nothing to appeal — your account is not suspended.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if Appeal.objects.filter(user=user, status='pending').exists():
+            return Response({'error': 'You already have an appeal under review.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        message = (request.data.get('message') or '').strip()
+        if len(message) < 10:
+            return Response({'error': 'Please describe your appeal (at least 10 characters).'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        appeal = Appeal.objects.create(user=user, message=message[:4000])
+        return Response(self.get_serializer(appeal).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def mine(self, request):
+        """Most recent appeal for the current user (or null)."""
+        appeal = Appeal.objects.filter(user=request.user).order_by('-created_at').first()
+        return Response(self.get_serializer(appeal).data if appeal else None)
 
 
 class UserViewSet(viewsets.ModelViewSet):

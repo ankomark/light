@@ -63,6 +63,7 @@ const AdminDashboard = ({ navigation }) => {
   const s = data?.signups || {};
   const r = data?.reports || {};
   const m = data?.moderation || {};
+  const ap = data?.appeals || {};
 
   return (
     <ScrollView
@@ -85,8 +86,12 @@ const AdminDashboard = ({ navigation }) => {
       </View>
 
       <Text style={styles.sectionTitle}>Manage</Text>
+      <QuickLink icon="chart-line" label="Analytics" sub="Signups, posts & reports over time"
+        onPress={() => navigation.navigate('AdminAnalytics')} />
       <QuickLink icon="flag-outline" label="Reports" sub="Review reported content"
         badge={r.pending} onPress={() => navigation.navigate('AdminReports')} />
+      <QuickLink icon="gavel" label="Appeals" sub="Review suspension appeals"
+        badge={ap.pending} onPress={() => navigation.navigate('AdminAppeals')} />
       <QuickLink icon="account-cog-outline" label="Users" sub="Suspend, ban, assign roles"
         onPress={() => navigation.navigate('AdminUsers')} />
       <QuickLink icon="file-document-multiple-outline" label="Content" sub="Browse & remove posts, tracks, comments"

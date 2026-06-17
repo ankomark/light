@@ -64,10 +64,20 @@ const ADMIN_SECTION = {
   title: 'Admin',
   items: [
     { label: 'Admin Dashboard', route: 'AdminDashboard', set: 'mci', icon: 'shield-crown-outline' },
+    { label: 'Analytics', route: 'AdminAnalytics', set: 'mci', icon: 'chart-line' },
     { label: 'Reports', route: 'AdminReports', set: 'mci', icon: 'flag-outline' },
     { label: 'Users', route: 'AdminUsers', set: 'mci', icon: 'account-cog-outline' },
     { label: 'Content', route: 'AdminContent', set: 'mci', icon: 'file-document-multiple-outline' },
+    { label: 'Appeals', route: 'AdminAppeals', set: 'mci', icon: 'gavel' },
     { label: 'Audit Log', route: 'AdminLogs', set: 'mci', icon: 'history' },
+  ],
+};
+
+// Shown only to a user whose own account is suspended.
+const APPEAL_SECTION = {
+  title: 'Account',
+  items: [
+    { label: 'Appeal suspension', route: 'Appeal', set: 'mci', icon: 'gavel' },
   ],
 };
 
@@ -165,7 +175,11 @@ function HamburgerMenu() {
           </View>
 
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-            {(isAdmin(currentUser) ? [...SECTIONS, ADMIN_SECTION] : SECTIONS).map((section) => (
+            {[
+              ...SECTIONS,
+              ...(currentUser?.is_suspended ? [APPEAL_SECTION] : []),
+              ...(isAdmin(currentUser) ? [ADMIN_SECTION] : []),
+            ].map((section) => (
               <View key={section.title} style={styles.section}>
                 <Text style={styles.sectionTitle}>{section.title.toUpperCase()}</Text>
                 <View style={styles.group}>

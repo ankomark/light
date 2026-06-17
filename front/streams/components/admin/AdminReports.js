@@ -1,13 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, Alert, Image, Modal, TextInput,
+  ActivityIndicator, Alert, Image, Modal, TextInput, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   fetchAdminReports, resolveReport, dismissReport, removeReportTarget,
-  assignReport, addReportNote,
+  assignReport, addReportNote, bulkReports,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
@@ -53,6 +53,9 @@ const AdminReports = () => {
   const [busyId, setBusyId] = useState(null);
   const [noteFor, setNoteFor] = useState(null);   // report being annotated
   const [noteText, setNoteText] = useState('');
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async (status) => {
     setLoading(true);
@@ -105,6 +108,27 @@ const AdminReports = () => {
     );
   };
 
+  const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
+  const toggleSelect = (id) => setSelected((prev) => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+  const runBulk = async (op) => {
+    if (selected.size === 0) return;
+    const ids = [...selected];
+    setBulkBusy(true);
+    try {
+      await bulkReports(ids, op);
+      setReports((prev) => prev.filter((r) => !ids.includes(r.id)));
+      exitSelect();
+    } catch {
+      Alert.alert('Error', 'Bulk action failed.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const openNote = (item) => { setNoteFor(item); setNoteText(item.moderator_notes || ''); };
   const saveNote = async () => {
     const item = noteFor;
@@ -116,9 +140,18 @@ const AdminReports = () => {
     const busy = busyId === item.id;
     const canRemove = REMOVABLE.has(item.content_type) && !item.target?.is_removed;
     const dup = item.duplicate_count || 1;
+    const checked = selected.has(item.id);
     return (
-      <View style={styles.card}>
+      <Pressable
+        onPress={() => selectMode && toggleSelect(item.id)}
+        style={[styles.card, checked && styles.cardSelected]}
+      >
         <View style={styles.cardHead}>
+          {selectMode && (
+            <View style={[styles.checkbox, checked && styles.checkboxOn]}>
+              {checked && <Ionicons name="checkmark" size={13} color="#0A1628" />}
+            </View>
+          )}
           <View style={styles.reasonPill}><Text style={styles.reasonText}>{item.reason}</Text></View>
           {dup > 1 && (
             <View style={styles.dupPill}>
@@ -143,7 +176,7 @@ const AdminReports = () => {
           <Text style={styles.note}>📝 {item.moderator_notes}</Text>
         ) : null}
 
-        {busy ? (
+        {!selectMode && (busy ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.sm }} />
         ) : (
           <>
@@ -173,20 +206,25 @@ const AdminReports = () => {
               </TouchableOpacity>
             </View>
           </>
-        )}
-      </View>
+        ))}
+      </Pressable>
     );
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Reports</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>Reports</Text>
+        <TouchableOpacity onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
+          <Text style={styles.selectToggle}>{selectMode ? 'Cancel' : 'Select'}</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
             <TouchableOpacity key={f.key} style={[styles.pill, active && styles.pillActive]}
-              onPress={() => setFilter(f.key)} activeOpacity={0.85}>
+              onPress={() => { exitSelect(); setFilter(f.key); }} activeOpacity={0.85}>
               <Text style={[styles.pillText, active && styles.pillTextActive]}>{f.label}</Text>
             </TouchableOpacity>
           );
@@ -200,7 +238,7 @@ const AdminReports = () => {
           data={reports}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, selectMode && selected.size > 0 && { paddingBottom: 96 }]}
           showsVerticalScrollIndicator={false}
           onRefresh={() => load(filter)}
           refreshing={loading}
@@ -211,6 +249,25 @@ const AdminReports = () => {
             </View>
           }
         />
+      )}
+
+      {/* Bulk action bar */}
+      {selectMode && selected.size > 0 && (
+        <View style={styles.bulkBar}>
+          <Text style={styles.bulkCount}>{selected.size} selected</Text>
+          {bulkBusy ? (
+            <ActivityIndicator color={colors.accent} />
+          ) : (
+            <View style={styles.bulkBtns}>
+              <TouchableOpacity style={[styles.bulkBtn, styles.bulkResolve]} onPress={() => runBulk('resolve')}>
+                <Text style={styles.btnTextDark}>Resolve</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.bulkBtn, styles.bulkDismiss]} onPress={() => runBulk('dismiss')}>
+                <Text style={styles.btnTextLight}>Dismiss</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       )}
 
       {/* Internal note editor */}
@@ -241,9 +298,36 @@ const AdminReports = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  titleRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+  },
   title: {
-    ...typography.h1, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+    ...typography.h1, color: colors.textPrimary,
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
+  selectToggle: { ...typography.label, color: colors.accent, fontWeight: '700' },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, marginRight: spacing.xs,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  cardSelected: { borderColor: colors.accent, borderWidth: 1.5 },
+  bulkBar: {
+    position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(14,32,56,0.97)', borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, ...shadows.md,
+  },
+  bulkCount: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
+  bulkBtns: { flexDirection: 'row', gap: spacing.sm },
+  bulkBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md },
+  bulkResolve: { backgroundColor: colors.accent },
+  bulkDismiss: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
   },
   filterRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   pill: {

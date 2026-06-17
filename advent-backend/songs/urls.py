@@ -3,6 +3,7 @@ from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
 from .views import (
     UserViewSet,
+    AppealViewSet,
     TrackViewSet,
     PlaylistViewSet,
     ProfileViewSet,
@@ -49,10 +50,12 @@ from .views import (
     CloudinarySignView,
     StripeWebhookView,
     AdminDashboardView,
+    AdminAnalyticsView,
     AdminReportViewSet,
     AdminUserViewSet,
     AdminContentViewSet,
     AdminLogViewSet,
+    AdminAppealViewSet,
 )
 
 router = DefaultRouter()
@@ -87,11 +90,13 @@ router.register(r'conversations', ConversationViewSet, basename='conversations')
 router.register(r'explore', ExploreViewSet, basename='explore')
 router.register(r'stories', StoryViewSet, basename='stories')
 router.register(r'reports', ReportViewSet, basename='reports')
+router.register(r'appeals', AppealViewSet, basename='appeals')
 # Admin / moderation panel (gated by IsModerator / IsSuperAdmin in the views).
 router.register(r'admin/reports', AdminReportViewSet, basename='admin-reports')
 router.register(r'admin/users', AdminUserViewSet, basename='admin-users')
 router.register(r'admin/content', AdminContentViewSet, basename='admin-content')
 router.register(r'admin/logs', AdminLogViewSet, basename='admin-logs')
+router.register(r'admin/appeals', AdminAppealViewSet, basename='admin-appeals')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
@@ -116,6 +121,7 @@ urlpatterns = [
     path('auth/status/', AuthStatusView.as_view(), name='auth-status'),
     path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
     path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
+    path('admin/analytics/', AdminAnalyticsView.as_view(), name='admin-analytics'),
     path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),
     path('marketplace/stripe-webhook/', StripeWebhookView.as_view(), name='stripe-webhook'),
     # Existing routes

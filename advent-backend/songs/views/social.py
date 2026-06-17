@@ -524,6 +524,8 @@ class StoryViewSet(viewsets.ModelViewSet):
 
 class ReportViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
+    # Rate-limit report submissions (abuse guard) via the global ScopedRateThrottle.
+    throttle_scope = 'reports'
 
     def create(self, request):
         content_type = request.data.get('content_type', '').lower()
