@@ -57,6 +57,11 @@ import EditProduct from './components/marketplace/EditProduct';
 import AddProduct from './components/marketplace/AddProduct';
 import SellerDashboard from './components/marketplace/SellerDashboard';
 import Checkout from './components/marketplace/Checkout';
+import AdminDashboard from './components/admin/AdminDashboard';
+import AdminReports from './components/admin/AdminReports';
+import AdminUsers from './components/admin/AdminUsers';
+import AdminContent from './components/admin/AdminContent';
+import { isAdmin } from './utils/roles';
 import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
 import LiveEventsList from './components/Live/LiveEventsList';
@@ -231,6 +236,10 @@ const App = () => {
                 <Stack.Screen name="Checkout" component={CheckoutWrapper} />
                 <Stack.Screen name="OrderHistory" component={OrderHistoryWrapper} />
                 <Stack.Screen name="SellerDashboard" component={SellerDashboardWrapper} />
+                <Stack.Screen name="AdminDashboard" component={AdminDashboardWrapper} />
+                <Stack.Screen name="AdminReports" component={AdminReportsWrapper} />
+                <Stack.Screen name="AdminUsers" component={AdminUsersWrapper} />
+                <Stack.Screen name="AdminContent" component={AdminContentWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxScreen} />
@@ -417,6 +426,34 @@ const SellerDashboardWrapper = ({ navigation }) => (
     <SellerDashboard navigation={navigation} />
   </View>
 );
+
+// Role gate: non-admins are bounced Home. The API is also gated server-side, so
+// this is purely UX (hides screens that would 403 anyway).
+const RequireAdmin = ({ navigation, children }) => {
+  const { currentUser } = useAuth();
+  const allowed = isAdmin(currentUser);
+  React.useEffect(() => {
+    if (!allowed) navigation.replace('Home');
+  }, [allowed, navigation]);
+  return allowed ? children : null;
+};
+
+// Shared luxury backdrop (rotating wallpaper + transparent nav bar) for all
+// admin screens, matching Explore/Bible/Hymns.
+const adminWrap = (Screen) => ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.6)" />
+    <Header navigation={navigation} transparentBg />
+    <RequireAdmin navigation={navigation}>
+      <Screen navigation={navigation} />
+    </RequireAdmin>
+  </View>
+);
+
+const AdminDashboardWrapper = adminWrap(AdminDashboard);
+const AdminReportsWrapper = adminWrap(AdminReports);
+const AdminUsersWrapper = adminWrap(AdminUsers);
+const AdminContentWrapper = adminWrap(AdminContent);
 const OrderDetailWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1 }}>
     <Header navigation={navigation} />

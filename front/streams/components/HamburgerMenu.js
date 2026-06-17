@@ -7,6 +7,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { fetchUnreadMessageCount } from '../services/api';
+import { isAdmin } from '../utils/roles';
 import { colors, spacing, radius, typography } from '../constants/theme';
 
 const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
@@ -57,6 +58,17 @@ const SECTIONS = [
     ],
   },
 ];
+
+// Appended only for moderators / super-admins (see isAdmin gating below).
+const ADMIN_SECTION = {
+  title: 'Admin',
+  items: [
+    { label: 'Admin Dashboard', route: 'AdminDashboard', set: 'mci', icon: 'shield-crown-outline' },
+    { label: 'Reports', route: 'AdminReports', set: 'mci', icon: 'flag-outline' },
+    { label: 'Users', route: 'AdminUsers', set: 'mci', icon: 'account-cog-outline' },
+    { label: 'Content', route: 'AdminContent', set: 'mci', icon: 'file-document-multiple-outline' },
+  ],
+};
 
 const Glyph = ({ set, name, color, size }) =>
   set === 'mci'
@@ -152,7 +164,7 @@ function HamburgerMenu() {
           </View>
 
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-            {SECTIONS.map((section) => (
+            {(isAdmin(currentUser) ? [...SECTIONS, ADMIN_SECTION] : SECTIONS).map((section) => (
               <View key={section.title} style={styles.section}>
                 <Text style={styles.sectionTitle}>{section.title.toUpperCase()}</Text>
                 <View style={styles.group}>

@@ -88,6 +88,17 @@ from datetime import timedelta
 logger = logging.getLogger(__name__)
 
 
+class IsNotSuspended(BasePermission):
+    """Suspended users can still read, but cannot create or modify content."""
+    message = 'Your account is suspended.'
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        u = request.user
+        return not (u and u.is_authenticated and getattr(u, 'is_suspended', False))
+
+
 class StandardPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'

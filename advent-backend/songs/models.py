@@ -29,6 +29,28 @@ class User(AbstractUser):
     is_email_verified = models.BooleanField(default=False)
     # is_artist = models.BooleanField(default=False)
 
+    # ── Platform admin role (in-app moderation panel) ─────────────────────────
+    # Distinct from Django's is_staff/is_superuser and from per-group is_admin.
+    ADMIN_ROLE_CHOICES = (
+        ('', 'None'),
+        ('moderator', 'Moderator'),
+        ('super_admin', 'Super Admin'),
+    )
+    admin_role = models.CharField(max_length=20, choices=ADMIN_ROLE_CHOICES, default='', blank=True)
+    # Soft moderation state. "Ban" uses Django's is_active (blocks auth);
+    # "suspend" is a reversible flag enforced on content-creating actions.
+    is_suspended = models.BooleanField(default=False)
+    suspension_reason = models.CharField(max_length=255, blank=True, default='')
+    suspended_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def is_super_admin(self):
+        return self.is_superuser or self.admin_role == 'super_admin'
+
+    @property
+    def is_platform_admin(self):
+        return self.is_super_admin or self.admin_role == 'moderator'
+
     groups = models.ManyToManyField(
         Group,
         related_name='custom_user_set',
@@ -92,6 +114,8 @@ class Track(models.Model):
     slug = models.SlugField(unique=True)
     views = models.PositiveIntegerField(default=0)
     downloads = models.PositiveIntegerField(default=0)
+    # Soft moderation takedown — hidden from public lists, kept for admin/audit.
+    is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     # A user's "favorites" are the tracks they've liked (the Like model);
@@ -240,6 +264,8 @@ class SocialPost(models.Model):
     # COUNT joins per query — the main scalability win for large datasets.
     likes_count = models.PositiveIntegerField(default=0)
     comments_count = models.PositiveIntegerField(default=0)
+    # Soft moderation takedown — hidden from public feed/explore, kept for admin.
+    is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -328,6 +354,8 @@ class PostComment(models.Model):
     post = models.ForeignKey(SocialPost, on_delete=models.CASCADE, related_name='comments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='social_comments')
     content = models.TextField()
+    # Soft moderation takedown — hidden from public comment lists.
+    is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -415,6 +443,24 @@ class Report(models.Model):
 
     def __str__(self):
         return f"Report by {self.reporter.username}: {self.content_type} #{self.object_id}"
+
+
+class AdminActionLog(models.Model):
+    """Audit trail for every moderation action taken from the admin panel."""
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='admin_actions')
+    action = models.CharField(max_length=40)  # e.g. resolve_report, remove_post, suspend_user, set_role
+    target_type = models.CharField(max_length=20, blank=True, default='')
+    target_id = models.PositiveIntegerField(null=True, blank=True)
+    reason = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['-created_at'])]
+
+    def __str__(self):
+        actor = self.actor.username if self.actor else 'system'
+        return f"{actor} {self.action} {self.target_type}#{self.target_id}"
 
 
 class Notification(models.Model):

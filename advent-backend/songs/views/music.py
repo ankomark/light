@@ -134,7 +134,7 @@ class TrackUploadView(APIView):
 class TrackViewSet(viewsets.ModelViewSet):
     queryset = Track.objects.all().order_by('-created_at')
     serializer_class = TrackSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsNotSuspended]
     pagination_class = StandardPagination
 
     def get_queryset(self):
@@ -149,6 +149,7 @@ class TrackViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = (
             Track.objects
+            .filter(is_removed=False)  # hide moderator takedowns
             .select_related('artist__profile')
             .annotate(likes_total=Count('likes', distinct=True))
         )

@@ -1466,6 +1466,53 @@ export const markConversationRead = (conversationId) =>
 export const fetchUnreadMessageCount = () =>
   apiRequest('get', '/conversations/unread_count/');
 
+// ── Admin / moderation panel (gated server-side by IsModerator/IsSuperAdmin) ──
+export const fetchAdminDashboard = () =>
+  apiRequest('get', '/admin/dashboard/');
+
+export const fetchAdminReports = (status = '') =>
+  apiRequest('get', '/admin/reports/', null, { params: status ? { status } : {} });
+
+export const resolveReport = (id) =>
+  apiRequest('post', `/admin/reports/${id}/resolve/`);
+
+export const dismissReport = (id) =>
+  apiRequest('post', `/admin/reports/${id}/dismiss/`);
+
+export const removeReportTarget = (id, reason = '') =>
+  apiRequest('post', `/admin/reports/${id}/remove_target/`, { reason });
+
+export const fetchAdminUsers = (q = '', role = '') =>
+  apiRequest('get', '/admin/users/', null, {
+    params: { ...(q ? { q } : {}), ...(role ? { role } : {}) },
+  });
+
+export const suspendUser = (id, reason = '') =>
+  apiRequest('post', `/admin/users/${id}/suspend/`, { reason });
+
+export const unsuspendUser = (id) =>
+  apiRequest('post', `/admin/users/${id}/unsuspend/`);
+
+export const banUser = (id, reason = '') =>
+  apiRequest('post', `/admin/users/${id}/ban/`, { reason });
+
+export const unbanUser = (id) =>
+  apiRequest('post', `/admin/users/${id}/unban/`);
+
+export const setUserRole = (id, role) =>
+  apiRequest('post', `/admin/users/${id}/set_role/`, { role });
+
+export const fetchAdminContent = (type = 'post', removed = '') =>
+  apiRequest('get', '/admin/content/', null, {
+    params: { type, ...(removed ? { removed } : {}) },
+  });
+
+export const removeContent = (type, id, reason = '') =>
+  apiRequest('post', '/admin/content/remove/', { type, id, reason });
+
+export const restoreContent = (type, id) =>
+  apiRequest('post', '/admin/content/restore/', { type, id });
+
 // Export all API functions
 export default {
   API_URL,

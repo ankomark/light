@@ -48,10 +48,10 @@ from .views import (
     SocialPostUploadView,
     CloudinarySignView,
     StripeWebhookView,
-
-
-
-
+    AdminDashboardView,
+    AdminReportViewSet,
+    AdminUserViewSet,
+    AdminContentViewSet,
 )
 
 router = DefaultRouter()
@@ -86,6 +86,10 @@ router.register(r'conversations', ConversationViewSet, basename='conversations')
 router.register(r'explore', ExploreViewSet, basename='explore')
 router.register(r'stories', StoryViewSet, basename='stories')
 router.register(r'reports', ReportViewSet, basename='reports')
+# Admin / moderation panel (gated by IsModerator / IsSuperAdmin in the views).
+router.register(r'admin/reports', AdminReportViewSet, basename='admin-reports')
+router.register(r'admin/users', AdminUserViewSet, basename='admin-users')
+router.register(r'admin/content', AdminContentViewSet, basename='admin-content')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
@@ -109,6 +113,7 @@ urlpatterns = [
     path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
     path('auth/status/', AuthStatusView.as_view(), name='auth-status'),
     path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
+    path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
     path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),
     path('marketplace/stripe-webhook/', StripeWebhookView.as_view(), name='stripe-webhook'),
     # Existing routes

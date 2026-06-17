@@ -15,6 +15,7 @@ def feed_post_queryset(user):
     )
     qs = (
         SocialPost.objects
+        .filter(is_removed=False)  # hide moderator takedowns from all public surfaces
         .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile')
         .annotate(author_followers_count=Subquery(author_followers, output_field=IntegerField()))
     )
@@ -44,7 +45,7 @@ class SocialPostViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
     queryset = SocialPost.objects.all()
     serializer_class = SocialPostSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly, IsNotSuspended]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
@@ -408,14 +409,14 @@ class PostLikeViewSet(viewsets.ModelViewSet):
 class PostCommentViewSet(viewsets.ModelViewSet):
     queryset = PostComment.objects.all()
     serializer_class = PostCommentSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly, IsNotSuspended]
     pagination_class = StandardPagination
 
     def get_queryset(self):
         # select_related pulls each comment's author (+ profile for the avatar)
         # in the same query, so a page of comments is a couple of queries instead
         # of one-per-row. Ordering/index come from PostComment.Meta.
-        qs = PostComment.objects.select_related('user', 'user__profile')
+        qs = PostComment.objects.select_related('user', 'user__profile').filter(is_removed=False)
         post_id = self.kwargs.get('post_pk')
         if post_id:
             qs = qs.filter(post__id=post_id)
@@ -598,7 +599,7 @@ class ExploreViewSet(viewsets.ViewSet):
         """Return the most-used hashtags in the last 7 days."""
         week_ago = timezone.now() - timedelta(days=7)
         posts_with_tags = SocialPost.objects.filter(
-            created_at__gte=week_ago, tags__gt=''
+            created_at__gte=week_ago, tags__gt='', is_removed=False
         ).values_list('tags', flat=True)
 
         counts = {}
@@ -623,7 +624,7 @@ class ExploreViewSet(viewsets.ViewSet):
             Q(caption__icontains=query) | Q(location__icontains=query)
         ).order_by('-created_at')[:20]
         tracks = Track.objects.filter(
-            Q(title__icontains=query) | Q(album__icontains=query)
+            Q(title__icontains=query) | Q(album__icontains=query), is_removed=False
         ).select_related('artist').order_by('-created_at')[:10]
         groups = Group.objects.filter(
             Q(name__icontains=query) | Q(description__icontains=query)

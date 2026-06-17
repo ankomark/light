@@ -207,6 +207,9 @@ class AuthStatusView(APIView):
             'email_verified_actual': user.is_email_verified,
             'verification_required': require_verification,
             'has_profile': hasattr(user, 'profile') and user.profile is not None,
+            'is_suspended': getattr(user, 'is_suspended', False),
+            'suspension_reason': getattr(user, 'suspension_reason', ''),
+            'admin_role': getattr(user, 'admin_role', ''),
         })
 
 
