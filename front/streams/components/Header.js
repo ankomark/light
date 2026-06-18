@@ -89,7 +89,22 @@ const Header = ({ transparentBg = false }) => {
             </LinearGradient>
             <Text style={styles.title}>ADVENT LIGHT</Text>
           </View>
-          <View style={styles.menuContainer}>
+          <View style={styles.rightCluster}>
+            {/* Dedicated Videos feed (TikTok-style). Sits just left of the menu. */}
+            <TouchableOpacity
+              style={styles.videosBtn}
+              onPress={() => navigation.navigate('Videos')}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Videos"
+              accessibilityState={{ selected: isOn('Videos') }}
+            >
+              <Ionicons
+                name={isOn('Videos') ? 'play-circle' : 'play-circle-outline'}
+                size={28}
+                color={isOn('Videos') ? colors.accent : '#fff'}
+              />
+            </TouchableOpacity>
             <HamburgerMenu />
           </View>
         </View>
@@ -224,6 +239,8 @@ const styles = StyleSheet.create({
     textShadowRadius: 8,
   },
   menuContainer: { marginLeft: 'auto' },
+  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 'auto' },
+  videosBtn: { padding: 2 },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

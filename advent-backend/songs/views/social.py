@@ -67,6 +67,11 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         if tag:
             qs = qs.filter(tags__icontains=tag)
 
+        # Media-type filter powers the dedicated Videos page (?content_type=video).
+        ctype = self.request.query_params.get('content_type')
+        if ctype in ('video', 'image'):
+            qs = qs.filter(content_type=ctype)
+
         # Personalised home feed: posts from people you follow (+ your own).
         # Falls back to the global feed when you follow no one yet, so new
         # users never see an empty timeline.
@@ -207,6 +212,7 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         search = (params.get('search') or '').strip()
         feed = params.get('feed', '')
         tag = params.get('tag', '')
+        ctype = params.get('content_type', '')
         first_page = not params.get('cursor')
         bypass = params.get('fresh') in ('1', 'true', 'True')
         ttl = getattr(settings, 'FEED_CACHE_SECONDS', 0)
@@ -218,7 +224,7 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         # on a non-refresh reload; the client updates those optimistically.)
         cache_key = None
         if ttl and user.is_authenticated and first_page and not search:
-            cache_key = f'feed:v1:{user.id}:{_feed_version(user.id)}:{feed}:{tag}'
+            cache_key = f'feed:v1:{user.id}:{_feed_version(user.id)}:{feed}:{tag}:{ctype}'
             if not bypass:
                 cached = cache.get(cache_key)
                 if cached is not None:

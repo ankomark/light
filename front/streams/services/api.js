@@ -315,7 +315,7 @@ export const cursorFromUrl = (url) => {
 // Cursor-paginated feed. Pass cursor=null for the first page, then the cursor
 // from the previous response's `next` to page further. `fresh` bypasses the
 // server's short-lived feed cache (used by pull-to-refresh / new-post checks).
-export const fetchSocialPosts = async (cursor = null, feed = null, search = '', { fresh = false } = {}) => {
+export const fetchSocialPosts = async (cursor = null, feed = null, search = '', { fresh = false, contentType = null } = {}) => {
   const retry = async (attempt = 1) => {
     try {
       const response = await apiRequest('get', '/social-posts/', null, {
@@ -325,6 +325,7 @@ export const fetchSocialPosts = async (cursor = null, feed = null, search = '', 
           ...(feed ? { feed } : {}),
           ...(search ? { search } : {}),
           ...(fresh ? { fresh: 1 } : {}),
+          ...(contentType ? { content_type: contentType } : {}),
         },
       });
       // response is { next, previous, results } (cursor pagination omits count)

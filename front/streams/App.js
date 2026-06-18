@@ -66,6 +66,7 @@ import AdminAnalytics from './components/admin/AdminAnalytics';
 import AdminAppeals from './components/admin/AdminAppeals';
 import AppealScreen from './components/admin/AppealScreen';
 import AdminRoles from './components/admin/AdminRoles';
+import VideoFeed from './components/VideoFeed';
 import { isAdmin } from './utils/roles';
 import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
@@ -258,6 +259,7 @@ const App = () => {
                 <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
                 <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
                 <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+                <Stack.Screen name="Videos" component={VideoFeed} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
                 <Stack.Screen name="StoryViewer" component={StoryViewer} options={{ headerShown: false, animation: 'fade' }} />
                 <Stack.Screen name="CreateStory" component={CreateStoryScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="LiveHomeScreen" component={LiveHomeScreenWrapper} />
