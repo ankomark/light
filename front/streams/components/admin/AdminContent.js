@@ -159,8 +159,14 @@ const AdminContent = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Type pills — horizontally scrollable (6 types) */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+      {/* Type pills — horizontally scrollable (6 types). flexGrow/Shrink 0 keeps
+          the row at its content height so the pills aren't vertically clipped. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.pillsScroll}
+        contentContainerStyle={styles.filterRow}
+      >
         {TYPES.map((tp) => {
           const active = type === tp.key;
           return (
@@ -241,14 +247,16 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
   selectToggle: { ...typography.label, color: colors.accent, fontWeight: '700' },
-  filterRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  pillsScroll: { flexGrow: 0, flexShrink: 0 },
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   pill: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full,
     backgroundColor: 'rgba(16,28,46,0.82)',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
   },
   pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
-  pillText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  pillText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', lineHeight: 16 },
   pillTextActive: { color: '#0A1628' },
   toolRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, alignItems: 'center' },
   searchBar: {
