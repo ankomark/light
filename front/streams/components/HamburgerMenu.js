@@ -8,6 +8,8 @@ import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { fetchUnreadMessageCount } from '../services/api';
 import { isAdmin, isSuperAdmin, hasCapability } from '../utils/roles';
+import RotatingBackground from './RotatingBackground';
+import ScreenVignette from './ScreenVignette';
 import { colors, spacing, radius, typography } from '../constants/theme';
 
 const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
@@ -136,6 +138,11 @@ function HamburgerMenu() {
 
       <Modal visible={menuVisible} animationType="slide" onRequestClose={close} statusBarTranslucent>
         <View style={[styles.container, { paddingTop: TOP_PAD }]}>
+          {/* Shared luxury backdrop — rotating wallpaper + navy edge vignette. */}
+          <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.62)" />
+          <ScreenVignette tintRgb="6,16,34" zIndex={1} />
+
+          <View style={styles.menuContent}>
           {/* Header: profile (or welcome) + close */}
           <View style={styles.header}>
             {isAuthenticated ? (
@@ -246,6 +253,7 @@ function HamburgerMenu() {
 
             <View style={{ height: spacing.xl }} />
           </ScrollView>
+          </View>
         </View>
       </Modal>
     </View>
@@ -265,7 +273,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   countBadgeText: { color: colors.white, fontSize: 11, fontWeight: '800' },
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: '#0A1628' },
+  menuContent: { flex: 1, zIndex: 2 },
 
   header: {
     flexDirection: 'row',
@@ -306,8 +315,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   group: {
-    backgroundColor: colors.card,
+    backgroundColor: 'rgba(16,28,46,0.82)',
     borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     marginHorizontal: spacing.md,
     overflow: 'hidden',
   },

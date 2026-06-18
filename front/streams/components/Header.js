@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
   // Gold metallic rim (the gradient is the ring; padding sets its thickness).
   logoRing: {
     width: 32,
-    height: 42,
+    height: 34,
     borderRadius: 26,
     padding: 3.5,
     alignItems: 'center',
