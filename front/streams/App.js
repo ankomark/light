@@ -67,7 +67,14 @@ import AdminAppeals from './components/admin/AdminAppeals';
 import AppealScreen from './components/admin/AppealScreen';
 import AdminRoles from './components/admin/AdminRoles';
 import VideoFeed from './components/VideoFeed';
+import LiveHub from './components/Live/LiveHub';
+import GoLive from './components/Live/GoLive';
+import LiveRoom from './components/Live/LiveRoom';
+import { registerGlobals as registerLiveKitGlobals } from '@livekit/react-native';
 import { isAdmin } from './utils/roles';
+
+// WebRTC globals for LiveKit must be registered once before any live screen mounts.
+registerLiveKitGlobals();
 import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
 import LiveEventsList from './components/Live/LiveEventsList';
@@ -266,6 +273,9 @@ const App = () => {
                 <Stack.Screen name="LiveEvents" component={LiveEventsListWrapper} />
                 <Stack.Screen name="LiveEventForm" component={LiveEventFormWrapper} />
                 <Stack.Screen name="LiveEventPlayer" component={LiveEventPlayerWrapper} options={{ headerShown: false, presentation: 'modal' }}/>
+                <Stack.Screen name="LiveHub" component={LiveHubWrapper} />
+                <Stack.Screen name="GoLive" component={GoLive} options={{ headerShown: false }} />
+                <Stack.Screen name="LiveRoom" component={LiveRoom} options={{ headerShown: false, gestureEnabled: false }} />
                 
                 
               
@@ -467,6 +477,14 @@ const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);
 const AdminLogsWrapper = adminWrap(AdminLogs);
+const LiveHubWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.6)" />
+    <Header navigation={navigation} transparentBg />
+    <LiveHub navigation={navigation} />
+  </View>
+);
+
 const AdminAnalyticsWrapper = adminWrap(AdminAnalytics);
 const AdminAppealsWrapper = adminWrap(AdminAppeals);
 const AdminRolesWrapper = adminWrap(AdminRoles);

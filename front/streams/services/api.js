@@ -1158,6 +1158,28 @@ const apiLog = (message, data = null, level = 'log') => {
 };
 
 // services/api.js
+// ── Live broadcasting (LiveKit) ──────────────────────────────────────────────
+export const createBroadcast = (kind, title) =>
+  apiRequest('post', '/live/broadcasts/', { kind, title });
+export const fetchBroadcasts = () =>
+  apiRequest('get', '/live/broadcasts/');
+export const fetchBroadcastToken = (id) =>
+  apiRequest('get', `/live/broadcasts/${id}/token/`);
+export const endBroadcast = (id) =>
+  apiRequest('post', `/live/broadcasts/${id}/end/`);
+export const requestCohost = (id) =>
+  apiRequest('post', `/live/broadcasts/${id}/request-cohost/`);
+export const fetchCohostRequests = (id) =>
+  apiRequest('get', `/live/broadcasts/${id}/cohost-requests/`);
+export const approveCohost = (id, requestId) =>
+  apiRequest('post', `/live/broadcasts/${id}/approve-cohost/`, { request_id: requestId });
+export const rejectCohost = (id, requestId) =>
+  apiRequest('post', `/live/broadcasts/${id}/reject-cohost/`, { request_id: requestId });
+export const fetchCohostToken = (id) =>
+  apiRequest('get', `/live/broadcasts/${id}/cohost-token/`);
+export const moderateBroadcast = (id, userId) =>
+  apiRequest('post', `/live/broadcasts/${id}/moderate/`, { user_id: userId });
+
 export const fetchLiveEvents = async (params = {}) => {
   // Normalize parameters
   const normalizedParams = {

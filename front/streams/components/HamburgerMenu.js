@@ -24,6 +24,7 @@ const SECTIONS = [
       { label: 'Media', route: 'MediaScreen', set: 'mci', icon: 'radio' },
       { label: 'Articles', route: 'Articles', set: 'mci', icon: 'newspaper-variant-outline' },
       { label: 'Live', route: 'LiveHomeScreen', set: 'mci', icon: 'broadcast' },
+      { label: 'Live Radio', route: 'LiveHub', set: 'mci', icon: 'access-point' },
     ],
   },
   {

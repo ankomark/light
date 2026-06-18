@@ -16,7 +16,9 @@
       "bundleIdentifier": "com.yourcompany.yourapp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": ["audio", "voip"],
+        "NSMicrophoneUsageDescription": "Allow microphone access so you can broadcast live audio.",
+        "NSCameraUsageDescription": "Allow camera access for live video broadcasts."
       }
     },
     "android": {
@@ -25,7 +27,8 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "streamscom.ankom.streams"
+      "package": "streamscom.ankom.streams",
+      "permissions": ["RECORD_AUDIO", "CAMERA", "MODIFY_AUDIO_SETTINGS"]
     },
     "web": {
       "bundler": "metro",
@@ -46,7 +49,9 @@
       "expo-font",
       "expo-web-browser",
       "expo-sqlite",
-      "expo-asset"
+      "expo-asset",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc"
     ],
     "experiments": {
       "typedRoutes": true
