@@ -5,8 +5,11 @@ from .models import (
     Church, Videostudio, Choir, Group, GroupMember, GroupJoinRequest,
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
-    Report, AdminActionLog, Appeal, Role,
+    Report, AdminActionLog, Appeal, Role, LiveBroadcast, CoHostRequest,
 )
+
+admin.site.register(LiveBroadcast)
+admin.site.register(CoHostRequest)
 
 
 @admin.register(Role)

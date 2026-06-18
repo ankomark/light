@@ -57,6 +57,8 @@ from .views import (
     AdminLogViewSet,
     AdminAppealViewSet,
     AdminRoleViewSet,
+    LiveBroadcastViewSet,
+    LiveKitWebhookView,
 )
 
 router = DefaultRouter()
@@ -99,6 +101,7 @@ router.register(r'admin/content', AdminContentViewSet, basename='admin-content')
 router.register(r'admin/logs', AdminLogViewSet, basename='admin-logs')
 router.register(r'admin/appeals', AdminAppealViewSet, basename='admin-appeals')
 router.register(r'admin/roles', AdminRoleViewSet, basename='admin-roles')
+router.register(r'live/broadcasts', LiveBroadcastViewSet, basename='live-broadcasts')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')
@@ -123,6 +126,7 @@ urlpatterns = [
     path('auth/status/', AuthStatusView.as_view(), name='auth-status'),
     path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
     path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
+    path('live/webhook/', LiveKitWebhookView.as_view(), name='livekit-webhook'),
     path('admin/analytics/', AdminAnalyticsView.as_view(), name='admin-analytics'),
     path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),
     path('marketplace/stripe-webhook/', StripeWebhookView.as_view(), name='stripe-webhook'),

@@ -182,6 +182,13 @@ TEMPLATES = [
 WSGI_APPLICATION = 'music.wsgi.application'
 
 AUTH_USER_MODEL = 'songs.User'
+
+# ── LiveKit (live broadcasting) ───────────────────────────────────────────────
+# Cloud now; self-hosting later is just changing these env vars (no code change).
+# LIVEKIT_URL is the wss:// signaling URL the app connects to.
+LIVEKIT_URL = os.getenv('LIVEKIT_URL', '')
+LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY', '')
+LIVEKIT_API_SECRET = os.getenv('LIVEKIT_API_SECRET', '')
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 SIMPLE_JWT = {

@@ -8,3 +8,4 @@ from .messaging import *  # noqa: F401,F403
 from .music import *  # noqa: F401,F403
 from .social import *  # noqa: F401,F403
 from .admin import *  # noqa: F401,F403
+from .live import *  # noqa: F401,F403

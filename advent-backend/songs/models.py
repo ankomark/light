@@ -1333,3 +1333,47 @@ class ReadingProgress(models.Model):
 
     class Meta:
         unique_together = ('publication', 'user')
+
+
+class LiveBroadcast(models.Model):
+    """An in-app live broadcast (radio/TV/podcast). Media is never stored — only
+    this metadata. The actual audio/video flows through LiveKit (the SFU)."""
+    KIND_CHOICES = [('radio', 'Radio'), ('tv', 'TV'), ('podcast', 'Podcast')]
+    STATUS_CHOICES = [('live', 'Live'), ('ended', 'Ended')]
+
+    host = models.ForeignKey(User, on_delete=models.CASCADE, related_name='broadcasts')
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, default='radio')
+    title = models.CharField(max_length=200)
+    room_name = models.CharField(max_length=100, unique=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='live')
+    viewer_count = models.PositiveIntegerField(default=0)
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [models.Index(fields=['status', '-started_at'])]
+
+    def __str__(self):
+        return f"{self.host.username} — {self.title} ({self.kind}, {self.status})"
+
+
+class CoHostRequest(models.Model):
+    """A viewer's request to join a broadcast as a co-host (TikTok-live style)."""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('left', 'Left'),
+    ]
+    broadcast = models.ForeignKey(LiveBroadcast, on_delete=models.CASCADE, related_name='cohost_requests')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cohost_requests')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['broadcast', 'status'])]
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.broadcast_id} ({self.status})"
