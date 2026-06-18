@@ -8,23 +8,26 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { fetchSocialPosts, cursorFromUrl } from '../services/api';
+import { fetchSocialPosts, cursorFromUrl, followUser } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { LikeButton, SaveButton, ShareButton } from './SocialActions';
 import CommentAction from './CommentAction';
-import FollowButton from './FollowButton';
 import { colors, typography } from '../constants/theme';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 // ── A single full-screen video page ─────────────────────────────────────────
-const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute, currentUser, navigation }) => {
+const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute, currentUser, navigation, bottomOffset = 120 }) => {
   const videoRef = useRef(null);
   const [manualPaused, setManualPaused] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
+  // Follow state lives on the post author (item.user.is_following), same field
+  // the feed's FollowButton uses.
+  const [following, setFollowing] = useState(!!item.user?.is_following);
+  const [followBusy, setFollowBusy] = useState(false);
   const uri = item.optimized_url || item.media_url;
   const playing = isActive && screenFocused && !manualPaused;
 
@@ -37,8 +40,24 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
   }, [isActive]);
 
   const author = item.user || {};
-  const isMine = currentUser?.id && author.id === currentUser.id;
+  const myId = currentUser?.id ?? currentUser?.user_id;
+  const isMine = myId && author.id === myId;
   const songTitle = item.song_title || item.song?.title;
+  const showFollowPlus = !isMine && !!author.id && !following;
+
+  const handleFollow = async () => {
+    if (followBusy || !author.id) return;
+    setFollowBusy(true);
+    setFollowing(true); // optimistic — the + vanishes immediately
+    try {
+      const res = await followUser(author.id);          // POST /users/:id/follow/
+      setFollowing(res?.is_following ?? true);           // trust the server, like FollowButton
+    } catch {
+      setFollowing(false); // revert if it failed
+    } finally {
+      setFollowBusy(false);
+    }
+  };
 
   return (
     <View style={{ height, width: SCREEN_W, backgroundColor: '#000' }}>
@@ -77,8 +96,26 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
       {/* Legibility gradient behind the overlays */}
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.65)']} style={styles.bottomGradient} pointerEvents="none" />
 
-      {/* Right action rail */}
-      <View style={styles.rightRail}>
+      {/* Right action rail — author avatar at the top, then like/comment/etc. */}
+      <View style={[styles.rightRail, { bottom: bottomOffset }]}>
+        <View style={styles.railAvatarWrap}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => author.id && navigation.navigate('UserProfile', { userId: author.id, username: author.username })}
+          >
+            <Image
+              source={author.profile_picture ? { uri: author.profile_picture } : DEFAULT_AVATAR}
+              defaultSource={DEFAULT_AVATAR}
+              style={styles.railAvatar}
+            />
+          </TouchableOpacity>
+          {/* TikTok-style red + — tap to follow, then it disappears. */}
+          {showFollowPlus && (
+            <TouchableOpacity style={styles.plusBadge} onPress={handleFollow} hitSlop={8} activeOpacity={0.85}>
+              <Ionicons name="add" size={14} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </View>
         <View style={styles.railItem}>
           <LikeButton postId={item.id} initialLikes={item.likes_count || 0} isLiked={item.is_liked ?? item.liked_by_me ?? false} />
         </View>
@@ -97,23 +134,14 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
       </View>
 
       {/* Bottom-left author + caption */}
-      <View style={styles.bottomInfo}>
+      <View style={[styles.bottomInfo, { bottom: bottomOffset }]}>
         <View style={styles.authorRow}>
           <TouchableOpacity
-            style={styles.authorTap}
             activeOpacity={0.8}
             onPress={() => author.id && navigation.navigate('UserProfile', { userId: author.id, username: author.username })}
           >
-            <Image
-              source={author.profile_picture ? { uri: author.profile_picture } : DEFAULT_AVATAR}
-              defaultSource={DEFAULT_AVATAR}
-              style={styles.authorAvatar}
-            />
             <Text style={styles.authorName} numberOfLines={1}>@{author.username || 'user'}</Text>
           </TouchableOpacity>
-          {!isMine && author.id ? (
-            <FollowButton userId={author.id} initialFollowing={item.author_is_following ?? false} />
-          ) : null}
         </View>
         {item.caption ? <Text style={styles.caption} numberOfLines={2}>{item.caption}</Text> : null}
         {songTitle ? (
@@ -126,6 +154,14 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
     </View>
   );
 };
+
+// Footer nav button (icon + tiny label) → navigates to an existing screen.
+const FooterBtn = ({ icon, label, onPress }) => (
+  <TouchableOpacity style={styles.footerBtn} onPress={onPress} activeOpacity={0.8}>
+    <Ionicons name={icon} size={22} color="#fff" />
+    <Text style={styles.footerLabel}>{label}</Text>
+  </TouchableOpacity>
+);
 
 // ── The vertical pager ──────────────────────────────────────────────────────
 const VideoFeed = () => {
@@ -142,10 +178,15 @@ const VideoFeed = () => {
   const [activeId, setActiveId] = useState(null);
   const [screenFocused, setScreenFocused] = useState(true);
   const [containerH, setContainerH] = useState(SCREEN_H);
+  const [tab, setTab] = useState('foryou'); // 'foryou' (all) | 'following'
 
   const activeIdRef = useRef(null);
   const nextCursorRef = useRef(null);
   const loadingMoreRef = useRef(false);
+  const tabRef = useRef('foryou');
+
+  const FOOTER_H = 54 + insets.bottom;
+  const feedFor = (t) => (t === 'following' ? 'following' : null);
 
   // Play sound even if the device is on silent (iOS).
   useEffect(() => {
@@ -156,11 +197,12 @@ const VideoFeed = () => {
     if (refresh) setRefreshing(true); else setLoading(true);
     setError(false);
     try {
-      const res = await fetchSocialPosts(null, null, '', { contentType: 'video', fresh: true });
+      const res = await fetchSocialPosts(null, feedFor(tabRef.current), '', { contentType: 'video', fresh: true });
       const items = res?.results || [];
       setPosts(items);
       nextCursorRef.current = cursorFromUrl(res?.next);
-      if (items.length) { activeIdRef.current = items[0].id; setActiveId(items[0].id); }
+      activeIdRef.current = items.length ? items[0].id : null;
+      setActiveId(items.length ? items[0].id : null);
     } catch {
       setError(true);
     } finally {
@@ -175,7 +217,7 @@ const VideoFeed = () => {
     if (loadingMoreRef.current || !nextCursorRef.current) return;
     loadingMoreRef.current = true;
     try {
-      const res = await fetchSocialPosts(nextCursorRef.current, null, '', { contentType: 'video' });
+      const res = await fetchSocialPosts(nextCursorRef.current, feedFor(tabRef.current), '', { contentType: 'video' });
       const items = res?.results || [];
       setPosts((prev) => {
         const seen = new Set(prev.map((p) => p.id));
@@ -188,6 +230,17 @@ const VideoFeed = () => {
       loadingMoreRef.current = false;
     }
   }, []);
+
+  const switchTab = useCallback((t) => {
+    if (t === tabRef.current) return;
+    tabRef.current = t;
+    setTab(t);
+    setPosts([]);
+    activeIdRef.current = null;
+    setActiveId(null);
+    nextCursorRef.current = null;
+    load();
+  }, [load]);
 
   // Pause the global music mini-player while watching; stop video audio on blur.
   useFocusEffect(useCallback(() => {
@@ -220,8 +273,9 @@ const VideoFeed = () => {
       onToggleMute={() => setMuted((m) => !m)}
       currentUser={currentUser}
       navigation={navigation}
+      bottomOffset={FOOTER_H + 14}
     />
-  ), [containerH, activeId, screenFocused, muted, currentUser, navigation]);
+  ), [containerH, activeId, screenFocused, muted, currentUser, navigation, FOOTER_H]);
 
   return (
     <View style={styles.root} onLayout={(e) => {
@@ -267,17 +321,44 @@ const VideoFeed = () => {
         />
       )}
 
-      {/* Top bar (back + title) over a gradient */}
-      <LinearGradient colors={['rgba(0,0,0,0.5)', 'transparent']} style={[styles.topGradient, { height: insets.top + 56 }]} pointerEvents="none" />
-      <TouchableOpacity
-        style={[styles.backBtn, { top: insets.top + 8 }]}
-        onPress={() => navigation.goBack()}
-        hitSlop={10}
-        activeOpacity={0.8}
-      >
-        <Ionicons name="chevron-back" size={28} color="#fff" />
-      </TouchableOpacity>
-      <Text style={[styles.title, { top: insets.top + 12 }]}>Videos</Text>
+      {/* Top bar: close · Explore · Following/For You tabs · Search */}
+      <LinearGradient colors={['rgba(0,0,0,0.55)', 'transparent']} style={[styles.topGradient, { height: insets.top + 60 }]} pointerEvents="none" />
+      <View style={[styles.topBar, { top: insets.top + 6 }]}>
+        <View style={styles.topSide}>
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={8}>
+            <Ionicons name="chevron-down" size={26} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Explore')} hitSlop={8}>
+            <Ionicons name="compass-outline" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.tabs}>
+          <TouchableOpacity onPress={() => switchTab('following')}>
+            <Text style={[styles.tabText, tab === 'following' && styles.tabActive]}>Following</Text>
+          </TouchableOpacity>
+          <Text style={styles.tabDot}>•</Text>
+          <TouchableOpacity onPress={() => switchTab('foryou')}>
+            <Text style={[styles.tabText, tab === 'foryou' && styles.tabActive]}>For You</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={[styles.topSide, { justifyContent: 'flex-end' }]}>
+          <TouchableOpacity onPress={() => navigation.navigate('Explore')} hitSlop={8}>
+            <Ionicons name="search" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Bottom footer — pure navigation links to existing screens */}
+      <View style={[styles.footer, { height: FOOTER_H, paddingBottom: insets.bottom }]}>
+        <FooterBtn icon="home-outline" label="Home" onPress={() => navigation.navigate('Home')} />
+        <FooterBtn icon="people-outline" label="Followers"
+          onPress={() => navigation.navigate('FollowList', { userId: currentUser?.user_id ?? currentUser?.id, type: 'followers', username: currentUser?.username })} />
+        <TouchableOpacity style={styles.createBtn} onPress={() => navigation.navigate('CreatePost')} activeOpacity={0.85}>
+          <Ionicons name="add" size={26} color="#0A1628" />
+        </TouchableOpacity>
+        <FooterBtn icon="chatbubble-ellipses-outline" label="Inbox" onPress={() => navigation.navigate('Inbox')} />
+        <FooterBtn icon="person-outline" label="You" onPress={() => navigation.navigate('Profile')} />
+      </View>
     </View>
   );
 };
@@ -289,13 +370,36 @@ const styles = StyleSheet.create({
   retryBtn: { marginTop: 8, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.primary },
   retryText: { color: '#fff', fontWeight: '700' },
 
-  bottomGradient: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 220 },
+  bottomGradient: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 240 },
   topGradient: { position: 'absolute', left: 0, right: 0, top: 0 },
-  backBtn: { position: 'absolute', left: 8, zIndex: 5, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { position: 'absolute', alignSelf: 'center', zIndex: 5, color: '#fff', fontWeight: '800', fontSize: 17, letterSpacing: 0.5, textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
 
-  rightRail: { position: 'absolute', right: 8, bottom: 120, alignItems: 'center', gap: 18 },
+  // Top bar
+  topBar: { position: 'absolute', left: 0, right: 0, zIndex: 5, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 },
+  topSide: { flexDirection: 'row', alignItems: 'center', gap: 16, width: 72 },
+  tabs: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  tabText: { color: 'rgba(255,255,255,0.6)', fontSize: 16, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  tabActive: { color: '#fff', fontWeight: '800' },
+  tabDot: { color: 'rgba(255,255,255,0.6)', fontSize: 12 },
+
+  // Footer
+  footer: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 5,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
+    backgroundColor: 'rgba(0,0,0,0.6)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  footerBtn: { alignItems: 'center', justifyContent: 'center', gap: 2, minWidth: 56 },
+  footerLabel: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  createBtn: { width: 46, height: 30, borderRadius: 9, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+
+  rightRail: { position: 'absolute', right: 8, alignItems: 'center', gap: 18 },
   railItem: { alignItems: 'center', justifyContent: 'center' },
+  railAvatarWrap: { width: 46, alignItems: 'center', marginBottom: 10 },
+  railAvatar: { width: 46, height: 46, borderRadius: 23, borderWidth: 2, borderColor: '#fff', backgroundColor: colors.surface },
+  plusBadge: {
+    position: 'absolute', bottom: -9, left: 13, width: 20, height: 20, borderRadius: 10,
+    backgroundColor: '#FF2D55', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#000', zIndex: 6, elevation: 6,
+  },
 
   bottomInfo: { position: 'absolute', left: 12, right: 80, bottom: 36 },
   authorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
