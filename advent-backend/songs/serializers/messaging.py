@@ -87,24 +87,37 @@ class ConversationSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request:
             return None
-        other = obj.participants.exclude(id=request.user.id).first()
+        # Use the prefetched participants (no extra query); fall back to a query
+        # for non-annotated instances (e.g. the create() path).
+        me = request.user.id
+        participants = obj.participants.all()
+        other = next((p for p in participants if p.id != me), None)
         return SimpleUserSerializer(other, context=self.context).data if other else None
 
     def get_last_message(self, obj):
+        # Prefer the list-query subquery annotations (no N+1).
+        if hasattr(obj, 'last_msg_id'):
+            if obj.last_msg_id is None:
+                return None
+            return {
+                'id': obj.last_msg_id,
+                'content': obj.last_msg_content,
+                'message_type': obj.last_msg_type,
+                'file_name': obj.last_msg_file,
+                'sender_id': obj.last_msg_sender,
+                'created_at': obj.last_msg_at,
+            }
         last = obj.messages.last()
         if not last:
             return None
-        # Lightweight preview — never include the base64 attachment here.
         return {
-            'id': last.id,
-            'content': last.content,
-            'message_type': last.message_type,
-            'file_name': last.file_name,
-            'sender_id': last.sender_id,
-            'created_at': last.created_at,
+            'id': last.id, 'content': last.content, 'message_type': last.message_type,
+            'file_name': last.file_name, 'sender_id': last.sender_id, 'created_at': last.created_at,
         }
 
     def get_unread_count(self, obj):
+        if hasattr(obj, 'unread_n'):
+            return obj.unread_n or 0
         request = self.context.get('request')
         if not request:
             return 0

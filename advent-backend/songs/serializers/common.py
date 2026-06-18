@@ -341,22 +341,21 @@ class UserSerializer(serializers.ModelSerializer):
         return None
     
     def get_social_posts(self, obj):
-        posts = obj.social_posts.select_related('user').prefetch_related(
-            'likes',
-            'comments'
-        ).order_by('-created_at')
-        
-        # Optional: Add request-based filtering
+        # Profile grids only need thumbnails, so serialize a lightweight payload
+        # (no nested author/song, no per-row like/save lookups). media_file lives
+        # on the row, so no joins/prefetch are needed — this removes the N+1 that
+        # made the profile slow.
+        posts = obj.social_posts.order_by('-created_at')
+
         if self.context.get('request'):
-            # Example: Filter by post type if requested
             content_type = self.context['request'].GET.get('content_type')
             if content_type in ['image', 'video']:
                 posts = posts.filter(content_type=content_type)
-                
-        # Lazy import avoids a circular dependency once serializers are split
-        # into a package (UserSerializer lives in views-common, SocialPost in social).
-        from songs.serializers import SocialPostSerializer
-        return SocialPostSerializer(posts, many=True, context=self.context).data
+
+        # Lazy import avoids a circular dependency (UserSerializer is in
+        # serializers-common, the post serializers in serializers-social).
+        from songs.serializers import ProfilePostThumbSerializer
+        return ProfilePostThumbSerializer(posts, many=True, context=self.context).data
 
     def get_followers_count(self, obj):
         return getattr(obj, 'followers_count', obj.followers.count())

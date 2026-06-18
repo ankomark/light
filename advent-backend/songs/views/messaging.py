@@ -1,4 +1,5 @@
 from .common import *  # noqa: F401,F403
+from django.db.models import OuterRef, Subquery, Count, IntegerField
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
@@ -8,11 +9,31 @@ class ConversationViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'head', 'options']
 
     def get_queryset(self):
-        return Conversation.objects.filter(
-            participants=self.request.user
-        ).prefetch_related(
-            'participants__profile',
-            'messages__sender__profile',
+        user = self.request.user
+        # Latest message per conversation + unread count, resolved as subqueries
+        # in the single list query — no per-row .last()/.count()/.first() N+1.
+        last = Message.objects.filter(conversation=OuterRef('pk')).order_by('-created_at')
+        unread = (
+            Message.objects
+            .filter(conversation=OuterRef('pk'), read=False)
+            .exclude(sender=user)
+            .order_by().values('conversation')
+            .annotate(c=Count('id')).values('c')
+        )
+        return (
+            Conversation.objects
+            .filter(participants=user)
+            # participants list (small) used to pick the other party from cache.
+            .prefetch_related('participants__profile')
+            .annotate(
+                last_msg_id=Subquery(last.values('id')[:1]),
+                last_msg_content=Subquery(last.values('content')[:1]),
+                last_msg_type=Subquery(last.values('message_type')[:1]),
+                last_msg_file=Subquery(last.values('file_name')[:1]),
+                last_msg_sender=Subquery(last.values('sender_id')[:1]),
+                last_msg_at=Subquery(last.values('created_at')[:1]),
+                unread_n=Subquery(unread, output_field=IntegerField()),
+            )
         )
 
     def get_serializer_context(self):

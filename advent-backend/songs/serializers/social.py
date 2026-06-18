@@ -415,6 +415,28 @@ class SocialPostSerializer(serializers.ModelSerializer):
 
 
 
+# Reused only for its pure (DB-free) media-URL builders below.
+_thumb_helper = SocialPostSerializer()
+
+
+class ProfilePostThumbSerializer(serializers.ModelSerializer):
+    """Minimal post payload for profile grids — just id, type, and a thumbnail.
+    Avoids the full SocialPostSerializer's nested author/song and per-row
+    is_liked/is_saved lookups (the source of the slow profile load)."""
+    media_url = serializers.SerializerMethodField()
+    optimized_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SocialPost
+        fields = ['id', 'content_type', 'media_url', 'optimized_url', 'width', 'height']
+
+    def get_media_url(self, obj):
+        return _thumb_helper.get_media_url(obj)
+
+    def get_optimized_url(self, obj):
+        return _thumb_helper.get_optimized_url(obj)
+
+
 class PostLikeSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     post = SocialPostSerializer(read_only=True)
