@@ -5,8 +5,14 @@ from .models import (
     Church, Videostudio, Choir, Group, GroupMember, GroupJoinRequest,
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
-    Report, AdminActionLog, Appeal,
+    Report, AdminActionLog, Appeal, Role,
 )
+
+
+@admin.register(Role)
+class RoleAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'created_at')
+    search_fields = ('name',)
 
 
 @admin.register(Appeal)

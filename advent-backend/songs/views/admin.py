@@ -2,12 +2,13 @@ from .common import *  # noqa: F401,F403  (DRF symbols, models, StandardPaginati
 from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
-from ..models import AdminActionLog, Appeal
+from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES
 from ..serializers import (
     AdminUserSerializer,
     AdminReportSerializer,
     AdminActionLogSerializer,
     AdminAppealSerializer,
+    RoleSerializer,
     AdminContentPostSerializer,
     AdminContentTrackSerializer,
     AdminContentCommentSerializer,
@@ -33,6 +34,18 @@ class IsSuperAdmin(BasePermission):
     def has_permission(self, request, view):
         u = request.user
         return bool(u and u.is_authenticated and u.is_super_admin)
+
+
+def Cap(*caps):
+    """Permission factory: allow if the user has ANY of the given capabilities
+    (super admins implicitly have all)."""
+    class _CapPermission(BasePermission):
+        message = 'You do not have permission for this action.'
+
+        def has_permission(self, request, view):
+            u = request.user
+            return bool(u and u.is_authenticated and any(u.has_capability(c) for c in caps))
+    return _CapPermission
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,7 +151,7 @@ class AdminDashboardView(APIView):
 
 # ── Analytics (time-series) ──────────────────────────────────────────────────
 class AdminAnalyticsView(APIView):
-    permission_classes = [IsModerator]
+    permission_classes = [Cap('view_analytics')]
 
     def get(self, request):
         try:
@@ -172,9 +185,15 @@ class AdminAnalyticsView(APIView):
 
 # ── Reports queue ────────────────────────────────────────────────────────────
 class AdminReportViewSet(viewsets.GenericViewSet):
-    permission_classes = [IsModerator]
+    permission_classes = [Cap('handle_reports')]
     pagination_class = StandardPagination
     serializer_class = AdminReportSerializer
+
+    def get_permissions(self):
+        # Taking down the reported content needs the content-removal capability.
+        if self.action == 'remove_target':
+            return [Cap('handle_reports', 'remove_content')()]
+        return super().get_permissions()
 
     def get_queryset(self):
         # Annotate how many reports target the same content (the "5 people
@@ -285,8 +304,19 @@ class AdminUserViewSet(viewsets.GenericViewSet):
     pagination_class = StandardPagination
     serializer_class = AdminUserSerializer
 
+    def get_permissions(self):
+        a = self.action
+        if a == 'set_role':
+            return [IsSuperAdmin()]
+        if a in ('ban', 'unban'):
+            return [Cap('ban_users')()]
+        if a in ('suspend', 'unsuspend', 'warn'):
+            return [Cap('manage_users')()]
+        # list / retrieve: any user-facing moderation capability can browse users
+        return [Cap('manage_users', 'ban_users')()]
+
     def get_queryset(self):
-        qs = User.objects.all().order_by('-date_joined')
+        qs = User.objects.select_related('role', 'profile').order_by('-date_joined')
         q = self.request.query_params.get('q')
         if q:
             qs = qs.filter(Q(username__icontains=q) | Q(email__icontains=q))
@@ -386,36 +416,55 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         log_admin_action(request.user, 'unban_user', 'user', user.id)
         return Response(self.get_serializer(user).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsSuperAdmin])
+    @action(detail=True, methods=['post'])
     def set_role(self, request, pk=None):
+        """Super-admin only. Accepts `super_admin` (bool) and/or `role_id`
+        (a Role PK, or null to clear). Super admin and a granular role are
+        mutually exclusive."""
         user = get_object_or_404(User, pk=pk)
-        role = request.data.get('role', '')
-        if role not in ('', 'moderator', 'super_admin'):
-            return Response({'error': 'role must be one of "", moderator, super_admin'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        # Never strip the last super admin.
-        if user.is_super_admin and role != 'super_admin':
-            others = User.objects.filter(
+        data = request.data
+
+        def _other_super_admins():
+            return User.objects.filter(
                 Q(admin_role='super_admin') | Q(is_superuser=True)
             ).exclude(id=user.id).count()
-            if others == 0:
-                return Response({'error': 'Cannot demote the last super admin.'},
+
+        if 'super_admin' in data:
+            make_super = bool(data.get('super_admin'))
+            if not make_super and user.is_super_admin and _other_super_admins() == 0:
+                return Response({'error': 'Cannot remove the last super admin.'},
                                 status=status.HTTP_400_BAD_REQUEST)
-        user.admin_role = role
-        if role == 'super_admin':
-            user.is_superuser = True
-            user.is_staff = True
-        else:
-            # Moderator is in-app only; demotion drops Django superuser access.
-            user.is_superuser = False
-        user.save(update_fields=['admin_role', 'is_superuser', 'is_staff'])
-        log_admin_action(request.user, 'set_role', 'user', user.id, reason=role or 'none')
+            user.admin_role = 'super_admin' if make_super else ''
+            user.is_superuser = make_super
+            if make_super:
+                user.is_staff = True
+                user.role = None
+
+        if 'role_id' in data:
+            rid = data.get('role_id')
+            if rid in (None, '', 0):
+                user.role = None
+            else:
+                role = Role.objects.filter(id=rid).first()
+                if not role:
+                    return Response({'error': 'Role not found.'}, status=status.HTTP_400_BAD_REQUEST)
+                if user.is_super_admin and _other_super_admins() == 0:
+                    return Response({'error': 'Cannot demote the last super admin.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                # A granular role supersedes legacy moderator / super-admin flags.
+                user.role = role
+                user.admin_role = ''
+                user.is_superuser = False
+
+        user.save(update_fields=['admin_role', 'is_superuser', 'is_staff', 'role'])
+        log_admin_action(request.user, 'set_role', 'user', user.id,
+                         reason=(user.role.name if user.role_id else ('super_admin' if user.is_super_admin else 'none')))
         return Response(self.get_serializer(user).data)
 
 
 # ── Content management ───────────────────────────────────────────────────────
 class AdminContentViewSet(viewsets.GenericViewSet):
-    permission_classes = [IsModerator]
+    permission_classes = [Cap('remove_content')]
     pagination_class = StandardPagination
     serializer_class = AdminContentPostSerializer
 
@@ -495,7 +544,7 @@ class AdminContentViewSet(viewsets.GenericViewSet):
 
 # ── Appeals queue ────────────────────────────────────────────────────────────
 class AdminAppealViewSet(viewsets.GenericViewSet):
-    permission_classes = [IsModerator]
+    permission_classes = [Cap('manage_appeals')]
     pagination_class = StandardPagination
     serializer_class = AdminAppealSerializer
 
@@ -546,7 +595,7 @@ class AdminAppealViewSet(viewsets.GenericViewSet):
 # ── Audit log viewer ─────────────────────────────────────────────────────────
 class AdminLogViewSet(viewsets.GenericViewSet):
     """Read-only audit trail of every moderation action."""
-    permission_classes = [IsModerator]
+    permission_classes = [Cap('view_audit_log')]
     pagination_class = StandardPagination
     serializer_class = AdminActionLogSerializer
 
@@ -559,3 +608,28 @@ class AdminLogViewSet(viewsets.GenericViewSet):
 
     def list(self, request):
         return _paginated(self, self.get_queryset(), AdminActionLogSerializer)
+
+
+# ── Roles (super-admin manages capability bundles) ───────────────────────────
+class AdminRoleViewSet(viewsets.ModelViewSet):
+    queryset = Role.objects.all()
+    serializer_class = RoleSerializer
+    permission_classes = [IsSuperAdmin]
+    pagination_class = None
+
+    @action(detail=False, methods=['get'])
+    def capabilities(self, request):
+        """The catalogue of assignable capabilities (key + label) for the editor."""
+        return Response([{'key': k, 'label': lbl} for k, lbl in ADMIN_CAPABILITIES])
+
+    def perform_create(self, serializer):
+        role = serializer.save()
+        log_admin_action(self.request.user, 'create_role', 'role', role.id, reason=role.name)
+
+    def perform_update(self, serializer):
+        role = serializer.save()
+        log_admin_action(self.request.user, 'update_role', 'role', role.id, reason=role.name)
+
+    def perform_destroy(self, instance):
+        log_admin_action(self.request.user, 'delete_role', 'role', instance.id, reason=instance.name)
+        instance.delete()

@@ -6,21 +6,23 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/useAuth';
-import { isSuperAdmin } from '../../utils/roles';
+import { isSuperAdmin, hasCapability } from '../../utils/roles';
 import {
-  fetchAdminUsers, suspendUser, unsuspendUser, banUser, unbanUser, setUserRole, warnUser,
+  fetchAdminUsers, suspendUser, unsuspendUser, banUser, unbanUser, warnUser,
+  fetchRoles, setUserSuperAdmin, assignUserRole,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
-const ROLE_LABEL = { moderator: 'Moderator', super_admin: 'Super Admin' };
-
 const AdminUsers = () => {
   const { currentUser } = useAuth();
   const superAdmin = isSuperAdmin(currentUser);
+  const canManage = hasCapability(currentUser, 'manage_users');
+  const canBan = hasCapability(currentUser, 'ban_users');
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // user in the manage sheet
   const [busy, setBusy] = useState(false);
@@ -38,7 +40,10 @@ const AdminUsers = () => {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(query.trim()); }, [load]));  // eslint-disable-line react-hooks/exhaustive-deps
+  useFocusEffect(useCallback(() => {
+    load(query.trim());
+    if (superAdmin) fetchRoles().then((r) => setRoles(Array.isArray(r) ? r : (r?.results || []))).catch(() => {});
+  }, [load]));  // eslint-disable-line react-hooks/exhaustive-deps
 
   const onChangeQuery = (text) => {
     setQuery(text);
@@ -59,15 +64,6 @@ const AdminUsers = () => {
     } finally {
       setBusy(false);
     }
-  };
-
-  const promptRole = () => {
-    Alert.alert('Set role', `Assign a role to @${selected.username}`, [
-      { text: 'Super Admin', onPress: () => run((id) => setUserRole(id, 'super_admin')) },
-      { text: 'Moderator', onPress: () => run((id) => setUserRole(id, 'moderator')) },
-      { text: 'None', onPress: () => run((id) => setUserRole(id, '')) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
   };
 
   const promptSuspend = () => {
@@ -92,7 +88,9 @@ const AdminUsers = () => {
         <Text style={styles.email} numberOfLines={1}>{item.email}</Text>
       </View>
       <View style={styles.badges}>
-        {item.admin_role ? <Text style={[styles.tag, styles.tagRole]}>{ROLE_LABEL[item.admin_role] || item.admin_role}</Text> : null}
+        {item.is_super_admin
+          ? <Text style={[styles.tag, styles.tagRole]}>Super Admin</Text>
+          : item.role ? <Text style={[styles.tag, styles.tagRole]}>{item.role.name}</Text> : null}
         {!item.is_active ? <Text style={[styles.tag, styles.tagBan]}>Banned</Text>
           : item.is_currently_suspended ? <Text style={[styles.tag, styles.tagSusp]}>Suspended</Text> : null}
         {item.strikes > 0 ? <Text style={[styles.tag, styles.tagStrike]}>{item.strikes}⚠</Text> : null}
@@ -160,19 +158,47 @@ const AdminUsers = () => {
 
                 {busy && <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.sm }} />}
 
-                <SheetBtn icon="alert-circle-outline" label="Warn (add strike)" onPress={() => run((id) => warnUser(id, ''))} disabled={busy} />
-                {selected.is_suspended ? (
+                {canManage && (
+                  <SheetBtn icon="alert-circle-outline" label="Warn (add strike)" onPress={() => run((id) => warnUser(id, ''))} disabled={busy} />
+                )}
+                {canManage && (selected.is_suspended ? (
                   <SheetBtn icon="play-circle-outline" label="Unsuspend" onPress={() => run(unsuspendUser)} disabled={busy} />
                 ) : (
                   <SheetBtn icon="pause-circle-outline" label="Suspend…" onPress={promptSuspend} disabled={busy} />
-                )}
-                {selected.is_active ? (
+                ))}
+                {canBan && (selected.is_active ? (
                   <SheetBtn icon="ban-outline" label="Ban (disable login)" danger onPress={() => run((id) => banUser(id, ''))} disabled={busy} />
                 ) : (
                   <SheetBtn icon="checkmark-circle-outline" label="Unban" onPress={() => run(unbanUser)} disabled={busy} />
-                )}
+                ))}
+
+                {/* Role assignment (super-admin only) */}
                 {superAdmin && (
-                  <SheetBtn icon="shield-outline" label="Set role" onPress={promptRole} disabled={busy} />
+                  <View style={styles.roleSection}>
+                    <Text style={styles.roleLabel}>Assign role</Text>
+                    <View style={styles.roleChips}>
+                      <TouchableOpacity
+                        style={[styles.roleChip, selected.is_super_admin && styles.roleChipOn]}
+                        onPress={() => run((id) => setUserSuperAdmin(id, true))} disabled={busy}>
+                        <Text style={[styles.roleChipText, selected.is_super_admin && styles.roleChipTextOn]}>Super Admin</Text>
+                      </TouchableOpacity>
+                      {roles.map((r) => {
+                        const on = !selected.is_super_admin && selected.role?.id === r.id;
+                        return (
+                          <TouchableOpacity key={r.id}
+                            style={[styles.roleChip, on && styles.roleChipOn]}
+                            onPress={() => run((id) => assignUserRole(id, r.id))} disabled={busy}>
+                            <Text style={[styles.roleChipText, on && styles.roleChipTextOn]}>{r.name}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                      <TouchableOpacity
+                        style={[styles.roleChip, !selected.is_super_admin && !selected.role && styles.roleChipOn]}
+                        onPress={() => run((id) => (selected.is_super_admin ? setUserSuperAdmin(id, false) : assignUserRole(id, null)))} disabled={busy}>
+                        <Text style={[styles.roleChipText, !selected.is_super_admin && !selected.role && styles.roleChipTextOn]}>No access</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 )}
 
                 <TouchableOpacity style={styles.sheetClose} onPress={() => setSelected(null)} disabled={busy}>
@@ -248,6 +274,20 @@ const styles = StyleSheet.create({
   sheetBtnText: { ...typography.label, color: colors.textPrimary, fontWeight: '600' },
   sheetClose: { alignItems: 'center', paddingVertical: spacing.md, marginTop: spacing.xs },
   sheetCloseText: { ...typography.label, color: colors.textSecondary, fontWeight: '700' },
+  roleSection: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.1)' },
+  roleLabel: {
+    ...typography.caption, color: colors.accent, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: spacing.sm,
+  },
+  roleChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  roleChip: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  roleChipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  roleChipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  roleChipTextOn: { color: '#0A1628' },
 });
 
 export default AdminUsers;

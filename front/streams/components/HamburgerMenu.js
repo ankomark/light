@@ -7,7 +7,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { fetchUnreadMessageCount } from '../services/api';
-import { isAdmin } from '../utils/roles';
+import { isAdmin, isSuperAdmin, hasCapability } from '../utils/roles';
 import { colors, spacing, radius, typography } from '../constants/theme';
 
 const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
@@ -59,19 +59,18 @@ const SECTIONS = [
   },
 ];
 
-// Appended only for moderators / super-admins (see isAdmin gating below).
-const ADMIN_SECTION = {
-  title: 'Admin',
-  items: [
-    { label: 'Admin Dashboard', route: 'AdminDashboard', set: 'mci', icon: 'shield-crown-outline' },
-    { label: 'Analytics', route: 'AdminAnalytics', set: 'mci', icon: 'chart-line' },
-    { label: 'Reports', route: 'AdminReports', set: 'mci', icon: 'flag-outline' },
-    { label: 'Users', route: 'AdminUsers', set: 'mci', icon: 'account-cog-outline' },
-    { label: 'Content', route: 'AdminContent', set: 'mci', icon: 'file-document-multiple-outline' },
-    { label: 'Appeals', route: 'AdminAppeals', set: 'mci', icon: 'gavel' },
-    { label: 'Audit Log', route: 'AdminLogs', set: 'mci', icon: 'history' },
-  ],
-};
+// Admin destinations, each gated by the capability it needs (dashboard is shown
+// to any admin; Roles is super-admin only). Filtered per user in the render.
+const ADMIN_ITEMS = [
+  { label: 'Admin Dashboard', route: 'AdminDashboard', set: 'mci', icon: 'shield-crown-outline' },
+  { label: 'Analytics', route: 'AdminAnalytics', set: 'mci', icon: 'chart-line', cap: 'view_analytics' },
+  { label: 'Reports', route: 'AdminReports', set: 'mci', icon: 'flag-outline', cap: 'handle_reports' },
+  { label: 'Users', route: 'AdminUsers', set: 'mci', icon: 'account-cog-outline', anyCap: ['manage_users', 'ban_users'] },
+  { label: 'Content', route: 'AdminContent', set: 'mci', icon: 'file-document-multiple-outline', cap: 'remove_content' },
+  { label: 'Appeals', route: 'AdminAppeals', set: 'mci', icon: 'gavel', cap: 'manage_appeals' },
+  { label: 'Audit Log', route: 'AdminLogs', set: 'mci', icon: 'history', cap: 'view_audit_log' },
+  { label: 'Roles', route: 'AdminRoles', set: 'mci', icon: 'shield-key-outline', superOnly: true },
+];
 
 // Shown only to a user whose own account is suspended.
 const APPEAL_SECTION = {
@@ -175,11 +174,22 @@ function HamburgerMenu() {
           </View>
 
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-            {[
-              ...SECTIONS,
-              ...(currentUser?.is_suspended ? [APPEAL_SECTION] : []),
-              ...(isAdmin(currentUser) ? [ADMIN_SECTION] : []),
-            ].map((section) => (
+            {(() => {
+              // Show only the admin items the user's capabilities allow.
+              const adminItems = isAdmin(currentUser)
+                ? ADMIN_ITEMS.filter((it) => {
+                    if (it.superOnly) return isSuperAdmin(currentUser);
+                    if (it.cap) return hasCapability(currentUser, it.cap);
+                    if (it.anyCap) return it.anyCap.some((c) => hasCapability(currentUser, c));
+                    return true; // dashboard — any admin
+                  })
+                : [];
+              return [
+                ...SECTIONS,
+                ...(currentUser?.is_suspended ? [APPEAL_SECTION] : []),
+                ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
+              ];
+            })().map((section) => (
               <View key={section.title} style={styles.section}>
                 <Text style={styles.sectionTitle}>{section.title.toUpperCase()}</Text>
                 <View style={styles.group}>

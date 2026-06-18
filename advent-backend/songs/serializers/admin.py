@@ -1,5 +1,27 @@
 from .common import *  # noqa: F401,F403  (serializers, models, SimpleUserSerializer, timezone)
-from ..models import AdminActionLog, Appeal
+from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITY_KEYS
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    user_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Role
+        fields = ['id', 'name', 'capabilities', 'user_count', 'created_at']
+
+    def get_user_count(self, obj):
+        return obj.users.count()
+
+    def validate_capabilities(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError('capabilities must be a list.')
+        bad = [c for c in value if c not in ADMIN_CAPABILITY_KEYS]
+        if bad:
+            raise serializers.ValidationError(f'Unknown capabilities: {bad}')
+        return value
+
+    def validate_name(self, value):
+        return (value or '').strip()
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
@@ -7,16 +29,23 @@ class AdminUserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
     posts_count = serializers.SerializerMethodField()
     followers_count = serializers.SerializerMethodField()
+    is_super_admin = serializers.ReadOnlyField()
+    role = serializers.SerializerMethodField()
+    capabilities = serializers.ReadOnlyField()
 
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'email', 'admin_role',
+            'id', 'username', 'email', 'admin_role', 'is_super_admin',
+            'role', 'capabilities',
             'is_active', 'is_suspended', 'is_currently_suspended',
             'suspension_reason', 'suspended_at', 'suspended_until', 'strikes',
             'is_email_verified', 'is_superuser',
             'posts_count', 'followers_count', 'profile_picture', 'date_joined',
         ]
+
+    def get_role(self, obj):
+        return {'id': obj.role_id, 'name': obj.role.name} if obj.role_id else None
 
     def get_profile_picture(self, obj):
         try:

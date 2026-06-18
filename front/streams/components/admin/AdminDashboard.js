@@ -6,6 +6,8 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminDashboard } from '../../services/api';
+import { useAuth } from '../../context/useAuth';
+import { isSuperAdmin } from '../../utils/roles';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -39,6 +41,7 @@ const QuickLink = ({ icon, label, sub, onPress, badge }) => (
 );
 
 const AdminDashboard = ({ navigation }) => {
+  const { currentUser } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -94,6 +97,10 @@ const AdminDashboard = ({ navigation }) => {
         badge={ap.pending} onPress={() => navigation.navigate('AdminAppeals')} />
       <QuickLink icon="account-cog-outline" label="Users" sub="Suspend, ban, assign roles"
         onPress={() => navigation.navigate('AdminUsers')} />
+      {isSuperAdmin(currentUser) && (
+        <QuickLink icon="shield-key-outline" label="Roles" sub="Create roles & set staff permissions"
+          onPress={() => navigation.navigate('AdminRoles')} />
+      )}
       <QuickLink icon="file-document-multiple-outline" label="Content" sub="Browse & remove posts, tracks, comments"
         onPress={() => navigation.navigate('AdminContent')} />
 

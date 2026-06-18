@@ -16,6 +16,20 @@ import os
 logger = logging.getLogger(__name__)
 
 
+# Delegatable admin capabilities. A Role is a named bundle of these; super
+# admins implicitly have all of them (plus role management, which is not
+# delegatable). Keys are stable identifiers; labels are for the UI.
+ADMIN_CAPABILITIES = (
+    ('view_analytics', 'View analytics'),
+    ('handle_reports', 'Handle reports'),
+    ('remove_content', 'Remove / restore content'),
+    ('manage_users', 'Suspend & warn users'),
+    ('ban_users', 'Ban users'),
+    ('manage_appeals', 'Review appeals'),
+    ('view_audit_log', 'View audit log'),
+)
+ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
+
 
 # Custom User Model
 class User(AbstractUser):
@@ -37,6 +51,8 @@ class User(AbstractUser):
         ('super_admin', 'Super Admin'),
     )
     admin_role = models.CharField(max_length=20, choices=ADMIN_ROLE_CHOICES, default='', blank=True)
+    # Granular role (a named bundle of capabilities) for non-super-admin staff.
+    role = models.ForeignKey('Role', null=True, blank=True, on_delete=models.SET_NULL, related_name='users')
     # Soft moderation state. "Ban" uses Django's is_active (blocks auth);
     # "suspend" is a reversible flag enforced on content-creating actions.
     is_suspended = models.BooleanField(default=False)
@@ -53,8 +69,26 @@ class User(AbstractUser):
         return self.is_superuser or self.admin_role == 'super_admin'
 
     @property
+    def capabilities(self):
+        """Effective admin capabilities. Super admins (and legacy 'moderator'
+        users) get the full set; granular staff get their role's bundle."""
+        if self.is_super_admin or self.admin_role == 'moderator':
+            return list(ADMIN_CAPABILITY_KEYS)
+        if self.role_id and self.role:
+            return [c for c in (self.role.capabilities or []) if c in ADMIN_CAPABILITY_KEYS]
+        return []
+
+    def has_capability(self, cap):
+        if self.is_super_admin or self.admin_role == 'moderator':
+            return True
+        if self.role_id and self.role:
+            return cap in (self.role.capabilities or [])
+        return False
+
+    @property
     def is_platform_admin(self):
-        return self.is_super_admin or self.admin_role == 'moderator'
+        # Any staff member: super admin, legacy moderator, or a role with caps.
+        return self.is_super_admin or self.admin_role == 'moderator' or bool(self.capabilities)
 
     @property
     def is_currently_suspended(self):
@@ -509,6 +543,19 @@ class Appeal(models.Model):
 
     def __str__(self):
         return f"Appeal by {self.user.username} ({self.status})"
+
+
+class Role(models.Model):
+    """A named bundle of admin capabilities a super admin assigns to staff."""
+    name = models.CharField(max_length=50, unique=True)
+    capabilities = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
 
 
 class Notification(models.Model):

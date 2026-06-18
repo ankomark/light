@@ -65,6 +65,7 @@ import AdminLogs from './components/admin/AdminLogs';
 import AdminAnalytics from './components/admin/AdminAnalytics';
 import AdminAppeals from './components/admin/AdminAppeals';
 import AppealScreen from './components/admin/AppealScreen';
+import AdminRoles from './components/admin/AdminRoles';
 import { isAdmin } from './utils/roles';
 import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
@@ -248,6 +249,7 @@ const App = () => {
                 <Stack.Screen name="AdminAnalytics" component={AdminAnalyticsWrapper} />
                 <Stack.Screen name="AdminAppeals" component={AdminAppealsWrapper} />
                 <Stack.Screen name="Appeal" component={AppealWrapper} />
+                <Stack.Screen name="AdminRoles" component={AdminRolesWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxScreen} />
@@ -465,6 +467,7 @@ const AdminContentWrapper = adminWrap(AdminContent);
 const AdminLogsWrapper = adminWrap(AdminLogs);
 const AdminAnalyticsWrapper = adminWrap(AdminAnalytics);
 const AdminAppealsWrapper = adminWrap(AdminAppeals);
+const AdminRolesWrapper = adminWrap(AdminRoles);
 
 // Appeal is available to any signed-in user (a suspended user can't reach admin
 // screens), so it gets the luxury backdrop without the RequireAdmin gate.

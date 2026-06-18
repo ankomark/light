@@ -1537,8 +1537,27 @@ export const banUser = (id, reason = '') =>
 export const unbanUser = (id) =>
   apiRequest('post', `/admin/users/${id}/unban/`);
 
-export const setUserRole = (id, role) =>
-  apiRequest('post', `/admin/users/${id}/set_role/`, { role });
+export const setUserSuperAdmin = (id, isSuper) =>
+  apiRequest('post', `/admin/users/${id}/set_role/`, { super_admin: isSuper });
+
+export const assignUserRole = (id, roleId) =>
+  apiRequest('post', `/admin/users/${id}/set_role/`, { role_id: roleId });
+
+// Roles (super-admin only)
+export const fetchRoles = () =>
+  apiRequest('get', '/admin/roles/');
+
+export const fetchCapabilities = () =>
+  apiRequest('get', '/admin/roles/capabilities/');
+
+export const createRole = (payload) =>
+  apiRequest('post', '/admin/roles/', payload);
+
+export const updateRole = (id, payload) =>
+  apiRequest('patch', `/admin/roles/${id}/`, payload);
+
+export const deleteRole = (id) =>
+  apiRequest('delete', `/admin/roles/${id}/`);
 
 export const fetchAdminContent = (type = 'post', q = '', removed = '') =>
   apiRequest('get', '/admin/content/', null, {

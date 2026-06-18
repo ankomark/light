@@ -56,6 +56,7 @@ from .views import (
     AdminContentViewSet,
     AdminLogViewSet,
     AdminAppealViewSet,
+    AdminRoleViewSet,
 )
 
 router = DefaultRouter()
@@ -97,6 +98,7 @@ router.register(r'admin/users', AdminUserViewSet, basename='admin-users')
 router.register(r'admin/content', AdminContentViewSet, basename='admin-content')
 router.register(r'admin/logs', AdminLogViewSet, basename='admin-logs')
 router.register(r'admin/appeals', AdminAppealViewSet, basename='admin-appeals')
+router.register(r'admin/roles', AdminRoleViewSet, basename='admin-roles')
 
 # Nested routers
 tracks_router = NestedSimpleRouter(router, r'tracks', lookup='track')

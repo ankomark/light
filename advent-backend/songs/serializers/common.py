@@ -122,6 +122,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     # Drives the in-app admin panel gating (rides along on /profiles/me/).
     admin_role = serializers.ReadOnlyField(source='user.admin_role')
     is_super_admin = serializers.ReadOnlyField(source='user.is_super_admin')
+    capabilities = serializers.ReadOnlyField(source='user.capabilities')
     is_suspended = serializers.ReadOnlyField(source='user.is_suspended')
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
@@ -129,10 +130,10 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Profile
-        fields = ['bio', 'user_id','username', 'is_staff', 'admin_role', 'is_super_admin', 'is_suspended',
+        fields = ['bio', 'user_id','username', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
                   'birth_date', 'location', 'is_public', 'picture','picture_url',
                   'followers_count', 'following_count', 'posts_count']
-        read_only_fields = ['user_id', 'username', 'is_staff', 'admin_role', 'is_super_admin', 'is_suspended',
+        read_only_fields = ['user_id', 'username', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
                             'picture_url', 'followers_count', 'following_count', 'posts_count']
         extra_kwargs = {
             'picture': {'write_only': True}  # Only needed for uploads
