@@ -84,7 +84,10 @@ const refreshAuthToken = async () => {
 
       if (!response.data?.access) throw new Error('Invalid token refresh response');
 
-      await storeTokens(response.data.access, refreshToken);
+      // The server rotates refresh tokens (ROTATE_REFRESH_TOKENS) and blacklists
+      // the old one, so we MUST persist the new refresh token it returns —
+      // reusing the old one would make the next refresh fail and log the user out.
+      await storeTokens(response.data.access, response.data.refresh || refreshToken);
       return response.data.access;
     } catch (error) {
       await clearTokens();

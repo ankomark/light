@@ -102,7 +102,8 @@ export const AuthProvider = ({ children }) => {
             const response = await axios.post(`${API_URL}/auth/token/refresh/`, {
               refresh: refreshToken,
             });
-            await storeTokens(response.data.access, refreshToken);
+            // Persist the rotated refresh token (server blacklists the old one).
+            await storeTokens(response.data.access, response.data.refresh || refreshToken);
             await applyStatus(response.data.access, await fetchAuthStatus(response.data.access));
           } catch (refreshError) {
             console.error('Token refresh failed:', refreshError);
