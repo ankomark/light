@@ -23,8 +23,7 @@ const SECTIONS = [
       { label: 'Explore', route: 'Explore', set: 'ion', icon: 'compass-outline' },
       { label: 'Media', route: 'MediaScreen', set: 'mci', icon: 'radio' },
       { label: 'Articles', route: 'Articles', set: 'mci', icon: 'newspaper-variant-outline' },
-      { label: 'Live', route: 'LiveHomeScreen', set: 'mci', icon: 'broadcast' },
-      { label: 'Live Radio', route: 'LiveHub', set: 'mci', icon: 'access-point' },
+      { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', color: colors.error },
     ],
   },
   {
@@ -218,7 +217,7 @@ function HamburgerMenu() {
                         ]}
                       >
                         <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
-                          <Glyph set={item.set} name={item.icon} size={20} color={active ? colors.accent : colors.textSecondary} />
+                          <Glyph set={item.set} name={item.icon} size={20} color={active ? colors.accent : (item.color || colors.textSecondary)} />
                         </View>
                         <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
                           {item.label}
