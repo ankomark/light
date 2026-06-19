@@ -91,13 +91,19 @@ const LiveRoom = ({ navigation, route }) => {
     url, token: initialToken, broadcast, role: initialRole,
     initialMicOn, initialCamOn,
   } = route.params;
+  const [token, setToken] = useState(initialToken);
   const [role, setRole] = useState(initialRole); // host | viewer | cohost
+  // Set while we intentionally reconnect for a promotion, so the unmount's
+  // disconnect doesn't bounce us out of the screen.
+  const promotingRef = useRef(false);
   const canPublish = role === 'host' || role === 'cohost';
   const isVideo = broadcast.kind === 'tv' || broadcast.kind === 'podcast';
-  // Whether we connect as a publisher is fixed at mount. A viewer promoted to
-  // co-host keeps the same connection and gets publish rights pushed by the
-  // server (see grant_publish) — we never swap the token / reconnect.
-  const initialCanPublish = initialRole === 'host' || initialRole === 'cohost';
+  // On promotion we swap to a publish token, which makes LiveKitRoom reconnect
+  // negotiated as a *publisher* — the reliable way to start sending both audio
+  // and video. Granting permission alone (grant_publish) let mic through but the
+  // camera track never reached the server, because the connection was set up
+  // subscribe-only. canPublish drives audio/video below, so the reconnected
+  // co-host publishes immediately.
 
   // Expo Go has no WebRTC native module — fail gracefully instead of crashing.
   const inExpoGo = Constants.executionEnvironment === 'storeClient';
@@ -123,17 +129,26 @@ const LiveRoom = ({ navigation, route }) => {
 
   return (
     <LiveKitRoom
+      // Remount on token change: swapping the prop alone won't reconnect because
+      // livekit-client's connect() is a no-op while already connected. A fresh
+      // mount establishes a new connection negotiated as a publisher (audio +
+      // video), which is what lets a promoted co-host actually send video.
+      key={token}
       serverUrl={url}
-      token={initialToken}
+      token={token}
       connect
-      audio={initialCanPublish && (initialMicOn !== false)}
-      video={initialCanPublish && isVideo && (initialCamOn !== false)}
+      audio={canPublish && (initialMicOn !== false)}
+      video={canPublish && isVideo && (initialCamOn !== false)}
       // adaptiveStream pauses remote video whose view isn't detected as visible
       // (flaky in RN ScrollViews), which hid late publishers' (co-hosts') video
       // from the host. A broadcast has few publishers, so subscribe fully.
       options={{ adaptiveStream: false }}
       onError={(e) => console.warn('LiveKit error', e)}
-      onDisconnected={() => navigation.goBack()}
+      onConnected={() => { promotingRef.current = false; }}
+      onDisconnected={() => {
+        if (promotingRef.current) { promotingRef.current = false; return; } // promotion reconnect
+        navigation.goBack();
+      }}
       style={styles.root}
     >
       <RoomInner
@@ -144,7 +159,10 @@ const LiveRoom = ({ navigation, route }) => {
         initialMicOn={initialMicOn !== false}
         initialCamOn={isVideo && initialCamOn !== false}
         navigation={navigation}
-        onPromoted={() => setRole('cohost')}
+        onPromoted={(t) => {
+          if (t && t !== token) { promotingRef.current = true; setToken(t); }
+          setRole('cohost');
+        }}
       />
     </LiveKitRoom>
   );
@@ -253,32 +271,28 @@ const RoomInner = ({
   }, [isHost, broadcast.id]);
 
   // ── viewer → co-host promotion ───────────────────────────────────────────--
-  // The server grants publish on our live connection (grant_publish) when the
-  // host approves, so we just need to notice it and flip into co-host mode —
-  // no token swap / reconnect. Primary signal: a permission-changed event.
-  useEffect(() => {
-    if (!room || role !== 'viewer') return undefined;
-    const check = () => {
-      if (room.localParticipant?.permissions?.canPublish) onPromoted();
-    };
-    check(); // already approved before we attached?
-    room.on(RoomEvent.ParticipantPermissionsChanged, check);
-    return () => { room.off(RoomEvent.ParticipantPermissionsChanged, check); };
-  }, [room, role, onPromoted]);
-
-  // Fallback for environments where the permission event is flaky: poll the
-  // cohost-token endpoint, which returns 200 only once the host has approved.
+  // After the host approves, poll for the co-host publish token. Once we get it,
+  // promote: this swaps the token so the room reconnects as a publisher and
+  // starts sending audio + video (canPublish drives the LiveKitRoom a/v props).
   const startPromotionPoll = useCallback(() => {
     if (pollRef.current) return;
     pollRef.current = setInterval(async () => {
       try {
-        await fetchCohostToken(broadcast.id); // 200 = approved, 403 = pending
-        clearInterval(pollRef.current); pollRef.current = null;
-        onPromoted();
+        const res = await fetchCohostToken(broadcast.id); // 200 = approved, 403 = pending
+        if (res?.token) {
+          clearInterval(pollRef.current); pollRef.current = null;
+          onPromoted(res.token);
+        }
       } catch { /* not approved yet (403) — keep waiting */ }
     }, 4000);
   }, [broadcast.id, onPromoted]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // When we become a co-host, the room reconnects publishing — reflect that in
+  // the control state (mic on; camera on for video kinds).
+  useEffect(() => {
+    if (role === 'cohost') { setMicOn(true); setCamOn(isVideo); }
+  }, [role, isVideo]);
 
   // ── publisher controls ───────────────────────────────────────────────────--
   const toggleMic = async () => {
@@ -291,10 +305,6 @@ const RoomInner = ({
     try {
       await localParticipant?.setCameraEnabled(next);
       setCamOn(next);
-      if (__DEV__ && next) {
-        const pub = localParticipant?.getTrackPublication?.(Track.Source.Camera);
-        Alert.alert('Camera debug', `pub:${!!pub} sid:${pub?.trackSid || 'none'} track:${!!(pub?.track || pub?.videoTrack)} muted:${pub?.isMuted}`);
-      }
     } catch (e) {
       if (__DEV__) Alert.alert('Camera publish failed', String(e?.message || e));
     }
