@@ -91,10 +91,13 @@ const LiveRoom = ({ navigation, route }) => {
     url, token: initialToken, broadcast, role: initialRole,
     initialMicOn, initialCamOn,
   } = route.params;
-  const [token, setToken] = useState(initialToken);
   const [role, setRole] = useState(initialRole); // host | viewer | cohost
   const canPublish = role === 'host' || role === 'cohost';
   const isVideo = broadcast.kind === 'tv' || broadcast.kind === 'podcast';
+  // Whether we connect as a publisher is fixed at mount. A viewer promoted to
+  // co-host keeps the same connection and gets publish rights pushed by the
+  // server (see grant_publish) — we never swap the token / reconnect.
+  const initialCanPublish = initialRole === 'host' || initialRole === 'cohost';
 
   // Expo Go has no WebRTC native module — fail gracefully instead of crashing.
   const inExpoGo = Constants.executionEnvironment === 'storeClient';
@@ -121,10 +124,10 @@ const LiveRoom = ({ navigation, route }) => {
   return (
     <LiveKitRoom
       serverUrl={url}
-      token={token}
+      token={initialToken}
       connect
-      audio={canPublish && (initialMicOn !== false)}
-      video={canPublish && isVideo && (initialCamOn !== false)}
+      audio={initialCanPublish && (initialMicOn !== false)}
+      video={initialCanPublish && isVideo && (initialCamOn !== false)}
       options={{ adaptiveStream: true }}
       onError={(e) => console.warn('LiveKit error', e)}
       onDisconnected={() => navigation.goBack()}
@@ -138,7 +141,7 @@ const LiveRoom = ({ navigation, route }) => {
         initialMicOn={initialMicOn !== false}
         initialCamOn={isVideo && initialCamOn !== false}
         navigation={navigation}
-        onPromoted={(t) => { setRole('cohost'); setToken(t); }}
+        onPromoted={() => setRole('cohost')}
       />
     </LiveKitRoom>
   );
@@ -246,16 +249,29 @@ const RoomInner = ({
     return () => clearInterval(t);
   }, [isHost, broadcast.id]);
 
-  // ── viewer: poll for co-host approval → publish token → promote ──────────--
+  // ── viewer → co-host promotion ───────────────────────────────────────────--
+  // The server grants publish on our live connection (grant_publish) when the
+  // host approves, so we just need to notice it and flip into co-host mode —
+  // no token swap / reconnect. Primary signal: a permission-changed event.
+  useEffect(() => {
+    if (!room || role !== 'viewer') return undefined;
+    const check = () => {
+      if (room.localParticipant?.permissions?.canPublish) onPromoted();
+    };
+    check(); // already approved before we attached?
+    room.on(RoomEvent.ParticipantPermissionsChanged, check);
+    return () => { room.off(RoomEvent.ParticipantPermissionsChanged, check); };
+  }, [room, role, onPromoted]);
+
+  // Fallback for environments where the permission event is flaky: poll the
+  // cohost-token endpoint, which returns 200 only once the host has approved.
   const startPromotionPoll = useCallback(() => {
     if (pollRef.current) return;
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetchCohostToken(broadcast.id);
-        if (res?.token) {
-          clearInterval(pollRef.current); pollRef.current = null;
-          onPromoted(res.token);
-        }
+        await fetchCohostToken(broadcast.id); // 200 = approved, 403 = pending
+        clearInterval(pollRef.current); pollRef.current = null;
+        onPromoted();
       } catch { /* not approved yet (403) — keep waiting */ }
     }, 4000);
   }, [broadcast.id, onPromoted]);

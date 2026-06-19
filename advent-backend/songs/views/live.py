@@ -153,6 +153,9 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             )
         req.status = 'approved'
         req.save(update_fields=['status'])
+        # Grant publish rights on the co-host's live connection so they can turn
+        # on mic/camera immediately — no client-side token swap / reconnect.
+        lk.grant_publish(b.room_name, _identity(req.user))
         notify_user(req.user, 'cohost_approved', f"You're now a co-host on {b.title}", {
             'type': 'cohost_approved', 'broadcast_id': b.id,
         })

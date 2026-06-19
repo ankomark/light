@@ -87,6 +87,28 @@ def end_room(room_name):
     _run(_go)
 
 
+def grant_publish(room_name, identity):
+    """Promote a connected participant to publisher *without* a reconnect.
+
+    LiveKit pushes the new permission to the participant's live connection, so an
+    approved co-host can immediately enable mic/camera on their existing
+    (originally subscribe-only) session. This is the documented way to promote a
+    viewer — far more reliable than swapping the join token client-side."""
+    async def _go():
+        lk = api.LiveKitAPI(_http_url(), settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
+        try:
+            await lk.room.update_participant(api.UpdateParticipantRequest(
+                room=room_name,
+                identity=str(identity),
+                permission=api.ParticipantPermission(
+                    can_subscribe=True, can_publish=True, can_publish_data=True,
+                ),
+            ))
+        finally:
+            await lk.aclose()
+    _run(_go)
+
+
 def remove_participant(room_name, identity):
     async def _go():
         lk = api.LiveKitAPI(_http_url(), settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
