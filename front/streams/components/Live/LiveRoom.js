@@ -232,6 +232,31 @@ const RoomInner = ({
     return () => { room.off(RoomEvent.ConnectionStateChanged, onState); };
   }, [room]);
 
+  // ── force-subscribe remote video ─────────────────────────────────────────--
+  // Auto-subscribe can miss a publisher's camera (e.g. a co-host that reconnects
+  // with the same identity): the host receives the publication (isCameraEnabled
+  // true) but never subscribes, so useTracks omits it and the tile shows the
+  // avatar. Explicitly subscribe to every remote video publication.
+  useEffect(() => {
+    if (!room) return undefined;
+    const ensureSubscribed = () => {
+      room.remoteParticipants?.forEach((p) => {
+        p.trackPublications?.forEach((pub) => {
+          if (pub.kind === Track.Kind.Video && typeof pub.setSubscribed === 'function' && !pub.isSubscribed) {
+            try { pub.setSubscribed(true); } catch {}
+          }
+        });
+      });
+    };
+    ensureSubscribed();
+    room.on(RoomEvent.TrackPublished, ensureSubscribed);
+    room.on(RoomEvent.ParticipantConnected, ensureSubscribed);
+    return () => {
+      room.off(RoomEvent.TrackPublished, ensureSubscribed);
+      room.off(RoomEvent.ParticipantConnected, ensureSubscribed);
+    };
+  }, [room]);
+
   // ── data channel: chat + reactions ───────────────────────────────────────--
   const pushMessage = useCallback((m) => {
     setMessages((prev) => [...prev.slice(-60), m]); // keep the tail bounded
