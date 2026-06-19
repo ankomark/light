@@ -42,6 +42,7 @@ import PublicationEditor from './pages/PublicationEditor';
 import Churches from './pages/Churches';
 import About from './pages/About';
 import Choirs from './pages/Choirs';
+import ChoirCommunity from './pages/ChoirCommunity';
 import Studios from './pages/Studios';
 import GroupList from './pages/GroupList';
 import GroupDetail from './pages/GroupDetail';
@@ -238,6 +239,7 @@ const App = () => {
                 <Stack.Screen name="About" component={About} />
                 <Stack.Screen name="Studios" component={Studios} />
                 <Stack.Screen name="Choirs" component={Choirs} />
+                <Stack.Screen name="ChoirCommunity" component={ChoirCommunity} options={{ headerShown: false }} />
                 <Stack.Screen name="Groups" component={GroupListWrapper} />
                 <Stack.Screen name="GroupDetail" component={GroupDetail} />
                 <Stack.Screen name="CreateGroup" component={CreateGroup} />

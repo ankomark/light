@@ -262,6 +262,17 @@ const Choirs = ({ navigation }) => {
           </TouchableOpacity>
         ) : null}
 
+        {/* Community entry point */}
+        <TouchableOpacity
+          style={styles.communityBtn}
+          onPress={() => navigation.navigate('ChoirCommunity', { choir: item, choirId: item.id })}
+          activeOpacity={0.9}
+        >
+          <Ionicons name="chatbubbles" size={18} color="#0A1628" />
+          <Text style={styles.communityText}>Open community</Text>
+          <Ionicons name="chevron-forward" size={16} color="#0A1628" style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
+
         {/* Owner controls */}
         {owner && (
           <View style={styles.ownerControls}>
@@ -542,6 +553,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   youtubeText: { ...typography.label, color: colors.textPrimary, fontWeight: '600' },
+
+  communityBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    marginHorizontal: spacing.md, marginTop: spacing.sm,
+    backgroundColor: colors.accent, borderRadius: radius.md,
+    paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.md, ...shadows.sm,
+  },
+  communityText: { ...typography.label, color: '#0A1628', fontWeight: '800' },
 
   ownerControls: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

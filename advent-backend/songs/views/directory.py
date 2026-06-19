@@ -311,13 +311,16 @@ class ChoirViewSet(viewsets.ModelViewSet):
         choir = self.get_object()
         m = self._membership(choir, request.user)
         pending = choir.join_requests.filter(user=request.user, status='pending').exists()
+        is_admin = self._is_admin(choir, request.user)
         return Response({
             'choir_id': choir.id,
             'name': choir.name,
-            'is_admin': self._is_admin(choir, request.user),
+            'is_admin': is_admin,
             'role': m.role if m else None,
             'is_member': bool(m),
             'has_pending_request': pending,
+            # For the admin's "requests waiting" badge.
+            'has_requests': is_admin and choir.join_requests.filter(status='pending').exists(),
             'members_count': choir.memberships.count(),
         })
 

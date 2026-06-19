@@ -733,6 +733,30 @@ export const toggleChoirActive = async (choirId) => {
 export const updateChoirMembers = async (choirId, count) => {
   return apiRequest('post', `/choirs/${choirId}/update_members/`, { count });
 };
+
+// ── Choir community (membership / requests / chat) ───────────────────────────
+export const fetchChoirCommunity = (id) =>
+  apiRequest('get', `/choirs/${id}/community/`);
+export const fetchChoirMembers = (id) =>
+  apiRequest('get', `/choirs/${id}/members/`);
+export const requestJoinChoir = (id, message = '') =>
+  apiRequest('post', `/choirs/${id}/request-join/`, { message });
+export const fetchChoirJoinRequests = (id) =>
+  apiRequest('get', `/choirs/${id}/join-requests/`);
+export const approveChoirRequest = (id, requestId) =>
+  apiRequest('post', `/choirs/${id}/approve-request/`, { request_id: requestId });
+export const rejectChoirRequest = (id, requestId) =>
+  apiRequest('post', `/choirs/${id}/reject-request/`, { request_id: requestId });
+export const removeChoirMember = (id, userId) =>
+  apiRequest('post', `/choirs/${id}/remove-member/`, { user_id: userId });
+export const leaveChoir = (id) =>
+  apiRequest('post', `/choirs/${id}/leave/`);
+export const fetchChoirMessages = (id, page = 1) =>
+  apiRequest('get', `/choirs/${id}/messages/`, null, { params: { page } });
+export const sendChoirMessage = (id, payload) =>
+  apiRequest('post', `/choirs/${id}/messages/`, payload);
+export const deleteChoirMessage = (id, messageId) =>
+  apiRequest('post', `/choirs/${id}/messages/${messageId}/delete/`);
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);
 };
