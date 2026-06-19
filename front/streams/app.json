@@ -16,7 +16,10 @@
       "bundleIdentifier": "com.yourcompany.yourapp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["audio", "voip"],
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ],
         "NSMicrophoneUsageDescription": "Allow microphone access so you can broadcast live audio.",
         "NSCameraUsageDescription": "Allow camera access for live video broadcasts."
       }
@@ -59,7 +62,14 @@
       "expo-sqlite",
       "expo-asset",
       "@livekit/react-native-expo-plugin",
-      "@config-plugins/react-native-webrtc"
+      "@config-plugins/react-native-webrtc",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "",
+          "enableGooglePay": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
