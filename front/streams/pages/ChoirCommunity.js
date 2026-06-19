@@ -21,6 +21,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
 import { useAuth } from '../context/useAuth';
+import RotatingBackground from '../components/RotatingBackground';
 import {
   fetchChoirCommunity, fetchChoirMessages, sendChoirMessage, deleteChoirMessage,
   requestJoinChoir, fetchChoirMembers, fetchChoirJoinRequests, approveChoirRequest,
@@ -57,6 +58,8 @@ const ChoirCommunity = ({ navigation, route }) => {
   const [showManage, setShowManage] = useState(false);
   const [requests, setRequests] = useState([]);
   const [members, setMembers] = useState([]);
+  const [showAttach, setShowAttach] = useState(false);
+  const [viewerUri, setViewerUri] = useState(null); // full-screen image viewer
 
   const recordingRef = useRef(null);
   const soundRef = useRef(null);
@@ -155,6 +158,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   };
 
   const attachImage = async () => {
+    setShowAttach(false);
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Enable photo access to share images.'); return; }
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -166,8 +170,11 @@ const ChoirCommunity = ({ navigation, route }) => {
     send({ message_type: 'image', attachment: `data:image/jpeg;base64,${out.base64}` });
   };
 
-  const attachDocument = async () => {
-    const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+  const attachDocument = async (audioOnly = false) => {
+    setShowAttach(false);
+    const res = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true, type: audioOnly ? 'audio/*' : '*/*',
+    });
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
     if (tooBig(a.size)) return;
@@ -210,13 +217,6 @@ const ChoirCommunity = ({ navigation, route }) => {
     } catch { Alert.alert('Choir', 'Could not save the recording.'); }
   };
 
-  const attachMenu = () => {
-    Alert.alert('Share', 'Add to the conversation', [
-      { text: 'Photo', onPress: attachImage },
-      { text: 'Document / audio file', onPress: attachDocument },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
 
   const playAudio = async (dataUri) => {
     try {
@@ -309,7 +309,10 @@ const ChoirCommunity = ({ navigation, route }) => {
             </View>
           )}
           {item.message_type === 'image' && !!item.attachment && (
-            <Image source={{ uri: item.attachment }} style={styles.msgImage} resizeMode="cover" />
+            <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerUri(item.attachment)}>
+              <Image source={{ uri: item.attachment }} style={styles.msgImage} resizeMode="cover" />
+              <View style={styles.imageExpand}><Ionicons name="expand" size={15} color="#fff" /></View>
+            </TouchableOpacity>
           )}
           {item.message_type === 'audio' && !!item.attachment && (
             <TouchableOpacity style={styles.audioRow} onPress={() => playAudio(item.attachment)}>
@@ -337,9 +340,11 @@ const ChoirCommunity = ({ navigation, route }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.root}>
+      <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.68)" />
+      <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
-      <LinearGradient colors={[colors.surface, colors.bg]} style={styles.header}>
+      <LinearGradient colors={['rgba(16,46,80,0.95)', 'rgba(10,22,40,0.80)']} style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -391,6 +396,21 @@ const ChoirCommunity = ({ navigation, route }) => {
             ListEmptyComponent={<View style={styles.emptyChat}><Text style={styles.emptyChatText}>Say hello 👋</Text></View>}
           />
 
+          {/* Icon-only attachment tray */}
+          {!recording && showAttach && (
+            <View style={styles.attachTray}>
+              <TouchableOpacity style={styles.attachIcon} onPress={attachImage}>
+                <Ionicons name="image" size={24} color={colors.accent} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.attachIcon} onPress={() => attachDocument(false)}>
+                <Ionicons name="document-text" size={24} color={colors.accent} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.attachIcon} onPress={() => attachDocument(true)}>
+                <Ionicons name="musical-notes" size={24} color={colors.accent} />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {recording ? (
             <View style={styles.recordBar}>
               <View style={styles.recDot} />
@@ -400,8 +420,8 @@ const ChoirCommunity = ({ navigation, route }) => {
             </View>
           ) : (
             <View style={[styles.inputBar, { paddingBottom: insets.bottom || spacing.sm }]}>
-              <TouchableOpacity onPress={attachMenu} hitSlop={8} style={styles.iconBtn}>
-                <Ionicons name="add-circle" size={28} color={colors.accent} />
+              <TouchableOpacity onPress={() => setShowAttach((s) => !s)} hitSlop={8} style={styles.iconBtn}>
+                <Ionicons name={showAttach ? 'close-circle' : 'add-circle'} size={28} color={colors.accent} />
               </TouchableOpacity>
               <TextInput
                 style={styles.input}
@@ -473,14 +493,45 @@ const ChoirCommunity = ({ navigation, route }) => {
           />
         </SafeAreaView>
       </Modal>
-    </SafeAreaView>
+      </SafeAreaView>
+
+      {/* Full-screen image viewer */}
+      <Modal visible={!!viewerUri} transparent animationType="fade" onRequestClose={() => setViewerUri(null)}>
+        <View style={styles.viewer}>
+          <TouchableOpacity style={styles.viewerClose} onPress={() => setViewerUri(null)} hitSlop={12}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          {!!viewerUri && <Image source={{ uri: viewerUri }} style={styles.viewerImg} resizeMode="contain" />}
+        </View>
+      </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: '#0A1628' },
+  container: { flex: 1, backgroundColor: 'transparent' },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+
+  // Icon attachment tray + full-screen image viewer
+  attachTray: {
+    flexDirection: 'row', gap: spacing.md, justifyContent: 'center',
+    paddingVertical: spacing.sm, marginHorizontal: spacing.md, marginBottom: spacing.xs,
+    backgroundColor: 'rgba(16,46,80,0.92)', borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.4)', ...shadows.md,
+  },
+  attachIcon: {
+    width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(244,162,97,0.12)', borderWidth: 1, borderColor: 'rgba(244,162,97,0.35)',
+  },
+  imageExpand: {
+    position: 'absolute', top: 8, right: 8, width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center',
+  },
+  viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
+  viewerImg: { width: '100%', height: '85%' },
+  viewerClose: { position: 'absolute', top: 48, right: 20, zIndex: 2, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
@@ -511,7 +562,7 @@ const styles = StyleSheet.create({
   msgRowMine: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   msgAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface },
   bubble: { borderRadius: radius.lg, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.sm, maxWidth: '100%' },
-  bubbleOther: { backgroundColor: colors.card, borderTopLeftRadius: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  bubbleOther: { backgroundColor: 'rgba(18,30,46,0.92)', borderTopLeftRadius: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)' },
   bubbleMine: { backgroundColor: colors.accent, borderTopRightRadius: 4 },
   msgSender: { ...typography.caption, color: colors.accent, fontWeight: '800', marginBottom: 2 },
   msgText: { ...typography.body, color: colors.textPrimary },
@@ -532,7 +583,7 @@ const styles = StyleSheet.create({
   systemText: { ...typography.caption, color: colors.textMuted, backgroundColor: colors.card, paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.full, overflow: 'hidden' },
 
   // Input
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(16,46,80,0.95)' },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   input: { flex: 1, maxHeight: 120, color: colors.textPrimary, fontSize: 15, backgroundColor: colors.inputBg, borderRadius: radius.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },

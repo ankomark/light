@@ -14,6 +14,7 @@ import {
   toggleChoirActive, updateChoirMembers,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const GENRES = [
@@ -318,7 +319,9 @@ const Choirs = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.root}>
+      <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.7)" />
+      <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Choirs</Text>
         <Text style={styles.subtitle}>Discover Adventist choirs</Text>
@@ -459,7 +462,8 @@ const Choirs = ({ navigation }) => {
           </View>
         </SafeAreaView>
       </Modal>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 };
 
@@ -488,17 +492,25 @@ const Field = ({ label, value, onChange, placeholder, multiline, keyboardType })
 );
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   container: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
 
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
-  title: { ...typography.h1, color: colors.textPrimary },
-  subtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  title: {
+    ...typography.h1, color: colors.textPrimary,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
+  subtitle: {
+    ...typography.caption, color: colors.textSecondary, marginTop: 2,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5,
+  },
 
   searchBar: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    backgroundColor: colors.card, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: 'rgba(18,30,46,0.82)', borderRadius: radius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
     marginHorizontal: spacing.md, paddingHorizontal: spacing.md, height: 44,
   },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
@@ -516,8 +528,8 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: spacing.md, paddingBottom: 96 },
 
   card: {
-    backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden',
-    marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: 'rgba(18,30,46,0.82)', borderRadius: radius.lg, overflow: 'hidden',
+    marginBottom: spacing.md, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', ...shadows.md,
   },
   banner: { height: 120, backgroundColor: colors.surface },
   cover: { width: '100%', height: '100%' },
