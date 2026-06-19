@@ -21,7 +21,6 @@ const SECTIONS = [
     title: 'Discover',
     items: [
       { label: 'Explore', route: 'Explore', set: 'ion', icon: 'compass-outline' },
-      { label: 'Media', route: 'MediaScreen', set: 'mci', icon: 'radio' },
       { label: 'Articles', route: 'Articles', set: 'mci', icon: 'newspaper-variant-outline' },
       { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', color: colors.error },
     ],
