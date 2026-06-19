@@ -1,3 +1,4 @@
+import './polyfills'; // must run before App (and any LiveKit import)
 import { registerRootComponent } from 'expo';
 
 import App from './App';
