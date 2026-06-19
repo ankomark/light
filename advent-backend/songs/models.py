@@ -1347,8 +1347,16 @@ class LiveBroadcast(models.Model):
     room_name = models.CharField(max_length=100, unique=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='live')
     viewer_count = models.PositiveIntegerField(default=0)
+    peak_viewer_count = models.PositiveIntegerField(default=0)
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def duration_seconds(self):
+        """Wall-clock length once ended; None while still live."""
+        if not self.ended_at:
+            return None
+        return int((self.ended_at - self.started_at).total_seconds())
 
     class Meta:
         ordering = ['-started_at']

@@ -5,6 +5,7 @@ occasional server command (end room, remove participant). Media never touches
 Django. Everything here is best-effort and credential-guarded so the app keeps
 working in dev without LiveKit keys (tokens are still produced for tests)."""
 import asyncio
+import json
 import logging
 from datetime import timedelta
 
@@ -53,6 +54,27 @@ def _run(coro):
         asyncio.run(coro())
     except Exception:
         logger.exception('LiveKit server call failed')
+
+
+def ensure_room(room_name, *, metadata=None, empty_timeout=120, max_participants=0):
+    """Create the room up front with descriptive metadata and an empty_timeout.
+
+    metadata (host/kind/title) lets clients and webhooks reason about a room
+    without a Django round-trip. empty_timeout makes LiveKit reap a room that
+    goes empty (e.g. host crashed) so it can't linger. Idempotent: creating an
+    existing room is a no-op on the server side."""
+    async def _go():
+        lk = api.LiveKitAPI(_http_url(), settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
+        try:
+            await lk.room.create_room(api.CreateRoomRequest(
+                name=room_name,
+                empty_timeout=empty_timeout,
+                max_participants=max_participants,
+                metadata=json.dumps(metadata) if metadata else '',
+            ))
+        finally:
+            await lk.aclose()
+    _run(_go)
 
 
 def end_room(room_name):

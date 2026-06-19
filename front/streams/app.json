@@ -28,7 +28,15 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "streamscom.ankom.streams",
-      "permissions": ["RECORD_AUDIO", "CAMERA", "MODIFY_AUDIO_SETTINGS"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "MODIFY_AUDIO_SETTINGS",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "FOREGROUND_SERVICE_MICROPHONE",
+        "WAKE_LOCK"
+      ]
     },
     "web": {
       "bundler": "metro",

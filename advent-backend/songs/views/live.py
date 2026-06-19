@@ -6,6 +6,10 @@ from ..serializers import LiveBroadcastSerializer, CoHostRequestSerializer
 from .. import livekit_service as lk
 
 
+# How many co-hosts can share the stage with the host at once.
+MAX_COHOSTS = 4
+
+
 def _identity(user):
     return f"u{user.id}"
 
@@ -29,6 +33,15 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             LiveBroadcast.objects.select_related('host__profile')
             .filter(status='live').order_by('-started_at')
         )
+
+    def get_throttles(self):
+        # Abuse guards on the two write paths a user can spam; other actions keep
+        # the default user/anon throttles. (Global ScopedRateThrottle reads this.)
+        if self.action == 'create':
+            self.throttle_scope = 'go_live'
+        elif self.action == 'request_cohost':
+            self.throttle_scope = 'cohost_request'
+        return super().get_throttles()
 
     # ── Discovery ────────────────────────────────────────────────────────────
     def list(self, request):
@@ -54,6 +67,10 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         broadcast = LiveBroadcast.objects.create(
             host=request.user, kind=kind, title=title[:200], room_name=room_name,
         )
+        lk.ensure_room(room_name, metadata={
+            'broadcast_id': broadcast.id, 'host': request.user.username,
+            'kind': kind, 'title': broadcast.title,
+        })
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=room_name, can_publish=True,
@@ -129,6 +146,11 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         if b.host_id != request.user.id:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
         req = get_object_or_404(CoHostRequest, pk=request.data.get('request_id'), broadcast=b)
+        if req.status != 'approved' and b.cohost_requests.filter(status='approved').count() >= MAX_COHOSTS:
+            return Response(
+                {'error': f'Maximum of {MAX_COHOSTS} co-hosts on stage.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         req.status = 'approved'
         req.save(update_fields=['status'])
         notify_user(req.user, 'cohost_approved', f"You're now a co-host on {b.title}", {
@@ -190,6 +212,26 @@ class LiveKitWebhookView(APIView):
                 LiveBroadcast.objects.filter(room_name=room_name, status='live').update(
                     status='ended', ended_at=timezone.now())
             elif event.event in ('participant_joined', 'participant_left'):
-                LiveBroadcast.objects.filter(room_name=room_name).update(
-                    viewer_count=max(0, getattr(room, 'num_participants', 0)))
+                n = max(0, getattr(room, 'num_participants', 0))
+                LiveBroadcast.objects.filter(room_name=room_name).update(viewer_count=n)
+                # Track the high-water mark for post-broadcast analytics.
+                LiveBroadcast.objects.filter(room_name=room_name, peak_viewer_count__lt=n).update(
+                    peak_viewer_count=n)
+                # If the host drops without ending, tear the room down so co-hosts
+                # and viewers aren't stranded in a frozen broadcast.
+                if event.event == 'participant_left':
+                    self._end_if_host_left(room_name, event)
         return Response({'ok': True})
+
+    @staticmethod
+    def _end_if_host_left(room_name, event):
+        participant = getattr(event, 'participant', None)
+        identity = getattr(participant, 'identity', None)
+        if not identity:
+            return
+        b = LiveBroadcast.objects.filter(room_name=room_name, status='live').first()
+        if b and identity == f"u{b.host_id}":
+            b.status = 'ended'
+            b.ended_at = timezone.now()
+            b.save(update_fields=['status', 'ended_at'])
+            lk.end_room(room_name)

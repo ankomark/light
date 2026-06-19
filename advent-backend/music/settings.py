@@ -159,6 +159,9 @@ REST_FRAMEWORK = {
         'appeals': '5/hour',
         'reports': '20/hour',
         'admin_bulk': '30/min',
+        # Live broadcasting abuse guards.
+        'go_live': '20/hour',
+        'cohost_request': '30/hour',
     },
 }
 ROOT_URLCONF = 'music.urls'
