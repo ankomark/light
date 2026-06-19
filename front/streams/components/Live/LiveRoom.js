@@ -350,6 +350,11 @@ const RoomInner = ({
 
       {/* Stage */}
       <Text style={styles.sectionLabel}>On air</Text>
+      {__DEV__ && (
+        <Text style={{ color: '#7Fd', fontSize: 10, marginBottom: 4 }}>
+          dbg · cams:{cameraTracks.length} pubs:{publishers.length} ids:[{cameraTracks.map((t) => t.participant.identity).join(',')}]
+        </Text>
+      )}
       {connecting ? (
         <View style={styles.connecting}><ActivityIndicator color={colors.accent} /><Text style={styles.connectingText}>Connecting…</Text></View>
       ) : isVideo ? (
@@ -499,7 +504,10 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
 };
 
 const PublisherTile = ({ participant, trackRef, big, showKick, onKick }) => {
-  const hasVideo = !!trackRef && participant.isCameraEnabled;
+  // Render the camera track whenever we have a (non-muted) publication for it,
+  // rather than trusting participant.isCameraEnabled, which can lag for a remote
+  // participant that just started publishing.
+  const hasVideo = !!trackRef && !trackRef.publication?.isMuted;
   return (
     <View style={[big ? styles.spotlightTile : styles.thumbTile, participant.isSpeaking && styles.tileSpeaking]}>
       {hasVideo ? (
