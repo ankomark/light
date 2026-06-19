@@ -82,10 +82,6 @@ try {
 } catch (e) {
   console.warn('[LiveKit] WebRTC native module unavailable — live disabled in this build.', e?.message);
 }
-import LiveEventForm from './components/Live/LiveEventForm';
-import LiveEventPlayer from './components/Live/LiveEventPlayer';
-import LiveEventsList from './components/Live/LiveEventsList';
-import LiveHomeScreen from './components/Live/LiveHomeScreen';
 import InboxScreen from './components/InboxScreen';
 import ChatScreen from './components/ChatScreen';
 import ExploreScreen from './components/ExploreScreen';
@@ -276,10 +272,6 @@ const App = () => {
                 <Stack.Screen name="Videos" component={VideoFeed} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
                 <Stack.Screen name="StoryViewer" component={StoryViewer} options={{ headerShown: false, animation: 'fade' }} />
                 <Stack.Screen name="CreateStory" component={CreateStoryScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="LiveHomeScreen" component={LiveHomeScreenWrapper} />
-                <Stack.Screen name="LiveEvents" component={LiveEventsListWrapper} />
-                <Stack.Screen name="LiveEventForm" component={LiveEventFormWrapper} />
-                <Stack.Screen name="LiveEventPlayer" component={LiveEventPlayerWrapper} options={{ headerShown: false, presentation: 'modal' }}/>
                 <Stack.Screen name="LiveHub" component={LiveHubWrapper} />
                 <Stack.Screen name="GoLive" component={GoLive} options={{ headerShown: false }} />
                 <Stack.Screen name="LiveRoom" component={LiveRoom} options={{ headerShown: false, gestureEnabled: false }} />
@@ -296,33 +288,6 @@ const App = () => {
       </ErrorBoundary>
     );
 };
-const LiveHomeScreenWrapper = ({ navigation,route }) => (
- 
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <LiveHomeScreen navigation={navigation} route={route} />
-  </View>
-);
-
-const LiveEventsListWrapper = ({ navigation, route }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <LiveEventsList navigation={navigation} route={route} />
-  </View>
-);
-
-const LiveEventFormWrapper = ({ navigation, route }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <LiveEventForm navigation={navigation} route={route} />
-  </View>
-);
-
-const LiveEventPlayerWrapper = ({ navigation, route }) => (
-  <View style={{ flex: 1 }}>
-    <LiveEventPlayer navigation={navigation} route={route} />
-  </View>
-);
 
 const GroupListWrapper = ({ navigation }) => (
   <View style={{ flex: 1 }}>
