@@ -34,7 +34,6 @@ import HymnList from './components/HymnList';
 import HymnDetail from './components/HymnDetail';
 import HamburgerMenu from './components/HamburgerMenu';
 import NoticeBoard from './pages/NoticeBoard';
-import MediaScreen from './pages/MediaScreen';
 import AdventistMedia from './pages/AdventistMedia';
 import Articles from './pages/Articles';
 import PublicationDetail from './pages/PublicationDetail';
@@ -230,7 +229,6 @@ const App = () => {
                 <Stack.Screen name="bible" component={BibleWrapper} />
                 <Stack.Screen name="HamburgerMenu" component={HamburgerMenu} />
                 <Stack.Screen name="NoticeBoard" component={NoticeBoard} options={{ headerShown: true, title: 'Notice Board', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
-                <Stack.Screen name="MediaScreen" component={MediaScreen} />
                 <Stack.Screen name="AdventistMedia" component={ AdventistMedia} />
                 <Stack.Screen name="Articles" component={Articles} />
                 <Stack.Screen name="PublicationDetail" component={PublicationDetail} />
