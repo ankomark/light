@@ -4,7 +4,7 @@
     "slug": "streams",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/images/adaptive-icon.png",
     "scheme": "streams",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
