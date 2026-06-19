@@ -128,7 +128,10 @@ const LiveRoom = ({ navigation, route }) => {
       connect
       audio={initialCanPublish && (initialMicOn !== false)}
       video={initialCanPublish && isVideo && (initialCamOn !== false)}
-      options={{ adaptiveStream: true }}
+      // adaptiveStream pauses remote video whose view isn't detected as visible
+      // (flaky in RN ScrollViews), which hid late publishers' (co-hosts') video
+      // from the host. A broadcast has few publishers, so subscribe fully.
+      options={{ adaptiveStream: false }}
       onError={(e) => console.warn('LiveKit error', e)}
       onDisconnected={() => navigation.goBack()}
       style={styles.root}
