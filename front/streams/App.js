@@ -74,7 +74,14 @@ import { registerGlobals as registerLiveKitGlobals } from '@livekit/react-native
 import { isAdmin } from './utils/roles';
 
 // WebRTC globals for LiveKit must be registered once before any live screen mounts.
-registerLiveKitGlobals();
+// Guarded: in Expo Go (or any build without the native WebRTC module) this throws
+// "WebRTC native module not found" at startup — swallow it so the rest of the app
+// still boots; the Live screens show their own "needs a dev build" guard.
+try {
+  registerLiveKitGlobals();
+} catch (e) {
+  console.warn('[LiveKit] WebRTC native module unavailable — live disabled in this build.', e?.message);
+}
 import LiveEventForm from './components/Live/LiveEventForm';
 import LiveEventPlayer from './components/Live/LiveEventPlayer';
 import LiveEventsList from './components/Live/LiveEventsList';
