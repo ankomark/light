@@ -372,7 +372,8 @@ const RoomInner = ({
       <Text style={styles.sectionLabel}>On air</Text>
       {__DEV__ && (
         <Text style={{ color: '#7Fd', fontSize: 10, marginBottom: 4 }}>
-          dbg · cams:{cameraTracks.length} pubs:{publishers.length} ids:[{cameraTracks.map((t) => t.participant.identity).join(',')}]
+          dbg me:{localParticipant?.identity} role:{role} cams:{cameraTracks.length}{'\n'}
+          {publishers.map((p) => `${p.identity}{cam:${camByIdentity[p.identity] ? 'Y' : 'n'} mut:${camByIdentity[p.identity]?.publication?.isMuted ? 'Y' : 'n'} en:${p.isCameraEnabled ? 'Y' : 'n'}}`).join(' ')}
         </Text>
       )}
       {connecting ? (
