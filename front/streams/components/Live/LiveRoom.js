@@ -283,11 +283,21 @@ const RoomInner = ({
   // ── publisher controls ───────────────────────────────────────────────────--
   const toggleMic = async () => {
     const next = !micOn;
-    try { await localParticipant?.setMicrophoneEnabled(next); setMicOn(next); } catch {}
+    try { await localParticipant?.setMicrophoneEnabled(next); setMicOn(next); }
+    catch (e) { if (__DEV__) Alert.alert('Mic failed', String(e?.message || e)); }
   };
   const toggleCam = async () => {
     const next = !camOn;
-    try { await localParticipant?.setCameraEnabled(next); setCamOn(next); } catch {}
+    try {
+      await localParticipant?.setCameraEnabled(next);
+      setCamOn(next);
+      if (__DEV__ && next) {
+        const pub = localParticipant?.getTrackPublication?.(Track.Source.Camera);
+        Alert.alert('Camera debug', `pub:${!!pub} sid:${pub?.trackSid || 'none'} track:${!!(pub?.track || pub?.videoTrack)} muted:${pub?.isMuted}`);
+      }
+    } catch (e) {
+      if (__DEV__) Alert.alert('Camera publish failed', String(e?.message || e));
+    }
   };
   const flipCam = async () => {
     try {
