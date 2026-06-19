@@ -178,13 +178,33 @@ class ChoirViewSet(viewsets.ModelViewSet):
         return context
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        choir = serializer.save(created_by=self.request.user)
+        # The creator runs the community as its admin.
+        ChoirMembership.objects.get_or_create(
+            choir=choir, user=self.request.user, defaults={'role': 'admin'},
+        )
 
     def get_queryset(self):
         user_id = self.request.query_params.get('user_id')
         if user_id:
             return Choir.objects.filter(created_by=user_id)
         return super().get_queryset()
+
+    # ── Community helpers ────────────────────────────────────────────────────
+    def _membership(self, choir, user):
+        if not user or not user.is_authenticated:
+            return None
+        return choir.memberships.filter(user=user).first()
+
+    def _is_admin(self, choir, user):
+        if user and user.is_authenticated and choir.created_by_id == user.id:
+            return True
+        m = self._membership(choir, user)
+        return bool(m and m.role == 'admin')
+
+    def _sync_count(self, choir):
+        choir.members_count = choir.memberships.count()
+        choir.save(update_fields=['members_count'])
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -283,6 +303,157 @@ class ChoirViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK
             )
 
+    # ── Community: membership state ──────────────────────────────────────────
+    @action(detail=True, methods=['get'], url_path='community')
+    def community(self, request, pk=None):
+        """Snapshot the caller needs to render the community: their role, the
+        member count, and whether they have a pending request."""
+        choir = self.get_object()
+        m = self._membership(choir, request.user)
+        pending = choir.join_requests.filter(user=request.user, status='pending').exists()
+        return Response({
+            'choir_id': choir.id,
+            'name': choir.name,
+            'is_admin': self._is_admin(choir, request.user),
+            'role': m.role if m else None,
+            'is_member': bool(m),
+            'has_pending_request': pending,
+            'members_count': choir.memberships.count(),
+        })
+
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        """Roster — visible to members of the community."""
+        choir = self.get_object()
+        if not self._membership(choir, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = choir.memberships.select_related('user__profile').order_by('role', 'joined_at')
+        return Response(ChoirMembershipSerializer(qs, many=True).data)
+
+    # ── Community: join requests ─────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='request-join')
+    def request_join(self, request, pk=None):
+        choir = self.get_object()
+        if self._membership(choir, request.user):
+            return Response({'error': "You're already in this community."}, status=status.HTTP_400_BAD_REQUEST)
+        req, _created = ChoirJoinRequest.objects.get_or_create(
+            choir=choir, user=request.user,
+            defaults={'message': (request.data.get('message') or '')[:500]},
+        )
+        if not _created and req.status in ('rejected',):
+            req.status = 'pending'
+            req.message = (request.data.get('message') or '')[:500]
+            req.save(update_fields=['status', 'message'])
+        try:
+            notify_user(choir.created_by, 'choir_request',
+                        f"{request.user.username} wants to join {choir.name}",
+                        {'type': 'choir_request', 'choir_id': choir.id, 'request_id': req.id})
+        except Exception:
+            logger.exception('choir request notify failed')
+        return Response(ChoirJoinRequestSerializer(req).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='join-requests')
+    def join_requests(self, request, pk=None):
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = choir.join_requests.select_related('user__profile').filter(status='pending')
+        return Response(ChoirJoinRequestSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='approve-request')
+    def approve_request(self, request, pk=None):
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        req = get_object_or_404(ChoirJoinRequest, pk=request.data.get('request_id'), choir=choir)
+        req.status = 'approved'
+        req.save(update_fields=['status'])
+        ChoirMembership.objects.get_or_create(choir=choir, user=req.user, defaults={'role': 'friend'})
+        self._sync_count(choir)
+        try:
+            notify_user(req.user, 'choir_approved', f"You're now a friend of {choir.name}",
+                        {'type': 'choir_approved', 'choir_id': choir.id})
+        except Exception:
+            logger.exception('choir approve notify failed')
+        return Response(ChoirJoinRequestSerializer(req).data)
+
+    @action(detail=True, methods=['post'], url_path='reject-request')
+    def reject_request(self, request, pk=None):
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        req = get_object_or_404(ChoirJoinRequest, pk=request.data.get('request_id'), choir=choir)
+        req.status = 'rejected'
+        req.save(update_fields=['status'])
+        return Response(ChoirJoinRequestSerializer(req).data)
+
+    # ── Community: moderation ────────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='remove-member')
+    def remove_member(self, request, pk=None):
+        """Admin drops a member or removes a friend. The creator can't be removed."""
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        target_id = request.data.get('user_id')
+        if str(target_id) == str(choir.created_by_id):
+            return Response({'error': "The creator can't be removed."}, status=status.HTTP_400_BAD_REQUEST)
+        deleted, _ = choir.memberships.filter(user_id=target_id).delete()
+        choir.join_requests.filter(user_id=target_id).delete()  # let them re-request later
+        self._sync_count(choir)
+        return Response({'status': 'removed', 'removed': deleted})
+
+    @action(detail=True, methods=['post'])
+    def leave(self, request, pk=None):
+        choir = self.get_object()
+        if choir.created_by_id == request.user.id:
+            return Response({'error': 'The creator cannot leave; delete the choir instead.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        choir.memberships.filter(user=request.user).delete()
+        self._sync_count(choir)
+        return Response({'status': 'left'})
+
+    # ── Community: chat ──────────────────────────────────────────────────────
+    @action(detail=True, methods=['get', 'post'])
+    def messages(self, request, pk=None):
+        choir = self.get_object()
+        if not self._membership(choir, request.user):
+            return Response({'error': 'Join this choir to see the chat.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == 'POST':
+            mtype = request.data.get('message_type', 'text')
+            if mtype not in dict(ChoirMessage.MESSAGE_TYPES) or mtype == 'system':
+                return Response({'error': 'Invalid message type.'}, status=status.HTTP_400_BAD_REQUEST)
+            content = (request.data.get('content') or '').strip()
+            attachment = request.data.get('attachment') or ''
+            if not content and not attachment:
+                return Response({'error': 'Empty message.'}, status=status.HTTP_400_BAD_REQUEST)
+            reply_to = None
+            reply_id = request.data.get('reply_to')
+            if reply_id:
+                reply_to = choir.messages.filter(pk=reply_id).first()
+            msg = ChoirMessage.objects.create(
+                choir=choir, sender=request.user, content=content[:5000],
+                message_type=mtype, attachment=attachment,
+                file_name=(request.data.get('file_name') or '')[:255],
+                duration=request.data.get('duration') or None, reply_to=reply_to,
+            )
+            return Response(ChoirMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+
+        # GET — newest first, paginated; the client reverses for display.
+        qs = choir.messages.select_related('sender__profile', 'reply_to__sender').order_by('-created_at')
+        page = self.paginate_queryset(qs)
+        data = ChoirMessageSerializer(page if page is not None else qs, many=True).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
+    def delete_message(self, request, pk=None, message_id=None):
+        """Sender can delete their own message; admin can delete any."""
+        choir = self.get_object()
+        msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
+        if msg.sender_id != request.user.id and not self._is_admin(choir, request.user):
+            return Response({'error': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+        msg.delete()
+        return Response({'status': 'deleted'})
 
 
 class LiveEventViewSet(viewsets.ModelViewSet):

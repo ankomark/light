@@ -101,6 +101,49 @@ class ChoirSerializer(serializers.ModelSerializer):
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
 
+# ── Choir community (membership / requests / chat) ────────────────────────────
+class ChoirMembershipSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = ChoirMembership
+        fields = ['id', 'user', 'role', 'joined_at']
+        read_only_fields = fields
+
+
+class ChoirJoinRequestSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = ChoirJoinRequest
+        fields = ['id', 'user', 'message', 'status', 'created_at']
+        read_only_fields = ['id', 'user', 'status', 'created_at']
+
+
+class ChoirMessageSerializer(serializers.ModelSerializer):
+    sender = SimpleUserSerializer(read_only=True)
+    reply_to = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChoirMessage
+        fields = [
+            'id', 'sender', 'content', 'message_type', 'attachment',
+            'file_name', 'duration', 'reply_to', 'created_at',
+        ]
+        read_only_fields = ['id', 'sender', 'created_at']
+
+    def get_reply_to(self, obj):
+        if not obj.reply_to_id:
+            return None
+        r = obj.reply_to
+        return {
+            'id': r.id,
+            'sender': r.sender.username,
+            'message_type': r.message_type,
+            # A short preview only — never echo a full base64 attachment back.
+            'content': (r.content or r.message_type)[:120],
+        }
+
 
 class LiveEventSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()

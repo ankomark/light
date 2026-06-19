@@ -805,6 +805,71 @@ class Choir(models.Model):
         verbose_name_plural = "Choirs"
         ordering = ['-created_at']
 
+
+class ChoirMembership(models.Model):
+    """A person's place in a choir community. The creator is 'admin'; people who
+    request and are approved become 'friend'; the admin may add core 'member's.
+    All roles can read and post in the choir chat — role only governs moderation."""
+    ROLE_CHOICES = (('admin', 'Admin'), ('member', 'Member'), ('friend', 'Friend'))
+    choir = models.ForeignKey(Choir, on_delete=models.CASCADE, related_name='memberships')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_memberships')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='friend')
+    joined_at = models.DateTimeField(auto_now_add=True)
+    last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
+
+    class Meta:
+        unique_together = ('choir', 'user')
+        indexes = [models.Index(fields=['choir', 'role'])]
+
+    def __str__(self):
+        return f"{self.user.username} in {self.choir.name} ({self.role})"
+
+
+class ChoirJoinRequest(models.Model):
+    """A request to become a friend of a choir (community access)."""
+    STATUS_CHOICES = (('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'))
+    choir = models.ForeignKey(Choir, on_delete=models.CASCADE, related_name='join_requests')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_join_requests')
+    message = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('choir', 'user')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.choir.name} ({self.status})"
+
+
+class ChoirMessage(models.Model):
+    """A message in a choir community chat (text / image / file / voice note /
+    system notice). Attachments ride as base64 data URIs, matching GroupPost."""
+    MESSAGE_TYPES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('file', 'File'),
+        ('audio', 'Voice note'),
+        ('system', 'System'),
+    ]
+    choir = models.ForeignKey(Choir, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_messages')
+    content = models.TextField(blank=True, default='')
+    message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
+    attachment = models.TextField(blank=True, default='')  # base64 data URI
+    file_name = models.CharField(max_length=255, blank=True, default='')
+    duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
+    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [models.Index(fields=['choir', 'created_at'])]
+
+    def __str__(self):
+        return f"{self.sender.username} in {self.choir.name}"
+
+
 class Group(models.Model):
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_groups')
     name = models.CharField(max_length=100)
