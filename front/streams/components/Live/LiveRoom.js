@@ -243,7 +243,9 @@ const RoomInner = ({
       room.remoteParticipants?.forEach((p) => {
         p.trackPublications?.forEach((pub) => {
           if (pub.kind === Track.Kind.Video && typeof pub.setSubscribed === 'function' && !pub.isSubscribed) {
-            try { pub.setSubscribed(true); } catch {}
+            // setSubscribed returns a promise that can reject during reconnect —
+            // swallow both sync and async errors so it can't surface a redbox.
+            try { Promise.resolve(pub.setSubscribed(true)).catch(() => {}); } catch {}
           }
         });
       });
