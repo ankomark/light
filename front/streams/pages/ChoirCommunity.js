@@ -54,7 +54,7 @@ const previewOf = (m) =>
  * GestureHandlerRootView; it only claims clearly-horizontal right-swipes, so the
  * inverted FlatList keeps its vertical scroll.
  */
-const MessageRow = ({ item, currentUser, isAdmin, onReply, onLongPress, onOpenImage, onPlayAudio, onToggleReaction }) => {
+const MessageRow = ({ item, currentUser, isAdmin, onReply, onLongPress, onOpenImage, onPlayAudio, onToggleReaction, onRetry }) => {
   const tx = useRef(new Animated.Value(0)).current;
   const armed = useRef(false); // crossed the trigger threshold this gesture
 
@@ -89,6 +89,9 @@ const MessageRow = ({ item, currentUser, isAdmin, onReply, onLongPress, onOpenIm
 
   const mine = item.sender?.id === currentUser?.id || item.sender?.username === currentUser?.username;
   const isImg = item.message_type === 'image' && !!item.attachment;
+  const status = item._status; // 'sending' | 'failed' | undefined (= delivered)
+  const sending = status === 'sending';
+  const failed = status === 'failed';
   const reactions = item.reactions?.summary || [];
   const myReaction = item.reactions?.mine || null;
   const hintOpacity = tx.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0, 1], extrapolate: 'clamp' });
@@ -100,13 +103,17 @@ const MessageRow = ({ item, currentUser, isAdmin, onReply, onLongPress, onOpenIm
       </Animated.View>
 
       <Animated.View style={{ transform: [{ translateX: tx }] }} {...pan.panHandlers}>
-        <Pressable onLongPress={() => onLongPress(item)} delayLongPress={280} style={[styles.msgRow, mine && styles.msgRowMine]}>
+        <Pressable
+          onLongPress={() => onLongPress(item)} delayLongPress={280}
+          onPress={failed ? () => onRetry(item) : undefined}
+          style={[styles.msgRow, mine && styles.msgRowMine]}
+        >
           {!mine && (
             <Image source={item.sender?.profile_picture ? { uri: item.sender.profile_picture } : DEFAULT_AVATAR}
               defaultSource={DEFAULT_AVATAR} style={styles.msgAvatar} />
           )}
           <View style={styles.bubbleCol}>
-            <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther, isImg && styles.bubbleImage]}>
+            <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther, isImg && styles.bubbleImage, sending && styles.bubbleSending]}>
               {!mine && <Text style={styles.msgSender}>{item.sender?.username || 'member'}</Text>}
               {item.reply_to && (
                 <View style={styles.replyChip}>
@@ -115,13 +122,17 @@ const MessageRow = ({ item, currentUser, isAdmin, onReply, onLongPress, onOpenIm
                 </View>
               )}
               {item.message_type === 'image' && !!item.attachment && (
-                <TouchableOpacity activeOpacity={0.9} onPress={() => onOpenImage(item.attachment)}>
+                <TouchableOpacity activeOpacity={0.9} onPress={() => (sending ? null : onOpenImage(item.attachment))}>
                   <Image source={{ uri: item.attachment }} style={styles.msgImage} resizeMode="cover" />
-                  <View style={styles.imageExpand}><Ionicons name="expand" size={15} color="#fff" /></View>
+                  {sending ? (
+                    <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>
+                  ) : (
+                    <View style={styles.imageExpand}><Ionicons name="expand" size={15} color="#fff" /></View>
+                  )}
                 </TouchableOpacity>
               )}
               {item.message_type === 'audio' && !!item.attachment && (
-                <TouchableOpacity style={styles.audioRow} onPress={() => onPlayAudio(item.attachment)}>
+                <TouchableOpacity style={styles.audioRow} onPress={() => onPlayAudio(item.attachment)} disabled={sending}>
                   <Ionicons name="play-circle" size={30} color={mine ? '#0A1628' : colors.accent} />
                   <View style={styles.audioBars}><Text style={[styles.audioMeta, mine && styles.audioMetaMine]}>Voice note · {fmtDuration(item.duration)}</Text></View>
                 </TouchableOpacity>
@@ -133,9 +144,23 @@ const MessageRow = ({ item, currentUser, isAdmin, onReply, onLongPress, onOpenIm
                 </View>
               )}
               {!!item.content && <Text style={[styles.msgText, mine && styles.textMine]}>{item.content}</Text>}
-              <Text style={[styles.msgTime, mine && styles.timeMine]}>
-                {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </Text>
+              <View style={styles.metaRow}>
+                <Text style={[styles.msgTime, mine && styles.timeMine]}>
+                  {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+                {mine && (
+                  failed ? (
+                    <View style={styles.statusWrap}>
+                      <Ionicons name="alert-circle" size={13} color={colors.error} />
+                      <Text style={styles.retryText}>Tap to retry</Text>
+                    </View>
+                  ) : sending ? (
+                    <Ionicons name="time-outline" size={12} color="rgba(10,22,40,0.55)" style={styles.statusIcon} />
+                  ) : (
+                    <Ionicons name="checkmark-done" size={14} color="rgba(10,22,40,0.6)" style={styles.statusIcon} />
+                  )
+                )}
+              </View>
             </View>
 
             {reactions.length > 0 && (
@@ -167,7 +192,6 @@ const ChoirCommunity = ({ navigation, route }) => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -259,27 +283,66 @@ const ChoirCommunity = ({ navigation, route }) => {
     } catch {} finally { setLoadingMore(false); }
   }, [choirId, page, hasMore, loadingMore]);
 
-  // ── sending ───────────────────────────────────────────────────────────────
-  const pushSent = (msg) => {
-    seenIdsRef.current.add(msg.id);
-    setMessages((prev) => [msg, ...prev]);
-  };
-
-  const send = useCallback(async (payload) => {
-    setSending(true);
-    // Attach (and clear) any active reply so text + media replies both work.
-    const reply = replyToRef.current;
-    const body = reply ? { ...payload, reply_to: reply.id } : payload;
-    if (reply) setReplyTo(null);
+  // ── sending (optimistic, WhatsApp-style) ──────────────────────────────────
+  // Show the message instantly with a 'sending' status, then swap in the saved
+  // server copy (→ delivered tick) or flag it 'failed' for a tap-to-retry.
+  const deliver = useCallback(async (body, display) => {
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const tempMsg = {
+      id: tempId,
+      sender: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
+      content: display.content || '',
+      message_type: display.message_type,
+      attachment: display.attachment || '',
+      file_name: display.file_name || '',
+      duration: display.duration,
+      reply_to: display.reply_to || null,
+      created_at: new Date().toISOString(),
+      reactions: { summary: [], mine: null },
+      _status: 'sending',
+      _body: body,
+      _display: display,
+    };
+    setMessages((prev) => [tempMsg, ...prev]);
     try {
       const msg = await sendChoirMessage(choirId, body);
-      pushSent(msg);
+      seenIdsRef.current.add(msg.id);
+      setMessages((prev) => {
+        // If the 5s poll already inserted the saved copy mid-flight, just drop
+        // the temp instead of leaving two rows with the same id.
+        if (prev.some((m) => m.id === msg.id && m.id !== tempId)) {
+          return prev.filter((m) => m.id !== tempId);
+        }
+        return prev.map((m) => (m.id === tempId ? { ...msg, _status: 'sent' } : m));
+      });
     } catch (e) {
-      Alert.alert('Choir', e?.response?.data?.error || 'Could not send your message.');
-    } finally {
-      setSending(false);
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
     }
-  }, [choirId]);
+  }, [choirId, currentUser]);
+
+  const send = useCallback((payload) => {
+    // Resolve (and clear) any active reply, then build the body + the optimistic
+    // display copy so the pending bubble looks identical to the delivered one.
+    const reply = replyToRef.current;
+    const body = reply ? { ...payload, reply_to: reply.id } : payload;
+    const display = {
+      message_type: payload.message_type,
+      content: payload.content,
+      attachment: payload.attachment,
+      file_name: payload.file_name,
+      duration: payload.duration,
+      reply_to: reply
+        ? { id: reply.id, sender: reply.sender?.username, message_type: reply.message_type, content: previewOf(reply) }
+        : null,
+    };
+    if (reply) setReplyTo(null);
+    deliver(body, display);
+  }, [deliver]);
+
+  const retrySend = useCallback((m) => {
+    setMessages((prev) => prev.filter((x) => x.id !== m.id));
+    deliver(m._body, m._display);
+  }, [deliver]);
 
   const sendText = () => {
     const t = draft.trim();
@@ -464,6 +527,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       onOpenImage={setViewerUri}
       onPlayAudio={playAudio}
       onToggleReaction={react}
+      onRetry={retrySend}
     />
   );
 
@@ -588,7 +652,7 @@ const ChoirCommunity = ({ navigation, route }) => {
                 multiline
               />
               {draft.trim() ? (
-                <TouchableOpacity onPress={sendText} disabled={sending} style={styles.sendBtn}>
+                <TouchableOpacity onPress={sendText} style={styles.sendBtn}>
                   <Ionicons name="send" size={18} color="#0A1628" />
                 </TouchableOpacity>
               ) : (
@@ -748,14 +812,23 @@ const styles = StyleSheet.create({
   bubble: { borderRadius: radius.lg, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.sm, maxWidth: '100%' },
   bubbleOther: { backgroundColor: 'rgba(18,30,46,0.92)', borderTopLeftRadius: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)' },
   bubbleMine: { backgroundColor: colors.accent, borderTopRightRadius: 4 },
-  bubbleImage: { padding: 3 }, // thin frame around shared images
+  bubbleImage: { padding: 2, borderRadius: 7 }, // slim 2px frame, tidy corners
+  bubbleSending: { opacity: 0.85 },             // dim while the message is in flight
   bodyLoading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   msgSender: { ...typography.caption, color: colors.accent, fontWeight: '800', marginBottom: 2 },
   msgText: { ...typography.body, color: colors.textPrimary },
   textMine: { color: '#0A1628' },
-  msgTime: { ...typography.caption, color: colors.textMuted, fontSize: 10, alignSelf: 'flex-end', marginTop: 3 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 3 },
+  msgTime: { ...typography.caption, color: colors.textMuted, fontSize: 10 },
   timeMine: { color: 'rgba(10,22,40,0.6)' },
-  msgImage: { width: 220, height: 220, borderRadius: radius.md, marginBottom: 4, backgroundColor: colors.surface },
+  statusIcon: { marginLeft: 1 },
+  statusWrap: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  retryText: { ...typography.caption, color: colors.error, fontSize: 10, fontWeight: '700' },
+  uploadOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 4, borderRadius: 5,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  msgImage: { width: 220, height: 220, borderRadius: 5, marginBottom: 4, backgroundColor: colors.surface },
   audioRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 4, minWidth: 180 },
   audioBars: { flex: 1 },
   audioMeta: { ...typography.caption, color: colors.textSecondary },
