@@ -101,6 +101,42 @@ class ChoirSerializer(serializers.ModelSerializer):
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
 
+class ChoirListSerializer(serializers.ModelSerializer):
+    """Lightweight list payload: the profile/cover images are returned as
+    cacheable URLs (served by the `cover`/`profile` actions) instead of the full
+    base64 data URIs, so the list stays small and fast — and the client never
+    has to decode 20 huge images at once. The client reads `profile_image` /
+    `cover_image` exactly as before; they're just URLs now."""
+    created_by = SimpleUserSerializer(read_only=True)
+    is_owner = serializers.SerializerMethodField()
+    profile_image = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Choir
+        fields = '__all__'
+        read_only_fields = ('created_by', 'members_count')
+
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
+
+    def _image_url(self, obj, kind):
+        # kind is 'profile' or 'cover'; empty stored blob → empty string.
+        if not getattr(obj, f'{kind}_image', ''):
+            return ''
+        ver = int(obj.updated_at.timestamp()) if obj.updated_at else 0  # cache-bust on edit
+        path = f'/api/choirs/{obj.id}/{kind}/?v={ver}'
+        request = self.context.get('request')
+        return request.build_absolute_uri(path) if request else path
+
+    def get_profile_image(self, obj):
+        return self._image_url(obj, 'profile')
+
+    def get_cover_image(self, obj):
+        return self._image_url(obj, 'cover')
+
+
 # ── Choir community (membership / requests / chat) ────────────────────────────
 class ChoirMembershipSerializer(serializers.ModelSerializer):
     user = SimpleUserSerializer(read_only=True)
@@ -123,12 +159,13 @@ class ChoirJoinRequestSerializer(serializers.ModelSerializer):
 class ChoirMessageSerializer(serializers.ModelSerializer):
     sender = SimpleUserSerializer(read_only=True)
     reply_to = serializers.SerializerMethodField()
+    reactions = serializers.SerializerMethodField()
 
     class Meta:
         model = ChoirMessage
         fields = [
             'id', 'sender', 'content', 'message_type', 'attachment',
-            'file_name', 'duration', 'reply_to', 'created_at',
+            'file_name', 'duration', 'reply_to', 'reactions', 'created_at',
         ]
         read_only_fields = ['id', 'sender', 'created_at']
 
@@ -143,6 +180,20 @@ class ChoirMessageSerializer(serializers.ModelSerializer):
             # A short preview only — never echo a full base64 attachment back.
             'content': (r.content or r.message_type)[:120],
         }
+
+    def get_reactions(self, obj):
+        """Aggregate emoji → count, plus the current user's own pick (if any).
+        Relies on the view prefetching `reactions` to avoid N+1 queries."""
+        request = self.context.get('request')
+        uid = request.user.id if request and request.user.is_authenticated else None
+        counts, mine = {}, None
+        for r in obj.reactions.all():
+            counts[r.emoji] = counts.get(r.emoji, 0) + 1
+            if uid and r.user_id == uid:
+                mine = r.emoji
+        summary = [{'emoji': e, 'count': c}
+                   for e, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+        return {'summary': summary, 'mine': mine}
 
 
 class LiveEventSerializer(serializers.ModelSerializer):

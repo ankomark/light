@@ -870,6 +870,23 @@ class ChoirMessage(models.Model):
         return f"{self.sender.username} in {self.choir.name}"
 
 
+class ChoirMessageReaction(models.Model):
+    """A single emoji reaction by one user on a choir message. WhatsApp-style:
+    at most one reaction per user per message — re-reacting with a different
+    emoji replaces it, re-reacting with the same emoji clears it."""
+    message = models.ForeignKey(ChoirMessage, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_reactions')
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('message', 'user')
+        indexes = [models.Index(fields=['message'])]
+
+    def __str__(self):
+        return f"{self.user.username} {self.emoji} on msg {self.message_id}"
+
+
 class Group(models.Model):
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_groups')
     name = models.CharField(max_length=100)

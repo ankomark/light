@@ -1,4 +1,6 @@
 from .common import *  # noqa: F401,F403
+import base64
+from django.http import HttpResponse
 
 
 class MediaStationViewSet(viewsets.ModelViewSet):
@@ -167,10 +169,17 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
 
 
 class ChoirViewSet(viewsets.ModelViewSet):
-    queryset = Choir.objects.all().order_by('-created_at')
+    # select_related avoids an N+1 on created_by (+ its profile) during listing.
+    queryset = Choir.objects.select_related('created_by', 'created_by__profile').order_by('-created_at')
     serializer_class = ChoirSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
+
+    def get_serializer_class(self):
+        # The list ships image URLs (small); detail/create/update keep base64.
+        if self.action == 'list':
+            return ChoirListSerializer
+        return ChoirSerializer
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -187,8 +196,32 @@ class ChoirViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user_id = self.request.query_params.get('user_id')
         if user_id:
-            return Choir.objects.filter(created_by=user_id)
+            return self.queryset.filter(created_by=user_id)
         return super().get_queryset()
+
+    # ── Image serving: stream the stored base64 as a real, cacheable image ────
+    def _serve_data_uri(self, data_uri):
+        """Decode a `data:<mime>;base64,<payload>` blob into an image response."""
+        if not data_uri or ',' not in data_uri:
+            raise Http404('No image.')
+        header, _, payload = data_uri.partition(',')
+        mime = header[5:].split(';')[0] if header.startswith('data:') else ''
+        try:
+            raw = base64.b64decode(payload)
+        except Exception:
+            raise Http404('Bad image data.')
+        resp = HttpResponse(raw, content_type=mime or 'image/jpeg')
+        # URLs are cache-busted with ?v=updated_at, so they're safe to cache hard.
+        resp['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return resp
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    def cover(self, request, pk=None):
+        return self._serve_data_uri(self.get_object().cover_image)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    def profile(self, request, pk=None):
+        return self._serve_data_uri(self.get_object().profile_image)
 
     # ── Community helpers ────────────────────────────────────────────────────
     def _membership(self, choir, user):
@@ -440,12 +473,17 @@ class ChoirViewSet(viewsets.ModelViewSet):
                 file_name=(request.data.get('file_name') or '')[:255],
                 duration=request.data.get('duration') or None, reply_to=reply_to,
             )
-            return Response(ChoirMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+            return Response(ChoirMessageSerializer(msg, context={'request': request}).data,
+                            status=status.HTTP_201_CREATED)
 
         # GET — newest first, paginated; the client reverses for display.
-        qs = choir.messages.select_related('sender__profile', 'reply_to__sender').order_by('-created_at')
+        qs = (choir.messages
+              .select_related('sender__profile', 'reply_to__sender')
+              .prefetch_related('reactions')
+              .order_by('-created_at'))
         page = self.paginate_queryset(qs)
-        data = ChoirMessageSerializer(page if page is not None else qs, many=True).data
+        data = ChoirMessageSerializer(page if page is not None else qs, many=True,
+                                      context={'request': request}).data
         return self.get_paginated_response(data) if page is not None else Response(data)
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
@@ -457,6 +495,26 @@ class ChoirViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
         msg.delete()
         return Response({'status': 'deleted'})
+
+    @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/react')
+    def react_message(self, request, pk=None, message_id=None):
+        """Toggle the caller's emoji reaction on a message (one per user)."""
+        choir = self.get_object()
+        if not self._membership(choir, request.user):
+            return Response({'error': 'Join this choir to react.'}, status=status.HTTP_403_FORBIDDEN)
+        msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
+        emoji = (request.data.get('emoji') or '').strip()
+        if not emoji or len(emoji) > 16:
+            return Response({'error': 'Invalid emoji.'}, status=status.HTTP_400_BAD_REQUEST)
+        existing = msg.reactions.filter(user=request.user).first()
+        if existing and existing.emoji == emoji:
+            existing.delete()  # tapping the same emoji clears it
+        elif existing:
+            existing.emoji = emoji
+            existing.save(update_fields=['emoji'])
+        else:
+            ChoirMessageReaction.objects.create(message=msg, user=request.user, emoji=emoji)
+        return Response(ChoirMessageSerializer(msg, context={'request': request}).data)
 
 
 class LiveEventViewSet(viewsets.ModelViewSet):

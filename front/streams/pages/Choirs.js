@@ -14,7 +14,6 @@ import {
   toggleChoirActive, updateChoirMembers,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
-import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const GENRES = [
@@ -137,10 +136,13 @@ const Choirs = ({ navigation }) => {
       contact_email: form.contact_email.trim(),
       genre: form.genre,
       youtube_link: form.youtube_link.trim(),
-      profile_image: profileImage || '',
-      cover_image: coverImage || '',
     };
     if (form.founded_date.trim()) payload.founded_date = form.founded_date.trim();
+    // Only send an image when it's a freshly-picked data URI. On edit the field
+    // holds a server URL (the list no longer ships base64), so omitting it leaves
+    // the stored image untouched instead of overwriting it with the URL string.
+    if (profileImage.startsWith('data:')) payload.profile_image = profileImage;
+    if (coverImage.startsWith('data:')) payload.cover_image = coverImage;
 
     try {
       setSaving(true);
@@ -320,8 +322,7 @@ const Choirs = ({ navigation }) => {
 
   return (
     <View style={styles.root}>
-      <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.7)" />
-      <SafeAreaView style={styles.screen} edges={['top']}>
+      <View style={styles.screen}>
       <View style={styles.header}>
         <Text style={styles.title}>Choirs</Text>
         <Text style={styles.subtitle}>Discover Adventist choirs</Text>
@@ -351,6 +352,10 @@ const Choirs = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
         refreshing={refreshing}
         onRefresh={() => load(true)}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={7}
+        removeClippedSubviews
         ListHeaderComponent={
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.filterRow}>
             {FILTERS.map((g) => {
@@ -462,7 +467,7 @@ const Choirs = ({ navigation }) => {
           </View>
         </SafeAreaView>
       </Modal>
-      </SafeAreaView>
+      </View>
     </View>
   );
 };
@@ -492,11 +497,11 @@ const Field = ({ label, value, onChange, placeholder, multiline, keyboardType })
 );
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   screen: { flex: 1, backgroundColor: 'transparent' },
   container: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
 
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: {

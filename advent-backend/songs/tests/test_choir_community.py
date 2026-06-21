@@ -6,7 +6,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from unittest import mock
 
-from songs.models import User, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage
+from songs.models import (
+    User, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction,
+)
 
 
 class ChoirCommunityTests(APITestCase):
@@ -112,3 +114,82 @@ class ChoirCommunityTests(APITestCase):
         r = self.client.post(f'/api/choirs/{cid}/messages/{mid}/delete/')
         self.assertEqual(r.status_code, 200)
         self.assertFalse(ChoirMessage.objects.filter(id=mid).exists())
+
+    def test_reply_threads_a_message(self):
+        cid = self._make_choir()
+        self.client.force_authenticate(self.creator)
+        first = self.client.post(f'/api/choirs/{cid}/messages/', {'content': 'Welcome!'}, format='json').json()
+        reply = self.client.post(
+            f'/api/choirs/{cid}/messages/',
+            {'content': 'Thank you!', 'reply_to': first['id']}, format='json',
+        )
+        self.assertEqual(reply.status_code, 201)
+        body = reply.json()
+        self.assertIsNotNone(body['reply_to'])
+        self.assertEqual(body['reply_to']['id'], first['id'])
+        self.assertEqual(body['reply_to']['sender'], 'creator')
+        self.assertEqual(body['reply_to']['content'], 'Welcome!')
+
+    def test_reaction_toggle_replace_and_clear(self):
+        cid = self._make_choir()
+        ChoirMembership.objects.create(choir_id=cid, user=self.fan, role='friend')
+        self.client.force_authenticate(self.creator)
+        mid = self.client.post(f'/api/choirs/{cid}/messages/', {'content': 'Amen'}, format='json').json()['id']
+
+        # Fan adds ❤️.
+        self.client.force_authenticate(self.fan)
+        r = self.client.post(f'/api/choirs/{cid}/messages/{mid}/react/', {'emoji': '❤️'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()['reactions'], {'summary': [{'emoji': '❤️', 'count': 1}], 'mine': '❤️'})
+
+        # Re-reacting with a different emoji replaces (still one per user).
+        r = self.client.post(f'/api/choirs/{cid}/messages/{mid}/react/', {'emoji': '🔥'}, format='json')
+        self.assertEqual(r.json()['reactions'], {'summary': [{'emoji': '🔥', 'count': 1}], 'mine': '🔥'})
+        self.assertEqual(ChoirMessageReaction.objects.filter(message_id=mid, user=self.fan).count(), 1)
+
+        # Tapping the same emoji clears it.
+        r = self.client.post(f'/api/choirs/{cid}/messages/{mid}/react/', {'emoji': '🔥'}, format='json')
+        self.assertEqual(r.json()['reactions'], {'summary': [], 'mine': None})
+        self.assertFalse(ChoirMessageReaction.objects.filter(message_id=mid).exists())
+
+    def test_non_member_cannot_react(self):
+        cid = self._make_choir()
+        self.client.force_authenticate(self.creator)
+        mid = self.client.post(f'/api/choirs/{cid}/messages/', {'content': 'hi'}, format='json').json()['id']
+        self.client.force_authenticate(self.outsider)
+        r = self.client.post(f'/api/choirs/{cid}/messages/{mid}/react/', {'emoji': '👍'}, format='json')
+        self.assertEqual(r.status_code, 403)
+
+    # A 1×1 transparent PNG, as the client would upload it.
+    PNG_1PX = (
+        'data:image/png;base64,'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    )
+
+    def test_list_serves_image_urls_not_base64(self):
+        self.client.force_authenticate(self.creator)
+        res = self.client.post(
+            '/api/choirs/',
+            {'name': 'Pixel Praise', 'location': 'Web', 'profile_image': self.PNG_1PX, 'cover_image': self.PNG_1PX},
+            format='json',
+        )
+        self.assertEqual(res.status_code, 201)
+        cid = res.json()['id']
+
+        # The list must NOT echo base64 — it returns small, cacheable URLs.
+        lst = self.client.get('/api/choirs/')
+        row = next(c for c in (lst.json().get('results') or lst.json()) if c['id'] == cid)
+        self.assertNotIn('base64', row['profile_image'])
+        self.assertIn(f'/choirs/{cid}/profile/', row['profile_image'])
+        self.assertIn(f'/choirs/{cid}/cover/', row['cover_image'])
+
+        # And the image endpoint streams real PNG bytes (public, no auth).
+        self.client.force_authenticate(user=None)
+        img = self.client.get(f'/api/choirs/{cid}/profile/')
+        self.assertEqual(img.status_code, 200)
+        self.assertEqual(img['Content-Type'], 'image/png')
+        self.assertEqual(img.content[:8], b'\x89PNG\r\n\x1a\n')
+
+    def test_image_endpoint_404_when_no_image(self):
+        cid = self._make_choir()  # created without images
+        self.assertEqual(self.client.get(f'/api/choirs/{cid}/cover/').status_code, 404)

@@ -757,6 +757,8 @@ export const sendChoirMessage = (id, payload) =>
   apiRequest('post', `/choirs/${id}/messages/`, payload);
 export const deleteChoirMessage = (id, messageId) =>
   apiRequest('post', `/choirs/${id}/messages/${messageId}/delete/`);
+export const reactToChoirMessage = (id, messageId, emoji) =>
+  apiRequest('post', `/choirs/${id}/messages/${messageId}/react/`, { emoji });
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);
 };

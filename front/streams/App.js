@@ -238,7 +238,7 @@ const App = () => {
                 <Stack.Screen name="Churches" component={Churches} options={{ headerShown: true, title: 'Churches', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
                 <Stack.Screen name="About" component={About} />
                 <Stack.Screen name="Studios" component={Studios} />
-                <Stack.Screen name="Choirs" component={Choirs} />
+                <Stack.Screen name="Choirs" component={ChoirsWrapper} />
                 <Stack.Screen name="ChoirCommunity" component={ChoirCommunity} options={{ headerShown: false }} />
                 <Stack.Screen name="Groups" component={GroupListWrapper} />
                 <Stack.Screen name="GroupDetail" component={GroupDetail} />
@@ -321,6 +321,16 @@ const ExploreWrapper = ({ navigation }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Explore couldn't load.">
       <ExploreScreen navigation={navigation} />
+    </ErrorBoundary>
+  </View>
+);
+
+const ChoirsWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Choirs couldn't load.">
+      <Choirs navigation={navigation} />
     </ErrorBoundary>
   </View>
 );

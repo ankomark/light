@@ -10,7 +10,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Image, Alert,
-  ActivityIndicator, KeyboardAvoidingView, Platform, Modal, Pressable,
+  ActivityIndicator, KeyboardAvoidingView, Platform, Modal, Pressable, Animated, PanResponder,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,12 +20,13 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import {
   fetchChoirCommunity, fetchChoirMessages, sendChoirMessage, deleteChoirMessage,
   requestJoinChoir, fetchChoirMembers, fetchChoirJoinRequests, approveChoirRequest,
-  rejectChoirRequest, removeChoirMember, leaveChoir,
+  rejectChoirRequest, removeChoirMember, leaveChoir, reactToChoirMessage,
 } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -33,10 +34,127 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const MAX_ATTACH_BYTES = 8 * 1024 * 1024; // 8MB cap on a single attachment
 
 const ROLE_BADGE = { admin: 'Admin', member: 'Member', friend: 'Friend' };
+const REACTIONS = ['❤️', '👍', '🙏', '🎵', '😂', '🔥'];
+const SWIPE_TRIGGER = 56; // px of right-swipe needed to fire a reply
 
 const fmtDuration = (s) => {
   const sec = Math.max(0, Math.round(s || 0));
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+};
+
+// A short, type-aware preview of a message (for reply chips / the compose bar).
+const previewOf = (m) =>
+  m?.content
+  || (m?.message_type === 'image' ? 'Photo'
+    : m?.message_type === 'audio' ? 'Voice note'
+    : m?.message_type === 'file' ? (m?.file_name || 'Document') : '');
+
+/**
+ * One chat row with swipe-right-to-reply. Built on PanResponder so it needs no
+ * GestureHandlerRootView; it only claims clearly-horizontal right-swipes, so the
+ * inverted FlatList keeps its vertical scroll.
+ */
+const MessageRow = ({ item, currentUser, isAdmin, onReply, onLongPress, onOpenImage, onPlayAudio, onToggleReaction }) => {
+  const tx = useRef(new Animated.Value(0)).current;
+  const armed = useRef(false); // crossed the trigger threshold this gesture
+
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => g.dx > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderMove: (_, g) => {
+        const x = Math.max(0, Math.min(g.dx, 80));
+        tx.setValue(x);
+        if (!armed.current && x >= SWIPE_TRIGGER) {
+          armed.current = true;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } else if (armed.current && x < SWIPE_TRIGGER) {
+          armed.current = false;
+        }
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dx >= SWIPE_TRIGGER) onReply(item);
+        armed.current = false;
+        Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+      },
+      onPanResponderTerminate: () => {
+        armed.current = false;
+        Animated.spring(tx, { toValue: 0, useNativeDriver: true }).start();
+      },
+    })
+  ).current;
+
+  if (item.message_type === 'system') {
+    return <View style={styles.systemRow}><Text style={styles.systemText}>{item.content}</Text></View>;
+  }
+
+  const mine = item.sender?.id === currentUser?.id || item.sender?.username === currentUser?.username;
+  const isImg = item.message_type === 'image' && !!item.attachment;
+  const reactions = item.reactions?.summary || [];
+  const myReaction = item.reactions?.mine || null;
+  const hintOpacity = tx.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0, 1], extrapolate: 'clamp' });
+
+  return (
+    <View style={styles.swipeWrap}>
+      <Animated.View style={[styles.replyHint, { opacity: hintOpacity, transform: [{ scale: hintOpacity }] }]}>
+        <Ionicons name="arrow-undo" size={18} color={colors.accent} />
+      </Animated.View>
+
+      <Animated.View style={{ transform: [{ translateX: tx }] }} {...pan.panHandlers}>
+        <Pressable onLongPress={() => onLongPress(item)} delayLongPress={280} style={[styles.msgRow, mine && styles.msgRowMine]}>
+          {!mine && (
+            <Image source={item.sender?.profile_picture ? { uri: item.sender.profile_picture } : DEFAULT_AVATAR}
+              defaultSource={DEFAULT_AVATAR} style={styles.msgAvatar} />
+          )}
+          <View style={styles.bubbleCol}>
+            <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther, isImg && styles.bubbleImage]}>
+              {!mine && <Text style={styles.msgSender}>{item.sender?.username || 'member'}</Text>}
+              {item.reply_to && (
+                <View style={styles.replyChip}>
+                  <Text style={styles.replyName}>{item.reply_to.sender}</Text>
+                  <Text style={styles.replyText} numberOfLines={1}>{previewOf(item.reply_to)}</Text>
+                </View>
+              )}
+              {item.message_type === 'image' && !!item.attachment && (
+                <TouchableOpacity activeOpacity={0.9} onPress={() => onOpenImage(item.attachment)}>
+                  <Image source={{ uri: item.attachment }} style={styles.msgImage} resizeMode="cover" />
+                  <View style={styles.imageExpand}><Ionicons name="expand" size={15} color="#fff" /></View>
+                </TouchableOpacity>
+              )}
+              {item.message_type === 'audio' && !!item.attachment && (
+                <TouchableOpacity style={styles.audioRow} onPress={() => onPlayAudio(item.attachment)}>
+                  <Ionicons name="play-circle" size={30} color={mine ? '#0A1628' : colors.accent} />
+                  <View style={styles.audioBars}><Text style={[styles.audioMeta, mine && styles.audioMetaMine]}>Voice note · {fmtDuration(item.duration)}</Text></View>
+                </TouchableOpacity>
+              )}
+              {item.message_type === 'file' && !!item.attachment && (
+                <View style={styles.fileRow}>
+                  <MaterialCommunityIcons name="file-document-outline" size={24} color={mine ? '#0A1628' : colors.accent} />
+                  <Text style={[styles.fileName, mine && styles.textMine]} numberOfLines={1}>{item.file_name || 'Document'}</Text>
+                </View>
+              )}
+              {!!item.content && <Text style={[styles.msgText, mine && styles.textMine]}>{item.content}</Text>}
+              <Text style={[styles.msgTime, mine && styles.timeMine]}>
+                {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+            </View>
+
+            {reactions.length > 0 && (
+              <View style={[styles.reactionsRow, mine && styles.reactionsRowMine]}>
+                {reactions.map((r) => (
+                  <TouchableOpacity key={r.emoji} activeOpacity={0.8}
+                    onPress={() => onToggleReaction(item, r.emoji)}
+                    style={[styles.reactionChip, myReaction === r.emoji && styles.reactionChipMine]}>
+                    <Text style={styles.reactionEmoji}>{r.emoji}</Text>
+                    {r.count > 1 && <Text style={[styles.reactionCount, myReaction === r.emoji && styles.reactionCountMine]}>{r.count}</Text>}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
 };
 
 const ChoirCommunity = ({ navigation, route }) => {
@@ -60,11 +178,28 @@ const ChoirCommunity = ({ navigation, route }) => {
   const [members, setMembers] = useState([]);
   const [showAttach, setShowAttach] = useState(false);
   const [viewerUri, setViewerUri] = useState(null); // full-screen image viewer
+  const [replyTo, setReplyTo] = useState(null);     // message being replied to
+  const [menuMsg, setMenuMsg] = useState(null);     // message for the long-press action menu
 
   const recordingRef = useRef(null);
   const soundRef = useRef(null);
   const pollRef = useRef(null);
   const seenIdsRef = useRef(new Set());
+  const replyToRef = useRef(null);
+  useEffect(() => { replyToRef.current = replyTo; }, [replyTo]);
+
+  // Attachment tray slide/fade animation (mounted only while visible/exiting).
+  const [trayMounted, setTrayMounted] = useState(false);
+  const trayAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (showAttach) {
+      setTrayMounted(true);
+      Animated.timing(trayAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    } else if (trayMounted) {
+      Animated.timing(trayAnim, { toValue: 0, duration: 160, useNativeDriver: true })
+        .start(({ finished }) => { if (finished) setTrayMounted(false); });
+    }
+  }, [showAttach]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isMember = !!community?.is_member;
   const isAdmin = !!community?.is_admin;
@@ -132,8 +267,12 @@ const ChoirCommunity = ({ navigation, route }) => {
 
   const send = useCallback(async (payload) => {
     setSending(true);
+    // Attach (and clear) any active reply so text + media replies both work.
+    const reply = replyToRef.current;
+    const body = reply ? { ...payload, reply_to: reply.id } : payload;
+    if (reply) setReplyTo(null);
     try {
-      const msg = await sendChoirMessage(choirId, payload);
+      const msg = await sendChoirMessage(choirId, body);
       pushSent(msg);
     } catch (e) {
       Alert.alert('Choir', e?.response?.data?.error || 'Could not send your message.');
@@ -232,15 +371,41 @@ const ChoirCommunity = ({ navigation, route }) => {
     } catch { Alert.alert('Choir', 'Could not play this audio.'); }
   };
 
-  const onLongPressMessage = (m) => {
-    const mine = m.sender?.id === currentUser?.id || m.sender?.username === currentUser?.username;
-    if (!mine && !isAdmin) return;
+  // Long-press opens an action menu (react / reply / delete).
+  const openMenu = (m) => {
+    if (m.message_type === 'system') return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setMenuMsg(m);
+  };
+
+  const startReply = (m) => {
+    setMenuMsg(null);
+    setReplyTo(m);
+    Haptics.selectionAsync().catch(() => {});
+  };
+
+  const canModerate = (m) =>
+    m?.sender?.id === currentUser?.id || m?.sender?.username === currentUser?.username || isAdmin;
+
+  const confirmDelete = (m) => {
+    setMenuMsg(null);
+    if (!canModerate(m)) return;
     Alert.alert('Message', 'Delete this message?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try { await deleteChoirMessage(choirId, m.id); setMessages((p) => p.filter((x) => x.id !== m.id)); } catch {}
       } },
     ]);
+  };
+
+  // Toggle an emoji reaction; the API returns the message's fresh reaction state.
+  const react = async (m, emoji) => {
+    setMenuMsg(null);
+    Haptics.selectionAsync().catch(() => {});
+    try {
+      const updated = await reactToChoirMessage(choirId, m.id, emoji);
+      setMessages((prev) => prev.map((x) => (x.id === updated.id ? { ...x, reactions: updated.reactions } : x)));
+    } catch {}
   };
 
   // ── membership actions ──────────────────────────────────────────────────--
@@ -289,55 +454,18 @@ const ChoirCommunity = ({ navigation, route }) => {
   };
 
   // ── render ────────────────────────────────────────────────────────────────
-  const renderMessage = ({ item }) => {
-    if (item.message_type === 'system') {
-      return <View style={styles.systemRow}><Text style={styles.systemText}>{item.content}</Text></View>;
-    }
-    const mine = item.sender?.id === currentUser?.id || item.sender?.username === currentUser?.username;
-    return (
-      <Pressable onLongPress={() => onLongPressMessage(item)} style={[styles.msgRow, mine && styles.msgRowMine]}>
-        {!mine && (
-          <Image source={item.sender?.profile_picture ? { uri: item.sender.profile_picture } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR} style={styles.msgAvatar} />
-        )}
-        <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
-          {!mine && <Text style={styles.msgSender}>{item.sender?.username || 'member'}</Text>}
-          {item.reply_to && (
-            <View style={styles.replyChip}>
-              <Text style={styles.replyName}>{item.reply_to.sender}</Text>
-              <Text style={styles.replyText} numberOfLines={1}>{item.reply_to.content}</Text>
-            </View>
-          )}
-          {item.message_type === 'image' && !!item.attachment && (
-            <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerUri(item.attachment)}>
-              <Image source={{ uri: item.attachment }} style={styles.msgImage} resizeMode="cover" />
-              <View style={styles.imageExpand}><Ionicons name="expand" size={15} color="#fff" /></View>
-            </TouchableOpacity>
-          )}
-          {item.message_type === 'audio' && !!item.attachment && (
-            <TouchableOpacity style={styles.audioRow} onPress={() => playAudio(item.attachment)}>
-              <Ionicons name="play-circle" size={30} color={mine ? '#0A1628' : colors.accent} />
-              <View style={styles.audioBars}><Text style={[styles.audioMeta, mine && styles.audioMetaMine]}>Voice note · {fmtDuration(item.duration)}</Text></View>
-            </TouchableOpacity>
-          )}
-          {item.message_type === 'file' && !!item.attachment && (
-            <View style={styles.fileRow}>
-              <MaterialCommunityIcons name="file-document-outline" size={24} color={mine ? '#0A1628' : colors.accent} />
-              <Text style={[styles.fileName, mine && styles.textMine]} numberOfLines={1}>{item.file_name || 'Document'}</Text>
-            </View>
-          )}
-          {!!item.content && <Text style={[styles.msgText, mine && styles.textMine]}>{item.content}</Text>}
-          <Text style={[styles.msgTime, mine && styles.timeMine]}>
-            {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-        </View>
-      </Pressable>
-    );
-  };
-
-  if (loading) {
-    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>;
-  }
+  const renderMessage = ({ item }) => (
+    <MessageRow
+      item={item}
+      currentUser={currentUser}
+      isAdmin={isAdmin}
+      onReply={startReply}
+      onLongPress={openMenu}
+      onOpenImage={setViewerUri}
+      onPlayAudio={playAudio}
+      onToggleReaction={react}
+    />
+  );
 
   return (
     <View style={styles.root}>
@@ -365,7 +493,9 @@ const ChoirCommunity = ({ navigation, route }) => {
         )}
       </LinearGradient>
 
-      {!isMember ? (
+      {loading ? (
+        <View style={styles.bodyLoading}><ActivityIndicator size="large" color={colors.accent} /></View>
+      ) : !isMember ? (
         // Locked hero for outsiders
         <View style={styles.locked}>
           <View style={styles.lockBadge}><MaterialCommunityIcons name="account-music" size={40} color={colors.accent} /></View>
@@ -392,13 +522,23 @@ const ChoirCommunity = ({ navigation, route }) => {
             contentContainerStyle={styles.chatContent}
             onEndReached={loadOlder}
             onEndReachedThreshold={0.4}
+            initialNumToRender={12}
+            maxToRenderPerBatch={10}
+            windowSize={9}
+            removeClippedSubviews
             ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
             ListEmptyComponent={<View style={styles.emptyChat}><Text style={styles.emptyChatText}>Say hello 👋</Text></View>}
           />
 
-          {/* Icon-only attachment tray */}
-          {!recording && showAttach && (
-            <View style={styles.attachTray}>
+          {/* Icon-only attachment tray (animated in/out) */}
+          {!recording && trayMounted && (
+            <Animated.View
+              style={[styles.attachTray, {
+                opacity: trayAnim,
+                transform: [{ translateY: trayAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) },
+                  { scale: trayAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
+              }]}
+            >
               <TouchableOpacity style={styles.attachIcon} onPress={attachImage}>
                 <Ionicons name="image" size={24} color={colors.accent} />
               </TouchableOpacity>
@@ -407,6 +547,22 @@ const ChoirCommunity = ({ navigation, route }) => {
               </TouchableOpacity>
               <TouchableOpacity style={styles.attachIcon} onPress={() => attachDocument(true)}>
                 <Ionicons name="musical-notes" size={24} color={colors.accent} />
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+
+          {/* Reply compose bar */}
+          {replyTo && !recording && (
+            <View style={styles.replyBar}>
+              <View style={styles.replyBarAccent} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.replyBarName} numberOfLines={1}>
+                  Replying to {replyTo.sender?.username || 'member'}
+                </Text>
+                <Text style={styles.replyBarText} numberOfLines={1}>{previewOf(replyTo)}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8}>
+                <Ionicons name="close-circle" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
           )}
@@ -495,6 +651,35 @@ const ChoirCommunity = ({ navigation, route }) => {
       </Modal>
       </SafeAreaView>
 
+      {/* Long-press action menu: react · reply · delete */}
+      <Modal visible={!!menuMsg} transparent animationType="fade" onRequestClose={() => setMenuMsg(null)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuMsg(null)}>
+          <Pressable style={styles.menuCard}>
+            <View style={styles.emojiBar}>
+              {REACTIONS.map((e) => {
+                const active = menuMsg?.reactions?.mine === e;
+                return (
+                  <TouchableOpacity key={e} onPress={() => react(menuMsg, e)}
+                    style={[styles.emojiBtn, active && styles.emojiBtnActive]} activeOpacity={0.7}>
+                    <Text style={styles.emojiBig}>{e}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity style={styles.menuItem} onPress={() => startReply(menuMsg)}>
+              <Ionicons name="arrow-undo" size={20} color={colors.textPrimary} />
+              <Text style={styles.menuItemText}>Reply</Text>
+            </TouchableOpacity>
+            {canModerate(menuMsg) && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
+                <Ionicons name="trash-outline" size={20} color={colors.error} />
+                <Text style={[styles.menuItemText, { color: colors.error }]}>Delete</Text>
+              </TouchableOpacity>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Full-screen image viewer */}
       <Modal visible={!!viewerUri} transparent animationType="fade" onRequestClose={() => setViewerUri(null)}>
         <View style={styles.viewer}>
@@ -512,7 +697,6 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0A1628' },
   container: { flex: 1, backgroundColor: 'transparent' },
   flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
 
   // Icon attachment tray + full-screen image viewer
   attachTray: {
@@ -523,7 +707,7 @@ const styles = StyleSheet.create({
   },
   attachIcon: {
     width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(244,162,97,0.12)', borderWidth: 1, borderColor: 'rgba(244,162,97,0.35)',
+    backgroundColor: 'rgba(244,162,97,0.12)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.3)',
   },
   imageExpand: {
     position: 'absolute', top: 8, right: 8, width: 26, height: 26, borderRadius: 13,
@@ -564,6 +748,8 @@ const styles = StyleSheet.create({
   bubble: { borderRadius: radius.lg, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.sm, maxWidth: '100%' },
   bubbleOther: { backgroundColor: 'rgba(18,30,46,0.92)', borderTopLeftRadius: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)' },
   bubbleMine: { backgroundColor: colors.accent, borderTopRightRadius: 4 },
+  bubbleImage: { padding: 3 }, // thin frame around shared images
+  bodyLoading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   msgSender: { ...typography.caption, color: colors.accent, fontWeight: '800', marginBottom: 2 },
   msgText: { ...typography.body, color: colors.textPrimary },
   textMine: { color: '#0A1628' },
@@ -579,8 +765,50 @@ const styles = StyleSheet.create({
   replyChip: { borderLeftWidth: 3, borderLeftColor: 'rgba(0,0,0,0.25)', paddingLeft: spacing.sm, marginBottom: 4, opacity: 0.9 },
   replyName: { ...typography.caption, fontWeight: '800', color: colors.primary },
   replyText: { ...typography.caption, color: colors.textSecondary },
+
+  // Swipe-to-reply + reactions
+  swipeWrap: { justifyContent: 'center' },
+  bubbleCol: { flexShrink: 1 },
+  replyHint: {
+    position: 'absolute', left: 12, alignSelf: 'center',
+    width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(244,162,97,0.16)',
+  },
+  reactionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: -6, marginLeft: spacing.xs, alignSelf: 'flex-start' },
+  reactionsRowMine: { alignSelf: 'flex-end', marginRight: spacing.xs, marginLeft: 0 },
+  reactionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2,
+    borderRadius: radius.full, backgroundColor: 'rgba(18,30,46,0.95)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  reactionChipMine: { backgroundColor: 'rgba(244,162,97,0.22)', borderColor: 'rgba(244,162,97,0.6)' },
+  reactionEmoji: { fontSize: 13 },
+  reactionCount: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', fontSize: 11 },
+  reactionCountMine: { color: colors.accent },
+
   systemRow: { alignItems: 'center', paddingVertical: spacing.xs, transform: [{ scaleY: -1 }] },
   systemText: { ...typography.caption, color: colors.textMuted, backgroundColor: colors.card, paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.full, overflow: 'hidden' },
+
+  // Reply compose bar
+  replyBar: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginHorizontal: spacing.sm, marginBottom: spacing.xs,
+    paddingVertical: spacing.xs + 2, paddingHorizontal: spacing.sm, borderRadius: radius.md,
+    backgroundColor: 'rgba(16,46,80,0.92)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.4)',
+  },
+  replyBarAccent: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: colors.accent },
+  replyBarName: { ...typography.caption, color: colors.accent, fontWeight: '800' },
+  replyBarText: { ...typography.caption, color: colors.textSecondary },
+
+  // Long-press action menu
+  menuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  menuCard: { width: '78%', maxWidth: 320, backgroundColor: '#12233B', borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden', ...shadows.lg },
+  emojiBar: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: spacing.sm, paddingHorizontal: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.10)' },
+  emojiBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  emojiBtnActive: { backgroundColor: 'rgba(244,162,97,0.22)' },
+  emojiBig: { fontSize: 24 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  menuItemText: { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
 
   // Input
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(16,46,80,0.95)' },
