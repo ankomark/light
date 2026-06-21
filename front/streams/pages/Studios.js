@@ -66,6 +66,7 @@ const Studios = () => {
   const [search, setSearch] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
 
+  const [actionsOpenId, setActionsOpenId] = useState(null); // card whose edit/delete is revealed
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
@@ -137,10 +138,15 @@ const Studios = () => {
       contact_phone: form.contact_phone.trim(), contact_email: form.contact_email.trim(),
       whatsapp_number: form.whatsapp_number.trim(), service_types: form.service_types,
       youtube_link: form.youtube_link.trim(), rate_description: form.rate_description.trim(),
-      currency: form.currency, logo: logo || '', cover_image: coverImage || '',
+      currency: form.currency,
     };
     const rate = form.service_rates.trim();
     payload.service_rates = rate ? rate : null;
+    // Only send an image when it's a freshly-picked data URI. On edit the field
+    // holds a server URL (the list no longer ships base64), so omitting it leaves
+    // the stored image untouched instead of overwriting it with the URL string.
+    if (logo.startsWith('data:')) payload.logo = logo;
+    if (coverImage.startsWith('data:')) payload.cover_image = coverImage;
 
     try {
       setSaving(true);
@@ -198,12 +204,23 @@ const Studios = () => {
           )}
           {owner && (
             <View style={styles.ownerActions}>
-              <TouchableOpacity style={styles.ownerBtn} onPress={() => openEdit(item)} hitSlop={6}>
-                <MaterialIcons name="edit" size={18} color={colors.white} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.ownerBtn} onPress={() => onDelete(item)} hitSlop={6}>
-                <MaterialIcons name="delete-outline" size={19} color={colors.white} />
-              </TouchableOpacity>
+              {actionsOpenId === item.id ? (
+                <>
+                  <TouchableOpacity style={styles.ownerBtn} onPress={() => { setActionsOpenId(null); openEdit(item); }} hitSlop={6}>
+                    <MaterialIcons name="edit" size={18} color={colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.ownerBtn} onPress={() => { setActionsOpenId(null); onDelete(item); }} hitSlop={6}>
+                    <MaterialIcons name="delete-outline" size={19} color={colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.ownerBtn} onPress={() => setActionsOpenId(null)} hitSlop={6}>
+                    <MaterialIcons name="close" size={18} color={colors.white} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity style={styles.ownerBtn} onPress={() => setActionsOpenId(item.id)} hitSlop={6}>
+                  <MaterialIcons name="more-horiz" size={20} color={colors.white} />
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
@@ -274,10 +291,10 @@ const Studios = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.title}>Media & Audio Production</Text>
-        <Text style={styles.subtitle}>Find production studios &amp; services</Text>
+        <Text style={styles.title}>Media &  Production</Text>
+        <Text style={styles.subtitle}>Find production  Media &amp; services</Text>
       </View>
 
       <View style={styles.searchBar}>
@@ -332,7 +349,7 @@ const Studios = () => {
       {currentUser && (
         <TouchableOpacity style={styles.fab} onPress={openCreate} activeOpacity={0.9}>
           <Ionicons name="add" size={20} color={colors.white} />
-          <Text style={styles.fabText}>Add Studio</Text>
+          <Text style={styles.fabText}>Create Studio</Text>
         </TouchableOpacity>
       )}
 
@@ -425,13 +442,13 @@ const Studios = () => {
             </TouchableOpacity>
             <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={submit} disabled={saving}>
               {saving ? <ActivityIndicator color={colors.white} /> : (
-                <Text style={styles.submitBtnText}>{editingId ? 'Save Changes' : 'Add Studio'}</Text>
+                <Text style={styles.submitBtnText}>{editingId ? 'Save Changes' : 'Create Studio'}</Text>
               )}
             </TouchableOpacity>
           </View>
         </SafeAreaView>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -454,8 +471,9 @@ const Field = ({ label, value, onChange, placeholder, multiline, keyboardType })
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
 
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { ...typography.h1, color: colors.textPrimary },

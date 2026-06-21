@@ -238,7 +238,7 @@ const App = () => {
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
                 <Stack.Screen name="Churches" component={ChurchesWrapper} />
                 <Stack.Screen name="About" component={About} />
-                <Stack.Screen name="Studios" component={Studios} />
+                <Stack.Screen name="Studios" component={StudiosWrapper} />
                 <Stack.Screen name="Choirs" component={ChoirsWrapper} />
                 <Stack.Screen name="ChoirCommunity" component={ChoirCommunity} options={{ headerShown: false }} />
                 <Stack.Screen name="ChurchCommunity" component={ChurchCommunity} options={{ headerShown: false }} />
@@ -343,6 +343,16 @@ const ChurchesWrapper = ({ navigation }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Churches couldn't load.">
       <Churches navigation={navigation} />
+    </ErrorBoundary>
+  </View>
+);
+
+const StudiosWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Studios couldn't load.">
+      <Studios navigation={navigation} />
     </ErrorBoundary>
   </View>
 );

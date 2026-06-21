@@ -319,12 +319,18 @@ from rest_framework.exceptions import PermissionDenied
 
 
 class VideoStudioViewSet(viewsets.ModelViewSet):
-    queryset = Videostudio.objects.all().order_by('-created_at')
+    # select_related avoids an N+1 on created_by (+ its profile) during listing.
+    queryset = Videostudio.objects.select_related('created_by', 'created_by__profile').order_by('-created_at')
     serializer_class = VideoStudioSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
 
-     
+    def get_serializer_class(self):
+        # The list ships image URLs (small); detail/create/update keep base64.
+        if self.action == 'list':
+            return VideoStudioListSerializer
+        return VideoStudioSerializer
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
@@ -332,8 +338,30 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         # Add filtering by user if requested
         user_id = self.request.query_params.get('user_id')
         if user_id:
-            return Videostudio.objects.filter(created_by=user_id)
+            return self.queryset.filter(created_by=user_id)
         return super().get_queryset()
+
+    # ── Image serving: stream the stored base64 as a real, cacheable image ────
+    def _serve_data_uri(self, data_uri):
+        if not data_uri or ',' not in data_uri:
+            raise Http404('No image.')
+        header, _, payload = data_uri.partition(',')
+        mime = header[5:].split(';')[0] if header.startswith('data:') else ''
+        try:
+            raw = base64.b64decode(payload)
+        except Exception:
+            raise Http404('Bad image data.')
+        resp = HttpResponse(raw, content_type=mime or 'image/jpeg')
+        resp['Cache-Control'] = 'public, max-age=31536000, immutable'  # URLs are version-busted
+        return resp
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    def logo(self, request, pk=None):
+        return self._serve_data_uri(self.get_object().logo)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    def cover(self, request, pk=None):
+        return self._serve_data_uri(self.get_object().cover_image)
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()

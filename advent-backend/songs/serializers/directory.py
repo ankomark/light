@@ -86,6 +86,40 @@ class VideoStudioSerializer(serializers.ModelSerializer):
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
 
+class VideoStudioListSerializer(serializers.ModelSerializer):
+    """Lightweight list payload: logo/cover return as cacheable URLs (served by
+    the `logo`/`cover` actions) instead of full base64, so the list stays small
+    and fast. The client reads `logo` / `cover_image` exactly as before."""
+    created_by = SimpleUserSerializer(read_only=True)
+    is_owner = serializers.SerializerMethodField()
+    logo = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Videostudio
+        fields = '__all__'
+        read_only_fields = ('created_by', 'is_verified')
+
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
+
+    def _image_url(self, obj, kind):
+        # kind is 'logo' or 'cover'; empty stored blob → empty string.
+        field = 'logo' if kind == 'logo' else 'cover_image'
+        if not getattr(obj, field, ''):
+            return ''
+        ver = int(obj.updated_at.timestamp()) if obj.updated_at else 0  # cache-bust on edit
+        path = f'/api/video-studios/{obj.id}/{kind}/?v={ver}'
+        request = self.context.get('request')
+        return request.build_absolute_uri(path) if request else path
+
+    def get_logo(self, obj):
+        return self._image_url(obj, 'logo')
+
+    def get_cover_image(self, obj):
+        return self._image_url(obj, 'cover')
+
 
 class ChoirSerializer(serializers.ModelSerializer):
     created_by = SimpleUserSerializer(read_only=True)
