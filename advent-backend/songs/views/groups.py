@@ -232,7 +232,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             GroupPost.objects
             .filter(group=group)
             .select_related('user__profile', 'reply_to__user')
-            .prefetch_related('attachments')
+            .prefetch_related('attachments', 'reactions')
             .order_by('-created_at')
         )
 
@@ -290,7 +290,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance.user != request.user and not GroupMember.objects.filter(
-            group=instance.group, 
+            group=instance.group,
             user=request.user,
             is_admin=True
         ).exists():
@@ -300,6 +300,30 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             )
         self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='react', permission_classes=[IsAuthenticated])
+    def react(self, request, *args, **kwargs):
+        """Toggle the caller's emoji reaction on a post (one per user). Any group
+        member may react — not just the post's owner — so this action overrides
+        the viewset's IsOwnerOrReadOnly and checks membership itself."""
+        post = self.get_object()
+        if not GroupMember.objects.filter(group=post.group, user=request.user).exists():
+            raise PermissionDenied("You are not a member of this group")
+        emoji = (request.data.get('emoji') or '').strip()
+        if not emoji or len(emoji) > 16:
+            return Response({'error': 'Invalid emoji.'}, status=status.HTTP_400_BAD_REQUEST)
+        existing = post.reactions.filter(user=request.user).first()
+        if existing and existing.emoji == emoji:
+            existing.delete()  # tapping the same emoji clears it
+        elif existing:
+            existing.emoji = emoji
+            existing.save(update_fields=['emoji'])
+        else:
+            GroupPostReaction.objects.create(post=post, user=request.user, emoji=emoji)
+        # get_object() prefetched a now-stale `reactions` set; clear the cache so
+        # the serializer re-reads the fresh aggregate.
+        post._prefetched_objects_cache = {}
+        return Response(self.get_serializer(post).data)
 
 
 

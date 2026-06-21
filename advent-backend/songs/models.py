@@ -987,6 +987,23 @@ class GroupPostAttachment(models.Model):
     file_type = models.CharField(max_length=10, choices=ATTACHMENT_TYPES)
     created_at = models.DateTimeField(auto_now_add=True)
 
+
+class GroupPostReaction(models.Model):
+    """A single emoji reaction by one user on a group message. WhatsApp-style:
+    at most one reaction per user per post — re-reacting with a different emoji
+    replaces it, re-reacting with the same emoji clears it."""
+    post = models.ForeignKey(GroupPost, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_post_reactions')
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('post', 'user')
+        indexes = [models.Index(fields=['post'])]
+
+    def __str__(self):
+        return f"{self.user.username} {self.emoji} on post {self.post_id}"
+
     def __str__(self):
         return f"Attachment for post {self.post.id}"
 

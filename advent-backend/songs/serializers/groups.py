@@ -125,13 +125,14 @@ class GroupPostSerializer(serializers.ModelSerializer):
         write_only=True, required=False, allow_null=True,
     )
     is_owner = serializers.SerializerMethodField()
+    reactions = serializers.SerializerMethodField()
 
     class Meta:
         model = GroupPost
         fields = [
             'id', 'content', 'message_type', 'attachment', 'file_name', 'duration',
             'reply_to', 'reply_to_id', 'created_at', 'updated_at', 'group', 'user',
-            'attachments', 'is_owner',
+            'attachments', 'is_owner', 'reactions',
         ]
         read_only_fields = ['group', 'user', 'created_at', 'updated_at', 'attachments', 'reply_to']
         extra_kwargs = {'content': {'required': False, 'allow_blank': True}}
@@ -139,6 +140,20 @@ class GroupPostSerializer(serializers.ModelSerializer):
     def get_is_owner(self, obj):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.user_id == request.user.id)
+
+    def get_reactions(self, obj):
+        """Aggregate emoji → count, plus the caller's own pick. Relies on the
+        view prefetching `reactions` to avoid N+1 queries."""
+        request = self.context.get('request')
+        uid = request.user.id if request and request.user.is_authenticated else None
+        counts, mine = {}, None
+        for r in obj.reactions.all():
+            counts[r.emoji] = counts.get(r.emoji, 0) + 1
+            if uid and r.user_id == uid:
+                mine = r.emoji
+        summary = [{'emoji': e, 'count': c}
+                   for e, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+        return {'summary': summary, 'mine': mine}
 
 
 # Add to existing serializers.py

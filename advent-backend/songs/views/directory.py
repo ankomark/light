@@ -56,7 +56,8 @@ class NoticeViewSet(viewsets.ModelViewSet):
 
 
 class ChurchViewSet(viewsets.ModelViewSet):
-    queryset = Church.objects.all()
+    # select_related avoids an N+1 on created_by during listing.
+    queryset = Church.objects.select_related('created_by', 'created_by__profile').order_by('-created_at')
     serializer_class = ChurchSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination

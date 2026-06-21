@@ -841,6 +841,14 @@ export const sendGroupMessage = async (slug, payload) =>
 export const markGroupRead = async (slug) =>
   apiRequest('post', `/groups/${slug}/mark-read/`);
 
+// Group chat: toggle an emoji reaction on a post (returns the updated post).
+export const reactToGroupPost = async (slug, postId, emoji) =>
+  apiRequest('post', `/groups/${slug}/posts/${postId}/react/`, { emoji });
+
+// Group chat: delete a post (sender or group admin).
+export const deleteGroupPost = async (slug, postId) =>
+  apiRequest('delete', `/groups/${slug}/posts/${postId}/`);
+
 export const leaveGroup = async (slug) =>
   apiRequest('post', `/groups/${slug}/leave/`);
 
