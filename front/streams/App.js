@@ -398,8 +398,9 @@ const TrackListWrapper = ({ navigation }) => (
 );
 
 const FavoritesWrapper = ({ navigation }) => (
-    <View style={{ flex: 1 }}>
-        <Header navigation={navigation} />
+    <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+        <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+        <Header navigation={navigation} transparentBg />
         <ErrorBoundary fallbackMessage="Favorites couldn't load.">
           <FavoritesPage />
         </ErrorBoundary>

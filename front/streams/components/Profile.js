@@ -154,6 +154,17 @@ const Profile = () => {
           <StatBox value={profile.posts_count ?? posts.length} label="Posts" />
         </View>
 
+        {/* Quick link to saved music & posts */}
+        <TouchableOpacity
+          style={styles.favoritesLink}
+          onPress={() => navigation.navigate('Favorites')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="heart" size={18} color={colors.accent} />
+          <Text style={styles.favoritesLinkText}>My Favorites</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
+
         {/* Info cards */}
         <View style={styles.infoSection}>
           {profile.bio ? (
@@ -326,6 +337,20 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs + 2,
     ...shadows.sm,
   },
+  favoritesLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(244,162,97,0.4)',
+  },
+  favoritesLinkText: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
   editBtnText: {
     ...typography.label,
     color: colors.white,

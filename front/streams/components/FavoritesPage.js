@@ -22,12 +22,24 @@ const COLS = 3;
 const GRID_PAD = 2;
 const CELL = (SCREEN_W - GRID_PAD * (COLS + 1)) / COLS;
 
-const thumbUri = (post) =>
-  post?.media_items?.[0]?.optimized_url ||
-  post?.media_items?.[0]?.media_url ||
-  post?.optimized_url ||
-  post?.media_url ||
-  null;
+// A still thumbnail for the grid. For videos we ask Cloudinary for a poster
+// frame (so_0 = first frame) as a JPG — same trick as the Explore grid — so the
+// cell shows an image instead of a blank <Image> that can't render an .mp4.
+const thumbUri = (post) => {
+  const url =
+    post?.media_items?.[0]?.optimized_url ||
+    post?.media_items?.[0]?.media_url ||
+    post?.optimized_url ||
+    post?.media_url ||
+    null;
+  if (!url) return null;
+  if (post?.content_type === 'video' || /\.(mp4|mov|webm|m4v)$/i.test(url)) {
+    return url
+      .replace('/video/upload/', '/video/upload/so_0,w_400,h_400,c_fill/')
+      .replace(/\.(mp4|mov|webm|m4v)$/i, '.jpg');
+  }
+  return url;
+};
 
 const EmptyState = ({ icon, title, text }) => (
   <View style={styles.empty}>
@@ -85,13 +97,7 @@ const FavoritesPage = () => {
     />
   );
 
-  if (loading && !refreshing) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  const busy = loading && !refreshing;
 
   return (
     <View style={styles.container}>
@@ -120,7 +126,11 @@ const FavoritesPage = () => {
         </TouchableOpacity>
       </View>
 
-      {tab === 'music' ? (
+      {busy ? (
+        <View style={styles.contentCenter}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : tab === 'music' ? (
         <FlatList
           data={favoriteTracks}
           keyExtractor={(track) => `track_${track.id}`}
@@ -187,9 +197,14 @@ const FavoritesPage = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: 'transparent',
   },
   center: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contentCenter: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
