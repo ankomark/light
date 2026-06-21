@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import { saveReadingProgress } from '../services/api';
-import { markdownTheme } from '../utils/publications';
+import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const FONT_SIZES = [15, 17, 19, 22];
@@ -17,6 +17,13 @@ const ChapterReader = ({ route, navigation }) => {
   const [index, setIndex] = useState(route.params?.index ?? 0);
   const [fontIdx, setFontIdx] = useState(1);
   const scrollRef = useRef(null);
+
+  // Author's reading look (background / text colour / font / size nudge).
+  const wt = resolveWritingTheme(publication?.theme);
+  const wtFont = fontFamilyFor(wt.font);
+  const light = isLightBg(wt.bg);
+  const chrome = light ? '#1A1A1A' : colors.textPrimary;       // top-bar icons/title
+  const subtleBorder = light ? 'rgba(0,0,0,0.12)' : colors.border;
 
   const chapter = chapters[index] || { title: '', body: '' };
   const canPrev = index > 0;
@@ -37,14 +44,14 @@ const ChapterReader = ({ route, navigation }) => {
   const cycleFont = () => setFontIdx((i) => (i + 1) % FONT_SIZES.length);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.topBar}>
+    <SafeAreaView style={[styles.container, { backgroundColor: wt.bg }]} edges={['top']}>
+      <View style={[styles.topBar, { borderBottomColor: subtleBorder }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={22} color={chrome} />
         </TouchableOpacity>
-        <Text style={styles.topTitle} numberOfLines={1}>{publication?.title}</Text>
+        <Text style={[styles.topTitle, { color: chrome }]} numberOfLines={1}>{publication?.title}</Text>
         <TouchableOpacity onPress={cycleFont} style={styles.iconBtn} hitSlop={10}>
-          <Ionicons name="text" size={20} color={colors.textPrimary} />
+          <Ionicons name="text" size={20} color={chrome} />
         </TouchableOpacity>
       </View>
 
@@ -52,11 +59,12 @@ const ChapterReader = ({ route, navigation }) => {
         <Text style={styles.chapterEyebrow}>
           Chapter {index + 1} of {chapters.length}
         </Text>
-        <Text style={styles.chapterTitle}>{chapter.title || `Chapter ${index + 1}`}</Text>
+        <Text style={[styles.chapterTitle, { color: wt.text, fontFamily: wtFont }]}>{chapter.title || `Chapter ${index + 1}`}</Text>
         <View style={styles.rule} />
 
         <Markdown
-          style={markdownTheme(FONT_SIZES[fontIdx])}
+          style={markdownTheme(FONT_SIZES[fontIdx] + wt.scale, { color: wt.text, fontFamily: wtFont })}
+          rules={markdownImageRule}
           onLinkPress={(url) => { Linking.openURL(url).catch(() => {}); return false; }}
         >
           {chapter.body || '_This chapter has no content yet._'}

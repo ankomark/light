@@ -1460,6 +1460,8 @@ class Publication(models.Model):
     summary = models.TextField(blank=True)
     # Cover stored as a small base64 data URI (or blank to use a default).
     cover = models.TextField(blank=True)
+    # Reading look chosen by the author: {bg, text, font, scale}. Empty = default.
+    theme = models.JSONField(default=dict, blank=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='publications')

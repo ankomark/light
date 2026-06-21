@@ -232,7 +232,7 @@ const App = () => {
                 <Stack.Screen name="HamburgerMenu" component={HamburgerMenu} />
                 <Stack.Screen name="NoticeBoard" component={NoticeBoard} options={{ headerShown: true, title: 'Notice Board', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
                 <Stack.Screen name="AdventistMedia" component={ AdventistMedia} />
-                <Stack.Screen name="Articles" component={Articles} />
+                <Stack.Screen name="Publishing" component={PublishingWrapper} />
                 <Stack.Screen name="PublicationDetail" component={PublicationDetail} />
                 <Stack.Screen name="ChapterReader" component={ChapterReader} />
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
@@ -353,6 +353,16 @@ const StudiosWrapper = ({ navigation }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Studios couldn't load.">
       <Studios navigation={navigation} />
+    </ErrorBoundary>
+  </View>
+);
+
+const PublishingWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Publishing couldn't load.">
+      <Articles navigation={navigation} />
     </ErrorBoundary>
   </View>
 );

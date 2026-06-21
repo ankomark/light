@@ -12,10 +12,13 @@ import Markdown from 'react-native-markdown-display';
 import {
   fetchPublication, createPublication, updatePublication,
 } from '../services/api';
-import { CATEGORIES, markdownTheme } from '../utils/publications';
+import {
+  CATEGORIES, markdownTheme, markdownImageRule, WRITING_BGS, WRITING_TEXT_COLORS, WRITING_FONTS,
+  DEFAULT_WRITING_THEME, fontFamilyFor, extractInlineImages, appendInlineImage, expandInlineImages,
+} from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
-const blankChapter = () => ({ key: `${Date.now()}_${Math.random()}`, title: '', body: '', preview: false });
+const blankChapter = () => ({ key: `${Date.now()}_${Math.random()}`, title: '', body: '', images: {}, preview: false });
 
 const PublicationEditor = ({ route, navigation }) => {
   const editId = route.params?.id || null;
@@ -28,6 +31,8 @@ const PublicationEditor = ({ route, navigation }) => {
   const [category, setCategory] = useState('devotional');
   const [status, setStatus] = useState('draft');
   const [chapters, setChapters] = useState([blankChapter()]);
+  const [theme, setTheme] = useState(DEFAULT_WRITING_THEME); // reading look (bg/text/font/scale)
+  const [showDesign, setShowDesign] = useState(false);
 
   // Load existing publication when editing.
   useEffect(() => {
@@ -40,9 +45,14 @@ const PublicationEditor = ({ route, navigation }) => {
         setCover(p.cover || '');
         setCategory(p.category || 'other');
         setStatus(p.status || 'draft');
+        setTheme({ ...DEFAULT_WRITING_THEME, ...(p.theme || {}) });
         setChapters(
           (p.chapters || []).length
-            ? p.chapters.map((c, i) => ({ key: `e${c.id ?? i}`, title: c.title || '', body: c.body || '', preview: false }))
+            ? p.chapters.map((c, i) => {
+                // Pull stored data-URI images out of the editable text into tokens.
+                const { body, images } = extractInlineImages(c.body || '');
+                return { key: `e${c.id ?? i}`, title: c.title || '', body, images, preview: false };
+              })
             : [blankChapter()]
         );
       } catch {
@@ -85,6 +95,35 @@ const PublicationEditor = ({ route, navigation }) => {
     setChapters((prev) => prev.map((c) => (c.key === key ? { ...c, ...patch } : c)));
   }, []);
 
+  // Pick + crop an image and drop it into the chapter as a markdown image, so it
+  // renders inline both in the live preview and in the reader.
+  const insertImage = async (key) => {
+    try {
+      const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm !== 'granted') { Alert.alert('Permission required', 'Enable photo access to add images.'); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, // gives the crop UI
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const processed = await manipulateAsync(
+        result.assets[0].uri, [{ resize: { width: 1000 } }],
+        { compress: 0.6, format: SaveFormat.JPEG, base64: true }
+      );
+      const dataUri = `data:image/jpeg;base64,${processed.base64}`;
+      // Insert only a short token into the text; keep the heavy data URI in the
+      // side map so the TextInput never holds the giant base64 string.
+      setChapters((prev) => prev.map((c) => {
+        if (c.key !== key) return c;
+        const next = appendInlineImage(c.body || '', c.images || {}, dataUri);
+        return { ...c, body: next.body, images: next.images, preview: false };
+      }));
+    } catch {
+      Alert.alert('Error', 'Could not add the image.');
+    }
+  };
+
   const addChapter = () => setChapters((prev) => [...prev, blankChapter()]);
 
   const removeChapter = (key) => {
@@ -111,7 +150,8 @@ const PublicationEditor = ({ route, navigation }) => {
       return;
     }
     const cleaned = chapters
-      .map((c, i) => ({ order: i + 1, title: c.title.trim(), body: c.body.trim() }))
+      // Expand image tokens back to real data URIs for storage / the reader.
+      .map((c, i) => ({ order: i + 1, title: c.title.trim(), body: expandInlineImages(c.body, c.images).trim() }))
       .filter((c) => c.title || c.body);
     if (cleaned.length === 0) {
       Alert.alert('Add content', 'Add at least one chapter with a title or text.');
@@ -121,6 +161,7 @@ const PublicationEditor = ({ route, navigation }) => {
       title: title.trim(),
       summary: summary.trim(),
       cover: cover || '',
+      theme,
       category,
       status: publish ? 'published' : 'draft',
       chapters: cleaned,
@@ -226,10 +267,75 @@ const PublicationEditor = ({ route, navigation }) => {
           })}
         </ScrollView>
 
+        {/* Reading design: background, font, text colour */}
+        <TouchableOpacity style={styles.designToggle} onPress={() => setShowDesign((s) => !s)} activeOpacity={0.85}>
+          <MaterialIcons name="palette" size={18} color={colors.accent} />
+          <Text style={styles.designToggleText}>Reading design</Text>
+          <View style={[styles.designPeek, { backgroundColor: theme.bg }]}>
+            <Text style={[styles.designPeekText, { color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}>Aa</Text>
+          </View>
+          <Ionicons name={showDesign ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+        </TouchableOpacity>
+
+        {showDesign && (
+          <View style={styles.designPanel}>
+            <View style={[styles.designPreview, { backgroundColor: theme.bg }]}>
+              <Text style={[styles.designPreviewText, { color: theme.text, fontFamily: fontFamilyFor(theme.font), fontSize: 17 + theme.scale }]}>
+                The heavens declare the glory of God.
+              </Text>
+            </View>
+
+            <Text style={styles.designLabel}>Background</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
+              {WRITING_BGS.map((b) => (
+                <TouchableOpacity
+                  key={b.key}
+                  onPress={() => setTheme((t) => ({ ...t, bg: b.bg, text: b.text }))}
+                  style={[styles.bgSwatch, { backgroundColor: b.bg }, theme.bg === b.bg && styles.swatchActive]}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.bgSwatchText, { color: b.text }]}>Aa</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.designLabel}>Text colour</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
+              {WRITING_TEXT_COLORS.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => setTheme((t) => ({ ...t, text: c }))}
+                  style={[styles.colorDot, { backgroundColor: c }, theme.text === c && styles.colorDotActive]}
+                  activeOpacity={0.85}
+                />
+              ))}
+            </ScrollView>
+
+            <Text style={styles.designLabel}>Font</Text>
+            <View style={styles.fontRow}>
+              {WRITING_FONTS.map((f) => {
+                const active = theme.font === f.key;
+                return (
+                  <TouchableOpacity key={f.key} onPress={() => setTheme((t) => ({ ...t, font: f.key }))} style={[styles.fontChip, active && styles.fontChipActive]} activeOpacity={0.85}>
+                    <Text style={[styles.fontChipText, { fontFamily: f.family }, active && styles.fontChipTextActive]}>{f.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.designLabel}>Reading size</Text>
+            <View style={styles.sizeRow}>
+              <TouchableOpacity style={styles.sizeBtn} onPress={() => setTheme((t) => ({ ...t, scale: Math.max(-2, t.scale - 1) }))}><Text style={styles.sizeBtnText}>A−</Text></TouchableOpacity>
+              <Text style={styles.sizeValue}>{theme.scale > 0 ? `+${theme.scale}` : theme.scale}</Text>
+              <TouchableOpacity style={styles.sizeBtn} onPress={() => setTheme((t) => ({ ...t, scale: Math.min(4, t.scale + 1) }))}><Text style={styles.sizeBtnText}>A+</Text></TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Chapters */}
         <View style={styles.chaptersHeader}>
           <Text style={styles.sectionTitle}>Chapters</Text>
-          <Text style={styles.hint}>Markdown supported (# heading, **bold**, lists…)</Text>
+          <Text style={styles.hint}>Markdown supported · tap the image icon to add a photo</Text>
         </View>
 
         {chapters.map((ch, idx) => (
@@ -242,6 +348,9 @@ const PublicationEditor = ({ route, navigation }) => {
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => moveChapter(idx, 1)} disabled={idx === chapters.length - 1} hitSlop={6} style={styles.toolBtn}>
                   <Ionicons name="arrow-down" size={17} color={idx === chapters.length - 1 ? colors.textMuted : colors.textSecondary} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => insertImage(ch.key)} hitSlop={6} style={styles.toolBtn}>
+                  <Ionicons name="image-outline" size={18} color={colors.accent} />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => updateChapter(ch.key, { preview: !ch.preview })} hitSlop={6} style={styles.toolBtn}>
                   <Ionicons name={ch.preview ? 'create-outline' : 'eye-outline'} size={18} color={colors.primary} />
@@ -261,14 +370,19 @@ const PublicationEditor = ({ route, navigation }) => {
             />
 
             {ch.preview ? (
-              <View style={styles.previewBox}>
-                <Markdown style={markdownTheme(16)}>{ch.body || '_Nothing to preview yet._'}</Markdown>
+              <View style={[styles.previewBox, { backgroundColor: theme.bg }]}>
+                <Markdown
+                  style={markdownTheme(16 + theme.scale, { color: theme.text, fontFamily: fontFamilyFor(theme.font) })}
+                  rules={markdownImageRule}
+                >
+                  {expandInlineImages(ch.body, ch.images) || '_Nothing to preview yet._'}
+                </Markdown>
               </View>
             ) : (
               <TextInput
-                style={styles.bodyInput}
+                style={[styles.bodyInput, { backgroundColor: theme.bg, color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}
                 placeholder="Write your chapter here… Markdown is supported."
-                placeholderTextColor={colors.placeholder}
+                placeholderTextColor={`${theme.text}80`}
                 value={ch.body}
                 onChangeText={(t) => updateChapter(ch.key, { body: t })}
                 multiline
@@ -351,6 +465,39 @@ const styles = StyleSheet.create({
   catChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   catChipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
   catChipTextActive: { color: colors.white },
+
+  // Reading design panel
+  designToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginTop: spacing.lg, paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.md,
+    backgroundColor: colors.card, borderRadius: radius.md,
+    borderWidth: 1, borderColor: 'rgba(244,162,97,0.4)',
+  },
+  designToggleText: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
+  designPeek: { marginLeft: 'auto', width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  designPeekText: { fontSize: 13, fontWeight: '700' },
+  designPanel: {
+    marginTop: spacing.sm, padding: spacing.md, borderRadius: radius.lg,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, gap: spacing.xs,
+  },
+  designPreview: { borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.md, marginBottom: spacing.sm, ...shadows.sm },
+  designPreviewText: { lineHeight: 24 },
+  designLabel: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: spacing.sm },
+  swatchRow: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs, alignItems: 'center' },
+  bgSwatch: { width: 46, height: 40, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  bgSwatchText: { fontSize: 13, fontWeight: '700' },
+  swatchActive: { borderColor: colors.accent, borderWidth: 2 },
+  colorDot: { width: 28, height: 28, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.4)' },
+  colorDotActive: { borderColor: colors.accent, borderWidth: 3 },
+  fontRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
+  fontChip: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  fontChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  fontChipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  fontChipTextActive: { color: colors.white },
+  sizeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.xs },
+  sizeBtn: { width: 44, height: 36, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  sizeBtnText: { ...typography.label, color: colors.textPrimary, fontWeight: '800' },
+  sizeValue: { ...typography.label, color: colors.textSecondary, minWidth: 28, textAlign: 'center' },
 
   chaptersHeader: { marginTop: spacing.lg, marginBottom: spacing.sm },
   sectionTitle: { ...typography.h3, color: colors.textPrimary },

@@ -4,7 +4,6 @@ import {
   ActivityIndicator, ScrollView, Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchPublications, fetchMyPublications } from '../services/api';
@@ -147,9 +146,9 @@ const Articles = ({ navigation }) => {
   const listData = showFeatured ? items.slice(1) : items;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Publish Books &amp; Articles</Text>
+        <Text style={styles.headerTitle}>Publishing</Text>
         <Text style={styles.headerSub}>Read and publish long-form writing</Text>
       </View>
 
@@ -250,12 +249,12 @@ const Articles = ({ navigation }) => {
         <Ionicons name="create-outline" size={20} color={colors.white} />
         <Text style={styles.fabText}>Write</Text>
       </TouchableOpacity>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
   headerTitle: { ...typography.h1, color: colors.textPrimary },
   headerSub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
