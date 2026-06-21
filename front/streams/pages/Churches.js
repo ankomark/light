@@ -16,12 +16,32 @@ import {
   Platform
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchChurches, createChurch, updateChurch, deleteChurch } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import RotatingBackground from '../components/RotatingBackground';
+import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 const DEFAULT_PROFILE_IMAGE = require('../assets/user-placeholder.png');
 
-const Churches = () => {
+// Labeled dark input used across the luxury Add/Edit Church form.
+const Field = ({ label, value, onChangeText, placeholder, keyboardType }) => (
+  <>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    <TextInput
+      style={styles.fieldInput}
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={colors.placeholder}
+      keyboardType={keyboardType}
+      autoCapitalize={keyboardType === 'numeric' || keyboardType === 'phone-pad' ? 'none' : 'words'}
+      autoCorrect={false}
+    />
+  </>
+);
+
+const Churches = ({ navigation }) => {
   const { currentUser } = useAuth();
   const [churches, setChurches] = useState([]);
   const [filteredChurches, setFilteredChurches] = useState([]);
@@ -336,149 +356,89 @@ const Churches = () => {
             </View>
           ) : null}
         </View>
+
+        {/* Community entry point */}
+        <TouchableOpacity
+          style={styles.communityBtn}
+          onPress={() => navigation.navigate('ChurchCommunity', { church: item, churchId: item.id })}
+          activeOpacity={0.9}
+        >
+          <MaterialIcons name="forum" size={18} color="#0A1628" />
+          <Text style={styles.communityBtnText}>Open community</Text>
+          <MaterialIcons name="chevron-right" size={20} color="#0A1628" style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
       </View>
     );
+  };
+
+  const closeForm = () => {
+    setShowAddForm(false);
+    setEditingChurch(null);
+    setNewChurch({ name: '', country: '', county: '', conference: '', district: '', location: '', members: '', pastor: '', contact: '' });
+    setImage(null);
   };
 
   const renderAddForm = () => (
     <Modal
       visible={showAddForm}
       animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowAddForm(false)}
+      onRequestClose={closeForm}
+      statusBarTranslucent
     >
-      <KeyboardAvoidingView
-        style={styles.modalOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={styles.modalContainer}>
-          <ScrollView
-            style={styles.addForm}
-            contentContainerStyle={styles.addFormContent}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>
-                {editingChurch ? 'Edit Church' : 'Add New Church'}
-              </Text>
-              <TouchableOpacity 
-                onPress={() => {
-                  setShowAddForm(false);
-                  setEditingChurch(null);
-                  setNewChurch({
-                    name: '',
-                    country: '',
-                    county: '',
-                    conference: '',
-                    district: '',
-                    location: '',
-                    members: '',
-                    pastor: '',
-                    contact: ''
-                  });
-                  setImage(null);
-                }}
-                style={styles.closeButton}
-              >
-                <MaterialIcons name="close" size={24} color="#555" />
-              </TouchableOpacity>
-            </View>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Church Name *"
-              value={newChurch.name}
-              onChangeText={text => setNewChurch({...newChurch, name: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Country *"
-              value={newChurch.country}
-              onChangeText={text => setNewChurch({...newChurch, country: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="County/State"
-              value={newChurch.county}
-              onChangeText={text => setNewChurch({...newChurch, county: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Conference *"
-              value={newChurch.conference}
-              onChangeText={text => setNewChurch({...newChurch, conference: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="District"
-              value={newChurch.district}
-              onChangeText={text => setNewChurch({...newChurch, district: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Physical Location"
-              value={newChurch.location}
-              onChangeText={text => setNewChurch({...newChurch, location: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Number of Members"
-              value={newChurch.members}
-              onChangeText={text => setNewChurch({...newChurch, members: text})}
-              keyboardType="numeric"
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Pastor's Name"
-              value={newChurch.pastor}
-              onChangeText={text => setNewChurch({...newChurch, pastor: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Contact Phone"
-              value={newChurch.contact}
-              onChangeText={text => setNewChurch({...newChurch, contact: text})}
-              keyboardType="phone-pad"
-            />
-            
-            <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
-              <MaterialIcons name="add-a-photo" size={24} color="#006064" />
-              <Text style={styles.imagePickerText}>
-                {image ? 'Change Image' : 'Add Church Image'}
-              </Text>
+      <View style={styles.formRoot}>
+        {/* Same rotating wallpaper the choir community/screens use. */}
+        <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.8)" />
+        <SafeAreaView style={styles.formSafe} edges={['top']}>
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={closeForm} style={styles.topIconBtn} hitSlop={10}>
+              <MaterialIcons name="close" size={24} color={colors.textPrimary} />
             </TouchableOpacity>
-            
-            {image && (
-              <Image 
-                source={{ uri: image }} 
-                style={styles.previewImage}
-                resizeMode="cover"
-              />
-            )}
-            
-            <View style={styles.formButtons}>
-              <TouchableOpacity 
-                style={styles.submitButton} 
-                onPress={handleAddChurch}
-              >
-                <Text style={styles.buttonText}>
-                  {editingChurch ? 'Update Church' : 'Add Church'}
-                </Text>
+            <Text style={styles.topTitle}>{editingChurch ? 'Edit Church' : 'New Church'}</Text>
+            <View style={styles.topIconBtn} />
+          </View>
+
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <ScrollView
+              contentContainerStyle={styles.formContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              showsVerticalScrollIndicator={false}
+            >
+              <TouchableOpacity style={styles.coverPicker} onPress={pickImage} activeOpacity={0.85}>
+                {image ? (
+                  <Image source={{ uri: image }} style={styles.coverPreview} resizeMode="cover" />
+                ) : (
+                  <View style={styles.coverPlaceholder}>
+                    <MaterialIcons name="add-a-photo" size={26} color={colors.accent} />
+                    <Text style={styles.coverHint}>{editingChurch ? 'Change church image' : 'Add church image'}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
+
+              <Field label="Church name *" value={newChurch.name} onChangeText={(t) => setNewChurch({ ...newChurch, name: t })} placeholder="e.g. Central SDA Church" />
+              <Field label="Country *" value={newChurch.country} onChangeText={(t) => setNewChurch({ ...newChurch, country: t })} placeholder="e.g. Kenya" />
+              <Field label="County / State" value={newChurch.county} onChangeText={(t) => setNewChurch({ ...newChurch, county: t })} placeholder="Optional" />
+              <Field label="Conference *" value={newChurch.conference} onChangeText={(t) => setNewChurch({ ...newChurch, conference: t })} placeholder="e.g. Central Kenya Conference" />
+              <Field label="District" value={newChurch.district} onChangeText={(t) => setNewChurch({ ...newChurch, district: t })} placeholder="Optional" />
+              <Field label="Physical location" value={newChurch.location} onChangeText={(t) => setNewChurch({ ...newChurch, location: t })} placeholder="Town / area" />
+              <Field label="Number of members" value={newChurch.members} onChangeText={(t) => setNewChurch({ ...newChurch, members: t })} placeholder="e.g. 250" keyboardType="numeric" />
+              <Field label="Pastor's name" value={newChurch.pastor} onChangeText={(t) => setNewChurch({ ...newChurch, pastor: t })} placeholder="Optional" />
+              <Field label="Contact phone" value={newChurch.contact} onChangeText={(t) => setNewChurch({ ...newChurch, contact: t })} placeholder="+254…" keyboardType="phone-pad" />
+
+              <View style={{ height: spacing.xl }} />
+            </ScrollView>
+          </KeyboardAvoidingView>
+
+          <View style={styles.saveBar}>
+            <TouchableOpacity style={[styles.saveBtn, styles.cancelBtn]} onPress={closeForm}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={handleAddChurch}>
+              <Text style={styles.submitText}>{editingChurch ? 'Save Changes' : 'Add Church'}</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
     </Modal>
   );
 
@@ -863,6 +823,17 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#eef2f4',
   },
+  communityBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 14,
+    backgroundColor: '#F4A261',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  communityBtnText: { color: '#0A1628', fontWeight: '800', fontSize: 14 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -897,80 +868,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 8,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+  // ── Luxury Add/Edit Church form (dark, over the rotating wallpaper) ─────────
+  formRoot: { flex: 1, backgroundColor: '#0A1628' },
+  formSafe: { flex: 1, backgroundColor: 'transparent' },
+  topBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.12)',
   },
-  modalContainer: {
-    // Percentage maxHeight (not a fixed pixel height) so the sheet shrinks to
-    // the space left above the keyboard instead of clipping the top fields.
-    maxHeight: '90%',
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 15,
+  topIconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  topTitle: { ...typography.h3, color: colors.textPrimary },
+  formContent: { padding: spacing.md },
+
+  coverPicker: {
+    height: 160, borderRadius: radius.lg, overflow: 'hidden',
+    backgroundColor: 'rgba(13,35,64,0.7)', borderWidth: 1, borderColor: 'rgba(244,162,97,0.4)',
+    marginBottom: spacing.sm,
   },
-  formHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
+  coverPreview: { width: '100%', height: '100%' },
+  coverPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
+  coverHint: { ...typography.caption, color: colors.textSecondary },
+
+  fieldLabel: { ...typography.label, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.md, marginBottom: spacing.xs },
+  fieldInput: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    color: colors.textPrimary, backgroundColor: 'rgba(13,35,64,0.85)', fontSize: 15,
   },
-  formTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#006064',
+
+  saveBar: {
+    flexDirection: 'row', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(16,46,80,0.92)',
   },
-  closeButton: {
-    padding: 5,
-  },
-  addForm: {
-    flex: 1,
-  },
-  addFormContent: {
-    paddingBottom: 24,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#b2ebf2',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    backgroundColor: '#f5fdff',
-    color: '#006064',
-  },
-  formButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-  },
-  submitButton: {
-    backgroundColor: '#006064',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 20,
-    flex: 1,
-  },
-  imagePicker: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    backgroundColor: '#e0f7fa',
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  imagePickerText: {
-    marginLeft: 8,
-    color: '#006064',
-  },
-  previewImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
+  saveBtn: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.md, alignItems: 'center' },
+  cancelBtn: { backgroundColor: 'rgba(18,30,46,0.9)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+  cancelText: { ...typography.button, color: colors.textSecondary },
+  submitBtn: { backgroundColor: colors.accent, ...shadows.md },
+  submitText: { ...typography.button, color: '#0A1628', fontWeight: '800' },
 });
 
 export default Churches;

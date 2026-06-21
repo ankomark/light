@@ -196,6 +196,65 @@ class ChoirMessageSerializer(serializers.ModelSerializer):
         return {'summary': summary, 'mine': mine}
 
 
+# ── Church community (membership / requests / chat) ───────────────────────────
+class ChurchMembershipSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = ChurchMembership
+        fields = ['id', 'user', 'role', 'joined_at']
+        read_only_fields = fields
+
+
+class ChurchJoinRequestSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = ChurchJoinRequest
+        fields = ['id', 'user', 'message', 'status', 'created_at']
+        read_only_fields = ['id', 'user', 'status', 'created_at']
+
+
+class ChurchMessageSerializer(serializers.ModelSerializer):
+    sender = SimpleUserSerializer(read_only=True)
+    reply_to = serializers.SerializerMethodField()
+    reactions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChurchMessage
+        fields = [
+            'id', 'sender', 'content', 'message_type', 'attachment',
+            'file_name', 'duration', 'reply_to', 'reactions', 'created_at',
+        ]
+        read_only_fields = ['id', 'sender', 'created_at']
+
+    def get_reply_to(self, obj):
+        if not obj.reply_to_id:
+            return None
+        r = obj.reply_to
+        return {
+            'id': r.id,
+            'sender': r.sender.username,
+            'message_type': r.message_type,
+            # A short preview only — never echo a full base64 attachment back.
+            'content': (r.content or r.message_type)[:120],
+        }
+
+    def get_reactions(self, obj):
+        """Aggregate emoji → count, plus the current user's own pick. Relies on
+        the view prefetching `reactions` to avoid N+1 queries."""
+        request = self.context.get('request')
+        uid = request.user.id if request and request.user.is_authenticated else None
+        counts, mine = {}, None
+        for r in obj.reactions.all():
+            counts[r.emoji] = counts.get(r.emoji, 0) + 1
+            if uid and r.user_id == uid:
+                mine = r.emoji
+        summary = [{'emoji': e, 'count': c}
+                   for e, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+        return {'summary': summary, 'mine': mine}
+
+
 class LiveEventSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
     embed_url = serializers.SerializerMethodField()

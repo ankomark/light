@@ -1,9 +1,9 @@
 /**
- * Choir community: a gated, chat-first space for a choir.
+ * Church community: a gated, chat-first space for a church.
  *
  * Membership tiers (admin / member / friend) all chat equally; only the admin
  * (creator) moderates — approve/reject join requests, remove members/friends,
- * delete the choir. Non-members see a locked hero with "Request to join".
+ * delete the church. Non-members see a locked hero with "Request to join".
  * Messages carry text, images, documents and voice notes as base64 data URIs
  * (matching the rest of the app's chat).
  */
@@ -25,9 +25,9 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import {
-  fetchChoirCommunity, fetchChoirMessages, sendChoirMessage, deleteChoirMessage,
-  requestJoinChoir, fetchChoirMembers, fetchChoirJoinRequests, approveChoirRequest,
-  rejectChoirRequest, removeChoirMember, leaveChoir, reactToChoirMessage,
+  fetchChurchCommunity, fetchChurchMessages, sendChurchMessage, deleteChurchMessage,
+  requestJoinChurch, fetchChurchMembers, fetchChurchJoinRequests, approveChurchRequest,
+  rejectChurchRequest, removeChurchMember, leaveChurch, reactToChurchMessage,
 } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -184,9 +184,9 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
   );
 };
 
-const ChoirCommunity = ({ navigation, route }) => {
-  const choir = route.params?.choir || {};
-  const choirId = route.params?.choirId || choir.id;
+const ChurchCommunity = ({ navigation, route }) => {
+  const church = route.params?.church || {};
+  const churchId = route.params?.churchId || church.id;
   const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
 
@@ -239,8 +239,8 @@ const ChoirCommunity = ({ navigation, route }) => {
   // so opening the community no longer waits on the whole payload. The messages
   // request 403s for non-members, which we swallow.
   const loadCommunity = useCallback(async () => {
-    const snapP = fetchChoirCommunity(choirId);
-    const msgsP = fetchChoirMessages(choirId, 1).catch(() => null);
+    const snapP = fetchChurchCommunity(churchId);
+    const msgsP = fetchChurchMessages(churchId, 1).catch(() => null);
     try {
       const snap = await snapP;
       setCommunity(snap);
@@ -258,7 +258,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     } finally {
       setMessagesLoading(false);
     }
-  }, [choirId]);
+  }, [churchId]);
 
   useEffect(() => { loadCommunity(); }, [loadCommunity]);
 
@@ -267,7 +267,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     if (!isMember) return undefined;
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetchChoirMessages(choirId, 1);
+        const res = await fetchChurchMessages(churchId, 1);
         const list = res?.results ?? [];
         const fresh = list.filter((m) => !seenIdsRef.current.has(m.id));
         if (fresh.length) {
@@ -277,7 +277,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       } catch {}
     }, 5000);
     return () => clearInterval(pollRef.current);
-  }, [isMember, choirId]);
+  }, [isMember, churchId]);
 
   useEffect(() => () => { soundRef.current?.unloadAsync?.().catch(() => {}); }, []);
 
@@ -286,14 +286,14 @@ const ChoirCommunity = ({ navigation, route }) => {
     setLoadingMore(true);
     try {
       const next = page + 1;
-      const res = await fetchChoirMessages(choirId, next);
+      const res = await fetchChurchMessages(churchId, next);
       const list = res?.results ?? [];
       list.forEach((m) => seenIdsRef.current.add(m.id));
       setMessages((prev) => [...prev, ...list]); // older append to the (inverted) tail
       setHasMore(!!res?.next);
       setPage(next);
     } catch {} finally { setLoadingMore(false); }
-  }, [choirId, page, hasMore, loadingMore]);
+  }, [churchId, page, hasMore, loadingMore]);
 
   // ── sending (optimistic, WhatsApp-style) ──────────────────────────────────
   // Show the message instantly with a 'sending' status, then swap in the saved
@@ -317,7 +317,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     };
     setMessages((prev) => [tempMsg, ...prev]);
     try {
-      const msg = await sendChoirMessage(choirId, body);
+      const msg = await sendChurchMessage(churchId, body);
       seenIdsRef.current.add(msg.id);
       setMessages((prev) => {
         // If the 5s poll already inserted the saved copy mid-flight, just drop
@@ -330,7 +330,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     } catch (e) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
     }
-  }, [choirId, currentUser]);
+  }, [churchId, currentUser]);
 
   const send = useCallback((payload) => {
     // Resolve (and clear) any active reply, then build the body + the optimistic
@@ -410,7 +410,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       recordingRef.current = rec;
       setRecording(true);
-    } catch { Alert.alert('Choir', 'Could not start recording.'); }
+    } catch { Alert.alert('Church', 'Could not start recording.'); }
   };
 
   const stopRecording = async (cancel = false) => {
@@ -428,7 +428,7 @@ const ChoirCommunity = ({ navigation, route }) => {
         message_type: 'audio', attachment: `data:audio/m4a;base64,${base64}`,
         file_name: 'voice-note.m4a', duration: (st?.durationMillis || 0) / 1000,
       });
-    } catch { Alert.alert('Choir', 'Could not save the recording.'); }
+    } catch { Alert.alert('Church', 'Could not save the recording.'); }
   };
 
 
@@ -450,7 +450,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       if (soundRef.current) { await soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; loadedIdRef.current = null; }
       // Native player may not accept data: URIs — stage to a cache file first.
       const base64 = (msg.attachment || '').split(',')[1] || '';
-      const path = `${FileSystem.cacheDirectory}choir-audio-${msg.id}.m4a`;
+      const path = `${FileSystem.cacheDirectory}church-audio-${msg.id}.m4a`;
       const info = await FileSystem.getInfoAsync(path);
       if (!info.exists) await FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 });
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
@@ -464,7 +464,7 @@ const ChoirCommunity = ({ navigation, route }) => {
           sound.setPositionAsync(0).catch(() => {}); // rewind so the next tap plays from the start
         }
       });
-    } catch { Alert.alert('Choir', 'Could not play this audio.'); }
+    } catch { Alert.alert('Church', 'Could not play this audio.'); }
   };
 
   // Open/share a document (or any non-image file, incl. a picture sent "as
@@ -472,7 +472,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   // OS share/preview sheet — the file row had no tap handler before.
   const openFile = async (msg) => {
     const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
-    if (!m) { Alert.alert('Choir', 'This file is unavailable.'); return; }
+    if (!m) { Alert.alert('Church', 'This file is unavailable.'); return; }
     // A picture sent "as document" → just preview it in the in-app viewer.
     if ((m[1] || '').startsWith('image/')) { setViewerUri(msg.attachment); return; }
     try {
@@ -481,7 +481,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path, { mimeType: m[1] || undefined });
       else Alert.alert('Saved', `Saved as ${msg.file_name || 'file'}.`);
-    } catch { Alert.alert('Choir', 'Could not open this file.'); }
+    } catch { Alert.alert('Church', 'Could not open this file.'); }
   };
 
   // Long-press opens an action menu (react / reply / delete).
@@ -506,7 +506,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     Alert.alert('Message', 'Delete this message?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        try { await deleteChoirMessage(choirId, m.id); setMessages((p) => p.filter((x) => x.id !== m.id)); } catch {}
+        try { await deleteChurchMessage(churchId, m.id); setMessages((p) => p.filter((x) => x.id !== m.id)); } catch {}
       } },
     ]);
   };
@@ -516,7 +516,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     setMenuMsg(null);
     Haptics.selectionAsync().catch(() => {});
     try {
-      const updated = await reactToChoirMessage(choirId, m.id, emoji);
+      const updated = await reactToChurchMessage(churchId, m.id, emoji);
       setMessages((prev) => prev.map((x) => (x.id === updated.id ? { ...x, reactions: updated.reactions } : x)));
     } catch {}
   };
@@ -524,10 +524,10 @@ const ChoirCommunity = ({ navigation, route }) => {
   // ── membership actions ──────────────────────────────────────────────────--
   const onRequestJoin = async () => {
     try {
-      await requestJoinChoir(choirId);
+      await requestJoinChurch(churchId);
       setCommunity((c) => ({ ...c, has_pending_request: true }));
     } catch (e) {
-      Alert.alert('Choir', e?.response?.data?.error || 'Could not send your request.');
+      Alert.alert('Church', e?.response?.data?.error || 'Could not send your request.');
     }
   };
 
@@ -535,8 +535,8 @@ const ChoirCommunity = ({ navigation, route }) => {
     setShowManage(true);
     try {
       const [reqs, mem] = await Promise.all([
-        isAdmin ? fetchChoirJoinRequests(choirId) : Promise.resolve([]),
-        fetchChoirMembers(choirId),
+        isAdmin ? fetchChurchJoinRequests(churchId) : Promise.resolve([]),
+        fetchChurchMembers(churchId),
       ]);
       setRequests(reqs || []);
       setMembers(mem || []);
@@ -544,24 +544,24 @@ const ChoirCommunity = ({ navigation, route }) => {
   };
 
   const approve = async (r) => {
-    try { await approveChoirRequest(choirId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); fetchChoirMembers(choirId).then(setMembers).catch(() => {}); } catch {}
+    try { await approveChurchRequest(churchId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); fetchChurchMembers(churchId).then(setMembers).catch(() => {}); } catch {}
   };
   const reject = async (r) => {
-    try { await rejectChoirRequest(choirId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); } catch {}
+    try { await rejectChurchRequest(churchId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); } catch {}
   };
   const remove = (m) => {
     Alert.alert('Remove', `Remove @${m.user?.username} from the community?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
-        try { await removeChoirMember(choirId, m.user.id); setMembers((p) => p.filter((x) => x.id !== m.id)); } catch {}
+        try { await removeChurchMember(churchId, m.user.id); setMembers((p) => p.filter((x) => x.id !== m.id)); } catch {}
       } },
     ]);
   };
   const onLeave = () => {
-    Alert.alert('Leave community', `Leave ${choir.name || 'this choir'}?`, [
+    Alert.alert('Leave community', `Leave ${church.name || 'this church'}?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
-        try { await leaveChoir(choirId); navigation.goBack(); } catch (e) { Alert.alert('Choir', e?.response?.data?.error || 'Could not leave.'); }
+        try { await leaveChurch(churchId); navigation.goBack(); } catch (e) { Alert.alert('Church', e?.response?.data?.error || 'Could not leave.'); }
       } },
     ]);
   };
@@ -592,10 +592,10 @@ const ChoirCommunity = ({ navigation, route }) => {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Image source={choir.profile_image ? { uri: choir.profile_image } : DEFAULT_AVATAR}
+        <Image source={church.image ? { uri: church.image } : DEFAULT_AVATAR}
           defaultSource={DEFAULT_AVATAR} style={styles.headerAvatar} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerName} numberOfLines={1}>{choir.name || 'Choir'}</Text>
+          <Text style={styles.headerName} numberOfLines={1}>{church.name || 'Church'}</Text>
           <Text style={styles.headerSub}>
             <Ionicons name="people" size={12} color={colors.textSecondary} /> {community?.members_count ?? 0} in community
             {community?.role ? `  ·  ${ROLE_BADGE[community.role]}` : ''}
@@ -615,9 +615,9 @@ const ChoirCommunity = ({ navigation, route }) => {
         // Locked hero for outsiders
         <View style={styles.locked}>
           <View style={styles.lockBadge}><MaterialCommunityIcons name="account-music" size={40} color={colors.accent} /></View>
-          <Text style={styles.lockTitle}>{choir.name || 'This choir'} community</Text>
+          <Text style={styles.lockTitle}>{church.name || 'This church'} community</Text>
           <Text style={styles.lockText}>
-            Become a friend of this choir to join the conversation — chat, share photos, documents and voice notes with members.
+            Become a friend of this church to join the conversation — chat, share photos, documents and voice notes with members.
           </Text>
           {community?.has_pending_request ? (
             <View style={styles.pendingPill}><Ionicons name="time-outline" size={16} color={colors.warning} /><Text style={styles.pendingText}>Request pending</Text></View>
@@ -726,7 +726,7 @@ const ChoirCommunity = ({ navigation, route }) => {
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.modalBar}>
             <TouchableOpacity onPress={() => setShowManage(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.textPrimary} /></TouchableOpacity>
-            <Text style={styles.modalTitle}>{choir.name}</Text>
+            <Text style={styles.modalTitle}>{church.name}</Text>
             <View style={{ width: 24 }} />
           </View>
           <FlatList
@@ -970,4 +970,4 @@ const styles = StyleSheet.create({
   leaveText: { ...typography.button, color: colors.error, fontWeight: '700' },
 });
 
-export default ChoirCommunity;
+export default ChurchCommunity;

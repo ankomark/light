@@ -751,14 +751,42 @@ export const removeChoirMember = (id, userId) =>
   apiRequest('post', `/choirs/${id}/remove-member/`, { user_id: userId });
 export const leaveChoir = (id) =>
   apiRequest('post', `/choirs/${id}/leave/`);
-export const fetchChoirMessages = (id, page = 1) =>
-  apiRequest('get', `/choirs/${id}/messages/`, null, { params: { page } });
+// Smaller page → a lighter first payload (messages can carry base64 media).
+export const fetchChoirMessages = (id, page = 1, pageSize = 15) =>
+  apiRequest('get', `/choirs/${id}/messages/`, null, { params: { page, page_size: pageSize } });
 export const sendChoirMessage = (id, payload) =>
   apiRequest('post', `/choirs/${id}/messages/`, payload);
 export const deleteChoirMessage = (id, messageId) =>
   apiRequest('post', `/choirs/${id}/messages/${messageId}/delete/`);
 export const reactToChoirMessage = (id, messageId, emoji) =>
   apiRequest('post', `/choirs/${id}/messages/${messageId}/react/`, { emoji });
+
+// ── Church community (membership / requests / chat) — mirrors the choir API ───
+export const fetchChurchCommunity = (id) =>
+  apiRequest('get', `/churches/${id}/community/`);
+export const fetchChurchMembers = (id) =>
+  apiRequest('get', `/churches/${id}/members/`);
+export const requestJoinChurch = (id, message = '') =>
+  apiRequest('post', `/churches/${id}/request-join/`, { message });
+export const fetchChurchJoinRequests = (id) =>
+  apiRequest('get', `/churches/${id}/join-requests/`);
+export const approveChurchRequest = (id, requestId) =>
+  apiRequest('post', `/churches/${id}/approve-request/`, { request_id: requestId });
+export const rejectChurchRequest = (id, requestId) =>
+  apiRequest('post', `/churches/${id}/reject-request/`, { request_id: requestId });
+export const removeChurchMember = (id, userId) =>
+  apiRequest('post', `/churches/${id}/remove-member/`, { user_id: userId });
+export const leaveChurch = (id) =>
+  apiRequest('post', `/churches/${id}/leave/`);
+export const fetchChurchMessages = (id, page = 1, pageSize = 15) =>
+  apiRequest('get', `/churches/${id}/messages/`, null, { params: { page, page_size: pageSize } });
+export const sendChurchMessage = (id, payload) =>
+  apiRequest('post', `/churches/${id}/messages/`, payload);
+export const deleteChurchMessage = (id, messageId) =>
+  apiRequest('post', `/churches/${id}/messages/${messageId}/delete/`);
+export const reactToChurchMessage = (id, messageId, emoji) =>
+  apiRequest('post', `/churches/${id}/messages/${messageId}/react/`, { emoji });
+
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);
 };

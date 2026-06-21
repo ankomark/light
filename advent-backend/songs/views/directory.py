@@ -83,6 +83,10 @@ class ChurchViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         church = serializer.save(created_by=self.request.user)
         self._handle_image_upload(church)
+        # The creator runs the community as its admin.
+        ChurchMembership.objects.get_or_create(
+            church=church, user=self.request.user, defaults={'role': 'admin'},
+        )
 
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
@@ -116,6 +120,195 @@ class ChurchViewSet(viewsets.ModelViewSet):
         churches = Church.objects.filter(created_by=request.user)
         serializer = self.get_serializer(churches, many=True)
         return Response(serializer.data)
+
+    # ── Community helpers ────────────────────────────────────────────────────
+    def _membership(self, church, user):
+        if not user or not user.is_authenticated:
+            return None
+        return church.memberships.filter(user=user).first()
+
+    def _is_admin(self, church, user):
+        if user and user.is_authenticated and church.created_by_id == user.id:
+            return True
+        m = self._membership(church, user)
+        return bool(m and m.role == 'admin')
+
+    # ── Community: membership state ──────────────────────────────────────────
+    @action(detail=True, methods=['get'], url_path='community')
+    def community(self, request, pk=None):
+        """Snapshot the caller needs to render the community: their role, the
+        member count, and whether they have a pending request."""
+        church = self.get_object()
+        m = self._membership(church, request.user)
+        pending = church.join_requests.filter(user=request.user, status='pending').exists()
+        is_admin = self._is_admin(church, request.user)
+        return Response({
+            'church_id': church.id,
+            'name': church.name,
+            'is_admin': is_admin,
+            'role': m.role if m else None,
+            'is_member': bool(m),
+            'has_pending_request': pending,
+            'has_requests': is_admin and church.join_requests.filter(status='pending').exists(),
+            # Live community size (separate from the congregation `members` field).
+            'members_count': church.memberships.count(),
+        })
+
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        """Roster — visible to members of the community."""
+        church = self.get_object()
+        if not self._membership(church, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = church.memberships.select_related('user__profile').order_by('role', 'joined_at')
+        return Response(ChurchMembershipSerializer(qs, many=True).data)
+
+    # ── Community: join requests ─────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='request-join')
+    def request_join(self, request, pk=None):
+        church = self.get_object()
+        if self._membership(church, request.user):
+            return Response({'error': "You're already in this community."}, status=status.HTTP_400_BAD_REQUEST)
+        req, _created = ChurchJoinRequest.objects.get_or_create(
+            church=church, user=request.user,
+            defaults={'message': (request.data.get('message') or '')[:500]},
+        )
+        if not _created and req.status in ('rejected',):
+            req.status = 'pending'
+            req.message = (request.data.get('message') or '')[:500]
+            req.save(update_fields=['status', 'message'])
+        try:
+            notify_user(church.created_by, 'church_request',
+                        f"{request.user.username} wants to join {church.name}",
+                        {'type': 'church_request', 'church_id': church.id, 'request_id': req.id})
+        except Exception:
+            logger.exception('church request notify failed')
+        return Response(ChurchJoinRequestSerializer(req).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='join-requests')
+    def join_requests(self, request, pk=None):
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = church.join_requests.select_related('user__profile').filter(status='pending')
+        return Response(ChurchJoinRequestSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='approve-request')
+    def approve_request(self, request, pk=None):
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        req = get_object_or_404(ChurchJoinRequest, pk=request.data.get('request_id'), church=church)
+        req.status = 'approved'
+        req.save(update_fields=['status'])
+        ChurchMembership.objects.get_or_create(church=church, user=req.user, defaults={'role': 'friend'})
+        try:
+            notify_user(req.user, 'church_approved', f"You're now in the {church.name} community",
+                        {'type': 'church_approved', 'church_id': church.id})
+        except Exception:
+            logger.exception('church approve notify failed')
+        return Response(ChurchJoinRequestSerializer(req).data)
+
+    @action(detail=True, methods=['post'], url_path='reject-request')
+    def reject_request(self, request, pk=None):
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        req = get_object_or_404(ChurchJoinRequest, pk=request.data.get('request_id'), church=church)
+        req.status = 'rejected'
+        req.save(update_fields=['status'])
+        return Response(ChurchJoinRequestSerializer(req).data)
+
+    # ── Community: moderation ────────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='remove-member')
+    def remove_member(self, request, pk=None):
+        """Admin drops a member or removes a friend. The creator can't be removed."""
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        target_id = request.data.get('user_id')
+        if str(target_id) == str(church.created_by_id):
+            return Response({'error': "The creator can't be removed."}, status=status.HTTP_400_BAD_REQUEST)
+        deleted, _ = church.memberships.filter(user_id=target_id).delete()
+        church.join_requests.filter(user_id=target_id).delete()  # let them re-request later
+        return Response({'status': 'removed', 'removed': deleted})
+
+    @action(detail=True, methods=['post'])
+    def leave(self, request, pk=None):
+        church = self.get_object()
+        if church.created_by_id == request.user.id:
+            return Response({'error': 'The creator cannot leave; delete the church instead.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        church.memberships.filter(user=request.user).delete()
+        return Response({'status': 'left'})
+
+    # ── Community: chat ──────────────────────────────────────────────────────
+    @action(detail=True, methods=['get', 'post'])
+    def messages(self, request, pk=None):
+        church = self.get_object()
+        if not self._membership(church, request.user):
+            return Response({'error': 'Join this church to see the chat.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == 'POST':
+            mtype = request.data.get('message_type', 'text')
+            if mtype not in dict(ChurchMessage.MESSAGE_TYPES) or mtype == 'system':
+                return Response({'error': 'Invalid message type.'}, status=status.HTTP_400_BAD_REQUEST)
+            content = (request.data.get('content') or '').strip()
+            attachment = request.data.get('attachment') or ''
+            if not content and not attachment:
+                return Response({'error': 'Empty message.'}, status=status.HTTP_400_BAD_REQUEST)
+            reply_to = None
+            reply_id = request.data.get('reply_to')
+            if reply_id:
+                reply_to = church.messages.filter(pk=reply_id).first()
+            msg = ChurchMessage.objects.create(
+                church=church, sender=request.user, content=content[:5000],
+                message_type=mtype, attachment=attachment,
+                file_name=(request.data.get('file_name') or '')[:255],
+                duration=request.data.get('duration') or None, reply_to=reply_to,
+            )
+            return Response(ChurchMessageSerializer(msg, context={'request': request}).data,
+                            status=status.HTTP_201_CREATED)
+
+        # GET — newest first, paginated; the client reverses for display.
+        qs = (church.messages
+              .select_related('sender__profile', 'reply_to__sender')
+              .prefetch_related('reactions')
+              .order_by('-created_at'))
+        page = self.paginate_queryset(qs)
+        data = ChurchMessageSerializer(page if page is not None else qs, many=True,
+                                       context={'request': request}).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
+    def delete_message(self, request, pk=None, message_id=None):
+        """Sender can delete their own message; admin can delete any."""
+        church = self.get_object()
+        msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
+        if msg.sender_id != request.user.id and not self._is_admin(church, request.user):
+            return Response({'error': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+        msg.delete()
+        return Response({'status': 'deleted'})
+
+    @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/react')
+    def react_message(self, request, pk=None, message_id=None):
+        """Toggle the caller's emoji reaction on a message (one per user)."""
+        church = self.get_object()
+        if not self._membership(church, request.user):
+            return Response({'error': 'Join this church to react.'}, status=status.HTTP_403_FORBIDDEN)
+        msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
+        emoji = (request.data.get('emoji') or '').strip()
+        if not emoji or len(emoji) > 16:
+            return Response({'error': 'Invalid emoji.'}, status=status.HTTP_400_BAD_REQUEST)
+        existing = msg.reactions.filter(user=request.user).first()
+        if existing and existing.emoji == emoji:
+            existing.delete()  # tapping the same emoji clears it
+        elif existing:
+            existing.emoji = emoji
+            existing.save(update_fields=['emoji'])
+        else:
+            ChurchMessageReaction.objects.create(message=msg, user=request.user, emoji=emoji)
+        return Response(ChurchMessageSerializer(msg, context={'request': request}).data)
 
 
 

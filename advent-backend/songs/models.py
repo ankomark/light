@@ -887,6 +887,87 @@ class ChoirMessageReaction(models.Model):
         return f"{self.user.username} {self.emoji} on msg {self.message_id}"
 
 
+# ── Church community (mirrors the choir community: membership / requests / chat) ─
+class ChurchMembership(models.Model):
+    """A person's place in a church community. The creator is 'admin'; people who
+    request and are approved become 'friend'; the admin may add core 'member's.
+    All roles can read and post in the church chat — role only governs moderation."""
+    ROLE_CHOICES = (('admin', 'Admin'), ('member', 'Member'), ('friend', 'Friend'))
+    church = models.ForeignKey(Church, on_delete=models.CASCADE, related_name='memberships')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_memberships')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='friend')
+    joined_at = models.DateTimeField(auto_now_add=True)
+    last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
+
+    class Meta:
+        unique_together = ('church', 'user')
+        indexes = [models.Index(fields=['church', 'role'])]
+
+    def __str__(self):
+        return f"{self.user.username} in {self.church.name} ({self.role})"
+
+
+class ChurchJoinRequest(models.Model):
+    """A request to join a church community."""
+    STATUS_CHOICES = (('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'))
+    church = models.ForeignKey(Church, on_delete=models.CASCADE, related_name='join_requests')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_join_requests')
+    message = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('church', 'user')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.church.name} ({self.status})"
+
+
+class ChurchMessage(models.Model):
+    """A message in a church community chat (text / image / file / voice note /
+    system notice). Attachments ride as base64 data URIs, matching ChoirMessage."""
+    MESSAGE_TYPES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('file', 'File'),
+        ('audio', 'Voice note'),
+        ('system', 'System'),
+    ]
+    church = models.ForeignKey(Church, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_messages')
+    content = models.TextField(blank=True, default='')
+    message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
+    attachment = models.TextField(blank=True, default='')  # base64 data URI
+    file_name = models.CharField(max_length=255, blank=True, default='')
+    duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
+    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [models.Index(fields=['church', 'created_at'])]
+
+    def __str__(self):
+        return f"{self.sender.username} in {self.church.name}"
+
+
+class ChurchMessageReaction(models.Model):
+    """A single emoji reaction by one user on a church message (one per user;
+    re-reacting with a different emoji replaces it, the same emoji clears it)."""
+    message = models.ForeignKey(ChurchMessage, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_reactions')
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('message', 'user')
+        indexes = [models.Index(fields=['message'])]
+
+    def __str__(self):
+        return f"{self.user.username} {self.emoji} on msg {self.message_id}"
+
+
 class Group(models.Model):
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_groups')
     name = models.CharField(max_length=100)
