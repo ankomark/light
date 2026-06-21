@@ -339,7 +339,8 @@ const ChoirsWrapper = ({ navigation }) => (
 
 const ChurchesWrapper = ({ navigation }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <Header navigation={navigation} />
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Churches couldn't load.">
       <Churches navigation={navigation} />
     </ErrorBoundary>

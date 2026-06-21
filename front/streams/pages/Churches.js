@@ -57,6 +57,7 @@ const Churches = ({ navigation }) => {
     contact: ''
   });
   const [showAddForm, setShowAddForm] = useState(false);
+  const [actionsOpenId, setActionsOpenId] = useState(null); // card whose edit/delete is revealed
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterValues, setFilterValues] = useState({
@@ -257,14 +258,26 @@ const Churches = ({ navigation }) => {
     );
     
     if (!isCreator) return null;
-    
+
+    // Collapsed by default: just a "…" — the icons appear only after a tap.
+    if (actionsOpenId !== church.id) {
+      return (
+        <TouchableOpacity onPress={() => setActionsOpenId(church.id)} hitSlop={10} style={styles.moreBtn}>
+          <MaterialIcons name="more-horiz" size={20} color="#0b3d52" />
+        </TouchableOpacity>
+      );
+    }
+
     return (
       <View style={styles.churchActions}>
-        <TouchableOpacity onPress={() => handleEditChurch(church)}>
+        <TouchableOpacity onPress={() => { setActionsOpenId(null); handleEditChurch(church); }}>
           <MaterialIcons name="edit" size={20} color="#006064" />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => handleDeleteChurch(church.id)}>
+        <TouchableOpacity onPress={() => { setActionsOpenId(null); handleDeleteChurch(church.id); }}>
           <MaterialIcons name="delete" size={20} color="#e53935" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setActionsOpenId(null)} hitSlop={10}>
+          <MaterialIcons name="close" size={18} color="#90a4ae" />
         </TouchableOpacity>
       </View>
     );
@@ -303,25 +316,25 @@ const Churches = ({ navigation }) => {
           />
         ) : (
           <View style={[styles.churchImage, styles.churchImagePlaceholder]}>
-            <MaterialIcons name="church" size={44} color="#9fb3c8" />
+            <MaterialIcons name="church" size={30} color="#9fb3c8" />
           </View>
         )}
 
         <View style={styles.nameRow}>
-          <MaterialIcons name="church" size={20} color="#006064" />
-          <Text style={styles.churchName} numberOfLines={2}>{item.name}</Text>
+          <MaterialIcons name="church" size={16} color="#006064" />
+          <Text style={styles.churchName} numberOfLines={1}>{item.name}</Text>
         </View>
 
         <View style={styles.churchDetails}>
           {locationText ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="location-on" size={16} color="#00838f" />
+              <MaterialIcons name="location-on" size={14} color="#00838f" />
               <Text style={styles.detailText}>{locationText}</Text>
             </View>
           ) : null}
 
           <View style={styles.detailRow}>
-            <MaterialIcons name="people" size={16} color="#00838f" />
+            <MaterialIcons name="people" size={14} color="#00838f" />
             <Text style={styles.detailText}>
               {Number(item.members || 0).toLocaleString()} members
             </Text>
@@ -329,14 +342,14 @@ const Churches = ({ navigation }) => {
 
           {item.pastor ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="account-circle" size={16} color="#00838f" />
+              <MaterialIcons name="account-circle" size={14} color="#00838f" />
               <Text style={styles.detailText}>Pastor {item.pastor}</Text>
             </View>
           ) : null}
 
           {item.contact ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="phone" size={16} color="#00838f" />
+              <MaterialIcons name="phone" size={14} color="#00838f" />
               <Text style={styles.detailText}>{item.contact}</Text>
             </View>
           ) : null}
@@ -363,9 +376,9 @@ const Churches = ({ navigation }) => {
           onPress={() => navigation.navigate('ChurchCommunity', { church: item, churchId: item.id })}
           activeOpacity={0.9}
         >
-          <MaterialIcons name="forum" size={18} color="#0A1628" />
+          <MaterialIcons name="forum" size={16} color="#0A1628" />
           <Text style={styles.communityBtnText}>Open community</Text>
-          <MaterialIcons name="chevron-right" size={20} color="#0A1628" style={{ marginLeft: 'auto' }} />
+          <MaterialIcons name="chevron-right" size={18} color="#0A1628" style={{ marginLeft: 'auto' }} />
         </TouchableOpacity>
       </View>
     );
@@ -464,7 +477,7 @@ const Churches = ({ navigation }) => {
       {/* Search and Filter Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
-          <MaterialIcons name="search" size={20} color="#555" style={styles.searchIcon} />
+          <MaterialIcons name="search" size={18} color="#555" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search churches..."
@@ -481,7 +494,7 @@ const Churches = ({ navigation }) => {
           style={styles.filterButton}
           onPress={() => setShowFilters(!showFilters)}
         >
-          <MaterialIcons name="filter-list" size={24} color="#006064" />
+          <MaterialIcons name="filter-list" size={20} color="#006064" />
         </TouchableOpacity>
       </View>
       
@@ -593,7 +606,7 @@ const Churches = ({ navigation }) => {
           style={styles.addButton} 
           onPress={() => setShowAddForm(true)}
         >
-          <MaterialIcons name="add" size={24} color="white" />
+          <MaterialIcons name="add" size={18} color="white" />
           <Text style={styles.buttonText}>Add Your Church</Text>
         </TouchableOpacity>
       )}
@@ -606,29 +619,29 @@ const Churches = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#102E50',
+    backgroundColor: 'transparent',
     padding: 16,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0A1628',
+    backgroundColor: 'transparent',
   },
   title: {
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '700',
-    marginTop: 6,
+    marginTop: 2,
     textAlign: 'center',
     letterSpacing: 0.3,
     color: '#FFA726',
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 11,
     textAlign: 'center',
     color: '#cdd9e5',
-    marginTop: 2,
-    marginBottom: 10,
+    marginTop: 1,
+    marginBottom: 8,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -640,22 +653,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'white',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 6,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
+    paddingVertical: 2,
   },
   filterButton: {
-    marginLeft: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    marginLeft: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     backgroundColor: 'white',
     justifyContent: 'center',
     alignItems: 'center',
@@ -736,65 +750,67 @@ const styles = StyleSheet.create({
   },
   churchCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: 14,
+    padding: 10,
+    marginBottom: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.12,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 4,
   },
   churchHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   profileImage: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    marginRight: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
     backgroundColor: '#eee',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: '#e0f2f4',
   },
   username: {
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: 13,
     color: '#0b3d52',
   },
   byline: {
-    fontSize: 12,
+    fontSize: 10.5,
     color: '#90a4ae',
-    marginTop: 1,
+    marginTop: 0,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
+    gap: 6,
+    marginBottom: 6,
   },
   churchName: {
     flex: 1,
-    fontSize: 19,
+    fontSize: 15,
     fontWeight: '700',
     color: '#006064',
   },
   churchActions: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 14,
   },
+  moreBtn: { padding: 2, alignItems: 'center', justifyContent: 'center' },
   churchImage: {
     width: '100%',
-    height: 180,
-    borderRadius: 12,
-    marginBottom: 12,
+    height: 96,
+    borderRadius: 10,
+    marginBottom: 8,
   },
   churchImagePlaceholder: {
     backgroundColor: '#eef3f6',
@@ -802,7 +818,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   churchDetails: {
-    gap: 8,
+    gap: 3,
   },
   detailRow: {
     flexDirection: 'row',
@@ -810,30 +826,30 @@ const styles = StyleSheet.create({
   },
   detailText: {
     color: '#455a64',
-    marginLeft: 8,
-    fontSize: 14.5,
+    marginLeft: 6,
+    fontSize: 12.5,
     flex: 1,
   },
   metaContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 14,
-    paddingTop: 12,
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#eef2f4',
   },
   communityBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 14,
+    gap: 6,
+    marginTop: 8,
     backgroundColor: '#F4A261',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
-  communityBtnText: { color: '#0A1628', fontWeight: '800', fontSize: 14 },
+  communityBtnText: { color: '#0A1628', fontWeight: '800', fontSize: 13 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -850,12 +866,14 @@ const styles = StyleSheet.create({
   },
   addButton: {
     backgroundColor: '#006064',
-    padding: 14,
-    borderRadius: 30,
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 22,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
+    alignSelf: 'center',
+    marginTop: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
@@ -865,8 +883,8 @@ const styles = StyleSheet.create({
   buttonText: {
     color: 'white',
     fontWeight: '600',
-    fontSize: 16,
-    marginLeft: 8,
+    fontSize: 13,
+    marginLeft: 6,
   },
   // ── Luxury Add/Edit Church form (dark, over the rotating wallpaper) ─────────
   formRoot: { flex: 1, backgroundColor: '#0A1628' },
