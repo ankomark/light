@@ -37,3 +37,32 @@ class PublicationThemeTests(APITestCase):
         }, format='json')
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(Publication.objects.get(pk=pid).theme['font'], 'cinzel')
+
+    PNG_1PX = (
+        'data:image/png;base64,'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    )
+
+    def test_list_serves_cover_url_detail_keeps_base64(self):
+        res = self.client.post('/api/publications/', {
+            'title': 'Cover Work', 'category': 'other', 'status': 'published',
+            'cover': self.PNG_1PX, 'chapters': [{'order': 1, 'title': 'a', 'body': 'b'}],
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        pid = res.json()['id']
+
+        # List → cover is a URL, not base64.
+        lst = self.client.get('/api/publications/')
+        row = next(p for p in (lst.json().get('results') or lst.json()) if p['id'] == pid)
+        self.assertNotIn('base64', row['cover'])
+        self.assertIn(f'/publications/{pid}/cover/', row['cover'])
+
+        # Detail keeps base64 (the editor reloads + re-saves it).
+        self.assertIn('base64', self.client.get(f'/api/publications/{pid}/').json()['cover'])
+
+        # The cover endpoint streams real PNG bytes, public.
+        self.client.force_authenticate(user=None)
+        img = self.client.get(f'/api/publications/{pid}/cover/')
+        self.assertEqual(img.status_code, 200)
+        self.assertEqual(img['Content-Type'], 'image/png')
+        self.assertEqual(img.content[:8], b'\x89PNG\r\n\x1a\n')

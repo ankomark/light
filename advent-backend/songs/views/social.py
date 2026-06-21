@@ -1,4 +1,6 @@
 from .common import *  # noqa: F401,F403
+import base64
+from django.http import HttpResponse, Http404
 from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F
 from django.conf import settings
 from django.core.cache import cache
@@ -701,6 +703,24 @@ class PublicationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    def cover(self, request, pk=None):
+        """Stream the stored base64 cover as a real, cacheable image so the list
+        doesn't have to ship the blob inline."""
+        pub = get_object_or_404(Publication, pk=pk)
+        data_uri = pub.cover or ''
+        if ',' not in data_uri:
+            raise Http404('No cover.')
+        header, _, payload = data_uri.partition(',')
+        mime = header[5:].split(';')[0] if header.startswith('data:') else ''
+        try:
+            raw = base64.b64decode(payload)
+        except Exception:
+            raise Http404('Bad cover data.')
+        resp = HttpResponse(raw, content_type=mime or 'image/jpeg')
+        resp['Cache-Control'] = 'public, max-age=31536000, immutable'  # version-busted below
+        return resp
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def like(self, request, pk=None):

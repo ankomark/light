@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image,
   ActivityIndicator, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import Markdown from 'react-native-markdown-display';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   fetchPublication, createPublication, updatePublication,
 } from '../services/api';
@@ -64,6 +65,51 @@ const PublicationEditor = ({ route, navigation }) => {
     })();
   }, [editId, navigation]);
 
+  // ── Local autosave / crash recovery ──────────────────────────────────────
+  const draftKey = `pubdraft:${editId || 'new'}`;
+
+  // Offer to restore a previous unsaved draft for a brand-new publication.
+  useEffect(() => {
+    if (editId) return; // edits load from the server
+    AsyncStorage.getItem(draftKey).then((raw) => {
+      if (!raw) return;
+      let d;
+      try { d = JSON.parse(raw); } catch { return; }
+      const hasContent = d?.title?.trim() || (d?.chapters || []).some((c) => c.title || c.body);
+      if (!hasContent) return;
+      Alert.alert('Unsaved draft', 'Restore your last unsaved draft?', [
+        { text: 'Discard', style: 'destructive', onPress: () => AsyncStorage.removeItem(draftKey).catch(() => {}) },
+        { text: 'Restore', onPress: () => {
+          setTitle(d.title || '');
+          setSummary(d.summary || '');
+          setCategory(d.category || 'devotional');
+          setTheme({ ...DEFAULT_WRITING_THEME, ...(d.theme || {}) });
+          setChapters((d.chapters || []).length
+            ? d.chapters.map((c, i) => ({ key: `r${i}`, title: c.title || '', body: c.body || '', images: {}, preview: false }))
+            : [blankChapter()]);
+        } },
+      ]);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced text-only autosave (no base64 — keeps the snapshot small so the
+  // typed work survives a crash; images are re-added on restore).
+  useEffect(() => {
+    if (loading) return undefined;
+    const t = setTimeout(() => {
+      const snapshot = {
+        title, summary, category, theme,
+        chapters: chapters.map((c) => ({
+          title: c.title,
+          body: (c.body || '').replace(/!\[[^\]]*\]\(img:\/\/[^)\s]+\)/g, '').trim(),
+        })),
+        at: Date.now(),
+      };
+      AsyncStorage.setItem(draftKey, JSON.stringify(snapshot)).catch(() => {});
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [title, summary, category, theme, chapters, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const pickCover = async () => {
     try {
       const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -94,6 +140,84 @@ const PublicationEditor = ({ route, navigation }) => {
   const updateChapter = useCallback((key, patch) => {
     setChapters((prev) => prev.map((c) => (c.key === key ? { ...c, ...patch } : c)));
   }, []);
+
+  // Track each chapter's cursor/selection so the toolbar inserts at the caret.
+  const selRef = useRef({});
+  const [pendingSel, setPendingSel] = useState(null); // {key,start,end} applied once
+  const onBodySelect = (key, e) => {
+    selRef.current[key] = e.nativeEvent.selection;
+    setPendingSel((p) => (p && p.key === key ? null : p)); // release control after it lands
+  };
+
+  // Insert markdown for the tapped format. It wraps the SELECTED text (real
+  // formatting) and moves the caret — it never injects placeholder words, so
+  // nothing like "bold text" can end up in the published reading.
+  const applyFormat = (key, kind) => {
+    const c = chapters.find((x) => x.key === key);
+    if (!c) return;
+    const body = c.body || '';
+    const sel = selRef.current[key] || { start: body.length, end: body.length };
+    const start = Math.min(sel.start, sel.end);
+    const end = Math.max(sel.start, sel.end);
+    const picked = body.slice(start, end);
+    let before = body.slice(0, start);
+    let after = body.slice(end);
+    let insert = '';
+    let caret = null; // [start, end] in the new body
+
+    const wrap = (mk) => {
+      insert = `${mk}${picked}${mk}`;
+      const base = before.length;
+      // selection → cursor after the wrap; no selection → cursor between markers.
+      caret = picked ? [base + insert.length, base + insert.length] : [base + mk.length, base + mk.length];
+    };
+    const prefixLine = (pfx) => {
+      const lineStart = before.lastIndexOf('\n') + 1;
+      before = body.slice(0, lineStart);
+      insert = `${pfx}${body.slice(lineStart, end)}`;
+      after = body.slice(end);
+      const pos = before.length + insert.length;
+      caret = [pos, pos];
+    };
+
+    switch (kind) {
+      case 'bold': wrap('**'); break;
+      case 'italic': wrap('*'); break; // '*' renders intraword; '_' does not
+      case 'h1': prefixLine('# '); break;
+      case 'h2': prefixLine('## '); break;
+      case 'quote': prefixLine('> '); break;
+      case 'list': prefixLine('- '); break;
+      case 'numbered': prefixLine('1. '); break;
+      case 'link': {
+        const text = picked || 'link';
+        insert = `[${text}](url)`;
+        const base = before.length;
+        // Highlight the part the author should replace next (text or the url).
+        caret = picked ? [base + text.length + 3, base + text.length + 6] : [base + 1, base + 1 + text.length];
+        break;
+      }
+      case 'divider': before = body.slice(0, end); after = body.slice(end); insert = '\n\n---\n\n'; { const pos = before.length + insert.length; caret = [pos, pos]; } break;
+      default: return;
+    }
+
+    updateChapter(key, { body: `${before}${insert}${after}` });
+    if (caret) {
+      selRef.current[key] = { start: caret[0], end: caret[1] };
+      setPendingSel({ key, start: caret[0], end: caret[1] });
+    }
+  };
+
+  const FORMAT_TOOLS = [
+    { kind: 'h1', icon: 'format-header-1', set: 'mci' },
+    { kind: 'h2', icon: 'format-header-2', set: 'mci' },
+    { kind: 'bold', icon: 'format-bold', set: 'mci' },
+    { kind: 'italic', icon: 'format-italic', set: 'mci' },
+    { kind: 'quote', icon: 'format-quote-close', set: 'mci' },
+    { kind: 'list', icon: 'format-list-bulleted', set: 'mci' },
+    { kind: 'numbered', icon: 'format-list-numbered', set: 'mci' },
+    { kind: 'link', icon: 'link-variant', set: 'mci' },
+    { kind: 'divider', icon: 'minus', set: 'mci' },
+  ];
 
   // Pick + crop an image and drop it into the chapter as a markdown image, so it
   // renders inline both in the live preview and in the reader.
@@ -171,6 +295,7 @@ const PublicationEditor = ({ route, navigation }) => {
       const saved = editId
         ? await updatePublication(editId, payload)
         : await createPublication(payload);
+      AsyncStorage.removeItem(draftKey).catch(() => {}); // work is safely on the server now
       navigation.navigate('PublicationDetail', { id: saved.id });
     } catch (err) {
       const msg = err?.response?.data?.error || 'Could not save. Please try again.';
@@ -379,15 +504,35 @@ const PublicationEditor = ({ route, navigation }) => {
                 </Markdown>
               </View>
             ) : (
-              <TextInput
-                style={[styles.bodyInput, { backgroundColor: theme.bg, color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}
-                placeholder="Write your chapter here… Markdown is supported."
-                placeholderTextColor={`${theme.text}80`}
-                value={ch.body}
-                onChangeText={(t) => updateChapter(ch.key, { body: t })}
-                multiline
-                textAlignVertical="top"
-              />
+              <>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyboardShouldPersistTaps="always"
+                  style={styles.toolbar}
+                  contentContainerStyle={styles.toolbarRow}
+                >
+                  {FORMAT_TOOLS.map((tool) => (
+                    <TouchableOpacity key={tool.kind} style={styles.toolBtnFmt} onPress={() => applyFormat(ch.key, tool.kind)} activeOpacity={0.7}>
+                      <MaterialCommunityIcons name={tool.icon} size={18} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity style={styles.toolBtnFmt} onPress={() => insertImage(ch.key)} activeOpacity={0.7}>
+                    <MaterialCommunityIcons name="image-plus" size={18} color={colors.accent} />
+                  </TouchableOpacity>
+                </ScrollView>
+                <TextInput
+                  style={[styles.bodyInput, { backgroundColor: theme.bg, color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}
+                  placeholder="Write your chapter here… select text, then tap a format."
+                  placeholderTextColor={`${theme.text}80`}
+                  value={ch.body}
+                  onChangeText={(t) => updateChapter(ch.key, { body: t })}
+                  onSelectionChange={(e) => onBodySelect(ch.key, e)}
+                  selection={pendingSel?.key === ch.key ? { start: pendingSel.start, end: pendingSel.end } : undefined}
+                  multiline
+                  textAlignVertical="top"
+                />
+              </>
             )}
           </View>
         ))}
@@ -514,6 +659,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
     color: colors.textPrimary, backgroundColor: colors.inputBg, fontSize: 15, fontWeight: '600', marginBottom: spacing.sm,
+  },
+  toolbar: { flexGrow: 0, marginBottom: spacing.xs },
+  toolbarRow: { flexDirection: 'row', gap: 6, alignItems: 'center', paddingVertical: 2 },
+  toolBtnFmt: {
+    width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
   },
   bodyInput: {
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,

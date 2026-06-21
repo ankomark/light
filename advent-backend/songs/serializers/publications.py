@@ -21,13 +21,14 @@ class ChapterSerializer(serializers.ModelSerializer):
 
 
 class PublicationListSerializer(serializers.ModelSerializer):
-    """Lightweight row for the Articles list — no chapter bodies."""
+    """Lightweight row for the list — no chapter bodies, cover as a URL not base64."""
     author = SimpleUserSerializer(read_only=True)
     is_owner = serializers.SerializerMethodField()
     chapter_count = serializers.SerializerMethodField()
     likes_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
     is_bookmarked = serializers.SerializerMethodField()
+    cover = serializers.SerializerMethodField()
 
     class Meta:
         model = Publication
@@ -35,6 +36,15 @@ class PublicationListSerializer(serializers.ModelSerializer):
             'id', 'title', 'summary', 'cover', 'category', 'status', 'author', 'is_owner',
             'chapter_count', 'likes_count', 'is_liked', 'is_bookmarked', 'created_at', 'updated_at',
         ]
+
+    def get_cover(self, obj):
+        # Cacheable URL instead of the inline base64 blob; version-busted on edit.
+        if not obj.cover:
+            return ''
+        ver = int(obj.updated_at.timestamp()) if obj.updated_at else 0
+        path = f'/api/publications/{obj.id}/cover/?v={ver}'
+        request = self.context.get('request')
+        return request.build_absolute_uri(path) if request else path
 
     def get_is_owner(self, obj):
         request = self.context.get('request')

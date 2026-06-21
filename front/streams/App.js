@@ -24,6 +24,7 @@ import Header from './components/Header'; // Move the import to the top
 import SocialFeed from './components/SocialFeed';
 import RotatingBackground from './components/RotatingBackground';
 import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold } from '@expo-google-fonts/cinzel';
+import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import CreatePost from './components/CreatePost';
 import Music from './components/Music';
 import EditTrackScreen from './components/EditTrackScreen';
@@ -169,7 +170,7 @@ const HymnalAppWrapper = ({ navigation }) => (
 
 const App = () => {
   // Load the Cinzel display font used for the app's brand title.
-  const [fontsLoaded] = useFonts({ Cinzel_600SemiBold, Cinzel_700Bold });
+  const [fontsLoaded] = useFonts({ Cinzel_600SemiBold, Cinzel_700Bold, Lora_400Regular, Lora_700Bold });
 
   // Handle notification taps when app is killed or in background
   React.useEffect(() => {

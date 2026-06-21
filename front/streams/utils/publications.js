@@ -85,6 +85,7 @@ export const WRITING_TEXT_COLORS = [
 ];
 
 export const WRITING_FONTS = [
+  { key: 'lora', label: 'Lora', family: 'Lora_400Regular' },     // book serif (premium)
   { key: 'system', label: 'Sans', family: undefined },
   { key: 'serif', label: 'Serif', family: Platform.select({ ios: 'Georgia', android: 'serif', default: 'serif' }) },
   { key: 'cinzel', label: 'Cinzel', family: 'Cinzel_700Bold' },
