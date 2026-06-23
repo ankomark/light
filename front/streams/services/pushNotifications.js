@@ -1,10 +1,18 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
 import { API_URL } from './api';
+
+// The EAS project id is what ties an Expo push token to this project. Resolve it
+// from the build config (works in dev, preview and production builds).
+const PROJECT_ID =
+  Constants?.expoConfig?.extra?.eas?.projectId ??
+  Constants?.easConfig?.projectId ??
+  null;
 
 // How to show notifications when the app is foregrounded
 Notifications.setNotificationHandler({
@@ -46,12 +54,30 @@ export async function registerForPushNotifications() {
   }
 
   try {
-    const tokenData = await Notifications.getExpoPushTokenAsync();
+    // Passing projectId explicitly is required in bare/EAS builds and avoids a
+    // class of "no project id found" failures.
+    const tokenData = await Notifications.getExpoPushTokenAsync(
+      PROJECT_ID ? { projectId: PROJECT_ID } : undefined
+    );
     const token = tokenData.data;
     await registerTokenWithBackend(token);
     return token;
   } catch (error) {
-    console.error('[Push] Failed to get push token:', error);
+    // The common Android cause is missing FCM credentials (no google-services.json
+    // in the build) or running in Expo Go, which can't mint a remote token. This
+    // is non-fatal — the app works without push — so keep it a quiet warning
+    // rather than a scary error on every login.
+    const msg = String(error?.message || error);
+    const fcmMissing = msg.includes('FirebaseApp is not initialized') || msg.includes('fcm');
+    if (fcmMissing) {
+      console.warn(
+        '[Push] No Android push token — FCM is not configured for this build. ' +
+        'Add google-services.json + upload FCM credentials to EAS, then rebuild. ' +
+        'See https://docs.expo.dev/push-notifications/fcm-credentials/'
+      );
+    } else {
+      console.warn('[Push] Could not get a push token:', msg);
+    }
     return null;
   }
 }

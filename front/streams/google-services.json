@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "479108059066",
+    "project_id": "adventist-life",
+    "storage_bucket": "adventist-life.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:479108059066:android:54c930980121cf3bc39783",
+        "android_client_info": {
+          "package_name": "com.ankom.streams"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBOmEAzXqTeQoQ12y_zyggLWfS-b4tYZv4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
