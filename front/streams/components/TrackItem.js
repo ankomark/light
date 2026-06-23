@@ -12,6 +12,7 @@ import { API_URL, getAccessToken } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer } from '../context/PlayerContext';
 import AddToPlaylistModal from './AddToPlaylistModal';
+import ReportModal from './ReportModal';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -29,6 +30,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
   const [lyricsVisible, setLyricsVisible] = useState(false);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
 
   const hasLyrics = typeof track.lyrics === 'string' && track.lyrics.trim().length > 0;
 
@@ -210,6 +212,14 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
             </TouchableOpacity>
           )}
 
+          {/* Report — a direct flag on other artists' tracks (mirrors posts). */}
+          {!isOwner && (
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setReportVisible(true)} hitSlop={HIT}
+              accessibilityRole="button" accessibilityLabel="Report track">
+              <MaterialIcons name="flag" size={20} color={colors.warning} />
+            </TouchableOpacity>
+          )}
+
           {onRemoveFromPlaylist && (
             <TouchableOpacity style={styles.iconBtn} onPress={onRemoveFromPlaylist} hitSlop={HIT}>
               <MaterialCommunityIcons name="playlist-remove" size={20} color={colors.textSecondary} />
@@ -238,6 +248,13 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
         onClose={() => setPlaylistModalVisible(false)}
         trackId={track.id}
         trackTitle={track.title}
+      />
+
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        contentType="track"
+        objectId={track.id}
       />
 
       {/* Floating lyrics page */}
