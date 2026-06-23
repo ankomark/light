@@ -51,6 +51,7 @@ import GroupDetail from './pages/GroupDetail';
 import CreateGroup from './pages/CreateGroup';
 import GroupMembers from './pages/GroupMembers';
 import GroupJoinRequests from './pages/GroupJoinRequests';
+import GroupAddMembers from './pages/GroupAddMembers';
 import MarketplaceHome from './components/marketplace/MarketplaceHome';
 import ProductList from './components/marketplace/ProductList';
 import ProductDetail from './components/marketplace/ProductDetail';
@@ -59,6 +60,7 @@ import EditProduct from './components/marketplace/EditProduct';
 import AddProduct from './components/marketplace/AddProduct';
 import SellerDashboard from './components/marketplace/SellerDashboard';
 import Checkout from './components/marketplace/Checkout';
+import OrderHistory from './components/marketplace/OrderHistory';
 import AdminDashboard from './components/admin/AdminDashboard';
 import AdminReports from './components/admin/AdminReports';
 import AdminUsers from './components/admin/AdminUsers';
@@ -223,8 +225,8 @@ const App = () => {
                 <Stack.Screen name="FollowList" component={FollowList} options={{ headerShown: true, title: 'Following', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD' }} />
                 <Stack.Screen name="Profile" component={ProfileWrapper} />
                 <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom' }} />
-                <Stack.Screen name="Playlists" component={PlaylistsScreen} options={{ headerShown: true, title: 'Playlists', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD' }} />
-                <Stack.Screen name="PlaylistDetail" component={PlaylistDetail} options={{ headerShown: true, title: 'Playlist', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD' }} />
+                <Stack.Screen name="Playlists" component={PlaylistsWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="PlaylistDetail" component={PlaylistDetailWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: true }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>
@@ -248,6 +250,7 @@ const App = () => {
                 <Stack.Screen name="CreateGroup" component={CreateGroup} />
                 <Stack.Screen name="GroupMembers" component={GroupMembers} options={{ title: 'Group Members' }}/>
                 <Stack.Screen name="GroupJoinRequests" component={GroupJoinRequests} options={{ title: 'Join Requests' }}/>
+                <Stack.Screen name="GroupAddMembers" component={GroupAddMembers} options={{ headerShown: false }}/>
                 <Stack.Screen name="MarketplaceHome" component={MarketplaceHomeWrapper} />
                 <Stack.Screen name="ProductList" component={ProductListWrapper} />
                 <Stack.Screen name="ProductDetail" component={ProductDetailWrapper} />
@@ -266,7 +269,7 @@ const App = () => {
                 <Stack.Screen name="AdminRoles" component={AdminRolesWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
-                <Stack.Screen name="Inbox" component={InboxScreen} />
+                <Stack.Screen name="Inbox" component={InboxWrapper} />
                 <Stack.Screen name="Chat" component={ChatScreen} />
                 <Stack.Screen name="Explore" component={ExploreWrapper} />
                 <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
@@ -293,10 +296,21 @@ const App = () => {
 };
 
 const GroupListWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Groups couldn't load.">
       <GroupList navigation={navigation} />
+    </ErrorBoundary>
+  </View>
+);
+
+const InboxWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Messages couldn't load.">
+      <InboxScreen navigation={navigation} />
     </ErrorBoundary>
   </View>
 );
@@ -414,54 +428,47 @@ const BooksListsPageWrapper = ({ navigation }) => (
     </View>
 );
 // Add these wrapper components
-const MarketplaceHomeWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <ErrorBoundary fallbackMessage="Marketplace couldn't load.">
-      <MarketplaceHome navigation={navigation} />
+// Shared luxury backdrop (rotating wallpaper + transparent nav bar) for every
+// marketplace screen, matching Studios/Churches. The screen itself renders on a
+// transparent surface so the wallpaper shows through behind cards & the header.
+const marketWrap = (Screen, fallbackMessage = "Marketplace couldn't load.") =>
+  ({ navigation, route }) => (
+    <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+      <Header navigation={navigation} transparentBg />
+      <ErrorBoundary fallbackMessage={fallbackMessage}>
+        <Screen navigation={navigation} route={route} />
+      </ErrorBoundary>
+    </View>
+  );
+
+const MarketplaceHomeWrapper = marketWrap(MarketplaceHome);
+const ProductListWrapper = marketWrap(ProductList);
+const ProductDetailWrapper = marketWrap(ProductDetail, 'This product couldn’t load.');
+const CartWrapper = marketWrap(Cart);
+const CheckoutWrapper = marketWrap(Checkout);
+const OrderHistoryWrapper = marketWrap(OrderHistory);
+const SellerDashboardWrapper = marketWrap(SellerDashboard);
+
+// Playlists share the same luxury backdrop + custom nav header as the rest of
+// the app (replacing the plain native stack header these screens used before).
+const PlaylistsWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Playlists couldn't load.">
+      <PlaylistsScreen navigation={navigation} />
     </ErrorBoundary>
   </View>
 );
 
-const ProductListWrapper = ({ navigation, route }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <ProductList route={route} navigation={navigation} />
-  </View>
-);
-
-const ProductDetailWrapper = ({ navigation, route }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <ProductDetail route={route} navigation={navigation} />
-  </View>
-);
-
-const CartWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <Cart navigation={navigation} />
-  </View>
-);
-
-const CheckoutWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <Checkout navigation={navigation} />
-  </View>
-);
-
-const OrderHistoryWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <OrderHistory navigation={navigation} />
-  </View>
-);
-
-const SellerDashboardWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <SellerDashboard navigation={navigation} />
+const PlaylistDetailWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="This playlist couldn’t load.">
+      <PlaylistDetail navigation={navigation} route={route} />
+    </ErrorBoundary>
   </View>
 );
 
@@ -521,19 +528,8 @@ const OrderDetailWrapper = ({ navigation, route }) => (
   </View>
 );
 
-const AddProductWrapper = ({ navigation }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <AddProduct navigation={navigation} />
-  </View>
-);
-
-const EditProductWrapper = ({ navigation, route }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <EditProduct route={route} navigation={navigation} />
-  </View>
-);
+const AddProductWrapper = marketWrap(AddProduct, 'The product form couldn’t load.');
+const EditProductWrapper = marketWrap(EditProduct, 'The product form couldn’t load.');
 
 // Repeat for other screens as needed...
 const SocialFeedWrapper = ({ navigation }) => (

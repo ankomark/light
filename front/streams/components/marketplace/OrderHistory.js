@@ -137,7 +137,7 @@ const OrderHistory = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
   },
   loadingContainer: {
     flex: 1,
@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 18,
-    color: '#888',
+    color: '#cdd9e5',
     marginTop: 16,
     marginBottom: 24,
   },

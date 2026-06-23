@@ -218,8 +218,8 @@ const Checkout = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, padding: spacing.md },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg, gap: spacing.sm },
+  container: { flex: 1, backgroundColor: 'transparent', padding: spacing.md },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent', gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textMuted },
   banner: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

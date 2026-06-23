@@ -150,8 +150,8 @@ const ProductDetail = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1D478B" />
-        <Text>Loading product details...</Text>
+        <ActivityIndicator size="large" color="#FFC46B" />
+        <Text style={styles.loadingText}>Loading product details...</Text>
       </View>
     );
   }
@@ -169,7 +169,8 @@ const ProductDetail = () => {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+     <View style={styles.sheet}>
       <View style={styles.mainImageContainer}>
         <Image 
           source={{ uri: product.images[selectedImage]?.image_url || 'https://via.placeholder.com/300' }} 
@@ -358,6 +359,7 @@ const ProductDetail = () => {
         <Icon name="share-alt" size={20} color="#1D478B" />
         <Text style={styles.shareButtonText}>Share this product</Text>
       </TouchableOpacity>
+     </View>
     </ScrollView>
   );
 };
@@ -365,12 +367,26 @@ const ProductDetail = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: 'transparent',
+  },
+  scrollContent: {
+    padding: 12,
+  },
+  sheet: {
     backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    paddingBottom: 8,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingText: {
+    color: '#cdd9e5',
+    fontSize: 15,
+    marginTop: 12,
   },
   errorContainer: {
     flex: 1,
@@ -380,7 +396,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 18,
-    color: '#888',
+    color: '#cdd9e5',
     marginTop: 16,
     textAlign: 'center',
   },

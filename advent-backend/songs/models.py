@@ -644,6 +644,8 @@ class Church(models.Model):
     members = models.PositiveIntegerField(default=0)
     pastor = models.CharField(max_length=200, blank=True, null=True)
     contact = models.CharField(max_length=100, blank=True, null=True)
+    # WhatsApp-style "Only admins can send messages" lock for the church community chat.
+    only_admins_can_post = models.BooleanField(default=False)
     # image = models.ImageField(upload_to='churches/', blank=True, null=True)
     image = CloudinaryField('image', folder='churches/', blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='churches')
@@ -794,6 +796,8 @@ class Choir(models.Model):
     founded_date = models.DateField(blank=True, null=True)
     youtube_link = models.URLField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    # WhatsApp-style "Only admins can send messages" lock for the choir community chat.
+    only_admins_can_post = models.BooleanField(default=False)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choirs')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -977,6 +981,12 @@ class Group(models.Model):
     # cover_image = models.ImageField(upload_to='group_covers/', blank=True, null=True)
     cover_image = CloudinaryField('image', folder='group_covers/', blank=True, null=True)
     is_private = models.BooleanField(default=True)
+    # WhatsApp-style "Only admins can send messages" lock.
+    only_admins_can_post = models.BooleanField(default=False)
+    # Shareable invite token. Lets admins add people to a private group via a
+    # link/code without exposing the group in public discovery. Null until an
+    # admin generates one; rotating it invalidates old links.
+    invite_code = models.UUIDField(null=True, blank=True, unique=True, db_index=True)
     # Soft moderation takedown — hidden from public group listings.
     is_removed = models.BooleanField(default=False)
     slug = models.SlugField(unique=True, max_length=100)

@@ -749,6 +749,15 @@ export const rejectChoirRequest = (id, requestId) =>
   apiRequest('post', `/choirs/${id}/reject-request/`, { request_id: requestId });
 export const removeChoirMember = (id, userId) =>
   apiRequest('post', `/choirs/${id}/remove-member/`, { user_id: userId });
+// Admin moderation: add members, change roles, lock the chat to admins.
+export const searchChoirUsers = (id, q) =>
+  apiRequest('get', `/choirs/${id}/search-users/`, null, { params: { q } });
+export const addChoirMember = (id, userId) =>
+  apiRequest('post', `/choirs/${id}/add-member/`, { user_id: userId });
+export const setChoirMemberRole = (id, userId, role) =>
+  apiRequest('post', `/choirs/${id}/set-role/`, { user_id: userId, role });
+export const setChoirPostingPolicy = (id, onlyAdmins) =>
+  apiRequest('post', `/choirs/${id}/posting-policy/`, { only_admins_can_post: onlyAdmins });
 export const leaveChoir = (id) =>
   apiRequest('post', `/choirs/${id}/leave/`);
 // Smaller page → a lighter first payload (messages can carry base64 media).
@@ -776,6 +785,15 @@ export const rejectChurchRequest = (id, requestId) =>
   apiRequest('post', `/churches/${id}/reject-request/`, { request_id: requestId });
 export const removeChurchMember = (id, userId) =>
   apiRequest('post', `/churches/${id}/remove-member/`, { user_id: userId });
+// Admin moderation: add members, change roles, lock the chat to admins.
+export const searchChurchUsers = (id, q) =>
+  apiRequest('get', `/churches/${id}/search-users/`, null, { params: { q } });
+export const addChurchMember = (id, userId) =>
+  apiRequest('post', `/churches/${id}/add-member/`, { user_id: userId });
+export const setChurchMemberRole = (id, userId, role) =>
+  apiRequest('post', `/churches/${id}/set-role/`, { user_id: userId, role });
+export const setChurchPostingPolicy = (id, onlyAdmins) =>
+  apiRequest('post', `/churches/${id}/posting-policy/`, { only_admins_can_post: onlyAdmins });
 export const leaveChurch = (id) =>
   apiRequest('post', `/churches/${id}/leave/`);
 export const fetchChurchMessages = (id, page = 1, pageSize = 15) =>
@@ -931,6 +949,32 @@ export const fetchGroupMembers = async (slug) => {
     throw error;
   }
 };
+
+// Group admin actions (WhatsApp-style member management).
+export const removeGroupMember = async (slug, userId) =>
+  apiRequest('post', `/groups/${slug}/remove-member/`, { user_id: userId });
+
+export const setGroupAdmin = async (slug, userId, isAdmin) =>
+  apiRequest('post', `/groups/${slug}/set-admin/`, { user_id: userId, is_admin: isAdmin });
+
+export const setGroupPostingPolicy = async (slug, onlyAdmins) =>
+  apiRequest('post', `/groups/${slug}/posting-policy/`, { only_admins_can_post: onlyAdmins });
+
+// Admin: search users to add (excludes existing members).
+export const searchGroupUsers = async (slug, q) =>
+  apiRequest('get', `/groups/${slug}/search-users/`, null, { params: { q } });
+
+// Admin: add a user directly to the group.
+export const addGroupMember = async (slug, userId) =>
+  apiRequest('post', `/groups/${slug}/add-member/`, { user_id: userId });
+
+// Admin: get (or rotate, with regenerate=true) the group's invite code.
+export const getGroupInviteLink = async (slug, regenerate = false) =>
+  apiRequest('post', `/groups/${slug}/invite-link/`, { regenerate });
+
+// Anyone: join a group using an invite code.
+export const joinGroupByCode = async (code) =>
+  apiRequest('post', '/groups/join-by-code/', { code });
 
 // ... other exports
 export const createGroupPost = async (content, groupSlug, attachments = []) => {
@@ -1517,6 +1561,13 @@ export default {
   approveJoinRequest,
   rejectJoinRequest,
   fetchGroupMembers,
+  removeGroupMember,
+  setGroupAdmin,
+  setGroupPostingPolicy,
+  searchGroupUsers,
+  addGroupMember,
+  getGroupInviteLink,
+  joinGroupByCode,
   fetchNotices,
   createNotice,
   deleteNotice,

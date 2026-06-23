@@ -171,8 +171,8 @@ const PlaylistsScreen = () => {
 const COVER = 56;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  centered: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: 'transparent' },
+  centered: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
   listContent: { padding: spacing.md, paddingBottom: 120, flexGrow: 1 },
   card: {
     flexDirection: 'row',

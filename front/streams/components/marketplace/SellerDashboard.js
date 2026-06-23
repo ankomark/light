@@ -357,7 +357,7 @@ const SellerDashboard = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: 'transparent',
   },
   loadingContainer: {
     flex: 1,
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
   },
   authText: {
     fontSize: 18,
-    color: COLORS.black,
+    color: '#E0E1DD',
     marginVertical: 20,
     textAlign: 'center',
   },
@@ -471,7 +471,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: COLORS.gray,
+    color: '#cdd9e5',
     marginTop: 16,
     marginBottom: 24,
     textAlign: 'center',

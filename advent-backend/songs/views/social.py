@@ -637,9 +637,13 @@ class ExploreViewSet(viewsets.ViewSet):
         tracks = Track.objects.filter(
             Q(title__icontains=query) | Q(album__icontains=query), is_removed=False
         ).select_related('artist').order_by('-created_at')[:10]
+        # Never surface private groups the caller isn't part of — their very
+        # existence must stay hidden from non-members.
         groups = Group.objects.filter(
             Q(name__icontains=query) | Q(description__icontains=query)
-        ).order_by('-created_at')[:10]
+        ).filter(
+            Q(is_private=False) | Q(creator=request.user) | Q(members__user=request.user)
+        ).filter(is_removed=False).distinct().order_by('-created_at')[:10]
         return Response({
             'users': SimpleUserSerializer(users, many=True, context={'request': request}).data,
             'posts': SocialPostSerializer(posts, many=True, context={'request': request}).data,

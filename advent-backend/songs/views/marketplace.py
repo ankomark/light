@@ -112,7 +112,14 @@ class ProductViewSet(viewsets.ModelViewSet):
     lookup_field = 'slug'
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        # select_related the to-one joins (seller, its profile for the avatar, and
+        # category) and prefetch the images so a page of products is served in a
+        # handful of queries instead of one-per-product-per-relation (N+1).
+        queryset = (
+            super().get_queryset()
+            .select_related('seller', 'seller__profile', 'category')
+            .prefetch_related('images')
+        )
         seller_id = self.request.query_params.get('seller')
         if seller_id:
             try:
@@ -208,7 +215,16 @@ class CartViewSet(viewsets.ModelViewSet):
             )
     @action(detail=False, methods=['get'])
     def my_cart(self, request):
-        cart = get_object_or_404(Cart, user=request.user)
+        # Prefetch each item's product graph (images + seller/profile + category)
+        # so rendering the cart is a few queries rather than N+1 per line item.
+        cart = get_object_or_404(
+            Cart.objects.prefetch_related(
+                'items__product__images',
+                'items__product__seller__profile',
+                'items__product__category',
+            ),
+            user=request.user,
+        )
         serializer = self.get_serializer(cart)
         return Response(serializer.data)
     
@@ -300,7 +316,20 @@ class OrderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Order.objects.filter(Q(buyer=self.request.user) | Q(items__seller=self.request.user)).distinct()
+        # Prefetch the item → product graph (and buyer) so order lists/details
+        # don't re-query the seller/images/category for every line item.
+        return (
+            Order.objects
+            .filter(Q(buyer=self.request.user) | Q(items__seller=self.request.user))
+            .distinct()
+            .select_related('buyer', 'buyer__profile')
+            .prefetch_related(
+                'items__seller',
+                'items__product__images',
+                'items__product__seller__profile',
+                'items__product__category',
+            )
+        )
 
     @action(detail=True, methods=['post'], url_path='set-shipping')
     def set_shipping(self, request, pk=None):

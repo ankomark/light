@@ -148,8 +148,8 @@ const Cart = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1D478B" />
-        <Text>Loading your cart...</Text>
+        <ActivityIndicator size="large" color="#FFC46B" />
+        <Text style={styles.loadingText}>Loading your cart...</Text>
       </View>
     );
   }
@@ -255,12 +255,17 @@ const Cart = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingText: {
+    color: '#cdd9e5',
+    fontSize: 15,
+    marginTop: 12,
   },
   emptyContainer: {
     flex: 1,
@@ -270,7 +275,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 18,
-    color: '#888',
+    color: '#cdd9e5',
     marginTop: 16,
     marginBottom: 24,
   },

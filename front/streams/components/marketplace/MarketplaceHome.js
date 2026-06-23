@@ -52,7 +52,7 @@ const MarketplaceHome = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>Loading marketplace...</Text>
+        <Text style={styles.loadingText}>Loading marketplace...</Text>
       </View>
     );
   }
@@ -138,13 +138,17 @@ const MarketplaceHome = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
     padding: 16,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingText: {
+    color: '#cdd9e5',
+    fontSize: 15,
   },
   heroContainer: {
     backgroundColor: '#1D478B',
@@ -170,7 +174,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 12,
-    color: '#333',
+    color: '#FFFFFF',
   },
   categoryList: {
     paddingRight: 16,
@@ -194,7 +198,7 @@ const styles = StyleSheet.create({
   categoryName: {
     fontSize: 14,
     textAlign: 'center',
-    color: '#555',
+    color: 'rgba(255,255,255,0.85)',
   },
   productList: {
     paddingRight: 16,
@@ -213,12 +217,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 4,
-    color: '#333',
+    color: '#FFFFFF',
   },
   productPrice: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1D478B',
+    color: '#FFC46B',
   },
   buttonContainer: {
     marginTop: 16,

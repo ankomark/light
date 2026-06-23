@@ -11,11 +11,19 @@ class GroupSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
     cover_image = serializers.ImageField(required=False, allow_null=True)
     is_private = serializers.BooleanField(default=False)
+    # Override the model field: the invite token is only ever revealed to admins.
+    invite_code = serializers.SerializerMethodField()
 
     class Meta:
         model = Group
         fields = '__all__'
         read_only_fields = ['creator', 'slug', 'created_at', 'updated_at']
+
+    def get_invite_code(self, obj):
+        m = self._membership(obj)
+        if m and m.is_admin and obj.invite_code:
+            return str(obj.invite_code)
+        return None
 
     def _membership(self, obj):
         request = self.context.get('request')

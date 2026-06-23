@@ -10,7 +10,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Image, Alert,
-  ActivityIndicator, KeyboardAvoidingView, Platform, Modal, Pressable, Animated, PanResponder,
+  ActivityIndicator, KeyboardAvoidingView, Platform, Modal, Pressable, Animated, PanResponder, Switch,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +28,7 @@ import {
   fetchChurchCommunity, fetchChurchMessages, sendChurchMessage, deleteChurchMessage,
   requestJoinChurch, fetchChurchMembers, fetchChurchJoinRequests, approveChurchRequest,
   rejectChurchRequest, removeChurchMember, leaveChurch, reactToChurchMessage,
+  searchChurchUsers, addChurchMember, setChurchMemberRole, setChurchPostingPolicy,
 } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -202,6 +203,11 @@ const ChurchCommunity = ({ navigation, route }) => {
   const [showManage, setShowManage] = useState(false);
   const [requests, setRequests] = useState([]);
   const [members, setMembers] = useState([]);
+  const [showAdd, setShowAdd] = useState(false);     // add-members search modal
+  const [addQuery, setAddQuery] = useState('');
+  const [addResults, setAddResults] = useState([]);
+  const [addBusyId, setAddBusyId] = useState(null);  // user id currently being added
+  const [policyBusy, setPolicyBusy] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
   const [viewerUri, setViewerUri] = useState(null); // full-screen image viewer
   const [replyTo, setReplyTo] = useState(null);     // message being replied to
@@ -232,6 +238,9 @@ const ChurchCommunity = ({ navigation, route }) => {
 
   const isMember = !!community?.is_member;
   const isAdmin = !!community?.is_admin;
+  const onlyAdmins = !!community?.only_admins_can_post;
+  const creatorId = community?.created_by_id;
+  const canPost = isAdmin || !onlyAdmins; // members can't post when the chat is admin-locked
 
   // ── load community snapshot + first page of messages ──────────────────────
   // Fire both at once and reveal the screen the moment the (small, fast)
@@ -557,6 +566,50 @@ const ChurchCommunity = ({ navigation, route }) => {
       } },
     ]);
   };
+
+  // Promote a member to admin, or dismiss an admin back to a member (optimistic).
+  const toggleAdmin = (m) => {
+    const nextRole = m.role === 'admin' ? 'member' : 'admin';
+    setMembers((p) => p.map((x) => (x.id === m.id ? { ...x, role: nextRole } : x)));
+    setChurchMemberRole(churchId, m.user.id, nextRole).catch(() => {
+      setMembers((p) => p.map((x) => (x.id === m.id ? { ...x, role: m.role } : x)));
+      Alert.alert('Church', 'Could not update this role.');
+    });
+  };
+
+  // WhatsApp-style "Only admins can send messages" lock (admin only).
+  const togglePosting = async (value) => {
+    setPolicyBusy(true);
+    setCommunity((c) => ({ ...c, only_admins_can_post: value }));
+    try {
+      await setChurchPostingPolicy(churchId, value);
+    } catch {
+      setCommunity((c) => ({ ...c, only_admins_can_post: !value }));
+      Alert.alert('Church', 'Could not change this setting.');
+    } finally { setPolicyBusy(false); }
+  };
+
+  // ── add members (admin search) ───────────────────────────────────────────--
+  const openAdd = () => { setAddQuery(''); setAddResults([]); setShowAdd(true); };
+  const runSearch = useCallback(async (text) => {
+    setAddQuery(text);
+    if (text.trim().length < 2) { setAddResults([]); return; }
+    try {
+      const res = await searchChurchUsers(churchId, text.trim());
+      setAddResults(Array.isArray(res) ? res : []);
+    } catch { setAddResults([]); }
+  }, [churchId]);
+  const addMember = async (u) => {
+    setAddBusyId(u.id);
+    try {
+      await addChurchMember(churchId, u.id);
+      setAddResults((p) => p.filter((x) => x.id !== u.id));
+      fetchChurchMembers(churchId).then(setMembers).catch(() => {});
+      setCommunity((c) => ({ ...c, members_count: (c?.members_count || 0) + 1 }));
+    } catch (e) {
+      Alert.alert('Church', e?.response?.data?.error || 'Could not add this person.');
+    } finally { setAddBusyId(null); }
+  };
   const onLeave = () => {
     Alert.alert('Leave community', `Leave ${church.name || 'this church'}?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -687,7 +740,12 @@ const ChurchCommunity = ({ navigation, route }) => {
             </View>
           )}
 
-          {recording ? (
+          {!canPost ? (
+            <View style={[styles.lockedBar, { paddingBottom: insets.bottom || spacing.sm }]}>
+              <Ionicons name="lock-closed" size={15} color={colors.textMuted} />
+              <Text style={styles.lockedBarText}>Only admins can send messages</Text>
+            </View>
+          ) : recording ? (
             <View style={styles.recordBar}>
               <View style={styles.recDot} />
               <Text style={styles.recText}>Recording… release to send</Text>
@@ -733,37 +791,120 @@ const ChurchCommunity = ({ navigation, route }) => {
             data={members}
             keyExtractor={(m) => String(m.id)}
             ListHeaderComponent={
-              isAdmin && requests.length > 0 ? (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Requests to join</Text>
-                  {requests.map((r) => (
-                    <View key={r.id} style={styles.memberRow}>
-                      <Image source={r.user?.profile_picture ? { uri: r.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
-                      <Text style={styles.memberName} numberOfLines={1}>@{r.user?.username}</Text>
-                      <TouchableOpacity style={[styles.smallBtn, styles.approveBtn]} onPress={() => approve(r)}><Text style={styles.approveText}>Approve</Text></TouchableOpacity>
-                      <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => reject(r)}><Text style={styles.rejectText}>Decline</Text></TouchableOpacity>
+              <View>
+                {isAdmin && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionLabel}>Admin controls</Text>
+                    <View style={styles.policyRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.policyTitle}>Only admins can send messages</Text>
+                        <Text style={styles.policySub}>Members can read but not post.</Text>
+                      </View>
+                      <Switch
+                        value={onlyAdmins}
+                        onValueChange={togglePosting}
+                        disabled={policyBusy}
+                        trackColor={{ true: colors.accent, false: colors.border }}
+                        thumbColor="#fff"
+                      />
                     </View>
-                  ))}
-                  <Text style={[styles.sectionLabel, { marginTop: spacing.lg }]}>Members</Text>
-                </View>
-              ) : <Text style={[styles.sectionLabel, { paddingHorizontal: spacing.md, paddingTop: spacing.md }]}>Members</Text>
-            }
-            renderItem={({ item: m }) => (
-              <View style={styles.memberRow}>
-                <Image source={m.user?.profile_picture ? { uri: m.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.memberName} numberOfLines={1}>@{m.user?.username}</Text>
-                  <Text style={styles.memberRole}>{ROLE_BADGE[m.role] || m.role}</Text>
-                </View>
-                {isAdmin && m.role !== 'admin' && (
-                  <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => remove(m)}><Text style={styles.rejectText}>Remove</Text></TouchableOpacity>
+                    <TouchableOpacity style={styles.addBtn} onPress={openAdd} activeOpacity={0.85}>
+                      <Ionicons name="person-add" size={18} color="#0A1628" />
+                      <Text style={styles.addBtnText}>Add members</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
+                {isAdmin && requests.length > 0 && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionLabel}>Requests to join</Text>
+                    {requests.map((r) => (
+                      <View key={r.id} style={styles.memberRow}>
+                        <Image source={r.user?.profile_picture ? { uri: r.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
+                        <Text style={styles.memberName} numberOfLines={1}>@{r.user?.username}</Text>
+                        <TouchableOpacity style={[styles.smallBtn, styles.approveBtn]} onPress={() => approve(r)}><Text style={styles.approveText}>Approve</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => reject(r)}><Text style={styles.rejectText}>Decline</Text></TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <Text style={[styles.sectionLabel, { paddingHorizontal: spacing.md, paddingTop: spacing.md }]}>Members</Text>
               </View>
-            )}
+            }
+            renderItem={({ item: m }) => {
+              const isCreator = m.user?.id === creatorId;
+              return (
+                <View style={styles.memberRow}>
+                  <Image source={m.user?.profile_picture ? { uri: m.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.memberName} numberOfLines={1}>@{m.user?.username}</Text>
+                    <Text style={styles.memberRole}>{isCreator ? 'Creator' : (ROLE_BADGE[m.role] || m.role)}</Text>
+                  </View>
+                  {isAdmin && !isCreator && (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.smallBtn, m.role === 'admin' ? styles.rejectBtn : styles.approveBtn]}
+                        onPress={() => toggleAdmin(m)}
+                      >
+                        <Text style={m.role === 'admin' ? styles.rejectText : styles.approveText}>
+                          {m.role === 'admin' ? 'Dismiss' : 'Make admin'}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => remove(m)}>
+                        <Text style={styles.rejectText}>Remove</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+              );
+            }}
             ListFooterComponent={
               !isAdmin ? (
                 <TouchableOpacity style={styles.leaveBtn} onPress={onLeave}><Text style={styles.leaveText}>Leave community</Text></TouchableOpacity>
               ) : null
+            }
+            contentContainerStyle={{ paddingBottom: spacing.xl }}
+          />
+        </SafeAreaView>
+      </Modal>
+
+      {/* Add-members search modal (admin) */}
+      <Modal visible={showAdd} animationType="slide" onRequestClose={() => setShowAdd(false)} statusBarTranslucent>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.modalBar}>
+            <TouchableOpacity onPress={() => setShowAdd(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.textPrimary} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>Add members</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={18} color={colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              value={addQuery}
+              onChangeText={runSearch}
+              placeholder="Search by username…"
+              placeholderTextColor={colors.placeholder}
+              autoFocus
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <FlatList
+            data={addResults}
+            keyExtractor={(u) => String(u.id)}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item: u }) => (
+              <View style={styles.memberRow}>
+                <Image source={u.profile_picture ? { uri: u.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
+                <Text style={[styles.memberName, { flex: 1 }]} numberOfLines={1}>@{u.username}</Text>
+                <TouchableOpacity style={[styles.smallBtn, styles.approveBtn]} onPress={() => addMember(u)} disabled={addBusyId === u.id}>
+                  {addBusyId === u.id ? <ActivityIndicator size="small" color="#0A1628" /> : <Text style={styles.approveText}>Add</Text>}
+                </TouchableOpacity>
+              </View>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.addHint}>
+                {addQuery.trim().length < 2 ? 'Type at least 2 letters to search.' : 'No matching people.'}
+              </Text>
             }
             contentContainerStyle={{ paddingBottom: spacing.xl }}
           />
@@ -968,6 +1109,39 @@ const styles = StyleSheet.create({
   rejectText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   leaveBtn: { margin: spacing.lg, paddingVertical: spacing.sm + 2, borderRadius: radius.md, alignItems: 'center', backgroundColor: 'rgba(229,57,53,0.12)', borderWidth: 1, borderColor: 'rgba(229,57,53,0.4)' },
   leaveText: { ...typography.button, color: colors.error, fontWeight: '700' },
+
+  // Admin controls (manage modal)
+  policyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: 'rgba(18,30,46,0.7)', borderRadius: radius.md, padding: spacing.sm + 2,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, marginBottom: spacing.sm,
+  },
+  policyTitle: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
+  policySub: { ...typography.caption, color: colors.textMuted, marginTop: 1 },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.sm + 2,
+  },
+  addBtnText: { ...typography.button, color: '#0A1628', fontWeight: '800' },
+
+  // Locked composer (only-admins-can-post)
+  lockedBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    paddingTop: spacing.md, paddingHorizontal: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(16,46,80,0.95)',
+  },
+  lockedBarText: { ...typography.caption, color: colors.textMuted, fontWeight: '600' },
+
+  // Add-members search
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginHorizontal: spacing.md, marginTop: spacing.md, marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md, height: 46, borderRadius: radius.lg,
+    backgroundColor: colors.inputBg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+  },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
+  addHint: { ...typography.caption, color: colors.textMuted, textAlign: 'center', padding: spacing.xl },
 });
 
 export default ChurchCommunity;

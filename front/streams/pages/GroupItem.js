@@ -68,7 +68,7 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
 };
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2, gap: spacing.sm, backgroundColor: colors.bg },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2, gap: spacing.sm, backgroundColor: 'rgba(16,46,80,0.55)', borderRadius: radius.md, marginBottom: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)' },
   avatarWrap: { position: 'relative' },
   avatar: { width: 54, height: 54, borderRadius: 27, backgroundColor: colors.surface },
   avatarFallback: { alignItems: 'center', justifyContent: 'center' },

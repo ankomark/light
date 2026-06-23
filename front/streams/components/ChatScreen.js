@@ -16,6 +16,7 @@ import { Audio } from 'expo-av';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { fetchMessages, sendMessage, markConversationRead } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import RotatingBackground from './RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -41,6 +42,7 @@ const ChatScreen = ({ route, navigation }) => {
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [viewer, setViewer] = useState(null); // full-screen image uri
+  const [attachSheet, setAttachSheet] = useState(false); // luxury "what to send" sheet
   const [isRecording, setIsRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
   const [playingId, setPlayingId] = useState(null);
@@ -168,12 +170,15 @@ const ChatScreen = ({ route, navigation }) => {
 
   const onAttachPress = useCallback(() => {
     setShowEmoji(false);
-    Alert.alert('Attach', 'Choose what to send', [
-      { text: 'Photo', onPress: attachImage },
-      { text: 'Document', onPress: attachFile },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [attachImage, attachFile]);
+    setAttachSheet(true);
+  }, []);
+
+  // Dismiss the sheet first, then fire the picker so the two don't fight over
+  // the screen on Android.
+  const pickFromSheet = useCallback((fn) => {
+    setAttachSheet(false);
+    setTimeout(fn, 220);
+  }, []);
 
   const openFile = useCallback(async (msg) => {
     try {
@@ -329,12 +334,14 @@ const ChatScreen = ({ route, navigation }) => {
   }, [currentUser?.id, messages, openFile]);
 
   return (
+    <View style={styles.root}>
+    <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.7)" />
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <SafeAreaView edges={['top']} style={styles.headerSafe}>
-        <LinearGradient colors={[colors.surface, colors.bg]} style={styles.header}>
+        <LinearGradient colors={['rgba(16,46,80,0.95)', 'rgba(10,22,40,0.80)']} style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
@@ -350,7 +357,7 @@ const ChatScreen = ({ route, navigation }) => {
       </SafeAreaView>
 
       {loading && messages.length === 0 ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color={colors.primary} /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
       ) : (
         <FlatList
           ref={listRef}
@@ -439,17 +446,56 @@ const ChatScreen = ({ route, navigation }) => {
           <View style={styles.viewerClose}><Ionicons name="close" size={28} color={colors.white} /></View>
         </Pressable>
       </Modal>
+
+      {/* Luxury attachment sheet: choose what to send */}
+      <Modal visible={attachSheet} transparent animationType="slide" onRequestClose={() => setAttachSheet(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setAttachSheet(false)}>
+          <Pressable style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Send to {otherUser?.username ?? 'chat'}</Text>
+            <Text style={styles.sheetSubtitle}>Choose what to send</Text>
+
+            <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => pickFromSheet(attachImage)}>
+              <View style={[styles.sheetIcon, styles.sheetIconPhoto]}>
+                <Ionicons name="image" size={24} color={colors.accent} />
+              </View>
+              <View style={styles.sheetOptionText}>
+                <Text style={styles.sheetOptionLabel}>Photo</Text>
+                <Text style={styles.sheetOptionHint}>Send a picture from your gallery</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => pickFromSheet(attachFile)}>
+              <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                <Ionicons name="document-text" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.sheetOptionText}>
+                <Text style={styles.sheetOptionLabel}>Document</Text>
+                <Text style={styles.sheetOptionHint}>Share a file up to 6 MB</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setAttachSheet(false)}>
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  headerSafe: { backgroundColor: colors.surface },
+  root: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
+  headerSafe: { backgroundColor: 'rgba(16,46,80,0.95)' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.sm },
   backBtn: { marginRight: spacing.xs },
-  headerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.surface },
+  headerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.surface, borderWidth: 1.5, borderColor: 'rgba(244,162,97,0.4)' },
   headerInfo: { flex: 1 },
   headerName: { ...typography.h3, color: colors.textPrimary },
 
@@ -461,8 +507,8 @@ const styles = StyleSheet.create({
   msgAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface },
   bubble: { maxWidth: '78%', borderRadius: radius.lg, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs + 2, ...shadows.sm },
   bubbleMedia: { padding: 4 },
-  bubbleOwn: { backgroundColor: colors.primary, borderBottomRightRadius: 4 },
-  bubbleOther: { backgroundColor: colors.card, borderBottomLeftRadius: 4 },
+  bubbleOwn: { backgroundColor: '#15407A', borderBottomRightRadius: 4 },
+  bubbleOther: { backgroundColor: 'rgba(18,30,46,0.92)', borderBottomLeftRadius: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)' },
   bubbleText: { fontSize: 15, lineHeight: 21 },
   bubbleTextOwn: { color: colors.white },
   bubbleTextOther: { color: colors.textPrimary },
@@ -483,7 +529,7 @@ const styles = StyleSheet.create({
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   emptyText: { ...typography.body, color: colors.textMuted },
 
-  emojiPanel: { height: 220, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
+  emojiPanel: { height: 220, backgroundColor: 'rgba(16,46,80,0.97)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)' },
   emojiGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: spacing.sm },
   emojiBtn: { width: '12.5%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
   emojiText: { fontSize: 26 },
@@ -491,7 +537,7 @@ const styles = StyleSheet.create({
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end',
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
-    backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.xs,
+    backgroundColor: 'rgba(16,46,80,0.95)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)', gap: spacing.xs,
   },
   iconBtn: { width: 36, height: 40, alignItems: 'center', justifyContent: 'center' },
   recordingInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm },
@@ -508,6 +554,35 @@ const styles = StyleSheet.create({
   viewerRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   viewerImage: { width: '100%', height: '80%' },
   viewerClose: { position: 'absolute', top: 48, right: 20 },
+
+  // ── Luxury attachment sheet ───────────────────────────────────────────────
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheetCard: {
+    backgroundColor: 'rgba(16,46,80,0.98)',
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xl + spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.35)', ...shadows.lg,
+  },
+  sheetHandle: { alignSelf: 'center', width: 42, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.22)', marginBottom: spacing.md },
+  sheetTitle: { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
+  sheetSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.md },
+  sheetOption: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.md,
+    backgroundColor: 'rgba(13,35,64,0.85)', borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', marginBottom: spacing.sm,
+  },
+  sheetIcon: { width: 48, height: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  sheetIconPhoto: { backgroundColor: 'rgba(244,162,97,0.16)', borderColor: 'rgba(244,162,97,0.5)' },
+  sheetIconFile: { backgroundColor: 'rgba(29,161,242,0.14)', borderColor: 'rgba(29,161,242,0.5)' },
+  sheetOptionText: { flex: 1 },
+  sheetOptionLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '700' },
+  sheetOptionHint: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
+  sheetCancel: {
+    marginTop: spacing.xs, paddingVertical: spacing.sm + 2, borderRadius: radius.lg, alignItems: 'center',
+    backgroundColor: 'rgba(18,30,46,0.9)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  sheetCancelText: { ...typography.button, color: colors.textSecondary, fontWeight: '700' },
 });
 
 export default ChatScreen;

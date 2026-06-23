@@ -405,9 +405,12 @@ const AddProduct = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
   },
   contentContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    margin: 12,
     padding: 16,
   },
   sectionTitle: {

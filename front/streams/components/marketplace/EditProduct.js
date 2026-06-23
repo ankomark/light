@@ -420,10 +420,13 @@ const EditProduct = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-    padding: 16,
+    backgroundColor: 'transparent',
   },
   contentContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    margin: 12,
+    padding: 16,
     paddingBottom: 32,
   },
   loadingContainer: {

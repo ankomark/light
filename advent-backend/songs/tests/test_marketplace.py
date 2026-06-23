@@ -14,8 +14,8 @@ class CheckoutTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.seller = User.objects.create_user(username='seller', password='pw')
-        self.buyer = User.objects.create_user(username='buyer', password='pw')
+        self.seller = User.objects.create_user(username='seller', email='seller@test.local', password='pw')
+        self.buyer = User.objects.create_user(username='buyer', email='buyer@test.local', password='pw')
         self.product = Product.objects.create(
             seller=self.seller, title='Hymnal', description='d',
             price=Decimal('10.00'), quantity=3,
@@ -52,8 +52,8 @@ class PaymentFulfillmentTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.seller = User.objects.create_user(username='seller', password='pw')
-        self.buyer = User.objects.create_user(username='buyer', password='pw')
+        self.seller = User.objects.create_user(username='seller', email='seller@test.local', password='pw')
+        self.buyer = User.objects.create_user(username='buyer', email='buyer@test.local', password='pw')
         self.product = Product.objects.create(
             seller=self.seller, title='Hymnal', description='d',
             price=Decimal('10.00'), quantity=5,
@@ -86,8 +86,8 @@ class UpdateStatusAuthTests(APITestCase):
 
     def setUp(self):
         cache.clear()
-        self.seller = User.objects.create_user(username='seller', password='pw')
-        self.buyer = User.objects.create_user(username='buyer', password='pw')
+        self.seller = User.objects.create_user(username='seller', email='seller@test.local', password='pw')
+        self.buyer = User.objects.create_user(username='buyer', email='buyer@test.local', password='pw')
         self.product = Product.objects.create(
             seller=self.seller, title='Hymnal', description='d',
             price=Decimal('10.00'), quantity=5,

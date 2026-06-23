@@ -17,9 +17,10 @@ import { Audio } from 'expo-av';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, markGroupRead,
-  leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost,
+  leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -186,12 +187,18 @@ const GroupDetail = ({ route, navigation }) => {
   const [isAdmin, setIsAdmin] = useState(initialGroup?.is_admin || false);
   const [requested, setRequested] = useState(initialGroup?.has_pending_request || false);
   const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // When we arrive from the list we already have the group object, so we can
+  // render the chat shell straight away instead of blocking on a full reload.
+  const [loading, setLoading] = useState(!initialGroup);
+  const [firstLoad, setFirstLoad] = useState(true); // first posts fetch in flight
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [viewer, setViewer] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [menuMsg, setMenuMsg] = useState(null); // long-press action menu target
+  const [attachSheet, setAttachSheet] = useState(false); // luxury "what to send" sheet
+  const [menuSheet, setMenuSheet] = useState(false);      // group options sheet
+  const [leaveConfirm, setLeaveConfirm] = useState(false);// leave-group confirm
   const [isRecording, setIsRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
   const [playingId, setPlayingId] = useState(null);
@@ -225,19 +232,26 @@ const GroupDetail = ({ route, navigation }) => {
   }, [groupSlug]);
 
   const loadGroup = useCallback(async () => {
+    // If the list already told us the user can read this group, start fetching
+    // messages right now — in parallel with the group-details request — so the
+    // chat fills in without waiting for two sequential round-trips.
+    const canReadNow = initialGroup?.is_member || (initialGroup && !initialGroup.is_private);
+    const postsPromise = canReadNow ? loadPosts() : null;
     try {
       const g = await fetchGroupDetails(groupSlug);
       setGroup(g);
       setIsMember(g.is_member);
       setIsAdmin(g.is_admin);
       setRequested(!!g.has_pending_request);
-      if (g.is_member || !g.is_private) await loadPosts();
+      if (!postsPromise && (g.is_member || !g.is_private)) await loadPosts();
     } catch {
       Alert.alert('Error', 'Could not load this group.');
     } finally {
+      if (postsPromise) await postsPromise.catch(() => {});
       setLoading(false);
+      setFirstLoad(false);
     }
-  }, [groupSlug, loadPosts]);
+  }, [groupSlug, loadPosts, initialGroup]);
 
   const loadEarlier = useCallback(async () => {
     try {
@@ -339,12 +353,15 @@ const GroupDetail = ({ route, navigation }) => {
 
   const onAttachPress = useCallback(() => {
     setShowEmoji(false);
-    Alert.alert('Attach', 'Choose what to send', [
-      { text: 'Photo', onPress: attachImage },
-      { text: 'Document', onPress: attachFile },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [attachImage, attachFile]);
+    setAttachSheet(true);
+  }, []);
+
+  // Dismiss the sheet first, then fire the picker so the two don't fight over
+  // the screen on Android.
+  const pickFromSheet = useCallback((fn) => {
+    setAttachSheet(false);
+    setTimeout(fn, 220);
+  }, []);
 
   const openFile = useCallback(async (msg) => {
     try {
@@ -405,30 +422,47 @@ const GroupDetail = ({ route, navigation }) => {
     } catch { Alert.alert('Error', 'Could not play this voice note.'); setPlayingId(null); }
   }, [playingId]);
 
-  // ── Group menu ──
-  const openMenu = useCallback(() => {
-    const opts = [];
-    // Only members can view the member list.
-    if (isMember) {
-      opts.push({ text: 'View members', onPress: () => navigation.navigate('GroupMembers', { groupSlug, group, isAdmin }) });
-    }
-    if (isAdmin) opts.push({ text: 'Join requests', onPress: () => navigation.navigate('GroupJoinRequests', { groupSlug, group }) });
-    if (isMember && group?.creator?.id !== currentUser?.id) {
-      opts.push({ text: 'Leave group', style: 'destructive', onPress: confirmLeave });
-    }
-    opts.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(group?.name || 'Group', null, opts);
-  }, [navigation, groupSlug, group, isAdmin, isMember, currentUser]);
+  // ── Group menu (luxury sheet) ──
+  const openMenu = useCallback(() => setMenuSheet(true), []);
 
-  const confirmLeave = () => {
-    Alert.alert('Leave group', `Leave "${group?.name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Leave', style: 'destructive', onPress: async () => {
-        try { await leaveGroup(groupSlug); navigation.goBack(); }
-        catch { Alert.alert('Error', 'Could not leave the group.'); }
-      } },
-    ]);
-  };
+  const goMembers = useCallback(() => {
+    setMenuSheet(false);
+    navigation.navigate('GroupMembers', { groupSlug, group, isAdmin });
+  }, [navigation, groupSlug, group, isAdmin]);
+
+  const goRequests = useCallback(() => {
+    setMenuSheet(false);
+    navigation.navigate('GroupJoinRequests', { groupSlug, group });
+  }, [navigation, groupSlug, group]);
+
+  const goAddMembers = useCallback(() => {
+    setMenuSheet(false);
+    navigation.navigate('GroupAddMembers', { groupSlug, group });
+  }, [navigation, groupSlug, group]);
+
+  const askLeave = useCallback(() => {
+    setMenuSheet(false);
+    setTimeout(() => setLeaveConfirm(true), 220);
+  }, []);
+
+  const doLeave = useCallback(async () => {
+    setLeaveConfirm(false);
+    try { await leaveGroup(groupSlug); navigation.goBack(); }
+    catch { Alert.alert('Error', 'Could not leave the group.'); }
+  }, [groupSlug, navigation]);
+
+  const canLeave = isMember && group?.creator?.id !== currentUser?.id;
+
+  const togglePostingPolicy = useCallback(async () => {
+    setMenuSheet(false);
+    const next = !group?.only_admins_can_post;
+    try {
+      const updated = await setGroupPostingPolicy(groupSlug, next);
+      setGroup(updated);
+    } catch {
+      Alert.alert('Error', 'Could not update this setting.');
+    }
+  }, [group, groupSlug]);
 
   const join = async () => {
     try {
@@ -503,15 +537,23 @@ const GroupDetail = ({ route, navigation }) => {
   }, [currentUser?.id, messages, playingId, openFile, playAudio, startReply, openMsgMenu, reactToPost, retrySend]);
 
   if (loading) {
-    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.primary} /></View>;
+    return (
+      <View style={styles.root}>
+        <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.68)" />
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+      </View>
+    );
   }
 
-  const canChat = isMember;
+  const adminsOnly = !!group?.only_admins_can_post;
+  const canChat = isMember && (!adminsOnly || isAdmin);
 
   return (
+    <View style={styles.root}>
+    <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.68)" />
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <SafeAreaView edges={['top']} style={styles.headerSafe}>
-        <LinearGradient colors={[colors.surface, colors.bg]} style={styles.header}>
+        <LinearGradient colors={['rgba(16,46,80,0.95)', 'rgba(10,22,40,0.80)']} style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
@@ -520,7 +562,11 @@ const GroupDetail = ({ route, navigation }) => {
             activeOpacity={isMember ? 0.8 : 1}
             onPress={() => isMember && navigation.navigate('GroupMembers', { groupSlug, group, isAdmin })}
           >
-            <View style={styles.groupAvatar}><Ionicons name="people" size={20} color={colors.primary} /></View>
+            {group?.cover_image ? (
+              <Image source={{ uri: group.cover_image }} style={styles.groupAvatar} />
+            ) : (
+              <View style={[styles.groupAvatar, styles.groupAvatarFallback]}><Ionicons name="people" size={20} color={colors.primary} /></View>
+            )}
             <View style={{ flex: 1 }}>
               <Text style={styles.headerName} numberOfLines={1}>{group?.name ?? 'Group'}</Text>
               <Text style={styles.headerSub} numberOfLines={1}>{group?.member_count ?? 0} members{group?.is_private ? ' · Private' : ''}</Text>
@@ -543,7 +589,11 @@ const GroupDetail = ({ route, navigation }) => {
         ListHeaderComponent={hasEarlier ? (
           <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>Load earlier messages</Text></TouchableOpacity>
         ) : null}
-        ListEmptyComponent={<View style={styles.emptyContainer}><Text style={styles.emptyText}>No messages yet. Say hello 👋</Text></View>}
+        ListEmptyComponent={firstLoad ? (
+          <View style={styles.emptyContainer}><ActivityIndicator color={colors.accent} /></View>
+        ) : (
+          <View style={styles.emptyContainer}><Text style={styles.emptyText}>No messages yet. Say hello 👋</Text></View>
+        )}
       />
 
       {showEmoji && canChat && (
@@ -591,6 +641,13 @@ const GroupDetail = ({ route, navigation }) => {
             </>
           )}
         </View>
+      ) : isMember ? (
+        <View style={styles.joinBar}>
+          <View style={styles.lockedPill}>
+            <Ionicons name="lock-closed" size={16} color={colors.textSecondary} />
+            <Text style={styles.lockedText}>Only admins can send messages</Text>
+          </View>
+        </View>
       ) : requested ? (
         <View style={styles.joinBar}>
           <View style={styles.pendingPill}>
@@ -609,6 +666,143 @@ const GroupDetail = ({ route, navigation }) => {
         <Pressable style={styles.viewerRoot} onPress={() => setViewer(null)}>
           <Image source={{ uri: viewer }} style={styles.viewerImage} resizeMode="contain" />
           <View style={styles.viewerClose}><Ionicons name="close" size={28} color={colors.white} /></View>
+        </Pressable>
+      </Modal>
+
+      {/* Luxury attachment sheet: choose what to send */}
+      <Modal visible={attachSheet} transparent animationType="slide" onRequestClose={() => setAttachSheet(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setAttachSheet(false)}>
+          <Pressable style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Share to the group</Text>
+            <Text style={styles.sheetSubtitle}>Choose what to send</Text>
+
+            <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => pickFromSheet(attachImage)}>
+              <View style={[styles.sheetIcon, styles.sheetIconPhoto]}>
+                <Ionicons name="image" size={24} color={colors.accent} />
+              </View>
+              <View style={styles.sheetOptionText}>
+                <Text style={styles.sheetOptionLabel}>Photo</Text>
+                <Text style={styles.sheetOptionHint}>Send a picture from your gallery</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => pickFromSheet(attachFile)}>
+              <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                <Ionicons name="document-text" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.sheetOptionText}>
+                <Text style={styles.sheetOptionLabel}>Document</Text>
+                <Text style={styles.sheetOptionHint}>Share a file up to 6 MB</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setAttachSheet(false)}>
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Luxury group options sheet: view members · join requests · leave */}
+      <Modal visible={menuSheet} transparent animationType="slide" onRequestClose={() => setMenuSheet(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setMenuSheet(false)}>
+          <Pressable style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle} numberOfLines={1}>{group?.name || 'Group'}</Text>
+            <Text style={styles.sheetSubtitle}>{group?.member_count ?? 0} members{group?.is_private ? ' · Private' : ''}</Text>
+
+            {isMember && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={goMembers}>
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name="people" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>View members</Text>
+                  <Text style={styles.sheetOptionHint}>See everyone in this group</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+
+            {isAdmin && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={goAddMembers}>
+                <View style={[styles.sheetIcon, styles.sheetIconPhoto]}>
+                  <Ionicons name="person-add" size={22} color={colors.accent} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>Add members</Text>
+                  <Text style={styles.sheetOptionHint}>Search people or share an invite link</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+
+            {isAdmin && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={goRequests}>
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name="mail-unread" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>Join requests</Text>
+                  <Text style={styles.sheetOptionHint}>Review people who want to join</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+
+            {isAdmin && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={togglePostingPolicy}>
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name={adminsOnly ? 'lock-closed' : 'lock-open'} size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>Only admins can message</Text>
+                  <Text style={styles.sheetOptionHint}>{adminsOnly ? 'On — members can’t send messages' : 'Off — everyone can send messages'}</Text>
+                </View>
+                <View style={[styles.toggle, adminsOnly && styles.toggleOn]}>
+                  <View style={[styles.toggleKnob, adminsOnly && styles.toggleKnobOn]} />
+                </View>
+              </TouchableOpacity>
+            )}
+
+            {canLeave && (
+              <TouchableOpacity style={[styles.sheetOption, styles.sheetOptionDanger]} activeOpacity={0.85} onPress={askLeave}>
+                <View style={[styles.sheetIcon, styles.sheetIconDanger]}>
+                  <Ionicons name="exit-outline" size={22} color={colors.error} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={[styles.sheetOptionLabel, { color: colors.error }]}>Leave group</Text>
+                  <Text style={styles.sheetOptionHint}>You'll stop receiving messages</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setMenuSheet(false)}>
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Luxury leave-group confirmation */}
+      <Modal visible={leaveConfirm} transparent animationType="fade" onRequestClose={() => setLeaveConfirm(false)}>
+        <Pressable style={styles.confirmBackdrop} onPress={() => setLeaveConfirm(false)}>
+          <Pressable style={styles.confirmCard}>
+            <View style={styles.confirmIcon}><Ionicons name="exit-outline" size={28} color={colors.error} /></View>
+            <Text style={styles.confirmTitle} numberOfLines={2}>Leave “{group?.name || 'this group'}”?</Text>
+            <Text style={styles.confirmText}>You'll no longer receive its messages. You can request to join again anytime.</Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity style={[styles.confirmBtn, styles.confirmCancelBtn]} activeOpacity={0.85} onPress={() => setLeaveConfirm(false)}>
+                <Text style={styles.confirmCancelText}>Stay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.confirmBtn, styles.confirmLeaveBtn]} activeOpacity={0.85} onPress={doLeave}>
+                <Text style={styles.confirmLeaveText}>Leave</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
@@ -641,17 +835,20 @@ const GroupDetail = ({ route, navigation }) => {
         </Pressable>
       </Modal>
     </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
-  headerSafe: { backgroundColor: colors.surface },
+  root: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
+  headerSafe: { backgroundColor: 'rgba(16,46,80,0.95)' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, gap: spacing.xs },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  groupAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center' },
+  groupAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card },
+  groupAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
   headerName: { ...typography.h3, color: colors.textPrimary },
   headerSub: { ...typography.caption, color: colors.textSecondary },
 
@@ -745,10 +942,71 @@ const styles = StyleSheet.create({
   joinBtnText: { ...typography.button, color: colors.white },
   pendingPill: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.surface, borderRadius: radius.full, borderWidth: 1, borderColor: colors.warning, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   pendingText: { ...typography.label, color: colors.warning, fontWeight: '700' },
+  lockedPill: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.surface, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  lockedText: { ...typography.label, color: colors.textSecondary, fontWeight: '600' },
+
+  // Toggle (admins-only switch in the options sheet)
+  toggle: { width: 44, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.16)', padding: 3, justifyContent: 'center' },
+  toggleOn: { backgroundColor: colors.accent },
+  toggleKnob: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.white, alignSelf: 'flex-start' },
+  toggleKnobOn: { alignSelf: 'flex-end' },
 
   viewerRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   viewerImage: { width: '100%', height: '80%' },
   viewerClose: { position: 'absolute', top: 48, right: 20 },
+
+  // ── Luxury attachment sheet ───────────────────────────────────────────────
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheetCard: {
+    backgroundColor: 'rgba(16,46,80,0.98)',
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xl + spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.35)',
+    ...shadows.lg,
+  },
+  sheetHandle: { alignSelf: 'center', width: 42, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.22)', marginBottom: spacing.md },
+  sheetTitle: { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
+  sheetSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.md },
+  sheetOption: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.md,
+    backgroundColor: 'rgba(13,35,64,0.85)', borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
+    marginBottom: spacing.sm,
+  },
+  sheetIcon: { width: 48, height: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  sheetIconPhoto: { backgroundColor: 'rgba(244,162,97,0.16)', borderColor: 'rgba(244,162,97,0.5)' },
+  sheetIconFile: { backgroundColor: 'rgba(29,161,242,0.14)', borderColor: 'rgba(29,161,242,0.5)' },
+  sheetIconDanger: { backgroundColor: 'rgba(229,57,53,0.14)', borderColor: 'rgba(229,57,53,0.5)' },
+  sheetOptionDanger: { borderColor: 'rgba(229,57,53,0.3)' },
+  sheetOptionText: { flex: 1 },
+  sheetOptionLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '700' },
+  sheetOptionHint: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
+  sheetCancel: {
+    marginTop: spacing.xs, paddingVertical: spacing.sm + 2, borderRadius: radius.lg, alignItems: 'center',
+    backgroundColor: 'rgba(18,30,46,0.9)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  sheetCancelText: { ...typography.button, color: colors.textSecondary, fontWeight: '700' },
+
+  // ── Luxury confirm dialog (leave group) ───────────────────────────────────
+  confirmBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  confirmCard: {
+    width: '100%', maxWidth: 360, backgroundColor: 'rgba(16,46,80,0.98)', borderRadius: radius.xl,
+    padding: spacing.lg, alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(229,57,53,0.35)', ...shadows.lg,
+  },
+  confirmIcon: {
+    width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(229,57,53,0.14)', borderWidth: 1, borderColor: 'rgba(229,57,53,0.5)', marginBottom: spacing.md,
+  },
+  confirmTitle: { ...typography.h3, color: colors.textPrimary, fontWeight: '800', textAlign: 'center' },
+  confirmText: { ...typography.caption, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs, lineHeight: 18 },
+  confirmActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg, alignSelf: 'stretch' },
+  confirmBtn: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.lg, alignItems: 'center' },
+  confirmCancelBtn: { backgroundColor: 'rgba(18,30,46,0.9)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)' },
+  confirmCancelText: { ...typography.button, color: colors.textSecondary, fontWeight: '700' },
+  confirmLeaveBtn: { backgroundColor: colors.error },
+  confirmLeaveText: { ...typography.button, color: colors.white, fontWeight: '800' },
 });
 
 export default GroupDetail;

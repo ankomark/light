@@ -298,7 +298,7 @@ const EmptyState = ({ query, onClear }) => (
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: 'transparent',
     paddingHorizontal: ITEM_MARGIN,
     paddingTop: SPACING.small,
   },
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
   emptyText: {
     fontFamily: FONTS.medium,
     fontSize: SIZES.large,
-    color: COLORS.gray,
+    color: '#cdd9e5',
     marginTop: SPACING.medium,
     textAlign: 'center',
   },

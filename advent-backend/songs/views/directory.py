@@ -150,6 +150,8 @@ class ChurchViewSet(viewsets.ModelViewSet):
             'is_member': bool(m),
             'has_pending_request': pending,
             'has_requests': is_admin and church.join_requests.filter(status='pending').exists(),
+            'only_admins_can_post': church.only_admins_can_post,
+            'created_by_id': church.created_by_id,
             # Live community size (separate from the congregation `members` field).
             'members_count': church.memberships.count(),
         })
@@ -233,6 +235,75 @@ class ChurchViewSet(viewsets.ModelViewSet):
         church.join_requests.filter(user_id=target_id).delete()  # let them re-request later
         return Response({'status': 'removed', 'removed': deleted})
 
+    @action(detail=True, methods=['get'], url_path='search-users')
+    def search_users(self, request, pk=None):
+        """Admin-only: find users by username to add, excluding current members."""
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        q = (request.query_params.get('q') or '').strip()
+        if len(q) < 2:
+            return Response([])
+        member_ids = church.memberships.values_list('user_id', flat=True)
+        users = (User.objects.filter(username__icontains=q)
+                 .exclude(id__in=member_ids).select_related('profile')
+                 .order_by('username')[:20])
+        return Response(SimpleUserSerializer(users, many=True, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='add-member')
+    def add_member(self, request, pk=None):
+        """Admin-only: add a user to the community directly (as a core 'member')."""
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        user = User.objects.filter(id=request.data.get('user_id')).first()
+        if not user:
+            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+        membership, created = ChurchMembership.objects.get_or_create(
+            church=church, user=user, defaults={'role': 'member'},
+        )
+        if created:
+            church.join_requests.filter(user=user, status='pending').update(status='approved')
+            try:
+                notify_user(user, 'church_added', f"You were added to {church.name}",
+                            {'type': 'church_added', 'church_id': church.id})
+            except Exception:
+                logger.exception('church add notify failed')
+        return Response(ChurchMembershipSerializer(membership).data,
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='set-role')
+    def set_role(self, request, pk=None):
+        """Admin-only: promote a member to admin, or dismiss an admin back to a
+        member. The creator is always an admin and can't be changed."""
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        role = request.data.get('role')
+        if role not in ('admin', 'member'):
+            return Response({'error': 'role must be "admin" or "member".'}, status=status.HTTP_400_BAD_REQUEST)
+        target = church.memberships.filter(user_id=request.data.get('user_id')).select_related('user').first()
+        if not target:
+            return Response({'error': 'That person is not a member.'}, status=status.HTTP_404_NOT_FOUND)
+        if target.user_id == church.created_by_id:
+            return Response({'error': 'The creator is always an admin.'}, status=status.HTTP_400_BAD_REQUEST)
+        if target.role != role:
+            target.role = role
+            target.save(update_fields=['role'])
+        return Response(ChurchMembershipSerializer(target).data)
+
+    @action(detail=True, methods=['post'], url_path='posting-policy')
+    def set_posting_policy(self, request, pk=None):
+        """Admin-only: toggle the WhatsApp-style 'Only admins can send messages' lock."""
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        only_admins = bool(request.data.get('only_admins_can_post'))
+        if church.only_admins_can_post != only_admins:
+            church.only_admins_can_post = only_admins
+            church.save(update_fields=['only_admins_can_post'])
+        return Response({'only_admins_can_post': church.only_admins_can_post})
+
     @action(detail=True, methods=['post'])
     def leave(self, request, pk=None):
         church = self.get_object()
@@ -250,6 +321,9 @@ class ChurchViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Join this church to see the chat.'}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == 'POST':
+            if church.only_admins_can_post and not self._is_admin(church, request.user):
+                return Response({'error': 'Only admins can send messages in this community.'},
+                                status=status.HTTP_403_FORBIDDEN)
             mtype = request.data.get('message_type', 'text')
             if mtype not in dict(ChurchMessage.MESSAGE_TYPES) or mtype == 'system':
                 return Response({'error': 'Invalid message type.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -486,40 +560,76 @@ class ChoirViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(choirs, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_path='add-member')
     def add_member(self, request, pk=None):
+        """Admin-only: add a user to the community directly (as a core 'member')."""
         choir = self.get_object()
-        user_id = request.data.get('user_id')
-        
-        if not user_id:
-            return Response(
-                {"error": "User ID is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response(
-                {"error": "User not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        if choir.members.filter(id=user.id).exists():
-            return Response(
-                {"error": "User is already a member of this choir"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        choir.members.add(user)
-        choir.members_count = choir.members.count()
-        choir.save()
-        
-        return Response(
-            {"status": "Member added successfully"},
-            status=status.HTTP_200_OK
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        user = User.objects.filter(id=request.data.get('user_id')).first()
+        if not user:
+            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+        membership, created = ChoirMembership.objects.get_or_create(
+            choir=choir, user=user, defaults={'role': 'member'},
         )
-    
+        if created:
+            choir.join_requests.filter(user=user, status='pending').update(status='approved')
+            self._sync_count(choir)
+            try:
+                notify_user(user, 'choir_added', f"You were added to {choir.name}",
+                            {'type': 'choir_added', 'choir_id': choir.id})
+            except Exception:
+                logger.exception('choir add notify failed')
+        return Response(ChoirMembershipSerializer(membership).data,
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='search-users')
+    def search_users(self, request, pk=None):
+        """Admin-only: find users by username to add, excluding current members."""
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        q = (request.query_params.get('q') or '').strip()
+        if len(q) < 2:
+            return Response([])
+        member_ids = choir.memberships.values_list('user_id', flat=True)
+        users = (User.objects.filter(username__icontains=q)
+                 .exclude(id__in=member_ids).select_related('profile')
+                 .order_by('username')[:20])
+        return Response(SimpleUserSerializer(users, many=True, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='set-role')
+    def set_role(self, request, pk=None):
+        """Admin-only: promote a member to admin, or dismiss an admin back to a
+        member. The creator is always an admin and can't be changed."""
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        role = request.data.get('role')
+        if role not in ('admin', 'member'):
+            return Response({'error': 'role must be "admin" or "member".'}, status=status.HTTP_400_BAD_REQUEST)
+        target = choir.memberships.filter(user_id=request.data.get('user_id')).select_related('user').first()
+        if not target:
+            return Response({'error': 'That person is not a member.'}, status=status.HTTP_404_NOT_FOUND)
+        if target.user_id == choir.created_by_id:
+            return Response({'error': 'The creator is always an admin.'}, status=status.HTTP_400_BAD_REQUEST)
+        if target.role != role:
+            target.role = role
+            target.save(update_fields=['role'])
+        return Response(ChoirMembershipSerializer(target).data)
+
+    @action(detail=True, methods=['post'], url_path='posting-policy')
+    def set_posting_policy(self, request, pk=None):
+        """Admin-only: toggle the WhatsApp-style 'Only admins can send messages' lock."""
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+        only_admins = bool(request.data.get('only_admins_can_post'))
+        if choir.only_admins_can_post != only_admins:
+            choir.only_admins_can_post = only_admins
+            choir.save(update_fields=['only_admins_can_post'])
+        return Response({'only_admins_can_post': choir.only_admins_can_post})
+
     @action(detail=True, methods=['post'])
     def toggle_active(self, request, pk=None):
             choir = self.get_object()
@@ -576,6 +686,8 @@ class ChoirViewSet(viewsets.ModelViewSet):
             'has_pending_request': pending,
             # For the admin's "requests waiting" badge.
             'has_requests': is_admin and choir.join_requests.filter(status='pending').exists(),
+            'only_admins_can_post': choir.only_admins_can_post,
+            'created_by_id': choir.created_by_id,
             'members_count': choir.memberships.count(),
         })
 
@@ -678,6 +790,9 @@ class ChoirViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Join this choir to see the chat.'}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == 'POST':
+            if choir.only_admins_can_post and not self._is_admin(choir, request.user):
+                return Response({'error': 'Only admins can send messages in this community.'},
+                                status=status.HTTP_403_FORBIDDEN)
             mtype = request.data.get('message_type', 'text')
             if mtype not in dict(ChoirMessage.MESSAGE_TYPES) or mtype == 'system':
                 return Response({'error': 'Invalid message type.'}, status=status.HTTP_400_BAD_REQUEST)

@@ -54,8 +54,13 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ['seller', 'created_at', 'updated_at', 'views', 'slug']
 
     def get_seller(self, obj):
+        # A product card/detail only needs the seller's id + username (+ avatar).
+        # The full UserSerializer would, per product, load the seller's entire
+        # social-post history and run ~5 COUNT queries (followers/following/posts) —
+        # turning a 20-item page into hundreds of queries. SimpleUserSerializer is
+        # flat and rides on the prefetched seller/profile, so it adds no queries.
         try:
-            return UserSerializer(obj.seller, context=self.context).data
+            return SimpleUserSerializer(obj.seller, context=self.context).data
         except AttributeError:
             return None
 
@@ -126,15 +131,38 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 
+class CartLineProductSerializer(serializers.ModelSerializer):
+    """Lean product payload for a cart line. The cart UI only needs the image,
+    title, price/currency and stock — so we skip the heavy fields the full
+    ProductSerializer carries (description, payment/contact details, track, …),
+    keeping the response small. Rides on the prefetched seller/profile/images,
+    so it adds no queries."""
+    seller = serializers.SerializerMethodField()
+    images = ProductImageSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Product
+        fields = [
+            'id', 'slug', 'title', 'price', 'currency', 'quantity',
+            'is_available', 'is_digital', 'seller', 'images',
+        ]
+
+    def get_seller(self, obj):
+        try:
+            return SimpleUserSerializer(obj.seller, context=self.context).data
+        except AttributeError:
+            return None
+
+
 class CartItemSerializer(serializers.ModelSerializer):
-    product = ProductSerializer(read_only=True)
+    product = CartLineProductSerializer(read_only=True)
     total_price = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = CartItem
         fields = ['id', 'product', 'quantity', 'added_at', 'total_price']
         read_only_fields = ['added_at']
-    
+
     def get_total_price(self, obj):
         return obj.product.price * obj.quantity
 
@@ -152,9 +180,10 @@ class CartSerializer(serializers.ModelSerializer):
     
     def get_subtotal(self, obj):
         return sum(item.product.price * item.quantity for item in obj.items.all())
-    
+
     def get_total_items(self, obj):
-        return obj.items.count()
+        # Reuse the prefetched items instead of issuing a separate COUNT query.
+        return len(obj.items.all())
 
 
 
