@@ -4,7 +4,7 @@
     "slug": "streams",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/adaptive-icon.png",
+    "icon": "./assets/images/icon.png",
     "scheme": "streams",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -26,8 +26,10 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/adaptive-foreground.png",
+        "backgroundImage": "./assets/images/adaptive-background.png",
+        "monochromeImage": "./assets/images/adaptive-foreground.png",
+        "backgroundColor": "#4797C6"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.ankom.streams",
@@ -67,6 +69,7 @@
       [
         "expo-notifications",
         {
+          "icon": "./assets/images/notification-icon.png",
           "color": "#1DA1F2"
         }
       ],
