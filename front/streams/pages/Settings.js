@@ -24,6 +24,7 @@ import {
   updateProfileFields,
   createAdminNote,
   changePassword,
+  deactivateAccount,
   deleteAccount,
   fetchNotificationPreferences,
   updateNotificationPreferences,
@@ -160,6 +161,11 @@ const Settings = () => {
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [deletePw, setDeletePw] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  // Deactivate account (reversible)
+  const [deactivateVisible, setDeactivateVisible] = useState(false);
+  const [deactivatePw, setDeactivatePw] = useState('');
+  const [deactivating, setDeactivating] = useState(false);
 
   // Notification preferences (per-category). null until loaded.
   const [notifPrefs, setNotifPrefs] = useState(null);
@@ -349,6 +355,36 @@ const Settings = () => {
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleDeactivate = async () => {
+    if (!deactivatePw) {
+      Alert.alert('Password required', 'Enter your password to confirm.');
+      return;
+    }
+    try {
+      setDeactivating(true);
+      await deactivateAccount(deactivatePw);
+      setDeactivateVisible(false);
+      setDeactivatePw('');
+      try { await logout(); } catch {}
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    } catch (error) {
+      Alert.alert(t('common.error'), error.response?.data?.error || 'Could not deactivate your account.');
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const confirmDeactivate = () => {
+    Alert.alert(
+      t('settings.session.deactivate'),
+      'Your profile and content will be hidden until you sign in again. You can reactivate anytime by logging back in.',
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: 'Continue', onPress: () => setDeactivateVisible(true) },
+      ]
+    );
   };
 
   const confirmDeleteAccount = () => {
@@ -625,6 +661,7 @@ const Settings = () => {
         {/* ── Session ───────────────────────────────────────────── */}
         <Section title={t('settings.section.session')}>
           <Row icon="logout" label={t('settings.session.logout')} danger onPress={handleLogout} right={null} />
+          <Row icon="account-off-outline" label={t('settings.session.deactivate')} onPress={confirmDeactivate} right={null} />
           <Row icon="trash-can-outline" label={t('settings.session.delete')} danger onPress={confirmDeleteAccount} last right={null} />
         </Section>
 
@@ -797,6 +834,60 @@ const Settings = () => {
                 : <>
                     <Ionicons name="trash-outline" size={18} color={colors.white} />
                     <Text style={styles.sendBtnText}>Delete my account</Text>
+                  </>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Deactivate-account modal (reversible; password confirmation) */}
+      <Modal
+        visible={deactivateVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDeactivateVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('settings.session.deactivate')}</Text>
+              <TouchableOpacity onPress={() => { setDeactivateVisible(false); setDeactivatePw(''); }}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.privacyHint}>
+              <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
+              <Text style={styles.privacyHintText}>
+                Your profile and posts are hidden until you sign in again. Reactivate anytime by logging back in.
+              </Text>
+            </View>
+
+            <TextInput
+              style={styles.pwInput}
+              placeholder="Enter your password to confirm"
+              placeholderTextColor={colors.placeholder}
+              value={deactivatePw}
+              onChangeText={setDeactivatePw}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity
+              style={[styles.sendBtn, deactivating && { opacity: 0.6 }]}
+              onPress={handleDeactivate}
+              disabled={deactivating}
+              activeOpacity={0.85}
+            >
+              {deactivating
+                ? <ActivityIndicator color={colors.white} />
+                : <>
+                    <MaterialCommunityIcons name="account-off-outline" size={18} color={colors.white} />
+                    <Text style={styles.sendBtnText}>Deactivate</Text>
                   </>}
             </TouchableOpacity>
           </View>

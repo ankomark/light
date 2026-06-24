@@ -64,6 +64,12 @@ class User(AbstractUser):
     # Escalating moderation warnings (warn -> temp suspend -> ban).
     strikes = models.PositiveIntegerField(default=0)
 
+    # Self-service "deactivate" — a reversible hide the user controls themselves
+    # (distinct from the moderation is_suspended and the is_active ban). The
+    # account can still authenticate; logging back in auto-reactivates it.
+    is_deactivated = models.BooleanField(default=False)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+
     @property
     def is_super_admin(self):
         return self.is_superuser or self.admin_role == 'super_admin'

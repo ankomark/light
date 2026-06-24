@@ -70,6 +70,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         if hidden_ids:
             qs = qs.exclude(user_id__in=hidden_ids)
 
+        # Hide posts from self-deactivated accounts.
+        qs = qs.exclude(user__is_deactivated=True)
+
         tag = self.request.query_params.get('tag')
         if tag:
             qs = qs.filter(tags__icontains=tag)

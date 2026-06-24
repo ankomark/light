@@ -44,6 +44,11 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
                 username = request.data.get('username')
                 user = User.objects.filter(username=username).first()
                 if user:
+                    # Logging back in auto-reactivates a self-deactivated account.
+                    if user.is_deactivated:
+                        user.is_deactivated = False
+                        user.deactivated_at = None
+                        user.save(update_fields=['is_deactivated', 'deactivated_at'])
                     notify_user(user, 'security', 'New sign-in to your Advent Light account.')
             except Exception:
                 pass  # never let alerting break login
@@ -364,6 +369,27 @@ class ExportDataView(APIView):
             ],
         }
         return Response(data)
+
+
+class DeactivateAccountView(APIView):
+    """Reversible self-deactivation: hides the user's content/profile while
+    letting them sign back in to reactivate. Password-confirmed; revokes other
+    sessions so the account goes dark everywhere."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from django.utils import timezone
+        password = request.data.get('password', '')
+        if not password:
+            return Response({'error': 'password is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not request.user.check_password(password):
+            return Response({'error': 'Password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+
+        request.user.is_deactivated = True
+        request.user.deactivated_at = timezone.now()
+        request.user.save(update_fields=['is_deactivated', 'deactivated_at'])
+        _revoke_other_sessions(request.user)  # sign out everywhere; re-login reactivates
+        return Response({'status': 'deactivated'})
 
 
 class DeleteAccountView(APIView):

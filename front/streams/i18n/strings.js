@@ -54,6 +54,7 @@ export const STRINGS = {
     'settings.support.contact': 'Contact admins',
     'settings.support.about': 'About',
     'settings.session.logout': 'Log out',
+    'settings.session.deactivate': 'Deactivate account',
     'settings.session.delete': 'Delete account',
 
     'blocked.title': 'Blocked accounts',
@@ -104,6 +105,7 @@ export const STRINGS = {
     'settings.support.contact': 'Wasiliana na wasimamizi',
     'settings.support.about': 'Kuhusu',
     'settings.session.logout': 'Toka',
+    'settings.session.deactivate': 'Zima akaunti kwa muda',
     'settings.session.delete': 'Futa akaunti',
 
     'blocked.title': 'Akaunti zilizozuiwa',

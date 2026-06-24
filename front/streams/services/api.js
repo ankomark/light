@@ -1403,6 +1403,10 @@ export const revokeOtherSessions = async () => {
 export const exportMyData = () =>
   apiRequest('get', '/auth/export-data/');
 
+// Reversible self-deactivation (password required). Logging back in reactivates.
+export const deactivateAccount = (password) =>
+  apiRequest('post', '/auth/deactivate/', { password });
+
 // Permanently delete the signed-in user's account (password required).
 export const deleteAccount = (password) =>
   apiRequest('post', '/auth/delete-account/', { password });
