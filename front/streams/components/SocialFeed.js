@@ -169,10 +169,12 @@ const PostMedia = React.memo(function PostMedia({
     setHasError(false);
   }, [item.id, item.mediaUrl]);
 
-  // Reset to the autoplay-derived default whenever it scrolls out of focus (or
-  // the preference changes), so the next focus respects the current setting.
+  // Apply the autoplay-derived default whenever focus changes OR the preference
+  // is toggled — so flipping "Autoplay videos" in Settings immediately plays/
+  // pauses the on-screen video. A manual tap only changes manualPaused (not these
+  // deps), so user taps while focused are preserved until the next scroll/toggle.
   useEffect(() => {
-    if (!isFocused) setManualPaused(!autoplay);
+    setManualPaused(!autoplay);
   }, [isFocused, autoplay]);
 
   const handleError = useCallback(() => {

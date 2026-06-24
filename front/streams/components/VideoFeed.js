@@ -45,13 +45,14 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
   );
   const playing = isActive && screenFocused && !manualPaused;
 
-  // Hard-pause whenever this item is no longer the focused one (kills audio on
-  // swipe), resetting to the autoplay-derived default for the next focus.
+  // Hard-pause whenever this item is no longer the active one (kills audio on
+  // swipe). Also (re)apply the autoplay-derived default on active change OR when
+  // the preference is toggled, so flipping "Autoplay videos" in Settings takes
+  // effect on the on-screen video immediately. Manual taps only change
+  // manualPaused (not these deps), so they're preserved until the next swipe/toggle.
   useEffect(() => {
-    if (!isActive && videoRef.current) {
-      videoRef.current.pauseAsync?.().catch(() => {});
-      setManualPaused(!autoplay);
-    }
+    if (!isActive) videoRef.current?.pauseAsync?.().catch(() => {});
+    setManualPaused(!autoplay);
   }, [isActive, autoplay]);
 
   const author = item.user || {};
