@@ -55,6 +55,27 @@ class NoticeViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
+class AdminNoteViewSet(viewsets.ModelViewSet):
+    """Private notes from users to admins. Any signed-in user may submit one,
+    but only staff/admins can list, read, mark-read (partial_update) or delete.
+    Admin gating is interim (User.is_staff) and will be expanded later."""
+    serializer_class = AdminNoteSerializer
+    pagination_class = StandardPagination
+
+    def get_queryset(self):
+        return AdminNote.objects.select_related('sender').all()
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAdminUser()]
+
+    def perform_create(self, serializer):
+        # Force is_read=False on create so a sender can't submit a pre-read note;
+        # only admins flip it later via update/partial_update.
+        serializer.save(sender=self.request.user, is_read=False)
+
+
 class ChurchViewSet(viewsets.ModelViewSet):
     # select_related avoids an N+1 on created_by during listing.
     queryset = Church.objects.select_related('created_by', 'created_by__profile').order_by('-created_at')

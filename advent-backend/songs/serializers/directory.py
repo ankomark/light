@@ -44,6 +44,21 @@ class NoticeSerializer(serializers.ModelSerializer):
         return bool(request and request.user.is_authenticated and request.user.is_staff)
 
 
+class AdminNoteSerializer(serializers.ModelSerializer):
+    """Note from a user to the admins. `sender` info is exposed only to admins
+    (the create response is the only time a non-admin sees their own note)."""
+    sender_username = serializers.CharField(
+        source='sender.username', read_only=True, default=None
+    )
+
+    class Meta:
+        model = AdminNote
+        fields = ['id', 'body', 'sender', 'sender_username', 'is_read', 'created_at']
+        # is_read stays writable so admins can mark notes read/unread on update;
+        # creation forces it false in the viewset so a sender can't pre-set it.
+        read_only_fields = ['sender', 'created_at']
+
+
 class ChurchSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)

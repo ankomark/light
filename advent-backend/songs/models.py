@@ -676,6 +676,23 @@ class Notice(models.Model):
         return self.title
 
 
+class AdminNote(models.Model):
+    """A private note any signed-in user can write to the admins.
+    Only staff/admins may read these; the sender can submit but not view them
+    (admin-role gating is interim — currently uses User.is_staff)."""
+    body = models.TextField()
+    sender = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, related_name='admin_notes')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['is_read', '-created_at']
+
+    def __str__(self):
+        who = self.sender.username if self.sender else 'Unknown'
+        return f"Note from {who} ({self.created_at:%Y-%m-%d})"
+
+
 class MediaStation(models.Model):
     STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
 
