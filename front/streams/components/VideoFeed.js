@@ -11,6 +11,8 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { fetchSocialPosts, cursorFromUrl, followUser } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
+import { usePreferences } from '../context/PreferencesContext';
+import { PREF_KEYS, applyVideoQuality } from '../utils/preferences';
 import { LikeButton, SaveButton, ShareButton } from './SocialActions';
 import CommentAction from './CommentAction';
 import { colors, typography } from '../constants/theme';
@@ -21,23 +23,36 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 // ── A single full-screen video page ─────────────────────────────────────────
 const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute, currentUser, navigation, bottomOffset = 120 }) => {
   const videoRef = useRef(null);
-  const [manualPaused, setManualPaused] = useState(false);
+  const { preferences } = usePreferences();
+  // Respect the "Autoplay videos" choice here too; Data saver suppresses
+  // autoplay so a video only streams once the user taps to play.
+  const autoplay =
+    !!preferences[PREF_KEYS.autoplayVideo] && !preferences[PREF_KEYS.dataSaver];
+
+  const [manualPaused, setManualPaused] = useState(!autoplay);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
   // Follow state lives on the post author (item.user.is_following), same field
   // the feed's FollowButton uses.
   const [following, setFollowing] = useState(!!item.user?.is_following);
   const [followBusy, setFollowBusy] = useState(false);
-  const uri = item.optimized_url || item.media_url;
+  const rawUri = item.optimized_url || item.media_url;
+  // Apply the chosen video quality (HD / auto / data-saver) to the delivery URL.
+  const uri = applyVideoQuality(
+    rawUri,
+    preferences[PREF_KEYS.videoQuality],
+    preferences[PREF_KEYS.dataSaver]
+  );
   const playing = isActive && screenFocused && !manualPaused;
 
-  // Hard-pause whenever this item is no longer the focused one (kills audio on swipe).
+  // Hard-pause whenever this item is no longer the focused one (kills audio on
+  // swipe), resetting to the autoplay-derived default for the next focus.
   useEffect(() => {
     if (!isActive && videoRef.current) {
       videoRef.current.pauseAsync?.().catch(() => {});
-      setManualPaused(false);
+      setManualPaused(!autoplay);
     }
-  }, [isActive]);
+  }, [isActive, autoplay]);
 
   const author = item.user || {};
   const myId = currentUser?.id ?? currentUser?.user_id;
