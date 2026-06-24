@@ -6,10 +6,13 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
+import { useI18n } from '../context/I18nContext';
 import { fetchUnreadMessageCount } from '../services/api';
 import { isAdmin, isSuperAdmin, hasCapability } from '../utils/roles';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
+// The menu is a deliberately dark, wallpaper-backed drawer, so it keeps the
+// static (dark) palette in both themes — only its text is internationalized.
 import { colors, spacing, radius, typography } from '../constants/theme';
 
 const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
@@ -22,7 +25,7 @@ const SECTIONS = [
     items: [
       { label: 'Explore', route: 'Explore', set: 'ion', icon: 'compass-outline' },
       { label: 'Publishing', route: 'Publishing', set: 'mci', icon: 'newspaper-variant-outline' },
-      { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', color: colors.error },
+      { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true },
     ],
   },
   {
@@ -89,6 +92,7 @@ const Glyph = ({ set, name, color, size }) =>
 function HamburgerMenu() {
   const navigation = useNavigation();
   const { isAuthenticated, currentUser, logout } = useAuth();
+  const { t } = useI18n();
   const [menuVisible, setMenuVisible] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
 
@@ -157,9 +161,9 @@ function HamburgerMenu() {
                 />
                 <View style={styles.profileText}>
                   <Text style={styles.username} numberOfLines={1}>
-                    {currentUser?.username || 'Your profile'}
+                    {currentUser?.username || t('menu.yourProfile')}
                   </Text>
-                  <Text style={styles.profileHint}>View profile</Text>
+                  <Text style={styles.profileHint}>{t('menu.viewProfile')}</Text>
                 </View>
               </TouchableOpacity>
             ) : (
@@ -168,8 +172,8 @@ function HamburgerMenu() {
                   <Ionicons name="sparkles" size={20} color={colors.accent} />
                 </View>
                 <View style={styles.profileText}>
-                  <Text style={styles.username}>Welcome</Text>
-                  <Text style={styles.profileHint}>Sign in to get started</Text>
+                  <Text style={styles.username}>{t('menu.welcome')}</Text>
+                  <Text style={styles.profileHint}>{t('menu.signInPrompt')}</Text>
                 </View>
               </View>
             )}
@@ -216,7 +220,7 @@ function HamburgerMenu() {
                         ]}
                       >
                         <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
-                          <Glyph set={item.set} name={item.icon} size={20} color={active ? colors.accent : (item.color || colors.textSecondary)} />
+                          <Glyph set={item.set} name={item.icon} size={20} color={active ? colors.accent : (item.danger ? colors.error : colors.textSecondary)} />
                         </View>
                         <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
                           {item.label}
@@ -246,7 +250,7 @@ function HamburgerMenu() {
                 accessibilityLabel="Log out"
               >
                 <MaterialCommunityIcons name="logout" size={20} color={colors.error} />
-                <Text style={styles.logoutText}>Log Out</Text>
+                <Text style={styles.logoutText}>{t('menu.logout')}</Text>
               </Pressable>
             )}
 

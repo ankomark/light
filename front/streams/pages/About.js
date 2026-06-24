@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { typography, spacing, radius, shadows } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../context/I18nContext';
 
 // ── Easily-editable brand/contact constants ──────────────────────────────────
 const APP_NAME = Constants.expoConfig?.name || 'Advent Light';
@@ -55,6 +57,9 @@ const openLink = async (url, fallbackMsg) => {
 
 const About = () => {
   const navigation = useNavigation();
+  const { colors } = useTheme();
+  const { t } = useI18n();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const year = new Date().getFullYear();
 
   const handleShare = async () => {
@@ -100,7 +105,7 @@ const About = () => {
 
             <View style={styles.versionPill}>
               <MaterialCommunityIcons name="shield-check" size={13} color={colors.white} />
-              <Text style={styles.versionText}>Version {APP_VERSION}</Text>
+              <Text style={styles.versionText}>{t('about.version')} {APP_VERSION}</Text>
             </View>
           </SafeAreaView>
         </LinearGradient>
@@ -108,7 +113,7 @@ const About = () => {
         <View style={styles.body}>
           {/* ── Mission ────────────────────────────────────────── */}
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Our Mission</Text>
+            <Text style={styles.sectionTitle}>{t('about.mission')}</Text>
             <Text style={styles.paragraph}>
               {APP_NAME} brings the worldwide Seventh-day Adventist community together —
               a home for worship, music, fellowship and sharing the good news. From bundled
@@ -118,7 +123,7 @@ const About = () => {
           </View>
 
           {/* ── Feature grid ───────────────────────────────────── */}
-          <Text style={[styles.sectionTitle, styles.gridTitle]}>What’s inside</Text>
+          <Text style={[styles.sectionTitle, styles.gridTitle]}>{t('about.whatsInside')}</Text>
           <View style={styles.grid}>
             {FEATURES.map((f) => (
               <View key={f.label} style={styles.featureCard}>
@@ -132,15 +137,15 @@ const About = () => {
           </View>
 
           {/* ── Get in touch ───────────────────────────────────── */}
-          <Text style={[styles.sectionTitle, styles.gridTitle]}>Get in touch</Text>
+          <Text style={[styles.sectionTitle, styles.gridTitle]}>{t('about.getInTouch')}</Text>
           <View style={styles.card}>
-            <ActionRow icon="share-social-outline" label="Share Advent Light" onPress={handleShare} />
+            <ActionRow icon="share-social-outline" label={t('about.share')} onPress={handleShare} />
             <Divider />
-            <ActionRow icon="mail-outline" label="Contact us" sub={SUPPORT_EMAIL} onPress={handleEmail} />
+            <ActionRow icon="mail-outline" label={t('about.contact')} sub={SUPPORT_EMAIL} onPress={handleEmail} />
             <Divider />
             <ActionRow
               icon="globe-outline"
-              label="Visit our website"
+              label={t('about.website')}
               onPress={() => openLink(WEBSITE_URL, 'Our website is coming soon.')}
             />
           </View>
@@ -149,13 +154,13 @@ const About = () => {
           <View style={styles.card}>
             <ActionRow
               icon="shield-checkmark-outline"
-              label="Privacy Policy"
+              label={t('about.privacy')}
               onPress={() => openLink(PRIVACY_URL, 'Our privacy policy is coming soon.')}
             />
             <Divider />
             <ActionRow
               icon="document-text-outline"
-              label="Terms of Service"
+              label={t('about.terms')}
               onPress={() => openLink(TERMS_URL, 'Our terms of service are coming soon.')}
             />
           </View>
@@ -176,24 +181,32 @@ const About = () => {
   );
 };
 
-const ActionRow = ({ icon, label, sub, onPress }) => (
-  <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
-    <View style={styles.rowIcon}>
-      <Ionicons name={icon} size={20} color={colors.primary} />
-    </View>
-    <View style={styles.rowTextWrap}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
-    </View>
-    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-  </TouchableOpacity>
-);
+const ActionRow = ({ icon, label, sub, onPress }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
+      <View style={styles.rowIcon}>
+        <Ionicons name={icon} size={20} color={colors.primary} />
+      </View>
+      <View style={styles.rowTextWrap}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+    </TouchableOpacity>
+  );
+};
 
-const Divider = () => <View style={styles.divider} />;
+const Divider = () => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return <View style={styles.divider} />;
+};
 
 const GAP = spacing.md;
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingBottom: spacing.xxl },
 

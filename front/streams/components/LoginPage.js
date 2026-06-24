@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image,
@@ -6,7 +6,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../context/I18nContext';
+import { typography, spacing, radius, shadows } from '../constants/theme';
 
 const LoginPage = () => {
   const [formData, setFormData] = useState({ username: '', password: '' });
@@ -15,6 +17,9 @@ const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const navigation = useNavigation();
   const { login } = useAuth();
+  const { colors } = useTheme();
+  const { t } = useI18n();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const handleChange = (name, value) => {
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -23,7 +28,7 @@ const LoginPage = () => {
 
   const handleSubmit = async () => {
     if (!formData.username.trim() || !formData.password) {
-      setError('Please fill in all fields');
+      setError(t('auth.fillAllFields'));
       return;
     }
     setLoading(true);
@@ -34,7 +39,7 @@ const LoginPage = () => {
       const target = !isVerified ? 'EmailVerification' : (hasProfile ? 'Home' : 'CreateProfile');
       navigation.reset({ index: 0, routes: [{ name: target }] });
     } catch {
-      setError('Invalid username or password');
+      setError(t('auth.invalidCredentials'));
     } finally {
       setLoading(false);
     }
@@ -48,16 +53,16 @@ const LoginPage = () => {
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
 
-        <Text style={styles.title}>Welcome Back</Text>
-        <Text style={styles.subtitle}>Sign in to your Advent Light account</Text>
+        <Text style={styles.title}>{t('auth.welcomeBack')}</Text>
+        <Text style={styles.subtitle}>{t('auth.loginSubtitle')}</Text>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Username</Text>
+          <Text style={styles.label}>{t('auth.username')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="person-outline" size={18} color={colors.placeholder} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Enter your username"
+              placeholder={t('auth.usernamePlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={formData.username}
               onChangeText={v => handleChange('username', v)}
@@ -68,12 +73,12 @@ const LoginPage = () => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Password</Text>
+          <Text style={styles.label}>{t('auth.password')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="lock-closed-outline" size={18} color={colors.placeholder} style={styles.inputIcon} />
             <TextInput
               style={[styles.input, { flex: 1 }]}
-              placeholder="Enter your password"
+              placeholder={t('auth.passwordPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={formData.password}
               onChangeText={v => handleChange('password', v)}
@@ -99,7 +104,7 @@ const LoginPage = () => {
         >
           {loading
             ? <ActivityIndicator color={colors.white} />
-            : <Text style={styles.buttonText}>Log In</Text>
+            : <Text style={styles.buttonText}>{t('auth.login')}</Text>
           }
         </TouchableOpacity>
 
@@ -107,19 +112,19 @@ const LoginPage = () => {
           style={styles.forgotRow}
           onPress={() => navigation.navigate('ForgotPassword')}
         >
-          <Text style={styles.forgotText}>Forgot password?</Text>
+          <Text style={styles.forgotText}>{t('auth.forgot')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.signupRow} onPress={() => navigation.navigate('SignUp')}>
-          <Text style={styles.signupText}>Don't have an account? </Text>
-          <Text style={styles.signupLink}>Sign Up</Text>
+          <Text style={styles.signupText}>{t('auth.noAccount')}</Text>
+          <Text style={styles.signupLink}>{t('auth.signUp')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   container: {
     flexGrow: 1,

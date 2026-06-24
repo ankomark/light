@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image,
@@ -8,7 +8,9 @@ import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL, API_BASE } from '../services/api';
 import { useAuth } from '../context/useAuth';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../context/I18nContext';
+import { typography, spacing, radius, shadows } from '../constants/theme';
 
 const SignUpPage = () => {
   const [formData, setFormData] = useState({ username: '', email: '', password: '' });
@@ -17,6 +19,9 @@ const SignUpPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const navigation = useNavigation();
   const { login } = useAuth();
+  const { colors } = useTheme();
+  const { t } = useI18n();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const handleChange = (name, value) => {
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -27,15 +32,15 @@ const SignUpPage = () => {
 
   const handleSubmit = async () => {
     if (!formData.username.trim() || !formData.email.trim() || !formData.password) {
-      setError('Please fill in all fields');
+      setError(t('auth.fillAllFields'));
       return;
     }
     if (!isValidEmail(formData.email.trim())) {
-      setError('Please enter a valid email address (you’ll need it to recover your account).');
+      setError(t('auth.invalidEmail'));
       return;
     }
     if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters');
+      setError(t('auth.passwordTooShort'));
       return;
     }
     setLoading(true);
@@ -76,16 +81,16 @@ const SignUpPage = () => {
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
 
-        <Text style={styles.title}>Create Account</Text>
-        <Text style={styles.subtitle}>Join the Advent Light community</Text>
+        <Text style={styles.title}>{t('auth.createTitle')}</Text>
+        <Text style={styles.subtitle}>{t('auth.signupSubtitle')}</Text>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Username</Text>
+          <Text style={styles.label}>{t('auth.username')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="person-outline" size={18} color={colors.placeholder} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Choose a username"
+              placeholder={t('auth.chooseUsername')}
               placeholderTextColor={colors.placeholder}
               value={formData.username}
               onChangeText={v => handleChange('username', v)}
@@ -96,12 +101,12 @@ const SignUpPage = () => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>{t('auth.email')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="mail-outline" size={18} color={colors.placeholder} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Enter your email"
+              placeholder={t('auth.emailPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={formData.email}
               onChangeText={v => handleChange('email', v)}
@@ -112,12 +117,12 @@ const SignUpPage = () => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Password</Text>
+          <Text style={styles.label}>{t('auth.password')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="lock-closed-outline" size={18} color={colors.placeholder} style={styles.inputIcon} />
             <TextInput
               style={[styles.input, { flex: 1 }]}
-              placeholder="Create a password"
+              placeholder={t('auth.createPassword')}
               placeholderTextColor={colors.placeholder}
               value={formData.password}
               onChangeText={v => handleChange('password', v)}
@@ -143,20 +148,20 @@ const SignUpPage = () => {
         >
           {loading
             ? <ActivityIndicator color={colors.white} />
-            : <Text style={styles.buttonText}>Create Account</Text>
+            : <Text style={styles.buttonText}>{t('auth.createTitle')}</Text>
           }
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.loginRow} onPress={() => navigation.navigate('Login')}>
-          <Text style={styles.loginText}>Already have an account? </Text>
-          <Text style={styles.loginLink}>Log In</Text>
+          <Text style={styles.loginText}>{t('auth.haveAccount')}</Text>
+          <Text style={styles.loginLink}>{t('auth.login')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   container: {
     flexGrow: 1,
