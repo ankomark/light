@@ -15,6 +15,8 @@ export const PREF_KEYS = {
   audioQuality: 'audioQuality', // 'auto' | 'high' | 'data_saver'
   videoQuality: 'videoQuality', // 'auto' | 'hd' | 'data_saver'
   pushEnabled: 'pushEnabled',
+  themeMode: 'themeMode',       // 'system' | 'light' | 'dark'
+  language: 'language',         // 'system' | 'en' | 'sw' | ...
 };
 
 export const DEFAULT_PREFERENCES = {
@@ -23,6 +25,10 @@ export const DEFAULT_PREFERENCES = {
   [PREF_KEYS.audioQuality]: 'auto',
   [PREF_KEYS.videoQuality]: 'auto',
   [PREF_KEYS.pushEnabled]: true,
+  // Default to dark so the existing (dark-only) screens are unaffected until a
+  // user explicitly opts into light/system.
+  [PREF_KEYS.themeMode]: 'dark',
+  [PREF_KEYS.language]: 'system',
 };
 
 const serialize = (value) => JSON.stringify(value);

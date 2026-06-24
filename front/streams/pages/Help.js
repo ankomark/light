@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,9 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { typography, spacing, radius, shadows } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../context/I18nContext';
 
 const APP_NAME = Constants.expoConfig?.name || 'Advent Light';
 const SUPPORT_EMAIL = 'ankomark76@gmail.com';
@@ -63,6 +65,9 @@ const openLink = async (url, fallbackMsg) => {
 
 const Help = () => {
   const navigation = useNavigation();
+  const { colors } = useTheme();
+  const { t } = useI18n();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [open, setOpen] = useState(null);
 
   const toggle = (i) => {
@@ -86,7 +91,7 @@ const Help = () => {
         >
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Help</Text>
+        <Text style={styles.headerTitle}>{t('help.title')}</Text>
         <View style={styles.backBtn} />
       </SafeAreaView>
 
@@ -140,7 +145,7 @@ const Help = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',

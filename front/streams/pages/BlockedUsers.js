@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,12 +13,17 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchBlockedUsers, unblockUser } from '../services/api';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { typography, spacing, radius, shadows } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const BlockedUsers = () => {
   const navigation = useNavigation();
+  const { colors } = useTheme();
+  const { t } = useI18n();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -74,7 +79,7 @@ const BlockedUsers = () => {
       >
         {busyId === item.id
           ? <ActivityIndicator size="small" color={colors.primary} />
-          : <Text style={styles.unblockText}>Unblock</Text>}
+          : <Text style={styles.unblockText}>{t('blocked.unblock')}</Text>}
       </TouchableOpacity>
     </View>
   );
@@ -89,7 +94,7 @@ const BlockedUsers = () => {
         >
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Blocked accounts</Text>
+        <Text style={styles.headerTitle}>{t('blocked.title')}</Text>
         <View style={styles.backBtn} />
       </SafeAreaView>
 
@@ -106,7 +111,7 @@ const BlockedUsers = () => {
           ListEmptyComponent={
             <View style={styles.empty}>
               <MaterialCommunityIcons name="account-cancel-outline" size={56} color={colors.border} />
-              <Text style={styles.emptyTitle}>No blocked accounts</Text>
+              <Text style={styles.emptyTitle}>{t('blocked.empty')}</Text>
               <Text style={styles.emptySub}>People you block will appear here.</Text>
             </View>
           }
@@ -116,7 +121,7 @@ const BlockedUsers = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {

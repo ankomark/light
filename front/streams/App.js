@@ -140,6 +140,8 @@ const MUSIC_WALLPAPERS = [
 import { useAuth, AuthProvider } from './context/useAuth';
 import { PlayerProvider } from './context/PlayerContext';
 import { PreferencesProvider } from './context/PreferencesContext';
+import { ThemeProvider } from './context/ThemeContext';
+import { I18nProvider } from './context/I18nContext';
 import MiniPlayer from './components/MiniPlayer';
 import { addNotificationResponseListener } from './services/pushNotifications';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -204,6 +206,8 @@ const App = () => {
       <AuthProvider>
       <AuthInitializer>
       <PreferencesProvider>
+      <ThemeProvider>
+      <I18nProvider>
       <PlayerProvider>
 
         <NavigationContainer ref={navigationRef} linking={linking} theme={navTheme}>
@@ -297,6 +301,8 @@ const App = () => {
             <MiniPlayer />
         </NavigationContainer>
       </PlayerProvider>
+      </I18nProvider>
+      </ThemeProvider>
       </PreferencesProvider>
       </AuthInitializer>
       </AuthProvider>

@@ -1,4 +1,7 @@
-export const colors = {
+// Dark palette — the app's original look. `colors` keeps pointing here so the
+// many components that import it statically are unaffected; theme-aware screens
+// read the active palette via useTheme() instead.
+export const darkColors = {
   primary: '#1DA1F2',
   primaryDark: '#0d8ecf',
   accent: '#F4A261',
@@ -22,6 +25,38 @@ export const colors = {
   border: '#1E3A5F',
   overlay: 'rgba(0,0,0,0.6)',
 };
+
+// Light palette — same semantic keys, tuned for contrast on light surfaces.
+export const lightColors = {
+  primary: '#1273B8',
+  primaryDark: '#0d5e95',
+  accent: '#D9712C',
+
+  bg: '#F5F7FA',
+  surface: '#FFFFFF',
+  card: '#FFFFFF',
+  inputBg: '#EEF2F7',
+
+  textPrimary: '#0A1628',
+  textSecondary: '#3A4A5E',
+  textMuted: '#6C757D',
+  placeholder: '#90A0B5',
+
+  error: '#D32F2F',
+  success: '#2E7D32',
+  warning: '#EF6C00',
+
+  white: '#FFFFFF',
+  black: '#000000',
+  border: '#D8E0EA',
+  overlay: 'rgba(0,0,0,0.45)',
+};
+
+// Back-compat default export used across the app (dark).
+export const colors = darkColors;
+
+// Resolve a palette from a color scheme string.
+export const paletteFor = (scheme) => (scheme === 'light' ? lightColors : darkColors);
 
 export const typography = {
   h1: { fontSize: 28, fontWeight: '700' },

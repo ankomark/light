@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -33,7 +33,9 @@ import {
 } from '../services/pushNotifications';
 import { PREF_KEYS } from '../utils/preferences';
 import { usePreferences } from '../context/PreferencesContext';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../context/I18nContext';
+import { typography, spacing, radius, shadows } from '../constants/theme';
 
 const APP_NAME = Constants.expoConfig?.name || 'Advent Light';
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
@@ -82,14 +84,20 @@ const openLink = async (url, fallbackMsg) => {
 };
 
 // ── Reusable building blocks ────────────────────────────────────────────────
-const Section = ({ title, children }) => (
-  <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title.toUpperCase()}</Text>
-    <View style={styles.group}>{children}</View>
-  </View>
-);
+const Section = ({ title, children }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title.toUpperCase()}</Text>
+      <View style={styles.group}>{children}</View>
+    </View>
+  );
+};
 
 const Row = ({ icon, iconColor, label, sub, right, onPress, last, danger }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const content = (
     <View style={[styles.row, !last && styles.rowDivider]}>
       <View style={[styles.rowIcon, danger && styles.rowIconDanger]}>
@@ -120,10 +128,15 @@ const Row = ({ icon, iconColor, label, sub, right, onPress, last, danger }) => {
   );
 };
 
+const THEME_CYCLE = ['system', 'light', 'dark'];
+
 const Settings = () => {
   const navigation = useNavigation();
   const { currentUser, isEmailVerified, logout, updateUser } = useAuth();
   const { preferences: prefs, setPreference: updatePref } = usePreferences();
+  const { colors, mode: themeMode, setMode: setThemeMode } = useTheme();
+  const { t, language, setLanguage, languages } = useI18n();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [isPrivate, setIsPrivate] = useState(!currentUser?.is_public);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
@@ -218,6 +231,20 @@ const Settings = () => {
     const next = VIDEO_QUALITY_CYCLE[(idx + 1) % VIDEO_QUALITY_CYCLE.length];
     updatePref(PREF_KEYS.videoQuality, next);
   };
+
+  const cycleTheme = () => {
+    const idx = THEME_CYCLE.indexOf(themeMode);
+    setThemeMode(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
+  };
+
+  const cycleLanguage = () => {
+    const codes = languages.map((l) => l.code);
+    const idx = codes.indexOf(language);
+    setLanguage(codes[(idx + 1) % codes.length]);
+  };
+
+  const themeLabel = t(`settings.theme.${themeMode}`);
+  const languageLabel = languages.find((l) => l.code === language)?.label || 'System default';
 
   const resetPwForm = () => { setCurrentPw(''); setNewPw(''); setConfirmPw(''); };
 
@@ -320,13 +347,13 @@ const Settings = () => {
         >
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={styles.headerTitle}>{t('settings.title')}</Text>
         <View style={styles.backBtn} />
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Account ───────────────────────────────────────────── */}
-        <Section title="Account">
+        <Section title={t('settings.section.account')}>
           <Row
             icon="account-circle-outline"
             label={currentUser?.username || 'Your profile'}
@@ -345,18 +372,18 @@ const Settings = () => {
           />
           <Row
             icon="lock-reset"
-            label="Change password"
+            label={t('settings.account.changePassword')}
             onPress={() => setPwVisible(true)}
             last
           />
         </Section>
 
         {/* ── Privacy ───────────────────────────────────────────── */}
-        <Section title="Privacy">
+        <Section title={t('settings.section.privacy')}>
           <Row
             icon="lock-outline"
-            label="Private account"
-            sub="Only approved followers can see your profile"
+            label={t('settings.privacy.privateAccount')}
+            sub={t('settings.privacy.privateAccountSub')}
             right={
               <View style={styles.switchWrap}>
                 {savingPrivacy && <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 6 }} />}
@@ -372,15 +399,42 @@ const Settings = () => {
           />
           <Row
             icon="account-cancel-outline"
-            label="Blocked accounts"
-            sub="Manage who you've blocked"
+            label={t('settings.privacy.blocked')}
+            sub={t('settings.privacy.blockedSub')}
             onPress={() => navigation.navigate('BlockedUsers')}
             last
           />
         </Section>
 
+        {/* ── Appearance ────────────────────────────────────────── */}
+        <Section title={t('settings.section.appearance')}>
+          <Row
+            icon="theme-light-dark"
+            label={t('settings.appearance.theme')}
+            sub={themeLabel}
+            onPress={cycleTheme}
+            right={
+              <View style={styles.valuePill}>
+                <Text style={styles.valuePillText}>{themeLabel}</Text>
+              </View>
+            }
+          />
+          <Row
+            icon="translate"
+            label={t('settings.appearance.language')}
+            sub={languageLabel}
+            onPress={cycleLanguage}
+            last
+            right={
+              <View style={styles.valuePill}>
+                <Text style={styles.valuePillText}>{languageLabel}</Text>
+              </View>
+            }
+          />
+        </Section>
+
         {/* ── Notifications ─────────────────────────────────────── */}
-        <Section title="Notifications">
+        <Section title={t('settings.section.notifications')}>
           <Row
             icon="bell-outline"
             label="Push notifications"
@@ -416,10 +470,10 @@ const Settings = () => {
         </Section>
 
         {/* ── Playback & Data ───────────────────────────────────── */}
-        <Section title="Playback & Data">
+        <Section title={t('settings.section.playback')}>
           <Row
             icon="play-circle-outline"
-            label="Autoplay videos"
+            label={t('settings.playback.autoplay')}
             sub="Play videos automatically in the feed"
             right={
               <Switch
@@ -432,7 +486,7 @@ const Settings = () => {
           />
           <Row
             icon="cellphone-arrow-down"
-            label="Data saver"
+            label={t('settings.playback.dataSaver')}
             sub="Reduce data usage on mobile networks"
             right={
               <Switch
@@ -445,7 +499,7 @@ const Settings = () => {
           />
           <Row
             icon="video-outline"
-            label="Video quality"
+            label={t('settings.playback.videoQuality')}
             sub={VIDEO_QUALITY_LABELS[prefs[PREF_KEYS.videoQuality]] || 'Automatic'}
             onPress={cycleVideoQuality}
             right={
@@ -458,7 +512,7 @@ const Settings = () => {
           />
           <Row
             icon="music-note-outline"
-            label="Audio quality"
+            label={t('settings.playback.audioQuality')}
             sub={AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
             onPress={cycleAudioQuality}
             right={
@@ -473,10 +527,10 @@ const Settings = () => {
         </Section>
 
         {/* ── Support ───────────────────────────────────────────── */}
-        <Section title="Support">
+        <Section title={t('settings.section.support')}>
           <Row
             icon="email-edit-outline"
-            label="Contact admins"
+            label={t('settings.support.contact')}
             sub="Send a private message to the team"
             onPress={() => setContactVisible(true)}
           />
@@ -487,16 +541,16 @@ const Settings = () => {
           />
           <Row
             icon="information-outline"
-            label="About"
+            label={t('settings.support.about')}
             onPress={() => navigation.navigate('About')}
             last
           />
         </Section>
 
         {/* ── Session ───────────────────────────────────────────── */}
-        <Section title="Session">
-          <Row icon="logout" label="Log out" danger onPress={handleLogout} right={null} />
-          <Row icon="trash-can-outline" label="Delete account" danger onPress={confirmDeleteAccount} last right={null} />
+        <Section title={t('settings.section.session')}>
+          <Row icon="logout" label={t('settings.session.logout')} danger onPress={handleLogout} right={null} />
+          <Row icon="trash-can-outline" label={t('settings.session.delete')} danger onPress={confirmDeleteAccount} last right={null} />
         </Section>
 
         <Text style={styles.version}>{APP_NAME} v{APP_VERSION}</Text>
@@ -677,7 +731,7 @@ const Settings = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
   header: {
