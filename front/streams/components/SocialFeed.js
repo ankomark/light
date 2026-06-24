@@ -19,7 +19,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
-import { PREF_KEYS } from '../utils/preferences';
+import { PREF_KEYS, applyVideoQuality } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
 import { fetchSocialPosts, cursorFromUrl } from '../services/api';
 import FollowButton from '../components/FollowButton';
@@ -208,6 +208,13 @@ const PostMedia = React.memo(function PostMedia({
   }
 
   if (item.content_type === 'video') {
+    // Derive the delivery URL for the chosen video quality; keep currentUrl raw
+    // so the onError fallback comparison against item.media_url still works.
+    const videoUri = applyVideoQuality(
+      currentUrl,
+      preferences[PREF_KEYS.videoQuality],
+      preferences[PREF_KEYS.dataSaver]
+    );
     return (
       <Pressable
         style={[styles.mediaContainer, { aspectRatio }]}
@@ -220,7 +227,7 @@ const PostMedia = React.memo(function PostMedia({
         )}
         <Video
           ref={ref => ref && (videoRefs.current[item.id] = ref)}
-          source={{ uri: currentUrl }}
+          source={{ uri: videoUri }}
           style={[styles.media, { aspectRatio }]}
           resizeMode="cover"
           isLooping

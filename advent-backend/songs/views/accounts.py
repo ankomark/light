@@ -4,6 +4,24 @@ from ..models import Appeal
 from ..serializers import AppealSerializer
 
 
+class NotificationPreferenceView(APIView):
+    """Get or update the signed-in user's per-category push preferences.
+    The row is created on first access so the client always has something to
+    bind to (absence == all-enabled)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        pref, _ = NotificationPreference.objects.get_or_create(user=request.user)
+        return Response(NotificationPreferenceSerializer(pref).data)
+
+    def patch(self, request):
+        pref, _ = NotificationPreference.objects.get_or_create(user=request.user)
+        serializer = NotificationPreferenceSerializer(pref, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
 class AppealViewSet(viewsets.GenericViewSet):
     """A suspended user submits / views their own appeal."""
     permission_classes = [IsAuthenticated]

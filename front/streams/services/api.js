@@ -1368,6 +1368,21 @@ export const forgotPassword = (email) =>
 export const resetPassword = (email, code, new_password) =>
   apiRequest('post', '/auth/reset-password/', { email, code, new_password });
 
+// Authenticated password change (signed-in user; no email code).
+export const changePassword = (current_password, new_password) =>
+  apiRequest('post', '/auth/change-password/', { current_password, new_password });
+
+// Permanently delete the signed-in user's account (password required).
+export const deleteAccount = (password) =>
+  apiRequest('post', '/auth/delete-account/', { password });
+
+// ── Notification preferences ────────────────────────────────────────────────
+export const fetchNotificationPreferences = () =>
+  apiRequest('get', '/notification-preferences/');
+
+export const updateNotificationPreferences = (fields) =>
+  apiRequest('patch', '/notification-preferences/', fields);
+
 // ── Post insights + view tracking ────────────────────────────────────────────
 export const markPostViewed = (postId) =>
   apiRequest('post', `/social-posts/${postId}/viewed/`);

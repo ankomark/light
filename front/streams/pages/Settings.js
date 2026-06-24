@@ -19,7 +19,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useAuth } from '../context/useAuth';
-import { updateProfileFields, createAdminNote } from '../services/api';
+import {
+  updateProfileFields,
+  createAdminNote,
+  changePassword,
+  deleteAccount,
+  fetchNotificationPreferences,
+  updateNotificationPreferences,
+} from '../services/api';
 import {
   registerForPushNotifications,
   unregisterPushToken,
@@ -45,6 +52,24 @@ const AUDIO_QUALITY_LABELS = {
   data_saver: 'Data saver',
 };
 const AUDIO_QUALITY_CYCLE = ['auto', 'high', 'data_saver'];
+
+const VIDEO_QUALITY_LABELS = {
+  auto: 'Automatic',
+  hd: 'HD',
+  data_saver: 'Data saver',
+};
+const VIDEO_QUALITY_CYCLE = ['auto', 'hd', 'data_saver'];
+
+// User-facing notification categories (key must match the serializer fields).
+const NOTIFICATION_CATEGORIES = [
+  { key: 'likes', label: 'Likes', icon: 'heart-outline' },
+  { key: 'comments', label: 'Comments', icon: 'comment-outline' },
+  { key: 'follows', label: 'New followers', icon: 'account-plus-outline' },
+  { key: 'messages', label: 'Messages', icon: 'message-text-outline' },
+  { key: 'groups', label: 'Group activity', icon: 'account-group-outline' },
+  { key: 'communities', label: 'Churches & choirs', icon: 'church' },
+  { key: 'live', label: 'Live events', icon: 'broadcast' },
+];
 
 const openLink = async (url, fallbackMsg) => {
   try {
@@ -107,9 +132,43 @@ const Settings = () => {
   const [contactText, setContactText] = useState('');
   const [sendingContact, setSendingContact] = useState(false);
 
+  // Change password
+  const [pwVisible, setPwVisible] = useState(false);
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [changingPw, setChangingPw] = useState(false);
+
+  // Delete account
+  const [deleteVisible, setDeleteVisible] = useState(false);
+  const [deletePw, setDeletePw] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  // Notification preferences (per-category). null until loaded.
+  const [notifPrefs, setNotifPrefs] = useState(null);
+
   useEffect(() => {
     setIsPrivate(!currentUser?.is_public);
   }, [currentUser?.is_public]);
+
+  // Load per-category notification preferences once.
+  useEffect(() => {
+    let alive = true;
+    fetchNotificationPreferences()
+      .then((data) => { if (alive) setNotifPrefs(data); })
+      .catch(() => { if (alive) setNotifPrefs(null); });
+    return () => { alive = false; };
+  }, []);
+
+  const toggleNotifCategory = async (key, value) => {
+    setNotifPrefs((prev) => ({ ...(prev || {}), [key]: value }));
+    try {
+      await updateNotificationPreferences({ [key]: value });
+    } catch {
+      setNotifPrefs((prev) => ({ ...(prev || {}), [key]: !value })); // revert
+      Alert.alert('Error', 'Could not update this notification setting.');
+    }
+  };
 
   // Privacy: persisted server-side on the profile (is_public is the inverse).
   const handleTogglePrivate = async (next) => {
@@ -152,6 +211,71 @@ const Settings = () => {
     const idx = AUDIO_QUALITY_CYCLE.indexOf(prefs[PREF_KEYS.audioQuality]);
     const next = AUDIO_QUALITY_CYCLE[(idx + 1) % AUDIO_QUALITY_CYCLE.length];
     updatePref(PREF_KEYS.audioQuality, next);
+  };
+
+  const cycleVideoQuality = () => {
+    const idx = VIDEO_QUALITY_CYCLE.indexOf(prefs[PREF_KEYS.videoQuality]);
+    const next = VIDEO_QUALITY_CYCLE[(idx + 1) % VIDEO_QUALITY_CYCLE.length];
+    updatePref(PREF_KEYS.videoQuality, next);
+  };
+
+  const resetPwForm = () => { setCurrentPw(''); setNewPw(''); setConfirmPw(''); };
+
+  const handleChangePassword = async () => {
+    if (!currentPw || !newPw) {
+      Alert.alert('Missing info', 'Enter your current and new password.');
+      return;
+    }
+    if (newPw.length < 8) {
+      Alert.alert('Weak password', 'New password must be at least 8 characters.');
+      return;
+    }
+    if (newPw !== confirmPw) {
+      Alert.alert('Mismatch', 'New password and confirmation do not match.');
+      return;
+    }
+    try {
+      setChangingPw(true);
+      await changePassword(currentPw, newPw);
+      setPwVisible(false);
+      resetPwForm();
+      Alert.alert('Done', 'Your password has been changed.');
+    } catch (error) {
+      Alert.alert('Error', error.response?.data?.error || 'Could not change your password.');
+    } finally {
+      setChangingPw(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePw) {
+      Alert.alert('Password required', 'Enter your password to confirm deletion.');
+      return;
+    }
+    try {
+      setDeleting(true);
+      await deleteAccount(deletePw);
+      setDeleteVisible(false);
+      setDeletePw('');
+      // Account is gone — clear the session and return to login.
+      try { await logout(); } catch {}
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    } catch (error) {
+      Alert.alert('Error', error.response?.data?.error || 'Could not delete your account.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This permanently deletes your account and all your content. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Continue', style: 'destructive', onPress: () => setDeleteVisible(true) },
+      ]
+    );
   };
 
   const handleSendContact = async () => {
@@ -222,7 +346,7 @@ const Settings = () => {
           <Row
             icon="lock-reset"
             label="Change password"
-            onPress={() => navigation.navigate('ForgotPassword')}
+            onPress={() => setPwVisible(true)}
             last
           />
         </Section>
@@ -254,8 +378,8 @@ const Settings = () => {
           <Row
             icon="bell-outline"
             label="Push notifications"
-            sub="Likes, comments, messages and notices"
-            last
+            sub="Master switch for all push alerts on this device"
+            last={!prefs[PREF_KEYS.pushEnabled]}
             right={
               <Switch
                 value={!!prefs[PREF_KEYS.pushEnabled]}
@@ -265,6 +389,24 @@ const Settings = () => {
               />
             }
           />
+          {/* Per-category opt-outs, only meaningful while push is enabled. */}
+          {!!prefs[PREF_KEYS.pushEnabled] && NOTIFICATION_CATEGORIES.map((cat, i) => (
+            <Row
+              key={cat.key}
+              icon={cat.icon}
+              label={cat.label}
+              last={i === NOTIFICATION_CATEGORIES.length - 1}
+              right={
+                <Switch
+                  value={notifPrefs ? notifPrefs[cat.key] !== false : true}
+                  onValueChange={(v) => toggleNotifCategory(cat.key, v)}
+                  disabled={notifPrefs === null}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor={colors.white}
+                />
+              }
+            />
+          ))}
         </Section>
 
         {/* ── Playback & Data ───────────────────────────────────── */}
@@ -293,6 +435,19 @@ const Settings = () => {
                 trackColor={{ false: colors.border, true: colors.primary }}
                 thumbColor={colors.white}
               />
+            }
+          />
+          <Row
+            icon="video-outline"
+            label="Video quality"
+            sub={VIDEO_QUALITY_LABELS[prefs[PREF_KEYS.videoQuality]] || 'Automatic'}
+            onPress={cycleVideoQuality}
+            right={
+              <View style={styles.valuePill}>
+                <Text style={styles.valuePillText}>
+                  {VIDEO_QUALITY_LABELS[prefs[PREF_KEYS.videoQuality]] || 'Automatic'}
+                </Text>
+              </View>
             }
           />
           <Row
@@ -334,7 +489,8 @@ const Settings = () => {
 
         {/* ── Session ───────────────────────────────────────────── */}
         <Section title="Session">
-          <Row icon="logout" label="Log out" danger onPress={handleLogout} last right={null} />
+          <Row icon="logout" label="Log out" danger onPress={handleLogout} right={null} />
+          <Row icon="trash-can-outline" label="Delete account" danger onPress={confirmDeleteAccount} last right={null} />
         </Section>
 
         <Text style={styles.version}>{APP_NAME} v{APP_VERSION}</Text>
@@ -387,6 +543,125 @@ const Settings = () => {
                 : <>
                     <Ionicons name="send-outline" size={18} color={colors.white} />
                     <Text style={styles.sendBtnText}>Send to admins</Text>
+                  </>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Change-password modal */}
+      <Modal
+        visible={pwVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setPwVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Change password</Text>
+              <TouchableOpacity onPress={() => { setPwVisible(false); resetPwForm(); }}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.pwInput}
+              placeholder="Current password"
+              placeholderTextColor={colors.placeholder}
+              value={currentPw}
+              onChangeText={setCurrentPw}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.pwInput}
+              placeholder="New password (min 8 chars)"
+              placeholderTextColor={colors.placeholder}
+              value={newPw}
+              onChangeText={setNewPw}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.pwInput}
+              placeholder="Confirm new password"
+              placeholderTextColor={colors.placeholder}
+              value={confirmPw}
+              onChangeText={setConfirmPw}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity
+              style={[styles.sendBtn, changingPw && { opacity: 0.6 }]}
+              onPress={handleChangePassword}
+              disabled={changingPw}
+              activeOpacity={0.85}
+            >
+              {changingPw
+                ? <ActivityIndicator color={colors.white} />
+                : <>
+                    <Ionicons name="lock-closed-outline" size={18} color={colors.white} />
+                    <Text style={styles.sendBtnText}>Update password</Text>
+                  </>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Delete-account modal (password confirmation) */}
+      <Modal
+        visible={deleteVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDeleteVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Delete account</Text>
+              <TouchableOpacity onPress={() => { setDeleteVisible(false); setDeletePw(''); }}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.privacyHint}>
+              <MaterialCommunityIcons name="alert-outline" size={16} color={colors.error} />
+              <Text style={[styles.privacyHintText, { color: colors.error }]}>
+                This permanently deletes your account and content. It cannot be undone.
+              </Text>
+            </View>
+
+            <TextInput
+              style={styles.pwInput}
+              placeholder="Enter your password to confirm"
+              placeholderTextColor={colors.placeholder}
+              value={deletePw}
+              onChangeText={setDeletePw}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity
+              style={[styles.deleteBtn, deleting && { opacity: 0.6 }]}
+              onPress={handleDeleteAccount}
+              disabled={deleting}
+              activeOpacity={0.85}
+            >
+              {deleting
+                ? <ActivityIndicator color={colors.white} />
+                : <>
+                    <Ionicons name="trash-outline" size={18} color={colors.white} />
+                    <Text style={styles.sendBtnText}>Delete my account</Text>
                   </>}
             </TouchableOpacity>
           </View>
@@ -496,6 +771,16 @@ const styles = StyleSheet.create({
     minHeight: 130,
     marginBottom: spacing.md,
   },
+  pwInput: {
+    backgroundColor: colors.inputBg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    color: colors.textPrimary,
+    fontSize: 15,
+    marginBottom: spacing.md,
+  },
   sendBtn: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -507,6 +792,16 @@ const styles = StyleSheet.create({
     ...shadows.md,
   },
   sendBtnText: { ...typography.button, color: colors.white, fontSize: 16 },
+  deleteBtn: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.error,
+    height: 52,
+    borderRadius: radius.md,
+    ...shadows.md,
+  },
 });
 
 export default Settings;

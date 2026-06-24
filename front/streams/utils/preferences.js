@@ -13,6 +13,7 @@ export const PREF_KEYS = {
   autoplayVideo: 'autoplayVideo',
   dataSaver: 'dataSaver',
   audioQuality: 'audioQuality', // 'auto' | 'high' | 'data_saver'
+  videoQuality: 'videoQuality', // 'auto' | 'hd' | 'data_saver'
   pushEnabled: 'pushEnabled',
 };
 
@@ -20,6 +21,7 @@ export const DEFAULT_PREFERENCES = {
   [PREF_KEYS.autoplayVideo]: true,
   [PREF_KEYS.dataSaver]: false,
   [PREF_KEYS.audioQuality]: 'auto',
+  [PREF_KEYS.videoQuality]: 'auto',
   [PREF_KEYS.pushEnabled]: true,
 };
 
@@ -74,6 +76,24 @@ export const applyAudioQuality = (url, audioQuality, dataSaver) => {
   if (dataSaver || audioQuality === 'data_saver') transform = 'q_auto:low';
   else if (audioQuality === 'auto') transform = 'q_auto';
   // 'high' → no transform: serve the original rendition.
+
+  if (!transform) return url;
+  return url.replace('/upload/', `/upload/${transform}/`);
+};
+
+// Rewrite a Cloudinary video URL for the chosen video quality. 'hd' requests a
+// 1080p-capped high-quality rendition; 'auto' lets Cloudinary pick; Data saver
+// (or the data_saver choice) caps to 480p low. Only touches Cloudinary
+// `/upload/` URLs and never double-applies.
+export const applyVideoQuality = (url, videoQuality, dataSaver) => {
+  if (!url || typeof url !== 'string' || !url.includes('/upload/')) return url;
+  if (/\/upload\/(q_|w_|h_|c_limit)/.test(url)) return url; // already transformed
+
+  let transform = null;
+  if (dataSaver || videoQuality === 'data_saver') transform = 'q_auto:low,w_854,c_limit';
+  else if (videoQuality === 'hd') transform = 'q_auto:good,w_1920,c_limit';
+  else if (videoQuality === 'auto') transform = 'q_auto';
+  // anything else → original.
 
   if (!transform) return url;
   return url.replace('/upload/', `/upload/${transform}/`);

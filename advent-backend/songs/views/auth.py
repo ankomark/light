@@ -187,6 +187,55 @@ class ResetPasswordView(APIView):
 
 
 
+class ChangePasswordView(APIView):
+    """Authenticated password change: verify the current password, then set a new
+    one. Unlike the email-code reset flow, this is for users who are signed in."""
+    permission_classes = [IsAuthenticated]
+    throttle_scope = 'password_reset'
+
+    def post(self, request):
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        current = request.data.get('current_password', '')
+        new_password = request.data.get('new_password', '')
+
+        if not current or not new_password:
+            return Response(
+                {'error': 'current_password and new_password are required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not request.user.check_password(current):
+            return Response({'error': 'Current password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_password(new_password, request.user)
+        except DjangoValidationError as e:
+            return Response({'error': ' '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        request.user.set_password(new_password)
+        request.user.save()
+        # Existing JWTs remain valid until they expire; the client keeps its
+        # session, so no re-login is forced here.
+        return Response({'message': 'Password updated successfully.'})
+
+
+class DeleteAccountView(APIView):
+    """Self-service account deletion. Requires the current password as a
+    confirmation, then permanently removes the account (cascades to the user's
+    content via the related models' on_delete rules)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        password = request.data.get('password', '')
+        if not password:
+            return Response({'error': 'password is required to delete your account'}, status=status.HTTP_400_BAD_REQUEST)
+        if not request.user.check_password(password):
+            return Response({'error': 'Password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+
+        request.user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class AuthStatusView(APIView):
     """Lightweight status for the signed-in user — works whether or not a
     profile exists yet, so the app can gate on email verification and route

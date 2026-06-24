@@ -59,6 +59,13 @@ class AdminNoteSerializer(serializers.ModelSerializer):
         read_only_fields = ['sender', 'created_at']
 
 
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = ['likes', 'comments', 'follows', 'messages', 'groups', 'communities', 'live', 'updated_at']
+        read_only_fields = ['updated_at']
+
+
 class ChurchSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)

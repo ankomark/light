@@ -11,6 +11,39 @@ NOTIFICATION_TITLES = {
     'message': '\U0001f4ac New Message',
 }
 
+# Maps a notification_type to the user-facing preference category that gates it.
+# Types not listed here (e.g. 'system', account/moderation messages) are always
+# delivered and cannot be turned off.
+NOTIFICATION_CATEGORIES = {
+    'like': 'likes',
+    'comment': 'comments',
+    'follow': 'follows',
+    'message': 'messages',
+    'group_join_request': 'groups',
+    'group_added': 'groups',
+    'church_request': 'communities',
+    'church_approved': 'communities',
+    'church_added': 'communities',
+    'choir_request': 'communities',
+    'choir_approved': 'communities',
+    'choir_added': 'communities',
+    'live': 'live',
+    'cohost_request': 'live',
+    'cohost_approved': 'live',
+}
+
+
+def _is_category_enabled(recipient, notification_type):
+    """Whether the recipient still wants pushes of this type. Unknown types and
+    users with no preference row default to enabled (fail-open)."""
+    category = NOTIFICATION_CATEGORIES.get(notification_type)
+    if not category:
+        return True
+    prefs = getattr(recipient, 'notification_preference', None)
+    if prefs is None:
+        return True
+    return bool(getattr(prefs, category, True))
+
 
 def send_expo_push(tokens, title, body, data=None):
     """Send push notifications to a list of Expo push tokens."""
@@ -75,6 +108,10 @@ def notify_user(recipient, notification_type, message, data=None):
     """
     from .models import DeviceToken
     from .tasks import run_in_background
+
+    # Respect the recipient's per-category push preference.
+    if not _is_category_enabled(recipient, notification_type):
+        return
 
     tokens = list(
         DeviceToken.objects.filter(user=recipient, is_active=True)

@@ -693,6 +693,23 @@ class AdminNote(models.Model):
         return f"Note from {who} ({self.created_at:%Y-%m-%d})"
 
 
+class NotificationPreference(models.Model):
+    """Per-user push opt-outs by category. A missing row means everything is on
+    (the default), so absence is treated as all-enabled in the send path."""
+    user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='notification_preference')
+    likes = models.BooleanField(default=True)
+    comments = models.BooleanField(default=True)
+    follows = models.BooleanField(default=True)
+    messages = models.BooleanField(default=True)
+    groups = models.BooleanField(default=True)
+    communities = models.BooleanField(default=True)
+    live = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Notification prefs for {self.user.username}"
+
+
 class MediaStation(models.Model):
     STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
 

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from ..models import User
-from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,ChoirMembership,ChoirJoinRequest,ChoirMessage,ChoirMessageReaction,ChurchMembership,ChurchJoinRequest,ChurchMessage,ChurchMessageReaction
+from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,ChoirMembership,ChoirJoinRequest,ChoirMessage,ChoirMessageReaction,ChurchMembership,ChurchJoinRequest,ChurchMessage,ChurchMessageReaction
 import re
 from django.utils import timezone
 from datetime import timedelta
@@ -118,6 +118,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source='user.id')
     picture_url = serializers.SerializerMethodField()
     username = serializers.ReadOnlyField(source='user.username')
+    email = serializers.ReadOnlyField(source='user.email')
     is_staff = serializers.ReadOnlyField(source='user.is_staff')
     # Drives the in-app admin panel gating (rides along on /profiles/me/).
     admin_role = serializers.ReadOnlyField(source='user.admin_role')
@@ -130,10 +131,10 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Profile
-        fields = ['bio', 'user_id','username', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
+        fields = ['bio', 'user_id','username', 'email', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
                   'birth_date', 'location', 'is_public', 'picture','picture_url',
                   'followers_count', 'following_count', 'posts_count']
-        read_only_fields = ['user_id', 'username', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
+        read_only_fields = ['user_id', 'username', 'email', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
                             'picture_url', 'followers_count', 'following_count', 'posts_count']
         extra_kwargs = {
             'picture': {'write_only': True}  # Only needed for uploads
