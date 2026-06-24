@@ -927,6 +927,25 @@ export const createNotice = async ({ title, body, is_pinned = false }) => {
 export const deleteNotice = async (id) => {
   return apiRequest('delete', `/notices/${id}/`);
 };
+
+// ---- Notes to admins ----
+// Any signed-in user can submit a private note; only admins can read them.
+export const createAdminNote = async (body) => {
+  return apiRequest('post', '/admin-notes/', { body });
+};
+
+export const fetchAdminNotes = async (page = 1) => {
+  const res = await apiRequest('get', '/admin-notes/', null, { params: { page, page_size: 100 } });
+  return res?.results ?? res;
+};
+
+export const markAdminNoteRead = async (id, is_read = true) => {
+  return apiRequest('patch', `/admin-notes/${id}/`, { is_read });
+};
+
+export const deleteAdminNote = async (id) => {
+  return apiRequest('delete', `/admin-notes/${id}/`);
+};
 export const fetchGroupJoinRequests = async (slug) => {
   const res = await apiRequest('get', `/groups/${slug}/join-requests/`);
   return res?.results ?? res;
@@ -1337,6 +1356,11 @@ export const updateProfile = (formData) =>
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 
+// JSON-only profile patch for simple scalar fields (e.g. the is_public privacy
+// toggle in Settings) — avoids the multipart path used for image uploads.
+export const updateProfileFields = (fields) =>
+  apiRequest('patch', '/profiles/update_me/', fields);
+
 // ── Password reset ────────────────────────────────────────────────────────────
 export const forgotPassword = (email) =>
   apiRequest('post', '/auth/forgot-password/', { email });
@@ -1571,6 +1595,10 @@ export default {
   fetchNotices,
   createNotice,
   deleteNotice,
+  createAdminNote,
+  fetchAdminNotes,
+  markAdminNoteRead,
+  deleteAdminNote,
   fetchProductCategories,
   fetchProducts,
   fetchProductById,

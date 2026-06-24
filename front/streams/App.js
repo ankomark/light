@@ -42,6 +42,8 @@ import ChapterReader from './pages/ChapterReader';
 import PublicationEditor from './pages/PublicationEditor';
 import Churches from './pages/Churches';
 import About from './pages/About';
+import Settings from './pages/Settings';
+import Help from './pages/Help';
 import Choirs from './pages/Choirs';
 import ChoirCommunity from './pages/ChoirCommunity';
 import ChurchCommunity from './pages/ChurchCommunity';
@@ -136,6 +138,7 @@ const MUSIC_WALLPAPERS = [
 
 import { useAuth, AuthProvider } from './context/useAuth';
 import { PlayerProvider } from './context/PlayerContext';
+import { PreferencesProvider } from './context/PreferencesContext';
 import MiniPlayer from './components/MiniPlayer';
 import { addNotificationResponseListener } from './services/pushNotifications';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -199,6 +202,7 @@ const App = () => {
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
       <AuthProvider>
       <AuthInitializer>
+      <PreferencesProvider>
       <PlayerProvider>
 
         <NavigationContainer ref={navigationRef} linking={linking} theme={navTheme}>
@@ -241,6 +245,8 @@ const App = () => {
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
                 <Stack.Screen name="Churches" component={ChurchesWrapper} />
                 <Stack.Screen name="About" component={About} />
+                <Stack.Screen name="Settings" component={Settings} options={{ headerShown: false }} />
+                <Stack.Screen name="Help" component={Help} options={{ headerShown: false }} />
                 <Stack.Screen name="Studios" component={StudiosWrapper} />
                 <Stack.Screen name="Choirs" component={ChoirsWrapper} />
                 <Stack.Screen name="ChoirCommunity" component={ChoirCommunity} options={{ headerShown: false }} />
@@ -289,6 +295,7 @@ const App = () => {
             <MiniPlayer />
         </NavigationContainer>
       </PlayerProvider>
+      </PreferencesProvider>
       </AuthInitializer>
       </AuthProvider>
       </ErrorBoundary>

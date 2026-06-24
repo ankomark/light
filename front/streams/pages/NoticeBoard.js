@@ -16,7 +16,15 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { fetchNotices, createNotice, deleteNotice } from '../services/api';
+import {
+  fetchNotices,
+  createNotice,
+  deleteNotice,
+  createAdminNote,
+  fetchAdminNotes,
+  markAdminNoteRead,
+  deleteAdminNote,
+} from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -39,6 +47,16 @@ const NoticeBoard = () => {
   const [body, setBody] = useState('');
   const [pinned, setPinned] = useState(false);
   const [posting, setPosting] = useState(false);
+
+  // Private note to admins (any user can write; only admins can read).
+  const [noteVisible, setNoteVisible] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [sendingNote, setSendingNote] = useState(false);
+
+  // Admin inbox of received notes.
+  const [inboxVisible, setInboxVisible] = useState(false);
+  const [inboxNotes, setInboxNotes] = useState([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -88,6 +106,68 @@ const NoticeBoard = () => {
     } finally {
       setPosting(false);
     }
+  };
+
+  const handleSendNote = async () => {
+    if (!noteText.trim()) {
+      Alert.alert('Empty note', 'Please write your message to the admins.');
+      return;
+    }
+    try {
+      setSendingNote(true);
+      await createAdminNote(noteText.trim());
+      setNoteVisible(false);
+      setNoteText('');
+      Alert.alert('Sent', 'Your note has been delivered to the admins. Only they can read it.');
+    } catch (error) {
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to send your note.');
+    } finally {
+      setSendingNote(false);
+    }
+  };
+
+  const openInbox = async () => {
+    setInboxVisible(true);
+    setInboxLoading(true);
+    try {
+      const data = await fetchAdminNotes();
+      setInboxNotes(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to load admin notes:', error);
+      Alert.alert('Error', 'Failed to load notes.');
+    } finally {
+      setInboxLoading(false);
+    }
+  };
+
+  const handleToggleNoteRead = async (note) => {
+    const next = !note.is_read;
+    setInboxNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, is_read: next } : n)));
+    try {
+      await markAdminNoteRead(note.id, next);
+    } catch {
+      setInboxNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, is_read: !next } : n)));
+    }
+  };
+
+  const handleDeleteNote = (note) => {
+    Alert.alert('Delete note', 'Remove this note from the inbox?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const prev = inboxNotes;
+          setInboxNotes((cur) => cur.filter((n) => n.id !== note.id));
+          try {
+            await deleteAdminNote(note.id);
+          } catch {
+            setInboxNotes(prev);
+            Alert.alert('Error', 'Failed to delete note.');
+          }
+        },
+      },
+    ]);
   };
 
   const handleDelete = (item) => {
@@ -157,11 +237,27 @@ const NoticeBoard = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
         }
         ListHeaderComponent={
-          <View style={styles.intro}>
-            <MaterialCommunityIcons name="bullhorn-variant-outline" size={20} color={colors.primary} />
-            <Text style={styles.introText}>
-              Official announcements from the leadership. {isAdmin ? 'Tap + to post a new notice.' : ''}
-            </Text>
+          <View>
+            <View style={styles.intro}>
+              <MaterialCommunityIcons name="bullhorn-variant-outline" size={20} color={colors.primary} />
+              <Text style={styles.introText}>
+                Official announcements from the leadership. {isAdmin ? 'Tap + to post a new notice.' : ''}
+              </Text>
+            </View>
+
+            <View style={styles.actionRow}>
+              <TouchableOpacity style={styles.actionBtn} onPress={() => setNoteVisible(true)} activeOpacity={0.85}>
+                <MaterialCommunityIcons name="email-edit-outline" size={18} color={colors.primary} />
+                <Text style={styles.actionBtnText}>Note to admins</Text>
+              </TouchableOpacity>
+
+              {isAdmin && (
+                <TouchableOpacity style={styles.actionBtn} onPress={openInbox} activeOpacity={0.85}>
+                  <MaterialCommunityIcons name="inbox-arrow-down-outline" size={18} color={colors.primary} />
+                  <Text style={styles.actionBtnText}>Admin inbox</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         }
         ListEmptyComponent={
@@ -250,6 +346,126 @@ const NoticeBoard = () => {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Note to admins (any signed-in user) */}
+      <Modal
+        visible={noteVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setNoteVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Note to admins</Text>
+              <TouchableOpacity onPress={() => { setNoteVisible(false); setNoteText(''); }}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View style={styles.privacyHint}>
+                <MaterialCommunityIcons name="lock-outline" size={16} color={colors.textMuted} />
+                <Text style={styles.privacyHintText}>
+                  This message is private — only admins can read it.
+                </Text>
+              </View>
+
+              <TextInput
+                style={[styles.input, styles.bodyInput]}
+                placeholder="Write your message to the admins..."
+                placeholderTextColor={colors.placeholder}
+                value={noteText}
+                onChangeText={setNoteText}
+                multiline
+                textAlignVertical="top"
+              />
+
+              <TouchableOpacity
+                style={[styles.postButton, sendingNote && styles.postButtonDisabled]}
+                onPress={handleSendNote}
+                disabled={sendingNote}
+                activeOpacity={0.85}
+              >
+                {sendingNote
+                  ? <ActivityIndicator color={colors.white} />
+                  : <>
+                      <Ionicons name="send-outline" size={18} color={colors.white} />
+                      <Text style={styles.postButtonText}>Send to admins</Text>
+                    </>}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Admin inbox of received notes (admins only) */}
+      <Modal
+        visible={inboxVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setInboxVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: '88%' }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Notes from users</Text>
+              <TouchableOpacity onPress={() => setInboxVisible(false)}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {inboxLoading ? (
+              <View style={{ paddingVertical: spacing.xxl }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+              </View>
+            ) : (
+              <FlatList
+                data={inboxNotes}
+                keyExtractor={(item) => item.id.toString()}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: spacing.xl }}
+                ListEmptyComponent={
+                  <View style={styles.empty}>
+                    <MaterialCommunityIcons name="email-open-outline" size={48} color={colors.border} />
+                    <Text style={styles.emptyTitle}>No notes yet</Text>
+                  </View>
+                }
+                renderItem={({ item }) => (
+                  <View style={[styles.noteCard, !item.is_read && styles.noteCardUnread]}>
+                    <Text style={styles.noteBody}>{item.body}</Text>
+                    <View style={styles.cardFooter}>
+                      <MaterialCommunityIcons name="account-circle-outline" size={14} color={colors.textMuted} />
+                      <Text style={styles.cardMeta}>
+                        {item.sender_username || 'Unknown'} · {formatDate(item.created_at)}
+                      </Text>
+                    </View>
+                    <View style={styles.noteActions}>
+                      <TouchableOpacity style={styles.noteActionBtn} onPress={() => handleToggleNoteRead(item)}>
+                        <MaterialCommunityIcons
+                          name={item.is_read ? 'email-outline' : 'email-open-outline'}
+                          size={16}
+                          color={colors.primary}
+                        />
+                        <Text style={styles.noteActionText}>{item.is_read ? 'Mark unread' : 'Mark read'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.noteActionBtn} onPress={() => handleDeleteNote(item)}>
+                        <Ionicons name="trash-outline" size={16} color={colors.error} />
+                        <Text style={[styles.noteActionText, { color: colors.error }]}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -271,6 +487,44 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   introText: { ...typography.caption, color: colors.textSecondary, flex: 1, lineHeight: 18 },
+
+  actionRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  actionBtnText: { ...typography.caption, color: colors.primary, fontWeight: '700' },
+
+  privacyHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: spacing.md,
+  },
+  privacyHintText: { ...typography.caption, color: colors.textMuted, flex: 1 },
+
+  noteCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  noteCardUnread: { borderColor: colors.primary },
+  noteBody: { ...typography.body, color: colors.textPrimary },
+  noteActions: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.md },
+  noteActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  noteActionText: { ...typography.caption, color: colors.primary, fontWeight: '600' },
 
   card: {
     backgroundColor: colors.card,

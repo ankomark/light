@@ -10,6 +10,8 @@ import { Audio } from 'expo-av';
 import {
   makeOrder, reshuffleOrder, nextPos, prevPos, canNext, canPrev,
 } from '../utils/queueLogic';
+import { usePreferences } from './PreferencesContext';
+import { applyAudioQuality } from '../utils/preferences';
 
 const PlayerContext = createContext(null);
 
@@ -40,6 +42,12 @@ export const PlayerProvider = ({ children }) => {
   const soundRef = useRef(null);
   const currentIdRef = useRef(null);
   const seekingRef = useRef(false);
+
+  // Playback prefs (audio quality / data saver). Mirrored to a ref so the load
+  // path reads current values without re-creating the loadAndPlay callback.
+  const { preferences } = usePreferences();
+  const prefsRef = useRef(preferences);
+  useEffect(() => { prefsRef.current = preferences; }, [preferences]);
 
   // Queue state (refs are the source of truth; mirrored to React state for UI).
   const queueRef = useRef([]);
@@ -112,8 +120,13 @@ export const PlayerProvider = ({ children }) => {
           await soundRef.current.unloadAsync().catch(() => {});
           soundRef.current = null;
         }
+        const uri = applyAudioQuality(
+          track.audio_file,
+          prefsRef.current.audioQuality,
+          prefsRef.current.dataSaver
+        );
         const { sound } = await Audio.Sound.createAsync(
-          { uri: track.audio_file },
+          { uri },
           { shouldPlay: true, progressUpdateIntervalMillis: 500 },
           onStatus
         );

@@ -18,6 +18,8 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { usePlayer } from '../context/PlayerContext';
+import { usePreferences } from '../context/PreferencesContext';
+import { PREF_KEYS } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
 import { fetchSocialPosts, cursorFromUrl } from '../services/api';
 import FollowButton from '../components/FollowButton';
@@ -148,10 +150,17 @@ const PostMedia = React.memo(function PostMedia({
   item, videoRefs, isFocused, isMuted, onToggleMute,
   isAudioActive, isAudioPlaying, onToggleAudio,
 }) {
+  const { preferences } = usePreferences();
+  // Honor the user's "Autoplay videos" choice; Data saver also suppresses
+  // autoplay so videos only stream when the user explicitly taps to play.
+  const autoplay =
+    !!preferences[PREF_KEYS.autoplayVideo] && !preferences[PREF_KEYS.dataSaver];
+
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [manualPaused, setManualPaused] = useState(false); // tap-to-pause for video
+  // When autoplay is off, the video starts paused; tap toggles play/pause.
+  const [manualPaused, setManualPaused] = useState(!autoplay);
   const aspectRatio = mediaAspectRatio(item.width, item.height);
 
   useEffect(() => {
@@ -160,10 +169,11 @@ const PostMedia = React.memo(function PostMedia({
     setHasError(false);
   }, [item.id, item.mediaUrl]);
 
-  // Resume autoplay next time the video scrolls into focus.
+  // Reset to the autoplay-derived default whenever it scrolls out of focus (or
+  // the preference changes), so the next focus respects the current setting.
   useEffect(() => {
-    if (!isFocused) setManualPaused(false);
-  }, [isFocused]);
+    if (!isFocused) setManualPaused(!autoplay);
+  }, [isFocused, autoplay]);
 
   const handleError = useCallback(() => {
     if (currentUrl !== item.media_url) {
