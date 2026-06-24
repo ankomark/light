@@ -13,6 +13,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   ActivityIndicator,
+  Share,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,6 +27,9 @@ import {
   deleteAccount,
   fetchNotificationPreferences,
   updateNotificationPreferences,
+  fetchSessions,
+  revokeOtherSessions,
+  exportMyData,
 } from '../services/api';
 import {
   registerForPushNotifications,
@@ -160,9 +164,62 @@ const Settings = () => {
   // Notification preferences (per-category). null until loaded.
   const [notifPrefs, setNotifPrefs] = useState(null);
 
+  // Security & sessions
+  const [sessionCount, setSessionCount] = useState(null);
+  const [revokingOthers, setRevokingOthers] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
   useEffect(() => {
     setIsPrivate(!currentUser?.is_public);
   }, [currentUser?.is_public]);
+
+  const loadSessions = () => {
+    fetchSessions()
+      .then((d) => setSessionCount(typeof d?.count === 'number' ? d.count : null))
+      .catch(() => setSessionCount(null));
+  };
+  useEffect(() => { loadSessions(); }, []);
+
+  const handleLogoutOthers = () => {
+    Alert.alert(
+      t('settings.security.logoutOthers'),
+      'Sign out of all other devices? This device stays signed in.',
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: 'Log out others',
+          style: 'destructive',
+          onPress: async () => {
+            setRevokingOthers(true);
+            try {
+              const res = await revokeOtherSessions();
+              loadSessions();
+              Alert.alert('Done', `Signed out of ${res?.revoked ?? 0} other session(s).`);
+            } catch {
+              Alert.alert(t('common.error'), 'Could not revoke other sessions.');
+            } finally {
+              setRevokingOthers(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleExportData = async () => {
+    setExporting(true);
+    try {
+      const data = await exportMyData();
+      await Share.share({
+        title: 'My Advent Light data',
+        message: JSON.stringify(data, null, 2),
+      });
+    } catch {
+      Alert.alert(t('common.error'), 'Could not export your data.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Load per-category notification preferences once.
   useEffect(() => {
@@ -430,6 +487,24 @@ const Settings = () => {
                 <Text style={styles.valuePillText}>{languageLabel}</Text>
               </View>
             }
+          />
+        </Section>
+
+        {/* ── Security ──────────────────────────────────────────── */}
+        <Section title={t('settings.section.security')}>
+          <Row
+            icon="cellphone-lock"
+            label={t('settings.security.logoutOthers')}
+            sub={sessionCount != null ? `${sessionCount} active session${sessionCount === 1 ? '' : 's'}` : undefined}
+            onPress={handleLogoutOthers}
+            right={revokingOthers ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+          />
+          <Row
+            icon="download-outline"
+            label={t('settings.security.export')}
+            onPress={handleExportData}
+            last
+            right={exporting ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
           />
         </Section>
 

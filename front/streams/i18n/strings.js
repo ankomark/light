@@ -23,6 +23,7 @@ export const STRINGS = {
     'settings.section.privacy': 'Privacy',
     'settings.section.notifications': 'Notifications',
     'settings.section.appearance': 'Appearance',
+    'settings.section.security': 'Security',
     'settings.section.playback': 'Playback & Data',
     'settings.section.support': 'Support',
     'settings.section.session': 'Session',
@@ -47,6 +48,9 @@ export const STRINGS = {
     'settings.playback.videoQuality': 'Video quality',
     'settings.playback.audioQuality': 'Audio quality',
 
+    'settings.security.logoutOthers': 'Log out other devices',
+    'settings.security.export': 'Download my data',
+
     'settings.support.contact': 'Contact admins',
     'settings.support.about': 'About',
     'settings.session.logout': 'Log out',
@@ -69,6 +73,7 @@ export const STRINGS = {
     'settings.section.privacy': 'Faragha',
     'settings.section.notifications': 'Arifa',
     'settings.section.appearance': 'Muonekano',
+    'settings.section.security': 'Usalama',
     'settings.section.playback': 'Uchezaji na Data',
     'settings.section.support': 'Usaidizi',
     'settings.section.session': 'Kipindi',
@@ -92,6 +97,9 @@ export const STRINGS = {
     'settings.playback.dataSaver': 'Kuokoa data',
     'settings.playback.videoQuality': 'Ubora wa video',
     'settings.playback.audioQuality': 'Ubora wa sauti',
+
+    'settings.security.logoutOthers': 'Toka kwenye vifaa vingine',
+    'settings.security.export': 'Pakua data yangu',
 
     'settings.support.contact': 'Wasiliana na wasimamizi',
     'settings.support.about': 'Kuhusu',

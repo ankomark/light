@@ -1378,9 +1378,30 @@ export const forgotPassword = (email) =>
 export const resetPassword = (email, code, new_password) =>
   apiRequest('post', '/auth/reset-password/', { email, code, new_password });
 
-// Authenticated password change (signed-in user; no email code).
-export const changePassword = (current_password, new_password) =>
-  apiRequest('post', '/auth/change-password/', { current_password, new_password });
+// Authenticated password change (signed-in user; no email code). Sends the
+// current refresh token so this device stays signed in while other sessions are
+// revoked server-side.
+export const changePassword = async (current_password, new_password) => {
+  const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
+  return apiRequest('post', '/auth/change-password/', { current_password, new_password, refresh });
+};
+
+// ── Sessions / security ──────────────────────────────────────────────────────
+export const fetchSessions = async () => {
+  const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
+  return apiRequest('get', '/auth/sessions/', null, { params: refresh ? { refresh } : {} });
+};
+
+export const revokeSession = (id) =>
+  apiRequest('post', '/auth/sessions/revoke/', { id });
+
+export const revokeOtherSessions = async () => {
+  const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
+  return apiRequest('post', '/auth/sessions/revoke-others/', { refresh });
+};
+
+export const exportMyData = () =>
+  apiRequest('get', '/auth/export-data/');
 
 // Permanently delete the signed-in user's account (password required).
 export const deleteAccount = (password) =>

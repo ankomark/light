@@ -9,6 +9,7 @@ NOTIFICATION_TITLES = {
     'follow': '\U0001f464 New Follower',
     'group_join_request': '\U0001f465 Join Request',
     'message': '\U0001f4ac New Message',
+    'security': '\U0001f512 Security alert',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.

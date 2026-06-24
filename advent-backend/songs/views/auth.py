@@ -31,8 +31,23 @@ def _send_verification_email(user):
 
 
 class ThrottledTokenObtainPairView(TokenObtainPairView):
-    """Login endpoint with a tight per-IP rate limit to deter credential stuffing."""
+    """Login endpoint with a tight per-IP rate limit to deter credential stuffing.
+    On a successful login it fires a best-effort security alert to the account's
+    already-registered devices (so a sign-in on a new device is visible)."""
     throttle_scope = 'auth'
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code == 200:
+            try:
+                from .common import notify_user
+                username = request.data.get('username')
+                user = User.objects.filter(username=username).first()
+                if user:
+                    notify_user(user, 'security', 'New sign-in to your Advent Light account.')
+            except Exception:
+                pass  # never let alerting break login
+        return response
 
 
 
@@ -187,9 +202,37 @@ class ResetPasswordView(APIView):
 
 
 
+def _refresh_jti(refresh_str):
+    """Extract the jti from a refresh token string, or None if it's invalid."""
+    if not refresh_str:
+        return None
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from rest_framework_simplejwt.exceptions import TokenError
+    try:
+        return RefreshToken(refresh_str).get('jti')
+    except TokenError:
+        return None
+
+
+def _revoke_other_sessions(user, keep_jti=None):
+    """Blacklist every active refresh token for `user` except the one matching
+    keep_jti (so the calling device stays signed in). Returns the count revoked."""
+    from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+    blacklisted = set(BlacklistedToken.objects.values_list('token_id', flat=True))
+    revoked = 0
+    for ot in OutstandingToken.objects.filter(user=user).exclude(id__in=blacklisted):
+        if keep_jti and ot.jti == keep_jti:
+            continue
+        BlacklistedToken.objects.get_or_create(token=ot)
+        revoked += 1
+    return revoked
+
+
 class ChangePasswordView(APIView):
     """Authenticated password change: verify the current password, then set a new
-    one. Unlike the email-code reset flow, this is for users who are signed in."""
+    one. Unlike the email-code reset flow, this is for users who are signed in.
+    On success, all *other* sessions are revoked (the current device stays in if
+    it sends its refresh token)."""
     permission_classes = [IsAuthenticated]
     throttle_scope = 'password_reset'
 
@@ -214,9 +257,113 @@ class ChangePasswordView(APIView):
 
         request.user.set_password(new_password)
         request.user.save()
-        # Existing JWTs remain valid until they expire; the client keeps its
-        # session, so no re-login is forced here.
-        return Response({'message': 'Password updated successfully.'})
+        # Security: revoke every other session, keeping the current device signed
+        # in when it supplies its refresh token.
+        revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')))
+        return Response({'message': 'Password updated successfully.', 'sessions_revoked': revoked})
+
+
+class SessionsView(APIView):
+    """List the user's active sessions (non-blacklisted, unexpired refresh
+    tokens)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+        from django.utils import timezone
+        blacklisted = set(BlacklistedToken.objects.values_list('token_id', flat=True))
+        rows = (
+            OutstandingToken.objects
+            .filter(user=request.user, expires_at__gt=timezone.now())
+            .exclude(id__in=blacklisted)
+            .order_by('-created_at')
+        )
+        current_jti = _refresh_jti(request.query_params.get('refresh'))
+        sessions = [{
+            'id': r.id,
+            'created_at': r.created_at,
+            'expires_at': r.expires_at,
+            'current': bool(current_jti and r.jti == current_jti),
+        } for r in rows]
+        return Response({'count': len(sessions), 'sessions': sessions})
+
+
+class RevokeSessionView(APIView):
+    """Revoke (blacklist) a single session by its outstanding-token id."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+        tid = request.data.get('id')
+        if not tid:
+            return Response({'error': 'id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ot = OutstandingToken.objects.get(id=tid, user=request.user)
+        except OutstandingToken.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+        BlacklistedToken.objects.get_or_create(token=ot)
+        return Response({'status': 'revoked'})
+
+
+class RevokeOtherSessionsView(APIView):
+    """Log out of all other devices, keeping the current one (which sends its
+    refresh token) signed in."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')))
+        return Response({'status': 'ok', 'revoked': revoked})
+
+
+class ExportDataView(APIView):
+    """Return a JSON snapshot of the user's own data (account, profile, posts,
+    comments, playlists, tracks) — a lightweight GDPR-style export."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.utils import timezone
+        u = request.user
+        prof = getattr(u, 'profile', None)
+
+        def iso(dt):
+            return dt.isoformat() if dt else None
+
+        data = {
+            'exported_at': timezone.now().isoformat(),
+            'account': {
+                'username': u.username,
+                'email': u.email,
+                'date_joined': iso(u.date_joined),
+                'is_email_verified': u.is_email_verified,
+            },
+            'profile': None if not prof else {
+                'bio': prof.bio,
+                'location': prof.location,
+                'birth_date': iso(prof.birth_date),
+                'is_public': prof.is_public,
+            },
+            'stats': {
+                'followers': u.followers.count(),
+                'following': u.followed_by.count(),
+            },
+            'posts': [
+                {'id': p.id, 'caption': p.caption, 'content_type': p.content_type, 'created_at': iso(p.created_at)}
+                for p in SocialPost.objects.filter(user=u).order_by('-created_at')[:1000]
+            ],
+            'comments': [
+                {'id': c.id, 'content': c.content, 'created_at': iso(c.created_at)}
+                for c in PostComment.objects.filter(user=u).order_by('-created_at')[:1000]
+            ],
+            'playlists': [
+                {'id': pl.id, 'name': getattr(pl, 'name', getattr(pl, 'title', ''))}
+                for pl in Playlist.objects.filter(user=u)
+            ],
+            'tracks': [
+                {'id': t.id, 'title': t.title, 'created_at': iso(getattr(t, 'created_at', None))}
+                for t in Track.objects.filter(artist=u)
+            ],
+        }
+        return Response(data)
 
 
 class DeleteAccountView(APIView):
