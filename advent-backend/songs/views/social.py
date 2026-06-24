@@ -65,6 +65,11 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         # comments_count are denormalised columns, so no DISTINCT COUNT joins.
         qs = feed_post_queryset(user).order_by('-created_at')
 
+        # Hide posts from anyone the user has blocked (or who blocked them).
+        hidden_ids = blocked_ids_for(user)
+        if hidden_ids:
+            qs = qs.exclude(user_id__in=hidden_ids)
+
         tag = self.request.query_params.get('tag')
         if tag:
             qs = qs.filter(tags__icontains=tag)

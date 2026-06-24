@@ -710,6 +710,40 @@ class NotificationPreference(models.Model):
         return f"Notification prefs for {self.user.username}"
 
 
+class Block(models.Model):
+    """A one-directional block record. Enforcement is symmetric: if either side
+    has blocked the other, they don't see each other's content and can't DM."""
+    blocker = models.ForeignKey('User', on_delete=models.CASCADE, related_name='blocks_made')
+    blocked = models.ForeignKey('User', on_delete=models.CASCADE, related_name='blocks_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('blocker', 'blocked')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.blocker_id} blocked {self.blocked_id}"
+
+
+def blocked_ids_for(user):
+    """The set of user ids hidden from `user`: everyone they blocked plus
+    everyone who blocked them. Empty for anonymous users."""
+    if not getattr(user, 'is_authenticated', False):
+        return set()
+    made = Block.objects.filter(blocker=user).values_list('blocked_id', flat=True)
+    received = Block.objects.filter(blocked=user).values_list('blocker_id', flat=True)
+    return set(made) | set(received)
+
+
+def is_blocked_between(a, b):
+    """True if either user has blocked the other (symmetric check)."""
+    if not a or not b:
+        return False
+    return Block.objects.filter(
+        models.Q(blocker=a, blocked=b) | models.Q(blocker=b, blocked=a)
+    ).exists()
+
+
 class MediaStation(models.Model):
     STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
 

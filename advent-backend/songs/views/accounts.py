@@ -136,6 +136,32 @@ class UserViewSet(viewsets.ModelViewSet):
             "followers_count": user_to_follow.followers.count(),
             "following_count": user_to_follow.followed_by.count()
         })
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def block(self, request, pk=None):
+        """Block a user: hides each other's content and disables DMs between
+        them. Blocking also severs any follow relationship in both directions."""
+        target = self.get_object()
+        if target == request.user:
+            return Response({'error': "You can't block yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+        Block.objects.get_or_create(blocker=request.user, blocked=target)
+        # A block implies an unfollow both ways.
+        target.followers.remove(request.user)
+        request.user.followers.remove(target)
+        return Response({'status': 'blocked', 'is_blocked': True})
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def unblock(self, request, pk=None):
+        target = self.get_object()
+        Block.objects.filter(blocker=request.user, blocked=target).delete()
+        return Response({'status': 'unblocked', 'is_blocked': False})
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def blocked(self, request):
+        """List the users the current user has blocked."""
+        qs = User.objects.filter(blocks_received__blocker=request.user).select_related('profile')
+        return Response(SimpleUserSerializer(qs, many=True, context={'request': request}).data)
+
     @action(detail=True, methods=['get'])
     def social_posts(self, request, pk=None):
         """Get user's posts with optimized author pictures"""

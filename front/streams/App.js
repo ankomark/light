@@ -44,6 +44,7 @@ import Churches from './pages/Churches';
 import About from './pages/About';
 import Settings from './pages/Settings';
 import Help from './pages/Help';
+import BlockedUsers from './pages/BlockedUsers';
 import Choirs from './pages/Choirs';
 import ChoirCommunity from './pages/ChoirCommunity';
 import ChurchCommunity from './pages/ChurchCommunity';
@@ -247,6 +248,7 @@ const App = () => {
                 <Stack.Screen name="About" component={About} />
                 <Stack.Screen name="Settings" component={Settings} options={{ headerShown: false }} />
                 <Stack.Screen name="Help" component={Help} options={{ headerShown: false }} />
+                <Stack.Screen name="BlockedUsers" component={BlockedUsers} options={{ headerShown: false }} />
                 <Stack.Screen name="Studios" component={StudiosWrapper} />
                 <Stack.Screen name="Choirs" component={ChoirsWrapper} />
                 <Stack.Screen name="ChoirCommunity" component={ChoirCommunity} options={{ headerShown: false }} />

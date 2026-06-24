@@ -52,6 +52,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         if other_user == request.user:
             return Response({'error': 'Cannot message yourself'}, status=status.HTTP_400_BAD_REQUEST)
+        if is_blocked_between(request.user, other_user):
+            return Response({'error': 'You cannot message this user.'}, status=status.HTTP_403_FORBIDDEN)
 
         # Find existing conversation between exactly these two users
         conversation = (
@@ -84,6 +86,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
         if not conversation.participants.filter(id=request.user.id).exists():
             return Response({'error': 'Not a participant'}, status=status.HTTP_403_FORBIDDEN)
 
+        other = conversation.participants.exclude(id=request.user.id).first()
+        if other and is_blocked_between(request.user, other):
+            return Response({'error': 'You cannot message this user.'}, status=status.HTTP_403_FORBIDDEN)
+
         content = (request.data.get('content') or '').strip()
         message_type = request.data.get('message_type', 'text')
         if message_type not in dict(Message.MESSAGE_TYPES):
@@ -108,8 +114,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # Touch conversation so ordering by updated_at works
         Conversation.objects.filter(pk=conversation.pk).update(updated_at=message.created_at)
 
-        # Push notification to the other participant
-        other = conversation.participants.exclude(id=request.user.id).first()
+        # Push notification to the other participant (already resolved above)
         if other:
             preview = content[:80] if content else {
                 'image': '📷 Photo', 'file': '📎 File', 'audio': '🎤 Voice note',

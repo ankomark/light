@@ -357,7 +357,6 @@ const Settings = () => {
             icon="lock-outline"
             label="Private account"
             sub="Only approved followers can see your profile"
-            last
             right={
               <View style={styles.switchWrap}>
                 {savingPrivacy && <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 6 }} />}
@@ -370,6 +369,13 @@ const Settings = () => {
                 />
               </View>
             }
+          />
+          <Row
+            icon="account-cancel-outline"
+            label="Blocked accounts"
+            sub="Manage who you've blocked"
+            onPress={() => navigation.navigate('BlockedUsers')}
+            last
           />
         </Section>
 

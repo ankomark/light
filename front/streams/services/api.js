@@ -465,6 +465,16 @@ export const followUser = async (userId) => {
   return apiRequest('post', `/users/${userId}/follow/`);
 };
 
+// ── Blocking ─────────────────────────────────────────────────────────────────
+export const blockUser = async (userId) =>
+  apiRequest('post', `/users/${userId}/block/`);
+
+export const unblockUser = async (userId) =>
+  apiRequest('post', `/users/${userId}/unblock/`);
+
+export const fetchBlockedUsers = async () =>
+  apiRequest('get', '/users/blocked/');
+
 // Public user profile: returns the user with nested profile (bio, location,
 // picture_url), followers/following counts, is_following flag and social_posts.
 export const fetchUserById = async (userId) => {

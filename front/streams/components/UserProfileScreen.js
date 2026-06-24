@@ -6,7 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { fetchUserById, followUser, getOrCreateConversation } from '../services/api';
+import { fetchUserById, followUser, getOrCreateConversation, blockUser } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -124,6 +124,31 @@ const UserProfileScreen = () => {
     }
   }, [followBusy, isOwnProfile, isFollowing, followersCount, userId]);
 
+  const handleBlock = useCallback(() => {
+    if (isOwnProfile || !userId) return;
+    const name = user?.username || initialUsername || 'this user';
+    Alert.alert(
+      `Block @${name}?`,
+      "They won't be able to see your content or message you, and you won't see theirs. You can undo this in Settings → Privacy.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(userId);
+              Alert.alert('Blocked', `You've blocked @${name}.`);
+              navigation.goBack();
+            } catch {
+              Alert.alert('Error', 'Could not block this user. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  }, [isOwnProfile, userId, user, initialUsername, navigation]);
+
   const handleMessage = useCallback(async () => {
     if (messageBusy || !userId) return;
     setMessageBusy(true);
@@ -196,6 +221,14 @@ const UserProfileScreen = () => {
                   ) : (
                     <Ionicons name="chatbubble-outline" size={18} color={colors.primary} />
                   )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.messageBtn}
+                  onPress={handleBlock}
+                  activeOpacity={0.85}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={18} color={colors.primary} />
                 </TouchableOpacity>
               </>
             )}
