@@ -105,7 +105,7 @@ const LiveHub = ({ navigation }) => {
             <View style={styles.empty}>
               <MaterialCommunityIcons name="broadcast-off" size={48} color={colors.textSecondary} />
               <Text style={styles.emptyText}>No one is live right now</Text>
-              <Text style={styles.emptySub}>Tap Radio above to start your own</Text>
+              <Text style={styles.emptySub}>Tap Meet or Go-Live above to start your own</Text>
             </View>
           }
         />
