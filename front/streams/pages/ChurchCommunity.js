@@ -4,7 +4,8 @@
  * Membership tiers (admin / member / friend) all chat equally; only the admin
  * (creator) moderates — approve/reject join requests, remove members/friends,
  * delete the church. Non-members see a locked hero with "Request to join".
- * Messages carry text, images, documents and voice notes as base64 data URIs
+ * Messages carry text; images, documents and voice notes upload to Cloudinary
+ * and the message stores the URL (older base64 messages still render)
  * (matching the rest of the app's chat).
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -24,6 +25,7 @@ import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
+import { uploadMedia } from '../services/cloudinary';
 import {
   fetchChurchCommunity, fetchChurchMessages, sendChurchMessage, deleteChurchMessage,
   requestJoinChurch, fetchChurchMembers, fetchChurchJoinRequests, approveChurchRequest,
@@ -34,6 +36,34 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const MAX_ATTACH_BYTES = 8 * 1024 * 1024; // 8MB cap on a single attachment
+
+// Voice notes recorded mono at a low bitrate — plenty for speech, far smaller
+// than HIGH_QUALITY, so they upload and load fast. Format stays .m4a/AAC.
+const VOICE_RECORDING_OPTIONS = {
+  isMeteringEnabled: false,
+  android: {
+    extension: '.m4a', outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+    audioEncoder: Audio.AndroidAudioEncoder.AAC, sampleRate: 22050,
+    numberOfChannels: 1, bitRate: 48000,
+  },
+  ios: {
+    extension: '.m4a', outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+    audioQuality: Audio.IOSAudioQuality.LOW, sampleRate: 22050,
+    numberOfChannels: 1, bitRate: 48000,
+    linearPCMBitDepth: 16, linearPCMIsBigEndian: false, linearPCMIsFloat: false,
+  },
+  web: { mimeType: 'audio/webm', bitsPerSecond: 48000 },
+};
+
+// Light Cloudinary delivery transform for an image bubble thumbnail. Leaves
+// local (file://) and legacy base64 (data:) attachments untouched.
+const cldThumb = (url) => {
+  if (typeof url !== 'string' || !url.includes('res.cloudinary.com') || !url.includes('/upload/')) return url;
+  if (/\/upload\/[a-z]{1,3}_/.test(url)) return url;
+  return url.replace('/upload/', '/upload/c_limit,w_800,q_auto,f_auto/');
+};
+
+const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
 const ROLE_BADGE = { admin: 'Admin', member: 'Member', friend: 'Friend' };
 const REACTIONS = ['❤️', '👍', '🙏', '🎵', '😂', '🔥'];
@@ -125,7 +155,7 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
               )}
               {item.message_type === 'image' && !!item.attachment && (
                 <TouchableOpacity activeOpacity={0.9} onPress={() => (sending ? null : onOpenImage(item.attachment))}>
-                  <Image source={{ uri: item.attachment }} style={styles.msgImage} resizeMode="cover" />
+                  <Image source={{ uri: cldThumb(item.attachment) }} style={styles.msgImage} resizeMode="cover" />
                   {sending ? (
                     <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>
                   ) : (
@@ -360,10 +390,46 @@ const ChurchCommunity = ({ navigation, route }) => {
     deliver(body, display);
   }, [deliver]);
 
+  // Media send: show the local file instantly, upload to Cloudinary in the
+  // background, then persist the message with just the URL (mirrors DMs).
+  const sendMedia = useCallback(async (media) => {
+    const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType } = media;
+    const reply = replyToRef.current;
+    if (reply) setReplyTo(null);
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const replyDisplay = reply
+      ? { id: reply.id, sender: reply.sender?.username, message_type: reply.message_type, content: previewOf(reply) }
+      : null;
+    const tempMsg = {
+      id: tempId,
+      sender: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
+      content: '', message_type, attachment: localUri, file_name, duration,
+      reply_to: replyDisplay, created_at: new Date().toISOString(),
+      reactions: { summary: [], mine: null },
+      _status: 'sending', _retryMedia: media,
+    };
+    setMessages((prev) => [tempMsg, ...prev]);
+    try {
+      const uploaded = await uploadMedia({ uri: localUri, name: file_name || `chat_${Date.now()}`, mimeType }, uploadType);
+      const body = {
+        message_type, attachment: uploaded.url, file_name, duration,
+        ...(reply ? { reply_to: reply.id } : {}),
+      };
+      const msg = await sendChurchMessage(churchId, body);
+      seenIdsRef.current.add(msg.id);
+      setMessages((prev) => (prev.some((m) => m.id === msg.id && m.id !== tempId)
+        ? prev.filter((m) => m.id !== tempId)
+        : prev.map((m) => (m.id === tempId ? { ...msg, _status: 'sent' } : m))));
+    } catch {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
+    }
+  }, [churchId, currentUser]);
+
   const retrySend = useCallback((m) => {
     setMessages((prev) => prev.filter((x) => x.id !== m.id));
-    deliver(m._body, m._display);
-  }, [deliver]);
+    if (m._retryMedia) sendMedia(m._retryMedia);
+    else deliver(m._body, m._display);
+  }, [deliver, sendMedia]);
 
   const sendText = () => {
     const t = draft.trim();
@@ -389,8 +455,8 @@ const ChurchCommunity = ({ navigation, route }) => {
     });
     if (res.canceled || !res.assets?.length) return;
     const out = await manipulateAsync(res.assets[0].uri, [{ resize: { width: 1280 } }],
-      { compress: 0.6, format: SaveFormat.JPEG, base64: true });
-    send({ message_type: 'image', attachment: `data:image/jpeg;base64,${out.base64}` });
+      { compress: 0.6, format: SaveFormat.JPEG });
+    sendMedia({ localUri: out.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg' });
   };
 
   const attachDocument = async (audioOnly = false) => {
@@ -401,13 +467,14 @@ const ChurchCommunity = ({ navigation, route }) => {
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
     if (tooBig(a.size)) return;
-    const base64 = await FileSystem.readAsStringAsync(a.uri, { encoding: FileSystem.EncodingType.Base64 });
     const mime = a.mimeType || 'application/octet-stream';
     const isAudioFile = mime.startsWith('audio/');
-    send({
+    sendMedia({
+      localUri: a.uri,
+      uploadType: isAudioFile ? 'chat-audio' : 'chat-file',
       message_type: isAudioFile ? 'audio' : 'file',
-      attachment: `data:${mime};base64,${base64}`,
       file_name: a.name || 'file',
+      mimeType: mime,
     });
   };
 
@@ -416,7 +483,7 @@ const ChurchCommunity = ({ navigation, route }) => {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) { Alert.alert('Permission needed', 'Enable microphone access to record.'); return; }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      const { recording: rec } = await Audio.Recording.createAsync(VOICE_RECORDING_OPTIONS);
       recordingRef.current = rec;
       setRecording(true);
     } catch { Alert.alert('Church', 'Could not start recording.'); }
@@ -432,10 +499,10 @@ const ChurchCommunity = ({ navigation, route }) => {
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
       const uri = rec.getURI();
       if (cancel || !uri) return;
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-      send({
-        message_type: 'audio', attachment: `data:audio/m4a;base64,${base64}`,
+      sendMedia({
+        localUri: uri, uploadType: 'chat-audio', message_type: 'audio',
         file_name: 'voice-note.m4a', duration: (st?.durationMillis || 0) / 1000,
+        mimeType: 'audio/m4a',
       });
     } catch { Alert.alert('Church', 'Could not save the recording.'); }
   };
@@ -457,13 +524,19 @@ const ChurchCommunity = ({ navigation, route }) => {
       }
       // A different clip → drop the old sound and load this one.
       if (soundRef.current) { await soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; loadedIdRef.current = null; }
-      // Native player may not accept data: URIs — stage to a cache file first.
-      const base64 = (msg.attachment || '').split(',')[1] || '';
-      const path = `${FileSystem.cacheDirectory}church-audio-${msg.id}.m4a`;
-      const info = await FileSystem.getInfoAsync(path);
-      if (!info.exists) await FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 });
+      // Legacy base64 → stage to a cache file first; Cloudinary/local URIs play
+      // directly (expo-av streams https).
+      let sourceUri = msg.attachment;
+      if (isData(msg.attachment)) {
+        const base64 = (msg.attachment || '').split(',')[1] || '';
+        const path = `${FileSystem.cacheDirectory}church-audio-${msg.id}.m4a`;
+        const info = await FileSystem.getInfoAsync(path);
+        if (!info.exists) await FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 });
+        sourceUri = path;
+      }
+      if (!sourceUri) return;
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
-      const { sound } = await Audio.Sound.createAsync({ uri: path }, { shouldPlay: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: sourceUri }, { shouldPlay: true });
       soundRef.current = sound;
       loadedIdRef.current = msg.id;
       setPlayingId(msg.id);
@@ -480,16 +553,26 @@ const ChurchCommunity = ({ navigation, route }) => {
   // document"): decode the base64 data URI to a cache file and hand it to the
   // OS share/preview sheet — the file row had no tap handler before.
   const openFile = async (msg) => {
-    const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
-    if (!m) { Alert.alert('Church', 'This file is unavailable.'); return; }
-    // A picture sent "as document" → just preview it in the in-app viewer.
-    if ((m[1] || '').startsWith('image/')) { setViewerUri(msg.attachment); return; }
+    const att = msg.attachment || '';
+    const safeName = (msg.file_name || 'file').replace(/[^\w.\-]/g, '_');
     try {
-      const safeName = (msg.file_name || 'file').replace(/[^\w.\-]/g, '_');
-      const path = `${FileSystem.cacheDirectory}${safeName}`;
-      await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path, { mimeType: m[1] || undefined });
-      else Alert.alert('Saved', `Saved as ${msg.file_name || 'file'}.`);
+      if (isData(att)) {
+        const m = /^data:(.*?);base64,(.*)$/.exec(att);
+        if (!m) { Alert.alert('Church', 'This file is unavailable.'); return; }
+        if ((m[1] || '').startsWith('image/')) { setViewerUri(att); return; }
+        const path = `${FileSystem.cacheDirectory}${safeName}`;
+        await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
+        if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path, { mimeType: m[1] || undefined });
+        else Alert.alert('Saved', `Saved as ${msg.file_name || 'file'}.`);
+        return;
+      }
+      if (att.startsWith('http')) {
+        if (msg.message_type === 'image') { setViewerUri(att); return; }
+        const path = `${FileSystem.cacheDirectory}${safeName}`;
+        const dl = await FileSystem.downloadAsync(att, path);
+        if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(dl.uri);
+        else Alert.alert('Saved', `Saved as ${msg.file_name || 'file'}.`);
+      }
     } catch { Alert.alert('Church', 'Could not open this file.'); }
   };
 

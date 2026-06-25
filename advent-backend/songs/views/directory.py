@@ -2,6 +2,24 @@ from .common import *  # noqa: F401,F403
 import base64
 from django.http import HttpResponse
 
+# Community chat attachments are a Cloudinary https URL (current) or a legacy
+# base64 data URI (older clients). base64 of ~6 MB is ~8 MB of text — headroom.
+MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
+
+
+def chat_attachment_error(attachment):
+    """Validate a chat attachment string. Returns (message, status) on a problem,
+    or None when it's a valid https URL / size-bounded data URI / empty."""
+    if not attachment:
+        return None
+    if attachment.startswith('https://'):
+        return ('Invalid attachment URL', status.HTTP_400_BAD_REQUEST) if len(attachment) > 2000 else None
+    if attachment.startswith('data:'):
+        if len(attachment) > MAX_ATTACHMENT_CHARS:
+            return ('Attachment is too large (max ~6 MB).', status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        return None
+    return ('Invalid attachment', status.HTTP_400_BAD_REQUEST)
+
 
 class MediaStationViewSet(viewsets.ModelViewSet):
     queryset = MediaStation.objects.all()
@@ -352,6 +370,9 @@ class ChurchViewSet(viewsets.ModelViewSet):
             attachment = request.data.get('attachment') or ''
             if not content and not attachment:
                 return Response({'error': 'Empty message.'}, status=status.HTTP_400_BAD_REQUEST)
+            att_err = chat_attachment_error(attachment)
+            if att_err:
+                return Response({'error': att_err[0]}, status=att_err[1])
             reply_to = None
             reply_id = request.data.get('reply_to')
             if reply_id:
@@ -821,6 +842,9 @@ class ChoirViewSet(viewsets.ModelViewSet):
             attachment = request.data.get('attachment') or ''
             if not content and not attachment:
                 return Response({'error': 'Empty message.'}, status=status.HTTP_400_BAD_REQUEST)
+            att_err = chat_attachment_error(attachment)
+            if att_err:
+                return Response({'error': att_err[0]}, status=att_err[1])
             reply_to = None
             reply_id = request.data.get('reply_to')
             if reply_id:
