@@ -95,6 +95,18 @@ class LiveBroadcastTests(APITestCase):
         b.save(update_fields=['status'])
         self.assertEqual(self.client.get(f'/api/live/broadcasts/{bid}/cohost-token/').status_code, 410)
 
+    def test_blocked_user_cannot_join_or_request(self):
+        from songs.models import Block
+        res, _ = self._go_live()
+        bid = res.json()['broadcast']['id']
+        # Host blocks the viewer.
+        Block.objects.create(blocker=self.host, blocked=self.viewer)
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self.client.get(f'/api/live/broadcasts/{bid}/token/').status_code, 403)
+        with mock.patch('songs.views.live.notify_user'):
+            r = self.client.post(f'/api/live/broadcasts/{bid}/request-cohost/', {}, format='json')
+        self.assertEqual(r.status_code, 403)
+
     def test_only_host_can_end_and_approve(self):
         res, _ = self._go_live()
         bid = res.json()['broadcast']['id']

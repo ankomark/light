@@ -1648,6 +1648,9 @@ class CoHostRequest(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [models.Index(fields=['broadcast', 'status'])]
+        # One request row per (broadcast, user) — get_or_create relies on this and
+        # it prevents duplicate rows under concurrent requests.
+        unique_together = ('broadcast', 'user')
 
     def __str__(self):
         return f"{self.user.username} -> {self.broadcast_id} ({self.status})"

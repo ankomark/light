@@ -117,6 +117,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         b = get_object_or_404(LiveBroadcast, pk=pk)
         if b.status != 'live':
             return Response({'error': 'This broadcast has ended.'}, status=status.HTTP_410_GONE)
+        if is_blocked_between(request.user, b.host):
+            return Response({'error': 'You cannot join this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=False,  # viewers are subscribe-only
@@ -144,6 +146,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             return Response({'error': 'Broadcast has ended.'}, status=status.HTTP_410_GONE)
         if b.host_id == request.user.id:
             return Response({'error': "You're the host."}, status=status.HTTP_400_BAD_REQUEST)
+        if is_blocked_between(request.user, b.host):
+            return Response({'error': 'You cannot join this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
         req, _created = CoHostRequest.objects.get_or_create(
             broadcast=b, user=request.user,
             defaults={'status': 'pending'},
