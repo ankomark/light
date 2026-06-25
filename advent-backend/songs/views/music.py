@@ -9,9 +9,19 @@ class CloudinarySignView(APIView):
         'audio': 'audio_uploads',
         'image': 'social_media/images',
         'video': 'social_media/videos',
+        'story_video': 'stories/videos',
         'profile': 'profile_images',
         'cover': 'cover_images',
         'avatar': 'avatars',
+    }
+
+    # Incoming transformations applied at upload time (these replace the stored
+    # original, so they reduce Cloudinary storage — not just delivery). Story
+    # videos are short, vertical, phone-shot clips: capping the long edge to 720
+    # and using eco quality roughly halves the stored size with no visible loss
+    # on a phone. (30s length is enforced on the client before upload.)
+    UPLOAD_TRANSFORMS = {
+        'story_video': 'c_limit,w_720,h_1280,q_auto:eco',
     }
 
     def post(self, request):
@@ -19,6 +29,13 @@ class CloudinarySignView(APIView):
         folder = self.FOLDER_MAP.get(upload_type, 'uploads')
         timestamp = int(time_module.time())
         params_to_sign = {'timestamp': timestamp, 'folder': folder}
+
+        # Sign the incoming transformation too, if this type has one. The client
+        # must echo the exact string back, so byte-for-byte signature match holds.
+        transformation = self.UPLOAD_TRANSFORMS.get(upload_type)
+        if transformation:
+            params_to_sign['transformation'] = transformation
+
         api_secret = cloudinary.config().api_secret
         if not api_secret:
             return Response({'error': 'Cloudinary not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -29,6 +46,7 @@ class CloudinarySignView(APIView):
             'api_key': cloudinary.config().api_key,
             'cloud_name': cloudinary.config().cloud_name,
             'folder': folder,
+            'transformation': transformation,
         })
 
 

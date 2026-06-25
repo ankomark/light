@@ -4,6 +4,7 @@ const RESOURCE_TYPES = {
   audio: 'video',   // Cloudinary treats audio as video resource type
   'social-image': 'image',
   'social-video': 'video',
+  'story-video': 'video',
   'profile-image': 'image',
   cover: 'image',
   avatar: 'image',
@@ -13,6 +14,7 @@ const SIGN_TYPES = {
   audio: 'audio',
   'social-image': 'image',
   'social-video': 'video',
+  'story-video': 'story_video',
   'profile-image': 'profile',
   cover: 'cover',
   avatar: 'avatar',
@@ -30,7 +32,7 @@ export const uploadMedia = async (file, type, onProgress) => {
   if (!resourceType) throw new Error(`Unknown upload type: ${type}`);
 
   // 1. Get a fresh signature from our backend (api_secret never leaves the server)
-  const { signature, timestamp, api_key, cloud_name, folder } =
+  const { signature, timestamp, api_key, cloud_name, folder, transformation } =
     await getCloudinarySignature(SIGN_TYPES[type] ?? 'image');
 
   // 2. Build multipart form
@@ -48,6 +50,9 @@ export const uploadMedia = async (file, type, onProgress) => {
   formData.append('timestamp', String(timestamp));
   formData.append('api_key', api_key);
   formData.append('folder', folder);
+  // Incoming transformation (signed server-side) — must be sent verbatim so the
+  // signature matches. Shrinks the stored asset, e.g. for story videos.
+  if (transformation) formData.append('transformation', transformation);
 
   // 3. Upload directly to Cloudinary — signed, no upload_preset. XHR exposes
   //    upload progress (fetch does not). Don't set Content-Type: the engine adds

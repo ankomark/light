@@ -13,6 +13,12 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 
 const { width } = Dimensions.get('window');
 
+// Stories cap video at 30s (WhatsApp-style). expo-image-picker reports asset
+// duration in milliseconds; allow a small tolerance so a ~30s clip isn't
+// rejected for being a few frames over.
+const MAX_VIDEO_MS = 30000;
+const MAX_VIDEO_TOLERANCE_MS = 31000;
+
 const CreateStoryScreen = () => {
   const navigation = useNavigation();
   const [media, setMedia] = useState(null);
@@ -30,9 +36,19 @@ const CreateStoryScreen = () => {
       allowsEditing: true,
       aspect: [9, 16],
       quality: 0.9,
+      videoMaxDuration: 30, // caps in-picker trimming / recording to 30s
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
+      // Hard 30s cap: in-picker trimming isn't guaranteed on gallery picks, so
+      // reject anything clearly longer rather than uploading an over-length clip.
+      if (asset.type === 'video' && asset.duration && asset.duration > MAX_VIDEO_TOLERANCE_MS) {
+        Alert.alert(
+          'Video too long',
+          'Stories can be up to 30 seconds. Please trim your clip and try again.',
+        );
+        return;
+      }
       if (asset.type === 'image') {
         // Compress image before upload
         const compressed = await ImageManipulator.manipulateAsync(
@@ -51,7 +67,8 @@ const CreateStoryScreen = () => {
     if (!media) { Alert.alert('No media', 'Please select a photo or video first.'); return; }
     setUploading(true);
     try {
-      const uploadType = media.type === 'video' ? 'social-video' : 'social-image';
+      // story-video applies a signed incoming transform that ~halves storage.
+      const uploadType = media.type === 'video' ? 'story-video' : 'social-image';
       const result = await uploadMedia(
         { uri: media.uri, name: `story_${Date.now()}`, mimeType: media.type === 'video' ? 'video/mp4' : 'image/jpeg' },
         uploadType,
