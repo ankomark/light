@@ -84,23 +84,27 @@ const GroupForm = ({ navigation, route }) => {
         });
       }
 
-      let response;
       if (isEditMode) {
         // The API looks groups up by slug (lookup_field='slug'), not the numeric pk.
-        response = await updateGroup(existingGroup.slug, formData);
+        const response = await updateGroup(existingGroup.slug, formData);
+        route.params?.onSubmit?.(response);
+        navigation.goBack();
       } else {
-        response = await createGroup(formData);
+        const response = await createGroup(formData);
+        // Drop this form from the stack and open the new group's chat directly.
+        navigation.replace('GroupDetail', { groupSlug: response.slug, group: response });
       }
 
-      route.params?.onSubmit?.(response);
-      navigation.goBack();
-      
     } catch (error) {
       console.error('Error:', error);
-      Alert.alert(
-        'Error',
-        error.name?.[0] || error.detail || 'Failed to save group. Please try again.'
-      );
+      // Error shapes vary: apiRequest throws an Error with .response.data;
+      // createGroup (raw axios) rejects with the response body object itself.
+      const body = error?.response?.data || (error instanceof Error ? null : error);
+      const nameErr = Array.isArray(body?.name) ? body.name[0]
+        : (typeof body?.name === 'string' ? body.name : null);
+      const msg = nameErr || body?.detail || body?.error || body?.message
+        || error?.message || 'Failed to save group. Please try again.';
+      Alert.alert('Error', msg);
     } finally {
       setIsLoading(false);
     }

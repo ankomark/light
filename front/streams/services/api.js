@@ -208,8 +208,16 @@ export const apiRequest = async (method, endpoint, data = null, options = {}) =>
                     error.response.data.detail || 
                     JSON.stringify(error.response.data);
     }
-    
-    throw new Error(errorMessage);
+
+    const enrichedError = new Error(errorMessage);
+    // Preserve the structured axios error so callers can read
+    // err.response.data.error / err.status, not just the flattened message.
+    if (error.response) {
+      enrichedError.response = error.response;
+      enrichedError.status = error.response.status;
+      enrichedError.data = error.response.data;
+    }
+    throw enrichedError;
   }
 };
 

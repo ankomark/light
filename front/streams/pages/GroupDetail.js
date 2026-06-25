@@ -342,7 +342,11 @@ const GroupDetail = ({ route, navigation }) => {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
     try {
       const saved = await sendGroupMessage(groupSlug, payload);
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...saved } : m)));
+      // Swap the optimistic row for the saved one, and drop any copy a concurrent
+      // poll may have already merged in, so the message can't briefly appear twice.
+      setMessages((prev) => prev
+        .filter((m) => m.id === tempId || m.id !== saved.id)
+        .map((m) => (m.id === tempId ? { ...saved } : m)));
     } catch {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
     }
@@ -377,7 +381,11 @@ const GroupDetail = ({ route, navigation }) => {
       const saved = await sendGroupMessage(groupSlug, {
         message_type, attachment: uploaded.url, file_name, duration, reply_to_id: replyDisplay?.id,
       });
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...saved } : m)));
+      // Swap the optimistic row for the saved one, and drop any copy a concurrent
+      // poll may have already merged in, so the message can't briefly appear twice.
+      setMessages((prev) => prev
+        .filter((m) => m.id === tempId || m.id !== saved.id)
+        .map((m) => (m.id === tempId ? { ...saved } : m)));
     } catch {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
     }
@@ -565,7 +573,8 @@ const GroupDetail = ({ route, navigation }) => {
       setRequested(true);
       Alert.alert('Request sent', 'The group admins will review your request.');
     } catch (e) {
-      const msg = e?.response?.data?.error || 'Could not send request.';
+      // requestJoinGroup rejects with the response body itself ({ error } / { message }).
+      const msg = e?.error || e?.response?.data?.error || e?.message || 'Could not send request.';
       if (/already/i.test(msg)) setRequested(true);
       Alert.alert('Notice', msg);
     }

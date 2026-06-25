@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/useAuth';
-import { fetchGroups, createGroup, deleteGroup, joinGroupByCode } from '../services/api';
+import { fetchGroups, deleteGroup, joinGroupByCode } from '../services/api';
 import GroupItem from './GroupItem';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -29,7 +29,6 @@ const GroupList = ({ navigation }) => {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [creatingGroup, setCreatingGroup] = useState(false);
   const [activeTab, setActiveTab] = useState('public');
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinCode, setJoinCode] = useState('');
@@ -84,30 +83,6 @@ const GroupList = ({ navigation }) => {
     setRefreshing(true);
     loadGroups(false);
   }, [loadGroups]);
-
-  const handleCreateGroup = useCallback(async (groupData) => {
-    try {
-      setCreatingGroup(true);
-      const newGroup = await createGroup(groupData);
-
-      // Optimistic update
-      setGroups(prev => [newGroup, ...prev]);
-
-      navigation.navigate('GroupDetail', {
-        groupSlug: newGroup.slug,
-        // Pass the new group to avoid immediate refetch
-        group: newGroup
-      });
-    } catch (error) {
-      console.error('Failed to create group:', error);
-      Alert.alert(
-        'Error',
-        error.detail || error.message || 'Failed to create group. Please try again.'
-      );
-    } finally {
-      setCreatingGroup(false);
-    }
-  }, [navigation]);
 
   const handleDeleteGroup = useCallback(async (group) => {
     Alert.alert(
@@ -233,19 +208,12 @@ const GroupList = ({ navigation }) => {
         {/* Actions */}
         <View style={styles.actionRow}>
           <TouchableOpacity
-            style={[styles.createButton, creatingGroup && styles.disabledButton]}
-            onPress={() => navigation.navigate('CreateGroup', { onCreate: handleCreateGroup })}
-            disabled={creatingGroup}
+            style={styles.createButton}
+            onPress={() => navigation.navigate('CreateGroup')}
             activeOpacity={0.85}
           >
-            {creatingGroup ? (
-              <ActivityIndicator color="#0A1628" size="small" />
-            ) : (
-              <>
-                <Ionicons name="add" size={18} color="#0A1628" />
-                <Text style={styles.createButtonText}>New Group</Text>
-              </>
-            )}
+            <Ionicons name="add" size={18} color="#0A1628" />
+            <Text style={styles.createButtonText}>New Group</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.codeButton} onPress={() => setJoinOpen(true)} activeOpacity={0.85}>
             <Ionicons name="link" size={18} color={colors.accent} />
