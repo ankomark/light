@@ -1,4 +1,6 @@
 from .common import *  # noqa: F401,F403
+from rest_framework.exceptions import APIException
+from django.http import Http404
 
 
 class CreatePaymentIntentView(APIView):
@@ -133,10 +135,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             logger.debug(f"Listing products with query params: {request.query_params}")
             return super().list(request, *args, **kwargs)
+        except (APIException, Http404):
+            # Let DRF render proper 4xx responses (e.g. invalid page -> 404)
+            # instead of masking them as a 500.
+            raise
         except Exception as e:
             logger.error(f"Error listing products: {str(e)}", exc_info=True)
             return Response(
-                {"error": f"An unexpected error occurred while fetching products: {str(e)}"},
+                {"error": "An unexpected error occurred while fetching products."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -151,10 +157,14 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
         try:
             return super().create(request, *args, **kwargs)
+        except (APIException, Http404):
+            # Validation / permission / not-found errors must reach the client as
+            # their real 4xx (with field errors), not be swallowed into a 500.
+            raise
         except Exception as e:
             logger.error(f"Error creating product: {str(e)}", exc_info=True)
             return Response(
-                {"error": f"An unexpected error occurred while creating the product: {str(e)}"},
+                {"error": "An unexpected error occurred while creating the product."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

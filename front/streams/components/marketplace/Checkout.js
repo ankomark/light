@@ -52,6 +52,8 @@ const PaymentLine = ({ icon, label, value }) => (
 
 const SellerGroup = ({ group, currency }) => {
   const { product } = group;
+  // Each seller sets their own product currency; never assume the order's first.
+  const gCurrency = product?.currency || currency;
 
   const openWhatsApp = () => {
     const num = (product.whatsapp_number || '').replace(/[^\d]/g, '');
@@ -79,14 +81,14 @@ const SellerGroup = ({ group, currency }) => {
           <Text style={styles.lineItemName} numberOfLines={1}>{item.product?.title ?? 'Product'}</Text>
           <Text style={styles.lineItemQty}>×{item.quantity}</Text>
           <Text style={styles.lineItemTotal}>
-            {formatPrice(item.quantity * (item.price_at_purchase ?? item.product?.price ?? 0), currency)}
+            {formatPrice(item.quantity * (item.price_at_purchase ?? item.product?.price ?? 0), gCurrency)}
           </Text>
         </View>
       ))}
 
       <View style={styles.sellerSubtotalRow}>
         <Text style={styles.sellerSubtotalLabel}>Pay this seller</Text>
-        <Text style={styles.sellerSubtotalValue}>{formatPrice(group.subtotal, currency)}</Text>
+        <Text style={styles.sellerSubtotalValue}>{formatPrice(group.subtotal, gCurrency)}</Text>
       </View>
 
       {hasPaymentInfo(product) ? (
@@ -174,6 +176,9 @@ const Checkout = () => {
 
   const currency = order.items?.[0]?.product?.currency ?? 'USD';
   const sellerGroups = groupBySeller(order.items);
+  // A single summed total only makes sense when every seller uses one currency.
+  const currencies = [...new Set(sellerGroups.map((g) => g.product?.currency).filter(Boolean))];
+  const mixedCurrency = currencies.length > 1;
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -190,7 +195,11 @@ const Checkout = () => {
 
       <View style={styles.totalCard}>
         <Text style={styles.totalLabel}>Order total</Text>
-        <Text style={styles.totalAmount}>{formatPrice(order.total_amount, currency)}</Text>
+        {mixedCurrency ? (
+          <Text style={styles.totalNote}>See each seller above</Text>
+        ) : (
+          <Text style={styles.totalAmount}>{formatPrice(order.total_amount, currency)}</Text>
+        )}
       </View>
 
       <Text style={styles.sectionTitle}>Delivery note (optional)</Text>
@@ -267,6 +276,7 @@ const styles = StyleSheet.create({
   },
   totalLabel: { ...typography.h3, color: colors.textPrimary },
   totalAmount: { ...typography.h2, color: colors.primary },
+  totalNote: { ...typography.caption, color: colors.textMuted, fontStyle: 'italic' },
   input: {
     backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.md, padding: spacing.md, color: colors.textPrimary,
