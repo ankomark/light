@@ -1443,8 +1443,8 @@ export const reportContent = (contentType, objectId, reason, description = '') =
   apiRequest('post', '/reports/', { content_type: contentType, object_id: objectId, reason, description });
 
 // ── Cloudinary signed upload ───────────────────────────────────────────────────
-export const getCloudinarySignature = (type) =>
-  apiRequest('post', '/upload/sign/', { type });
+export const getCloudinarySignature = (type, extra = {}) =>
+  apiRequest('post', '/upload/sign/', { type, ...extra });
 
 // ── Direct Messaging ──────────────────────────────────────────────────────────
 export const fetchConversations = async () => {

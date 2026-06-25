@@ -12,7 +12,7 @@ import { fetchSocialPosts, cursorFromUrl, followUser } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { usePreferences } from '../context/PreferencesContext';
-import { PREF_KEYS, applyVideoQuality } from '../utils/preferences';
+import { PREF_KEYS } from '../utils/preferences';
 import { LikeButton, SaveButton, ShareButton } from './SocialActions';
 import CommentAction from './CommentAction';
 import { colors, typography } from '../constants/theme';
@@ -36,13 +36,17 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
   // the feed's FollowButton uses.
   const [following, setFollowing] = useState(!!item.user?.is_following);
   const [followBusy, setFollowBusy] = useState(false);
-  const rawUri = item.optimized_url || item.media_url;
-  // Apply the chosen video quality (HD / auto / data-saver) to the delivery URL.
-  const uri = applyVideoQuality(
-    rawUri,
-    preferences[PREF_KEYS.videoQuality],
-    preferences[PREF_KEYS.dataSaver]
-  );
+  // Pick the rendition that matches the chosen quality. The backend exposes two:
+  // optimized_url (≈720p eco, smallest) and media_url (q_auto, up to the 1080p
+  // master). Data saver / "data_saver" -> the small one; auto / hd -> the fuller
+  // one. (applyVideoQuality can't be used here: both URLs already carry
+  // Cloudinary transforms, which it deliberately leaves untouched.)
+  const lowData =
+    preferences[PREF_KEYS.dataSaver] ||
+    preferences[PREF_KEYS.videoQuality] === 'data_saver';
+  const uri = lowData
+    ? (item.optimized_url || item.media_url)
+    : (item.media_url || item.optimized_url);
   const playing = isActive && screenFocused && !manualPaused;
 
   // Hard-pause whenever this item is no longer the active one (kills audio on

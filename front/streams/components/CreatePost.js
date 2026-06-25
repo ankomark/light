@@ -28,6 +28,11 @@ const clampAspect = (w, h) => {
 
 const PREVIEW_W = Dimensions.get('window').width - 40; // contentContainer padding 20 each side
 
+// Accept 1080p and below only; reject 2K/4K. Measured on the shorter edge — a
+// 1080p clip (portrait or landscape) has a 1080px short side, while 1440p/4K
+// have 1440/2160. The tolerance covers encoders that pad 1080 up to 1088.
+const MAX_VIDEO_SHORT_SIDE = 1130;
+
 const CreatePost = ({ navigation }) => {
   const [contentType, setContentType] = useState('image');
   const [media, setMedia] = useState(null);          // single video
@@ -178,6 +183,18 @@ const CreatePost = ({ navigation }) => {
         });
         if (result.canceled || !result.assets?.length) return;
         const selected = result.assets[0];
+        // Reject 2K/4K — only 1080p and below are accepted. (Unknown dimensions
+        // are allowed through; the backend caps resolution on upload as a net.)
+        const shortSide = selected.width && selected.height
+          ? Math.min(selected.width, selected.height)
+          : 0;
+        if (shortSide > MAX_VIDEO_SHORT_SIDE) {
+          Alert.alert(
+            'Resolution too high',
+            'Please upload a 1080p video or lower. 2K and 4K videos are not supported.',
+          );
+          return;
+        }
         // Any length is allowed — the user trims to ≤30s next. Only guard against
         // an unreasonably large raw file (the full file still uploads).
         if (selected.fileSize && selected.fileSize > 300 * 1024 * 1024) {
@@ -421,7 +438,10 @@ const CreatePost = ({ navigation }) => {
         ...songData,
       };
     } else {
-      const uploadResult = await uploadToCloudinary(media, 'video', fileProgress);
+      const uploadResult = await uploadToCloudinary(media, 'video', fileProgress, {
+        trimStart: videoTrim.start,
+        trimEnd: videoTrim.end,
+      });
       fileDone();
       const clip = Math.max(1, Math.round(videoTrim.end - videoTrim.start));
       postData = {
@@ -430,9 +450,9 @@ const CreatePost = ({ navigation }) => {
         media_file: uploadResult.public_id,
         width: uploadResult.width,
         height: uploadResult.height,
-        // Delivery is trimmed to this window + compressed by the backend/Cloudinary.
-        video_start_time: Number(videoTrim.start.toFixed(2)),
-        video_end_time: Number(videoTrim.end.toFixed(2)),
+        // The clip is trimmed in at upload, so only the selected window is stored
+        // and it already starts at 0 — no delivery-side trim (video_start/end_time
+        // are intentionally omitted so the backend doesn't trim again).
         duration: clip,
       };
     }
@@ -449,7 +469,7 @@ const CreatePost = ({ navigation }) => {
   }
 };
 
-const uploadToCloudinary = async (mediaFile, type, onProgress) => {
+const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
   const uploadType =
     type === 'video' ? 'social-video' : type === 'audio' ? 'audio' : 'social-image';
   const ext = type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'jpg';
@@ -462,7 +482,8 @@ const uploadToCloudinary = async (mediaFile, type, onProgress) => {
       mimeType: mediaFile.mimeType ?? mediaFile.type ?? defaultMime,
     },
     uploadType,
-    onProgress
+    onProgress,
+    opts
   );
   // Normalise to the shape the rest of CreatePost expects
   return {

@@ -22,7 +22,38 @@ class CloudinarySignView(APIView):
     # on a phone. (30s length is enforced on the client before upload.)
     UPLOAD_TRANSFORMS = {
         'story_video': 'c_limit,w_720,h_1280,q_auto:eco',
+        # Social-feed videos: cap the long edge to 1920 (1080p-class, works for
+        # any orientation since c_limit fits within the 1920x1920 box and only
+        # downscales) and compress with q_auto:good. Halves storage on big clips
+        # and is a server-side net for anything that slips past the 1080p client
+        # check (e.g. other upload surfaces).
+        'video': 'c_limit,w_1920,h_1920,q_auto:good',
     }
+
+    @staticmethod
+    def _trim_segment(start, end):
+        """Build a `so_,eo_` trim segment (seconds) from a requested window, or
+        None if the window is missing/invalid. The stored clip is capped at 30s."""
+        try:
+            s = round(float(start), 2)
+            e = round(float(end), 2)
+        except (TypeError, ValueError):
+            return None
+        if s < 0 or e <= s:
+            return None
+        e = min(e, s + 30)
+        return f"so_{s},eo_{e}"
+
+    def _transformation_for(self, upload_type, data):
+        """Incoming transformation to bake in at upload. For social videos a trim
+        window is trimmed in at ingest so ONLY the clip is stored (not the full
+        upload); without a window it falls back to the static compress/cap."""
+        base = self.UPLOAD_TRANSFORMS.get(upload_type)
+        if upload_type == 'video':
+            seg = self._trim_segment(data.get('start'), data.get('end'))
+            if seg:
+                return f"{seg},c_limit,w_1920,h_1920,q_auto:good"
+        return base
 
     def post(self, request):
         upload_type = request.data.get('type', 'image')
@@ -32,7 +63,7 @@ class CloudinarySignView(APIView):
 
         # Sign the incoming transformation too, if this type has one. The client
         # must echo the exact string back, so byte-for-byte signature match holds.
-        transformation = self.UPLOAD_TRANSFORMS.get(upload_type)
+        transformation = self._transformation_for(upload_type, request.data)
         if transformation:
             params_to_sign['transformation'] = transformation
 

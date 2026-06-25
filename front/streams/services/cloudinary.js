@@ -27,13 +27,21 @@ const SIGN_TYPES = {
  * Uses XMLHttpRequest (not fetch) so upload progress can be reported via the
  * optional `onProgress(fraction)` callback (0..1).
  */
-export const uploadMedia = async (file, type, onProgress) => {
+export const uploadMedia = async (file, type, onProgress, opts = {}) => {
   const resourceType = RESOURCE_TYPES[type];
   if (!resourceType) throw new Error(`Unknown upload type: ${type}`);
 
+  // A trim window (seconds) is forwarded to the signer so video is trimmed in at
+  // ingest — only the clip is stored to Cloudinary, not the full upload.
+  const signExtra = {};
+  if (opts.trimStart != null && opts.trimEnd != null) {
+    signExtra.start = opts.trimStart;
+    signExtra.end = opts.trimEnd;
+  }
+
   // 1. Get a fresh signature from our backend (api_secret never leaves the server)
   const { signature, timestamp, api_key, cloud_name, folder, transformation } =
-    await getCloudinarySignature(SIGN_TYPES[type] ?? 'image');
+    await getCloudinarySignature(SIGN_TYPES[type] ?? 'image', signExtra);
 
   // 2. Build multipart form
   const mimeType =

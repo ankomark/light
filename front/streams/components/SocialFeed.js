@@ -19,7 +19,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
-import { PREF_KEYS, applyVideoQuality } from '../utils/preferences';
+import { PREF_KEYS } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
 import { fetchSocialPosts, cursorFromUrl } from '../services/api';
 import FollowButton from '../components/FollowButton';
@@ -210,13 +210,17 @@ const PostMedia = React.memo(function PostMedia({
   }
 
   if (item.content_type === 'video') {
-    // Derive the delivery URL for the chosen video quality; keep currentUrl raw
-    // so the onError fallback comparison against item.media_url still works.
-    const videoUri = applyVideoQuality(
-      currentUrl,
-      preferences[PREF_KEYS.videoQuality],
-      preferences[PREF_KEYS.dataSaver]
-    );
+    // Pick the rendition that matches the chosen quality: optimized_url (≈720p
+    // eco) for data saver, media_url (q_auto, up to the 1080p master) otherwise.
+    // If an onError already swapped currentUrl to media_url, stick with that.
+    const lowData =
+      preferences[PREF_KEYS.dataSaver] ||
+      preferences[PREF_KEYS.videoQuality] === 'data_saver';
+    const videoUri = currentUrl === item.media_url
+      ? item.media_url
+      : lowData
+        ? (item.optimized_url || item.media_url)
+        : (item.media_url || item.optimized_url);
     return (
       <Pressable
         style={[styles.mediaContainer, { aspectRatio }]}
