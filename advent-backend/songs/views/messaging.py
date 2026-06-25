@@ -1,6 +1,10 @@
 from .common import *  # noqa: F401,F403
 from django.db.models import OuterRef, Subquery, Count, IntegerField
 
+# Base64 of a ~6 MB binary is ~8 MB of text; allow a little headroom. The client
+# caps uploads at 6 MB, but the server enforces its own bound (clients lie).
+MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
+
 
 class ConversationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -74,6 +78,33 @@ class ConversationViewSet(viewsets.ModelViewSet):
         conversation = self.get_object()
         if not conversation.participants.filter(id=request.user.id).exists():
             return Response({'error': 'Not a participant'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Incremental poll: with ?after=<id> return only newer messages plus the
+        # ids of the caller's own earlier messages that have since been read.
+        # This avoids re-downloading the whole list (and its base64 attachments)
+        # every few seconds. Without ?after, return the most recent 100.
+        after = request.query_params.get('after')
+        if after is not None:
+            try:
+                after_id = int(after)
+            except (TypeError, ValueError):
+                after_id = 0
+            new_msgs = (
+                conversation.messages.select_related('sender__profile')
+                .filter(id__gt=after_id).order_by('created_at')[:100]
+            )
+            # Read receipts for already-loaded outgoing messages — ids only, no
+            # attachment payload. Bounded to the visible window.
+            read_ids = list(
+                conversation.messages
+                .filter(sender=request.user, read=True, id__lte=after_id)
+                .order_by('-id').values_list('id', flat=True)[:100]
+            )
+            return Response({
+                'messages': MessageSerializer(new_msgs, many=True).data,
+                'read_ids': read_ids,
+            })
+
         # Bound the response: return the most recent 100 messages in
         # chronological order (older history can be loaded later if needed).
         recent = conversation.messages.select_related('sender__profile').order_by('-created_at')[:100]
@@ -101,6 +132,23 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # A message must have either text or an attachment.
         if not content and not attachment:
             return Response({'error': 'Message cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Attachments are either a Cloudinary https URL (current path — media is
+        # uploaded to Cloudinary and only the URL is stored) or a legacy base64
+        # data URI (older clients). Validate shape + size on the server since the
+        # client cap can't be trusted.
+        if attachment:
+            if attachment.startswith('https://'):
+                if len(attachment) > 2000:
+                    return Response({'error': 'Invalid attachment URL'}, status=status.HTTP_400_BAD_REQUEST)
+            elif attachment.startswith('data:'):
+                if len(attachment) > MAX_ATTACHMENT_CHARS:
+                    return Response(
+                        {'error': 'Attachment is too large (max ~6 MB).'},
+                        status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    )
+            else:
+                return Response({'error': 'Invalid attachment'}, status=status.HTTP_400_BAD_REQUEST)
 
         message = Message.objects.create(
             conversation=conversation,

@@ -15,6 +15,7 @@ import * as Sharing from 'expo-sharing';
 import { Audio } from 'expo-av';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { fetchMessages, sendMessage, markConversationRead } from '../services/api';
+import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from './RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -22,9 +23,46 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const POLL_MS = 3000;
 const { width: SCREEN_W } = Dimensions.get('window');
-const MAX_FILE_BYTES = 6 * 1024 * 1024; // 6 MB cap for base64 attachments
+const MAX_FILE_BYTES = 6 * 1024 * 1024; // 6 MB cap for document attachments
 
 const EMOJIS = ['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','🥰','😘','😋','😜','🤪','🤔','🤭','🫡','😎','🥳','😏','😴','😢','😭','😤','😡','🥺','😱','🤯','🙏','👍','👎','👏','🙌','🤝','💪','🫶','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🔥','✨','🎉','🎊','💯','✅','🕊️','📖','🎵','🎶','☀️','🌙','⭐','🙏🏽'];
+
+// Voice notes recorded mono at a low bitrate — plenty for speech, a fraction of
+// HIGH_QUALITY's size, so they upload and load fast. Format stays .m4a/AAC.
+const VOICE_RECORDING_OPTIONS = {
+  isMeteringEnabled: false,
+  android: {
+    extension: '.m4a',
+    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+    audioEncoder: Audio.AndroidAudioEncoder.AAC,
+    sampleRate: 22050,
+    numberOfChannels: 1,
+    bitRate: 48000,
+  },
+  ios: {
+    extension: '.m4a',
+    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+    audioQuality: Audio.IOSAudioQuality.LOW,
+    sampleRate: 22050,
+    numberOfChannels: 1,
+    bitRate: 48000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: { mimeType: 'audio/webm', bitsPerSecond: 48000 },
+};
+
+// Insert a small Cloudinary delivery transform so an image bubble loads a light
+// thumbnail rather than the full upload. Leaves local (file://) and legacy
+// base64 (data:) attachments untouched.
+const cldThumb = (url) => {
+  if (typeof url !== 'string' || !url.includes('res.cloudinary.com') || !url.includes('/upload/')) return url;
+  if (/\/upload\/[a-z]{1,3}_/.test(url)) return url; // already has a transform
+  return url.replace('/upload/', '/upload/c_limit,w_800,q_auto,f_auto/');
+};
+
+const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const fmtDuration = (s) => {
@@ -51,22 +89,59 @@ const ChatScreen = ({ route, navigation }) => {
   const pollRef = useRef(null);
   const appState = useRef(AppState.currentState);
   const lastCountRef = useRef(0);
+  const lastIdRef = useRef(0); // highest server message id we hold (for incremental polls)
   const isFocused = useRef(true);
   const recordingRef = useRef(null);
   const recordTimerRef = useRef(null);
   const recordStartRef = useRef(0);
   const soundRef = useRef(null);
 
+  // Highest numeric (server-assigned) id in a list, ignoring optimistic temps.
+  const maxNumericId = (arr) =>
+    arr.reduce((mx, m) => (typeof m.id === 'number' && m.id > mx ? m.id : mx), 0);
+
   const loadMessages = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const data = await fetchMessages(conversationId);
-      if (Array.isArray(data)) {
-        setMessages(data);
-        if (data.length !== lastCountRef.current) {
-          lastCountRef.current = data.length;
-          setTimeout(() => listRef.current?.scrollToEnd({ animated: !silent }), 80);
+
+      // Full load on first open (or if a prior load never succeeded); after that,
+      // polls fetch only new messages + read-receipt updates — so we don't
+      // re-download the whole list (and its base64 attachments) every few seconds.
+      if (!silent || lastIdRef.current === 0) {
+        const data = await fetchMessages(conversationId);
+        if (Array.isArray(data)) {
+          setMessages(data);
+          lastIdRef.current = maxNumericId(data);
+          if (data.length !== lastCountRef.current) {
+            lastCountRef.current = data.length;
+            setTimeout(() => listRef.current?.scrollToEnd({ animated: !silent }), 80);
+          }
         }
+        return;
+      }
+
+      const res = await fetchMessages(conversationId, lastIdRef.current);
+      const incoming = res?.messages ?? [];
+      const readIds = res?.read_ids ?? [];
+      if (!incoming.length && !readIds.length) return;
+
+      setMessages((prev) => {
+        const have = new Set(prev.map((m) => m.id));
+        const merged = incoming.length
+          ? [...prev, ...incoming.filter((m) => !have.has(m.id))]
+          : prev.slice();
+        if (readIds.length) {
+          const rset = new Set(readIds);
+          for (let i = 0; i < merged.length; i++) {
+            if (rset.has(merged[i].id) && !merged[i].read) merged[i] = { ...merged[i], read: true };
+          }
+        }
+        return merged;
+      });
+
+      if (incoming.length) {
+        lastIdRef.current = Math.max(lastIdRef.current, maxNumericId(incoming));
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
       }
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [conversationId]);
@@ -113,9 +188,53 @@ const ChatScreen = ({ route, navigation }) => {
     try {
       const saved = await sendMessage(conversationId, payload);
       setMessages((prev) => prev.map((m) => (m.id === tempId ? saved : m)));
+      if (typeof saved?.id === 'number') {
+        lastIdRef.current = Math.max(lastIdRef.current, saved.id);
+      }
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       Alert.alert('Error', 'Message could not be sent.');
+    } finally {
+      setSending(false);
+    }
+  }, [conversationId, currentUser]);
+
+  // Media send: show the local file instantly (optimistic), upload it to
+  // Cloudinary in the background, then persist the message with just the URL.
+  const sendMediaMessage = useCallback(async ({ localUri, uploadType, message_type, file_name = '', duration = null, mimeType }) => {
+    const tempId = `temp_${Date.now()}`;
+    const optimistic = {
+      id: tempId,
+      sender: { id: currentUser?.id, username: currentUser?.username, profile_picture: null },
+      content: '',
+      message_type,
+      attachment: localUri, // local preview while uploading (file:// or content://)
+      file_name,
+      duration,
+      read: false,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setSending(true);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+    try {
+      const uploaded = await uploadMedia(
+        { uri: localUri, name: file_name || `chat_${Date.now()}`, mimeType },
+        uploadType,
+      );
+      const saved = await sendMessage(conversationId, {
+        message_type,
+        attachment: uploaded.url,
+        file_name,
+        duration,
+      });
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? saved : m)));
+      if (typeof saved?.id === 'number') {
+        lastIdRef.current = Math.max(lastIdRef.current, saved.id);
+      }
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      Alert.alert('Error', 'Could not send attachment.');
     } finally {
       setSending(false);
     }
@@ -137,16 +256,20 @@ const ChatScreen = ({ route, navigation }) => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7,
       });
       if (res.canceled || !res.assets?.length) return;
+      // Compress on-device first (smaller upload); Cloudinary compresses again
+      // on ingest. No base64 — we upload the file and store only the URL.
       const processed = await manipulateAsync(
         res.assets[0].uri, [{ resize: { width: 1080 } }],
-        { compress: 0.6, format: SaveFormat.JPEG, base64: true }
+        { compress: 0.6, format: SaveFormat.JPEG }
       );
-      const uri = `data:image/jpeg;base64,${processed.base64}`;
-      sendPayload({ content: '', message_type: 'image', attachment: uri });
+      sendMediaMessage({
+        localUri: processed.uri, uploadType: 'chat-image',
+        message_type: 'image', mimeType: 'image/jpeg',
+      });
     } catch (e) {
       Alert.alert('Error', 'Could not attach image.');
     }
-  }, [sendPayload]);
+  }, [sendMediaMessage]);
 
   const attachFile = useCallback(async () => {
     try {
@@ -157,16 +280,14 @@ const ChatScreen = ({ route, navigation }) => {
         Alert.alert('File too large', 'Please choose a file under 6 MB.');
         return;
       }
-      const b64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
-      const mime = file.mimeType || 'application/octet-stream';
-      sendPayload({
-        content: '', message_type: 'file',
-        attachment: `data:${mime};base64,${b64}`, file_name: file.name || 'file',
+      sendMediaMessage({
+        localUri: file.uri, uploadType: 'chat-file', message_type: 'file',
+        file_name: file.name || 'file', mimeType: file.mimeType || 'application/octet-stream',
       });
     } catch (e) {
       Alert.alert('Error', 'Could not attach file.');
     }
-  }, [sendPayload]);
+  }, [sendMediaMessage]);
 
   const onAttachPress = useCallback(() => {
     setShowEmoji(false);
@@ -182,10 +303,21 @@ const ChatScreen = ({ route, navigation }) => {
 
   const openFile = useCallback(async (msg) => {
     try {
-      const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
-      if (!m) return;
-      const path = `${FileSystem.cacheDirectory}${(msg.file_name || 'file').replace(/[^\w.\-]/g, '_')}`;
-      await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
+      const safeName = (msg.file_name || 'file').replace(/[^\w.\-]/g, '_');
+      const dest = `${FileSystem.cacheDirectory}${safeName}`;
+      let path;
+      if (isData(msg.attachment)) {
+        const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
+        if (!m) return;
+        await FileSystem.writeAsStringAsync(dest, m[2], { encoding: FileSystem.EncodingType.Base64 });
+        path = dest;
+      } else if (typeof msg.attachment === 'string' && msg.attachment.startsWith('http')) {
+        const dl = await FileSystem.downloadAsync(msg.attachment, dest);
+        path = dl.uri;
+      } else {
+        path = msg.attachment; // local file:// from an optimistic, still-uploading message
+      }
+      if (!path) return;
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(path);
       } else {
@@ -203,7 +335,7 @@ const ChatScreen = ({ route, navigation }) => {
       if (!perm.granted) { Alert.alert('Permission required', 'Enable microphone access to record.'); return; }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.prepareToRecordAsync(VOICE_RECORDING_OPTIONS);
       await rec.startAsync();
       recordingRef.current = rec;
       recordStartRef.current = Date.now();
@@ -230,26 +362,35 @@ const ChatScreen = ({ route, navigation }) => {
       const uri = rec.getURI();
       const seconds = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
       if (!uri) return;
-      const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-      sendPayload({ message_type: 'audio', attachment: `data:audio/m4a;base64,${b64}`, duration: seconds });
+      sendMediaMessage({
+        localUri: uri, uploadType: 'chat-audio', message_type: 'audio',
+        duration: seconds, mimeType: 'audio/m4a',
+      });
     } catch {
       Alert.alert('Error', 'Could not save the voice note.');
     }
-  }, [sendPayload]);
+  }, [sendMediaMessage]);
 
   const playAudio = useCallback(async (msg) => {
     try {
       if (soundRef.current) { await soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; }
       if (playingId === msg.id) { setPlayingId(null); return; } // toggle off
-      const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
-      if (!m) return;
-      const path = `${FileSystem.cacheDirectory}voice_${msg.id}.m4a`;
-      const info = await FileSystem.getInfoAsync(path);
-      if (!info.exists) {
-        await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
+      // Legacy base64 → write to a cache file first; Cloudinary/local URIs play
+      // directly (expo-av streams https).
+      let sourceUri = msg.attachment;
+      if (isData(msg.attachment)) {
+        const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
+        if (!m) return;
+        const path = `${FileSystem.cacheDirectory}voice_${msg.id}.m4a`;
+        const info = await FileSystem.getInfoAsync(path);
+        if (!info.exists) {
+          await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
+        }
+        sourceUri = path;
       }
+      if (!sourceUri) return;
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
-      const { sound } = await Audio.Sound.createAsync({ uri: path }, { shouldPlay: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: sourceUri }, { shouldPlay: true });
       soundRef.current = sound;
       setPlayingId(msg.id);
       sound.setOnPlaybackStatusUpdate((st) => {
@@ -293,7 +434,7 @@ const ChatScreen = ({ route, navigation }) => {
         <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, type === 'image' && styles.bubbleMedia]}>
           {type === 'image' && item.attachment ? (
             <Pressable onPress={() => setViewer(item.attachment)}>
-              <Image source={{ uri: item.attachment }} style={styles.imageMsg} resizeMode="cover" />
+              <Image source={{ uri: cldThumb(item.attachment) }} style={styles.imageMsg} resizeMode="cover" />
             </Pressable>
           ) : type === 'file' ? (
             <Pressable style={styles.fileRow} onPress={() => openFile(item)}>

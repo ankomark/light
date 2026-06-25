@@ -1455,8 +1455,12 @@ export const fetchConversations = async () => {
 export const getOrCreateConversation = (userId) =>
   apiRequest('post', '/conversations/', { user_id: userId });
 
-export const fetchMessages = (conversationId) =>
-  apiRequest('get', `/conversations/${conversationId}/messages/`);
+// Without `after`: returns the most recent messages (array).
+// With `after` (a message id): returns { messages: [...newer], read_ids: [...] }
+// so polling doesn't re-download the whole list (and its base64 attachments).
+export const fetchMessages = (conversationId, after) =>
+  apiRequest('get', `/conversations/${conversationId}/messages/`, null,
+    after ? { params: { after } } : {});
 
 // payload: { content?, message_type?, attachment?, file_name?, duration? }
 export const sendMessage = (conversationId, payload) =>

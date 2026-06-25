@@ -10,6 +10,9 @@ class CloudinarySignView(APIView):
         'image': 'social_media/images',
         'video': 'social_media/videos',
         'story_video': 'stories/videos',
+        'chat_image': 'chat/images',
+        'chat_audio': 'chat/audio',
+        'chat_file': 'chat/files',
         'profile': 'profile_images',
         'cover': 'cover_images',
         'avatar': 'avatars',
@@ -28,6 +31,9 @@ class CloudinarySignView(APIView):
         # and is a server-side net for anything that slips past the 1080p client
         # check (e.g. other upload surfaces).
         'video': 'c_limit,w_1920,h_1920,q_auto:good',
+        # Chat images: cap to 1080 on the long edge and q_auto compress so a
+        # photo shared in DMs is small to store and quick to load.
+        'chat_image': 'c_limit,w_1080,h_1080,q_auto:good',
     }
 
     @staticmethod

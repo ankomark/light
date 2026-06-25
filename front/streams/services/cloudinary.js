@@ -5,6 +5,9 @@ const RESOURCE_TYPES = {
   'social-image': 'image',
   'social-video': 'video',
   'story-video': 'video',
+  'chat-image': 'image',
+  'chat-audio': 'video',  // audio rides the video resource type
+  'chat-file': 'raw',     // arbitrary documents
   'profile-image': 'image',
   cover: 'image',
   avatar: 'image',
@@ -15,6 +18,9 @@ const SIGN_TYPES = {
   'social-image': 'image',
   'social-video': 'video',
   'story-video': 'story_video',
+  'chat-image': 'chat_image',
+  'chat-audio': 'chat_audio',
+  'chat-file': 'chat_file',
   'profile-image': 'profile',
   cover: 'cover',
   avatar: 'avatar',
