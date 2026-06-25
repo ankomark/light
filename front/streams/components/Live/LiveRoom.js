@@ -1,5 +1,5 @@
 /**
- * Live room (LiveKit). Host/co-host publish audio (+video for tv/podcast);
+ * Live room (LiveKit). Host/co-host publish audio (+video for tv);
  * viewers watch/listen. Chat and reactions ride the room's data channel.
  *
  * NOTE: WebRTC is native — this screen only runs in a custom dev client / EAS
@@ -9,10 +9,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import Constants from 'expo-constants';
 import {
   LiveKitRoom, AudioSession, useParticipants, useLocalParticipant, useRoomContext,
@@ -69,6 +70,8 @@ const decodeData = (u8) => {
   } catch { return null; }
 };
 
+const KIND_LABEL = { meet: 'MEET', tv: 'GO-LIVE' };
+
 const fmtElapsed = (totalSec) => {
   const s = Math.max(0, totalSec);
   const h = Math.floor(s / 3600);
@@ -97,7 +100,7 @@ const LiveRoom = ({ navigation, route }) => {
   // disconnect doesn't bounce us out of the screen.
   const promotingRef = useRef(false);
   const canPublish = role === 'host' || role === 'cohost';
-  const isVideo = broadcast.kind === 'tv' || broadcast.kind === 'podcast';
+  const isVideo = broadcast.kind === 'tv';
   // On promotion we swap to a publish token, which makes LiveKitRoom reconnect
   // negotiated as a *publisher* — the reliable way to start sending both audio
   // and video. Granting permission alone (grant_publish) let mic through but the
@@ -112,6 +115,16 @@ const LiveRoom = ({ navigation, route }) => {
     if (inExpoGo) return undefined;
     AudioSession.startAudioSession().catch(() => {});
     return () => { AudioSession.stopAudioSession().catch(() => {}); };
+  }, [inExpoGo]);
+
+  // Live supports both portrait and landscape (screen flip). The rest of the app
+  // is portrait-locked at the root, so we unlock here and relock on leave.
+  useEffect(() => {
+    if (inExpoGo) return undefined;
+    ScreenOrientation.unlockAsync().catch(() => {});
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
   }, [inExpoGo]);
 
   if (inExpoGo) {
@@ -172,6 +185,8 @@ const RoomInner = ({
   broadcast, role, canPublish, isVideo, initialMicOn, initialCamOn, navigation, onPromoted,
 }) => {
   const insets = useSafeAreaInsets();
+  const { width: winW, height: winH } = useWindowDimensions();
+  const landscape = winW > winH;
   const room = useRoomContext();
   const participants = useParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -237,27 +252,51 @@ const RoomInner = ({
   // with the same identity): the host receives the publication (isCameraEnabled
   // true) but never subscribes, so useTracks omits it and the tile shows the
   // avatar. Explicitly subscribe to every remote video publication.
+  const ensureSubscribed = useCallback(() => {
+    if (!room) return;
+    room.remoteParticipants?.forEach((p) => {
+      p.trackPublications?.forEach((pub) => {
+        if (pub.kind === Track.Kind.Video && typeof pub.setSubscribed === 'function' && !pub.isSubscribed) {
+          // setSubscribed returns a promise that can reject during reconnect —
+          // swallow both sync and async errors so it can't surface a redbox.
+          try { Promise.resolve(pub.setSubscribed(true)).catch(() => {}); } catch {}
+        }
+      });
+    });
+  }, [room]);
+
   useEffect(() => {
     if (!room) return undefined;
-    const ensureSubscribed = () => {
-      room.remoteParticipants?.forEach((p) => {
-        p.trackPublications?.forEach((pub) => {
-          if (pub.kind === Track.Kind.Video && typeof pub.setSubscribed === 'function' && !pub.isSubscribed) {
-            // setSubscribed returns a promise that can reject during reconnect —
-            // swallow both sync and async errors so it can't surface a redbox.
-            try { Promise.resolve(pub.setSubscribed(true)).catch(() => {}); } catch {}
-          }
-        });
-      });
-    };
     ensureSubscribed();
     room.on(RoomEvent.TrackPublished, ensureSubscribed);
+    room.on(RoomEvent.TrackSubscriptionFailed, ensureSubscribed);
     room.on(RoomEvent.ParticipantConnected, ensureSubscribed);
     return () => {
       room.off(RoomEvent.TrackPublished, ensureSubscribed);
+      room.off(RoomEvent.TrackSubscriptionFailed, ensureSubscribed);
       room.off(RoomEvent.ParticipantConnected, ensureSubscribed);
     };
-  }, [room]);
+  }, [room, ensureSubscribed]);
+
+  // Re-check whenever the roster changes. A promoted co-host rejoins with the
+  // same identity, so the host may see the new camera publication without a
+  // fresh TrackPublished — this catches that case.
+  useEffect(() => { ensureSubscribed(); }, [participants, ensureSubscribed]);
+
+  // ── publish intent enforcement (fixes "audio but no video") ───────────────--
+  // The <LiveKitRoom> audio/video props publish once at connect; on a
+  // same-identity reconnect (co-host promotion token swap) the camera publish can
+  // be dropped while the mic still goes through. Re-assert our intent on the SFU
+  // every time we (re)connect as a publisher so the camera track actually lands.
+  useEffect(() => {
+    if (!canPublish || !localParticipant) return;
+    if (connState !== ConnectionState.Connected) return;
+    localParticipant.setMicrophoneEnabled(micOn).catch(() => {});
+    if (isVideo) localParticipant.setCameraEnabled(camOn).catch(() => {});
+    // micOn/camOn intentionally read at connect time, not in deps, so this fires
+    // on (re)connect rather than on every toggle (toggles publish directly).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connState, canPublish, isVideo, localParticipant]);
 
   // ── data channel: chat + reactions ───────────────────────────────────────--
   const pushMessage = useCallback((m) => {
@@ -337,14 +376,29 @@ const RoomInner = ({
     }
   };
   const flipCam = async () => {
+    const next = facingRef.current === 'user' ? 'environment' : 'user';
     try {
       const pub = localParticipant?.getTrackPublication?.(Track.Source.Camera);
       const vt = pub?.videoTrack || pub?.track;
-      facingRef.current = facingRef.current === 'user' ? 'environment' : 'user';
-      const mst = vt?.mediaStreamTrack;
-      if (mst?._switchCamera) mst._switchCamera();          // react-native-webrtc fast path
-      else if (vt?.restartTrack) await vt.restartTrack({ facingMode: facingRef.current });
-    } catch {}
+      if (!vt) return;
+      // Fast path: react-native-webrtc flips the physical camera in place (no
+      // renegotiation). The underlying track lives at .mediaStreamTrack.
+      const mst = vt.mediaStreamTrack || vt._mediaStreamTrack;
+      if (mst && typeof mst._switchCamera === 'function') {
+        mst._switchCamera();
+        facingRef.current = next; // only commit after a successful switch
+        return;
+      }
+      // Fallback: restart the capture with the other facing mode.
+      if (typeof vt.restartTrack === 'function') {
+        await vt.restartTrack({ facingMode: next });
+        facingRef.current = next;
+        return;
+      }
+      if (__DEV__) Alert.alert('Flip camera', 'No camera-switch API available on this track.');
+    } catch (e) {
+      if (__DEV__) Alert.alert('Flip failed', String(e?.message || e));
+    }
   };
 
   const leave = () => { try { room?.disconnect(); } catch {} };
@@ -393,7 +447,7 @@ const RoomInner = ({
       )}
 
       <Text style={styles.title} numberOfLines={1}>{broadcast.title}</Text>
-      <Text style={styles.kind}>{(broadcast.kind || 'radio').toUpperCase()}</Text>
+      <Text style={styles.kind}>{KIND_LABEL[broadcast.kind] || (broadcast.kind || 'meet').toUpperCase()}</Text>
 
       {/* Stage */}
       <Text style={styles.sectionLabel}>On air</Text>
@@ -413,6 +467,8 @@ const RoomInner = ({
           isHost={isHost}
           localIdentity={localParticipant?.identity}
           onKick={kick}
+          landscape={landscape}
+          windowHeight={winH}
         />
       ) : (
         <View style={styles.speakerWrap}>
@@ -521,8 +577,12 @@ const RoomInner = ({
 };
 
 // Video: large active-speaker tile + a thumbnail row of the other publishers.
-const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick }) => {
+const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick, landscape, windowHeight }) => {
   const others = publishers.filter((p) => p.identity !== spotlight?.identity);
+  // In landscape the column has little vertical room, so size the spotlight to a
+  // share of the screen height instead of a fixed aspect ratio (which would be
+  // too tall full-width). Portrait keeps the 16:10 tile.
+  const bigStyle = landscape ? { aspectRatio: undefined, height: Math.round(windowHeight * 0.6) } : null;
   return (
     <View style={styles.videoStage}>
       {spotlight && (
@@ -530,6 +590,7 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
           participant={spotlight}
           trackRef={camByIdentity[spotlight.identity]}
           big
+          bigStyle={bigStyle}
           showKick={isHost && spotlight.identity !== localIdentity}
           onKick={onKick}
         />
@@ -551,13 +612,13 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
   );
 };
 
-const PublisherTile = ({ participant, trackRef, big, showKick, onKick }) => {
+const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick }) => {
   // Render the camera track whenever we have a (non-muted) publication for it,
   // rather than trusting participant.isCameraEnabled, which can lag for a remote
   // participant that just started publishing.
   const hasVideo = !!trackRef && !trackRef.publication?.isMuted;
   return (
-    <View style={[big ? styles.spotlightTile : styles.thumbTile, participant.isSpeaking && styles.tileSpeaking]}>
+    <View style={[big ? styles.spotlightTile : styles.thumbTile, big && bigStyle, participant.isSpeaking && styles.tileSpeaking]}>
       {hasVideo ? (
         <VideoTrack trackRef={trackRef} style={styles.video} objectFit="cover" />
       ) : (

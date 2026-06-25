@@ -1602,13 +1602,13 @@ class ReadingProgress(models.Model):
 
 
 class LiveBroadcast(models.Model):
-    """An in-app live broadcast (radio/TV/podcast). Media is never stored — only
-    this metadata. The actual audio/video flows through LiveKit (the SFU)."""
-    KIND_CHOICES = [('radio', 'Radio'), ('tv', 'TV'), ('podcast', 'Podcast')]
+    """An in-app live broadcast (meet = audio, tv = video). Media is never stored
+    — only this metadata. The actual audio/video flows through LiveKit (the SFU)."""
+    KIND_CHOICES = [('meet', 'Meet'), ('tv', 'Go-Live')]
     STATUS_CHOICES = [('live', 'Live'), ('ended', 'Ended')]
 
     host = models.ForeignKey(User, on_delete=models.CASCADE, related_name='broadcasts')
-    kind = models.CharField(max_length=10, choices=KIND_CHOICES, default='radio')
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, default='meet')
     title = models.CharField(max_length=200)
     room_name = models.CharField(max_length=100, unique=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='live')

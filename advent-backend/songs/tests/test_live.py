@@ -19,7 +19,11 @@ SECRET = 'devsecret_devsecret_devsecret_0123'
 @override_settings(LIVEKIT_API_KEY='devkey', LIVEKIT_API_SECRET=SECRET, LIVEKIT_URL='')
 class LiveBroadcastTests(APITestCase):
     def setUp(self):
+        # Staff host: exempt from the follower gate so these flow tests focus on
+        # the broadcast lifecycle (the gate has its own test class below).
         self.host = User.objects.create_user('host', 'h@x.com', 'x')
+        self.host.admin_role = 'super_admin'
+        self.host.save(update_fields=['admin_role'])
         self.viewer = User.objects.create_user('viewer', 'v@x.com', 'x')
         self.fan = User.objects.create_user('fan', 'f@x.com', 'x')
         self.host.followers.add(self.fan)  # fan follows host
@@ -30,7 +34,7 @@ class LiveBroadcastTests(APITestCase):
     def _go_live(self):
         self.client.force_authenticate(self.host)
         with mock.patch('songs.views.live.notify_user') as notify:
-            res = self.client.post('/api/live/broadcasts/', {'kind': 'radio', 'title': 'Devotion'}, format='json')
+            res = self.client.post('/api/live/broadcasts/', {'kind': 'meet', 'title': 'Devotion'}, format='json')
         return res, notify
 
     def test_go_live_creates_broadcast_token_and_notifies_followers(self):
@@ -98,9 +102,21 @@ class LiveBroadcastTests(APITestCase):
         self.assertEqual(LiveBroadcast.objects.get(id=bid).status, 'ended')
         self.assertEqual(self.client.get('/api/live/broadcasts/').json()['count'], 0)
 
+    def test_going_live_ends_previous_live_broadcast(self):
+        # Host starts a broadcast, then (e.g. after a crash) goes live again.
+        first, _ = self._go_live()
+        first_id = first.json()['broadcast']['id']
+        second, _ = self._go_live()
+        second_id = second.json()['broadcast']['id']
+        self.assertNotEqual(first_id, second_id)
+        # The first is force-ended; only the new one is live.
+        self.assertEqual(LiveBroadcast.objects.get(id=first_id).status, 'ended')
+        self.assertEqual(LiveBroadcast.objects.get(id=second_id).status, 'live')
+        self.assertEqual(LiveBroadcast.objects.filter(host=self.host, status='live').count(), 1)
+
     def test_anonymous_cannot_go_live(self):
         self.assertIn(
-            self.client.post('/api/live/broadcasts/', {'kind': 'radio', 'title': 'x'}, format='json').status_code,
+            self.client.post('/api/live/broadcasts/', {'kind': 'meet', 'title': 'x'}, format='json').status_code,
             (401, 403),
         )
 
@@ -124,11 +140,49 @@ class LiveBroadcastTests(APITestCase):
 
 
 @override_settings(LIVEKIT_API_KEY='devkey', LIVEKIT_API_SECRET=SECRET, LIVEKIT_URL='')
+@mock.patch('songs.views.live.MIN_FOLLOWERS', {'tv': 3, 'meet': 2})
+class FollowerGateTests(APITestCase):
+    """Non-staff users need followers to go live (Go-Live > Meet); staff exempt."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('creator', 'c@x.com', 'x')
+
+    def _add_followers(self, n):
+        start = getattr(self, '_fc', 0)
+        fans = [User.objects.create_user(f'f{start + i}', f'f{start + i}@x.com', 'x') for i in range(n)]
+        self._fc = start + n
+        self.user.followers.add(*fans)
+
+    def _go(self, kind):
+        self.client.force_authenticate(self.user)
+        with mock.patch('songs.views.live.notify_user'):
+            return self.client.post('/api/live/broadcasts/', {'kind': kind, 'title': 'Hi'}, format='json')
+
+    def test_meet_blocked_below_threshold(self):
+        self.assertEqual(self._go('meet').status_code, 403)
+
+    def test_meet_allowed_at_threshold(self):
+        self._add_followers(2)
+        self.assertEqual(self._go('meet').status_code, 201)
+
+    def test_tv_needs_more_than_meet(self):
+        self._add_followers(2)  # enough for meet, not for tv (3)
+        self.assertEqual(self._go('tv').status_code, 403)
+        self._add_followers(1)  # now 3
+        self.assertEqual(self._go('tv').status_code, 201)
+
+    def test_staff_bypass_gate(self):
+        self.user.admin_role = 'super_admin'
+        self.user.save(update_fields=['admin_role'])
+        self.assertEqual(self._go('tv').status_code, 201)  # zero followers, still allowed
+
+
+@override_settings(LIVEKIT_API_KEY='devkey', LIVEKIT_API_SECRET=SECRET, LIVEKIT_URL='')
 class LiveWebhookTests(APITestCase):
     def setUp(self):
         self.host = User.objects.create_user('host', 'h@x.com', 'x')
         self.b = LiveBroadcast.objects.create(
-            host=self.host, kind='radio', title='Devotion', room_name='bc_test123',
+            host=self.host, kind='meet', title='Devotion', room_name='bc_test123',
         )
 
     def _post_event(self, event_name, num_participants=0, identity=None):

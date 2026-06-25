@@ -3,7 +3,7 @@
     "name": "Advent Light",
     "slug": "streams",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "streams",
     "userInterfaceStyle": "automatic",

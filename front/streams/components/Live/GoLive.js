@@ -10,15 +10,14 @@ import { createBroadcast } from '../../services/api';
 import { colors, typography, spacing, radius } from '../../constants/theme';
 
 const KINDS = [
-  { key: 'radio', label: 'Radio', icon: 'radio', hint: 'Audio only' },
-  { key: 'tv', label: 'TV', icon: 'television-classic', hint: 'Video' },
-  { key: 'podcast', label: 'Podcast', icon: 'microphone', hint: 'Video + talk' },
+  { key: 'meet', label: 'Meet', icon: 'account-group', hint: 'Audio · 100 followers' },
+  { key: 'tv', label: 'Go-Live', icon: 'television-classic', hint: 'Video · 1,000 followers' },
 ];
 
 const GoLive = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const [stage, setStage] = useState('setup'); // setup | lobby
-  const [kind, setKind] = useState(route.params?.kind || 'radio');
+  const [kind, setKind] = useState(route.params?.kind || 'meet');
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -29,7 +28,7 @@ const GoLive = ({ navigation, route }) => {
   const facingRef = useRef('user');
   const streamRef = useRef(null);
 
-  const isVideo = kind === 'tv' || kind === 'podcast';
+  const isVideo = kind === 'tv';
   const inExpoGo = Constants.executionEnvironment === 'storeClient';
 
   const stopPreview = useCallback(() => {
@@ -122,7 +121,7 @@ const GoLive = ({ navigation, route }) => {
             />
           ) : (
             <View style={styles.previewPlaceholder}>
-              <MaterialCommunityIcons name={isVideo ? 'video-off' : 'radio'} size={56} color={colors.textSecondary} />
+              <MaterialCommunityIcons name={isVideo ? 'video-off' : 'account-group'} size={56} color={colors.textSecondary} />
               <Text style={styles.previewHint}>{isVideo ? 'Camera off' : 'Audio broadcast'}</Text>
             </View>
           )}

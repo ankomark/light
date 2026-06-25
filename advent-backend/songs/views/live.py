@@ -9,6 +9,11 @@ from .. import livekit_service as lk
 # How many co-hosts can share the stage with the host at once.
 MAX_COHOSTS = 4
 
+# Follower thresholds to go live (staff/admins are exempt). Video (Go-Live) is a
+# heavier commitment than an audio Meet, so it needs a larger following.
+MIN_FOLLOWERS = {'tv': 1000, 'meet': 100}
+KIND_LABEL = {'tv': 'Go-Live', 'meet': 'Meet'}
+
 
 def _identity(user):
     return f"u{user.id}"
@@ -56,12 +61,31 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
     # ── Go live (host) ─────────────────────────────────────────────────────────
     def create(self, request):
-        kind = request.data.get('kind', 'radio')
+        kind = request.data.get('kind', 'meet')
         title = (request.data.get('title') or '').strip()
         if kind not in dict(LiveBroadcast.KIND_CHOICES):
-            return Response({'error': 'kind must be radio|tv|podcast'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'kind must be meet|tv'}, status=status.HTTP_400_BAD_REQUEST)
         if not title:
             return Response({'error': 'title is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Follower gate (staff/admins exempt): Go-Live (video) needs 1,000
+        # followers; Meet (audio) needs 100.
+        if not request.user.is_platform_admin:
+            needed = MIN_FOLLOWERS.get(kind, 0)
+            if needed and request.user.followers.count() < needed:
+                return Response(
+                    {'error': f"You need {needed:,} followers to start a {KIND_LABEL.get(kind, kind)}."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # One live broadcast per host: end any the host left dangling (e.g. a
+        # crash where the room was never torn down) so the hub never shows two
+        # live cards for the same host and stale rooms get reaped.
+        for old in LiveBroadcast.objects.filter(host=request.user, status='live'):
+            old.status = 'ended'
+            old.ended_at = timezone.now()
+            old.save(update_fields=['status', 'ended_at'])
+            lk.end_room(old.room_name)
 
         room_name = f"bc_{uuid.uuid4().hex[:12]}"
         broadcast = LiveBroadcast.objects.create(

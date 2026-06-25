@@ -10,12 +10,11 @@ import { colors, typography, spacing, radius, shadows } from '../../constants/th
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
 const KINDS = [
-  { key: 'radio', label: 'Radio', icon: 'radio' },
-  { key: 'tv', label: 'TV', icon: 'television-classic' },
-  { key: 'podcast', label: 'Podcast', icon: 'microphone' },
+  { key: 'meet', label: 'Meet', icon: 'account-group' },
+  { key: 'tv', label: 'Go-Live', icon: 'television-classic' },
 ];
 
-const KIND_ICON = { radio: 'radio', tv: 'television-classic', podcast: 'microphone' };
+const KIND_ICON = { meet: 'account-group', tv: 'television-classic' };
 
 const LiveHub = ({ navigation }) => {
   const [items, setItems] = useState([]);
@@ -57,7 +56,7 @@ const LiveHub = ({ navigation }) => {
           <Image source={host.profile_picture ? { uri: host.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.thumbImg} />
           <View style={styles.liveTag}><Text style={styles.liveTagText}>LIVE</Text></View>
           <View style={styles.kindTag}>
-            <MaterialCommunityIcons name={KIND_ICON[item.kind] || 'radio'} size={12} color="#fff" />
+            <MaterialCommunityIcons name={KIND_ICON[item.kind] || 'account-group'} size={12} color="#fff" />
           </View>
         </View>
         <View style={{ flex: 1 }}>
