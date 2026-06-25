@@ -199,6 +199,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     def cohost_token(self, request, pk=None):
         """An approved co-host fetches their publish token."""
         b = get_object_or_404(LiveBroadcast, pk=pk)
+        if b.status != 'live':
+            return Response({'error': 'This broadcast has ended.'}, status=status.HTTP_410_GONE)
         approved = b.cohost_requests.filter(user=request.user, status='approved').exists()
         if not approved:
             return Response({'error': 'Not approved as a co-host.'}, status=status.HTTP_403_FORBIDDEN)

@@ -83,6 +83,18 @@ class LiveBroadcastTests(APITestCase):
         self.assertEqual(ct.status_code, 200)
         self.assertTrue(self._grants(ct.json()['token'])['canPublish'])
 
+    def test_cohost_token_gone_after_broadcast_ends(self):
+        res, _ = self._go_live()
+        bid = res.json()['broadcast']['id']
+        b = LiveBroadcast.objects.get(id=bid)
+        CoHostRequest.objects.create(broadcast=b, user=self.viewer, status='approved')
+        # While live the approved co-host gets a token; once ended it's 410.
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self.client.get(f'/api/live/broadcasts/{bid}/cohost-token/').status_code, 200)
+        b.status = 'ended'
+        b.save(update_fields=['status'])
+        self.assertEqual(self.client.get(f'/api/live/broadcasts/{bid}/cohost-token/').status_code, 410)
+
     def test_only_host_can_end_and_approve(self):
         res, _ = self._go_live()
         bid = res.json()['broadcast']['id']
