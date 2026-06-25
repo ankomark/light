@@ -426,8 +426,30 @@ const RoomInner = ({
 
   const connecting = publishers.length === 0;
 
+  // Host's pending co-host requests. Extracted so it can live in the main column
+  // (portrait) or the side panel (landscape) without duplicating the markup.
+  const inboxNode = isHost && requests.length > 0 ? (
+    <View style={styles.inbox}>
+      <Text style={styles.sectionLabel}>Requests to join</Text>
+      <ScrollView style={{ maxHeight: 140 }}>
+        {requests.map((r) => (
+          <View key={r.id} style={styles.reqRow}>
+            <Text style={styles.reqName} numberOfLines={1}>@{r.user?.username || 'user'}</Text>
+            <TouchableOpacity style={[styles.reqBtn, styles.reqApprove]} onPress={() => approve(r)}>
+              <Text style={styles.reqApproveText}>Approve</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.reqBtn, styles.reqReject]} onPress={() => reject(r)}>
+              <Text style={styles.reqRejectText}>Decline</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  ) : null;
+
   return (
-    <View style={[styles.inner, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.sm }]}>
+    <View style={[styles.inner, landscape && styles.innerLandscape, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.sm }]}>
+      <View style={styles.mainCol}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.liveDot} />
@@ -446,11 +468,13 @@ const RoomInner = ({
         </View>
       )}
 
-      <Text style={styles.title} numberOfLines={1}>{broadcast.title}</Text>
-      <Text style={styles.kind}>{KIND_LABEL[broadcast.kind] || (broadcast.kind || 'meet').toUpperCase()}</Text>
+      {!landscape && <Text style={styles.title} numberOfLines={1}>{broadcast.title}</Text>}
+      {!landscape && (
+        <Text style={styles.kind}>{KIND_LABEL[broadcast.kind] || (broadcast.kind || 'meet').toUpperCase()}</Text>
+      )}
 
       {/* Stage */}
-      <Text style={styles.sectionLabel}>On air</Text>
+      {!landscape && <Text style={styles.sectionLabel}>On air</Text>}
       {__DEV__ && (
         <Text style={{ color: '#7Fd', fontSize: 10, marginBottom: 4 }}>
           dbg me:{localParticipant?.identity} role:{role} cams:{cameraTracks.length}{'\n'}
@@ -468,7 +492,6 @@ const RoomInner = ({
           localIdentity={localParticipant?.identity}
           onKick={kick}
           landscape={landscape}
-          windowHeight={winH}
         />
       ) : (
         <View style={styles.speakerWrap}>
@@ -492,40 +515,26 @@ const RoomInner = ({
         </View>
       )}
 
-      {/* Host: co-host request inbox */}
-      {isHost && requests.length > 0 && (
-        <View style={styles.inbox}>
-          <Text style={styles.sectionLabel}>Requests to join</Text>
-          <ScrollView style={{ maxHeight: 140 }}>
-            {requests.map((r) => (
-              <View key={r.id} style={styles.reqRow}>
-                <Text style={styles.reqName} numberOfLines={1}>@{r.user?.username || 'user'}</Text>
-                <TouchableOpacity style={[styles.reqBtn, styles.reqApprove]} onPress={() => approve(r)}>
-                  <Text style={styles.reqApproveText}>Approve</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.reqBtn, styles.reqReject]} onPress={() => reject(r)}>
-                  <Text style={styles.reqRejectText}>Decline</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+      {/* Host: co-host request inbox (in the main column in portrait) */}
+      {!landscape && inboxNode}
 
-      <View style={{ flex: 1 }} />
+      {!landscape && <View style={{ flex: 1 }} />}
+      </View>{/* mainCol */}
 
-      {/* Chat + reactions float above the controls */}
+      {/* Chat + reactions above the controls — a right-hand side panel in landscape */}
       <KeyboardAvoidingView
+        style={landscape ? styles.sidePanel : undefined}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.bottom + 8}
       >
-        <View style={styles.bottomRow}>
+        {landscape && inboxNode}
+        <View style={[styles.bottomRow, landscape && styles.bottomRowLandscape]}>
           <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat} />
           <FloatingReactions ref={reactionsRef} />
         </View>
 
         {/* Controls */}
-        <View style={styles.controls}>
+        <View style={[styles.controls, landscape && styles.controlsLandscape]}>
           <TouchableOpacity style={styles.ctrlBtn} onPress={sendReaction}>
             <Ionicons name="heart" size={22} color={colors.error} />
           </TouchableOpacity>
@@ -577,25 +586,24 @@ const RoomInner = ({
 };
 
 // Video: large active-speaker tile + a thumbnail row of the other publishers.
-const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick, landscape, windowHeight }) => {
+const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick, landscape }) => {
   const others = publishers.filter((p) => p.identity !== spotlight?.identity);
-  // In landscape the column has little vertical room, so size the spotlight to a
-  // share of the screen height instead of a fixed aspect ratio (which would be
-  // too tall full-width). Portrait keeps the 16:10 tile.
-  const bigStyle = landscape ? { aspectRatio: undefined, height: Math.round(windowHeight * 0.6) } : null;
+  // Landscape: the spotlight fills the column (active speaker), and the thumbnail
+  // row is hidden to keep the video full-bleed. Portrait keeps the 16:10 tile +
+  // a thumbnail strip of the other publishers.
   return (
-    <View style={styles.videoStage}>
+    <View style={[styles.videoStage, landscape && styles.videoStageFill]}>
       {spotlight && (
         <PublisherTile
           participant={spotlight}
           trackRef={camByIdentity[spotlight.identity]}
           big
-          bigStyle={bigStyle}
+          bigStyle={landscape ? styles.spotlightFill : null}
           showKick={isHost && spotlight.identity !== localIdentity}
           onKick={onKick}
         />
       )}
-      {others.length > 0 && (
+      {!landscape && others.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbRow} contentContainerStyle={{ gap: spacing.sm }}>
           {others.map((p) => (
             <PublisherTile
@@ -644,6 +652,14 @@ const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0A1628' },
   inner: { flex: 1, paddingHorizontal: spacing.md },
+  // Landscape: video on the left, a chat/controls side panel on the right.
+  innerLandscape: { flexDirection: 'row' },
+  mainCol: { flex: 1 },
+  sidePanel: { width: '40%', maxWidth: 340, marginLeft: spacing.sm },
+  videoStageFill: { flex: 1 },
+  spotlightFill: { flex: 1, aspectRatio: undefined, width: '100%' },
+  bottomRowLandscape: { flex: 1 },
+  controlsLandscape: { flexWrap: 'wrap', justifyContent: 'center' },
 
   guard: { flex: 1, backgroundColor: '#0A1628', alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
   guardTitle: { ...typography.h2, color: colors.textPrimary, textAlign: 'center' },
