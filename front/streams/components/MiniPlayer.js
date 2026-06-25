@@ -91,6 +91,8 @@ const MiniPlayer = () => {
       : durationMs > 0
       ? positionMs / durationMs
       : 0;
+  // While dragging, preview the seek target instead of the live position.
+  const displayedMs = seekValue != null ? seekValue * durationMs : positionMs;
   const busy = isLoading || isBuffering;
 
   return (
@@ -149,7 +151,7 @@ const MiniPlayer = () => {
             </Text>
             <Text style={styles.sub} numberOfLines={1}>
               {currentTrack.artist?.username || 'Unknown artist'}
-              {durationMs > 0 ? `  ·  ${formatTime(positionMs)} / ${formatTime(durationMs)}` : ''}
+              {durationMs > 0 ? `  ·  ${formatTime(displayedMs)} / ${formatTime(durationMs)}` : ''}
             </Text>
           </View>
         </TouchableOpacity>

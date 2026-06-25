@@ -2,7 +2,10 @@ import React, { useRef, useState } from 'react';
 import { View, PanResponder, StyleSheet } from 'react-native';
 import { colors as defaultColors } from '../constants/theme';
 
-const clamp01 = (n) => Math.max(0, Math.min(1, n));
+const clamp01 = (n) => {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+};
 
 /**
  * View-based seek bar with the same callback shape as
@@ -77,6 +80,9 @@ const SeekBar = ({
       onLayout={(e) => {
         widthRef.current = e.nativeEvent.layout.width;
       }}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(ratio * 100) }}
       {...pan.panHandlers}
     >
       <View style={[styles.track, { height: trackHeight, backgroundColor: maximumTrackTintColor }]}>

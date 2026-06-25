@@ -2,6 +2,7 @@ import React from 'react';
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import { Audio } from 'expo-av';
 import { PlayerProvider, usePlayer } from '../PlayerContext';
+import { PreferencesProvider } from '../PreferencesContext';
 
 // --- expo-av mock -----------------------------------------------------------
 // A single fake Sound whose status callback we capture so tests can simulate
@@ -28,7 +29,13 @@ jest.mock('expo-av', () => ({
   },
 }));
 
-const wrapper = ({ children }) => <PlayerProvider>{children}</PlayerProvider>;
+// PlayerProvider reads audio-quality prefs via usePreferences(), so it must be
+// rendered inside a PreferencesProvider.
+const wrapper = ({ children }) => (
+  <PreferencesProvider>
+    <PlayerProvider>{children}</PlayerProvider>
+  </PreferencesProvider>
+);
 
 // Simulate the player emitting a status update from native.
 const emit = (status) =>
