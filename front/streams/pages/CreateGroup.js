@@ -86,7 +86,8 @@ const GroupForm = ({ navigation, route }) => {
 
       let response;
       if (isEditMode) {
-        response = await updateGroup(existingGroup.id, formData);
+        // The API looks groups up by slug (lookup_field='slug'), not the numeric pk.
+        response = await updateGroup(existingGroup.slug, formData);
       } else {
         response = await createGroup(formData);
       }
@@ -117,7 +118,7 @@ const GroupForm = ({ navigation, route }) => {
           onPress: async () => {
             try {
               setIsLoading(true);
-              await deleteGroup(existingGroup.id);
+              await deleteGroup(existingGroup.slug);
               route.params?.onDelete?.();
               navigation.goBack();
             } catch (error) {

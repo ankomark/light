@@ -354,6 +354,12 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         group_slug = self.kwargs.get('group_slug')
         group = get_object_or_404(Group, slug=group_slug)
+        # Private group messages are members-only. Public group messages stay
+        # readable so people can preview a group before joining (mirrors how the
+        # group itself is visible). Without this, any authenticated user could
+        # read a private group's chat by hitting this endpoint directly.
+        if group.is_private and not GroupMember.objects.filter(group=group, user=self.request.user).exists():
+            raise PermissionDenied("You are not a member of this group")
         # Newest first (paginated); the chat reverses for chronological display.
         return (
             GroupPost.objects
@@ -499,13 +505,17 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         ).exists():
             raise PermissionDenied("Only group admins can approve requests")
         
-        GroupMember.objects.create(
+        # get_or_create guards the unique_together(group, user): if the person was
+        # already added (e.g. directly by an admin while the request sat pending),
+        # approving shouldn't 500 on a duplicate-key error.
+        _, created = GroupMember.objects.get_or_create(
             group=join_request.group,
-            user=join_request.user
+            user=join_request.user,
         )
         join_request.status = 'approved'
         join_request.save()
-        group_system_message(join_request.group, f"{join_request.user.username} joined", join_request.user)
+        if created:
+            group_system_message(join_request.group, f"{join_request.user.username} joined", join_request.user)
 
         return Response({"status": "Request approved"}, status=status.HTTP_200_OK)
 
