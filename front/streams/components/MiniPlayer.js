@@ -9,7 +9,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
+import SeekBar from './SeekBar';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius, shadows, typography } from '../constants/theme';
 import { usePlayer } from '../context/PlayerContext';
@@ -108,10 +108,8 @@ const MiniPlayer = () => {
         </TouchableOpacity>
       </View>
 
-      <Slider
+      <SeekBar
         style={styles.slider}
-        minimumValue={0}
-        maximumValue={1}
         value={progress}
         onSlidingStart={() => {
           beginSeek();

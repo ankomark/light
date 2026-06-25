@@ -3,7 +3,7 @@ import {
   View, Text, Image, StyleSheet, TouchableOpacity, ScrollView,
   Dimensions, ActivityIndicator, Platform, StatusBar,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
+import SeekBar from './SeekBar';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -158,10 +158,8 @@ const NowPlaying = () => {
 
       {/* Scrubber */}
       <View style={styles.scrubBlock}>
-        <Slider
+        <SeekBar
           style={styles.slider}
-          minimumValue={0}
-          maximumValue={1}
           value={progress}
           onSlidingStart={() => { beginSeek(); setSeekValue(progress); }}
           onValueChange={setSeekValue}
