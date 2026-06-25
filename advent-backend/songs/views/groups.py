@@ -2,6 +2,10 @@ import uuid
 
 from .common import *  # noqa: F401,F403
 
+# Group chat attachments are a Cloudinary https URL (current) or a legacy base64
+# data URI (older clients). base64 of ~6 MB is ~8 MB of text — allow headroom.
+MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
+
 
 def group_system_message(group, text, actor):
     """Create a 'system' notice in the group chat (e.g. 'X joined')."""
@@ -374,6 +378,19 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         attachment = serializer.validated_data.get('attachment') or ''
         if not content and not attachment:
             raise ValidationError({'detail': 'Message cannot be empty'})
+
+        # Validate the inline attachment: a Cloudinary https URL (media is now
+        # uploaded there and only the URL is stored) or a legacy base64 data URI,
+        # which is size-capped so it can't bloat the DB.
+        if attachment:
+            if attachment.startswith('https://'):
+                if len(attachment) > 2000:
+                    raise ValidationError({'detail': 'Invalid attachment URL'})
+            elif attachment.startswith('data:'):
+                if len(attachment) > MAX_ATTACHMENT_CHARS:
+                    raise ValidationError({'detail': 'Attachment is too large (max ~6 MB).'})
+            else:
+                raise ValidationError({'detail': 'Invalid attachment'})
 
         post = serializer.save(user=self.request.user, group=group)
 

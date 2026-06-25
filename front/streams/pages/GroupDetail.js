@@ -19,6 +19,7 @@ import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
 } from '../services/api';
+import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -30,6 +31,42 @@ const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const EMOJIS = ['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','🥰','😘','😋','😜','🤪','🤔','🤭','😎','🥳','😢','😭','😤','😡','🥺','😱','🙏','👍','👎','👏','🙌','🤝','💪','🫶','❤️','🧡','💛','💚','💙','💜','🔥','✨','🎉','💯','✅','🕊️','📖','🎵','☀️','⭐'];
 const REACTIONS = ['❤️', '👍', '🙏', '🎵', '😂', '🔥']; // quick-react row
 const SWIPE_TRIGGER = 56; // px of right-swipe to fire a reply
+
+// Voice notes recorded mono at a low bitrate — plenty for speech, far smaller
+// than HIGH_QUALITY, so they upload and load fast. Format stays .m4a/AAC.
+const VOICE_RECORDING_OPTIONS = {
+  isMeteringEnabled: false,
+  android: {
+    extension: '.m4a',
+    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+    audioEncoder: Audio.AndroidAudioEncoder.AAC,
+    sampleRate: 22050,
+    numberOfChannels: 1,
+    bitRate: 48000,
+  },
+  ios: {
+    extension: '.m4a',
+    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+    audioQuality: Audio.IOSAudioQuality.LOW,
+    sampleRate: 22050,
+    numberOfChannels: 1,
+    bitRate: 48000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: { mimeType: 'audio/webm', bitsPerSecond: 48000 },
+};
+
+// Light Cloudinary delivery transform for an image bubble thumbnail. Leaves
+// local (file://) and legacy base64 (data:) attachments untouched.
+const cldThumb = (url) => {
+  if (typeof url !== 'string' || !url.includes('res.cloudinary.com') || !url.includes('/upload/')) return url;
+  if (/\/upload\/[a-z]{1,3}_/.test(url)) return url;
+  return url.replace('/upload/', '/upload/c_limit,w_800,q_auto,f_auto/');
+};
+
+const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const fmtDuration = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.round((s || 0) % 60)).padStart(2, '0')}`;
@@ -115,7 +152,7 @@ const GroupMessageRow = ({
 
               {type === 'image' && item.attachment ? (
                 <Pressable onPress={() => (sending ? null : onOpenImage(item.attachment))}>
-                  <Image source={{ uri: item.attachment }} style={styles.imageMsg} resizeMode="cover" />
+                  <Image source={{ uri: cldThumb(item.attachment) }} style={styles.imageMsg} resizeMode="cover" />
                   {sending && <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>}
                 </Pressable>
               ) : type === 'file' ? (
@@ -317,10 +354,46 @@ const GroupDetail = ({ route, navigation }) => {
     deliver(payload, rd);
   }, [deliver, replyTo]);
 
+  // Media send: show the local file instantly, upload it to Cloudinary in the
+  // background, then persist the message with just the URL (mirrors DMs).
+  const sendMedia = useCallback(async (media, replyDisplay) => {
+    const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType } = media;
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const optimistic = {
+      id: tempId,
+      user: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
+      content: '', message_type, attachment: localUri, file_name, duration,
+      reply_to: replyDisplay
+        ? { id: replyDisplay.id, content: replyDisplay.content, message_type: replyDisplay.message_type, sender_username: replyDisplay.user?.username || replyDisplay.sender_username }
+        : null,
+      created_at: new Date().toISOString(), is_owner: true,
+      reactions: { summary: [], mine: null },
+      _status: 'sending', _retryMedia: media, _replyDisplay: replyDisplay || null,
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+    try {
+      const uploaded = await uploadMedia({ uri: localUri, name: file_name || `chat_${Date.now()}`, mimeType }, uploadType);
+      const saved = await sendGroupMessage(groupSlug, {
+        message_type, attachment: uploaded.url, file_name, duration, reply_to_id: replyDisplay?.id,
+      });
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...saved } : m)));
+    } catch {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
+    }
+  }, [groupSlug, currentUser]);
+
+  const sendMediaMessage = useCallback((media) => {
+    const rd = replyTo;
+    setReplyTo(null);
+    sendMedia(media, rd);
+  }, [sendMedia, replyTo]);
+
   const retrySend = useCallback((m) => {
     setMessages((prev) => prev.filter((x) => x.id !== m.id));
-    deliver(m._payload, m._replyDisplay);
-  }, [deliver]);
+    if (m._retryMedia) sendMedia(m._retryMedia, m._replyDisplay);
+    else deliver(m._payload, m._replyDisplay);
+  }, [deliver, sendMedia]);
 
   const handleSendText = useCallback(() => {
     const content = text.trim();
@@ -335,10 +408,10 @@ const GroupDetail = ({ route, navigation }) => {
       if (status !== 'granted') { Alert.alert('Permission required', 'Enable photo access.'); return; }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (res.canceled || !res.assets?.length) return;
-      const p = await manipulateAsync(res.assets[0].uri, [{ resize: { width: 1080 } }], { compress: 0.6, format: SaveFormat.JPEG, base64: true });
-      sendPayload({ message_type: 'image', attachment: `data:image/jpeg;base64,${p.base64}`, reply_to_id: replyTo?.id });
+      const p = await manipulateAsync(res.assets[0].uri, [{ resize: { width: 1080 } }], { compress: 0.6, format: SaveFormat.JPEG });
+      sendMediaMessage({ localUri: p.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg' });
     } catch { Alert.alert('Error', 'Could not attach image.'); }
-  }, [sendPayload, replyTo]);
+  }, [sendMediaMessage]);
 
   const attachFile = useCallback(async () => {
     try {
@@ -346,10 +419,12 @@ const GroupDetail = ({ route, navigation }) => {
       if (res.canceled || !res.assets?.length) return;
       const f = res.assets[0];
       if (f.size && f.size > MAX_FILE_BYTES) { Alert.alert('File too large', 'Choose a file under 6 MB.'); return; }
-      const b64 = await FileSystem.readAsStringAsync(f.uri, { encoding: FileSystem.EncodingType.Base64 });
-      sendPayload({ message_type: 'file', attachment: `data:${f.mimeType || 'application/octet-stream'};base64,${b64}`, file_name: f.name || 'file', reply_to_id: replyTo?.id });
+      sendMediaMessage({
+        localUri: f.uri, uploadType: 'chat-file', message_type: 'file',
+        file_name: f.name || 'file', mimeType: f.mimeType || 'application/octet-stream',
+      });
     } catch { Alert.alert('Error', 'Could not attach file.'); }
-  }, [sendPayload, replyTo]);
+  }, [sendMediaMessage]);
 
   const onAttachPress = useCallback(() => {
     setShowEmoji(false);
@@ -365,10 +440,21 @@ const GroupDetail = ({ route, navigation }) => {
 
   const openFile = useCallback(async (msg) => {
     try {
-      const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
-      if (!m) return;
-      const path = `${FileSystem.cacheDirectory}${(msg.file_name || 'file').replace(/[^\w.\-]/g, '_')}`;
-      await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
+      const safeName = (msg.file_name || 'file').replace(/[^\w.\-]/g, '_');
+      const dest = `${FileSystem.cacheDirectory}${safeName}`;
+      let path;
+      if (isData(msg.attachment)) {
+        const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
+        if (!m) return;
+        await FileSystem.writeAsStringAsync(dest, m[2], { encoding: FileSystem.EncodingType.Base64 });
+        path = dest;
+      } else if (typeof msg.attachment === 'string' && msg.attachment.startsWith('http')) {
+        const dl = await FileSystem.downloadAsync(msg.attachment, dest);
+        path = dl.uri;
+      } else {
+        path = msg.attachment; // local file:// (optimistic, still uploading)
+      }
+      if (!path) return;
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
       else Alert.alert('Saved', `Saved as ${msg.file_name}.`);
     } catch { Alert.alert('Error', 'Could not open this file.'); }
@@ -381,7 +467,7 @@ const GroupDetail = ({ route, navigation }) => {
       if (!perm.granted) { Alert.alert('Permission required', 'Enable microphone access.'); return; }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.prepareToRecordAsync(VOICE_RECORDING_OPTIONS);
       await rec.startAsync();
       recordingRef.current = rec; recordStartRef.current = Date.now();
       setShowEmoji(false); setIsRecording(true); setRecordSecs(0);
@@ -401,22 +487,31 @@ const GroupDetail = ({ route, navigation }) => {
       const uri = rec.getURI();
       const seconds = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
       if (!uri) return;
-      const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-      sendPayload({ message_type: 'audio', attachment: `data:audio/m4a;base64,${b64}`, duration: seconds, reply_to_id: replyTo?.id });
+      sendMediaMessage({
+        localUri: uri, uploadType: 'chat-audio', message_type: 'audio',
+        duration: seconds, mimeType: 'audio/m4a',
+      });
     } catch { Alert.alert('Error', 'Could not save the voice note.'); }
-  }, [sendPayload, replyTo]);
+  }, [sendMediaMessage]);
 
   const playAudio = useCallback(async (msg) => {
     try {
       if (soundRef.current) { await soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; }
       if (playingId === msg.id) { setPlayingId(null); return; }
-      const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
-      if (!m) return;
-      const path = `${FileSystem.cacheDirectory}gvoice_${msg.id}.m4a`;
-      const info = await FileSystem.getInfoAsync(path);
-      if (!info.exists) await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
+      // Legacy base64 → write to a cache file first; Cloudinary/local URIs play
+      // directly (expo-av streams https).
+      let sourceUri = msg.attachment;
+      if (isData(msg.attachment)) {
+        const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
+        if (!m) return;
+        const path = `${FileSystem.cacheDirectory}gvoice_${msg.id}.m4a`;
+        const info = await FileSystem.getInfoAsync(path);
+        if (!info.exists) await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
+        sourceUri = path;
+      }
+      if (!sourceUri) return;
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
-      const { sound } = await Audio.Sound.createAsync({ uri: path }, { shouldPlay: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: sourceUri }, { shouldPlay: true });
       soundRef.current = sound; setPlayingId(msg.id);
       sound.setOnPlaybackStatusUpdate((st) => { if (st.didJustFinish) { setPlayingId(null); sound.unloadAsync().catch(() => {}); soundRef.current = null; } });
     } catch { Alert.alert('Error', 'Could not play this voice note.'); setPlayingId(null); }
