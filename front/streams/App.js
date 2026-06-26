@@ -9,7 +9,7 @@ Sentry.init({
 });
 
 import React from 'react';
-import * as ScreenOrientation from 'expo-screen-orientation';
+import { lockPortrait } from './utils/orientation';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import TrackList from './components/TrackList';
@@ -185,7 +185,7 @@ const App = () => {
   // unlocks on mount and relocks portrait on leave). Guarded so it no-ops until
   // the native module is present in a fresh build.
   React.useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    lockPortrait();
   }, []);
 
   // Handle notification taps when app is killed or in background
