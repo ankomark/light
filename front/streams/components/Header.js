@@ -87,7 +87,7 @@ const Header = ({ transparentBg = false }) => {
                 <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
               </View>
             </LinearGradient>
-            <Text style={styles.title}>ADVENT LIGHT</Text>
+            <Text style={styles.title}>ADVENTIST LIFE</Text>
           </View>
           <View style={styles.rightCluster}>
             {/* Dedicated Videos feed (TikTok-style). Sits just left of the menu. */}

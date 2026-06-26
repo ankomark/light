@@ -870,7 +870,7 @@ _SHARE_PAGE = """<!doctype html>
     <div class="body">
       <p class="user">__USER__</p>__CAPTION_BLOCK__
       <a class="btn" href="__DEEP__">Open in Adventist Life</a>
-      <p class="brand">ADVENT LIGHT</p>
+      <p class="brand">ADVENTIST LIFE</p>
     </div>
   </div>
   <script>
