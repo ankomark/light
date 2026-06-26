@@ -1,18 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, FlatList,
-  StyleSheet, ActivityIndicator, Dimensions,
+  StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import useGridColumns from '../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const API_URL = 'https://bible-api.com';
-const { width } = Dimensions.get('window');
-
-// Chapter chips: 5 per row.
-const CHIP_COLS = 5;
-const CHIP_SIZE = Math.floor((width - spacing.md * 2 - spacing.sm * (CHIP_COLS - 1)) / CHIP_COLS);
 
 const OT_COUNT = 39; // first 39 books are the Old Testament
 
@@ -55,6 +51,14 @@ const BIBLE_BOOKS = [
 ];
 
 const BibleReader = () => {
+  // Responsive chapter chips: 5 per row on a phone, more on tablets / landscape.
+  const { cols: chipCols, tileSize: chipSize } = useGridColumns({
+    target: 64, min: 5, max: 10, horizontalPadding: spacing.md * 2, gap: spacing.sm,
+  });
+  // Responsive book cards: 2 per row on a phone, more on tablets / landscape.
+  const { tileSize: bookWidth } = useGridColumns({
+    target: 165, min: 2, max: 5, horizontalPadding: spacing.md * 2, gap: spacing.sm,
+  });
   const [verses, setVerses] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
   const [selectedChapter, setSelectedChapter] = useState(null);
@@ -118,7 +122,7 @@ const BibleReader = () => {
   const renderBookCard = (book) => (
     <TouchableOpacity
       key={book.name}
-      style={styles.bookCard}
+      style={[styles.bookCard, { width: bookWidth }]}
       onPress={() => handleBookSelect(book)}
       activeOpacity={0.85}
     >
@@ -183,14 +187,15 @@ const BibleReader = () => {
       <FlatList
         data={chapters}
         keyExtractor={(c) => `ch_${c}`}
-        numColumns={CHIP_COLS}
+        key={`chips-${chipCols}`}
+        numColumns={chipCols}
         columnWrapperStyle={styles.chipRow}
         contentContainerStyle={styles.chipGrid}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={<Text style={styles.pickPrompt}>Select a chapter</Text>}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={styles.chip}
+            style={[styles.chip, { width: chipSize, height: chipSize }]}
             onPress={() => fetchChapter(selectedBook, item)}
             activeOpacity={0.8}
           >
@@ -376,7 +381,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md - spacing.xs,
   },
   bookCard: {
-    width: (width - spacing.md * 2 - spacing.sm) / 2,
     margin: spacing.xs,
     backgroundColor: 'rgba(16,28,46,0.82)',
     borderRadius: radius.md,
@@ -402,8 +406,6 @@ const styles = StyleSheet.create({
   chipGrid: { padding: spacing.md },
   chipRow: { gap: spacing.sm, marginBottom: spacing.sm },
   chip: {
-    width: CHIP_SIZE,
-    height: CHIP_SIZE,
     borderRadius: radius.md,
     backgroundColor: 'rgba(16,28,46,0.82)',
     borderWidth: StyleSheet.hairlineWidth,

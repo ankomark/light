@@ -1,20 +1,18 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Dimensions,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminDashboard } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import { isSuperAdmin, hasCapability } from '../../utils/roles';
+import useGridColumns from '../../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
-const { width } = Dimensions.get('window');
-const CARD_W = (width - spacing.md * 2 - spacing.sm) / 2;
-
-const StatCard = ({ icon, set: Set = Ionicons, label, value, tint }) => (
-  <View style={styles.statCard}>
+const StatCard = ({ icon, set: Set = Ionicons, label, value, tint, width }) => (
+  <View style={[styles.statCard, { width }]}>
     <View style={[styles.statIcon, { backgroundColor: `${tint}22` }]}>
       <Set name={icon} size={20} color={tint} />
     </View>
@@ -44,6 +42,10 @@ const AdminDashboard = ({ navigation }) => {
   const { currentUser } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Responsive stat grid: 2 cards per row on a phone, more on tablets / landscape.
+  const { tileSize: cardW } = useGridColumns({
+    target: 150, min: 2, max: 4, horizontalPadding: spacing.md * 2, gap: spacing.sm,
+  });
 
   const load = useCallback(async () => {
     try {
@@ -87,14 +89,14 @@ const AdminDashboard = ({ navigation }) => {
       <Text style={styles.title}>Dashboard</Text>
 
       <View style={styles.grid}>
-        <StatCard icon="people" label="Users" value={t.users} tint="#1DA1F2" />
-        <StatCard icon="images" label="Posts" value={t.posts} tint="#17BF63" />
-        <StatCard icon="musical-notes" label="Tracks" value={t.tracks} tint="#F4A261" />
-        <StatCard icon="chatbubbles" label="Comments" value={t.comments} tint="#9B59B6" />
-        <StatCard icon="flag" label="Pending reports" value={r.pending} tint="#E0245E" />
-        <StatCard icon="person-add" label="New · 24h" value={s.last_24h} tint="#2ECC71" />
-        <StatCard set={MaterialCommunityIcons} icon="account-off" label="Suspended" value={m.suspended} tint="#FB8C00" />
-        <StatCard set={MaterialCommunityIcons} icon="cancel" label="Banned" value={m.banned} tint="#E53935" />
+        <StatCard width={cardW} icon="people" label="Users" value={t.users} tint="#1DA1F2" />
+        <StatCard width={cardW} icon="images" label="Posts" value={t.posts} tint="#17BF63" />
+        <StatCard width={cardW} icon="musical-notes" label="Tracks" value={t.tracks} tint="#F4A261" />
+        <StatCard width={cardW} icon="chatbubbles" label="Comments" value={t.comments} tint="#9B59B6" />
+        <StatCard width={cardW} icon="flag" label="Pending reports" value={r.pending} tint="#E0245E" />
+        <StatCard width={cardW} icon="person-add" label="New · 24h" value={s.last_24h} tint="#2ECC71" />
+        <StatCard width={cardW} set={MaterialCommunityIcons} icon="account-off" label="Suspended" value={m.suspended} tint="#FB8C00" />
+        <StatCard width={cardW} set={MaterialCommunityIcons} icon="cancel" label="Banned" value={m.banned} tint="#E53935" />
       </View>
 
       <Text style={styles.sectionTitle}>Manage</Text>
@@ -158,7 +160,6 @@ const styles = StyleSheet.create({
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   statCard: {
-    width: CARD_W,
     backgroundColor: 'rgba(16,28,46,0.82)',
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
