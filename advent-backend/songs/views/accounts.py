@@ -1,4 +1,5 @@
 from .common import *  # noqa: F401,F403
+from rest_framework import mixins
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import Appeal
 from ..serializers import AppealSerializer
@@ -55,7 +56,13 @@ class AppealViewSet(viewsets.GenericViewSet):
         return Response(self.get_serializer(appeal).data if appeal else None)
 
 
-class UserViewSet(viewsets.ModelViewSet):
+class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    # List/retrieve + the follow/block/social actions only — NOT a full
+    # ModelViewSet. With default update/destroy and no ownership check, any
+    # authenticated user could PATCH /users/<victim>/ to change another account's
+    # email/password (takeover) or DELETE it. Account mutation goes through the
+    # dedicated, self-scoped paths: SignUpView, /profiles/update_me/,
+    # ChangePasswordView, DeleteAccountView.
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -228,7 +235,11 @@ class UserViewSet(viewsets.ModelViewSet):
 
 
 
-class ProfileViewSet(viewsets.ModelViewSet):
+class ProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    # List/retrieve + self-scoped actions only. As a full ModelViewSet, default
+    # destroy had no ownership check (any user could DELETE another's profile) and
+    # create was unguarded. Profile changes go through the self-scoped actions
+    # below (create_profile / update_me); reads via me / by_user / retrieve.
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]

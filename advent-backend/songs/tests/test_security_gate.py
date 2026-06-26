@@ -6,7 +6,7 @@ allow unauthorized moderation. These are the bug classes that have bitten before
 """
 from rest_framework.test import APITestCase
 
-from songs.models import User, Conversation, Message
+from songs.models import User, Conversation, Message, Profile
 
 
 class DirectMessageSecurityTests(APITestCase):
@@ -80,3 +80,34 @@ class AdminPanelGateTests(APITestCase):
     def test_super_admin_allowed(self):
         self.client.force_authenticate(self.boss)
         self.assertEqual(self.client.get('/api/admin/dashboard/').status_code, 200)
+
+
+class AccountTakeoverTests(APITestCase):
+    """A user can only ever mutate their own account — never another user's
+    credentials or profile through the users/profiles collections."""
+
+    def setUp(self):
+        self.attacker = User.objects.create_user('atk_user', 'atk@x.com', 'pw')
+        self.victim = User.objects.create_user('victim_user', 'victim@x.com', 'pw')
+
+    def test_cannot_change_another_users_password_or_email(self):
+        self.client.force_authenticate(self.attacker)
+        r = self.client.patch(
+            f'/api/users/{self.victim.id}/',
+            {'password': 'hacked123', 'email': 'stolen@x.com'},
+        )
+        self.assertEqual(r.status_code, 405, r.content[:200])
+        self.victim.refresh_from_db()
+        self.assertFalse(self.victim.check_password('hacked123'))
+        self.assertEqual(self.victim.email, 'victim@x.com')
+
+    def test_cannot_delete_another_user(self):
+        self.client.force_authenticate(self.attacker)
+        self.assertEqual(self.client.delete(f'/api/users/{self.victim.id}/').status_code, 405)
+        self.assertTrue(User.objects.filter(id=self.victim.id).exists())
+
+    def test_cannot_delete_another_users_profile(self):
+        prof = Profile.objects.create(user=self.victim)
+        self.client.force_authenticate(self.attacker)
+        self.assertEqual(self.client.delete(f'/api/profiles/{prof.id}/').status_code, 405)
+        self.assertTrue(Profile.objects.filter(id=prof.id).exists())
