@@ -14,13 +14,9 @@ const UserProfile = ({ profile, size = 56 }) => {
   const [starting, setStarting] = React.useState(false);
   const displayedProfile = profile || currentUser;
 
-  if (!displayedProfile) return null;
-
-  const isOwnProfile = currentUser?.id === displayedProfile.id
-    || currentUser?.id === displayedProfile.user_id;
-
+  // Hooks must run unconditionally — keep this above the early return below.
   const handleMessage = useCallback(async () => {
-    if (!displayedProfile.id && !displayedProfile.user_id) return;
+    if (!displayedProfile?.id && !displayedProfile?.user_id) return;
     const userId = displayedProfile.user_id ?? displayedProfile.id;
     setStarting(true);
     try {
@@ -35,6 +31,11 @@ const UserProfile = ({ profile, size = 56 }) => {
       setStarting(false);
     }
   }, [displayedProfile, navigation]);
+
+  if (!displayedProfile) return null;
+
+  const isOwnProfile = currentUser?.id === displayedProfile.id
+    || currentUser?.id === displayedProfile.user_id;
 
   const avatarSource = displayedProfile.profile_picture
     ? { uri: displayedProfile.profile_picture }

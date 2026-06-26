@@ -10,12 +10,15 @@ import {
   ActivityIndicator,
   ScrollView,
   Modal,
+  Dimensions,
   Image
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchAudiostudios, createAudiostudio, updateAudiostudio, deleteAudiostudio } from '../services/api';
 import { useAuth } from '../context/useAuth';
+
+const { height } = Dimensions.get('window');
 
 const Audiostudios = () => {
   const { currentUser } = useAuth();

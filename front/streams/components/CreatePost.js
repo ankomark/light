@@ -1152,14 +1152,6 @@ pickSongText: {
   color: '#1DA1F2',
   fontWeight: '500',
 },
-selectedSongContainer: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: '#e6f7ff',
-  borderRadius: 8,
-  padding: 10,
-  marginBottom: 10,
-},
 removeSongButton: {
   marginLeft: 10,
 },

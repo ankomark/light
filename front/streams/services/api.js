@@ -143,6 +143,20 @@ axios.interceptors.response.use(
   }
 );
 
+// Best-effort, human-readable hint for a request that got no server response.
+// (Was referenced in the error path but never defined — an actual network error
+// then threw a ReferenceError and masked the real failure.)
+const diagnoseNetworkError = (error, url) => {
+  const msg = error?.message || '';
+  if (error?.code === 'ECONNABORTED' || /timeout/i.test(msg)) {
+    return `The request to ${url} timed out — the server may be slow or unreachable.`;
+  }
+  if (/Network Error/i.test(msg)) {
+    return `Couldn't reach ${url}. Check your internet connection.`;
+  }
+  return msg || `Request to ${url} failed with no response.`;
+};
+
 // Enhanced apiRequest function
 export const apiRequest = async (method, endpoint, data = null, options = {}) => {
   const url = `${API_URL}${endpoint}`;

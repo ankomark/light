@@ -4,9 +4,10 @@ import {
   Text, 
   StyleSheet, 
   FlatList, 
-  TouchableOpacity, 
+  TouchableOpacity,
   TextInput,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';

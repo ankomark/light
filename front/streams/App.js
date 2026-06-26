@@ -161,13 +161,6 @@ const AuthInitializer = ({ children }) => {
 
   return children;
 };
-const HymnalAppWrapper = ({ navigation }) => (
-    <View style={{ flex: 1 }}>
-      <Header navigation={navigation} />
-      <HymnalApp navigation={navigation} />
-    </View>
-  );
-  
   const HymnDetailWrapper = ({ navigation, route }) => (
     <View style={{ flex: 1 }}>
       <Header navigation={navigation} />
@@ -444,13 +437,6 @@ const FavoritesWrapper = ({ navigation }) => (
     </View>
 );
 
-const BooksListsPageWrapper = ({ navigation }) => (
-    <View style={{ flex: 1 }}>
-        <Header navigation={navigation} />
-        <BooksLists />
-    </View>
-);
-// Add these wrapper components
 // Shared luxury backdrop (rotating wallpaper + transparent nav bar) for every
 // marketplace screen, matching Studios/Churches. The screen itself renders on a
 // transparent surface so the wallpaper shows through behind cards & the header.
@@ -544,13 +530,6 @@ const AppealWrapper = ({ navigation }) => (
     <AppealScreen navigation={navigation} />
   </View>
 );
-const OrderDetailWrapper = ({ navigation, route }) => (
-  <View style={{ flex: 1 }}>
-    <Header navigation={navigation} />
-    <OrderDetail route={route} navigation={navigation} />
-  </View>
-);
-
 const AddProductWrapper = marketWrap(AddProduct, 'The product form couldn’t load.');
 const EditProductWrapper = marketWrap(EditProduct, 'The product form couldn’t load.');
 
