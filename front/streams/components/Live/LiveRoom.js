@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { lockPortrait, allowAllOrientations } from '../../utils/orientation';
 import Constants from 'expo-constants';
 import {
@@ -449,163 +451,195 @@ const RoomInner = ({
     </View>
   ) : null;
 
-  return (
-    <View style={[styles.inner, landscape && styles.innerLandscape, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.sm }]}>
-      <View style={styles.mainCol}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.liveDot} />
-        <Text style={styles.liveLabel}>LIVE</Text>
-        <Text style={styles.elapsed}>{elapsed}</Text>
-        <Text style={styles.viewers}><Ionicons name="eye" size={13} color={colors.textSecondary} /> {watching}</Text>
-        <TouchableOpacity style={styles.closeBtn} onPress={isHost ? endLive : leave} hitSlop={10}>
-          <Ionicons name="close" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
-      </View>
+  // ── Shared pieces (composed differently for portrait vs landscape) ───────────
+  const headerNode = (
+    <View style={styles.header}>
+      <View style={styles.liveDot} />
+      <Text style={styles.liveLabel}>LIVE</Text>
+      <Text style={styles.elapsed}>{elapsed}</Text>
+      <Text style={styles.viewers}><Ionicons name="eye" size={13} color={colors.textSecondary} /> {watching}</Text>
+      <TouchableOpacity style={styles.closeBtn} onPress={isHost ? endLive : leave} hitSlop={10}>
+        <Ionicons name="close" size={24} color={colors.textPrimary} />
+      </TouchableOpacity>
+    </View>
+  );
 
-      {reconnecting && (
-        <View style={styles.reconnect}>
-          <ActivityIndicator size="small" color="#fff" />
-          <Text style={styles.reconnectText}>Reconnecting…</Text>
-        </View>
-      )}
+  const reconnectNode = reconnecting ? (
+    <View style={styles.reconnect}>
+      <ActivityIndicator size="small" color="#fff" />
+      <Text style={styles.reconnectText}>Reconnecting…</Text>
+    </View>
+  ) : null;
 
-      {!landscape && <Text style={styles.title} numberOfLines={1}>{broadcast.title}</Text>}
-      {!landscape && (
-        <Text style={styles.kind}>{KIND_LABEL[broadcast.kind] || (broadcast.kind || 'meet').toUpperCase()}</Text>
-      )}
-
-      {/* Stage */}
-      {!landscape && <Text style={styles.sectionLabel}>On air</Text>}
-      {__DEV__ && (
-        <Text style={{ color: '#7Fd', fontSize: 10, marginBottom: 4 }}>
-          dbg me:{localParticipant?.identity} role:{role} cams:{cameraTracks.length}{'\n'}
-          {publishers.map((p) => `${p.identity}{cam:${camByIdentity[p.identity] ? 'Y' : 'n'} mut:${camByIdentity[p.identity]?.publication?.isMuted ? 'Y' : 'n'} en:${p.isCameraEnabled ? 'Y' : 'n'}}`).join(' ')}
-        </Text>
-      )}
-      {connecting ? (
-        <View style={styles.connecting}><ActivityIndicator color={colors.accent} /><Text style={styles.connectingText}>Connecting…</Text></View>
-      ) : isVideo ? (
-        <VideoStage
-          spotlight={spotlight}
-          publishers={publishers}
-          camByIdentity={camByIdentity}
-          isHost={isHost}
-          localIdentity={localParticipant?.identity}
-          onKick={kick}
-          landscape={landscape}
-        />
-      ) : (
-        <View style={styles.speakerWrap}>
-          {publishers.map((p) => (
-            <View key={p.identity} style={styles.speaker}>
-              <View style={[styles.speakerAvatar, p.isSpeaking && styles.speakerActive]}>
-                <MaterialCommunityIcons
-                  name={p.isMicrophoneEnabled ? 'microphone' : 'microphone-off'}
-                  size={22}
-                  color={p.isMicrophoneEnabled ? colors.accent : colors.textMuted}
-                />
-              </View>
-              <Text style={styles.speakerName} numberOfLines={1}>{p.name || p.identity}</Text>
-              {isHost && p.identity !== localParticipant?.identity && (
-                <TouchableOpacity onPress={() => kick(p.identity)}>
-                  <Text style={styles.removeText}>remove</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Host: co-host request inbox (in the main column in portrait) */}
-      {!landscape && inboxNode}
-
-      {!landscape && <View style={{ flex: 1 }} />}
-      </View>{/* mainCol */}
-
-      {/* Chat + reactions above the controls — a right-hand side panel in landscape */}
-      <KeyboardAvoidingView
-        style={landscape ? styles.sidePanel : undefined}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.bottom + 8}
-      >
-        {landscape && inboxNode}
-        <View style={[styles.bottomRow, landscape && styles.bottomRowLandscape]}>
-          <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat} />
-          <FloatingReactions ref={reactionsRef} />
-        </View>
-
-        {/* Controls */}
-        <View style={[styles.controls, landscape && styles.controlsLandscape]}>
-          <TouchableOpacity style={styles.ctrlBtn} onPress={sendReaction}>
-            <Ionicons name="heart" size={22} color={colors.error} />
-          </TouchableOpacity>
-
-          {canPublish ? (
-            <>
-              <TouchableOpacity style={[styles.ctrlBtn, !micOn && styles.ctrlMuted]} onPress={toggleMic}>
-                <MaterialCommunityIcons name={micOn ? 'microphone' : 'microphone-off'} size={22} color="#fff" />
-              </TouchableOpacity>
-              {isVideo && (
-                <TouchableOpacity style={[styles.ctrlBtn, !camOn && styles.ctrlMuted]} onPress={toggleCam}>
-                  <MaterialCommunityIcons name={camOn ? 'video' : 'video-off'} size={22} color="#fff" />
-                </TouchableOpacity>
-              )}
-              {isVideo && camOn && (
-                <TouchableOpacity style={styles.ctrlBtn} onPress={flipCam}>
-                  <MaterialCommunityIcons name="camera-flip-outline" size={22} color="#fff" />
-                </TouchableOpacity>
-              )}
-              {isHost ? (
-                <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={endLive}>
-                  <Ionicons name="stop" size={20} color="#fff" /><Text style={styles.ctrlText}>End</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
-                  <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>Leave</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={[styles.ctrlBtn, styles.ctrlGrow, requested && styles.ctrlMuted]}
-                onPress={askToJoin}
-                disabled={requested}
-              >
-                <MaterialCommunityIcons name="hand-back-right-outline" size={20} color="#fff" />
-                <Text style={styles.ctrlText}>{requested ? 'Requested…' : 'Request to join'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
-                <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>Leave</Text>
-              </TouchableOpacity>
-            </>
+  const stageNode = connecting ? (
+    <View style={[styles.connecting, !landscape && styles.centerFill]}>
+      <ActivityIndicator color={colors.accent} />
+      <Text style={styles.connectingText}>Connecting…</Text>
+    </View>
+  ) : isVideo ? (
+    <VideoStage
+      spotlight={spotlight}
+      publishers={publishers}
+      camByIdentity={camByIdentity}
+      isHost={isHost}
+      localIdentity={localParticipant?.identity}
+      onKick={kick}
+      landscape={landscape}
+      fill={!landscape}
+    />
+  ) : (
+    <View style={[styles.speakerWrap, !landscape && styles.speakerWrapFull]}>
+      {publishers.map((p) => (
+        <View key={p.identity} style={styles.speaker}>
+          <View style={[styles.speakerAvatar, p.isSpeaking && styles.speakerActive]}>
+            <MaterialCommunityIcons
+              name={p.isMicrophoneEnabled ? 'microphone' : 'microphone-off'}
+              size={22}
+              color={p.isMicrophoneEnabled ? colors.accent : colors.textMuted}
+            />
+          </View>
+          <Text style={styles.speakerName} numberOfLines={1}>{p.name || p.identity}</Text>
+          {isHost && p.identity !== localParticipant?.identity && (
+            <TouchableOpacity onPress={() => kick(p.identity)}>
+              <Text style={styles.removeText}>remove</Text>
+            </TouchableOpacity>
           )}
         </View>
+      ))}
+    </View>
+  );
+
+  const controlsNode = (
+    <View style={[styles.controls, landscape && styles.controlsLandscape]}>
+      <TouchableOpacity style={styles.ctrlBtn} onPress={sendReaction}>
+        <Ionicons name="heart" size={22} color={colors.error} />
+      </TouchableOpacity>
+      {canPublish ? (
+        <>
+          <TouchableOpacity style={[styles.ctrlBtn, !micOn && styles.ctrlMuted]} onPress={toggleMic}>
+            <MaterialCommunityIcons name={micOn ? 'microphone' : 'microphone-off'} size={22} color="#fff" />
+          </TouchableOpacity>
+          {isVideo && (
+            <TouchableOpacity style={[styles.ctrlBtn, !camOn && styles.ctrlMuted]} onPress={toggleCam}>
+              <MaterialCommunityIcons name={camOn ? 'video' : 'video-off'} size={22} color="#fff" />
+            </TouchableOpacity>
+          )}
+          {isVideo && camOn && (
+            <TouchableOpacity style={styles.ctrlBtn} onPress={flipCam}>
+              <MaterialCommunityIcons name="camera-flip-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+          )}
+          {isHost ? (
+            <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={endLive}>
+              <Ionicons name="stop" size={20} color="#fff" /><Text style={styles.ctrlText}>End</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
+              <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>Leave</Text>
+            </TouchableOpacity>
+          )}
+        </>
+      ) : (
+        <>
+          <TouchableOpacity
+            style={[styles.ctrlBtn, styles.ctrlGrow, requested && styles.ctrlMuted]}
+            onPress={askToJoin}
+            disabled={requested}
+          >
+            <MaterialCommunityIcons name="hand-back-right-outline" size={20} color="#fff" />
+            <Text style={styles.ctrlText}>{requested ? 'Requested…' : 'Request to join'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
+            <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>Leave</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+
+  // ── Landscape: video fills the left, a chat/controls panel on the right ──────
+  if (landscape) {
+    return (
+      <View style={[styles.inner, styles.innerLandscape, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.sm }]}>
+        <View style={styles.mainCol}>
+          {headerNode}
+          {reconnectNode}
+          {stageNode}
+        </View>
+        <KeyboardAvoidingView
+          style={styles.sidePanel}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={insets.bottom + 8}
+        >
+          {inboxNode}
+          <View style={[styles.bottomRow, styles.bottomRowLandscape]}>
+            <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat} />
+            <FloatingReactions ref={reactionsRef} />
+          </View>
+          {controlsNode}
+        </KeyboardAvoidingView>
+      </View>
+    );
+  }
+
+  // ── Portrait: full-bleed video with a frosted blue-glass dock (TikTok-style) ──
+  return (
+    <View style={styles.portraitRoot}>
+      <View style={styles.bgStage}>{stageNode}</View>
+
+      {/* Top scrim keeps the header + title legible over bright video. */}
+      <LinearGradient
+        colors={['rgba(6,16,32,0.92)', 'rgba(6,16,32,0.35)', 'transparent']}
+        style={[styles.topScrim, { paddingTop: insets.top + spacing.sm }]}
+        pointerEvents="box-none"
+      >
+        {headerNode}
+        <Text style={styles.titleOverlay} numberOfLines={2}>{broadcast.title}</Text>
+        <Text style={styles.kindOverlay}>{KIND_LABEL[broadcast.kind] || (broadcast.kind || 'meet').toUpperCase()}</Text>
+      </LinearGradient>
+
+      {reconnecting && <View style={styles.reconnectFloat} pointerEvents="none">{reconnectNode}</View>}
+
+      <FloatingReactions ref={reactionsRef} />
+
+      {/* Bottom dock: a frosted blue glass holding the inbox, chat and controls. */}
+      <KeyboardAvoidingView
+        style={styles.dockWrap}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <BlurView intensity={32} tint="dark" style={styles.dock}>
+          <View style={styles.dockTint} pointerEvents="none" />
+          <View style={[styles.dockInner, { paddingBottom: insets.bottom + spacing.sm }]}>
+            {inboxNode}
+            <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chatFull} />
+            {controlsNode}
+          </View>
+        </BlurView>
       </KeyboardAvoidingView>
     </View>
   );
 };
 
 // Video: large active-speaker tile + a thumbnail row of the other publishers.
-const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick, landscape }) => {
+const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick, landscape, fill }) => {
   const others = publishers.filter((p) => p.identity !== spotlight?.identity);
-  // Landscape: the spotlight fills the column (active speaker), and the thumbnail
-  // row is hidden to keep the video full-bleed. Portrait keeps the 16:10 tile +
-  // a thumbnail strip of the other publishers.
+  // `cover` = the spotlight fills its container edge-to-edge (landscape, or the
+  // portrait full-bleed layout). Otherwise it's a 16:10 tile with a thumbnail row.
+  const cover = landscape || fill;
   return (
-    <View style={[styles.videoStage, landscape && styles.videoStageFill]}>
+    <View style={[styles.videoStage, cover && styles.videoStageFill]}>
       {spotlight && (
         <PublisherTile
           participant={spotlight}
           trackRef={camByIdentity[spotlight.identity]}
           big
-          bigStyle={landscape ? styles.spotlightFill : null}
+          bigStyle={cover ? styles.spotlightFill : null}
           showKick={isHost && spotlight.identity !== localIdentity}
           onKick={onKick}
         />
       )}
-      {!landscape && others.length > 0 && (
+      {!cover && others.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbRow} contentContainerStyle={{ gap: spacing.sm }}>
           {others.map((p) => (
             <PublisherTile
@@ -617,6 +651,20 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
             />
           ))}
         </ScrollView>
+      )}
+      {/* Portrait full-bleed: co-hosts float as small picture-in-picture tiles. */}
+      {fill && others.length > 0 && (
+        <View style={styles.floatThumbs} pointerEvents="box-none">
+          {others.slice(0, 3).map((p) => (
+            <PublisherTile
+              key={p.identity}
+              participant={p}
+              trackRef={camByIdentity[p.identity]}
+              showKick={isHost && p.identity !== localIdentity}
+              onKick={onKick}
+            />
+          ))}
+        </View>
       )}
     </View>
   );
@@ -753,6 +801,34 @@ const styles = StyleSheet.create({
   ctrlMuted: { opacity: 0.6 },
   ctrlEnd: { backgroundColor: colors.error, borderColor: colors.error, flex: 1 },
   ctrlText: { ...typography.label, color: '#fff', fontWeight: '700' },
+
+  // ── Portrait full-bleed (TikTok-style) ──────────────────────────────────────
+  portraitRoot: { flex: 1, backgroundColor: '#000' },
+  bgStage: { ...StyleSheet.absoluteFillObject },
+  centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  speakerWrapFull: { flex: 1, alignItems: 'center', justifyContent: 'center', alignContent: 'center' },
+  floatThumbs: { position: 'absolute', top: 104, right: spacing.md, gap: spacing.sm },
+
+  topScrim: {
+    position: 'absolute', top: 0, left: 0, right: 0,
+    paddingHorizontal: spacing.md, paddingBottom: spacing.xl, zIndex: 2,
+  },
+  titleOverlay: {
+    ...typography.h3, color: '#fff', fontWeight: '800', marginTop: spacing.xs,
+    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
+  kindOverlay: { ...typography.caption, color: colors.accent, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
+  reconnectFloat: { position: 'absolute', top: 110, left: 0, right: 0, alignItems: 'center', zIndex: 3 },
+
+  dockWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 4 },
+  dock: {
+    borderTopLeftRadius: radius.xl + 6, borderTopRightRadius: radius.xl + 6, overflow: 'hidden',
+    borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(160,200,255,0.28)',
+  },
+  // The blue cast over the blur — frosted "blue glass".
+  dockTint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,46,80,0.46)' },
+  dockInner: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  chatFull: { width: '100%' },
 });
 
 export default LiveRoom;
