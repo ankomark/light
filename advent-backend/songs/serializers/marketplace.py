@@ -212,7 +212,11 @@ class OrderSerializer(serializers.ModelSerializer):
             'payment_method', 'total_amount', 'created_at', 'updated_at',
             'transaction_id', 'items'
         ]
-        read_only_fields = ['buyer', 'total_amount', 'created_at', 'updated_at']
+        # Everything is read-only over the API: orders mutate only through the
+        # gated checkout/set-shipping/update_status paths and the Stripe webhook,
+        # never by a client writing these fields directly (payment_status/status/
+        # total_amount/transaction_id are integrity-critical).
+        read_only_fields = fields
 
 
 

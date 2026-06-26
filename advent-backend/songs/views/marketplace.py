@@ -1,4 +1,5 @@
 from .common import *  # noqa: F401,F403
+from rest_framework import mixins
 from rest_framework.exceptions import APIException
 from django.http import Http404
 
@@ -321,7 +322,12 @@ class CartViewSet(viewsets.ModelViewSet):
 
 
 
-class OrderViewSet(viewsets.ModelViewSet):
+class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    # List/retrieve only — NOT a full ModelViewSet. Orders are created via
+    # cart checkout, shipping via set-shipping, and status via update_status
+    # (all gated). Exposing default create/update/destroy let a buyer PATCH their
+    # own order's payment_status to 'PAID' or force its status, bypassing those
+    # checks; payment_status must only ever change via the Stripe webhook.
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
 

@@ -126,3 +126,56 @@ class UpdateStatusAuthTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, 'SHIPPED')
+
+
+class OrderMutationLockdownTests(APITestCase):
+    """Orders can't be created/edited/deleted directly — only via the gated
+    checkout/set-shipping/update_status paths and the Stripe webhook. Guards the
+    payment-integrity bypass (a buyer PATCHing their own order to PAID)."""
+
+    def setUp(self):
+        cache.clear()
+        self.seller = User.objects.create_user('lk_seller', 'lks@x.com', 'pw')
+        self.buyer = User.objects.create_user('lk_buyer', 'lkb@x.com', 'pw')
+        self.product = Product.objects.create(
+            seller=self.seller, title='Book', description='d',
+            price=Decimal('10.00'), quantity=5,
+        )
+        self.order = Order.objects.create(
+            buyer=self.buyer, status='PENDING', payment_status='PENDING',
+            total_amount=Decimal('10.00'),
+        )
+        OrderItem.objects.create(
+            order=self.order, product=self.product, quantity=1,
+            price_at_purchase=Decimal('10.00'), seller=self.seller,
+        )
+
+    def test_buyer_cannot_mark_own_order_paid_via_patch(self):
+        self.client.force_authenticate(self.buyer)
+        r = self.client.patch(f'/api/marketplace/orders/{self.order.id}/', {'payment_status': 'PAID'})
+        self.assertEqual(r.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, 'PENDING')
+
+    def test_buyer_cannot_tamper_status_or_total_via_put(self):
+        self.client.force_authenticate(self.buyer)
+        r = self.client.put(
+            f'/api/marketplace/orders/{self.order.id}/',
+            {'status': 'DELIVERED', 'total_amount': '0.01'},
+        )
+        self.assertEqual(r.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'PENDING')
+        self.assertEqual(self.order.total_amount, Decimal('10.00'))
+
+    def test_no_direct_order_create_or_delete(self):
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(
+            self.client.post('/api/marketplace/orders/', {}).status_code,
+            status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+        self.assertEqual(
+            self.client.delete(f'/api/marketplace/orders/{self.order.id}/').status_code,
+            status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+        self.assertTrue(Order.objects.filter(id=self.order.id).exists())
