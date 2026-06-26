@@ -382,26 +382,39 @@ const RoomInner = ({
   const flipCam = async () => {
     const next = facingRef.current === 'user' ? 'environment' : 'user';
     try {
-      const pub = localParticipant?.getTrackPublication?.(Track.Source.Camera);
+      const localId = localParticipant?.identity;
+      const pub = localParticipant?.getTrackPublication?.(Track.Source.Camera)
+        || camByIdentity[localId]?.publication;
       const vt = pub?.videoTrack || pub?.track;
-      if (!vt) return;
-      // Fast path: react-native-webrtc flips the physical camera in place (no
-      // renegotiation). The underlying track lives at .mediaStreamTrack.
-      const mst = vt.mediaStreamTrack || vt._mediaStreamTrack;
-      if (mst && typeof mst._switchCamera === 'function') {
-        mst._switchCamera();
-        facingRef.current = next; // only commit after a successful switch
+      const mst = vt?.mediaStreamTrack || vt?._mediaStreamTrack;
+      if (!vt && !mst) {
+        Alert.alert('Flip camera', 'Turn your camera on first.');
         return;
       }
-      // Fallback: restart the capture with the other facing mode.
-      if (typeof vt.restartTrack === 'function') {
+
+      // Flip in place (no renegotiation) by applying the *explicit* facing mode
+      // we want. We deliberately don't use mst._switchCamera(): it toggles off
+      // the track's own _settings.facingMode, which LiveKit often leaves unset,
+      // so the first tap becomes a no-op. Setting facingMode directly is reliable.
+      if (mst && typeof mst.applyConstraints === 'function') {
+        const settings = typeof mst.getSettings === 'function' ? mst.getSettings() : {};
+        const constraints = { ...settings };
+        delete constraints.deviceId; // deviceId would pin the current camera
+        constraints.facingMode = next;
+        await mst.applyConstraints(constraints);
+        facingRef.current = next;
+        return;
+      }
+      // Fallback: re-acquire the camera with the other facing mode.
+      if (vt && typeof vt.restartTrack === 'function') {
         await vt.restartTrack({ facingMode: next });
         facingRef.current = next;
         return;
       }
-      if (__DEV__) Alert.alert('Flip camera', 'No camera-switch API available on this track.');
+      Alert.alert('Flip camera', "This device doesn't support switching cameras here.");
     } catch (e) {
-      if (__DEV__) Alert.alert('Flip failed', String(e?.message || e));
+      Alert.alert('Flip camera', "Couldn't switch the camera. Please try again.");
+      if (__DEV__) console.warn('flipCam failed', e);
     }
   };
 
