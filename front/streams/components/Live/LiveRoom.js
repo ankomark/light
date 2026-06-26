@@ -392,22 +392,19 @@ const RoomInner = ({
         return;
       }
 
-      // Flip in place (no renegotiation) by applying the *explicit* facing mode
-      // we want. We deliberately don't use mst._switchCamera(): it toggles off
-      // the track's own _settings.facingMode, which LiveKit often leaves unset,
-      // so the first tap becomes a no-op. Setting facingMode directly is reliable.
-      if (mst && typeof mst.applyConstraints === 'function') {
-        const settings = typeof mst.getSettings === 'function' ? mst.getSettings() : {};
-        const constraints = { ...settings };
-        delete constraints.deviceId; // deviceId would pin the current camera
-        constraints.facingMode = next;
-        await mst.applyConstraints(constraints);
+      // Primary: re-acquire the camera with the other facing mode. restartTrack
+      // does a real getUserMedia switch and replaces the sender track in place
+      // (it skips a closed transport, so it won't break publishing). This is the
+      // reliable path — applyConstraints/_switchCamera don't actually switch a
+      // LiveKit-managed capture on @livekit/react-native-webrtc.
+      if (vt && typeof vt.restartTrack === 'function') {
+        await vt.restartTrack({ facingMode: next });
         facingRef.current = next;
         return;
       }
-      // Fallback: re-acquire the camera with the other facing mode.
-      if (vt && typeof vt.restartTrack === 'function') {
-        await vt.restartTrack({ facingMode: next });
+      // Fallback: react-native-webrtc's in-place camera switch.
+      if (mst && typeof mst._switchCamera === 'function') {
+        mst._switchCamera();
         facingRef.current = next;
         return;
       }
