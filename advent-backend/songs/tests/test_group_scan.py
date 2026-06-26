@@ -35,6 +35,23 @@ class GroupPrivacyScanTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()['count'], 1)
 
+    def test_super_admin_can_read_private_group_posts(self):
+        """A super admin holds a master key: every private group, no membership."""
+        boss = User.objects.create_user('scanboss', 'boss@x.com', 'x')
+        boss.admin_role = 'super_admin'
+        boss.is_superuser = True
+        boss.save(update_fields=['admin_role', 'is_superuser'])
+        self.client.force_authenticate(boss)
+        # Posts of a private group they're not a member of.
+        r = self.client.get(f'/api/groups/{self.group.slug}/posts/')
+        self.assertEqual(r.status_code, 200, r.content[:200])
+        self.assertEqual(r.json()['count'], 1)
+        # The group itself is visible (master-key queryset) and flagged member/admin.
+        d = self.client.get(f'/api/groups/{self.group.slug}/')
+        self.assertEqual(d.status_code, 200)
+        self.assertTrue(d.json()['is_member'])
+        self.assertTrue(d.json()['is_admin'])
+
     def test_outsider_can_read_public_group_posts(self):
         """Public group messages stay readable so people can preview before joining."""
         pub = Group.objects.create(creator=self.creator, name='Open Forum', is_private=False)

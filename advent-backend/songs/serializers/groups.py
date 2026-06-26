@@ -34,10 +34,18 @@ class GroupSerializer(serializers.ModelSerializer):
     def get_member_count(self, obj):
         return obj.members.count()
 
+    def _is_super(self):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and request.user.is_super_admin)
+
     def get_is_member(self, obj):
-        return self._membership(obj) is not None
+        # Super admins hold a master key — treated as a member of every group so
+        # the app unlocks the chat for them (drives the frontend, no app update).
+        return self._is_super() or self._membership(obj) is not None
 
     def get_is_admin(self, obj):
+        if self._is_super():
+            return True
         m = self._membership(obj)
         return bool(m and m.is_admin)
 

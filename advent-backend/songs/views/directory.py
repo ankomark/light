@@ -167,7 +167,8 @@ class ChurchViewSet(viewsets.ModelViewSet):
         return church.memberships.filter(user=user).first()
 
     def _is_admin(self, church, user):
-        if user and user.is_authenticated and church.created_by_id == user.id:
+        # Super admins hold a master key over every community.
+        if user and user.is_authenticated and (user.is_super_admin or church.created_by_id == user.id):
             return True
         m = self._membership(church, user)
         return bool(m and m.role == 'admin')
@@ -186,7 +187,8 @@ class ChurchViewSet(viewsets.ModelViewSet):
             'name': church.name,
             'is_admin': is_admin,
             'role': m.role if m else None,
-            'is_member': bool(m),
+            # A super admin is reported as a member so the chat unlocks for them.
+            'is_member': bool(m) or is_admin,
             'has_pending_request': pending,
             'has_requests': is_admin and church.join_requests.filter(status='pending').exists(),
             'only_admins_can_post': church.only_admins_can_post,
@@ -199,7 +201,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
     def members(self, request, pk=None):
         """Roster — visible to members of the community."""
         church = self.get_object()
-        if not self._membership(church, request.user):
+        if not self._membership(church, request.user) and not self._is_admin(church, request.user):
             return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
         qs = church.memberships.select_related('user__profile').order_by('role', 'joined_at')
         return Response(ChurchMembershipSerializer(qs, many=True).data)
@@ -356,7 +358,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get', 'post'])
     def messages(self, request, pk=None):
         church = self.get_object()
-        if not self._membership(church, request.user):
+        if not self._membership(church, request.user) and not self._is_admin(church, request.user):
             return Response({'error': 'Join this church to see the chat.'}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == 'POST':
@@ -410,7 +412,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
     def react_message(self, request, pk=None, message_id=None):
         """Toggle the caller's emoji reaction on a message (one per user)."""
         church = self.get_object()
-        if not self._membership(church, request.user):
+        if not self._membership(church, request.user) and not self._is_admin(church, request.user):
             return Response({'error': 'Join this church to react.'}, status=status.HTTP_403_FORBIDDEN)
         msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
         emoji = (request.data.get('emoji') or '').strip()
@@ -568,7 +570,8 @@ class ChoirViewSet(viewsets.ModelViewSet):
         return choir.memberships.filter(user=user).first()
 
     def _is_admin(self, choir, user):
-        if user and user.is_authenticated and choir.created_by_id == user.id:
+        # Super admins hold a master key over every community.
+        if user and user.is_authenticated and (user.is_super_admin or choir.created_by_id == user.id):
             return True
         m = self._membership(choir, user)
         return bool(m and m.role == 'admin')
@@ -724,7 +727,8 @@ class ChoirViewSet(viewsets.ModelViewSet):
             'name': choir.name,
             'is_admin': is_admin,
             'role': m.role if m else None,
-            'is_member': bool(m),
+            # A super admin is reported as a member so the chat unlocks for them.
+            'is_member': bool(m) or is_admin,
             'has_pending_request': pending,
             # For the admin's "requests waiting" badge.
             'has_requests': is_admin and choir.join_requests.filter(status='pending').exists(),
@@ -737,7 +741,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
     def members(self, request, pk=None):
         """Roster — visible to members of the community."""
         choir = self.get_object()
-        if not self._membership(choir, request.user):
+        if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
             return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
         qs = choir.memberships.select_related('user__profile').order_by('role', 'joined_at')
         return Response(ChoirMembershipSerializer(qs, many=True).data)
@@ -828,7 +832,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get', 'post'])
     def messages(self, request, pk=None):
         choir = self.get_object()
-        if not self._membership(choir, request.user):
+        if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
             return Response({'error': 'Join this choir to see the chat.'}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == 'POST':
@@ -882,7 +886,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
     def react_message(self, request, pk=None, message_id=None):
         """Toggle the caller's emoji reaction on a message (one per user)."""
         choir = self.get_object()
-        if not self._membership(choir, request.user):
+        if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
             return Response({'error': 'Join this choir to react.'}, status=status.HTTP_403_FORBIDDEN)
         msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
         emoji = (request.data.get('emoji') or '').strip()

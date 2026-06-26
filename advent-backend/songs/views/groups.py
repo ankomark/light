@@ -26,6 +26,9 @@ class GroupViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         # For authenticated users
         if self.request.user.is_authenticated:
+            # Super admins hold a master key: every group, public or private.
+            if self.request.user.is_super_admin:
+                return Group.objects.filter(is_removed=False).order_by('-created_at')
             return Group.objects.filter(
                 Q(is_private=False) |  # Show all public groups
                 Q(creator=self.request.user) |  # Show groups user created
@@ -94,9 +97,9 @@ class GroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='members')
     def group_members(self, request, slug=None):
         group = self.get_object()
-        if not GroupMember.objects.filter(group=group, user=request.user).exists():
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user).exists()):
             raise PermissionDenied("You are not a member of this group")
-        
+
         members = GroupMember.objects.filter(group=group).select_related('user', 'user__profile')
         serializer = GroupMemberSerializer(members, many=True, context={'request': request})
         return Response(serializer.data)
@@ -153,7 +156,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='remove-member')
     def remove_member(self, request, slug=None):
         group = self.get_object()
-        if not GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists():
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can remove members")
         
         user_id = request.data.get('user_id')
@@ -174,7 +177,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         """Promote a member to admin or dismiss them as admin. Admins only.
         The group creator is always an admin and cannot be demoted."""
         group = self.get_object()
-        if not GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists():
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can change roles")
 
         user_id = request.data.get('user_id')
@@ -199,7 +202,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     def set_posting_policy(self, request, slug=None):
         """Toggle the WhatsApp-style 'Only admins can send messages' lock. Admins only."""
         group = self.get_object()
-        if not GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists():
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can change this setting")
 
         only_admins = bool(request.data.get('only_admins_can_post'))
@@ -215,7 +218,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         """Admin-only: find users by username to add to the group (excludes
         people who are already members)."""
         group = self.get_object()
-        if not GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists():
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can add members")
         q = (request.query_params.get('q') or '').strip()
         if len(q) < 2:
@@ -234,7 +237,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         """Admin-only: add a user to the group directly (used to populate private
         groups without a join request)."""
         group = self.get_object()
-        if not GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists():
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can add members")
         user_id = request.data.get('user_id')
         if not user_id:
@@ -262,7 +265,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         """Admin-only: return the group's invite code, creating one if needed or
         rotating it when {'regenerate': true} is sent (invalidates old links)."""
         group = self.get_object()
-        if not GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists():
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can manage invite links")
         if request.data.get('regenerate') or not group.invite_code:
             group.invite_code = uuid.uuid4()
@@ -290,13 +293,14 @@ class GroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='check-membership')
     def check_membership(self, request, slug=None):
         group = self.get_object()
-        is_member = GroupMember.objects.filter(group=group, user=request.user).exists()
-        is_admin = GroupMember.objects.filter(
-            group=group, 
+        sa = request.user.is_super_admin
+        is_member = sa or GroupMember.objects.filter(group=group, user=request.user).exists()
+        is_admin = sa or GroupMember.objects.filter(
+            group=group,
             user=request.user,
             is_admin=True
         ).exists()
-        
+
         return Response({
             'is_member': is_member,
             'is_admin': is_admin,
@@ -358,7 +362,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         # readable so people can preview a group before joining (mirrors how the
         # group itself is visible). Without this, any authenticated user could
         # read a private group's chat by hitting this endpoint directly.
-        if group.is_private and not GroupMember.objects.filter(group=group, user=self.request.user).exists():
+        if (group.is_private and not self.request.user.is_super_admin
+                and not GroupMember.objects.filter(group=group, user=self.request.user).exists()):
             raise PermissionDenied("You are not a member of this group")
         # Newest first (paginated); the chat reverses for chronological display.
         return (
@@ -374,9 +379,10 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         group = get_object_or_404(Group, slug=group_slug)
 
         member = GroupMember.objects.filter(group=group, user=self.request.user).first()
-        if not member:
+        is_super = self.request.user.is_super_admin
+        if not member and not is_super:
             raise PermissionDenied("You are not a member of this group")
-        if group.only_admins_can_post and not member.is_admin:
+        if group.only_admins_can_post and not (is_super or (member and member.is_admin)):
             raise PermissionDenied("Only admins can send messages in this group")
 
         # A message needs text or an attachment.
@@ -438,7 +444,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.user != request.user and not GroupMember.objects.filter(
+        if instance.user != request.user and not request.user.is_super_admin and not GroupMember.objects.filter(
             group=instance.group,
             user=request.user,
             is_admin=True
@@ -456,7 +462,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         member may react — not just the post's owner — so this action overrides
         the viewset's IsOwnerOrReadOnly and checks membership itself."""
         post = self.get_object()
-        if not GroupMember.objects.filter(group=post.group, user=request.user).exists():
+        if not request.user.is_super_admin and not GroupMember.objects.filter(group=post.group, user=request.user).exists():
             raise PermissionDenied("You are not a member of this group")
         emoji = (request.data.get('emoji') or '').strip()
         if not emoji or len(emoji) > 16:
