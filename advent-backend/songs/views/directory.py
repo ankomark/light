@@ -389,13 +389,17 @@ class ChurchViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_201_CREATED)
 
         # GET — newest first, paginated; the client reverses for display.
+        # Super admins operate invisibly — regular members never see a message
+        # (or reaction) a super admin authored.
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         qs = (church.messages
+              .exclude(sender_id__in=hidden)
               .select_related('sender__profile', 'reply_to__sender')
               .prefetch_related('reactions')
               .order_by('-created_at'))
         page = self.paginate_queryset(qs)
         data = ChurchMessageSerializer(page if page is not None else qs, many=True,
-                                       context={'request': request}).data
+                                       context={'request': request, 'hide_super_ids': hidden}).data
         return self.get_paginated_response(data) if page is not None else Response(data)
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
@@ -426,7 +430,8 @@ class ChurchViewSet(viewsets.ModelViewSet):
             existing.save(update_fields=['emoji'])
         else:
             ChurchMessageReaction.objects.create(message=msg, user=request.user, emoji=emoji)
-        return Response(ChurchMessageSerializer(msg, context={'request': request}).data)
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        return Response(ChurchMessageSerializer(msg, context={'request': request, 'hide_super_ids': hidden}).data)
 
 
 
@@ -863,13 +868,17 @@ class ChoirViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_201_CREATED)
 
         # GET — newest first, paginated; the client reverses for display.
+        # Super admins operate invisibly — regular members never see a message
+        # (or reaction) a super admin authored.
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         qs = (choir.messages
+              .exclude(sender_id__in=hidden)
               .select_related('sender__profile', 'reply_to__sender')
               .prefetch_related('reactions')
               .order_by('-created_at'))
         page = self.paginate_queryset(qs)
         data = ChoirMessageSerializer(page if page is not None else qs, many=True,
-                                      context={'request': request}).data
+                                      context={'request': request, 'hide_super_ids': hidden}).data
         return self.get_paginated_response(data) if page is not None else Response(data)
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
@@ -900,7 +909,8 @@ class ChoirViewSet(viewsets.ModelViewSet):
             existing.save(update_fields=['emoji'])
         else:
             ChoirMessageReaction.objects.create(message=msg, user=request.user, emoji=emoji)
-        return Response(ChoirMessageSerializer(msg, context={'request': request}).data)
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        return Response(ChoirMessageSerializer(msg, context={'request': request, 'hide_super_ids': hidden}).data)
 
 
 class LiveEventViewSet(viewsets.ModelViewSet):

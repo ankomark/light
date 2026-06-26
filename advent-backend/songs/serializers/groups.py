@@ -62,13 +62,16 @@ class GroupSerializer(serializers.ModelSerializer):
         if not member:
             return 0
         request = self.context.get('request')
-        qs = obj.posts.exclude(user=request.user).exclude(message_type='system')
+        hidden = self.context.get('hide_super_ids') or ()
+        qs = (obj.posts.exclude(user=request.user).exclude(message_type='system')
+              .exclude(user_id__in=hidden))
         if member.last_read_at:
             qs = qs.filter(created_at__gt=member.last_read_at)
         return qs.count()
 
     def get_last_message(self, obj):
-        last = obj.posts.order_by('-created_at').first()
+        hidden = self.context.get('hide_super_ids') or ()
+        last = obj.posts.exclude(user_id__in=hidden).order_by('-created_at').first()
         if not last:
             return None
         return {
@@ -162,8 +165,12 @@ class GroupPostSerializer(serializers.ModelSerializer):
         view prefetching `reactions` to avoid N+1 queries."""
         request = self.context.get('request')
         uid = request.user.id if request and request.user.is_authenticated else None
+        # Super admins react invisibly: skip their reactions for regular clients.
+        hidden = self.context.get('hide_super_ids') or ()
         counts, mine = {}, None
         for r in obj.reactions.all():
+            if r.user_id in hidden:
+                continue
             counts[r.emoji] = counts.get(r.emoji, 0) + 1
             if uid and r.user_id == uid:
                 mine = r.emoji

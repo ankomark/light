@@ -52,6 +52,28 @@ class GroupPrivacyScanTests(APITestCase):
         self.assertTrue(d.json()['is_member'])
         self.assertTrue(d.json()['is_admin'])
 
+    def test_super_admin_messages_invisible_to_regular_members(self):
+        """A super admin operates invisibly: a regular member never sees a message
+        the super admin authored, but the super admin sees their own."""
+        boss = User.objects.create_user('ghostboss', 'gb@x.com', 'x')
+        boss.admin_role = 'super_admin'
+        boss.is_superuser = True
+        boss.save(update_fields=['admin_role', 'is_superuser'])
+        self.client.force_authenticate(boss)
+        resp = self.client.post(
+            f'/api/groups/{self.group.slug}/posts/',
+            {'content': 'ghost note', 'message_type': 'text'}, format='json',
+        )
+        self.assertEqual(resp.status_code, 201, resp.content[:200])
+        # The group creator (a regular member) must not see the super admin's note.
+        self.client.force_authenticate(self.creator)
+        r = self.client.get(f'/api/groups/{self.group.slug}/posts/')
+        self.assertNotIn('ghost note', [p['content'] for p in r.json()['results']])
+        # The super admin sees their own message.
+        self.client.force_authenticate(boss)
+        r2 = self.client.get(f'/api/groups/{self.group.slug}/posts/')
+        self.assertIn('ghost note', [p['content'] for p in r2.json()['results']])
+
     def test_outsider_can_read_public_group_posts(self):
         """Public group messages stay readable so people can preview before joining."""
         pub = Group.objects.create(creator=self.creator, name='Open Forum', is_private=False)

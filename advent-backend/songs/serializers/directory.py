@@ -242,8 +242,12 @@ class ChoirMessageSerializer(serializers.ModelSerializer):
         Relies on the view prefetching `reactions` to avoid N+1 queries."""
         request = self.context.get('request')
         uid = request.user.id if request and request.user.is_authenticated else None
+        # Super admins react invisibly: skip their reactions for regular clients.
+        hidden = self.context.get('hide_super_ids') or ()
         counts, mine = {}, None
         for r in obj.reactions.all():
+            if r.user_id in hidden:
+                continue
             counts[r.emoji] = counts.get(r.emoji, 0) + 1
             if uid and r.user_id == uid:
                 mine = r.emoji
@@ -301,8 +305,12 @@ class ChurchMessageSerializer(serializers.ModelSerializer):
         the view prefetching `reactions` to avoid N+1 queries."""
         request = self.context.get('request')
         uid = request.user.id if request and request.user.is_authenticated else None
+        # Super admins react invisibly: skip their reactions for regular clients.
+        hidden = self.context.get('hide_super_ids') or ()
         counts, mine = {}, None
         for r in obj.reactions.all():
+            if r.user_id in hidden:
+                continue
             counts[r.emoji] = counts.get(r.emoji, 0) + 1
             if uid and r.user_id == uid:
                 mine = r.emoji

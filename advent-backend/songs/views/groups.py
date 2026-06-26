@@ -45,12 +45,24 @@ class GroupViewSet(viewsets.ModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
+        # Hide super-admin-authored posts from a regular viewer's unread count and
+        # last-message preview (super admins themselves see everyone).
+        u = self.request.user
+        context['hide_super_ids'] = (
+            set() if (u.is_authenticated and u.is_super_admin) else super_admin_user_ids()
+        )
         return context
 
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
+        # Hide super-admin-authored posts from a regular viewer's unread count and
+        # last-message preview (super admins themselves see everyone).
+        u = self.request.user
+        context['hide_super_ids'] = (
+            set() if (u.is_authenticated and u.is_super_admin) else super_admin_user_ids()
+        )
         return context
     
     
@@ -355,6 +367,21 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
+    def _hidden_ids(self):
+        """Super-admin user ids to hide from this viewer (empty when the viewer
+        is themselves a super admin — they see everyone)."""
+        if not hasattr(self, '_hidden_ids_cache'):
+            u = self.request.user
+            self._hidden_ids_cache = (
+                set() if (u.is_authenticated and u.is_super_admin) else super_admin_user_ids()
+            )
+        return self._hidden_ids_cache
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx['hide_super_ids'] = self._hidden_ids()
+        return ctx
+
     def get_queryset(self):
         group_slug = self.kwargs.get('group_slug')
         group = get_object_or_404(Group, slug=group_slug)
@@ -366,9 +393,12 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                 and not GroupMember.objects.filter(group=group, user=self.request.user).exists()):
             raise PermissionDenied("You are not a member of this group")
         # Newest first (paginated); the chat reverses for chronological display.
+        # Super admins operate invisibly — regular clients never see a message a
+        # super admin authored (an empty exclude set is a no-op for super admins).
         return (
             GroupPost.objects
             .filter(group=group)
+            .exclude(user_id__in=self._hidden_ids())
             .select_related('user__profile', 'reply_to__user')
             .prefetch_related('attachments', 'reactions')
             .order_by('-created_at')

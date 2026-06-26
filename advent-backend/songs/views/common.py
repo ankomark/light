@@ -141,6 +141,17 @@ class FeedCursorPagination(CursorPagination):
 
 
 
+def super_admin_user_ids():
+    """IDs of every super admin. Super admins operate invisibly in community
+    chats: their messages and reactions are filtered out for regular clients, so
+    callers pass these ids to ``.exclude(...)`` / skip them in reaction aggregates.
+    Empty-set-friendly: an empty ``__in`` exclude is a harmless no-op."""
+    return set(
+        User.objects.filter(Q(is_superuser=True) | Q(admin_role='super_admin'))
+        .values_list('id', flat=True)
+    )
+
+
 class IsOwnerOrReadOnly(BasePermission):
     """Object-level permission: safe methods are open; writes/deletes are
     restricted to the object's owner.
