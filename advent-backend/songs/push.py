@@ -120,5 +120,5 @@ def notify_user(recipient, notification_type, message, data=None):
     )
     if not tokens:
         return
-    title = NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Advent Light")
+    title = NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
     run_in_background(send_expo_push, tokens, title, message, data)

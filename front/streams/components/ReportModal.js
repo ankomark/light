@@ -79,7 +79,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
             <Ionicons name="checkmark-circle" size={52} color={colors.success ?? '#43A047'} />
             <Text style={styles.successTitle}>Report submitted</Text>
             <Text style={styles.successSub}>
-              Thanks for keeping Advent Light safe. We'll review this within 24 hours.
+              Thanks for keeping Adventist Life safe. We'll review this within 24 hours.
             </Text>
             <TouchableOpacity style={styles.doneBtn} onPress={handleClose}>
               <Text style={styles.doneBtnText}>Done</Text>

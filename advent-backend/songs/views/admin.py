@@ -81,8 +81,8 @@ def notify_moderation(user, subject, message):
         from django.core.mail import send_mail
         if user.email:
             send_mail(
-                subject=f"{getattr(settings, 'SITE_NAME', 'Advent Light')} — {subject}",
-                message=f"Hi {user.username},\n\n{message}\n\n— {getattr(settings, 'SITE_NAME', 'Advent Light')} Team",
+                subject=f"{getattr(settings, 'SITE_NAME', 'Adventist Life')} — {subject}",
+                message=f"Hi {user.username},\n\n{message}\n\n— {getattr(settings, 'SITE_NAME', 'Adventist Life')} Team",
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
                 fail_silently=True,

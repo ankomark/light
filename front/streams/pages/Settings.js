@@ -42,7 +42,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import { typography, spacing, radius, shadows } from '../constants/theme';
 
-const APP_NAME = Constants.expoConfig?.name || 'Advent Light';
+const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 const PACKAGE_ID =
   Constants.expoConfig?.android?.package ||
@@ -217,7 +217,7 @@ const Settings = () => {
     try {
       const data = await exportMyData();
       await Share.share({
-        title: 'My Advent Light data',
+        title: 'My Adventist Life data',
         message: JSON.stringify(data, null, 2),
       });
     } catch {

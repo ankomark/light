@@ -19,7 +19,7 @@ import { typography, spacing, radius, shadows } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 
-const APP_NAME = Constants.expoConfig?.name || 'Advent Light';
+const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
 const SUPPORT_EMAIL = 'ankomark76@gmail.com';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {

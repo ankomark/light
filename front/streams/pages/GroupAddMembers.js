@@ -73,7 +73,7 @@ const GroupAddMembers = ({ route, navigation }) => {
     if (!invite?.code) return;
     const name = group?.name || invite.group_name || 'our group';
     const message =
-      `Join "${name}" on Advent Light.\n\n` +
+      `Join "${name}" on Adventist Life.\n\n` +
       `Open the app → Groups → "Join with code" and enter this code:\n${invite.code}\n\n` +
       `Or tap: ${inviteLink}`;
     try { await Share.share({ message }); } catch { /* user cancelled */ }

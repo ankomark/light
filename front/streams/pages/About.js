@@ -21,7 +21,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 
 // ── Easily-editable brand/contact constants ──────────────────────────────────
-const APP_NAME = Constants.expoConfig?.name || 'Advent Light';
+const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 const TAGLINE = 'Faith, music & community — in one place';
 const SUPPORT_EMAIL = 'ankomark76@gmail.com';

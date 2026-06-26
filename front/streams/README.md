@@ -1,6 +1,6 @@
-# Advent Light — mobile app (Expo / React Native)
+# Adventist Life — mobile app (Expo / React Native)
 
-The frontend for Advent Light, a Seventh-day Adventist social, media, and
+The frontend for Adventist Life, a Seventh-day Adventist social, media, and
 marketplace app. Built with Expo (SDK 53), React Native, and React Navigation.
 The Django backend lives in `../advent-backend` (see its `DEPLOYMENT.md`).
 

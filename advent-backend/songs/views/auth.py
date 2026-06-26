@@ -49,7 +49,7 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
                         user.is_deactivated = False
                         user.deactivated_at = None
                         user.save(update_fields=['is_deactivated', 'deactivated_at'])
-                    notify_user(user, 'security', 'New sign-in to your Advent Light account.')
+                    notify_user(user, 'security', 'New sign-in to your Adventist Life account.')
             except Exception:
                 pass  # never let alerting break login
         return response

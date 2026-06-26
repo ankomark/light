@@ -1,4 +1,4 @@
-# Deployment & Ops — Advent Light backend
+# Deployment & Ops — Adventist Life backend
 
 Django 5.2 + DRF, deployed on Railway with Postgres (Supabase) and Cloudinary.
 This file lists the environment variables and operational steps the app needs.

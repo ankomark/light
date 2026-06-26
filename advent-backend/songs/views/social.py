@@ -832,7 +832,7 @@ _SHARE_PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
-<meta property="og:site_name" content="Advent Light">
+<meta property="og:site_name" content="Adventist Life">
 <meta property="og:type" content="__OGTYPE__">
 <meta property="og:title" content="__TITLE__">
 <meta property="og:description" content="__DESC__">
@@ -869,7 +869,7 @@ _SHARE_PAGE = """<!doctype html>
     <div class="media">__IMG_BLOCK____PLAY_BLOCK__</div>
     <div class="body">
       <p class="user">__USER__</p>__CAPTION_BLOCK__
-      <a class="btn" href="__DEEP__">Open in Advent Light</a>
+      <a class="btn" href="__DEEP__">Open in Adventist Life</a>
       <p class="brand">ADVENT LIGHT</p>
     </div>
   </div>
@@ -895,8 +895,8 @@ def post_share_page(request, post_id):
 
     username = post.user.username if post.user else 'Someone'
     caption = (post.caption or '').strip()
-    title = f"{username} on Advent Light"
-    description = caption or f"See {username}'s post on Advent Light."
+    title = f"{username} on Adventist Life"
+    description = caption or f"See {username}'s post on Adventist Life."
     image = _share_image(post)
     deep_link = f"streams://post/{post.id}"
     is_video = post.content_type == 'video'
