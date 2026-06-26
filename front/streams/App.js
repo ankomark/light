@@ -1,13 +1,5 @@
 import * as Sentry from '@sentry/react-native';
 
-// Init Sentry before anything else — DSN is set at build time via EXPO_PUBLIC_SENTRY_DSN
-Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN ?? '',
-  environment: __DEV__ ? 'development' : 'production',
-  tracesSampleRate: __DEV__ ? 0 : 0.2,
-  enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
-});
-
 import React from 'react';
 import { lockPortrait } from './utils/orientation';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -80,16 +72,6 @@ import GoLive from './components/Live/GoLive';
 import LiveRoom from './components/Live/LiveRoom';
 import { registerGlobals as registerLiveKitGlobals } from '@livekit/react-native';
 import { isAdmin } from './utils/roles';
-
-// WebRTC globals for LiveKit must be registered once before any live screen mounts.
-// Guarded: in Expo Go (or any build without the native WebRTC module) this throws
-// "WebRTC native module not found" at startup — swallow it so the rest of the app
-// still boots; the Live screens show their own "needs a dev build" guard.
-try {
-  registerLiveKitGlobals();
-} catch (e) {
-  console.warn('[LiveKit] WebRTC native module unavailable — live disabled in this build.', e?.message);
-}
 import InboxScreen from './components/InboxScreen';
 import ChatScreen from './components/ChatScreen';
 import ExploreScreen from './components/ExploreScreen';
@@ -106,6 +88,34 @@ import PlaylistsScreen from './components/PlaylistsScreen';
 import PlaylistDetail from './components/PlaylistDetail';
 import { navigationRef, navigate } from './services/navigationRef';
 import { API_BASE, PUBLIC_BASE } from './services/api';
+
+
+import { useAuth, AuthProvider } from './context/useAuth';
+import { PlayerProvider } from './context/PlayerContext';
+import { PreferencesProvider } from './context/PreferencesContext';
+import { ThemeProvider } from './context/ThemeContext';
+import { I18nProvider } from './context/I18nContext';
+import MiniPlayer from './components/MiniPlayer';
+import { addNotificationResponseListener } from './services/pushNotifications';
+import ErrorBoundary from './components/ErrorBoundary';
+
+// Init Sentry before anything else — DSN is set at build time via EXPO_PUBLIC_SENTRY_DSN
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN ?? '',
+  environment: __DEV__ ? 'development' : 'production',
+  tracesSampleRate: __DEV__ ? 0 : 0.2,
+  enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+});
+
+// WebRTC globals for LiveKit must be registered once before any live screen mounts.
+// Guarded: in Expo Go (or any build without the native WebRTC module) this throws
+// "WebRTC native module not found" at startup — swallow it so the rest of the app
+// still boots; the Live screens show their own "needs a dev build" guard.
+try {
+  registerLiveKitGlobals();
+} catch (e) {
+  console.warn('[LiveKit] WebRTC native module unavailable — live disabled in this build.', e?.message);
+}
 
 // Deep linking: a shared post URL (streams://post/123, or the web page
 // https://<public-host>/post/123) opens the app straight to that post.
@@ -136,16 +146,6 @@ const MUSIC_WALLPAPERS = [
   `${CLD_W}/ikinna96rzqdle0ztcoy.jpg`,
   `${CLD_W}/gvwuacmn04nq1b25axs1.jpg`,
 ];
-
-
-import { useAuth, AuthProvider } from './context/useAuth';
-import { PlayerProvider } from './context/PlayerContext';
-import { PreferencesProvider } from './context/PreferencesContext';
-import { ThemeProvider } from './context/ThemeContext';
-import { I18nProvider } from './context/I18nContext';
-import MiniPlayer from './components/MiniPlayer';
-import { addNotificationResponseListener } from './services/pushNotifications';
-import ErrorBoundary from './components/ErrorBoundary';
 
 const Stack = createNativeStackNavigator();
 const AuthInitializer = ({ children }) => {

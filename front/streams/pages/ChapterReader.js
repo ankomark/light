@@ -6,6 +6,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { saveReadingProgress } from '../services/api';
+import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 // expo-speech is a native module; on a dev client that hasn't been rebuilt since
 // it was added it isn't present. Load it defensively so the reader still works
@@ -13,9 +16,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 let Speech = null;
 try { Speech = require('expo-speech'); } catch { Speech = null; }
 const SPEECH_OK = !!(Speech && typeof Speech.speak === 'function');
-import { saveReadingProgress } from '../services/api';
-import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const FONT_SIZES = [15, 17, 19, 22];
 

@@ -9,12 +9,12 @@ import {
   TouchableOpacity,
   RefreshControl 
 } from "react-native";
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect , useNavigation } from '@react-navigation/native';
 import { fetchTracks } from "../services/api";
 import TrackItem from "./TrackItem";
 import SearchBar from "./SearchBar";
 import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+
 import { usePlayer } from '../context/PlayerContext';
 import { colors } from '../constants/theme';
 

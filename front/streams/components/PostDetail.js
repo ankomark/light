@@ -9,8 +9,7 @@ import {
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
-import { Video } from 'expo-av';
-import { Audio } from 'expo-av';
+import { Video , Audio } from 'expo-av';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
