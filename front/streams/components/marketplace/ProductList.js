@@ -8,11 +8,11 @@ import {
   Image,
   TextInput,
   ActivityIndicator,
-  Dimensions,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts } from '../../services/api';
+import useGridColumns from '../../utils/useGridColumns';
 
 // =====================
 // Helper Functions
@@ -71,10 +71,7 @@ const SPACING = {
   xLarge: 20,
 };
 
-// Calculate item width based on screen width
-const { width } = Dimensions.get('window');
 const ITEM_MARGIN = SPACING.small;
-const ITEM_WIDTH = (width - (ITEM_MARGIN * 3)) / 2;
 
 // =====================
 // Main Component
@@ -82,6 +79,10 @@ const ITEM_WIDTH = (width - (ITEM_MARGIN * 3)) / 2;
 const ProductList = () => {
   const navigation = useNavigation();
   const route = useRoute();
+  // Responsive grid: 2 columns on a phone, more on tablets / landscape.
+  const { cols, tileSize } = useGridColumns({
+    target: 180, min: 2, max: 5, horizontalPadding: ITEM_MARGIN * 2, gap: ITEM_MARGIN,
+  });
 
   const [products, setProducts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -186,10 +187,11 @@ const ProductList = () => {
             <ProductCard
               product={item}
               onPress={() => handleProductPress(item)}
-              style={{ width: ITEM_WIDTH }}
+              style={{ width: tileSize }}
             />
           )}
-          numColumns={2}
+          key={`products-${cols}`}
+          numColumns={cols}
           columnWrapperStyle={styles.columnWrapper}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -333,10 +335,11 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   columnWrapper: {
-    justifyContent: 'space-between',
+    gap: ITEM_MARGIN,
     marginBottom: ITEM_MARGIN,
   },
   listContent: {
+    paddingHorizontal: ITEM_MARGIN,
     paddingBottom: SPACING.large,
   },
   card: {
@@ -352,7 +355,7 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     width: '100%',
-    height: ITEM_WIDTH, // Square image
+    aspectRatio: 1, // Square image, scales with the responsive card width
     backgroundColor: COLORS.lightGray,
     position: 'relative',
     justifyContent: 'center',

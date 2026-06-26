@@ -1,22 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, Image, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { fetchProfile, fetchUserPosts } from '../services/api';
+import useGridColumns from '../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
-const { width } = Dimensions.get('window');
 const AVATAR_SIZE = 90;
-const GRID_COLS = 3;
 const GRID_GAP = 6;
 const GRID_PADDING = spacing.md;
-const TILE_SIZE = Math.floor(
-  (width - GRID_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS
-);
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 /** Build a still-image thumbnail for a post (videos -> first-frame jpg). */
@@ -55,6 +51,10 @@ const Profile = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const navigation = useNavigation();
+  // Responsive photo grid: 3 columns on a phone, more on tablets / landscape.
+  const { cols, tileSize } = useGridColumns({
+    target: 124, min: 3, max: 6, horizontalPadding: GRID_PADDING * 2, gap: GRID_GAP,
+  });
 
   const loadProfile = useCallback(async () => {
     try {
@@ -202,7 +202,7 @@ const Profile = () => {
     const thumb = getPostThumb(item);
     return (
       <TouchableOpacity
-        style={styles.tile}
+        style={[styles.tile, { width: tileSize, height: tileSize }]}
         activeOpacity={0.85}
         onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
       >
@@ -220,7 +220,7 @@ const Profile = () => {
         )}
       </TouchableOpacity>
     );
-  }, [navigation]);
+  }, [navigation, tileSize]);
 
   const renderEmptyPosts = useCallback(() => (
     <View style={styles.postsEmpty}>
@@ -256,8 +256,8 @@ const Profile = () => {
     <FlatList
       style={styles.container}
       data={posts}
-      key={`grid-${GRID_COLS}`}
-      numColumns={GRID_COLS}
+      key={`grid-${cols}`}
+      numColumns={cols}
       columnWrapperStyle={styles.gridRow}
       keyExtractor={(item) => `my_post_${item.id}`}
       renderItem={renderPost}
@@ -430,8 +430,6 @@ const styles = StyleSheet.create({
     gap: GRID_GAP,
   },
   tile: {
-    width: TILE_SIZE,
-    height: TILE_SIZE,
     marginBottom: GRID_GAP,
     backgroundColor: colors.surface,
     borderRadius: radius.sm,

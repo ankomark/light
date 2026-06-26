@@ -1,16 +1,15 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, FlatList, Image, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Dimensions, ScrollView,
+  StyleSheet, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiRequest } from '../services/api';
+import useGridColumns from '../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
-const { width } = Dimensions.get('window');
-const GRID_ITEM = (width - spacing.md * 2 - spacing.xs) / 2;
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 /**
@@ -49,11 +48,11 @@ const SuggestedUser = ({ user, onPress }) => (
   </TouchableOpacity>
 );
 
-const TrendingPostCard = ({ post, onPress }) => {
+const TrendingPostCard = ({ post, onPress, size }) => {
   const thumb = getPostThumb(post);
   const isVideo = post.content_type === 'video';
   return (
-    <TouchableOpacity style={styles.gridCard} onPress={() => onPress(post)} activeOpacity={0.85}>
+    <TouchableOpacity style={[styles.gridCard, { width: size, height: size }]} onPress={() => onPress(post)} activeOpacity={0.85}>
       {thumb ? (
         <Image source={{ uri: thumb }} style={styles.gridImage} resizeMode="cover" />
       ) : (
@@ -99,6 +98,10 @@ const SearchUserRow = ({ user, onPress }) => (
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 const ExploreScreen = ({ navigation }) => {
+  // Responsive grid tile: 2 across on a phone, more on tablets / landscape.
+  const { tileSize } = useGridColumns({
+    target: 175, min: 2, max: 5, horizontalPadding: spacing.md * 2, gap: spacing.xs,
+  });
   const [query, setQuery] = useState('');
   const [trending, setTrending] = useState([]);
   const [suggested, setSuggested] = useState([]);
@@ -169,7 +172,7 @@ const ExploreScreen = ({ navigation }) => {
           <Text style={styles.sectionTitle}>Trending This Week</Text>
           <View style={styles.grid}>
             {trending.map(post => (
-              <TrendingPostCard key={post.id} post={post} onPress={openPost} />
+              <TrendingPostCard key={post.id} post={post} onPress={openPost} size={tileSize} />
             ))}
           </View>
         </View>
@@ -214,7 +217,7 @@ const ExploreScreen = ({ navigation }) => {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Posts</Text>
             <View style={styles.grid}>
-              {posts.map(post => <TrendingPostCard key={post.id} post={post} onPress={openPost} />)}
+              {posts.map(post => <TrendingPostCard key={post.id} post={post} onPress={openPost} size={tileSize} />)}
             </View>
           </View>
         )}
@@ -357,8 +360,6 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   gridCard: {
-    width: GRID_ITEM,
-    height: GRID_ITEM,
     borderRadius: radius.md,
     overflow: 'hidden',
     backgroundColor: colors.surface,

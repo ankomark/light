@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, Image, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, Dimensions, Alert,
+  ActivityIndicator, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
@@ -10,13 +10,11 @@ import { fetchUserById, followUser, getOrCreateConversation, blockUser } from '.
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
+import useGridColumns from '../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
-const { width } = Dimensions.get('window');
 const AVATAR_SIZE = 96;
 const GRID_GAP = 2;
-const GRID_COLS = 3;
-const TILE_SIZE = Math.floor((width - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS);
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 /** Build a still-image thumbnail for a post (videos -> first-frame jpg). */
@@ -40,6 +38,10 @@ const StatBox = ({ value, label }) => (
 
 const UserProfileScreen = () => {
   const navigation = useNavigation();
+  // Responsive photo grid: 3 columns on a phone, more on tablets / landscape.
+  const { cols, tileSize } = useGridColumns({
+    target: 124, min: 3, max: 6, horizontalPadding: 0, gap: GRID_GAP,
+  });
   const route = useRoute();
   const { currentUser } = useAuth();
   const userId = route.params?.userId;
@@ -275,10 +277,10 @@ const UserProfileScreen = () => {
 
   const renderPost = useCallback(({ item, index }) => {
     const thumb = getPostThumb(item);
-    const isLastInRow = (index + 1) % GRID_COLS === 0;
+    const isLastInRow = (index + 1) % cols === 0;
     return (
       <TouchableOpacity
-        style={[styles.tile, !isLastInRow && { marginRight: GRID_GAP }]}
+        style={[styles.tile, { width: tileSize, height: tileSize }, !isLastInRow && { marginRight: GRID_GAP }]}
         activeOpacity={0.85}
         onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
       >
@@ -296,7 +298,7 @@ const UserProfileScreen = () => {
         )}
       </TouchableOpacity>
     );
-  }, [navigation]);
+  }, [navigation, cols, tileSize]);
 
   const renderEmptyPosts = useCallback(() => (
     <View style={styles.postsEmpty}>
@@ -338,8 +340,8 @@ const UserProfileScreen = () => {
       <FlatList
         style={styles.container}
         data={posts}
-        key={`grid-${GRID_COLS}`}
-        numColumns={GRID_COLS}
+        key={`grid-${cols}`}
+        numColumns={cols}
         keyExtractor={(item) => `up_post_${item.id}`}
         renderItem={renderPost}
         ListHeaderComponent={renderHeader}
@@ -445,7 +447,7 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
   tile: {
-    width: TILE_SIZE, height: TILE_SIZE, marginBottom: GRID_GAP,
+    marginBottom: GRID_GAP,
     backgroundColor: colors.surface,
   },
   tileImage: { width: '100%', height: '100%' },

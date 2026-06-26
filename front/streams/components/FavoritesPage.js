@@ -9,18 +9,15 @@ import {
   RefreshControl,
   TouchableOpacity,
   Image,
-  Dimensions,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { getFavoriteTracks, fetchSavedPosts } from '../services/api';
 import TrackItem from './TrackItem';
+import useGridColumns from '../utils/useGridColumns';
 import { colors, spacing, typography, radius } from '../constants/theme';
 
-const SCREEN_W = Dimensions.get('window').width;
-const COLS = 3;
 const GRID_PAD = 2;
-const CELL = (SCREEN_W - GRID_PAD * (COLS + 1)) / COLS;
 
 // A still thumbnail for the grid. For videos we ask Cloudinary for a poster
 // frame (so_0 = first frame) as a JPG — same trick as the Explore grid — so the
@@ -51,6 +48,10 @@ const EmptyState = ({ icon, title, text }) => (
 
 const FavoritesPage = () => {
   const navigation = useNavigation();
+  // Responsive grid: 3 columns on a phone, more on tablets / landscape.
+  const { cols, tileSize } = useGridColumns({
+    target: 124, min: 3, max: 6, horizontalPadding: GRID_PAD * 2, gap: GRID_PAD,
+  });
   const [tab, setTab] = useState('music'); // 'music' | 'posts'
   const [favoriteTracks, setFavoriteTracks] = useState([]);
   const [savedPosts, setSavedPosts] = useState([]);
@@ -149,13 +150,13 @@ const FavoritesPage = () => {
         />
       ) : (
         <FlatList
-          key="posts-grid"
+          key={`posts-grid-${cols}`}
           data={savedPosts}
-          numColumns={COLS}
+          numColumns={cols}
           keyExtractor={(post) => `saved_${post.id}`}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={styles.cell}
+              style={[styles.cell, { width: tileSize, height: tileSize }]}
               activeOpacity={0.85}
               onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
             >
@@ -252,8 +253,6 @@ const styles = StyleSheet.create({
     paddingBottom: 110,
   },
   cell: {
-    width: CELL,
-    height: CELL,
     marginBottom: GRID_PAD,
     backgroundColor: colors.surface,
     borderRadius: 4,
