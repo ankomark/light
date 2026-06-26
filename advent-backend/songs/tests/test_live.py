@@ -126,6 +126,53 @@ class LiveBroadcastTests(APITestCase):
         self.assertEqual(LiveBroadcast.objects.get(id=bid).status, 'ended')
         self.assertEqual(self.client.get('/api/live/broadcasts/').json()['count'], 0)
 
+    def test_super_admin_can_end_any_broadcast(self):
+        res, _ = self._go_live()  # owned by self.host
+        bid = res.json()['broadcast']['id']
+        boss = User.objects.create_user('liveboss', 'lb@x.com', 'x')
+        boss.admin_role = 'super_admin'
+        boss.is_superuser = True
+        boss.save(update_fields=['admin_role', 'is_superuser'])
+        self.client.force_authenticate(boss)  # a different super admin, not the host
+        with mock.patch('songs.views.live.lk.end_room') as end_room:
+            e = self.client.post(f'/api/live/broadcasts/{bid}/end/')
+        self.assertEqual(e.status_code, 200, e.content[:200])
+        self.assertEqual(e.json()['status'], 'ended')
+        end_room.assert_called_once()
+
+    def test_super_admin_can_delete_broadcast(self):
+        res, _ = self._go_live()
+        bid = res.json()['broadcast']['id']
+        boss = User.objects.create_user('liveboss2', 'lb2@x.com', 'x')
+        boss.admin_role = 'super_admin'
+        boss.is_superuser = True
+        boss.save(update_fields=['admin_role', 'is_superuser'])
+        self.client.force_authenticate(boss)
+        with mock.patch('songs.views.live.lk.end_room') as end_room:
+            d = self.client.delete(f'/api/live/broadcasts/{bid}/')
+        self.assertEqual(d.status_code, 204, getattr(d, 'content', b'')[:200])
+        self.assertFalse(LiveBroadcast.objects.filter(id=bid).exists())
+        end_room.assert_called_once()  # a live room is torn down before delete
+
+    def test_regular_user_cannot_delete_broadcast(self):
+        res, _ = self._go_live()
+        bid = res.json()['broadcast']['id']
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self.client.delete(f'/api/live/broadcasts/{bid}/').status_code, 403)
+        self.assertTrue(LiveBroadcast.objects.filter(id=bid).exists())
+
+    def test_super_admin_can_join_despite_block(self):
+        from songs.models import Block
+        res, _ = self._go_live()
+        bid = res.json()['broadcast']['id']
+        Block.objects.create(blocker=self.host, blocked=self.viewer)
+        # The blocked viewer is promoted to super admin — a block can't shut them out.
+        self.viewer.admin_role = 'super_admin'
+        self.viewer.is_superuser = True
+        self.viewer.save(update_fields=['admin_role', 'is_superuser'])
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self.client.get(f'/api/live/broadcasts/{bid}/token/').status_code, 200)
+
     def test_going_live_ends_previous_live_broadcast(self):
         # Host starts a broadcast, then (e.g. after a crash) goes live again.
         first, _ = self._go_live()

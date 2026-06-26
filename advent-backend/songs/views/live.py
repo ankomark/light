@@ -117,7 +117,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         b = get_object_or_404(LiveBroadcast, pk=pk)
         if b.status != 'live':
             return Response({'error': 'This broadcast has ended.'}, status=status.HTTP_410_GONE)
-        if is_blocked_between(request.user, b.host):
+        # Super admins can join any broadcast — a block by the host can't shut them out.
+        if not request.user.is_super_admin and is_blocked_between(request.user, b.host):
             return Response({'error': 'You cannot join this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
@@ -125,18 +126,31 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         )
         return Response(_broadcast_payload(b, token))
 
-    # ── End (host) ─────────────────────────────────────────────────────────────
+    # ── End (host or super admin) ───────────────────────────────────────────────
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
         b = get_object_or_404(LiveBroadcast, pk=pk)
-        if b.host_id != request.user.id:
-            return Response({'error': 'Only the host can end this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
+        # The host ends their own broadcast; a super admin can end anyone's.
+        if b.host_id != request.user.id and not request.user.is_super_admin:
+            return Response({'error': 'Only the host or an admin can end this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
         if b.status != 'ended':
             b.status = 'ended'
             b.ended_at = timezone.now()
             b.save(update_fields=['status', 'ended_at'])
             lk.end_room(b.room_name)
         return Response(LiveBroadcastSerializer(b).data)
+
+    # ── Delete (host or super admin) ────────────────────────────────────────────
+    def destroy(self, request, pk=None):
+        """Remove a broadcast entirely. The host can delete their own; a super
+        admin can delete any. A still-live room is torn down first."""
+        b = get_object_or_404(LiveBroadcast, pk=pk)
+        if b.host_id != request.user.id and not request.user.is_super_admin:
+            return Response({'error': 'Only the host or an admin can delete this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
+        if b.status == 'live':
+            lk.end_room(b.room_name)
+        b.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     # ── Co-host requests ───────────────────────────────────────────────────────
     @action(detail=True, methods=['post'], url_path='request-cohost')
@@ -218,7 +232,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def moderate(self, request, pk=None):
         b = get_object_or_404(LiveBroadcast, pk=pk)
-        if b.host_id != request.user.id:
+        if b.host_id != request.user.id and not request.user.is_super_admin:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
         target_user_id = request.data.get('user_id')
         if not target_user_id:

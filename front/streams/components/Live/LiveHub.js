@@ -4,7 +4,9 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchBroadcasts, fetchBroadcastToken } from '../../services/api';
+import { fetchBroadcasts, fetchBroadcastToken, endBroadcast } from '../../services/api';
+import { useAuth } from '../../context/useAuth';
+import { isSuperAdmin } from '../../utils/roles';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
@@ -17,9 +19,12 @@ const KINDS = [
 const KIND_ICON = { meet: 'account-group', tv: 'television-classic' };
 
 const LiveHub = ({ navigation }) => {
+  const { currentUser } = useAuth();
+  const isSuper = isSuperAdmin(currentUser);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(null);
+  const [endingId, setEndingId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,6 +53,32 @@ const LiveHub = ({ navigation }) => {
     }
   };
 
+  // Super admins can terminate any live session straight from the hub.
+  const endLive = (b) => {
+    Alert.alert(
+      'End live session',
+      `End @${b.host?.username || 'host'}'s “${b.title}” for everyone?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'End live',
+          style: 'destructive',
+          onPress: async () => {
+            setEndingId(b.id);
+            try {
+              await endBroadcast(b.id);
+              setItems((prev) => prev.filter((x) => x.id !== b.id));
+            } catch {
+              Alert.alert('Live', 'Could not end this session.');
+            } finally {
+              setEndingId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const renderItem = ({ item }) => {
     const host = item.host || {};
     return (
@@ -67,9 +98,19 @@ const LiveHub = ({ navigation }) => {
             <Text style={styles.viewerText}>{item.viewer_count || 0}</Text>
           </View>
         </View>
-        {opening === item.id
-          ? <ActivityIndicator color={colors.accent} />
-          : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
+        {opening === item.id ? (
+          <ActivityIndicator color={colors.accent} />
+        ) : isSuper ? (
+          endingId === item.id ? (
+            <ActivityIndicator color={colors.error} />
+          ) : (
+            <TouchableOpacity onPress={() => endLive(item)} hitSlop={10} style={styles.endBtn}>
+              <Ionicons name="stop-circle" size={24} color={colors.error} />
+            </TouchableOpacity>
+          )
+        ) : (
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        )}
       </TouchableOpacity>
     );
   };
@@ -155,6 +196,7 @@ const styles = StyleSheet.create({
   cardHost: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
   viewerRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
   viewerText: { ...typography.caption, color: colors.textMuted },
+  endBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.xs },
   emptyText: { ...typography.body, color: colors.textSecondary },
   emptySub: { ...typography.caption, color: colors.textMuted },

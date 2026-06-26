@@ -1313,6 +1313,9 @@ export const fetchBroadcastToken = (id) =>
   apiRequest('get', `/live/broadcasts/${id}/token/`);
 export const endBroadcast = (id) =>
   apiRequest('post', `/live/broadcasts/${id}/end/`);
+// Host or super admin: delete a broadcast record (tears down a live room first).
+export const deleteBroadcast = (id) =>
+  apiRequest('delete', `/live/broadcasts/${id}/`);
 export const requestCohost = (id) =>
   apiRequest('post', `/live/broadcasts/${id}/request-cohost/`);
 export const fetchCohostRequests = (id) =>
