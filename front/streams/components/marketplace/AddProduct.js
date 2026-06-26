@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  Modal,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -15,6 +16,14 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { createProduct } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+
+const CURRENCIES = [
+  { code: 'KES', label: 'KES (Ksh)' },
+  { code: 'USD', label: 'USD ($)' },
+  { code: 'EUR', label: 'EUR (€)' },
+  { code: 'GBP', label: 'GBP (£)' },
+  { code: 'NGN', label: 'NGN (₦)' },
+];
 
 const AddProduct = () => {
   const navigation = useNavigation();
@@ -36,6 +45,7 @@ const AddProduct = () => {
     payment_instructions: '',
   });
   const [currency, setCurrency] = useState('USD');
+  const [currencyOpen, setCurrencyOpen] = useState(false);
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [track, setTrack] = useState(null);
@@ -79,20 +89,9 @@ const AddProduct = () => {
     setImages(newImages);
   };
 
-  const handleCurrencyChange = () => {
-    Alert.alert(
-      'Select Currency',
-      'Choose your product currency',
-      [
-        { text: 'KES (Ksh)', onPress: () => setCurrency('KES') },
-        { text: 'USD ($)', onPress: () => setCurrency('USD') },
-        { text: 'EUR (€)', onPress: () => setCurrency('EUR') },
-        { text: 'GBP (£)', onPress: () => setCurrency('GBP') },
-        { text: 'NGN (₦)', onPress: () => setCurrency('NGN') },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
-  };
+  // A custom picker — Android's Alert renders at most 3 buttons, so the five
+  // currencies + Cancel can't live in an Alert.
+  const handleCurrencyChange = () => setCurrencyOpen(true);
 
   const validateWhatsAppNumber = (number) => {
     if (!number) return true; // Optional field
@@ -398,6 +397,28 @@ const AddProduct = () => {
           {loading ? 'Creating Product...' : 'Create Product'}
         </Text>
       </TouchableOpacity>
+
+      {/* Currency picker (Android-safe; replaces a >3-button Alert) */}
+      <Modal visible={currencyOpen} transparent animationType="fade" onRequestClose={() => setCurrencyOpen(false)}>
+        <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setCurrencyOpen(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.pickerCard}>
+            <Text style={styles.pickerTitle}>Select currency</Text>
+            {CURRENCIES.map((c) => (
+              <TouchableOpacity
+                key={c.code}
+                style={[styles.pickerRow, currency === c.code && styles.pickerRowActive]}
+                onPress={() => { setCurrency(c.code); setCurrencyOpen(false); }}
+              >
+                <Text style={styles.pickerRowText}>{c.label}</Text>
+                {currency === c.code && <Icon name="check" size={16} color="#2e7d32" />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.pickerCancel} onPress={() => setCurrencyOpen(false)}>
+              <Text style={styles.pickerCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 };
@@ -582,6 +603,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+  pickerBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center', padding: 24,
+  },
+  pickerCard: {
+    width: '100%', maxWidth: 340, backgroundColor: '#fff',
+    borderRadius: 14, padding: 16,
+  },
+  pickerTitle: { fontSize: 16, fontWeight: '700', color: '#111', textAlign: 'center', marginBottom: 8 },
+  pickerRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10, marginTop: 4,
+    backgroundColor: '#f5f5f5',
+  },
+  pickerRowActive: { backgroundColor: '#e8f5e9' },
+  pickerRowText: { fontSize: 15, color: '#222', fontWeight: '600' },
+  pickerCancel: { paddingVertical: 14, alignItems: 'center', marginTop: 6 },
+  pickerCancelText: { fontSize: 15, color: '#888', fontWeight: '700' },
 });
 
 export default AddProduct;
