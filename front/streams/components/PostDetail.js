@@ -426,8 +426,9 @@ const styles = StyleSheet.create({
   },
 
   mediaFrame: {
-    width: SCREEN_WIDTH - spacing.md * 2,
-    marginHorizontal: spacing.md,
+    // Cap + center on wide screens (tablets) so the media doesn't stretch huge.
+    width: Math.min(SCREEN_WIDTH - spacing.md * 2, 600),
+    alignSelf: 'center',
     marginTop: spacing.xs,
     borderRadius: radius.lg,
     overflow: 'hidden',

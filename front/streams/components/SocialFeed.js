@@ -35,7 +35,11 @@ import { colors, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const AVATAR_FAILED = '__failed__';
-const CARD_W = Dimensions.get('window').width - 24; // postContainer marginHorizontal 12 each side
+// Post card width. Capped on wide screens (tablets/landscape) so the feed reads
+// as a centered column instead of stretching edge-to-edge; on phones it's just
+// the window width minus the 12px side margins, so their layout is unchanged.
+const MAX_FEED_W = 600;
+const CARD_W = Math.min(Dimensions.get('window').width - 24, MAX_FEED_W);
 
 // Compact relative time, e.g. "now", "5m", "3h", "2d", "4w", or a date.
 const timeAgo = (dateStr) => {
@@ -1090,7 +1094,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 18,
     marginVertical: 8,
-    marginHorizontal: 12,
+    width: CARD_W,        // window-24 on phones, capped at MAX_FEED_W on tablets
+    alignSelf: 'center',  // centered column on wide screens
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,

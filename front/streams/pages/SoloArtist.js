@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Modal,
-  Dimensions,
   Image,
   Linking
 } from 'react-native';
@@ -25,8 +24,6 @@ import {
   toggleSoloArtistActive
 } from '../services/api';
 import { useAuth } from '../context/auth';
-
-const { height } = Dimensions.get('window');
 
 const GENRE_CHOICES = {
   gospel: 'Gospel',
