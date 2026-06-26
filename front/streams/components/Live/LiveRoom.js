@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { lockPortrait, unlockOrientation } from '../../utils/orientation';
+import { lockPortrait, allowAllOrientations } from '../../utils/orientation';
 import Constants from 'expo-constants';
 import {
   LiveKitRoom, AudioSession, useParticipants, useLocalParticipant, useRoomContext,
@@ -117,11 +117,13 @@ const LiveRoom = ({ navigation, route }) => {
     return () => { AudioSession.stopAudioSession().catch(() => {}); };
   }, [inExpoGo]);
 
-  // Live supports both portrait and landscape (screen flip). The rest of the app
-  // is portrait-locked at the root, so we unlock here and relock on leave.
+  // The rest of the app is portrait-locked at the root. In the live room we switch
+  // to full sensor rotation so the whole screen flips automatically with the
+  // device (TikTok-style) — even if the phone's auto-rotate toggle is off — then
+  // relock portrait on leave.
   useEffect(() => {
     if (inExpoGo) return undefined;
-    unlockOrientation();
+    allowAllOrientations();
     return () => {
       lockPortrait();
     };

@@ -19,10 +19,15 @@ export const lockPortrait = async () => {
   }
 };
 
-export const unlockOrientation = async () => {
+// Full sensor-driven rotation in all orientations. Unlike unlockAsync()
+// (SCREEN_ORIENTATION_UNSPECIFIED, which obeys the phone's auto-rotate toggle and
+// makes Android pop a manual "rotate" suggestion icon), OrientationLock.ALL maps
+// to SCREEN_ORIENTATION_FULL_SENSOR — the screen flips automatically with the
+// device regardless of the system auto-rotate setting, like a TikTok live.
+export const allowAllOrientations = async () => {
   try {
-    await ScreenOrientation.unlockAsync();
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.ALL);
   } catch {
-    /* native module unavailable — ignore */
+    /* native module unavailable (Expo Go or a stale build) — ignore */
   }
 };
