@@ -7,7 +7,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminDashboard } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
-import { isSuperAdmin } from '../../utils/roles';
+import { isSuperAdmin, hasCapability } from '../../utils/roles';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -68,6 +68,15 @@ const AdminDashboard = ({ navigation }) => {
   const m = data?.moderation || {};
   const ap = data?.appeals || {};
 
+  // Gate each quick link by the capability its page needs, mirroring the
+  // hamburger menu, so admins don't tap into a page that 403s server-side.
+  const canAnalytics = hasCapability(currentUser, 'view_analytics');
+  const canReports = hasCapability(currentUser, 'handle_reports');
+  const canAppeals = hasCapability(currentUser, 'manage_appeals');
+  const canUsers = hasCapability(currentUser, 'manage_users') || hasCapability(currentUser, 'ban_users');
+  const canContent = hasCapability(currentUser, 'remove_content');
+  const canAudit = hasCapability(currentUser, 'view_audit_log');
+
   return (
     <ScrollView
       style={styles.container}
@@ -89,22 +98,36 @@ const AdminDashboard = ({ navigation }) => {
       </View>
 
       <Text style={styles.sectionTitle}>Manage</Text>
-      <QuickLink icon="chart-line" label="Analytics" sub="Signups, posts & reports over time"
-        onPress={() => navigation.navigate('AdminAnalytics')} />
-      <QuickLink icon="flag-outline" label="Reports" sub="Review reported content"
-        badge={r.pending} onPress={() => navigation.navigate('AdminReports')} />
-      <QuickLink icon="gavel" label="Appeals" sub="Review suspension appeals"
-        badge={ap.pending} onPress={() => navigation.navigate('AdminAppeals')} />
-      <QuickLink icon="account-cog-outline" label="Users" sub="Suspend, ban, assign roles"
-        onPress={() => navigation.navigate('AdminUsers')} />
+      {canAnalytics && (
+        <QuickLink icon="chart-line" label="Analytics" sub="Signups, posts & reports over time"
+          onPress={() => navigation.navigate('AdminAnalytics')} />
+      )}
+      {canReports && (
+        <QuickLink icon="flag-outline" label="Reports" sub="Review reported content"
+          badge={r.pending} onPress={() => navigation.navigate('AdminReports')} />
+      )}
+      {canAppeals && (
+        <QuickLink icon="gavel" label="Appeals" sub="Review suspension appeals"
+          badge={ap.pending} onPress={() => navigation.navigate('AdminAppeals')} />
+      )}
+      {canUsers && (
+        <QuickLink icon="account-cog-outline" label="Users" sub="Suspend, ban, assign roles"
+          onPress={() => navigation.navigate('AdminUsers')} />
+      )}
+      {canContent && (
+        <QuickLink icon="file-document-multiple-outline" label="Content" sub="Browse & remove posts, tracks, comments"
+          onPress={() => navigation.navigate('AdminContent')} />
+      )}
+      {canAudit && (
+        <QuickLink icon="history" label="Audit log" sub="Every moderation action, logged"
+          onPress={() => navigation.navigate('AdminLogs')} />
+      )}
       {isSuperAdmin(currentUser) && (
         <QuickLink icon="shield-key-outline" label="Roles" sub="Create roles & set staff permissions"
           onPress={() => navigation.navigate('AdminRoles')} />
       )}
-      <QuickLink icon="file-document-multiple-outline" label="Content" sub="Browse & remove posts, tracks, comments"
-        onPress={() => navigation.navigate('AdminContent')} />
 
-      {data?.recent_reports?.length > 0 && (
+      {canReports && data?.recent_reports?.length > 0 && (
         <>
           <Text style={styles.sectionTitle}>Recent reports</Text>
           {data.recent_reports.slice(0, 5).map((rep) => (

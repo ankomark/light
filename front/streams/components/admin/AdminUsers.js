@@ -26,6 +26,7 @@ const AdminUsers = () => {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // user in the manage sheet
   const [busy, setBusy] = useState(false);
+  const [suspendFor, setSuspendFor] = useState(null); // user pending a suspension-duration pick
   const debounceRef = useRef(null);
 
   const load = useCallback(async (q) => {
@@ -66,14 +67,12 @@ const AdminUsers = () => {
     }
   };
 
-  const promptSuspend = () => {
-    Alert.alert('Suspend user', `How long should @${selected.username} be suspended?`, [
-      { text: '1 day', onPress: () => run((id) => suspendUser(id, '', 1)) },
-      { text: '7 days', onPress: () => run((id) => suspendUser(id, '', 7)) },
-      { text: '30 days', onPress: () => run((id) => suspendUser(id, '', 30)) },
-      { text: 'Indefinite', onPress: () => run((id) => suspendUser(id, '', 0)) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  // A custom duration picker — Android's Alert only renders 3 buttons, so the
+  // four duration options + Cancel can't live in an Alert.
+  const promptSuspend = () => setSuspendFor(selected);
+  const doSuspend = (days) => {
+    setSuspendFor(null);
+    run((id) => suspendUser(id, '', days));
   };
 
   const renderItem = ({ item }) => (
@@ -209,6 +208,29 @@ const AdminUsers = () => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Suspension duration picker (Android-safe; replaces a >3-button Alert) */}
+      <Modal visible={!!suspendFor} transparent animationType="fade" onRequestClose={() => setSuspendFor(null)}>
+        <TouchableOpacity style={styles.durBackdrop} activeOpacity={1} onPress={() => setSuspendFor(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.durCard}>
+            <Text style={styles.durTitle}>Suspend @{suspendFor?.username}</Text>
+            <Text style={styles.durSub}>How long should the suspension last?</Text>
+            {[
+              { label: '1 day', days: 1 },
+              { label: '7 days', days: 7 },
+              { label: '30 days', days: 30 },
+              { label: 'Indefinite', days: 0 },
+            ].map((opt) => (
+              <TouchableOpacity key={opt.label} style={styles.durBtn} onPress={() => doSuspend(opt.days)} activeOpacity={0.85}>
+                <Text style={styles.durBtnText}>{opt.label}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.durCancel} onPress={() => setSuspendFor(null)}>
+              <Text style={styles.durCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -288,6 +310,21 @@ const styles = StyleSheet.create({
   roleChipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   roleChipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   roleChipTextOn: { color: '#0A1628' },
+
+  durBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  durCard: {
+    width: '100%', maxWidth: 340, backgroundColor: '#0E2038', borderRadius: radius.xl, padding: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  durTitle: { ...typography.h3, color: colors.textPrimary, fontWeight: '800', textAlign: 'center' },
+  durSub: { ...typography.caption, color: colors.textSecondary, textAlign: 'center', marginTop: 2, marginBottom: spacing.sm },
+  durBtn: {
+    paddingVertical: spacing.md, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.xs,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  durBtnText: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
+  durCancel: { paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.xs },
+  durCancelText: { ...typography.label, color: colors.textSecondary, fontWeight: '700' },
 });
 
 export default AdminUsers;
