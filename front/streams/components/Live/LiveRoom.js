@@ -217,9 +217,20 @@ const RoomInner = ({
   );
   const camByIdentity = useMemo(() => {
     const m = {};
-    cameraTracks.forEach((t) => { m[t.participant.identity] = t; });
+    // Keep only refs with a real subscribed track — a placeholder ref (no
+    // .publication.track) would make the tile try to render an empty video.
+    cameraTracks.forEach((t) => { if (t.publication?.track) m[t.participant.identity] = t; });
+    // Backfill: a just-promoted co-host's camera can be subscribed yet missing
+    // from useTracks for a beat (its source is briefly reported as unknown), so
+    // the host sees audio but no video. Pull the camera straight from each
+    // publisher's publication so it renders as soon as the track arrives.
+    publishers.forEach((p) => {
+      if (m[p.identity]) return;
+      const pub = p.getTrackPublication?.(Track.Source.Camera);
+      if (pub?.track) m[p.identity] = { participant: p, publication: pub, source: Track.Source.Camera };
+    });
     return m;
-  }, [cameraTracks]);
+  }, [cameraTracks, publishers]);
   const spotlight = useMemo(
     () => publishers.find((p) => p.isSpeaking) || publishers[0] || null,
     [publishers],
@@ -681,10 +692,10 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
 };
 
 const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick }) => {
-  // Render the camera track whenever we have a (non-muted) publication for it,
-  // rather than trusting participant.isCameraEnabled, which can lag for a remote
-  // participant that just started publishing.
-  const hasVideo = !!trackRef && !trackRef.publication?.isMuted;
+  // Render only when there's an actual subscribed track that isn't muted. A bare
+  // placeholder ref (publication without a track) must fall back to the avatar,
+  // not try to draw an empty video — that's what hid a co-host's late video.
+  const hasVideo = !!trackRef?.publication?.track && !trackRef.publication.isMuted;
   return (
     <View style={[big ? styles.spotlightTile : styles.thumbTile, big && bigStyle, participant.isSpeaking && styles.tileSpeaking]}>
       {hasVideo ? (
