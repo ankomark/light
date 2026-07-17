@@ -11,6 +11,7 @@ import { Video, Audio } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { createSocialPost, fetchTracks } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
+import { processVideo, cleanupProcessedVideos } from '../services/videoProcessing';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
 
@@ -438,27 +439,39 @@ const CreatePost = ({ navigation }) => {
         ...songData,
       };
     } else {
-      const uploadResult = await uploadToCloudinary(media, 'video', fileProgress, {
-        trimStart: videoTrim.start,
-        trimEnd: videoTrim.end,
+      // R2 stores bytes verbatim, so cut + compress the clip ON-DEVICE first
+      // (this is what Cloudinary used to do at ingest). Trims to the chosen
+      // window and downscales to <=1080p; the uploaded file IS the final clip.
+      const processed = await processVideo({
+        uri: media.uri,
+        startSec: videoTrim.start,
+        endSec: videoTrim.end,
+        width: media.width,
+        height: media.height,
       });
+      if (!processed.processed) {
+        console.warn('[CreatePost] video processing unavailable — uploading raw clip.');
+      }
+      const uploadResult = await uploadToCloudinary(
+        { ...media, uri: processed.uri }, 'video', fileProgress,
+      );
       fileDone();
       const clip = Math.max(1, Math.round(videoTrim.end - videoTrim.start));
       postData = {
         caption: caption.trim(),
         content_type: 'video',
         media_file: uploadResult.public_id,
-        width: uploadResult.width,
-        height: uploadResult.height,
-        // The clip is trimmed in at upload, so only the selected window is stored
-        // and it already starts at 0 — no delivery-side trim (video_start/end_time
-        // are intentionally omitted so the backend doesn't trim again).
+        width: uploadResult.width ?? media.width,
+        height: uploadResult.height ?? media.height,
+        // The stored file is already the trimmed clip starting at 0 — omit
+        // video_start/end_time so no player-side trim is applied.
         duration: clip,
       };
     }
 
     setUploadProgress(1);
     await createSocialPost(postData);
+    cleanupProcessedVideos();  // best-effort: drop the on-device scratch files
     Alert.alert('Success', 'Post created successfully!');
     navigation.goBack();
   } catch (error) {

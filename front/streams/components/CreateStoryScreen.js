@@ -8,6 +8,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { uploadMedia } from '../services/cloudinary';
+import { processVideo } from '../services/videoProcessing';
 import { createStory } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -67,10 +68,20 @@ const CreateStoryScreen = () => {
     if (!media) { Alert.alert('No media', 'Please select a photo or video first.'); return; }
     setUploading(true);
     try {
-      // story-video applies a signed incoming transform that ~halves storage.
-      const uploadType = media.type === 'video' ? 'story-video' : 'social-image';
+      const isVideo = media.type === 'video';
+      // R2 stores bytes verbatim, so compress/downscale story video on-device
+      // (Cloudinary used to do this at ingest). Stories are already <=30s, so
+      // no trim window here — just compress to <=1080p.
+      let uploadUri = media.uri;
+      if (isVideo) {
+        const processed = await processVideo({
+          uri: media.uri, width: media.width, height: media.height,
+        });
+        uploadUri = processed.uri;
+      }
+      const uploadType = isVideo ? 'story-video' : 'social-image';
       const result = await uploadMedia(
-        { uri: media.uri, name: `story_${Date.now()}`, mimeType: media.type === 'video' ? 'video/mp4' : 'image/jpeg' },
+        { uri: uploadUri, name: `story_${Date.now()}`, mimeType: isVideo ? 'video/mp4' : 'image/jpeg' },
         uploadType,
       );
       await createStory({
