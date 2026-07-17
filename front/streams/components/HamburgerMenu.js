@@ -29,7 +29,7 @@ const SECTIONS = [
     ],
   },
   {
-    title: 'Music',
+    title: 'Media',
     items: [
       { label: 'Favorites', route: 'Favorites', set: 'ion', icon: 'heart-outline' },
       { label: 'Playlists', route: 'Playlists', set: 'mci', icon: 'playlist-music-outline' },
