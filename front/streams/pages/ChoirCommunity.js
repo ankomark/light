@@ -4,14 +4,15 @@
  * Membership tiers (admin / member / friend) all chat equally; only the admin
  * (creator) moderates — approve/reject join requests, remove members/friends,
  * delete the choir. Non-members see a locked hero with "Request to join".
- * Messages carry text; images, documents and voice notes upload to Cloudinary
- * and the message stores the URL (older base64 messages still render).
+ * Messages carry text; images, documents and voice notes upload to R2 and the
+ * message stores the URL (older base64 messages still render).
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Image, Alert,
+  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert,
   ActivityIndicator, KeyboardAvoidingView, Platform, Modal, Pressable, Animated, PanResponder, Switch,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -52,14 +53,6 @@ const VOICE_RECORDING_OPTIONS = {
     linearPCMBitDepth: 16, linearPCMIsBigEndian: false, linearPCMIsFloat: false,
   },
   web: { mimeType: 'audio/webm', bitsPerSecond: 48000 },
-};
-
-// Light Cloudinary delivery transform for an image bubble thumbnail. Leaves
-// local (file://) and legacy base64 (data:) attachments untouched.
-const cldThumb = (url) => {
-  if (typeof url !== 'string' || !url.includes('res.cloudinary.com') || !url.includes('/upload/')) return url;
-  if (/\/upload\/[a-z]{1,3}_/.test(url)) return url;
-  return url.replace('/upload/', '/upload/c_limit,w_800,q_auto,f_auto/');
 };
 
 const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
@@ -141,7 +134,7 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
         >
           {!mine && (
             <Image source={item.sender?.profile_picture ? { uri: item.sender.profile_picture } : DEFAULT_AVATAR}
-              defaultSource={DEFAULT_AVATAR} style={styles.msgAvatar} />
+              placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.msgAvatar} />
           )}
           <View style={styles.bubbleCol}>
             <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther, isImg && styles.bubbleImage, sending && styles.bubbleSending]}>
@@ -154,7 +147,7 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
               )}
               {item.message_type === 'image' && !!item.attachment && (
                 <TouchableOpacity activeOpacity={0.9} onPress={() => (sending ? null : onOpenImage(item.attachment))}>
-                  <Image source={{ uri: cldThumb(item.attachment) }} style={styles.msgImage} resizeMode="cover" />
+                  <Image source={{ uri: item.attachment }} style={styles.msgImage} contentFit="cover" transition={150} />
                   {sending ? (
                     <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>
                   ) : (
@@ -389,8 +382,8 @@ const ChoirCommunity = ({ navigation, route }) => {
     deliver(body, display);
   }, [deliver]);
 
-  // Media send: show the local file instantly, upload to Cloudinary in the
-  // background, then persist the message with just the URL (mirrors DMs).
+  // Media send: show the local file instantly, upload to R2 in the background,
+  // then persist the message with just the URL (mirrors DMs).
   const sendMedia = useCallback(async (media) => {
     const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType } = media;
     const reply = replyToRef.current;
@@ -728,7 +721,7 @@ const ChoirCommunity = ({ navigation, route }) => {
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
         <Image source={choir.profile_image ? { uri: choir.profile_image } : DEFAULT_AVATAR}
-          defaultSource={DEFAULT_AVATAR} style={styles.headerAvatar} />
+          placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.headerAvatar} />
         <View style={{ flex: 1 }}>
           <Text style={styles.headerName} numberOfLines={1}>{choir.name || 'Choir'}</Text>
           <Text style={styles.headerSub}>
@@ -901,7 +894,7 @@ const ChoirCommunity = ({ navigation, route }) => {
                     <Text style={styles.sectionLabel}>Requests to join</Text>
                     {requests.map((r) => (
                       <View key={r.id} style={styles.memberRow}>
-                        <Image source={r.user?.profile_picture ? { uri: r.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
+                        <Image source={r.user?.profile_picture ? { uri: r.user.profile_picture } : DEFAULT_AVATAR} placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.memberAvatar} />
                         <Text style={styles.memberName} numberOfLines={1}>@{r.user?.username}</Text>
                         <TouchableOpacity style={[styles.smallBtn, styles.approveBtn]} onPress={() => approve(r)}><Text style={styles.approveText}>Approve</Text></TouchableOpacity>
                         <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => reject(r)}><Text style={styles.rejectText}>Decline</Text></TouchableOpacity>
@@ -916,7 +909,7 @@ const ChoirCommunity = ({ navigation, route }) => {
               const isCreator = m.user?.id === creatorId;
               return (
                 <View style={styles.memberRow}>
-                  <Image source={m.user?.profile_picture ? { uri: m.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
+                  <Image source={m.user?.profile_picture ? { uri: m.user.profile_picture } : DEFAULT_AVATAR} placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.memberAvatar} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.memberName} numberOfLines={1}>@{m.user?.username}</Text>
                     <Text style={styles.memberRole}>{isCreator ? 'Creator' : (ROLE_BADGE[m.role] || m.role)}</Text>
@@ -976,7 +969,7 @@ const ChoirCommunity = ({ navigation, route }) => {
             keyboardShouldPersistTaps="handled"
             renderItem={({ item: u }) => (
               <View style={styles.memberRow}>
-                <Image source={u.profile_picture ? { uri: u.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
+                <Image source={u.profile_picture ? { uri: u.profile_picture } : DEFAULT_AVATAR} placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.memberAvatar} />
                 <Text style={[styles.memberName, { flex: 1 }]} numberOfLines={1}>@{u.username}</Text>
                 <TouchableOpacity style={[styles.smallBtn, styles.approveBtn]} onPress={() => addMember(u)} disabled={addBusyId === u.id}>
                   {addBusyId === u.id ? <ActivityIndicator size="small" color="#0A1628" /> : <Text style={styles.approveText}>Add</Text>}
@@ -1029,7 +1022,7 @@ const ChoirCommunity = ({ navigation, route }) => {
           <TouchableOpacity style={styles.viewerClose} onPress={() => setViewerUri(null)} hitSlop={12}>
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
-          {!!viewerUri && <Image source={{ uri: viewerUri }} style={styles.viewerImg} resizeMode="contain" />}
+          {!!viewerUri && <Image source={{ uri: viewerUri }} style={styles.viewerImg} contentFit="contain" transition={150} />}
         </View>
       </Modal>
     </View>

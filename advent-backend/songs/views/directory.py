@@ -602,7 +602,12 @@ class ChoirViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def my_choirs(self, request):
-        choirs = Choir.objects.filter(created_by=request.user)
+        # select_related avoids an N+1 on created_by (+ profile) when the
+        # list serializer resolves the owner via SimpleUserSerializer.
+        choirs = (
+            Choir.objects.filter(created_by=request.user)
+            .select_related('created_by', 'created_by__profile')
+        )
         serializer = self.get_serializer(choirs, many=True)
         return Response(serializer.data)
 

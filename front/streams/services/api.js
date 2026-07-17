@@ -741,10 +741,25 @@ export const deleteAudioStudio = async (id) => {
 };
 
 // ==================== CHOIRS ====================
+// Returns the paginated response { results, next, ... } so the caller can
+// infinite-scroll. (Legacy callers that read an array should use res.results.)
 export const fetchChoirs = async (params = {}) => {
-  const queryString = new URLSearchParams(params).toString();
-  const res = await apiRequest('get', `/choirs/?${queryString}`);
-  return res?.results ?? res;
+  const queryString = new URLSearchParams({ page_size: 20, ...params }).toString();
+  return apiRequest('get', `/choirs/?${queryString}`);
+};
+
+// Follow a paginated `next` link (preserves path + query) for infinite scroll.
+export const fetchChoirsByUrl = async (nextUrl) => {
+  if (!nextUrl) return null;
+  const [base, qs] = nextUrl.split('?');
+  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
+  const params = {};
+  (qs || '').split('&').forEach((kv) => {
+    if (!kv) return;
+    const [k, v] = kv.split('=');
+    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  });
+  return apiRequest('get', path, null, { params });
 };
 
 export const fetchChoirById = async (id) => {
@@ -755,7 +770,7 @@ export const fetchMyChoirs = async () => {
   return apiRequest('get', '/choirs/my_choirs/');
 };
 
-// Choirs now use JSON (images are base64 data URIs), not multipart.
+// Choirs use JSON; images are R2 URLs (uploaded client-side before create).
 export const createChoir = async (data) => {
   return apiRequest('post', '/choirs/', data);
 };
@@ -1726,6 +1741,7 @@ export default {
   updateAudioStudio,
   deleteAudioStudio,
   fetchChoirs,
+  fetchChoirsByUrl,
   fetchChoirById,
   fetchMyChoirs,
   createChoir,

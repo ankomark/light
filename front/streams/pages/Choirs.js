@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert,
-  ActivityIndicator, Image, Linking, Modal, Platform, ScrollView,
+  ActivityIndicator, Linking, Modal, Platform, ScrollView,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,7 +11,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
-  fetchChoirs, createChoir, updateChoir, deleteChoir,
+  fetchChoirs, fetchChoirsByUrl, createChoir, updateChoir, deleteChoir,
   toggleChoirActive, updateChoirMembers,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
@@ -69,6 +70,8 @@ const Choirs = ({ navigation }) => {
   const [choirs, setChoirs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
   const [search, setSearch] = useState('');
   const [genre, setGenre] = useState('all');
 
@@ -86,7 +89,8 @@ const Choirs = ({ navigation }) => {
     try {
       if (isRefresh) setRefreshing(true); else setLoading(true);
       const res = await fetchChoirs();
-      setChoirs(Array.isArray(res) ? res : (res?.results ?? []));
+      setChoirs(res?.results ?? (Array.isArray(res) ? res : []));
+      setNextUrl(res?.next ?? null);
     } catch (err) {
       console.error('fetchChoirs error:', err);
       Alert.alert('Error', 'Failed to load choirs');
@@ -95,6 +99,24 @@ const Choirs = ({ navigation }) => {
       setRefreshing(false);
     }
   }, []);
+
+  // Infinite scroll: append the next page of choirs, deduped.
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchChoirsByUrl(nextUrl);
+      setChoirs((prev) => {
+        const have = new Set(prev.map((c) => c.id));
+        return [...prev, ...(res?.results ?? []).filter((c) => !have.has(c.id))];
+      });
+      setNextUrl(res?.next ?? null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -218,7 +240,7 @@ const Choirs = ({ navigation }) => {
         {/* Cover banner */}
         <View style={styles.banner}>
           {item.cover_image ? (
-            <Image source={{ uri: item.cover_image }} style={styles.cover} />
+            <Image source={{ uri: item.cover_image }} style={styles.cover} contentFit="cover" transition={150} />
           ) : (
             <LinearGradient colors={[colors.surface, colors.bg]} style={styles.cover} />
           )}
@@ -241,7 +263,9 @@ const Choirs = ({ navigation }) => {
         <View style={styles.cardHeader}>
           <Image
             source={item.profile_image ? { uri: item.profile_image } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR}
+            placeholder={DEFAULT_AVATAR}
+            contentFit="cover"
+            transition={150}
             style={styles.avatar}
           />
           <View style={styles.headerInfo}>
@@ -364,10 +388,17 @@ const Choirs = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
         refreshing={refreshing}
         onRefresh={() => load(true)}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
         initialNumToRender={4}
         maxToRenderPerBatch={4}
         windowSize={7}
         removeClippedSubviews
+        ListFooterComponent={
+          loadingMore
+            ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: spacing.md }} />
+            : null
+        }
         ListHeaderComponent={
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.filterRow}>
             {FILTERS.map((g) => {
@@ -423,7 +454,7 @@ const Choirs = ({ navigation }) => {
             {/* Cover + profile pickers */}
             <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover'); if (u) setCoverImage(u); }} activeOpacity={0.85}>
               {coverImage ? (
-                <Image source={{ uri: coverImage }} style={styles.coverPreview} />
+                <Image source={{ uri: coverImage }} style={styles.coverPreview} contentFit="cover" transition={150} />
               ) : (
                 <View style={styles.coverPlaceholder}>
                   <Ionicons name="image-outline" size={26} color={colors.textMuted} />
@@ -435,7 +466,7 @@ const Choirs = ({ navigation }) => {
             <View style={styles.profileRow}>
               <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'profile-image'); if (u) setProfileImage(u); }} activeOpacity={0.85}>
                 {profileImage ? (
-                  <Image source={{ uri: profileImage }} style={styles.profilePreview} />
+                  <Image source={{ uri: profileImage }} style={styles.profilePreview} contentFit="cover" transition={150} />
                 ) : (
                   <Ionicons name="camera-outline" size={24} color={colors.textMuted} />
                 )}
