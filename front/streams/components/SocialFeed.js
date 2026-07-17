@@ -23,7 +23,7 @@ import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
-import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents } from '../services/api';
+import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, fetchLatestPostId } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
@@ -534,14 +534,16 @@ const SocialFeed = ({ showBackground = true }) => {
     loadPosts(true);
   }, [loadPosts]);
 
-  // Quietly check page 1 for newer posts instead of replacing the feed mid-scroll.
+  // Quietly probe for newer posts. Only meaningful on the chronological
+  // Following tab — For You is ranked (not newest-first), so a "new posts" pill
+  // there would be misleading; pull-to-refresh recomputes it instead. Uses the
+  // lightweight /latest/ endpoint (just the newest id) — no full feed fetch.
   const checkForNewPosts = useCallback(async () => {
-    if (refreshing || loading || searchRef.current) return;
+    if (refreshing || loading || searchRef.current || feedType !== 'following') return;
     try {
-      // fresh=1 so the poll sees new posts even within the cache window.
-      const response = await fetchSocialPosts(null, feedType, '', { fresh: true, rank: feedType === 'for_you' });
-      const newest = response?.results?.[0];
-      if (newest && topPostIdRef.current && newest.id !== topPostIdRef.current) {
+      const response = await fetchLatestPostId('following');
+      const latestId = response?.latest_id;
+      if (latestId && topPostIdRef.current && latestId !== topPostIdRef.current) {
         setNewPostsAvailable(true);
       }
     } catch {

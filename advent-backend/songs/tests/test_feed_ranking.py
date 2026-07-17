@@ -139,6 +139,26 @@ class RankedFeedEndpointTests(APITestCase):
         snap = feed.build_ranked_feed(self.alice)
         self.assertLess(snap.index(p1.id), snap.index(p2.id))
 
+    def test_latest_endpoint_returns_newest_visible_id(self):
+        newest = mkpost(self.bob, likes=0)   # newest overall
+        res = self.client.get('/api/social-posts/latest/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()['latest_id'], newest.id)
+
+    def test_latest_following_filter_and_not_interested(self):
+        # Following filter: newest among followed authors (+ self).
+        follow(self.alice, self.carol)
+        newest_followed = mkpost(self.carol, likes=0)
+        mkpost(self.dave, likes=0)  # not followed, newer, must be ignored on following
+        res = self.client.get('/api/social-posts/latest/?feed=following')
+        self.assertEqual(res.json()['latest_id'], newest_followed.id)
+
+        # A "not interested" newest post is skipped.
+        self.client.post(f'/api/social-posts/{newest_followed.id}/not_interested/')
+        cache.clear()
+        res = self.client.get('/api/social-posts/latest/?feed=following')
+        self.assertNotEqual(res.json()['latest_id'], newest_followed.id)
+
     def test_watch_batch_stores_and_clamps(self):
         from songs.models import WatchEvent
         res = self.client.post('/api/social-posts/watch/', {'events': [

@@ -385,6 +385,28 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK
             )
 
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticatedOrReadOnly])
+    def latest(self, request):
+        """Cheapest possible "is there anything newer?" check for the poll: the
+        newest visible post id, no serialization. Honors the same visibility
+        filters as the feed so the client's "new posts" pill isn't a false alarm."""
+        from .. import feed as feedrank
+        user = request.user
+        qs = SocialPost.objects.filter(is_removed=False).exclude(user__is_deactivated=True)
+        if user.is_authenticated:
+            blocked = blocked_ids_for(user)
+            if blocked:
+                qs = qs.exclude(user_id__in=blocked)
+            ni = feedrank.not_interested_ids(user.id)
+            if ni:
+                qs = qs.exclude(id__in=ni)
+            if request.query_params.get('feed') == 'following':
+                followed = list(user.followed_by.values_list('id', flat=True))
+                if followed:
+                    qs = qs.filter(Q(user_id__in=followed) | Q(user=user))
+        latest_id = qs.order_by('-id').values_list('id', flat=True).first()
+        return Response({'latest_id': latest_id})
+
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def watch(self, request):
         """Ingest a batch of dwell events: {"events": [{"post_id", "dwell_ms"}]}.

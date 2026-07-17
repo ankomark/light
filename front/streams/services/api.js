@@ -1491,6 +1491,10 @@ export const markNotInterested = (postId) =>
 export const logWatchEvents = (events) =>
   apiRequest('post', '/social-posts/watch/', { events });
 
+// Cheap "anything newer?" probe for the feed poll — returns { latest_id } only.
+export const fetchLatestPostId = (feed = null) =>
+  apiRequest('get', '/social-posts/latest/', null, { params: feed ? { feed } : {} });
+
 // ── R2 presigned upload ───────────────────────────────────────────────────────
 // Returns { upload_url, key, public_url, content_type, expires_in }; the app
 // PUTs the raw bytes to upload_url and stores public_url as the media ref.
