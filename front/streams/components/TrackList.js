@@ -33,6 +33,7 @@ const TrackList = () => {
   // loadMore / focus reloads read the latest value without stale closures.
   const searchRef = useRef('');
   const debounceRef = useRef(null);
+  const lastFetchRef = useRef(0);   // throttle auto-reload on tab focus
 
   // Minimal playable shape for the queue (mini-player reads these fields).
   const buildQueue = useCallback(
@@ -48,43 +49,23 @@ const TrackList = () => {
     [tracks]
   );
 
-  // Memoized Cloudinary transformation function
-  const getOptimizedMediaUrl = useCallback((url, type = 'image') => {
-    if (!url) return null;
-    
-    if (url.includes('res.cloudinary.com')) {
-      const transformations = {
-        image: 'w_300,h_300,c_fill,q_auto,f_auto',
-        audio: 'q_auto',
-        profile: 'w_50,h_50,c_fill,q_auto'
-      };
-      return url.replace('/upload/', `/upload/${transformations[type]}/`);
-    }
-    return url;
-  }, []);
-
-  const processTrack = useCallback((track) => ({
-    ...track,
-    cover_image: getOptimizedMediaUrl(track.cover_image, 'image'),
-    audio_file: getOptimizedMediaUrl(track.audio_file, 'audio'),
-  }), [getOptimizedMediaUrl]);
-
   const loadTracks = useCallback(async (search = searchRef.current) => {
     try {
       setRefreshing(true);
       setError(null);
       const response = await fetchTracks(1, search);
-      const results = (response?.results ?? []).map(processTrack);
-      setTracks(results);
+      // Media URLs are absolute (R2) and served as-is; no client rewriting.
+      setTracks(response?.results ?? []);
       setPage(1);
       setHasMore(!!response?.next);
+      lastFetchRef.current = Date.now();
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to load tracks');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [processTrack]);
+  }, []);
 
   const loadMoreTracks = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -92,7 +73,7 @@ const TrackList = () => {
     try {
       const nextPage = page + 1;
       const response = await fetchTracks(nextPage, searchRef.current);
-      const more = (response?.results ?? []).map(processTrack);
+      const more = response?.results ?? [];
       setTracks(prev => [...prev, ...more]);
       setPage(nextPage);
       setHasMore(!!response?.next);
@@ -101,24 +82,17 @@ const TrackList = () => {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, page, processTrack]);
+  }, [loadingMore, hasMore, page]);
 
-  // Load data on focus and initial mount (preserving any active search).
+  // Reload on focus, but throttled — don't refetch the whole list on every tab
+  // switch (only when it's been a while, or the list is empty).
   useFocusEffect(
     useCallback(() => {
-      loadTracks(searchRef.current);
-    }, [loadTracks])
+      if (tracks.length === 0 || Date.now() - lastFetchRef.current > 120000) {
+        loadTracks(searchRef.current);
+      }
+    }, [loadTracks, tracks.length])
   );
-
-  const handleNewTrack = useCallback((newTrack) => {
-    const optimizedTrack = {
-      ...newTrack,
-      cover_image: getOptimizedMediaUrl(newTrack.cover_image, 'image'),
-      audio_file: getOptimizedMediaUrl(newTrack.audio_file, 'audio')
-    };
-
-    setTracks(prev => [optimizedTrack, ...prev]);
-  }, [getOptimizedMediaUrl]);
 
   // Server-side search: debounce keystrokes so we hit the API once the user
   // pauses, then reload page 1 with the new term.
@@ -146,9 +120,9 @@ const TrackList = () => {
     return (
       <View style={styles.center}>
         <Text style={styles.error}>{error}</Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.retryButton}
-          onPress={loadTracks}
+          onPress={() => loadTracks()}
         >
           <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
