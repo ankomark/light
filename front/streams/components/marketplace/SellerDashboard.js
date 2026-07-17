@@ -3,12 +3,12 @@ import {
   View, 
   Text, 
   StyleSheet, 
-  FlatList, 
+  FlatList,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts, fetchOrders, deleteProduct } from '../../services/api';
@@ -58,7 +58,7 @@ const STATUS_COLORS = {
   default: '#888'
 };
 
-const DEFAULT_IMAGE = 'https://via.placeholder.com/120';
+const DEFAULT_IMAGE = require('../../assets/default-image.png');
 
 // Helper Functions
 const formatPrice = (price, currency = 'USD') => {
@@ -75,6 +75,9 @@ const SellerDashboard = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('products');
+  const [productsPage, setProductsPage] = useState(1);
+  const [productsHasMore, setProductsHasMore] = useState(false);
+  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
 
   // Data Fetching
   useEffect(() => {
@@ -93,6 +96,8 @@ const SellerDashboard = () => {
         ]);
 
         setProducts(productsData?.results || []);
+        setProductsPage(1);
+        setProductsHasMore(!!productsData?.next);
         setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
       } catch (error) {
         console.error('Error loading seller data:', error);
@@ -104,6 +109,26 @@ const SellerDashboard = () => {
 
     loadData();
   }, [isAuthenticated, currentUser]);
+
+  // Append the next page of the seller's own products (deduped by id).
+  const loadMoreProducts = async () => {
+    if (loadingMoreProducts || !productsHasMore || !currentUser?.id) return;
+    setLoadingMoreProducts(true);
+    try {
+      const next = productsPage + 1;
+      const data = await fetchProducts(next, { seller: currentUser.id });
+      setProducts((prev) => {
+        const have = new Set(prev.map((p) => p.id));
+        return [...prev, ...(data?.results || []).filter((p) => !have.has(p.id))];
+      });
+      setProductsPage(next);
+      setProductsHasMore(!!data?.next);
+    } catch (error) {
+      console.error('Error loading more products:', error);
+    } finally {
+      setLoadingMoreProducts(false);
+    }
+  };
 
   // Business Logic
   const handleDeleteProduct = async (slug) => {
@@ -239,10 +264,12 @@ const SellerDashboard = () => {
         { slug: item.slug }
       )}
     >
-      <Image 
-        source={{ uri: item.images?.[0]?.image_url || DEFAULT_IMAGE }} 
+      <Image
+        source={item.images?.[0]?.image_url ? { uri: item.images[0].image_url } : DEFAULT_IMAGE}
+        placeholder={DEFAULT_IMAGE}
+        contentFit="cover"
+        transition={150}
         style={styles.productImage}
-        resizeMode="cover"
       />
       <View style={styles.productInfo}>
         <Text style={styles.productTitle} numberOfLines={1}>
@@ -340,6 +367,13 @@ const SellerDashboard = () => {
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmptyState}
         contentContainerStyle={styles.contentContainer}
+        onEndReached={activeTab === 'products' ? loadMoreProducts : undefined}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          activeTab === 'products' && loadingMoreProducts
+            ? <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 16 }} />
+            : null
+        }
       />
 
       {activeTab === 'products' && (

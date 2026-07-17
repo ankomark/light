@@ -5,11 +5,11 @@ import {
   StyleSheet, 
   ScrollView, 
   TextInput, 
-  TouchableOpacity, 
+  TouchableOpacity,
   Alert,
-  Image,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
@@ -332,9 +332,11 @@ const EditProduct = () => {
       <View style={styles.imageContainer}>
         {existingImages.map((image) => (
           <View key={image.id} style={styles.imageWrapper}>
-            <Image 
-              source={{ uri: image.image_url }} 
+            <Image
+              source={{ uri: image.image_url }}
               style={styles.image}
+              contentFit="cover"
+              transition={120}
             />
             <TouchableOpacity 
               style={styles.removeImageButton}
@@ -347,9 +349,11 @@ const EditProduct = () => {
         
         {newImages.map((uri, index) => (
           <View key={`new-${index}`} style={styles.imageWrapper}>
-            <Image 
-              source={{ uri }} 
+            <Image
+              source={{ uri }}
               style={styles.image}
+              contentFit="cover"
+              transition={120}
             />
             <TouchableOpacity 
               style={styles.removeImageButton}

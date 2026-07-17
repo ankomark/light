@@ -5,14 +5,16 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   TextInput,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts } from '../../services/api';
 import useGridColumns from '../../utils/useGridColumns';
+
+const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
 // =====================
 // Helper Functions
@@ -226,9 +228,11 @@ const ProductCard = ({ product, onPress, style }) => {
       {/* Product Image */}
       <View style={styles.imageContainer}>
         <Image
-          source={{ uri: product.images?.[0]?.image_url || 'https://via.placeholder.com/150' }}
+          source={product.images?.[0]?.image_url ? { uri: product.images[0].image_url } : PLACEHOLDER_IMAGE}
+          placeholder={PLACEHOLDER_IMAGE}
+          contentFit="contain"
+          transition={150}
           style={styles.cardImage}
-          resizeMode="contain"
         />
         {hasDiscount && (
           <View style={styles.discountBadge}>

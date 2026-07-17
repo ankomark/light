@@ -7,9 +7,9 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
-  Image,
   Modal,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
@@ -342,7 +342,7 @@ const AddProduct = () => {
       <View style={styles.imageContainer}>
         {images.map((uri, index) => (
           <View key={index} style={styles.imageWrapper}>
-            <Image source={{ uri }} style={styles.image} />
+            <Image source={{ uri }} style={styles.image} contentFit="cover" transition={120} />
             <TouchableOpacity
               style={styles.removeImageButton}
               onPress={() => removeImage(index)}

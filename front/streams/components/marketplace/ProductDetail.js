@@ -1,21 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ScrollView, 
-  Image, 
-  TouchableOpacity, 
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
   FlatList,
   Alert,
   Share,
   ActivityIndicator,
   Linking
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProductById, addToCart, addToWishlist } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+
+const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
 const ProductDetail = () => {
   const navigation = useNavigation();
@@ -172,10 +174,12 @@ const ProductDetail = () => {
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
      <View style={styles.sheet}>
       <View style={styles.mainImageContainer}>
-        <Image 
-          source={{ uri: product.images[selectedImage]?.image_url || 'https://via.placeholder.com/300' }} 
+        <Image
+          source={product.images?.[selectedImage]?.image_url ? { uri: product.images[selectedImage].image_url } : PLACEHOLDER_IMAGE}
+          placeholder={PLACEHOLDER_IMAGE}
+          contentFit="contain"
+          transition={150}
           style={styles.mainImage}
-          resizeMode="contain"
         />
       </View>
       
@@ -186,13 +190,15 @@ const ProductDetail = () => {
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item, index }) => (
             <TouchableOpacity onPress={() => setSelectedImage(index)}>
-              <Image 
-                source={{ uri: item.image_url || 'https://via.placeholder.com/60' }} 
+              <Image
+                source={item.image_url ? { uri: item.image_url } : PLACEHOLDER_IMAGE}
+                placeholder={PLACEHOLDER_IMAGE}
+                contentFit="cover"
+                transition={120}
                 style={[
                   styles.thumbnailImage,
                   index === selectedImage && styles.selectedThumbnail
                 ]}
-                resizeMode="cover"
               />
             </TouchableOpacity>
           )}

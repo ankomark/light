@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView } from 'react-native';
+import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import { fetchProducts, fetchProductCategories } from '../../services/api';
+
+const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
 // Price formatting helper function
 const formatPrice = (price, currency) => {
@@ -101,9 +104,11 @@ const MarketplaceHome = () => {
               onPress={() => navigation.navigate('ProductDetail', { slug: item.slug })}
             >
               <Image
-                source={{ uri: item.images?.[0]?.image_url || 'https://via.placeholder.com/150' }}
+                source={item.images?.[0]?.image_url ? { uri: item.images[0].image_url } : PLACEHOLDER_IMAGE}
+                placeholder={PLACEHOLDER_IMAGE}
+                contentFit="cover"
+                transition={150}
                 style={styles.productImage}
-                resizeMode="cover"
               />
               <Text style={styles.productTitle} numberOfLines={1}>{item.title}</Text>
               <Text style={styles.productPrice}>

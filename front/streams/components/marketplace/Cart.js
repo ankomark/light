@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  FlatList, 
-  TouchableOpacity, 
-  Image,
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
   Alert,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchCart, removeFromCart, checkoutCart } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import NetInfo from '@react-native-community/netinfo';
+
+const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
 // Price formatting helper
 const formatPrice = (price, currency) => {
@@ -180,22 +182,24 @@ const Cart = () => {
         renderItem={({ item }) => (
           <View style={styles.cartItem}>
             <Image
-              source={{ uri: item.product?.images?.[0]?.image_url || 'https://via.placeholder.com/80' }}
+              source={item.product?.images?.[0]?.image_url ? { uri: item.product.images[0].image_url } : PLACEHOLDER_IMAGE}
+              placeholder={PLACEHOLDER_IMAGE}
+              contentFit="cover"
+              transition={150}
               style={styles.productImage}
-              resizeMode="cover"
             />
             <View style={styles.itemDetails}>
-              <Text style={styles.productTitle} numberOfLines={1}>{item.product.title}</Text>
-              
+              <Text style={styles.productTitle} numberOfLines={1}>{item.product?.title || 'Unavailable product'}</Text>
+
               <View style={styles.priceContainer}>
                 <Text style={styles.price}>
-                  {formatPrice(item.product.price, item.product.currency)}
+                  {formatPrice(item.product?.price, item.product?.currency)}
                 </Text>
                 <Text style={styles.quantityText}>Qty: {item.quantity}</Text>
               </View>
-              
+
               <Text style={styles.itemTotal}>
-                Total: {formatPrice(item.product.price * item.quantity, item.product.currency)}
+                Total: {formatPrice((item.product?.price || 0) * item.quantity, item.product?.currency)}
               </Text>
             </View>
             
