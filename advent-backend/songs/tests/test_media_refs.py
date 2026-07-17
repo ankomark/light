@@ -81,3 +81,40 @@ class SerializerMediaTests(APITestCase):
     def test_profile_picture_legacy_pid_renders_none(self):
         Profile.objects.create(user=self.user, picture='profiles/old')
         self.assertIsNone(SimpleUserSerializer(self.user).data['profile_picture'])
+
+
+@override_settings(R2_PUBLIC_BASE='https://pub-test.r2.dev')
+class ProfileWriteWithR2UrlTests(APITestCase):
+    """Profile create/update now receive the avatar as an R2 URL string (the app
+    uploads to R2 first), not a multipart file. Guards the regression that broke
+    both flows after the CloudinaryField -> CharField switch."""
+
+    PIC = 'https://pub-test.r2.dev/profile_images/abc.jpg'
+
+    def setUp(self):
+        self.user = User.objects.create_user('pt', 'pt@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+
+    def test_create_profile_with_url(self):
+        res = self.client.post('/api/profiles/create_profile/', {
+            'bio': 'hi', 'birth_date': '1990-01-01', 'location': 'NBO', 'picture': self.PIC,
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data['picture_url'], self.PIC)
+        self.assertEqual(Profile.objects.get(user=self.user).picture, self.PIC)
+
+    def test_update_profile_picture_and_fields(self):
+        Profile.objects.create(user=self.user, picture=self.PIC)
+        new_pic = self.PIC.replace('abc', 'xyz')
+        res = self.client.patch('/api/profiles/update_me/', {
+            'location': 'Kisumu', 'picture': new_pic,
+        }, format='json')
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data['picture_url'], new_pic)
+        self.assertEqual(res.data['location'], 'Kisumu')
+
+    def test_update_without_picture_keeps_existing(self):
+        Profile.objects.create(user=self.user, picture=self.PIC)
+        res = self.client.patch('/api/profiles/update_me/', {'bio': 'changed'}, format='json')
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(Profile.objects.get(user=self.user).picture, self.PIC)

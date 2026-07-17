@@ -1386,10 +1386,10 @@ export const debugApiResponse = (response, context = 'API') => {
 };
 
 // ── Profile ───────────────────────────────────────────────────────────────────
-export const updateProfile = (formData) =>
-  apiRequest('patch', '/profiles/update_me/', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+// Media (avatar) is uploaded to R2 separately; this now sends plain JSON with
+// the picture as a URL string (no more multipart file upload).
+export const updateProfile = (fields) =>
+  apiRequest('patch', '/profiles/update_me/', fields);
 
 // JSON-only profile patch for simple scalar fields (e.g. the is_public privacy
 // toggle in Settings) — avoids the multipart path used for image uploads.

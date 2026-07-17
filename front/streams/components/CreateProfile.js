@@ -9,6 +9,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { fetchProfile, updateProfile, getAccessToken, API_URL } from '../services/api';
+import { uploadMedia } from '../services/cloudinary';
 import axios from 'axios';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -137,22 +138,26 @@ const CreateProfile = () => {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
-      const formData = new FormData();
-      formData.append('bio', profileData.bio);
-      formData.append('birth_date', profileData.birth_date);
-      formData.append('location', profileData.location);
+      const payload = {
+        bio: profileData.bio,
+        birth_date: profileData.birth_date,
+        location: profileData.location,
+      };
 
-      // Only append picture if it's a new local file (uri starts with file:// or content://)
+      // A newly picked photo is a local file — upload it to R2 first and send
+      // the resulting URL (the picture column stores a URL string now, not a
+      // file). An unchanged existing picture (already an http URL) is left out
+      // so the backend keeps the current value.
       if (profileData.picture && (profileData.picture.startsWith('file://') || profileData.picture.startsWith('content://'))) {
-        formData.append('picture', {
-          uri: profileData.picture,
-          type: 'image/jpeg',
-          name: 'profile_pic.jpg',
-        });
+        const uploaded = await uploadMedia(
+          { uri: profileData.picture, name: `profile_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+          'profile-image',
+        );
+        payload.picture = uploaded.url;
       }
 
       if (isEditMode) {
-        await updateProfile(formData);
+        await updateProfile(payload);
         Alert.alert('Updated!', 'Your profile has been updated.');
       } else {
         const token = await getAccessToken().catch(() => null);
@@ -161,8 +166,8 @@ const CreateProfile = () => {
           navigation.navigate('Login');
           return;
         }
-        await axios.post(`${API_URL}/profiles/create_profile/`, formData, {
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+        await axios.post(`${API_URL}/profiles/create_profile/`, payload, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           timeout: 15000,
         });
         Alert.alert('Profile Created!', 'Your profile has been successfully set up');
