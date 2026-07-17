@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, StatusBar, useWindowDimensions } from 'react-native';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import GlassView from './GlassView';
@@ -38,6 +38,15 @@ const Header = ({ transparentBg = false }) => {
   const navigation = useNavigation();
   const { currentUser, isAuthenticated } = useAuth();
 
+  // Responsive brand sizing: recomputes on rotation / different devices so the
+  // title never wraps or crowds the icons on small phones, and scales up a
+  // touch on tablets. Bottom-row nav content is capped + centered on wide
+  // screens so it reads as a bar, not stretched thin.
+  const { width } = useWindowDimensions();
+  const titleSize = width < 340 ? 18 : width < 400 ? 21 : width < 768 ? 24 : 27;
+  const titleTracking = width < 400 ? 1.4 : width < 768 ? 2.5 : 3;
+  const rowMaxWidth = width >= 768 ? 720 : undefined;  // centered bar on tablets
+
   // Name of the screen currently shown in this stack, for active highlighting.
   const activeRoute = useNavigationState((s) => s?.routes?.[s.index]?.name);
   const isOn = (name) => activeRoute === name;
@@ -73,7 +82,7 @@ const Header = ({ transparentBg = false }) => {
 
         <View style={styles.header}>
         {/* Top row: brand cluster (medallion + title) on the left, menu right. */}
-        <View style={styles.topRow}>
+        <View style={[styles.topRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
           <View style={styles.brand}>
             {/* Brand mark set in a gold-rimmed ivory medallion — a coin/seal look
                 that lifts the emblem off the dark glass for a luxury feel. */}
@@ -87,7 +96,14 @@ const Header = ({ transparentBg = false }) => {
                 <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
               </View>
             </LinearGradient>
-            <Text style={styles.title}>ADVENTIST LIFE</Text>
+            <Text
+              style={[styles.title, { fontSize: titleSize, letterSpacing: titleTracking }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              ADVENTIST LIFE
+            </Text>
           </View>
           <View style={styles.rightCluster}>
             {/* Dedicated Videos feed (TikTok-style). Sits just left of the menu. */}
@@ -110,7 +126,7 @@ const Header = ({ transparentBg = false }) => {
         </View>
 
         {/* Bottom row: primary destinations */}
-        <View style={styles.bottomRow}>
+        <View style={[styles.bottomRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
           <NavItem
             active="home" inactive="home-outline" label="Home"
             isActive={isOn('Home')} onPress={() => navigation.navigate('Home')}
@@ -221,11 +237,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   logo: { width: 36, height: 24 },
-  // Medallion + title sit together as one left-aligned brand lockup.
+  // Medallion + title sit together as one left-aligned brand lockup. flexShrink
+  // lets the title give way (it auto-shrinks/ellipsizes) so the right-side icons
+  // are never pushed off-screen on a narrow device.
   brand: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
   },
   title: {
     color: colors.accent,
@@ -239,7 +258,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 8,
   },
   menuContainer: { marginLeft: 'auto' },
-  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 'auto' },
+  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 'auto', flexShrink: 0 },
   // marginLeft opens a gap between the brand title and the video icon so it
   // doesn't crowd "ADVENTIST LIFE" on narrower screens.
   videosBtn: { padding: 2, marginLeft: 14 },
