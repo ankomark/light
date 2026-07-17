@@ -20,7 +20,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import PostLike, SocialPost, User, blocked_ids_for
+from .models import NotInterested, PostLike, SocialPost, User, blocked_ids_for
 
 
 def _cfg(name, default):
@@ -56,12 +56,17 @@ TASTE_MAX_AUTHORS = _cfg('FEED_TASTE_MAX_AUTHORS', 15)
 TASTE_MAX_TAGS = _cfg('FEED_TASTE_MAX_TAGS', 15)
 TASTE_AUTHOR_BONUS = _cfg('FEED_TASTE_AUTHOR_BONUS', 4.0)
 TASTE_TAG_BONUS = _cfg('FEED_TASTE_TAG_BONUS', 3.0)
+# Negative signal ("not interested"): how hard to demote matching author/tag.
+NEG_AUTHOR_PENALTY = _cfg('FEED_NEG_AUTHOR_PENALTY', 6.0)
+NEG_TAG_PENALTY = _cfg('FEED_NEG_TAG_PENALTY', 4.0)
+NEG_TTL = _cfg('FEED_NEG_TTL', 12 * 60 * 60)
+NEG_SAMPLE_CAP = _cfg('FEED_NEG_SAMPLE_CAP', 200)
 
 
-def _score(row, now, taste=None):
-    """Time-decayed engagement score for a candidate row (a .values() dict),
-    plus a small affinity bonus when the post matches the viewer's taste
-    (authors/tags they engage with)."""
+def _score(row, now, taste=None, neg=None):
+    """Time-decayed engagement score for a candidate row (a .values() dict):
+    engagement × recency, plus an affinity bonus for taste-matching content and
+    a penalty for content matching the viewer's "not interested" signals."""
     age_h = max(0.0, (now - row['created_at']).total_seconds() / 3600.0)
     freshness = 1.0 / ((age_h + 2) ** GRAVITY)
     engagement = (
@@ -69,14 +74,20 @@ def _score(row, now, taste=None):
         + (row.get('likes_count') or 0)
         + 0.1 * (row.get('view_count') or 0)
     )
-    bonus = 0.0
+    post_tags = (row.get('tags') or '').lower().split()
+    modifier = 0.0
     if taste:
         if row.get('user_id') in taste['authors']:
-            bonus += TASTE_AUTHOR_BONUS
-        post_tags = (row.get('tags') or '').lower().split()
+            modifier += TASTE_AUTHOR_BONUS
         if post_tags and taste['tags'].intersection(post_tags):
-            bonus += TASTE_TAG_BONUS
-    return (engagement + bonus + 1) * freshness
+            modifier += TASTE_TAG_BONUS
+    if neg:
+        if row.get('user_id') in neg['authors']:
+            modifier -= NEG_AUTHOR_PENALTY
+        if post_tags and neg['tags'].intersection(post_tags):
+            modifier -= NEG_TAG_PENALTY
+    # Keep the base positive so recency still orders near-zero-signal posts.
+    return max(0.05, engagement + modifier + 1) * freshness
 
 
 # ── "Seen" set (cache-only, best-effort — no per-impression DB write) ──────────
@@ -120,6 +131,49 @@ def taste_profile(user):
     }
     cache.set(key, profile, TASTE_TTL)
     return profile
+
+
+# ── "Not interested" — hidden posts + negative taste (cached per user) ─────────
+def not_interested_ids(user_id):
+    key = f'feed:ni:{user_id}'
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    ids = set(
+        NotInterested.objects.filter(user_id=user_id).values_list('post_id', flat=True)
+    )
+    cache.set(key, ids, NEG_TTL)
+    return ids
+
+
+def negative_taste(user):
+    """Authors/tags the viewer has marked "not interested", to demote similar
+    content. Cached; invalidated when a new not-interested is recorded."""
+    key = f'feed:neg:{user.id}'
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    rows = (
+        NotInterested.objects.filter(user=user)
+        .order_by('-id')
+        .values_list('post__user_id', 'post__tags')[:NEG_SAMPLE_CAP]
+    )
+    authors, tags = set(), set()
+    for author_id, post_tags in rows:
+        if author_id is not None:
+            authors.add(author_id)
+        tags.update((post_tags or '').lower().split())
+    profile = {'authors': authors, 'tags': tags}
+    cache.set(key, profile, NEG_TTL)
+    return profile
+
+
+def invalidate_user(user_id):
+    """Drop this user's ranking caches after a signal that should change their
+    feed immediately (e.g. a new "not interested")."""
+    cache.delete_many([
+        f'feed:rank:{user_id}', f'feed:ni:{user_id}', f'feed:neg:{user_id}',
+    ])
 
 
 # ── Trending (global, cached, lazily refreshed) ───────────────────────────────
@@ -239,6 +293,8 @@ def build_ranked_feed(user):
     discovery_ids = set(get_discovery_authors(user, list(followee_ids)))
     seen = set(get_seen(user.id))       # demote (not exclude) already-served posts
     taste = taste_profile(user)         # boost authors/tags the viewer engages with
+    neg = negative_taste(user)          # demote "not interested" authors/tags
+    hidden = not_interested_ids(user.id)  # hide "not interested" posts outright
 
     authors = {}   # post_id -> author_id, for diversity + dedup
 
@@ -255,9 +311,11 @@ def build_ranked_feed(user):
         )
         if blocked:
             qs = qs.exclude(user_id__in=blocked)
+        if hidden:
+            qs = qs.exclude(id__in=hidden)
         rows = list(qs.values('id', 'user_id', 'likes_count', 'comments_count',
                               'view_count', 'created_at', 'tags')[:CANDIDATE_CAP])
-        rows.sort(key=lambda r: _score(r, now, taste), reverse=True)
+        rows.sort(key=lambda r: _score(r, now, taste, neg), reverse=True)
         for r in rows:
             authors[r['id']] = r['user_id']
         return [r['id'] for r in rows]
@@ -267,7 +325,7 @@ def build_ranked_feed(user):
 
     trending_pool = []
     for t in get_trending():
-        if t['a'] == user.id or t['a'] in blocked:
+        if t['a'] == user.id or t['a'] in blocked or t['id'] in hidden:
             continue
         authors.setdefault(t['id'], t['a'])
         trending_pool.append(t['id'])

@@ -745,6 +745,20 @@ def is_blocked_between(a, b):
     ).exists()
 
 
+class NotInterested(models.Model):
+    """A private "not interested" signal on a post. Low-volume explicit intent
+    (unlike ephemeral impressions), so it lives in the DB: the post is hidden
+    from the user's feeds, and its author/tags become a negative signal that
+    demotes similar content in the ranked feed."""
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='not_interested')
+    post = models.ForeignKey('SocialPost', on_delete=models.CASCADE, related_name='not_interested_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'post')
+        indexes = [models.Index(fields=['user', 'post'])]
+
+
 class MediaStation(models.Model):
     STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
 

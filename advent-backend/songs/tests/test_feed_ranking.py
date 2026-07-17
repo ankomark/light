@@ -139,6 +139,36 @@ class RankedFeedEndpointTests(APITestCase):
         snap = feed.build_ranked_feed(self.alice)
         self.assertLess(snap.index(p1.id), snap.index(p2.id))
 
+    def test_not_interested_hides_post_from_both_feeds(self):
+        from songs.models import NotInterested
+        target = self.bob_post  # bob is followed, so normally in-feed
+        res = self.client.post(f'/api/social-posts/{target.id}/not_interested/')
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertTrue(NotInterested.objects.filter(user=self.alice, post=target).exists())
+
+        cache.clear()
+        # Ranked feed excludes it...
+        ranked = self.client.get('/api/social-posts/?rank=1&fresh=1')
+        self.assertNotIn(target.id, self._ids(ranked))
+        # ...and so does the chronological (Following) feed.
+        chrono = self.client.get('/api/social-posts/?feed=following&fresh=1')
+        self.assertNotIn(target.id, self._ids(chrono))
+
+    def test_not_interested_demotes_same_author(self):
+        from songs import feed
+        # Mark one of dave's posts not-interested -> dave's other posts sink.
+        disliked = mkpost(self.dave, likes=5)
+        neutral = mkpost(self.carol, likes=5)   # carol followed below
+        follow(self.alice, self.carol)
+        another_dave = mkpost(self.dave, likes=5)
+        self.client.post(f'/api/social-posts/{disliked.id}/not_interested/')
+        cache.clear()
+        snap = feed.build_ranked_feed(self.alice)
+        # dave (penalised author) ranks below carol at equal engagement.
+        self.assertIn(neutral.id, snap)
+        if another_dave.id in snap:
+            self.assertLess(snap.index(neutral.id), snap.index(another_dave.id))
+
     def test_falls_back_to_chronological_when_no_candidates(self):
         # With ONLY the viewer's own content in existence, every pool is empty
         # (own posts are excluded from ranking), so the snapshot is empty and the

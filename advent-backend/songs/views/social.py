@@ -73,6 +73,13 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         # Hide posts from self-deactivated accounts.
         qs = qs.exclude(user__is_deactivated=True)
 
+        # Hide posts the user marked "not interested" (both feeds honor it).
+        if user.is_authenticated:
+            from .. import feed as feedrank
+            ni = feedrank.not_interested_ids(user.id)
+            if ni:
+                qs = qs.exclude(id__in=ni)
+
         tag = self.request.query_params.get('tag')
         if tag:
             qs = qs.filter(tags__icontains=tag)
@@ -370,6 +377,19 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                 {"status": "Post unsaved", "is_saved": False},
                 status=status.HTTP_200_OK
             )
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def not_interested(self, request, pk=None):
+        """Record a private "not interested" signal: hide this post from the
+        user's feeds and demote its author/tags in the ranked blend."""
+        from ..models import NotInterested
+        from .. import feed as feedrank
+        post = self.get_object()
+        NotInterested.objects.get_or_create(user=request.user, post=post)
+        feedrank.invalidate_user(request.user.id)   # drop ni/neg/snapshot caches
+        _bump_feed_version(request.user.id)          # and the chronological cache
+        return Response({'status': 'ok', 'not_interested': True},
+                        status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
     def share(self, request, pk=None):
