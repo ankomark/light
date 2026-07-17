@@ -81,30 +81,33 @@ const Header = ({ transparentBg = false }) => {
         <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
         <View style={styles.header}>
-        {/* Top row: brand cluster (medallion + title) on the left, menu right. */}
+        {/* Top row: logo left, title centered in the middle (equal gaps to the
+            logo and the icons), video + menu right. */}
         <View style={[styles.topRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
-          <View style={styles.brand}>
-            {/* Brand mark set in a gold-rimmed ivory medallion — a coin/seal look
-                that lifts the emblem off the dark glass for a luxury feel. */}
-            <LinearGradient
-              colors={['#F4DE9B', '#C99A2E', '#8C6A1A', '#E7C871']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.logoRing}
-            >
-              <View style={styles.logoDisc}>
-                <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
-              </View>
-            </LinearGradient>
-            <Text
-              style={[styles.title, { fontSize: titleSize, letterSpacing: titleTracking }]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.85}
-            >
-              ADVENTIST LIFE
-            </Text>
-          </View>
+          {/* Brand mark set in a gold-rimmed ivory medallion — a coin/seal look
+              that lifts the emblem off the dark glass for a luxury feel. */}
+          <LinearGradient
+            colors={['#F4DE9B', '#C99A2E', '#8C6A1A', '#E7C871']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.logoRing}
+          >
+            <View style={styles.logoDisc}>
+              <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+            </View>
+          </LinearGradient>
+
+          {/* Title fills the space between the logo and the icons and centers
+              within it — equal padding on both sides. */}
+          <Text
+            style={[styles.title, { fontSize: titleSize, letterSpacing: titleTracking }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.8}
+          >
+            ADVENTIST LIFE
+          </Text>
+
           <View style={styles.rightCluster}>
             {/* Dedicated Videos feed (TikTok-style). Sits just left of the menu. */}
             <TouchableOpacity
@@ -237,17 +240,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   logo: { width: 36, height: 24 },
-  // Medallion + title sit together as one left-aligned brand lockup. flexShrink
-  // lets the title give way (it auto-shrinks/ellipsizes) so the right-side icons
-  // are never pushed off-screen on a narrow device.
-  brand: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexShrink: 1,
-  },
+  // Fills the space between the logo and the icons and centers within it, so the
+  // gap to the logo (left) equals the gap to the video icon (right).
   title: {
+    flex: 1,
+    marginHorizontal: 10,
     color: colors.accent,
+    textAlign: 'center',
     fontFamily: 'Cinzel_700Bold',
     fontSize: 24,
     // Wider tracking gives Cinzel its engraved, monument-like premium feel.
@@ -258,10 +257,8 @@ const styles = StyleSheet.create({
     textShadowRadius: 8,
   },
   menuContainer: { marginLeft: 'auto' },
-  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 'auto', flexShrink: 0 },
-  // marginLeft opens a gap between the brand title and the video icon so it
-  // doesn't crowd "ADVENTIST LIFE" on narrower screens.
-  videosBtn: { padding: 2, marginLeft: 14 },
+  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
+  videosBtn: { padding: 2 },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
