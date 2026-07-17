@@ -86,18 +86,9 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
                 
         return queryset
     def get_serializer_context(self):
-        """Add context for profile picture transformations"""
-        context = super().get_serializer_context()
-        context.update({
-            'picture_width': 50,  # Smaller for user lists
-            'picture_height': 50,
-            'picture_crop': 'fill',
-            'picture_gravity': 'face',
-            'picture_quality': 'auto'
-        })
-        return context
-
-    def get_serializer_context(self):
+        # (The old picture_width/crop/gravity context was Cloudinary-era and was
+        # already dead — a second definition shadowed it — so it's dropped. R2
+        # serves stored URLs as-is.)
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
