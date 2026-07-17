@@ -347,7 +347,7 @@ const SocialFeed = ({ showBackground = true }) => {
   const [nextUrl, setNextUrl] = useState(null); // full `next` URL for the next page
   const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [feedType, setFeedType] = useState('following'); // 'following' | 'for_you'
+  const [feedType, setFeedType] = useState('for_you'); // 'following' | 'for_you' — land on the ranked feed
   const [newPostsAvailable, setNewPostsAvailable] = useState(false);
   const [topBarH, setTopBarH] = useState(0);
   const [error, setError] = useState(null);
