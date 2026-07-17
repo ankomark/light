@@ -60,7 +60,13 @@ class MediaStationViewSet(viewsets.ModelViewSet):
 class NoticeViewSet(viewsets.ModelViewSet):
     """Notice board: anyone signed in can read; only staff/admins can post.
     Admin-role gating is interim (User.is_staff) and will be expanded later."""
-    queryset = Notice.objects.all()
+    # Pinned notices float to the top, then newest-first — this is what makes the
+    # admin "Pin to top" toggle actually reorder the board. select_related the
+    # author so the list doesn't fire a query per row for created_by.username.
+    queryset = (
+        Notice.objects.select_related('created_by')
+        .order_by('-is_pinned', '-created_at')
+    )
     serializer_class = NoticeSerializer
     pagination_class = StandardPagination
 
@@ -81,7 +87,8 @@ class AdminNoteViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        return AdminNote.objects.select_related('sender').all()
+        # Newest note first so the admin inbox reads top-to-bottom by recency.
+        return AdminNote.objects.select_related('sender').order_by('-created_at')
 
     def get_permissions(self):
         if self.action == 'create':
