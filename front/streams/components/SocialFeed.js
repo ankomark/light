@@ -751,6 +751,7 @@ const SocialFeed = ({ showBackground = true }) => {
             post={item}
             onUpdate={handlePostUpdate}
             onDelete={() => handlePostDelete(item.id)}
+            onNotInterested={() => handlePostDelete(item.id)}
           />
         </View>
       </View>

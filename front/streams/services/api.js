@@ -1482,6 +1482,10 @@ export const viewStory = (id) => apiRequest('post', `/stories/${id}/view_story/`
 export const reportContent = (contentType, objectId, reason, description = '') =>
   apiRequest('post', '/reports/', { content_type: contentType, object_id: objectId, reason, description });
 
+// "Not interested" — hide a post and demote similar content in the ranked feed.
+export const markNotInterested = (postId) =>
+  apiRequest('post', `/social-posts/${postId}/not_interested/`, {});
+
 // ── R2 presigned upload ───────────────────────────────────────────────────────
 // Returns { upload_url, key, public_url, content_type, expires_in }; the app
 // PUTs the raw bytes to upload_url and stores public_url as the media ref.

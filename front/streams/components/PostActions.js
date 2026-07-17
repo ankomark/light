@@ -2,16 +2,30 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet, Modal, TextInput, Alert } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import axios from 'axios';
-import { API_URL, getAccessToken } from '../services/api';
+import { API_URL, getAccessToken, markNotInterested } from '../services/api';
 import ReportModal from './ReportModal';
 import { colors, spacing, radius, typography } from '../constants/theme';
 
-const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
+const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [otherMenuVisible, setOtherMenuVisible] = useState(false);
   const [editedCaption, setEditedCaption] = useState(post.caption);
   const [loading, setLoading] = useState(false);
+
+  const handleNotInterested = async () => {
+    setOtherMenuVisible(false);
+    // Optimistically remove it from the feed; the ranked feed will also show
+    // less from this author/topic going forward.
+    (onNotInterested ?? onDelete)?.();
+    try {
+      await markNotInterested(post.id);
+    } catch (e) {
+      // Non-fatal: the local hide already happened; the signal just didn't save.
+      console.warn('not_interested failed', e?.message);
+    }
+  };
 
   const handleEditPost = async () => {
     if (!editedCaption.trim()) {
@@ -74,12 +88,44 @@ const PostActions = ({ post, onUpdate, onDelete, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Report — stays as a direct flag button on other people's posts. */}
+      {/* Other people's posts: a "..." menu with Not interested + Report. */}
       {!post.can_edit && (
-        <TouchableOpacity onPress={() => setReportVisible(true)} style={styles.button}>
-          <MaterialIcons name="flag" size={22} color={colors.warning} />
+        <TouchableOpacity
+          onPress={() => setOtherMenuVisible(true)}
+          style={styles.button}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Post options"
+        >
+          <MaterialIcons name="more-horiz" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
       )}
+
+      {/* Viewer action sheet: Not interested / Report. */}
+      <Modal
+        visible={otherMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOtherMenuVisible(false)}
+      >
+        <View style={styles.sheetRoot}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setOtherMenuVisible(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <TouchableOpacity style={styles.sheetItem} onPress={handleNotInterested}>
+              <MaterialIcons name="not-interested" size={22} color={colors.textSecondary} />
+              <Text style={styles.sheetLabel}>Not interested</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.sheetItem}
+              onPress={() => { setOtherMenuVisible(false); setReportVisible(true); }}
+            >
+              <MaterialIcons name="flag" size={22} color={colors.warning} />
+              <Text style={styles.sheetLabel}>Report post</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Author: a single "..." trigger opening a tap-to-open Edit/Delete sheet. */}
       {post.can_edit && (
