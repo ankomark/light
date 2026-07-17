@@ -47,7 +47,7 @@ const SECTIONS = [
     ],
   },
   {
-    title: 'Shop',
+    title: 'Marketplace',
     items: [
       { label: 'Marketplace', route: 'MarketplaceHome', set: 'mci', icon: 'storefront-outline' },
       { label: 'Cart', route: 'Cart', set: 'mci', icon: 'cart-outline' },
