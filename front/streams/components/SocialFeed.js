@@ -442,7 +442,26 @@ const SocialFeed = ({ showBackground = true }) => {
   const audioRef = useRef(null);
   const { currentUser } = useAuth();
   const { pause: pauseMusic } = usePlayer();
+  const { preferences } = usePreferences();
   const lastFetchTimeRef = useRef(0);
+
+  // Warm the image cache for a freshly-loaded batch so posts appear instantly as
+  // the user scrolls into them. Skipped under Data saver (don't pre-download on a
+  // metered connection). Best-effort — prefetch failures are ignored.
+  const prefetchMedia = useCallback((list) => {
+    if (preferences[PREF_KEYS.dataSaver]) return;
+    const urls = [];
+    for (const p of list) {
+      if (p.content_type === 'video') {
+        if (p.thumbnailUrl) urls.push(p.thumbnailUrl);
+      } else if (p.mediaUrl) {
+        urls.push(p.mediaUrl);
+      }
+      const pic = p.user?.profile_picture;
+      if (pic && pic !== AVATAR_FAILED) urls.push(pic);
+    }
+    if (urls.length) Image.prefetch(urls).catch(() => {});
+  }, [preferences]);
   const [currentlyPlayingPostId, setCurrentlyPlayingPostId] = useState(null);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false); // play/pause of attached song
   const playingSongPostIdRef = useRef(null); // mirrors the attached-song post id
@@ -509,6 +528,7 @@ const SocialFeed = ({ showBackground = true }) => {
       const processed = valid.map(p => processPost(p, followStates));
 
       setPosts(processed);
+      prefetchMedia(processed);
       setNextUrl(response?.next ?? null);
       setHasMore(!!response?.next);
       setNewPostsAvailable(false);
@@ -528,7 +548,7 @@ const SocialFeed = ({ showBackground = true }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [followStates, feedType]);
+  }, [followStates, feedType, prefetchMedia]);
 
   const loadMorePosts = useCallback(async () => {
     if (loadingMore || !hasMore || loading || !nextUrl) return;
@@ -542,6 +562,7 @@ const SocialFeed = ({ showBackground = true }) => {
         .filter(p => p.user && typeof p.user === 'object')
         .map(p => processPost(p, followStates));
       setPosts(prev => [...prev, ...processed]);
+      prefetchMedia(processed);
       setNextUrl(response?.next ?? null);
       setHasMore(!!response?.next);
     } catch {
@@ -549,7 +570,7 @@ const SocialFeed = ({ showBackground = true }) => {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, loading, nextUrl, followStates]);
+  }, [loadingMore, hasMore, loading, nextUrl, followStates, prefetchMedia]);
 
   const handleRefresh = useCallback(() => loadPosts(true), [loadPosts]);
 
