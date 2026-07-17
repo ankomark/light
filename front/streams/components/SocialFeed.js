@@ -21,7 +21,7 @@ import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
-import { fetchSocialPosts, cursorFromUrl } from '../services/api';
+import { fetchSocialPosts, fetchFeedByUrl } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
@@ -344,7 +344,7 @@ const SocialFeed = ({ showBackground = true }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState(null); // cursor for the next page
+  const [nextUrl, setNextUrl] = useState(null); // full `next` URL for the next page
   const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [feedType, setFeedType] = useState('following'); // 'following' | 'for_you'
@@ -395,13 +395,15 @@ const SocialFeed = ({ showBackground = true }) => {
       // Search is global; otherwise honor the selected feed tab. Pull-to-refresh
       // bypasses the server's short feed cache so it's always live.
       const search = searchRef.current;
-      const response = await fetchSocialPosts(null, search ? null : feedType, search, { fresh: isRefresh });
+      // For You is the ranked feed (?rank=1); Following stays chronological.
+      const useRank = !search && feedType === 'for_you';
+      const response = await fetchSocialPosts(null, search ? null : feedType, search, { fresh: isRefresh, rank: useRank });
       const raw = response?.results ?? [];
       const valid = raw.filter(p => p.user && typeof p.user === 'object');
       const processed = valid.map(p => processPost(p, followStates));
 
       setPosts(processed);
-      setNextCursor(cursorFromUrl(response?.next));
+      setNextUrl(response?.next ?? null);
       setHasMore(!!response?.next);
       setNewPostsAvailable(false);
       lastFetchTimeRef.current = now;
@@ -423,24 +425,25 @@ const SocialFeed = ({ showBackground = true }) => {
   }, [followStates, feedType]);
 
   const loadMorePosts = useCallback(async () => {
-    if (loadingMore || !hasMore || loading || !nextCursor) return;
+    if (loadingMore || !hasMore || loading || !nextUrl) return;
     setLoadingMore(true);
     try {
-      const search = searchRef.current;
-      const response = await fetchSocialPosts(nextCursor, search ? null : feedType, search);
+      // Follow the server's `next` link — carries the feed's mode + pagination
+      // style (page for ranked, cursor for chronological).
+      const response = await fetchFeedByUrl(nextUrl);
       const raw = response?.results ?? [];
       const processed = raw
         .filter(p => p.user && typeof p.user === 'object')
         .map(p => processPost(p, followStates));
       setPosts(prev => [...prev, ...processed]);
-      setNextCursor(cursorFromUrl(response?.next));
+      setNextUrl(response?.next ?? null);
       setHasMore(!!response?.next);
     } catch {
       // silent — user can pull-to-refresh
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, loading, nextCursor, followStates, feedType]);
+  }, [loadingMore, hasMore, loading, nextUrl, followStates]);
 
   const handleRefresh = useCallback(() => loadPosts(true), [loadPosts]);
 
@@ -473,7 +476,7 @@ const SocialFeed = ({ showBackground = true }) => {
     if (refreshing || loading || searchRef.current) return;
     try {
       // fresh=1 so the poll sees new posts even within the cache window.
-      const response = await fetchSocialPosts(null, feedType, '', { fresh: true });
+      const response = await fetchSocialPosts(null, feedType, '', { fresh: true, rank: feedType === 'for_you' });
       const newest = response?.results?.[0];
       if (newest && topPostIdRef.current && newest.id !== topPostIdRef.current) {
         setNewPostsAvailable(true);

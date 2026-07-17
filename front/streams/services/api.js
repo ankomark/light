@@ -337,10 +337,24 @@ export const cursorFromUrl = (url) => {
   return m ? decodeURIComponent(m[1]) : null;
 };
 
+// Follow a DRF pagination `next` link directly, re-issuing it as a feed request.
+// Works for BOTH pagination styles — cursor (chronological) and page (ranked
+// ?rank=1) — so infinite scroll doesn't care which the server returned.
+export const fetchFeedByUrl = async (nextUrl) => {
+  if (!nextUrl) return null;
+  const params = {};
+  (nextUrl.split('?')[1] || '').split('&').forEach((kv) => {
+    if (!kv) return;
+    const [k, v] = kv.split('=');
+    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  });
+  return apiRequest('get', '/social-posts/', null, { params });
+};
+
 // Cursor-paginated feed. Pass cursor=null for the first page, then the cursor
 // from the previous response's `next` to page further. `fresh` bypasses the
 // server's short-lived feed cache (used by pull-to-refresh / new-post checks).
-export const fetchSocialPosts = async (cursor = null, feed = null, search = '', { fresh = false, contentType = null } = {}) => {
+export const fetchSocialPosts = async (cursor = null, feed = null, search = '', { fresh = false, contentType = null, rank = false } = {}) => {
   const retry = async (attempt = 1) => {
     try {
       const response = await apiRequest('get', '/social-posts/', null, {
@@ -351,6 +365,7 @@ export const fetchSocialPosts = async (cursor = null, feed = null, search = '', 
           ...(search ? { search } : {}),
           ...(fresh ? { fresh: 1 } : {}),
           ...(contentType ? { content_type: contentType } : {}),
+          ...(rank ? { rank: 1 } : {}),
         },
       });
       // response is { next, previous, results } (cursor pagination omits count)
