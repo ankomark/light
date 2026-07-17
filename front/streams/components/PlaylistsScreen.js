@@ -1,8 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, Image, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Modal, TextInput, Alert, Pressable,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { fetchPlaylists, createPlaylist } from '../services/api';
@@ -17,14 +18,14 @@ const CoverCollage = ({ images = [] }) => {
     );
   }
   if (images.length === 1) {
-    return <Image source={{ uri: images[0] }} style={styles.cover} />;
+    return <Image source={{ uri: images[0] }} style={styles.cover} contentFit="cover" transition={150} />;
   }
   const cells = [0, 1, 2, 3];
   return (
     <View style={[styles.cover, styles.collage]}>
       {cells.map((i) => (
         images[i]
-          ? <Image key={i} source={{ uri: images[i] }} style={styles.collageCell} />
+          ? <Image key={i} source={{ uri: images[i] }} style={styles.collageCell} contentFit="cover" transition={150} />
           : <View key={i} style={[styles.collageCell, styles.collageBlank]} />
       ))}
     </View>

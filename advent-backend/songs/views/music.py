@@ -258,9 +258,12 @@ class TrackViewSet(viewsets.ModelViewSet):
     # endpoint lists the current user's liked tracks for the Favorites screen.
     @action(detail=False, methods=['get'], url_path='favorites')
     def get_favorites(self, request):
-        user = request.user
-        favorites = Track.objects.filter(likes__user=user)
-        serializer = TrackSerializer(favorites, many=True, context={"request": request})
+        # Reuse the list's optimized queryset (select_related artist__profile +
+        # likes_total/liked_by_me annotations) so the Favorites screen isn't an
+        # N+1 — the raw Track.objects.filter(...) here used to fire ~3 queries
+        # per liked track (artist profile, like count, is-liked). Newest first.
+        favorites = self.get_queryset().filter(likes__user=request.user).order_by('-created_at')
+        serializer = self.get_serializer(favorites, many=True)
         return Response(serializer.data)
 
 
@@ -274,14 +277,19 @@ class PlaylistViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user.is_authenticated:
             return Playlist.objects.none()
-        return (
+        qs = (
             Playlist.objects
             .filter(user=user)
             .select_related('user__profile')
-            .prefetch_related('tracks__artist__profile')
             .annotate(tracks_total=Count('tracks', distinct=True))
             .order_by('-created_at')
         )
+        # The list only renders a count + up to 4 cover thumbnails, so it
+        # prefetches just the tracks; detail nests the full track payload
+        # (artist + avatar) and needs the deeper prefetch.
+        if self.action == 'list':
+            return qs.prefetch_related('tracks')
+        return qs.prefetch_related('tracks__artist__profile')
 
     def get_serializer_class(self):
         if self.action == 'list':

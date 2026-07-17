@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import GlassView from './GlassView';
 import Likes from './LikeButton';
 import Comments from './Comments';
@@ -23,7 +24,6 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
   const { currentTrack, isPlaying, isLoading, isBuffering, playTrack, togglePlay } = usePlayer();
   const isOwner = track.is_owner;
 
-  const [profileImageError, setProfileImageError] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
@@ -34,12 +34,10 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
 
   const hasLyrics = typeof track.lyrics === 'string' && track.lyrics.trim().length > 0;
 
-  const optimizedCover = track.cover_image?.includes('cloudinary')
-    ? track.cover_image.replace('/upload/', '/upload/w_200,h_200,c_fill,q_auto,f_auto/')
-    : track.cover_image;
-  const optimizedAudio = track.audio_file?.includes('cloudinary')
-    ? track.audio_file.replace('/upload/', '/upload/q_auto/')
-    : track.audio_file;
+  // Media are R2 URLs now (served as-is); the old Cloudinary delivery
+  // transforms were a no-op on them, so we use the stored URL directly.
+  const optimizedCover = track.cover_image;
+  const optimizedAudio = track.audio_file;
   // The artist avatar already ships with the track payload
   // (DetailedUserSerializer.profile_picture) — no per-row request needed.
   const artistAvatar = track.artist?.profile_picture || null;
@@ -147,7 +145,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
       <View style={styles.mainRow}>
         <TouchableOpacity style={styles.coverWrap} onPress={handlePlay} activeOpacity={0.85}>
           {optimizedCover ? (
-            <Image source={{ uri: optimizedCover }} style={styles.cover} />
+            <Image source={{ uri: optimizedCover }} style={styles.cover} contentFit="cover" transition={150} />
           ) : (
             <View style={[styles.cover, styles.coverPlaceholder]}>
               <Ionicons name="musical-notes" size={26} color={colors.textMuted} />
@@ -166,10 +164,11 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
           </Text>
           <View style={styles.artistRow}>
             <Image
-              source={profileImageError || !artistAvatar ? DEFAULT_AVATAR : { uri: artistAvatar, cache: 'force-cache' }}
+              source={artistAvatar ? { uri: artistAvatar } : DEFAULT_AVATAR}
+              placeholder={DEFAULT_AVATAR}
+              contentFit="cover"
+              transition={150}
               style={styles.avatar}
-              defaultSource={DEFAULT_AVATAR}
-              onError={() => setProfileImageError(true)}
             />
             <Text style={styles.subtitle} numberOfLines={1}>
               {track.artist?.username}

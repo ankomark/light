@@ -8,8 +8,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { getFavoriteTracks, fetchSavedPosts } from '../services/api';
@@ -19,22 +19,20 @@ import { colors, spacing, typography, radius } from '../constants/theme';
 
 const GRID_PAD = 2;
 
-// A still thumbnail for the grid. For videos we ask Cloudinary for a poster
-// frame (so_0 = first frame) as a JPG — same trick as the Explore grid — so the
-// cell shows an image instead of a blank <Image> that can't render an .mp4.
+// A still thumbnail for the grid. Prefer the server-provided thumbnail_url
+// (R2 poster for videos); a raw video URL can't render in <Image>, so if no
+// poster exists we fall back to the placeholder cell (the play badge still
+// marks it as a video).
 const thumbUri = (post) => {
   const url =
+    post?.media_items?.[0]?.thumbnail_url ||
+    post?.thumbnail_url ||
     post?.media_items?.[0]?.optimized_url ||
     post?.media_items?.[0]?.media_url ||
     post?.optimized_url ||
     post?.media_url ||
     null;
-  if (!url) return null;
-  if (post?.content_type === 'video' || /\.(mp4|mov|webm|m4v)$/i.test(url)) {
-    return url
-      .replace('/video/upload/', '/video/upload/so_0,w_400,h_400,c_fill/')
-      .replace(/\.(mp4|mov|webm|m4v)$/i, '.jpg');
-  }
+  if (!url || /\.(mp4|mov|webm|m4v)$/i.test(url)) return null;
   return url;
 };
 
@@ -161,7 +159,7 @@ const FavoritesPage = () => {
               onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
             >
               {thumbUri(item) ? (
-                <Image source={{ uri: thumbUri(item) }} style={styles.cellImg} resizeMode="cover" />
+                <Image source={{ uri: thumbUri(item) }} style={styles.cellImg} contentFit="cover" transition={150} />
               ) : (
                 <View style={[styles.cellImg, styles.cellPlaceholder]}>
                   <MaterialIcons name="image" size={24} color={colors.textMuted} />
