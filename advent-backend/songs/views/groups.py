@@ -1,10 +1,20 @@
 import uuid
+from datetime import datetime, timezone as dt_timezone
+
+from django.db.models import (
+    OuterRef, Subquery, Exists, Count, Value, IntegerField, DateTimeField,
+)
+from django.db.models.functions import Coalesce
 
 from .common import *  # noqa: F401,F403
 
-# Group chat attachments are a Cloudinary https URL (current) or a legacy base64
-# data URI (older clients). base64 of ~6 MB is ~8 MB of text — allow headroom.
+# Group chat attachments are an R2 https URL (current) or a legacy base64 data
+# URI (older clients). base64 of ~6 MB is ~8 MB of text — allow headroom.
 MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
+
+# Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
+# never-opened group counts every message as unread (matches the old behaviour).
+EPOCH = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 
 
 def group_system_message(group, text, actor):
@@ -23,17 +33,72 @@ class GroupViewSet(viewsets.ModelViewSet):
     lookup_field = 'slug'
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
+    def _hidden_ids(self):
+        """Super-admin user ids to hide from this viewer (empty when the viewer
+        is themselves a super admin — they see everyone)."""
+        u = self.request.user
+        return set() if (u.is_authenticated and u.is_super_admin) else super_admin_user_ids()
+
+    def _annotate(self, qs):
+        """Fold the per-row serializer lookups (member count, my membership/role,
+        pending request, unread count, last message) into the list query as
+        subqueries. Without this the group list ran ~6 queries PER row; this
+        makes it a fixed handful regardless of page size. The serializer reads
+        these annotations when present and falls back to live lookups for the
+        un-annotated single-object (detail) responses."""
+        user = self.request.user
+        if not user.is_authenticated:
+            return qs
+        hidden = list(self._hidden_ids())
+
+        member_count = (GroupMember.objects.filter(group=OuterRef('pk'))
+                        .order_by().values('group').annotate(c=Count('id')).values('c'))
+        my_member = GroupMember.objects.filter(group=OuterRef('pk'), user=user)
+        pending = GroupJoinRequest.objects.filter(group=OuterRef('pk'), user=user, status='pending')
+
+        # Latest visible post's fields (excludes super-admin-authored posts).
+        last = (GroupPost.objects.filter(group=OuterRef('pk'))
+                .exclude(user_id__in=hidden).order_by('-created_at'))
+
+        # Unread = my group's posts after my last_read_at, minus my own/system/
+        # hidden. The nested subquery resolves my last_read for this same group.
+        my_last_read = (GroupMember.objects
+                        .filter(group=OuterRef('group'), user=user).values('last_read_at')[:1])
+        unread = (GroupPost.objects.filter(group=OuterRef('pk'))
+                  .exclude(user=user).exclude(message_type='system').exclude(user_id__in=hidden)
+                  .filter(created_at__gt=Coalesce(
+                      Subquery(my_last_read, output_field=DateTimeField()),
+                      Value(EPOCH, output_field=DateTimeField()),
+                  ))
+                  .order_by().values('group').annotate(c=Count('id')).values('c'))
+
+        return qs.select_related('creator', 'creator__profile').annotate(
+            anno_member_count=Coalesce(Subquery(member_count, output_field=IntegerField()), 0),
+            anno_is_member=Exists(my_member),
+            anno_is_admin=Exists(my_member.filter(is_admin=True)),
+            anno_has_pending=Exists(pending),
+            anno_unread=Coalesce(Subquery(unread, output_field=IntegerField()), 0),
+            anno_last_id=Subquery(last.values('id')[:1]),
+            anno_last_content=Subquery(last.values('content')[:1]),
+            anno_last_type=Subquery(last.values('message_type')[:1]),
+            anno_last_file=Subquery(last.values('file_name')[:1]),
+            anno_last_sender=Subquery(last.values('user__username')[:1]),
+            anno_last_at=Subquery(last.values('created_at')[:1]),
+        )
+
     def get_queryset(self):
         # For authenticated users
         if self.request.user.is_authenticated:
             # Super admins hold a master key: every group, public or private.
             if self.request.user.is_super_admin:
-                return Group.objects.filter(is_removed=False).order_by('-created_at')
-            return Group.objects.filter(
-                Q(is_private=False) |  # Show all public groups
-                Q(creator=self.request.user) |  # Show groups user created
-                Q(members__user=self.request.user)  # Show groups user is member of
-            ).filter(is_removed=False).distinct().order_by('-created_at')
+                base = Group.objects.filter(is_removed=False).order_by('-created_at')
+            else:
+                base = Group.objects.filter(
+                    Q(is_private=False) |  # Show all public groups
+                    Q(creator=self.request.user) |  # Show groups user created
+                    Q(members__user=self.request.user)  # Show groups user is member of
+                ).filter(is_removed=False).distinct().order_by('-created_at')
+            return self._annotate(base)
         # For unauthenticated users (if needed)
         return Group.objects.filter(is_private=False, is_removed=False).order_by('-created_at')
 
@@ -47,25 +112,9 @@ class GroupViewSet(viewsets.ModelViewSet):
         context['request'] = self.request
         # Hide super-admin-authored posts from a regular viewer's unread count and
         # last-message preview (super admins themselves see everyone).
-        u = self.request.user
-        context['hide_super_ids'] = (
-            set() if (u.is_authenticated and u.is_super_admin) else super_admin_user_ids()
-        )
+        context['hide_super_ids'] = self._hidden_ids()
         return context
 
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        # Hide super-admin-authored posts from a regular viewer's unread count and
-        # last-message preview (super admins themselves see everyone).
-        u = self.request.user
-        context['hide_super_ids'] = (
-            set() if (u.is_authenticated and u.is_super_admin) else super_admin_user_ids()
-        )
-        return context
-    
-    
 
     @transaction.atomic
     def perform_create(self, serializer):

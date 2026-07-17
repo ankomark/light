@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius } from '../constants/theme';
 
@@ -29,7 +30,7 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
     <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.8}>
       <View style={styles.avatarWrap}>
         {group.cover_image ? (
-          <Image source={{ uri: group.cover_image }} style={styles.avatar} />
+          <Image source={{ uri: group.cover_image }} style={styles.avatar} contentFit="cover" transition={150} />
         ) : (
           <View style={[styles.avatar, styles.avatarFallback]}>
             <Ionicons name="people" size={24} color={colors.primary} />

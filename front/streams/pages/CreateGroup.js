@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { Image } from 'expo-image';
 import { useAuth } from '../context/useAuth';
 import { createGroup, updateGroup, deleteGroup } from '../services/api';
 import * as ImagePicker from 'expo-image-picker';
@@ -156,10 +157,11 @@ const GroupForm = ({ navigation, route }) => {
         >
           {coverImage ? (
             <>
-              <Image 
-                source={{ uri: coverImage }} 
-                style={styles.coverImage} 
-                resizeMode="cover"
+              <Image
+                source={{ uri: coverImage }}
+                style={styles.coverImage}
+                contentFit="cover"
+                transition={150}
               />
               <View style={styles.coverImageOverlay}>
                 <MaterialIcons name="edit" size={24} color="white" />

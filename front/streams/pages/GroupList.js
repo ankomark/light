@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/useAuth';
-import { fetchGroups, deleteGroup, joinGroupByCode } from '../services/api';
+import { fetchGroups, fetchGroupsByUrl, deleteGroup, joinGroupByCode } from '../services/api';
 import GroupItem from './GroupItem';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -29,6 +29,8 @@ const GroupList = ({ navigation }) => {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
   const [activeTab, setActiveTab] = useState('public');
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinCode, setJoinCode] = useState('');
@@ -40,7 +42,8 @@ const GroupList = ({ navigation }) => {
     try {
       if (showLoader) setLoading(true);
       const data = await fetchGroups();
-      setGroups(Array.isArray(data) ? data : []);
+      setGroups(data?.results ?? (Array.isArray(data) ? data : []));
+      setNextUrl(data?.next ?? null);
       return data;
     } catch (error) {
       console.error('Failed to load groups:', error);
@@ -54,6 +57,24 @@ const GroupList = ({ navigation }) => {
       setRefreshing(false);
     }
   }, []);
+
+  // Infinite scroll: append the next page of groups, deduped by slug.
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchGroupsByUrl(nextUrl);
+      setGroups((prev) => {
+        const have = new Set(prev.map((g) => g.slug));
+        return [...prev, ...(res?.results ?? []).filter((g) => !have.has(g.slug))];
+      });
+      setNextUrl(res?.next ?? null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   // Load data on focus and initial mount
   useFocusEffect(
@@ -238,6 +259,13 @@ const GroupList = ({ navigation }) => {
           initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={11}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore
+              ? <ActivityIndicator size="small" color={colors.accent} style={{ marginVertical: spacing.md }} />
+              : null
+          }
         />
       </View>
 

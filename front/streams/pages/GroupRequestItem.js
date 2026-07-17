@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 
 const GroupRequestItem = ({ request, onApprove, onReject }) => {
   return (
@@ -12,6 +13,9 @@ const GroupRequestItem = ({ request, onApprove, onReject }) => {
             ? { uri: request.user.profile_picture || request.user.profile.picture_url }
             : require('../assets/user-placeholder.png')
         }
+        placeholder={require('../assets/user-placeholder.png')}
+        contentFit="cover"
+        transition={120}
         style={styles.avatar}
       />
       <View style={styles.info}>

@@ -35,8 +35,13 @@ class GroupSerializer(serializers.ModelSerializer):
         return super().update(instance, self._upload_cover(validated_data))
 
     def get_invite_code(self, obj):
-        m = self._membership(obj)
-        if m and m.is_admin and obj.invite_code:
+        # Prefer the list annotation to avoid a per-row membership query; fall
+        # back to a live lookup for un-annotated detail responses.
+        is_admin = getattr(obj, 'anno_is_admin', None)
+        if is_admin is None:
+            m = self._membership(obj)
+            is_admin = bool(m and m.is_admin)
+        if is_admin and obj.invite_code:
             return str(obj.invite_code)
         return None
 
@@ -46,8 +51,12 @@ class GroupSerializer(serializers.ModelSerializer):
             return None
         return GroupMember.objects.filter(group=obj, user=request.user).first()
 
+    # The list view annotates these (anno_*) as subqueries so the list is a
+    # handful of queries instead of ~6 per row; detail responses aren't
+    # annotated, so each getter falls back to a live lookup.
     def get_member_count(self, obj):
-        return obj.members.count()
+        v = getattr(obj, 'anno_member_count', None)
+        return v if v is not None else obj.members.count()
 
     def _is_super(self):
         request = self.context.get('request')
@@ -56,15 +65,24 @@ class GroupSerializer(serializers.ModelSerializer):
     def get_is_member(self, obj):
         # Super admins hold a master key — treated as a member of every group so
         # the app unlocks the chat for them (drives the frontend, no app update).
-        return self._is_super() or self._membership(obj) is not None
+        if self._is_super():
+            return True
+        v = getattr(obj, 'anno_is_member', None)
+        return v if v is not None else (self._membership(obj) is not None)
 
     def get_is_admin(self, obj):
         if self._is_super():
             return True
+        v = getattr(obj, 'anno_is_admin', None)
+        if v is not None:
+            return v
         m = self._membership(obj)
         return bool(m and m.is_admin)
 
     def get_has_pending_request(self, obj):
+        v = getattr(obj, 'anno_has_pending', None)
+        if v is not None:
+            return v
         request = self.context.get('request')
         if not (request and request.user.is_authenticated):
             return False
@@ -73,6 +91,10 @@ class GroupSerializer(serializers.ModelSerializer):
         ).exists()
 
     def get_unread_count(self, obj):
+        # Only members carry an unread count (mirrors the live path's gate); the
+        # annotation is 0 for a super admin who isn't actually a member.
+        if hasattr(obj, 'anno_unread'):
+            return obj.anno_unread if getattr(obj, 'anno_is_member', False) else 0
         member = self._membership(obj)
         if not member:
             return 0
@@ -85,6 +107,17 @@ class GroupSerializer(serializers.ModelSerializer):
         return qs.count()
 
     def get_last_message(self, obj):
+        if hasattr(obj, 'anno_last_id'):
+            if obj.anno_last_id is None:
+                return None
+            return {
+                'id': obj.anno_last_id,
+                'content': obj.anno_last_content,
+                'message_type': obj.anno_last_type,
+                'file_name': obj.anno_last_file,
+                'sender_username': obj.anno_last_sender,
+                'created_at': obj.anno_last_at,
+            }
         hidden = self.context.get('hide_super_ids') or ()
         last = obj.posts.exclude(user_id__in=hidden).order_by('-created_at').first()
         if not last:

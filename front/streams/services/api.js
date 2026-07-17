@@ -902,11 +902,12 @@ export const toggleSoloArtistActive = async (artistId) => {
 };
 
 // Group endpoints
+// Returns the paginated envelope { results, next, ... } so the caller can
+// infinite-scroll; keeps the retry/backoff since this is the community landing.
 export const fetchGroups = async (retries = 3, delay = 1000) => {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const data = await apiRequest('get', '/groups/');
-      return data?.results ?? data;
+      return await apiRequest('get', '/groups/', null, { params: { page_size: 20 } });
     } catch (error) {
       if (attempt === retries) {
         console.error('Failed to fetch groups after retries:', error);
@@ -915,6 +916,20 @@ export const fetchGroups = async (retries = 3, delay = 1000) => {
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
+};
+
+// Follow a paginated `next` link (preserves path + query) for infinite scroll.
+export const fetchGroupsByUrl = async (nextUrl) => {
+  if (!nextUrl) return null;
+  const [base, qs] = nextUrl.split('?');
+  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
+  const params = {};
+  (qs || '').split('&').forEach((kv) => {
+    if (!kv) return;
+    const [k, v] = kv.split('=');
+    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  });
+  return apiRequest('get', path, null, { params });
 };
 
 export const fetchGroupDetails = async (slug) => {
@@ -1754,6 +1769,7 @@ export default {
   updateSoloArtist,
   deleteSoloArtist,
   fetchGroups,
+  fetchGroupsByUrl,
   fetchGroupDetails,
   createGroup,
   requestJoinGroup,

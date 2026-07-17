@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity, Image, Pressable, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity, Pressable, Alert } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchGroupMembers, removeGroupMember, setGroupAdmin } from '../services/api';
@@ -17,7 +18,9 @@ const GroupMemberItem = ({ member, isCreator, canManage, isSelf, onPress }) => (
   >
     <Image
       source={member.user?.profile?.picture ? { uri: member.user.profile.picture } : DEFAULT_AVATAR}
-      defaultSource={DEFAULT_AVATAR}
+      placeholder={DEFAULT_AVATAR}
+      contentFit="cover"
+      transition={120}
       style={styles.memberAvatar}
     />
     <View style={styles.memberInfo}>
@@ -170,7 +173,9 @@ const GroupMembers = (props) => {
               <View style={styles.sheetHead}>
                 <Image
                   source={am?.user?.profile?.picture ? { uri: am.user.profile.picture } : DEFAULT_AVATAR}
-                  defaultSource={DEFAULT_AVATAR}
+                  placeholder={DEFAULT_AVATAR}
+                  contentFit="cover"
+                  transition={120}
                   style={styles.sheetAvatar}
                 />
                 <View style={{ flex: 1 }}>

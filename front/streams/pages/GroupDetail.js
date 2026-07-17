@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  View, Text, FlatList, TextInput, TouchableOpacity, Image, StyleSheet,
+  View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, AppState, Modal,
   ScrollView, Alert, Pressable, Dimensions, Animated, PanResponder,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,14 +57,6 @@ const VOICE_RECORDING_OPTIONS = {
     linearPCMIsFloat: false,
   },
   web: { mimeType: 'audio/webm', bitsPerSecond: 48000 },
-};
-
-// Light Cloudinary delivery transform for an image bubble thumbnail. Leaves
-// local (file://) and legacy base64 (data:) attachments untouched.
-const cldThumb = (url) => {
-  if (typeof url !== 'string' || !url.includes('res.cloudinary.com') || !url.includes('/upload/')) return url;
-  if (/\/upload\/[a-z]{1,3}_/.test(url)) return url;
-  return url.replace('/upload/', '/upload/c_limit,w_800,q_auto,f_auto/');
 };
 
 const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
@@ -135,7 +128,7 @@ const GroupMessageRow = ({
           {!isOwn && (
             <View style={styles.avatarPlaceholder}>
               {showName && (
-                <Image source={item.user?.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.msgAvatar} />
+                <Image source={item.user?.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR} placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.msgAvatar} />
               )}
             </View>
           )}
@@ -152,7 +145,7 @@ const GroupMessageRow = ({
 
               {type === 'image' && item.attachment ? (
                 <Pressable onPress={() => (sending ? null : onOpenImage(item.attachment))}>
-                  <Image source={{ uri: cldThumb(item.attachment) }} style={styles.imageMsg} resizeMode="cover" />
+                  <Image source={{ uri: item.attachment }} style={styles.imageMsg} contentFit="cover" transition={150} />
                   {sending && <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>}
                 </Pressable>
               ) : type === 'file' ? (
@@ -358,7 +351,7 @@ const GroupDetail = ({ route, navigation }) => {
     deliver(payload, rd);
   }, [deliver, replyTo]);
 
-  // Media send: show the local file instantly, upload it to Cloudinary in the
+  // Media send: show the local file instantly, upload it to R2 in the
   // background, then persist the message with just the URL (mirrors DMs).
   const sendMedia = useCallback(async (media, replyDisplay) => {
     const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType } = media;
@@ -506,7 +499,7 @@ const GroupDetail = ({ route, navigation }) => {
     try {
       if (soundRef.current) { await soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; }
       if (playingId === msg.id) { setPlayingId(null); return; }
-      // Legacy base64 → write to a cache file first; Cloudinary/local URIs play
+      // Legacy base64 → write to a cache file first; R2/local URIs play
       // directly (expo-av streams https).
       let sourceUri = msg.attachment;
       if (isData(msg.attachment)) {
@@ -667,7 +660,7 @@ const GroupDetail = ({ route, navigation }) => {
             onPress={() => isMember && navigation.navigate('GroupMembers', { groupSlug, group, isAdmin })}
           >
             {group?.cover_image ? (
-              <Image source={{ uri: group.cover_image }} style={styles.groupAvatar} />
+              <Image source={{ uri: group.cover_image }} style={styles.groupAvatar} contentFit="cover" transition={150} />
             ) : (
               <View style={[styles.groupAvatar, styles.groupAvatarFallback]}><Ionicons name="people" size={20} color={colors.primary} /></View>
             )}
@@ -768,7 +761,7 @@ const GroupDetail = ({ route, navigation }) => {
 
       <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
         <Pressable style={styles.viewerRoot} onPress={() => setViewer(null)}>
-          <Image source={{ uri: viewer }} style={styles.viewerImage} resizeMode="contain" />
+          <Image source={{ uri: viewer }} style={styles.viewerImage} contentFit="contain" transition={150} />
           <View style={styles.viewerClose}><Ionicons name="close" size={28} color={colors.white} /></View>
         </Pressable>
       </Modal>

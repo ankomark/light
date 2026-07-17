@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TextInput, FlatList, TouchableOpacity, Image, ActivityIndicator,
+  View, Text, TextInput, FlatList, TouchableOpacity, ActivityIndicator,
   StyleSheet, Share, Alert,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { searchGroupUsers, addGroupMember, getGroupInviteLink } from '../services/api';
@@ -85,7 +86,9 @@ const GroupAddMembers = ({ route, navigation }) => {
       <View style={styles.userRow}>
         <Image
           source={item.profile_picture ? { uri: item.profile_picture } : DEFAULT_AVATAR}
-          defaultSource={DEFAULT_AVATAR}
+          placeholder={DEFAULT_AVATAR}
+          contentFit="cover"
+          transition={120}
           style={styles.userAvatar}
         />
         <Text style={styles.userName} numberOfLines={1}>{item.username}</Text>
