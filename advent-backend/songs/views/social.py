@@ -205,6 +205,15 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         bypass = params.get('fresh') in ('1', 'true', 'True')
         ttl = getattr(settings, 'FEED_CACHE_SECONDS', 0)
 
+        # Ranked "For You" feed (opt-in via ?rank=1). Only for the plain home
+        # feed — search / tag / content-type filters keep the chronological path.
+        if (params.get('rank') in ('1', 'true', 'True') and user.is_authenticated
+                and not search and not tag and not ctype and feed != 'following'):
+            ranked = self._ranked_list(request)
+            if ranked is not None:
+                return ranked
+            # else: no ranked candidates yet — fall through to chronological.
+
         # Short-lived per-user cache of the feed's first page — the part hit on
         # every cold app/screen open. Searches and deeper (cursor) pages aren't
         # cached, and pull-to-refresh sends ?fresh=1 to bypass the read so it's
@@ -230,6 +239,52 @@ class SocialPostViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
+
+    def _ranked_list(self, request):
+        """Serve a page of the ranked snapshot (stable page-number pagination
+        over a cached id list). Returns None when there are no ranked candidates
+        so list() can fall back to the chronological feed."""
+        from django.db.models import Case, When
+        from .. import feed as feedrank
+
+        user = request.user
+        fresh = request.query_params.get('fresh') in ('1', 'true', 'True')
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            page = 1
+
+        snapshot = feedrank.get_snapshot(user, fresh=(fresh and page == 1))
+        if not snapshot:
+            return None
+
+        size = feedrank.PAGE_SIZE
+        start = (page - 1) * size
+        page_ids = snapshot[start:start + size]
+        if not page_ids and page > 1:
+            page_ids = []  # past the end — empty page with no `next`
+
+        order = Case(*[When(id=pid, then=pos) for pos, pid in enumerate(page_ids)])
+        posts = list(
+            feed_post_queryset(user).filter(id__in=page_ids).order_by(order)
+        ) if page_ids else []
+        data = self.get_serializer(posts, many=True).data
+
+        has_next = start + size < len(snapshot)
+        base = request.build_absolute_uri(request.path)
+
+        def _page_url(p):
+            q = request.query_params.copy()
+            q['page'] = p
+            q.pop('fresh', None)  # only the first request refreshes the snapshot
+            return f"{base}?{q.urlencode()}"
+
+        return Response({
+            'count': len(snapshot),
+            'next': _page_url(page + 1) if has_next else None,
+            'previous': _page_url(page - 1) if page > 1 else None,
+            'results': data,
+        })
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def like(self, request, pk=None):
