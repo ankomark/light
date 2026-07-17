@@ -278,6 +278,10 @@ class SocialPost(models.Model):
     content_type = models.CharField(max_length=5, choices=CONTENT_TYPES)
     # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
     media_file = models.CharField(max_length=500, blank=True, null=True)
+    # Poster frame (R2 URL) for video posts, generated on-device at upload.
+    # R2 stores bytes verbatim, so there's no server-side frame extraction —
+    # the client grabs the first frame and uploads it alongside the clip.
+    thumbnail = models.CharField(max_length=500, blank=True, null=True)
     song = models.ForeignKey(Track, null=True, blank=True, on_delete=models.SET_NULL)
     # Carousel of 1–4 images for image posts: list of {public_id, width, height}.
     # Empty for legacy/single-image posts (which fall back to media_file) and for

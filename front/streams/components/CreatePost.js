@@ -448,6 +448,7 @@ const CreatePost = ({ navigation }) => {
         endSec: videoTrim.end,
         width: media.width,
         height: media.height,
+        thumbnail: true,   // grab a poster frame for the feed/explore grid
       });
       if (!processed.processed) {
         console.warn('[CreatePost] video processing unavailable — uploading raw clip.');
@@ -455,12 +456,28 @@ const CreatePost = ({ navigation }) => {
       const uploadResult = await uploadToCloudinary(
         { ...media, uri: processed.uri }, 'video', fileProgress,
       );
+
+      // Upload the poster frame (if we got one) so grids have a still to show —
+      // R2 has no server-side frame extraction.
+      let thumbnailUrl;
+      if (processed.thumbnailUri) {
+        try {
+          const thumb = await uploadMedia(
+            { uri: processed.thumbnailUri, name: `poster_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+            'social-image',
+          );
+          thumbnailUrl = thumb.url;
+        } catch (e) {
+          console.warn('[CreatePost] poster upload failed', e?.message);
+        }
+      }
       fileDone();
       const clip = Math.max(1, Math.round(videoTrim.end - videoTrim.start));
       postData = {
         caption: caption.trim(),
         content_type: 'video',
         media_file: uploadResult.public_id,
+        ...(thumbnailUrl ? { thumbnail: thumbnailUrl } : {}),
         width: uploadResult.width ?? media.width,
         height: uploadResult.height ?? media.height,
         // The stored file is already the trimmed clip starting at 0 — omit

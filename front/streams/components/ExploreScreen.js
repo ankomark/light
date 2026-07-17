@@ -13,19 +13,16 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 /**
- * Build a still-image thumbnail for a post. For videos we ask Cloudinary for a
- * single extracted frame (so_0 = first frame) as a JPG, so the grid shows a
- * poster image instead of a blank <Image> that can't render an .mp4.
+ * Still-image thumbnail for a post. Videos use the poster frame captured on
+ * upload (thumbnail_url) — R2 has no server-side frame extraction, so a video's
+ * media URL is a raw .mp4 that can't render in an <Image>. Images just use their
+ * own URL. Returns null when there's no still, so the caller shows a placeholder.
  */
 const getPostThumb = (post) => {
-  const url = post.optimized_url || post.media_url;
-  if (!url) return null;
   if (post.content_type === 'video') {
-    return url
-      .replace('/video/upload/', '/video/upload/so_0,w_600,h_600,c_fill/')
-      .replace(/\.(mp4|mov|webm|m4v)$/i, '.jpg');
+    return post.thumbnail_url || null;
   }
-  return url;
+  return post.thumbnail_url || post.optimized_url || post.media_url || null;
 };
 
 // ── API helpers ───────────────────────────────────────────────────────────────

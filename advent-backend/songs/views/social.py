@@ -184,6 +184,8 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         # items too — each carries its own uploaded object.
         if instance.media_file:
             r2.delete(str(instance.media_file))
+        if instance.thumbnail:
+            r2.delete(str(instance.thumbnail))
         gallery = instance.gallery if isinstance(instance.gallery, list) else []
         for it in gallery:
             if isinstance(it, dict):

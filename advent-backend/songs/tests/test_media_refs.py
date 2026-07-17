@@ -62,6 +62,22 @@ class SerializerMediaTests(APITestCase):
         self.assertEqual(s.get_media_url(post), R2_URL)
         self.assertEqual(s.get_optimized_url(post), R2_URL)
 
+    def test_video_thumbnail_url(self):
+        thumb = 'https://pub-test.r2.dev/social_media/images/poster.jpg'
+        post = SocialPost.objects.create(
+            user=self.user, content_type='video', media_file=R2_URL, thumbnail=thumb,
+        )
+        self.assertEqual(SocialPostSerializer(post).data['thumbnail_url'], thumb)
+
+    def test_image_post_thumbnail_falls_back_to_media(self):
+        img = 'https://pub-test.r2.dev/social_media/images/pic.jpg'
+        post = SocialPost.objects.create(user=self.user, content_type='image', media_file=img)
+        self.assertEqual(SocialPostSerializer(post).data['thumbnail_url'], img)
+
+    def test_video_without_thumbnail_is_none(self):
+        post = SocialPost.objects.create(user=self.user, content_type='video', media_file=R2_URL)
+        self.assertIsNone(SocialPostSerializer(post).data['thumbnail_url'])
+
     def test_gallery_items(self):
         s = SocialPostSerializer()
         item = s._gallery_item({'url': R2_URL, 'width': 100, 'height': 200})

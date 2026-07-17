@@ -13,6 +13,9 @@ class SocialPostSerializer(serializers.ModelSerializer):
     media_items = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
     optimized_url = serializers.SerializerMethodField()
+    # Video poster: written as an R2 URL on create, read back resolved.
+    thumbnail = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
+    thumbnail_url = serializers.SerializerMethodField()
     song_id = serializers.PrimaryKeyRelatedField(
         queryset=Track.objects.all(),
         source='song',
@@ -25,6 +28,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
         model = SocialPost
         fields = [
             'id', 'user', 'content_type', 'media_file', 'media_url', 'media_items',
+            'thumbnail', 'thumbnail_url',
             'gallery', 'song','song_id',
             'song_audio_url', 'song_title', 'song_artist',
             'song_start_time', 'song_end_time',
@@ -66,6 +70,13 @@ class SocialPostSerializer(serializers.ModelSerializer):
         # Stored references are absolute R2 URLs; new uploads arrive already
         # trimmed/compressed client-side, so there are no URL transforms.
         return media.resolve(obj.media_file)
+
+    def get_thumbnail_url(self, obj):
+        # Video poster frame (R2). For image posts, fall back to the image
+        # itself so grids/explore always have a still to show.
+        return media.resolve(obj.thumbnail) or (
+            media.resolve(obj.media_file) if obj.content_type == 'image' else None
+        )
 
     def get_optimized_url(self, obj):
         # No delivery-transform tier yet (comes with the custom media domain) —
@@ -241,16 +252,20 @@ class ProfilePostThumbSerializer(serializers.ModelSerializer):
     is_liked/is_saved lookups (the source of the slow profile load)."""
     media_url = serializers.SerializerMethodField()
     optimized_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
 
     class Meta:
         model = SocialPost
-        fields = ['id', 'content_type', 'media_url', 'optimized_url', 'width', 'height']
+        fields = ['id', 'content_type', 'media_url', 'optimized_url', 'thumbnail_url', 'width', 'height']
 
     def get_media_url(self, obj):
         return _thumb_helper.get_media_url(obj)
 
     def get_optimized_url(self, obj):
         return _thumb_helper.get_optimized_url(obj)
+
+    def get_thumbnail_url(self, obj):
+        return _thumb_helper.get_thumbnail_url(obj)
 
 
 class PostLikeSerializer(serializers.ModelSerializer):
