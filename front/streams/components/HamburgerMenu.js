@@ -34,7 +34,7 @@ const SECTIONS = [
       { label: 'Favorites', route: 'Favorites', set: 'ion', icon: 'heart-outline' },
       { label: 'Playlists', route: 'Playlists', set: 'mci', icon: 'playlist-music-outline' },
       { label: 'Choirs', route: 'Choirs', set: 'mci', icon: 'account-music-outline' },
-      { label: 'Media Production', route: 'Studios', set: 'mci', icon: 'video-outline' },
+      { label: 'Services', route: 'Studios', set: 'mci', icon: 'video-outline' },
     ],
   },
   {
