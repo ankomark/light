@@ -11,9 +11,11 @@ import {
   Dimensions,
   Platform,
   AppState,
+  Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Video, Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 import GlassView from './GlassView';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -23,7 +25,7 @@ import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
-import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, fetchLatestPostId } from '../services/api';
+import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, fetchLatestPostId, likePost } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
@@ -165,9 +167,19 @@ const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPre
   );
 });
 
+// Instagram-style heart burst shown over the media on a double-tap-to-like.
+const HeartBurst = ({ scale }) => (
+  <Animated.View
+    style={[styles.heartBurst, { opacity: scale, transform: [{ scale }] }]}
+    pointerEvents="none"
+  >
+    <MaterialIcons name="favorite" size={96} color="rgba(255,255,255,0.95)" />
+  </Animated.View>
+);
+
 const PostMedia = React.memo(function PostMedia({
   item, videoRefs, isFocused, isMuted, onToggleMute,
-  isAudioActive, isAudioPlaying, onToggleAudio,
+  isAudioActive, isAudioPlaying, onToggleAudio, onDoubleTapLike,
 }) {
   const { preferences } = usePreferences();
   // Honor the user's "Autoplay videos" choice; Data saver also suppresses
@@ -208,6 +220,35 @@ const PostMedia = React.memo(function PostMedia({
   const handleLoad = useCallback(() => {
     setIsLoading(false);
   }, []);
+
+  // Double-tap-to-like: heart burst + haptic + like (never unlikes — a
+  // double-tap only ever adds a like, Instagram-style).
+  const heartScale = useRef(new Animated.Value(0)).current;
+  const tapStateRef = useRef({ t: 0, timer: null });
+  const burstLike = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    heartScale.setValue(0);
+    Animated.sequence([
+      Animated.spring(heartScale, { toValue: 1, friction: 4, useNativeDriver: true }),
+      Animated.timing(heartScale, { toValue: 0, duration: 250, delay: 350, useNativeDriver: true }),
+    ]).start();
+    onDoubleTapLike?.(item);
+  }, [heartScale, onDoubleTapLike, item]);
+
+  // A single tap runs `singleAction` after a short delay unless a second tap
+  // arrives first (which fires the like instead).
+  const handleTap = useCallback((singleAction) => {
+    const s = tapStateRef.current;
+    const now = Date.now();
+    if (now - s.t < 280) {
+      if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+      s.t = 0;
+      burstLike();
+    } else {
+      s.t = now;
+      if (singleAction) s.timer = setTimeout(() => { s.timer = null; singleAction(); }, 280);
+    }
+  }, [burstLike]);
 
   if (!currentUrl || hasError) {
     return (
@@ -269,7 +310,7 @@ const PostMedia = React.memo(function PostMedia({
     return (
       <Pressable
         style={[styles.mediaContainer, { aspectRatio }]}
-        onPress={isFocused ? () => setManualPaused((p) => !p) : undefined}
+        onPress={() => handleTap(() => setManualPaused((p) => !p))}
       >
         {isLoading && (
           <View style={styles.loadingOverlay}>
@@ -310,6 +351,7 @@ const PostMedia = React.memo(function PostMedia({
             />
           </TouchableOpacity>
         )}
+        <HeartBurst scale={heartScale} />
       </Pressable>
     );
   }
@@ -324,8 +366,9 @@ const PostMedia = React.memo(function PostMedia({
         <FeedCarousel
           urls={galleryUrls}
           aspectRatio={aspectRatio}
-          onPressSlide={hasAudio ? () => onToggleAudio?.(item) : undefined}
+          onPressSlide={() => handleTap(hasAudio ? () => onToggleAudio?.(item) : null)}
         />
+        <HeartBurst scale={heartScale} />
         {hasAudio && isAudioActive && isAudioPlaying && (
           <GlassView intensity={28} tint="dark" style={styles.audioVizPill} pointerEvents="none">
             <MaterialIcons name="music-note" size={16} color={colors.white} />
@@ -346,8 +389,7 @@ const PostMedia = React.memo(function PostMedia({
   return (
     <Pressable
       style={styles.mediaContainer}
-      onPress={hasAudio ? () => onToggleAudio?.(item) : undefined}
-      disabled={!hasAudio}
+      onPress={() => handleTap(hasAudio ? () => onToggleAudio?.(item) : null)}
     >
       {isLoading && (
         <View style={styles.loadingOverlay}>
@@ -377,6 +419,7 @@ const PostMedia = React.memo(function PostMedia({
           </View>
         </View>
       )}
+      <HeartBurst scale={heartScale} />
     </Pressable>
   );
 });
@@ -784,6 +827,22 @@ const SocialFeed = ({ showBackground = true }) => {
     ));
   }, []);
 
+  // Double-tap-to-like: only ever ADDS a like (never toggles off). Optimistic +
+  // reconciled; the like button reflects it via the post's is_liked/likes_count.
+  const handleDoubleTapLike = useCallback((post) => {
+    if (!post || post.is_liked) return;  // already liked — burst only, no API
+    handleLikeChange(post.id, { is_liked: true, likes_count: (post.likes_count || 0) + 1 });
+    likePost(post.id)
+      .then((res) => {
+        if (typeof res?.is_liked === 'boolean' && typeof res?.likes_count === 'number') {
+          handleLikeChange(post.id, { is_liked: res.is_liked, likes_count: res.likes_count });
+        }
+      })
+      .catch(() => {
+        handleLikeChange(post.id, { is_liked: false, likes_count: post.likes_count || 0 });
+      });
+  }, [handleLikeChange]);
+
   const renderPostHeader = useCallback(({ item }) => {
     if (!item.user || typeof item.user !== 'object') {
       return null;
@@ -909,11 +968,12 @@ const SocialFeed = ({ showBackground = true }) => {
         isAudioActive={currentlyPlayingPostId === item.id}
         isAudioPlaying={currentlyPlayingPostId === item.id ? isAudioPlaying : false}
         onToggleAudio={toggleSongPlayback}
+        onDoubleTapLike={handleDoubleTapLike}
       />
       {renderPostFooter({ item })}
     </View>
   ), [renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
-      currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback]);
+      currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback, handleDoubleTapLike]);
 
   const renderEmptyComponent = useCallback(() => {
     if (loading) return null;
@@ -1294,6 +1354,13 @@ const styles = StyleSheet.create({
   // Dark placeholder for an off-screen video with no poster frame yet.
   videoPosterFallback: {
     backgroundColor: '#0A1628',
+  },
+  // Double-tap-to-like heart burst, centered over the media.
+  heartBurst: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    textShadowColor: 'rgba(0,0,0,0.4)',
   },
 
   loadingOverlay: {

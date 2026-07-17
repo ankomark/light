@@ -15,6 +15,7 @@ import {
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
+import * as Haptics from 'expo-haptics';
 import config from '../config';
 import { likePost, savePost, PUBLIC_BASE } from '../services/api';
 
@@ -38,6 +39,10 @@ export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
     const nextLiked = !prevLiked;
     const nextLikes = Math.max(0, prevLikes + (nextLiked ? 1 : -1));
 
+    // A light tap on like, a soft one on unlike — tactile "premium" feedback.
+    Haptics.impactAsync(
+      nextLiked ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Soft
+    ).catch(() => {});
     setLiked(nextLiked);                                  // optimistic
     setLikes(nextLikes);
     onLikeChange?.({ is_liked: nextLiked, likes_count: nextLikes });
