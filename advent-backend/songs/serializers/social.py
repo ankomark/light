@@ -2,9 +2,23 @@ from .common import *  # noqa: F401,F403
 from .music import TrackSerializer
 
 
+class FeedSongSerializer(serializers.ModelSerializer):
+    """Slim attached-song payload for the feed. The full TrackSerializer runs
+    a likes COUNT + an is_liked EXISTS per track — an N+1 across a page of posts
+    that carry songs. The feed only needs enough to label/play the clip (audio
+    lives in the post's denormalised song_audio_url), so expose just that."""
+    artist = SimpleUserSerializer(read_only=True)
+    audio_file = MediaReferenceField()
+    cover_image = MediaReferenceField(required=False)
+
+    class Meta:
+        model = Track
+        fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image', 'slug']
+
+
 class SocialPostSerializer(serializers.ModelSerializer):
     user = DetailedUserSerializer(read_only=True)
-    song = TrackSerializer(read_only=True)
+    song = FeedSongSerializer(read_only=True)
     likes_count = serializers.SerializerMethodField()
     comments_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()

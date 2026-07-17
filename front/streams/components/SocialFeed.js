@@ -3,14 +3,15 @@ import {
   View,
   Text,
   FlatList,
-  Image,
   StyleSheet,
   ActivityIndicator,
   Alert,
   TouchableOpacity,
   Pressable,
   Dimensions,
+  Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Video, Audio } from 'expo-av';
 import GlassView from './GlassView';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -100,6 +101,11 @@ const processPost = (post, existingFollowStates = {}) => {
     .filter(Boolean);
   const primaryUrl = itemUrls[0] || post.optimized_url || post.media_url;
 
+  // Video poster: use the stored thumbnail_url (a real image). primaryUrl for a
+  // video is the .mp4, which can't render in <Image>, so it's not a valid poster.
+  const isVideo = post.content_type === 'video';
+  const posterUrl = isVideo ? (post.thumbnail_url || null) : primaryUrl;
+
   return {
     ...post,
     user: {
@@ -110,7 +116,7 @@ const processPost = (post, existingFollowStates = {}) => {
       is_following: userIsFollowing
     },
     mediaUrl: primaryUrl,
-    thumbnailUrl: primaryUrl,
+    thumbnailUrl: posterUrl,
     mediaItems: itemUrls.length ? itemUrls : (primaryUrl ? [primaryUrl] : []),
   };
 };
@@ -134,7 +140,7 @@ const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPre
         }
         renderItem={({ item: url }) => (
           <Pressable onPress={onPressSlide} disabled={!onPressSlide} style={{ width: CARD_W, height: '100%' }}>
-            <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={150} />
           </Pressable>
         )}
       />
@@ -214,6 +220,32 @@ const PostMedia = React.memo(function PostMedia({
   }
 
   if (item.content_type === 'video') {
+    // CRASH GUARD: only the focused card mounts a real <Video> (a native
+    // decoder). Off-screen video cards show a lightweight poster image instead,
+    // so we never hold more than ~1 decoder — Android has a hard decoder limit
+    // and exceeding it crashes the app on a video-heavy feed.
+    if (!isFocused) {
+      return (
+        <View style={[styles.mediaContainer, { aspectRatio }]}>
+          {item.thumbnailUrl ? (
+            <Image
+              source={{ uri: item.thumbnailUrl }}
+              style={[styles.media, { aspectRatio }]}
+              contentFit="cover"
+              transition={150}
+            />
+          ) : (
+            <View style={[styles.media, styles.videoPosterFallback, { aspectRatio }]} />
+          )}
+          <View style={styles.audioPausedOverlay} pointerEvents="none">
+            <GlassView intensity={32} tint="dark" style={styles.audioPlayBadge}>
+              <MaterialIcons name="play-arrow" size={40} color={colors.white} />
+            </GlassView>
+          </View>
+        </View>
+      );
+    }
+
     // Pick the rendition that matches the chosen quality: optimized_url (≈720p
     // eco) for data saver, media_url (q_auto, up to the 1080p master) otherwise.
     // If an onError already swapped currentUrl to media_url, stick with that.
@@ -236,7 +268,7 @@ const PostMedia = React.memo(function PostMedia({
           </View>
         )}
         <Video
-          ref={ref => ref && (videoRefs.current[item.id] = ref)}
+          ref={ref => { if (ref) videoRefs.current[item.id] = ref; else delete videoRefs.current[item.id]; }}
           source={{ uri: videoUri }}
           style={[styles.media, { aspectRatio }]}
           resizeMode="cover"
@@ -316,7 +348,8 @@ const PostMedia = React.memo(function PostMedia({
       <Image
         source={{ uri: currentUrl }}
         style={[styles.media, { aspectRatio }, isLoading && { opacity: 0 }]}
-        resizeMode="cover"
+        contentFit="cover"
+        transition={150}
         onError={handleError}
         onLoad={handleLoad}
       />
@@ -719,7 +752,9 @@ const SocialFeed = ({ showBackground = true }) => {
                   ? { uri: item.user.profile_picture }
                   : DEFAULT_AVATAR
               }
-              defaultSource={DEFAULT_AVATAR}
+              placeholder={DEFAULT_AVATAR}
+              contentFit="cover"
+              transition={150}
               style={styles.profileImage}
               onError={() => setPosts(prev => prev.map(p =>
                 p.id === item.id
@@ -985,6 +1020,7 @@ const SocialFeed = ({ showBackground = true }) => {
         updateCellsBatchingPeriod={100}
         initialNumToRender={5}
         windowSize={10}
+        removeClippedSubviews={Platform.OS === 'android'}
       />
 
       {loading && !refreshing && posts.length === 0 && (
@@ -1173,6 +1209,10 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 1,
     backgroundColor: colors.black,
+  },
+  // Dark placeholder for an off-screen video with no poster frame yet.
+  videoPosterFallback: {
+    backgroundColor: '#0A1628',
   },
 
   loadingOverlay: {

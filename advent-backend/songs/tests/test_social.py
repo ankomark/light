@@ -371,3 +371,25 @@ class FeedQueryCountTests(APITestCase):
             f'Feed query count grew with posts ({small} -> {large}); N+1 reintroduced.'
         )
         self.assertLessEqual(small, 8)
+
+    def test_posts_with_attached_songs_dont_n_plus_one(self):
+        # Posts carrying a song used to run a likes COUNT + is_liked EXISTS per
+        # track via the nested TrackSerializer. The slim FeedSongSerializer must
+        # keep the feed query count flat as more song-posts are added.
+        from songs.models import Track
+        self.client.force_authenticate(self.viewer)
+        artist = User.objects.create_user('artist', 'artist@test.co', 'pw12345!')
+
+        def song_post(n):
+            track = Track.objects.create(title=f'song{n}', artist=artist)
+            p = make_post(self.a1, caption=f's{n}')
+            p.song = track
+            p.save(update_fields=['song'])
+
+        song_post(0)
+        self.client.get('/api/social-posts/')  # warm up
+        one = self._count('/api/social-posts/')
+        for i in range(1, 6):
+            song_post(i)
+        many = self._count('/api/social-posts/')
+        self.assertEqual(one, many, f'song-post N+1 reintroduced ({one} -> {many}).')
