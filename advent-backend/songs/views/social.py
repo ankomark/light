@@ -787,12 +787,16 @@ class PublicationViewSet(viewsets.ModelViewSet):
         qs = (
             Publication.objects
             .select_related('author', 'author__profile')
-            .prefetch_related('chapters')
             .annotate(
                 chapter_count_anno=Count('chapters', distinct=True),
                 likes_total=Count('likes', distinct=True),
             )
         )
+        # Chapters (whose bodies carry heavy base64 inline images) are only
+        # serialized on detail — prefetching them for the LIST would pull
+        # megabytes per row that are never rendered.
+        if self.action != 'list':
+            qs = qs.prefetch_related('chapters')
         if user.is_authenticated:
             qs = qs.annotate(
                 liked_by_me=Exists(PublicationLike.objects.filter(publication=OuterRef('pk'), user=user)),

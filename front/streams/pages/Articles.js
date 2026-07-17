@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Image,
+  View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput,
   ActivityIndicator, ScrollView, Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,7 +23,9 @@ const TABS = [
 const AuthorAvatar = ({ uri, size = 18 }) => (
   <Image
     source={uri ? { uri } : DEFAULT_AVATAR}
-    defaultSource={DEFAULT_AVATAR}
+    placeholder={DEFAULT_AVATAR}
+    contentFit="cover"
+    transition={150}
     style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.surface }}
   />
 );
@@ -57,17 +60,35 @@ const Articles = ({ navigation }) => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      lastLoadRef.current = Date.now();
     }
   }, [tab, query, category]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // A ref to the latest loader so the focus effect doesn't depend on load's
+  // identity — that identity changes with `query`, which previously re-fired
+  // load() on every keystroke via useFocusEffect and defeated the debounce.
+  const loadRef = useRef(load);
+  const lastLoadRef = useRef(0);
+  const didMountRef = useRef(false);
+  useEffect(() => { loadRef.current = load; });
 
+  // Initial load + reload when the tab or category changes.
+  useEffect(() => { loadRef.current(); }, [tab, category]);
+
+  // Debounced search (Discover tab only) — the sole search trigger now.
   useEffect(() => {
     if (tab !== 'discover') return;
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => load(), 350);
+    debounceRef.current = setTimeout(() => loadRef.current(), 350);
     return () => clearTimeout(debounceRef.current);
-  }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, tab]);
+
+  // Refresh on return to the screen — skip the mount focus (handled above) and
+  // throttle so a quick tab-out/tab-in doesn't refetch the whole list.
+  useFocusEffect(useCallback(() => {
+    if (!didMountRef.current) { didMountRef.current = true; return; }
+    if (Date.now() - lastLoadRef.current > 60000) loadRef.current();
+  }, []));
 
   const open = (item) => navigation.navigate('PublicationDetail', { id: item.id });
 
@@ -75,7 +96,7 @@ const Articles = ({ navigation }) => {
   const renderFeatured = (item) => (
     <TouchableOpacity style={styles.featured} activeOpacity={0.9} onPress={() => open(item)}>
       {item.cover ? (
-        <Image source={{ uri: item.cover }} style={styles.featuredCover} />
+        <Image source={{ uri: item.cover }} style={styles.featuredCover} contentFit="cover" transition={150} />
       ) : (
         <View style={[styles.featuredCover, styles.coverFallback]}>
           <MaterialIcons name="auto-stories" size={48} color={colors.textMuted} />
@@ -108,7 +129,7 @@ const Articles = ({ navigation }) => {
     return (
       <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={() => open(item)}>
         {item.cover ? (
-          <Image source={{ uri: item.cover }} style={styles.cover} />
+          <Image source={{ uri: item.cover }} style={styles.cover} contentFit="cover" transition={150} />
         ) : (
           <View style={[styles.cover, styles.coverFallback]}>
             <MaterialIcons name="menu-book" size={28} color={colors.textMuted} />

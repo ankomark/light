@@ -55,3 +55,27 @@ class PublicationThemeTests(APITestCase):
         row = next(p for p in (lst.json().get('results') or lst.json()) if p['id'] == pid)
         self.assertEqual(row['cover'], self.COVER)
         self.assertEqual(self.client.get(f'/api/publications/{pid}/').json()['cover'], self.COVER)
+
+    def test_list_does_not_load_chapter_bodies(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        # A publication with a heavy chapter body (base64-image-like payload).
+        self.client.post('/api/publications/', {
+            'title': 'Heavy', 'category': 'other', 'status': 'published',
+            'chapters': [{'order': 1, 'title': 'a', 'body': 'x' * 5000}],
+        }, format='json')
+
+        with CaptureQueriesContext(connection) as ctx:
+            res = self.client.get('/api/publications/')
+            self.assertEqual(res.status_code, 200)
+        # The chapter_count annotation may JOIN the chapter table for a COUNT,
+        # but NO query should load the heavy `body` column (that was the prefetch).
+        loaded_bodies = any(
+            'songs_chapter' in q['sql'] and 'body' in q['sql']
+            for q in ctx.captured_queries
+        )
+        self.assertFalse(loaded_bodies, 'list is loading chapter bodies it never renders')
+        # But detail still returns chapters.
+        pid = (res.json().get('results') or res.json())[0]['id']
+        detail = self.client.get(f'/api/publications/{pid}/')
+        self.assertGreaterEqual(len(detail.json()['chapters']), 1)
