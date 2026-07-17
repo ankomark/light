@@ -36,6 +36,14 @@ import { colors, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const AVATAR_FAILED = '__failed__';
+
+// "Why you're seeing this" chip for the ranked For You feed (backend sends
+// feed_reason). Turns the ranking into a visible, made-for-me signal.
+const FEED_REASON = {
+  following: { label: 'From someone you follow', icon: 'people' },
+  discovery: { label: 'Popular in your circles', icon: 'explore' },
+  trending: { label: 'Trending now', icon: 'trending-up' },
+};
 // Post card width. Capped on wide screens (tablets/landscape) so the feed reads
 // as a centered column instead of stretching edge-to-edge; on phones it's just
 // the window width minus the 12px side margins, so their layout is unchanged.
@@ -771,6 +779,18 @@ const SocialFeed = ({ showBackground = true }) => {
               {timeAgo(item.created_at)}
               {item.location ? `  ·  ${item.location}` : ''}
             </Text>
+            {FEED_REASON[item.feed_reason] && (
+              <View style={styles.reasonChip}>
+                <MaterialIcons
+                  name={FEED_REASON[item.feed_reason].icon}
+                  size={11}
+                  color={colors.primary}
+                />
+                <Text style={styles.reasonChipText} numberOfLines={1}>
+                  {FEED_REASON[item.feed_reason].label}
+                </Text>
+              </View>
+            )}
           </View>
         </TouchableOpacity>
         <View style={styles.headerActions}>
@@ -1191,6 +1211,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 1,
+  },
+  reasonChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 3,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(29,161,242,0.12)',
+  },
+  reasonChipText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: colors.primary,
   },
 
   headerActions: {

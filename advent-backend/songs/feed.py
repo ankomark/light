@@ -172,7 +172,8 @@ def invalidate_user(user_id):
     """Drop this user's ranking caches after a signal that should change their
     feed immediately (e.g. a new "not interested")."""
     cache.delete_many([
-        f'feed:rank:{user_id}', f'feed:ni:{user_id}', f'feed:neg:{user_id}',
+        f'feed:rank:{user_id}', f'feed:reason:{user_id}',
+        f'feed:ni:{user_id}', f'feed:neg:{user_id}',
     ])
 
 
@@ -330,6 +331,17 @@ def build_ranked_feed(user):
         authors.setdefault(t['id'], t['a'])
         trending_pool.append(t['id'])
 
+    # Why a post is shown (drives the client's "reason chip"). A post can be in
+    # several pools; label it by the most personal one it qualifies for.
+    reasons = {}
+    for pid in following_pool:
+        reasons.setdefault(pid, 'following')
+    for pid in discovery_pool:
+        reasons.setdefault(pid, 'discovery')
+    for pid in trending_pool:
+        reasons.setdefault(pid, 'trending')
+    cache.set(f'feed:reason:{user.id}', reasons, SNAPSHOT_TTL)
+
     merged = _weighted_interleave(
         [following_pool, trending_pool, discovery_pool], BLEND_WEIGHTS,
     )
@@ -343,6 +355,12 @@ def build_ranked_feed(user):
         + _diversify(seen_tail, authors, DIVERSITY_WINDOW, SNAPSHOT_SIZE)
     )
     return ranked[:SNAPSHOT_SIZE]
+
+
+def get_reasons(user_id):
+    """Map of post_id -> reason for the user's current snapshot (cached beside
+    it by build_ranked_feed). Empty when there's no ranked snapshot."""
+    return cache.get(f'feed:reason:{user_id}') or {}
 
 
 def get_snapshot(user, *, fresh=False):

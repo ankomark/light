@@ -139,6 +139,15 @@ class RankedFeedEndpointTests(APITestCase):
         snap = feed.build_ranked_feed(self.alice)
         self.assertLess(snap.index(p1.id), snap.index(p2.id))
 
+    def test_feed_reason_chip_labels_each_post(self):
+        res = self.client.get('/api/social-posts/?rank=1&fresh=1')
+        self.assertEqual(res.status_code, 200)
+        by_id = {p['id']: p.get('feed_reason') for p in res.data['results']}
+        # bob is followed; carol is a follower-of-follower; dave is trending.
+        self.assertEqual(by_id.get(self.bob_post.id), 'following')
+        self.assertEqual(by_id.get(self.carol_post.id), 'discovery')
+        self.assertEqual(by_id.get(self.dave_post.id), 'trending')
+
     def test_not_interested_hides_post_from_both_feeds(self):
         from songs.models import NotInterested
         target = self.bob_post  # bob is followed, so normally in-feed

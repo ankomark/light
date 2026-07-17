@@ -277,6 +277,13 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         ) if page_ids else []
         data = self.get_serializer(posts, many=True).data
 
+        # Attach the "why you're seeing this" reason for the client's chip.
+        reasons = feedrank.get_reasons(user.id)
+        for row in data:
+            reason = reasons.get(row.get('id'))
+            if reason:
+                row['feed_reason'] = reason
+
         # Remember what we served so later refreshes demote it (cache-only).
         feedrank.mark_seen(user.id, page_ids)
 
