@@ -147,7 +147,12 @@ class ChurchViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def my_churches(self, request):
-        churches = Church.objects.filter(created_by=request.user)
+        # select_related avoids an N+1 on created_by (+ profile) when the
+        # serializer resolves created_by_picture.
+        churches = (
+            Church.objects.filter(created_by=request.user)
+            .select_related('created_by', 'created_by__profile')
+        )
         serializer = self.get_serializer(churches, many=True)
         return Response(serializer.data)
 

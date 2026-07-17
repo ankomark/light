@@ -10,15 +10,15 @@ import {
   ActivityIndicator,
   ScrollView,
   Modal,
-  Image,
   RefreshControl,
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
+import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { fetchChurches, createChurch, updateChurch, deleteChurch } from '../services/api';
+import { fetchChurches, fetchChurchesByUrl, createChurch, updateChurch, deleteChurch } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
@@ -68,20 +68,38 @@ const Churches = ({ navigation }) => {
   const [image, setImage] = useState(null);
   const [editingChurch, setEditingChurch] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
 
   // Load churches from API (reused by initial load, pull-to-refresh, and mutations)
   const loadChurches = useCallback(async () => {
     try {
-      const response = await fetchChurches({ page_size: 100 });
-      const list = Array.isArray(response) ? response : [];
+      const response = await fetchChurches();  // page 1
+      const list = response?.results ?? (Array.isArray(response) ? response : []);
       setChurches(list);
-      setFilteredChurches(list);
+      setNextUrl(response?.next ?? null);
       return list;
     } catch (error) {
       Alert.alert('Error', 'Failed to load churches');
       return null;
     }
   }, []);
+
+  // Infinite scroll: append the next page (filteredChurches re-derives from
+  // `churches`, so newly loaded rows flow into the visible list + search).
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchChurchesByUrl(nextUrl);
+      setChurches(prev => [...prev, ...(res?.results ?? [])]);
+      setNextUrl(res?.next ?? null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useEffect(() => {
     (async () => {
@@ -298,7 +316,9 @@ const Churches = ({ navigation }) => {
             <Image
               source={creatorImage}
               style={styles.profileImage}
-              defaultSource={DEFAULT_PROFILE_IMAGE}
+              placeholder={DEFAULT_PROFILE_IMAGE}
+              contentFit="cover"
+              transition={150}
             />
             <View>
               <Text style={styles.username}>{creatorName}</Text>
@@ -312,7 +332,8 @@ const Churches = ({ navigation }) => {
           <Image
             source={{ uri: item.image }}
             style={styles.churchImage}
-            resizeMode="cover"
+            contentFit="cover"
+            transition={150}
           />
         ) : (
           <View style={[styles.churchImage, styles.churchImagePlaceholder]}>
@@ -419,7 +440,7 @@ const Churches = ({ navigation }) => {
             >
               <TouchableOpacity style={styles.coverPicker} onPress={pickImage} activeOpacity={0.85}>
                 {image ? (
-                  <Image source={{ uri: image }} style={styles.coverPreview} resizeMode="cover" />
+                  <Image source={{ uri: image }} style={styles.coverPreview} contentFit="cover" transition={150} />
                 ) : (
                   <View style={styles.coverPlaceholder}>
                     <MaterialIcons name="add-a-photo" size={26} color={colors.accent} />
@@ -580,6 +601,13 @@ const Churches = ({ navigation }) => {
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          loadingMore
+            ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 16 }} />
+            : null
+        }
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

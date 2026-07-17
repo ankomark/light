@@ -557,10 +557,25 @@ export const toggleFavorite = async (hymnId) => {
 
 //church endpoints
 
+// Returns the paginated response { results, next, ... } so the caller can
+// infinite-scroll. (Legacy callers that read an array should use res.results.)
 export const fetchChurches = async (params = {}) => {
-  const queryString = new URLSearchParams(params).toString();
-  const res = await apiRequest('get', `/churches/?${queryString}`);
-  return res?.results ?? res;
+  const queryString = new URLSearchParams({ page_size: 20, ...params }).toString();
+  return apiRequest('get', `/churches/?${queryString}`);
+};
+
+// Follow a paginated `next` link (preserves path + query) for infinite scroll.
+export const fetchChurchesByUrl = async (nextUrl) => {
+  if (!nextUrl) return null;
+  const [base, qs] = nextUrl.split('?');
+  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
+  const params = {};
+  (qs || '').split('&').forEach((kv) => {
+    if (!kv) return;
+    const [k, v] = kv.split('=');
+    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  });
+  return apiRequest('get', path, null, { params });
 };
 
 export const fetchChurchById = async (id) => {
