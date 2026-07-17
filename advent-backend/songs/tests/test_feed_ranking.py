@@ -139,6 +139,34 @@ class RankedFeedEndpointTests(APITestCase):
         snap = feed.build_ranked_feed(self.alice)
         self.assertLess(snap.index(p1.id), snap.index(p2.id))
 
+    def test_watch_batch_stores_and_clamps(self):
+        from songs.models import WatchEvent
+        res = self.client.post('/api/social-posts/watch/', {'events': [
+            {'post_id': self.bob_post.id, 'dwell_ms': 5000},
+            {'post_id': self.carol_post.id, 'dwell_ms': 100},   # below MIN -> dropped
+            {'post_id': 999999, 'dwell_ms': 4000},              # invalid post -> dropped
+        ]}, format='json')
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.json()['stored'], 1)
+        self.assertTrue(WatchEvent.objects.filter(user=self.alice, post=self.bob_post).exists())
+
+    def test_long_dwell_boosts_taste(self):
+        from songs import feed
+        # Two equal-engagement candidates from followed authors; alice watched
+        # dave (untracked here) — instead seed a dwell on a bob-authored topic.
+        follow(self.alice, self.carol)
+        p_watched_author = mkpost(self.bob, tags='choir', likes=5)
+        rival = mkpost(self.carol, tags='news', likes=5)
+        # Long dwell on a 'choir' post by bob -> taste favors bob/choir.
+        seed = mkpost(self.dave, tags='choir', likes=1)
+        self.client.post('/api/social-posts/watch/',
+                         {'events': [{'post_id': seed.id, 'dwell_ms': 8000}]}, format='json')
+        cache.clear()
+        snap = feed.build_ranked_feed(self.alice)
+        self.assertIn(p_watched_author.id, snap)
+        if rival.id in snap:
+            self.assertLess(snap.index(p_watched_author.id), snap.index(rival.id))
+
     def test_feed_reason_chip_labels_each_post(self):
         res = self.client.get('/api/social-posts/?rank=1&fresh=1')
         self.assertEqual(res.status_code, 200)

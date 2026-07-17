@@ -1486,6 +1486,11 @@ export const reportContent = (contentType, objectId, reason, description = '') =
 export const markNotInterested = (postId) =>
   apiRequest('post', `/social-posts/${postId}/not_interested/`, {});
 
+// Batched watch-time (dwell) events → sharpen personalization. Best-effort:
+// callers ignore failures. events: [{ post_id, dwell_ms }].
+export const logWatchEvents = (events) =>
+  apiRequest('post', '/social-posts/watch/', { events });
+
 // ── R2 presigned upload ───────────────────────────────────────────────────────
 // Returns { upload_url, key, public_url, content_type, expires_in }; the app
 // PUTs the raw bytes to upload_url and stores public_url as the media ref.

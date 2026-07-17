@@ -385,6 +385,36 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK
             )
 
+    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def watch(self, request):
+        """Ingest a batch of dwell events: {"events": [{"post_id", "dwell_ms"}]}.
+        Batched + capped + bulk-inserted so the write cost stays low. Only
+        meaningful dwells are stored (noise/outliers are clamped out)."""
+        from ..models import WatchEvent
+        MIN_MS, MAX_MS, MAX_EVENTS = 500, 120000, 200
+        events = request.data.get('events') or []
+        if not isinstance(events, list):
+            return Response({'error': 'events must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+
+        cleaned = {}
+        for e in events[:MAX_EVENTS]:
+            try:
+                pid, ms = int(e['post_id']), int(e['dwell_ms'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if ms < MIN_MS:
+                continue
+            ms = min(ms, MAX_MS)
+            cleaned[pid] = max(cleaned.get(pid, 0), ms)  # keep the longest per post
+
+        if not cleaned:
+            return Response({'stored': 0})
+        valid_ids = set(SocialPost.objects.filter(id__in=cleaned).values_list('id', flat=True))
+        rows = [WatchEvent(user=request.user, post_id=pid, dwell_ms=cleaned[pid])
+                for pid in valid_ids]
+        WatchEvent.objects.bulk_create(rows, batch_size=200)
+        return Response({'stored': len(rows)}, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def not_interested(self, request, pk=None):
         """Record a private "not interested" signal: hide this post from the

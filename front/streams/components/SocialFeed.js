@@ -10,6 +10,7 @@ import {
   Pressable,
   Dimensions,
   Platform,
+  AppState,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Video, Audio } from 'expo-av';
@@ -22,7 +23,7 @@ import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
-import { fetchSocialPosts, fetchFeedByUrl } from '../services/api';
+import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
@@ -423,6 +424,27 @@ const SocialFeed = ({ showBackground = true }) => {
   const flatListRef = useRef(null);
   const topPostIdRef = useRef(null);
 
+  // Watch-time (dwell) tracking: enter-time per post + a batched send buffer.
+  const viewStartRef = useRef({});          // postId -> ms timestamp entered view
+  const watchBufferRef = useRef([]);        // [{ post_id, dwell_ms }] pending upload
+
+  // Send buffered dwell events (best-effort). closeOpen finalizes posts still in
+  // view — used when leaving the screen / backgrounding.
+  const flushWatch = useCallback((closeOpen = false) => {
+    if (closeOpen) {
+      const now = Date.now();
+      Object.entries(viewStartRef.current).forEach(([id, start]) => {
+        const dwell = now - start;
+        if (dwell >= 500) watchBufferRef.current.push({ post_id: Number(id), dwell_ms: dwell });
+      });
+      viewStartRef.current = {};
+    }
+    const events = watchBufferRef.current;
+    if (!events.length) return;
+    watchBufferRef.current = [];
+    logWatchEvents(events).catch(() => {});
+  }, []);
+
   useEffect(() => { topPostIdRef.current = posts[0]?.id ?? null; }, [posts]);
 
   const loadPosts = useCallback(async (isRefresh = false) => {
@@ -536,17 +558,27 @@ const SocialFeed = ({ showBackground = true }) => {
     return () => clearInterval(interval);
   }, [checkForNewPosts]);
 
+  // Flush dwell events periodically, on background, and on unmount.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') flushWatch(true);
+    });
+    const iv = setInterval(() => flushWatch(false), 30000);
+    return () => { sub.remove(); clearInterval(iv); flushWatch(true); };
+  }, [flushWatch]);
+
   useFocusEffect(
     useCallback(() => {
       const now = Date.now();
       if (now - lastFetchTimeRef.current > 120000) loadPosts();
-      // Leaving the screen: pause the focused video and stop attached-song audio.
+      // Leaving the screen: pause the focused video, stop audio, send dwell.
       return () => {
         focusedVideoIdRef.current = null;
         setFocusedVideoId(null);
         stopSongRef.current?.();
+        flushWatch(true);
       };
-    }, [loadPosts])
+    }, [loadPosts, flushWatch])
   );
 
   useEffect(() => () => {
@@ -658,6 +690,8 @@ const SocialFeed = ({ showBackground = true }) => {
       const post = entry.item;
       if (!post) return;
       if (entry.isViewable) {
+        // Start the dwell timer for this post.
+        viewStartRef.current[post.id] = Date.now();
         if (
           post.content_type === 'image' &&
           post.song_audio_url &&
@@ -665,8 +699,17 @@ const SocialFeed = ({ showBackground = true }) => {
         ) {
           playSongRef.current?.(post);
         }
-      } else if (playingSongPostIdRef.current === post.id) {
-        stopSongRef.current?.();
+      } else {
+        // Left view: bank the dwell time.
+        const started = viewStartRef.current[post.id];
+        if (started) {
+          const dwell = Date.now() - started;
+          delete viewStartRef.current[post.id];
+          if (dwell >= 500) watchBufferRef.current.push({ post_id: post.id, dwell_ms: dwell });
+        }
+        if (playingSongPostIdRef.current === post.id) {
+          stopSongRef.current?.();
+        }
       }
     });
   }).current;

@@ -759,6 +759,20 @@ class NotInterested(models.Model):
         indexes = [models.Index(fields=['user', 'post'])]
 
 
+class WatchEvent(models.Model):
+    """How long a user actually dwelled on a post (ms in viewport). Written in
+    batches by the client, so the write cost stays low. A strong implicit
+    interest signal — long dwells feed the taste profile like soft likes — and
+    the training data for a future learned ranker."""
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='watch_events')
+    post = models.ForeignKey('SocialPost', on_delete=models.CASCADE, related_name='watch_events')
+    dwell_ms = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', '-created_at'])]
+
+
 class MediaStation(models.Model):
     STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
 

@@ -20,7 +20,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import NotInterested, PostLike, SocialPost, User, blocked_ids_for
+from .models import NotInterested, PostLike, SocialPost, User, WatchEvent, blocked_ids_for
 
 
 def _cfg(name, default):
@@ -56,6 +56,10 @@ TASTE_MAX_AUTHORS = _cfg('FEED_TASTE_MAX_AUTHORS', 15)
 TASTE_MAX_TAGS = _cfg('FEED_TASTE_MAX_TAGS', 15)
 TASTE_AUTHOR_BONUS = _cfg('FEED_TASTE_AUTHOR_BONUS', 4.0)
 TASTE_TAG_BONUS = _cfg('FEED_TASTE_TAG_BONUS', 3.0)
+# Watch-time (implicit) taste signal.
+DWELL_STRONG_MS = _cfg('FEED_DWELL_STRONG_MS', 3000)     # a dwell >= this = interest
+WATCH_SAMPLE_CAP = _cfg('FEED_WATCH_SAMPLE_CAP', 300)
+WATCH_TASTE_WEIGHT = _cfg('FEED_WATCH_TASTE_WEIGHT', 1)  # long dwell ≈ one like
 # Negative signal ("not interested"): how hard to demote matching author/tag.
 NEG_AUTHOR_PENALTY = _cfg('FEED_NEG_AUTHOR_PENALTY', 6.0)
 NEG_TAG_PENALTY = _cfg('FEED_NEG_TAG_PENALTY', 4.0)
@@ -114,17 +118,31 @@ def taste_profile(user):
     cached = cache.get(key)
     if cached is not None:
         return cached
-    rows = (
+    author_counts, tag_counts = {}, {}
+
+    def _tally(author_id, tags, weight=1):
+        if author_id is not None:
+            author_counts[author_id] = author_counts.get(author_id, 0) + weight
+        for t in (tags or '').lower().split():
+            tag_counts[t] = tag_counts.get(t, 0) + weight
+
+    # Explicit signal: likes.
+    likes = (
         PostLike.objects.filter(user=user)
         .order_by('-id')
         .values_list('post__user_id', 'post__tags')[:TASTE_LIKES_CAP]
     )
-    author_counts, tag_counts = {}, {}
-    for author_id, tags in rows:
-        if author_id is not None:
-            author_counts[author_id] = author_counts.get(author_id, 0) + 1
-        for t in (tags or '').lower().split():
-            tag_counts[t] = tag_counts.get(t, 0) + 1
+    for author_id, tags in likes:
+        _tally(author_id, tags)
+
+    # Implicit signal: long dwells count like a soft like (watch-time).
+    watched = (
+        WatchEvent.objects.filter(user=user, dwell_ms__gte=DWELL_STRONG_MS)
+        .order_by('-id')
+        .values_list('post__user_id', 'post__tags')[:WATCH_SAMPLE_CAP]
+    )
+    for author_id, tags in watched:
+        _tally(author_id, tags, weight=WATCH_TASTE_WEIGHT)
     profile = {
         'authors': set(sorted(author_counts, key=author_counts.get, reverse=True)[:TASTE_MAX_AUTHORS]),
         'tags': set(sorted(tag_counts, key=tag_counts.get, reverse=True)[:TASTE_MAX_TAGS]),
