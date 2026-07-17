@@ -107,9 +107,7 @@ class VideoStudioSerializer(serializers.ModelSerializer):
 
 
 class VideoStudioListSerializer(serializers.ModelSerializer):
-    """Lightweight list payload: logo/cover return as cacheable URLs (served by
-    the `logo`/`cover` actions) instead of full base64, so the list stays small
-    and fast. The client reads `logo` / `cover_image` exactly as before."""
+    """Lightweight list payload. logo/cover_image are R2 URLs served directly."""
     created_by = SimpleUserSerializer(read_only=True)
     is_owner = serializers.SerializerMethodField()
     logo = serializers.SerializerMethodField()
@@ -124,21 +122,11 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
-    def _image_url(self, obj, kind):
-        # kind is 'logo' or 'cover'; empty stored blob → empty string.
-        field = 'logo' if kind == 'logo' else 'cover_image'
-        if not getattr(obj, field, ''):
-            return ''
-        ver = int(obj.updated_at.timestamp()) if obj.updated_at else 0  # cache-bust on edit
-        path = f'/api/video-studios/{obj.id}/{kind}/?v={ver}'
-        request = self.context.get('request')
-        return request.build_absolute_uri(path) if request else path
-
     def get_logo(self, obj):
-        return self._image_url(obj, 'logo')
+        return media.resolve(obj.logo) or ''
 
     def get_cover_image(self, obj):
-        return self._image_url(obj, 'cover')
+        return media.resolve(obj.cover_image) or ''
 
 
 class ChoirSerializer(serializers.ModelSerializer):
@@ -156,11 +144,8 @@ class ChoirSerializer(serializers.ModelSerializer):
 
 
 class ChoirListSerializer(serializers.ModelSerializer):
-    """Lightweight list payload: the profile/cover images are returned as
-    cacheable URLs (served by the `cover`/`profile` actions) instead of the full
-    base64 data URIs, so the list stays small and fast — and the client never
-    has to decode 20 huge images at once. The client reads `profile_image` /
-    `cover_image` exactly as before; they're just URLs now."""
+    """Lightweight list payload. profile_image/cover_image are R2 URLs served
+    directly."""
     created_by = SimpleUserSerializer(read_only=True)
     is_owner = serializers.SerializerMethodField()
     profile_image = serializers.SerializerMethodField()
@@ -175,20 +160,11 @@ class ChoirListSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
-    def _image_url(self, obj, kind):
-        # kind is 'profile' or 'cover'; empty stored blob → empty string.
-        if not getattr(obj, f'{kind}_image', ''):
-            return ''
-        ver = int(obj.updated_at.timestamp()) if obj.updated_at else 0  # cache-bust on edit
-        path = f'/api/choirs/{obj.id}/{kind}/?v={ver}'
-        request = self.context.get('request')
-        return request.build_absolute_uri(path) if request else path
-
     def get_profile_image(self, obj):
-        return self._image_url(obj, 'profile')
+        return media.resolve(obj.profile_image) or ''
 
     def get_cover_image(self, obj):
-        return self._image_url(obj, 'cover')
+        return media.resolve(obj.cover_image) or ''
 
 
 # ── Choir community (membership / requests / chat) ────────────────────────────

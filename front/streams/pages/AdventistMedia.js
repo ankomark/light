@@ -10,6 +10,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
   fetchMediaStations, createMediaStation, updateMediaStation, deleteMediaStation,
 } from '../services/api';
+import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const TYPES = ['TV', 'Radio', 'Podcast'];
@@ -78,8 +79,7 @@ const AdventistMedia = () => {
     Linking.openURL(url).catch(() => Alert.alert('Error', 'Could not open this link.'));
   }, []);
 
-  // Pick a logo, downscale to a small square, and keep it as a base64 data URI
-  // (stored on the backend as text — no separate file upload needed).
+  // Pick a logo, downscale to a small square, upload to R2, and store the URL.
   const pickLogo = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -97,13 +97,17 @@ const AdventistMedia = () => {
         const processed = await manipulateAsync(
           result.assets[0].uri,
           [{ resize: { width: 256, height: 256 } }],
-          { compress: 0.7, format: SaveFormat.JPEG, base64: true }
+          { compress: 0.7, format: SaveFormat.JPEG }
         );
-        setNewStation((prev) => ({ ...prev, logo: `data:image/jpeg;base64,${processed.base64}` }));
+        const uploaded = await uploadMedia(
+          { uri: processed.uri, name: `station_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+          'cover',
+        );
+        setNewStation((prev) => ({ ...prev, logo: uploaded.url }));
       }
     } catch (error) {
       console.error('Logo picker error:', error);
-      Alert.alert('Error', 'Failed to select image.');
+      Alert.alert('Error', 'Failed to upload image.');
     }
   };
 

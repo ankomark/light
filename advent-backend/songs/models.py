@@ -750,8 +750,8 @@ class MediaStation(models.Model):
 
     name = models.CharField(max_length=200)
     type = models.CharField(max_length=10, choices=STATION_TYPES, default='TV')
-    # Logo is stored as a small base64 data URI (or blank to use a default icon).
-    logo = models.TextField(blank=True)
+    # Media reference: absolute URL (R2), or blank to use a default icon.
+    logo = models.CharField(max_length=500, blank=True)
     website = models.URLField(max_length=500, blank=True)
     youtube = models.URLField(max_length=500, blank=True)
     facebook = models.URLField(max_length=500, blank=True)
@@ -792,8 +792,9 @@ class Videostudio(models.Model):
     contact_phone = models.CharField(max_length=20, blank=True, null=True)
     contact_email = models.EmailField(blank=True, null=True)
     # Images stored as base64 data URIs (or blank to use a default).
-    logo = models.TextField(blank=True, default='')
-    cover_image = models.TextField(blank=True, default='')
+    # Media references: absolute URLs (R2).
+    logo = models.CharField(max_length=500, blank=True, default='')
+    cover_image = models.CharField(max_length=500, blank=True, default='')
     whatsapp_number = models.CharField(max_length=20, blank=True, null=True)
     currency = models.CharField(max_length=8, blank=True, default='USD')
     rate_description = models.CharField(max_length=200, blank=True, default='')
@@ -860,8 +861,9 @@ class Choir(models.Model):
     genre = models.CharField(max_length=50, choices=GENRE_CHOICES, default='gospel')
     members_count = models.PositiveIntegerField(default=0)
     # Images stored as base64 data URIs (or blank to use a default).
-    profile_image = models.TextField(blank=True, default='')
-    cover_image = models.TextField(blank=True, default='')
+    # Media references: absolute URLs (R2).
+    profile_image = models.CharField(max_length=500, blank=True, default='')
+    cover_image = models.CharField(max_length=500, blank=True, default='')
     founded_date = models.DateField(blank=True, null=True)
     youtube_link = models.URLField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
@@ -1541,7 +1543,9 @@ class Publication(models.Model):
     title = models.CharField(max_length=200)
     summary = models.TextField(blank=True)
     # Cover stored as a small base64 data URI (or blank to use a default).
-    cover = models.TextField(blank=True)
+    # Media reference: absolute URL (R2). Inline article-body images remain
+    # base64 data URIs for now.
+    cover = models.CharField(max_length=500, blank=True)
     # Reading look chosen by the author: {bg, text, font, scale}. Empty = default.
     theme = models.JSONField(default=dict, blank=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')

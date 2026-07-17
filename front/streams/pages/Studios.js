@@ -12,6 +12,7 @@ import {
   fetchVideoStudios, createVideoStudio, updateVideoStudio, deleteVideoStudio,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 // Keys MUST match the backend Videostudio.SERVICE_TYPES choices.
@@ -41,7 +42,7 @@ const EMPTY = {
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
-async function pickBase64(aspect, width) {
+async function pickAndUpload(aspect, width, type) {
   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status !== 'granted') {
     Alert.alert('Permission required', 'Please enable photo library access.');
@@ -53,9 +54,18 @@ async function pickBase64(aspect, width) {
   if (result.canceled || !result.assets?.length) return null;
   const processed = await manipulateAsync(
     result.assets[0].uri, [{ resize: { width } }],
-    { compress: 0.6, format: SaveFormat.JPEG, base64: true }
+    { compress: 0.6, format: SaveFormat.JPEG }
   );
-  return `data:image/jpeg;base64,${processed.base64}`;
+  try {
+    const uploaded = await uploadMedia(
+      { uri: processed.uri, name: `studio_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+      type,
+    );
+    return uploaded.url;
+  } catch (e) {
+    Alert.alert('Upload failed', e?.message ?? 'Could not upload the image.');
+    return null;
+  }
 }
 
 const Studios = () => {
@@ -145,8 +155,8 @@ const Studios = () => {
     // Only send an image when it's a freshly-picked data URI. On edit the field
     // holds a server URL (the list no longer ships base64), so omitting it leaves
     // the stored image untouched instead of overwriting it with the URL string.
-    if (logo.startsWith('data:')) payload.logo = logo;
-    if (coverImage.startsWith('data:')) payload.cover_image = coverImage;
+    if (logo.startsWith('http')) payload.logo = logo;
+    if (coverImage.startsWith('http')) payload.cover_image = coverImage;
 
     try {
       setSaving(true);
@@ -372,7 +382,7 @@ const Studios = () => {
             enableResetScrollToCoords={false}
             extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
           >
-            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickBase64([16, 9], 800); if (u) setCoverImage(u); }} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover'); if (u) setCoverImage(u); }} activeOpacity={0.85}>
               {coverImage ? <Image source={{ uri: coverImage }} style={styles.coverPreview} /> : (
                 <View style={styles.coverPlaceholder}>
                   <Ionicons name="image-outline" size={26} color={colors.textMuted} />
@@ -382,7 +392,7 @@ const Studios = () => {
             </TouchableOpacity>
 
             <View style={styles.profileRow}>
-              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickBase64([1, 1], 400); if (u) setLogo(u); }} activeOpacity={0.85}>
+              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'cover'); if (u) setLogo(u); }} activeOpacity={0.85}>
                 {logo ? <Image source={{ uri: logo }} style={styles.profilePreview} /> : <Ionicons name="camera-outline" size={24} color={colors.textMuted} />}
               </TouchableOpacity>
               <Text style={styles.profileHint}>Studio logo (optional)</Text>

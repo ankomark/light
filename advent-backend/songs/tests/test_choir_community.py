@@ -2,6 +2,7 @@
 
     python manage.py test songs.tests.test_choir_community --settings=music.settings_test
 """
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 from unittest import mock
@@ -160,36 +161,30 @@ class ChoirCommunityTests(APITestCase):
         r = self.client.post(f'/api/choirs/{cid}/messages/{mid}/react/', {'emoji': '👍'}, format='json')
         self.assertEqual(r.status_code, 403)
 
-    # A 1×1 transparent PNG, as the client would upload it.
-    PNG_1PX = (
-        'data:image/png;base64,'
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-    )
+    # Images are R2 URLs now (moved off base64 data-URIs).
+    PROFILE = 'https://pub-test.r2.dev/profile_images/p.jpg'
+    COVER = 'https://pub-test.r2.dev/cover_images/c.jpg'
 
-    def test_list_serves_image_urls_not_base64(self):
+    @override_settings(R2_PUBLIC_BASE='https://pub-test.r2.dev')
+    def test_list_returns_stored_r2_urls(self):
         self.client.force_authenticate(self.creator)
         res = self.client.post(
             '/api/choirs/',
-            {'name': 'Pixel Praise', 'location': 'Web', 'profile_image': self.PNG_1PX, 'cover_image': self.PNG_1PX},
+            {'name': 'Pixel Praise', 'location': 'Web',
+             'profile_image': self.PROFILE, 'cover_image': self.COVER},
             format='json',
         )
         self.assertEqual(res.status_code, 201)
         cid = res.json()['id']
 
-        # The list must NOT echo base64 — it returns small, cacheable URLs.
         lst = self.client.get('/api/choirs/')
         row = next(c for c in (lst.json().get('results') or lst.json()) if c['id'] == cid)
-        self.assertNotIn('base64', row['profile_image'])
-        self.assertIn(f'/choirs/{cid}/profile/', row['profile_image'])
-        self.assertIn(f'/choirs/{cid}/cover/', row['cover_image'])
+        self.assertEqual(row['profile_image'], self.PROFILE)
+        self.assertEqual(row['cover_image'], self.COVER)
 
-        # And the image endpoint streams real PNG bytes (public, no auth).
-        self.client.force_authenticate(user=None)
-        img = self.client.get(f'/api/choirs/{cid}/profile/')
-        self.assertEqual(img.status_code, 200)
-        self.assertEqual(img['Content-Type'], 'image/png')
-        self.assertEqual(img.content[:8], b'\x89PNG\r\n\x1a\n')
-
-    def test_image_endpoint_404_when_no_image(self):
+    def test_missing_images_are_empty(self):
         cid = self._make_choir()  # created without images
-        self.assertEqual(self.client.get(f'/api/choirs/{cid}/cover/').status_code, 404)
+        lst = self.client.get('/api/choirs/')
+        row = next(c for c in (lst.json().get('results') or lst.json()) if c['id'] == cid)
+        self.assertEqual(row['cover_image'], '')
+        self.assertEqual(row['profile_image'], '')

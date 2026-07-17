@@ -17,6 +17,7 @@ import {
   CATEGORIES, markdownTheme, markdownImageRule, WRITING_BGS, WRITING_TEXT_COLORS, WRITING_FONTS,
   DEFAULT_WRITING_THEME, fontFamilyFor, extractInlineImages, appendInlineImage, expandInlineImages,
 } from '../utils/publications';
+import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const blankChapter = () => ({ key: `${Date.now()}_${Math.random()}`, title: '', body: '', images: {}, preview: false });
@@ -127,13 +128,17 @@ const PublicationEditor = ({ route, navigation }) => {
         const processed = await manipulateAsync(
           result.assets[0].uri,
           [{ resize: { width: 600 } }],
-          { compress: 0.6, format: SaveFormat.JPEG, base64: true }
+          { compress: 0.6, format: SaveFormat.JPEG }
         );
-        setCover(`data:image/jpeg;base64,${processed.base64}`);
+        const uploaded = await uploadMedia(
+          { uri: processed.uri, name: `cover_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+          'cover',
+        );
+        setCover(uploaded.url);
       }
     } catch (err) {
       console.error('Cover picker error:', err);
-      Alert.alert('Error', 'Failed to select image.');
+      Alert.alert('Error', 'Failed to upload image.');
     }
   };
 

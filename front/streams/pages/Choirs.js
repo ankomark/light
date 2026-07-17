@@ -14,6 +14,7 @@ import {
   toggleChoirActive, updateChoirMembers,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const GENRES = [
@@ -32,8 +33,8 @@ const EMPTY = {
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
-// Pick an image and return a compressed base64 data URI.
-async function pickBase64(aspect, width) {
+// Pick an image, compress it, upload to R2, and return the public URL.
+async function pickAndUpload(aspect, width, type) {
   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status !== 'granted') {
     Alert.alert('Permission required', 'Please enable photo library access.');
@@ -49,9 +50,18 @@ async function pickBase64(aspect, width) {
   const processed = await manipulateAsync(
     result.assets[0].uri,
     [{ resize: { width } }],
-    { compress: 0.6, format: SaveFormat.JPEG, base64: true }
+    { compress: 0.6, format: SaveFormat.JPEG }
   );
-  return `data:image/jpeg;base64,${processed.base64}`;
+  try {
+    const uploaded = await uploadMedia(
+      { uri: processed.uri, name: `choir_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+      type,
+    );
+    return uploaded.url;
+  } catch (e) {
+    Alert.alert('Upload failed', e?.message ?? 'Could not upload the image.');
+    return null;
+  }
 }
 
 const Choirs = ({ navigation }) => {
@@ -141,8 +151,10 @@ const Choirs = ({ navigation }) => {
     // Only send an image when it's a freshly-picked data URI. On edit the field
     // holds a server URL (the list no longer ships base64), so omitting it leaves
     // the stored image untouched instead of overwriting it with the URL string.
-    if (profileImage.startsWith('data:')) payload.profile_image = profileImage;
-    if (coverImage.startsWith('data:')) payload.cover_image = coverImage;
+    // Send image URLs (uploaded to R2 by the picker) when present. An unchanged
+    // existing URL is re-sent harmlessly; a cleared image isn't touched.
+    if (profileImage.startsWith('http')) payload.profile_image = profileImage;
+    if (coverImage.startsWith('http')) payload.cover_image = coverImage;
 
     try {
       setSaving(true);
@@ -409,7 +421,7 @@ const Choirs = ({ navigation }) => {
             extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
           >
             {/* Cover + profile pickers */}
-            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickBase64([16, 9], 800); if (u) setCoverImage(u); }} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover'); if (u) setCoverImage(u); }} activeOpacity={0.85}>
               {coverImage ? (
                 <Image source={{ uri: coverImage }} style={styles.coverPreview} />
               ) : (
@@ -421,7 +433,7 @@ const Choirs = ({ navigation }) => {
             </TouchableOpacity>
 
             <View style={styles.profileRow}>
-              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickBase64([1, 1], 400); if (u) setProfileImage(u); }} activeOpacity={0.85}>
+              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'profile-image'); if (u) setProfileImage(u); }} activeOpacity={0.85}>
                 {profileImage ? (
                   <Image source={{ uri: profileImage }} style={styles.profilePreview} />
                 ) : (
