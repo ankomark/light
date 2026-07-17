@@ -1467,9 +1467,15 @@ export const viewStory = (id) => apiRequest('post', `/stories/${id}/view_story/`
 export const reportContent = (contentType, objectId, reason, description = '') =>
   apiRequest('post', '/reports/', { content_type: contentType, object_id: objectId, reason, description });
 
-// ── Cloudinary signed upload ───────────────────────────────────────────────────
-export const getCloudinarySignature = (type, extra = {}) =>
-  apiRequest('post', '/upload/sign/', { type, ...extra });
+// ── R2 presigned upload ───────────────────────────────────────────────────────
+// Returns { upload_url, key, public_url, content_type, expires_in }; the app
+// PUTs the raw bytes to upload_url and stores public_url as the media ref.
+export const getR2UploadTicket = (type, contentType, filename) =>
+  apiRequest('post', '/upload/r2-sign/', {
+    type,
+    content_type: contentType,
+    ...(filename ? { filename } : {}),
+  });
 
 // ── Direct Messaging ──────────────────────────────────────────────────────────
 export const fetchConversations = async () => {

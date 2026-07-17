@@ -173,16 +173,9 @@ export const DownloadButton = ({ mediaUrl, publicId, contentType }) => {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  // Prefer the delivery URL we already have (media_file is write-only on the API,
-  // so publicId is usually unavailable on the client); fall back to building one.
-  const resolveUrl = () => {
-    if (mediaUrl) return mediaUrl;
-    if (publicId) {
-      const resourceType = contentType === 'video' ? 'video' : 'image';
-      return `https://res.cloudinary.com/${config.cloudinary.cloudName}/${resourceType}/upload/${publicId}`;
-    }
-    return null;
-  };
+  // The API always returns absolute media URLs now; publicId is a legacy prop
+  // kept only so old call sites don't crash.
+  const resolveUrl = () => mediaUrl || (typeof publicId === 'string' && publicId.startsWith('http') ? publicId : null);
 
   const handleDownload = async () => {
     const downloadUrl = resolveUrl();

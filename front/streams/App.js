@@ -138,7 +138,7 @@ const navTheme = {
 
 // Per-tab wallpapers. Home/SocialFeed keeps the rotating set (in RotatingBackground's
 // defaults); other tabs pass their own here (re-hosted on Cloudinary, optimized).
-const CLD_W = 'https://res.cloudinary.com/dxdmo9j4v/image/upload/f_auto,q_auto,c_limit,w_1080/wallpapers';
+const CLD_W = 'https://pub-9c5a2f0a7a2244be84e39a116c2dc4d5.r2.dev/wallpapers';
 const MUSIC_WALLPAPERS = [
   `${CLD_W}/wg19rbjnqphztrcsan0b.jpg`,
   `${CLD_W}/fjcbdllwljh0dvglousp.jpg`,

@@ -6,10 +6,9 @@ import ScreenVignette from './ScreenVignette';
 // the grey navigator scene.
 const BASE_BG = '#0A1628';
 
-// Wallpapers re-hosted on our own Cloudinary (folder: wallpapers), served from
-// its CDN with on-the-fly optimization: f_auto (WebP/AVIF where supported),
-// q_auto (smart compression), c_limit/w_1080 (cap size, never upscale).
-const CLD = 'https://res.cloudinary.com/dxdmo9j4v/image/upload/f_auto,q_auto,c_limit,w_1080/wallpapers';
+// Wallpapers hosted on R2 (folder: wallpapers), pre-optimized at 1080px/q_auto
+// before upload — R2 serves the bytes verbatim through Cloudflare's CDN.
+const CLD = 'https://pub-9c5a2f0a7a2244be84e39a116c2dc4d5.r2.dev/wallpapers';
 const DEFAULT_IMAGES = [
   `${CLD}/s366jodfjqsiikqn39ps.jpg`,
   `${CLD}/f0y17m0ksh6a2tbq33f6.jpg`,

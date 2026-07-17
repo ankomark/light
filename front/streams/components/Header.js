@@ -13,7 +13,7 @@ import { colors } from '../constants/theme';
 
 const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the image
 // Wallpaper behind the header — re-hosted on our Cloudinary CDN, optimized.
-const HEADER_IMAGE = 'https://res.cloudinary.com/dxdmo9j4v/image/upload/f_auto,q_auto,c_limit,w_1080/wallpapers/bpqz33r3njhwouungnli.jpg';
+const HEADER_IMAGE = 'https://pub-9c5a2f0a7a2244be84e39a116c2dc4d5.r2.dev/wallpapers/bpqz33r3njhwouungnli.jpg';
 const INACTIVE = 'rgba(255,255,255,0.62)';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
