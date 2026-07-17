@@ -79,7 +79,10 @@
           "merchantIdentifier": "",
           "enableGooglePay": false
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker",
+      "@sentry/react-native",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
