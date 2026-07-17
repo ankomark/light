@@ -89,6 +89,39 @@ class AdminPrivilegeTests(APITestCase):
         self.assertEqual(r.status_code, 403, r.content[:300])
 
 
+class AdminReportTargetTests(APITestCase):
+    """The reports list batches target previews (one query per content type),
+    so its query count must not grow with the number of reports."""
+
+    def setUp(self):
+        self.boss = _super_admin('rt_boss')
+        self.author = User.objects.create_user('rt_author', 'rta@x.com', 'x')
+        self.client.force_authenticate(self.boss)
+
+    def _report_on_post(self, i):
+        post = SocialPost.objects.create(user=self.author, caption=f'bad {i}')
+        reporter = User.objects.create_user(f'rt_rep{i}', f'rtr{i}@x.com', 'x')
+        Report.objects.create(reporter=reporter, content_type='post', object_id=post.id, reason='spam')
+
+    def _load(self):
+        with CaptureQueriesContext(connection) as ctx:
+            r = self.client.get('/api/admin/reports/')
+            self.assertEqual(r.status_code, 200)
+        return len(ctx.captured_queries), r.json()['results']
+
+    def test_targets_batched_no_n_plus_1(self):
+        self._report_on_post(0)
+        self._report_on_post(1)
+        few, _ = self._load()
+        for i in range(2, 7):
+            self._report_on_post(i)
+        many, rows = self._load()
+        self.assertEqual(few, many, f'report targets scale per-row: {few} -> {many}')
+        # Previews are still populated (author + type) — batching didn't lose data.
+        self.assertTrue(rows and all(r['target'] and r['target']['type'] == 'post' for r in rows))
+        self.assertTrue(all(r['target']['author']['username'] == 'rt_author' for r in rows))
+
+
 class AdminUserListQueryTests(APITestCase):
     """The user-management list must not run COUNT queries per row."""
 

@@ -1,5 +1,80 @@
+from collections import defaultdict
+
 from .common import *  # noqa: F401,F403  (serializers, models, SimpleUserSerializer, timezone)
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITY_KEYS
+
+
+# ── Report target previews (batched) ─────────────────────────────────────────
+# One formatter per content type, shared by the per-row fallback and the batched
+# prefetch so the shape is identical either way.
+def _format_post(p):
+    return {
+        'type': 'post', 'id': p.id, 'caption': (p.caption or '')[:140],
+        'content_type': p.content_type,
+        'author': SimpleUserSerializer(p.user).data,
+        'is_removed': p.is_removed,
+    }
+
+
+def _format_comment(c):
+    return {
+        'type': 'comment', 'id': c.id, 'content': (c.content or '')[:200],
+        'post_id': c.post_id,
+        'author': SimpleUserSerializer(c.user).data,
+        'is_removed': c.is_removed,
+    }
+
+
+def _format_track(t):
+    return {
+        'type': 'track', 'id': t.id, 'title': t.title,
+        'author': SimpleUserSerializer(t.artist).data,
+        'is_removed': t.is_removed,
+    }
+
+
+def _format_user(u):
+    return {
+        'type': 'user', 'id': u.id, 'username': u.username,
+        'author': SimpleUserSerializer(u).data,
+        'is_suspended': u.is_suspended, 'is_active': u.is_active,
+    }
+
+
+def _format_group(g):
+    return {'type': 'group', 'id': g.id, 'name': getattr(g, 'name', '')}
+
+
+# content_type -> (queryset builder, formatter). select_related pulls the
+# author (+ its profile for the avatar) so a page of targets is a query per
+# TYPE, not per report.
+_TARGET_FETCHERS = {
+    'post':    (lambda ids: SocialPost.objects.filter(id__in=ids).select_related('user__profile'),   _format_post),
+    'comment': (lambda ids: PostComment.objects.filter(id__in=ids).select_related('user__profile'),  _format_comment),
+    'track':   (lambda ids: Track.objects.filter(id__in=ids).select_related('artist__profile'),      _format_track),
+    'user':    (lambda ids: User.objects.filter(id__in=ids).select_related('profile'),               _format_user),
+    'group':   (lambda ids: Group.objects.filter(id__in=ids),                                        _format_group),
+}
+
+
+def build_report_targets(reports):
+    """Given the reports on a page, fetch every target with one query per content
+    type and return a {(content_type, object_id): preview} map. Pass this to
+    AdminReportSerializer via context['report_targets'] to avoid the per-row
+    target query (the reports list's only N+1)."""
+    ids_by_type = defaultdict(set)
+    for r in reports:
+        if r.content_type in _TARGET_FETCHERS:
+            ids_by_type[r.content_type].add(r.object_id)
+    out = {}
+    for ctype, ids in ids_by_type.items():
+        build_qs, fmt = _TARGET_FETCHERS[ctype]
+        for obj in build_qs(ids):
+            try:
+                out[(ctype, obj.id)] = fmt(obj)
+            except Exception:
+                out[(ctype, obj.id)] = None
+    return out
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -96,53 +171,21 @@ class AdminReportSerializer(serializers.ModelSerializer):
 
     def get_target(self, obj):
         ct, oid = obj.content_type, obj.object_id
+        # Prefer the batched map (one query per type for the whole page); it maps
+        # every (type, id) on the page, so a miss here means the target is gone.
+        prefetched = self.context.get('report_targets')
+        if prefetched is not None:
+            return prefetched.get((ct, oid))
+        # Fallback for un-prefetched callers: fetch + format this one target.
+        fetcher = _TARGET_FETCHERS.get(ct)
+        if not fetcher:
+            return None
+        build_qs, fmt = fetcher
         try:
-            if ct == 'post':
-                p = SocialPost.objects.filter(id=oid).select_related('user').first()
-                if not p:
-                    return None
-                return {
-                    'type': 'post', 'id': p.id, 'caption': (p.caption or '')[:140],
-                    'content_type': p.content_type,
-                    'author': SimpleUserSerializer(p.user).data,
-                    'is_removed': p.is_removed,
-                }
-            if ct == 'comment':
-                c = PostComment.objects.filter(id=oid).select_related('user').first()
-                if not c:
-                    return None
-                return {
-                    'type': 'comment', 'id': c.id, 'content': (c.content or '')[:200],
-                    'post_id': c.post_id,
-                    'author': SimpleUserSerializer(c.user).data,
-                    'is_removed': c.is_removed,
-                }
-            if ct == 'track':
-                t = Track.objects.filter(id=oid).select_related('artist').first()
-                if not t:
-                    return None
-                return {
-                    'type': 'track', 'id': t.id, 'title': t.title,
-                    'author': SimpleUserSerializer(t.artist).data,
-                    'is_removed': t.is_removed,
-                }
-            if ct == 'user':
-                u = User.objects.filter(id=oid).first()
-                if not u:
-                    return None
-                return {
-                    'type': 'user', 'id': u.id, 'username': u.username,
-                    'author': SimpleUserSerializer(u).data,
-                    'is_suspended': u.is_suspended, 'is_active': u.is_active,
-                }
-            if ct == 'group':
-                g = Group.objects.filter(id=oid).first()
-                if not g:
-                    return None
-                return {'type': 'group', 'id': g.id, 'name': getattr(g, 'name', '')}
+            obj_ = build_qs([oid]).first()
+            return fmt(obj_) if obj_ else None
         except Exception:
             return None
-        return None
 
 
 class AdminActionLogSerializer(serializers.ModelSerializer):

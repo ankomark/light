@@ -3,6 +3,7 @@ from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES
+from ..serializers.admin import build_report_targets
 from ..serializers import (
     AdminUserSerializer,
     AdminReportSerializer,
@@ -121,7 +122,7 @@ class AdminDashboardView(APIView):
         week_ago = now - timedelta(days=7)
         recent_reports = (
             Report.objects
-            .select_related('reporter', 'assigned_to', 'resolved_by')
+            .select_related('reporter__profile', 'assigned_to__profile', 'resolved_by__profile')
             .order_by('-created_at')[:10]
         )
         recent_users = (
@@ -156,7 +157,10 @@ class AdminDashboardView(APIView):
                 'banned': User.objects.filter(is_active=False).count(),
                 'removed_posts': SocialPost.objects.filter(is_removed=True).count(),
             },
-            'recent_reports': AdminReportSerializer(recent_reports, many=True).data,
+            'recent_reports': AdminReportSerializer(
+                recent_reports, many=True,
+                context={'request': request, 'report_targets': build_report_targets(list(recent_reports))},
+            ).data,
             'recent_users': AdminUserSerializer(recent_users, many=True).data,
         })
 
@@ -218,7 +222,11 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         )
         qs = (
             Report.objects
-            .select_related('reporter', 'assigned_to', 'resolved_by')
+            # __profile too: the serializer's reporter/assigned/resolved run
+            # through SimpleUserSerializer, which reads profile.picture.
+            .select_related(
+                'reporter__profile', 'assigned_to__profile', 'resolved_by__profile',
+            )
             .annotate(dup_count=Subquery(dup))
             .order_by('-created_at')
         )
@@ -230,11 +238,18 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         return qs
 
     def list(self, request):
-        return _paginated(self, self.get_queryset(), AdminReportSerializer)
+        qs = self.get_queryset()
+        page = self.paginate_queryset(qs)
+        rows = page if page is not None else list(qs)
+        # Batch every target on the page into one query per content type.
+        ctx = {'request': request, 'report_targets': build_report_targets(rows)}
+        data = AdminReportSerializer(rows, many=True, context=ctx).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
 
     def retrieve(self, request, pk=None):
         report = get_object_or_404(Report, pk=pk)
-        return Response(self.get_serializer(report).data)
+        ctx = {'request': request, 'report_targets': build_report_targets([report])}
+        return Response(AdminReportSerializer(report, context=ctx).data)
 
     def _set_status(self, request, pk, new_status, action_name):
         report = get_object_or_404(Report, pk=pk)
