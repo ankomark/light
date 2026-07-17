@@ -33,7 +33,6 @@ const SECTIONS = [
     items: [
       { label: 'Favorites', route: 'Favorites', set: 'ion', icon: 'heart-outline' },
       { label: 'Playlists', route: 'Playlists', set: 'mci', icon: 'playlist-music-outline' },
-      { label: 'Choirs', route: 'Choirs', set: 'mci', icon: 'account-music-outline' },
       { label: 'Services', route: 'Studios', set: 'mci', icon: 'video-outline' },
     ],
   },
@@ -41,8 +40,9 @@ const SECTIONS = [
     title: 'Community',
     items: [
       { label: 'Messages', route: 'Inbox', set: 'ion', icon: 'chatbubbles-outline' },
-      { label: 'Groups', route: 'Groups', set: 'mci', icon: 'account-group-outline' },
+      { label: 'Choirs', route: 'Choirs', set: 'mci', icon: 'account-music-outline' },
       { label: 'Churches', route: 'Churches', set: 'mci', icon: 'church' },
+      { label: 'Groups', route: 'Groups', set: 'mci', icon: 'account-group-outline' },
       { label: 'Notice Board', route: 'NoticeBoard', set: 'mci', icon: 'bulletin-board' },
     ],
   },
