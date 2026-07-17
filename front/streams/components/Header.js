@@ -240,7 +240,9 @@ const styles = StyleSheet.create({
   },
   menuContainer: { marginLeft: 'auto' },
   rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 'auto' },
-  videosBtn: { padding: 2 },
+  // marginLeft opens a gap between the brand title and the video icon so it
+  // doesn't crowd "ADVENTIST LIFE" on narrower screens.
+  videosBtn: { padding: 2, marginLeft: 14 },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
