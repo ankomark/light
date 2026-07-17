@@ -1,12 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, Alert, Image, Modal, TextInput, Pressable,
+  ActivityIndicator, Alert, Modal, TextInput, Pressable,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  fetchAdminReports, resolveReport, dismissReport, removeReportTarget,
+  fetchAdminReports, fetchAdminByUrl, resolveReport, dismissReport, removeReportTarget,
   assignReport, addReportNote, bulkReports,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
@@ -32,7 +33,9 @@ const TargetPreview = ({ target }) => {
         <View style={styles.targetAuthor}>
           <Image
             source={author.profile_picture ? { uri: author.profile_picture } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR}
+            placeholder={DEFAULT_AVATAR}
+            contentFit="cover"
+            transition={120}
             style={styles.targetAvatar}
           />
           <Text style={styles.targetAuthorName}>@{author.username}</Text>
@@ -56,18 +59,39 @@ const AdminReports = () => {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
 
   const load = useCallback(async (status) => {
     setLoading(true);
     try {
       const res = await fetchAdminReports(status);
       setReports(res?.results || (Array.isArray(res) ? res : []));
+      setNextUrl(res?.next || null);
     } catch {
       setReports([]);
+      setNextUrl(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchAdminByUrl(nextUrl);
+      setReports((prev) => {
+        const have = new Set(prev.map((r) => r.id));
+        return [...prev, ...(res?.results || []).filter((r) => !have.has(r.id))];
+      });
+      setNextUrl(res?.next || null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useFocusEffect(useCallback(() => { load(filter); }, [load, filter]));
 
@@ -242,6 +266,9 @@ const AdminReports = () => {
           showsVerticalScrollIndicator={false}
           onRefresh={() => load(filter)}
           refreshing={loading}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="shield-checkmark-outline" size={48} color={colors.textSecondary} />

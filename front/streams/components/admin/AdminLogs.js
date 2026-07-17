@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, ActivityIndicator, Image,
+  View, Text, StyleSheet, FlatList, ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminLogs } from '../../services/api';
+import { fetchAdminLogs, fetchAdminByUrl } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
@@ -32,18 +33,39 @@ function timeAgo(dateStr) {
 const AdminLogs = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetchAdminLogs();
       setLogs(res?.results || (Array.isArray(res) ? res : []));
+      setNextUrl(res?.next || null);
     } catch {
       setLogs([]);
+      setNextUrl(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchAdminByUrl(nextUrl);
+      setLogs((prev) => {
+        const have = new Set(prev.map((l) => l.id));
+        return [...prev, ...(res?.results || []).filter((l) => !have.has(l.id))];
+      });
+      setNextUrl(res?.next || null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -60,7 +82,9 @@ const AdminLogs = () => {
           <View style={styles.metaRow}>
             <Image
               source={item.actor?.profile_picture ? { uri: item.actor.profile_picture } : DEFAULT_AVATAR}
-              defaultSource={DEFAULT_AVATAR}
+              placeholder={DEFAULT_AVATAR}
+              contentFit="cover"
+              transition={120}
               style={styles.actorAvatar}
             />
             <Text style={styles.actor} numberOfLines={1}>
@@ -89,6 +113,9 @@ const AdminLogs = () => {
           showsVerticalScrollIndicator={false}
           onRefresh={load}
           refreshing={loading}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
           ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>No actions logged yet</Text></View>}
         />
       )}

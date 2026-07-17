@@ -119,8 +119,20 @@ class AdminDashboardView(APIView):
         now = timezone.now()
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
-        recent_reports = Report.objects.select_related('reporter').order_by('-created_at')[:10]
-        recent_users = User.objects.order_by('-date_joined')[:10]
+        recent_reports = (
+            Report.objects
+            .select_related('reporter', 'assigned_to', 'resolved_by')
+            .order_by('-created_at')[:10]
+        )
+        recent_users = (
+            User.objects
+            .select_related('role', 'profile')
+            .annotate(
+                anno_posts_count=Count('social_posts', distinct=True),
+                anno_followers_count=Count('followers', distinct=True),
+            )
+            .order_by('-date_joined')[:10]
+        )
         return Response({
             'totals': {
                 'users': User.objects.count(),
@@ -316,7 +328,17 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         return [Cap('manage_users', 'ban_users')()]
 
     def get_queryset(self):
-        qs = User.objects.select_related('role', 'profile').order_by('-date_joined')
+        # Annotate the per-row counts the serializer shows (posts + followers) so
+        # the user list is a couple of queries instead of 2 COUNTs per row.
+        qs = (
+            User.objects
+            .select_related('role', 'profile')
+            .annotate(
+                anno_posts_count=Count('social_posts', distinct=True),
+                anno_followers_count=Count('followers', distinct=True),
+            )
+            .order_by('-date_joined')
+        )
         q = self.request.query_params.get('q')
         if q:
             qs = qs.filter(Q(username__icontains=q) | Q(email__icontains=q))
@@ -337,6 +359,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user = get_object_or_404(User, pk=pk)
         if user.id == request.user.id:
             return Response({'error': "You can't suspend yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        # Super admins are untouchable by moderation actions (mirrors ban).
+        if user.is_super_admin:
+            return Response({'error': "You can't suspend a super admin."}, status=status.HTTP_400_BAD_REQUEST)
         reason = (request.data.get('reason') or '')[:255]
         # Optional ?days=N for a temporary suspension; omitted/0 => indefinite.
         try:
@@ -373,6 +398,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user = get_object_or_404(User, pk=pk)
         if user.id == request.user.id:
             return Response({'error': "You can't warn yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        # Super admins are untouchable — a warning can auto-escalate to a suspension.
+        if user.is_super_admin:
+            return Response({'error': "You can't warn a super admin."}, status=status.HTTP_400_BAD_REQUEST)
         reason = (request.data.get('reason') or '')[:255]
         user.strikes = (user.strikes or 0) + 1
         fields = ['strikes']

@@ -1,14 +1,15 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
-  ActivityIndicator, Image, Modal, Alert,
+  ActivityIndicator, Modal, Alert,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/useAuth';
 import { isSuperAdmin, hasCapability } from '../../utils/roles';
 import {
-  fetchAdminUsers, suspendUser, unsuspendUser, banUser, unbanUser, warnUser,
+  fetchAdminUsers, fetchAdminByUrl, suspendUser, unsuspendUser, banUser, unbanUser, warnUser,
   fetchRoles, setUserSuperAdmin, assignUserRole,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
@@ -24,6 +25,8 @@ const AdminUsers = () => {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
   const [selected, setSelected] = useState(null); // user in the manage sheet
   const [busy, setBusy] = useState(false);
   const [suspendFor, setSuspendFor] = useState(null); // user pending a suspension-duration pick
@@ -34,12 +37,31 @@ const AdminUsers = () => {
     try {
       const res = await fetchAdminUsers(q);
       setUsers(res?.results || (Array.isArray(res) ? res : []));
+      setNextUrl(res?.next || null);
     } catch {
       setUsers([]);
+      setNextUrl(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchAdminByUrl(nextUrl);
+      setUsers((prev) => {
+        const have = new Set(prev.map((u) => u.id));
+        return [...prev, ...(res?.results || []).filter((u) => !have.has(u.id))];
+      });
+      setNextUrl(res?.next || null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useFocusEffect(useCallback(() => {
     load(query.trim());
@@ -79,7 +101,9 @@ const AdminUsers = () => {
     <TouchableOpacity style={styles.row} onPress={() => setSelected(item)} activeOpacity={0.85}>
       <Image
         source={item.profile_picture ? { uri: item.profile_picture } : DEFAULT_AVATAR}
-        defaultSource={DEFAULT_AVATAR}
+        placeholder={DEFAULT_AVATAR}
+        contentFit="cover"
+        transition={120}
         style={styles.avatar}
       />
       <View style={{ flex: 1 }}>
@@ -124,6 +148,9 @@ const AdminUsers = () => {
           showsVerticalScrollIndicator={false}
           onRefresh={() => load(query.trim())}
           refreshing={loading}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
           ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>No users found</Text></View>}
         />
       )}
@@ -138,7 +165,9 @@ const AdminUsers = () => {
                 <View style={styles.sheetHead}>
                   <Image
                     source={selected.profile_picture ? { uri: selected.profile_picture } : DEFAULT_AVATAR}
-                    defaultSource={DEFAULT_AVATAR}
+                    placeholder={DEFAULT_AVATAR}
+                    contentFit="cover"
+                    transition={120}
                     style={styles.sheetAvatar}
                   />
                   <View style={{ flex: 1 }}>

@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
-  Image, Alert, ScrollView, TextInput, Pressable,
+  Alert, ScrollView, TextInput, Pressable,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminContent, removeContent, restoreContent, bulkContent } from '../../services/api';
+import { fetchAdminContent, fetchAdminByUrl, removeContent, restoreContent, bulkContent } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
@@ -29,6 +30,8 @@ const AdminContent = () => {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
   const debounceRef = useRef(null);
 
   const load = useCallback(async (t, q, removed) => {
@@ -36,12 +39,33 @@ const AdminContent = () => {
     try {
       const res = await fetchAdminContent(t, q, removed ? 'true' : '');
       setItems(res?.results || (Array.isArray(res) ? res : []));
+      setNextUrl(res?.next || null);
     } catch {
       setItems([]);
+      setNextUrl(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // nextUrl already encodes the active type/query/removed filters, so loadMore
+  // just follows it — no need to thread the current filters through here.
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchAdminByUrl(nextUrl);
+      setItems((prev) => {
+        const have = new Set(prev.map((it) => it.id));
+        return [...prev, ...(res?.results || []).filter((it) => !have.has(it.id))];
+      });
+      setNextUrl(res?.next || null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useFocusEffect(useCallback(() => { load(type, query.trim(), removedOnly); }, [load, type, removedOnly]));  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -123,7 +147,9 @@ const AdminContent = () => {
           )}
           <Image
             source={author?.profile_picture ? { uri: author.profile_picture } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR}
+            placeholder={DEFAULT_AVATAR}
+            contentFit="cover"
+            transition={120}
             style={styles.avatar}
           />
           <Text style={styles.author} numberOfLines={1}>@{author?.username || 'unknown'}</Text>
@@ -209,6 +235,9 @@ const AdminContent = () => {
           showsVerticalScrollIndicator={false}
           onRefresh={() => load(type, query.trim(), removedOnly)}
           refreshing={loading}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
           ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>Nothing here</Text></View>}
         />
       )}

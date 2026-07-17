@@ -1615,6 +1615,21 @@ export const fetchUnreadMessageCount = () =>
 export const fetchAdminDashboard = () =>
   apiRequest('get', '/admin/dashboard/');
 
+// Follow a paginated `next` link (preserves path + query) for the admin
+// queues' infinite scroll. Shared by every admin list screen.
+export const fetchAdminByUrl = (nextUrl) => {
+  if (!nextUrl) return Promise.resolve(null);
+  const [base, qs] = nextUrl.split('?');
+  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
+  const params = {};
+  (qs || '').split('&').forEach((kv) => {
+    if (!kv) return;
+    const [k, v] = kv.split('=');
+    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  });
+  return apiRequest('get', path, null, { params });
+};
+
 export const fetchAdminAnalytics = (days = 14) =>
   apiRequest('get', '/admin/analytics/', null, { params: { days } });
 

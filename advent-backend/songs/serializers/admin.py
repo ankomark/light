@@ -48,16 +48,22 @@ class AdminUserSerializer(serializers.ModelSerializer):
         return {'id': obj.role_id, 'name': obj.role.name} if obj.role_id else None
 
     def get_profile_picture(self, obj):
+        # Resolve the avatar directly off the prefetched profile — building a
+        # nested SimpleUserSerializer per row was needless overhead on the list.
         try:
-            return SimpleUserSerializer(obj).data.get('profile_picture')
+            prof = getattr(obj, 'profile', None)
+            return media.resolve(prof.picture) if prof and prof.picture else None
         except Exception:
             return None
 
     def get_posts_count(self, obj):
-        return obj.social_posts.count()
+        # Prefer the list annotation (anno_posts_count) to avoid a COUNT per row.
+        v = getattr(obj, 'anno_posts_count', None)
+        return v if v is not None else obj.social_posts.count()
 
     def get_followers_count(self, obj):
-        return obj.followers.count()
+        v = getattr(obj, 'anno_followers_count', None)
+        return v if v is not None else obj.followers.count()
 
 
 class AdminReportSerializer(serializers.ModelSerializer):

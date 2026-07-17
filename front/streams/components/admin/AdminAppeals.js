@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Image, Alert,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminAppeals, approveAppeal, rejectAppeal } from '../../services/api';
+import { fetchAdminAppeals, fetchAdminByUrl, approveAppeal, rejectAppeal } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
@@ -20,18 +21,39 @@ const AdminAppeals = () => {
   const [appeals, setAppeals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
 
   const load = useCallback(async (status) => {
     setLoading(true);
     try {
       const res = await fetchAdminAppeals(status);
       setAppeals(res?.results || (Array.isArray(res) ? res : []));
+      setNextUrl(res?.next || null);
     } catch {
       setAppeals([]);
+      setNextUrl(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchAdminByUrl(nextUrl);
+      setAppeals((prev) => {
+        const have = new Set(prev.map((a) => a.id));
+        return [...prev, ...(res?.results || []).filter((a) => !have.has(a.id))];
+      });
+      setNextUrl(res?.next || null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useFocusEffect(useCallback(() => { load(filter); }, [load, filter]));
 
@@ -60,7 +82,9 @@ const AdminAppeals = () => {
         <View style={styles.head}>
           <Image
             source={item.user?.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR}
+            placeholder={DEFAULT_AVATAR}
+            contentFit="cover"
+            transition={120}
             style={styles.avatar}
           />
           <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
@@ -114,6 +138,9 @@ const AdminAppeals = () => {
           showsVerticalScrollIndicator={false}
           onRefresh={() => load(filter)}
           refreshing={loading}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="file-tray-outline" size={48} color={colors.textSecondary} />
