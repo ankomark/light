@@ -1536,9 +1536,23 @@ export const getR2UploadTicket = (type, contentType, filename) =>
   });
 
 // ── Direct Messaging ──────────────────────────────────────────────────────────
-export const fetchConversations = async () => {
-  const res = await apiRequest('get', '/conversations/');
-  return res?.results ?? res;
+// Returns the paginated response { results, next, ... } so the inbox can
+// load more. Page 1 is the freshest conversations (ordered by recent activity).
+export const fetchConversations = async () =>
+  apiRequest('get', '/conversations/', null, { params: { page_size: 20 } });
+
+// Follow a paginated `next` link (preserves path + query) for infinite scroll.
+export const fetchConversationsByUrl = async (nextUrl) => {
+  if (!nextUrl) return null;
+  const [base, qs] = nextUrl.split('?');
+  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
+  const params = {};
+  (qs || '').split('&').forEach((kv) => {
+    if (!kv) return;
+    const [k, v] = kv.split('=');
+    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  });
+  return apiRequest('get', path, null, { params });
 };
 
 export const getOrCreateConversation = (userId) =>

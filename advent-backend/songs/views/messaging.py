@@ -1,5 +1,5 @@
 from .common import *  # noqa: F401,F403
-from django.db.models import OuterRef, Subquery, Count, IntegerField
+from django.db.models import OuterRef, Subquery, Count, IntegerField, F
 
 # Base64 of a ~6 MB binary is ~8 MB of text; allow a little headroom. The client
 # caps uploads at 6 MB, but the server enforces its own bound (clients lie).
@@ -38,6 +38,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 last_msg_at=Subquery(last.values('created_at')[:1]),
                 unread_n=Subquery(unread, output_field=IntegerField()),
             )
+            # Most-recent activity first; stable secondary key so pagination
+            # can't drift or duplicate rows across pages.
+            .order_by(F('last_msg_at').desc(nulls_last=True), '-id')
         )
 
     def get_serializer_context(self):

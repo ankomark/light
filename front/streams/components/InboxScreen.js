@@ -6,7 +6,7 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchConversations } from '../services/api';
+import { fetchConversations, fetchConversationsByUrl } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -78,14 +78,25 @@ const InboxScreen = ({ navigation }) => {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
   const appState = useRef(AppState.currentState);
   const pollRef = useRef(null);
 
+  // Initial/refresh: replace with page 1 (freshest) + capture the next cursor.
+  // Silent poll: merge page 1 on top of the loaded list (deduped) so new
+  // activity bubbles up without losing older pages the user scrolled in.
   const load = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const data = await fetchConversations();
-      setConversations(Array.isArray(data) ? data : []);
+      const res = await fetchConversations();
+      const page1 = res?.results ?? (Array.isArray(res) ? res : []);
+      setConversations((prev) => {
+        if (!silent) return page1;
+        const ids = new Set(page1.map((c) => c.id));
+        return [...page1, ...prev.filter((c) => !ids.has(c.id))];
+      });
+      if (!silent) setNextUrl(res?.next ?? null);
     } catch {
       // ignore
     } finally {
@@ -93,6 +104,24 @@ const InboxScreen = ({ navigation }) => {
       setRefreshing(false);
     }
   }, []);
+
+  // Infinite scroll: append the next page of older conversations.
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchConversationsByUrl(nextUrl);
+      setConversations((prev) => {
+        const have = new Set(prev.map((c) => c.id));
+        return [...prev, ...(res?.results ?? []).filter((c) => !have.has(c.id))];
+      });
+      setNextUrl(res?.next ?? null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   useFocusEffect(
     useCallback(() => {
@@ -152,6 +181,13 @@ const InboxScreen = ({ navigation }) => {
         renderItem={({ item }) => <ConversationItem item={item} onPress={openChat} />}
         contentContainerStyle={[styles.listContent, conversations.length === 0 && styles.emptyContent]}
         showsVerticalScrollIndicator={false}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          loadingMore
+            ? <ActivityIndicator size="small" color={colors.accent} style={{ marginVertical: 16 }} />
+            : null
+        }
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" colors={[colors.accent]} />
         }
