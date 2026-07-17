@@ -1,91 +1,41 @@
-from .common import *  # noqa: F401,F403
+﻿from .common import *  # noqa: F401,F403
 from django.db.models import Exists, OuterRef
+from .. import r2
 
 
-class CloudinarySignView(APIView):
+class R2SignView(APIView):
+    """Presigned direct-to-R2 uploads â€” the Cloudinary signer's successor.
+
+    Same `type` vocabulary as CloudinarySignView so the app's upload service
+    swaps providers without re-mapping. Key differences the client must honor:
+    - upload is a plain HTTP PUT of the raw bytes to `upload_url` (no multipart)
+    - the Content-Type sent on the PUT must match `content_type` exactly
+    - trim/compress/thumbnails happen client-side before upload (R2 stores
+      bytes verbatim; there is no ingest transformation)
+    """
     permission_classes = [IsAuthenticated]
-
-    FOLDER_MAP = {
-        'audio': 'audio_uploads',
-        'image': 'social_media/images',
-        'video': 'social_media/videos',
-        'story_video': 'stories/videos',
-        'chat_image': 'chat/images',
-        'chat_audio': 'chat/audio',
-        'chat_file': 'chat/files',
-        'profile': 'profile_images',
-        'cover': 'cover_images',
-        'avatar': 'avatars',
-    }
-
-    # Incoming transformations applied at upload time (these replace the stored
-    # original, so they reduce Cloudinary storage — not just delivery). Story
-    # videos are short, vertical, phone-shot clips: capping the long edge to 720
-    # and using eco quality roughly halves the stored size with no visible loss
-    # on a phone. (30s length is enforced on the client before upload.)
-    UPLOAD_TRANSFORMS = {
-        'story_video': 'c_limit,w_720,h_1280,q_auto:eco',
-        # Social-feed videos: cap the long edge to 1920 (1080p-class, works for
-        # any orientation since c_limit fits within the 1920x1920 box and only
-        # downscales) and compress with q_auto:good. Halves storage on big clips
-        # and is a server-side net for anything that slips past the 1080p client
-        # check (e.g. other upload surfaces).
-        'video': 'c_limit,w_1920,h_1920,q_auto:good',
-        # Chat images: cap to 1080 on the long edge and q_auto compress so a
-        # photo shared in DMs is small to store and quick to load.
-        'chat_image': 'c_limit,w_1080,h_1080,q_auto:good',
-    }
-
-    @staticmethod
-    def _trim_segment(start, end):
-        """Build a `so_,eo_` trim segment (seconds) from a requested window, or
-        None if the window is missing/invalid. The stored clip is capped at 30s."""
-        try:
-            s = round(float(start), 2)
-            e = round(float(end), 2)
-        except (TypeError, ValueError):
-            return None
-        if s < 0 or e <= s:
-            return None
-        e = min(e, s + 30)
-        return f"so_{s},eo_{e}"
-
-    def _transformation_for(self, upload_type, data):
-        """Incoming transformation to bake in at upload. For social videos a trim
-        window is trimmed in at ingest so ONLY the clip is stored (not the full
-        upload); without a window it falls back to the static compress/cap."""
-        base = self.UPLOAD_TRANSFORMS.get(upload_type)
-        if upload_type == 'video':
-            seg = self._trim_segment(data.get('start'), data.get('end'))
-            if seg:
-                return f"{seg},c_limit,w_1920,h_1920,q_auto:good"
-        return base
 
     def post(self, request):
         upload_type = request.data.get('type', 'image')
-        folder = self.FOLDER_MAP.get(upload_type, 'uploads')
-        timestamp = int(time_module.time())
-        params_to_sign = {'timestamp': timestamp, 'folder': folder}
+        if upload_type not in r2.FOLDER_MAP:
+            return Response({'error': f'Unknown upload type: {upload_type}'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not r2.is_configured():
+            return Response({'error': 'R2 not configured'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Sign the incoming transformation too, if this type has one. The client
-        # must echo the exact string back, so byte-for-byte signature match holds.
-        transformation = self._transformation_for(upload_type, request.data)
-        if transformation:
-            params_to_sign['transformation'] = transformation
+        content_type = (request.data.get('content_type') or '').strip().lower()
+        if not content_type:
+            return Response({'error': 'content_type is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not r2.content_type_allowed(upload_type, content_type):
+            return Response(
+                {'error': f'content_type {content_type} not allowed for {upload_type}'},
+                status=status.HTTP_400_BAD_REQUEST)
 
-        api_secret = cloudinary.config().api_secret
-        if not api_secret:
-            return Response({'error': 'Cloudinary not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        signature = cloudinary_sign_request(params_to_sign, api_secret)
-        return Response({
-            'signature': signature,
-            'timestamp': timestamp,
-            'api_key': cloudinary.config().api_key,
-            'cloud_name': cloudinary.config().cloud_name,
-            'folder': folder,
-            'transformation': transformation,
-        })
-
+        return Response(r2.presign_put(
+            upload_type, content_type, filename=request.data.get('filename'),
+        ))
 
 
 class AvatarUploadView(APIView):
@@ -105,22 +55,12 @@ class AvatarUploadView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            result = upload(
-                serializer.validated_data['avatar'],
-                folder='profile_pictures',
-                resource_type='image',
-                transformation=[
-                    {'width': 300, 'height': 300, 'crop': 'thumb', 'gravity': 'face'},
-                    {'quality': 'auto'}
-                ]
-            )
-            
-            # Update profile with new picture data
+            # Straight to R2. Sizing/cropping is the client's job now (it
+            # already compresses before upload); R2 stores bytes verbatim.
+            url = r2.upload_file(serializer.validated_data['avatar'], 'profile_images')
+
             profile = request.user.profile
-            profile.picture = {
-                'public_id': result['public_id'],
-                'secure_url': result['secure_url']
-            }
+            profile.picture = url
             profile.save()
             
             return Response(
@@ -144,29 +84,21 @@ class TrackUploadView(APIView):
         serializer = TrackUploadSerializer(data=request.data)
         if serializer.is_valid():
             try:
-                # Upload audio file
-                audio_result = upload(
-                    serializer.validated_data['audio_file'],
-                    folder='audio',
-                    resource_type='video',
-                    format='mp3'
-                )
-                
-                # Upload cover image if provided
-                cover_result = None
+                # Straight to R2; the stored reference is the public URL.
+                audio_url = r2.upload_file(
+                    serializer.validated_data['audio_file'], 'audio_uploads')
+
+                cover_url = None
                 if 'cover_image' in serializer.validated_data:
-                    cover_result = upload(
-                        serializer.validated_data['cover_image'],
-                        folder='covers',
-                        resource_type='image'
-                    )
-                
+                    cover_url = r2.upload_file(
+                        serializer.validated_data['cover_image'], 'cover_images')
+
                 # Create track
                 track_data = {
                     'title': request.data.get('title', 'Untitled Track'),
                     'artist': request.user.id,
-                    'audio_file': audio_result['public_id'],
-                    'cover_image': cover_result['public_id'] if cover_result else None,
+                    'audio_file': audio_url,
+                    'cover_image': cover_url,
                     'album': request.data.get('album', ''),
                     'lyrics': request.data.get('lyrics', '')
                 }
@@ -176,10 +108,11 @@ class TrackUploadView(APIView):
                     track = track_serializer.save()
                     return Response(track_serializer.data, status=status.HTTP_201_CREATED)
                 return Response(track_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-                
-            except CloudinaryError as e:
+
+            except Exception as e:
+                logger.error(f"Track upload to R2 failed: {e}", exc_info=True)
                 return Response(
-                    {'error': str(e)},
+                    {'error': 'Upload failed. Please try again.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -319,7 +252,7 @@ class TrackViewSet(viewsets.ModelViewSet):
         if not track.audio_file:
             return Response({'error': 'Audio file not found'}, status=404)
         return Response({
-            'download_url': CloudinaryFieldSerializer().to_representation(track.audio_file)
+            'download_url': media.resolve(track.audio_file)
         })
     # "Favorites" == liked tracks. Toggling a favorite is just toggle_like; this
     # endpoint lists the current user's liked tracks for the Favorites screen.
@@ -402,7 +335,7 @@ class CommentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         track_id = self.kwargs.get('track_pk')
         track = get_object_or_404(Track, id=track_id)
-        # Single save — this used to call save() twice (a redundant write).
+        # Single save â€” this used to call save() twice (a redundant write).
         comment = serializer.save(user=self.request.user, track=track)
 
         if comment.user != track.artist:

@@ -185,7 +185,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 )
             images = request.FILES.getlist('images')
             for image in images:
-                ProductImage.objects.create(product=product, image=image)
+                ProductImage.objects.create(
+                    product=product,
+                    image=r2.upload_file(image, 'products/images'),
+                )
             return Response(
                 {"status": "Images uploaded successfully"},
                 status=status.HTTP_201_CREATED

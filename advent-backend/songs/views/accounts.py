@@ -340,31 +340,20 @@ class ProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            result = upload(
-                serializer.validated_data['avatar'],
-                folder='profiles',
-                resource_type='image',
-                transformation=[
-                    {'width': 500, 'height': 500, 'crop': 'fill', 'gravity': 'face'},
-                    {'quality': 'auto', 'fetch_format': 'auto'}
-                ]
-            )
-            
-            # Store both public_id and URL for flexibility
-            request.user.profile.picture = {
-                'public_id': result['public_id'],
-                'secure_url': result['secure_url']
-            }
+            # Straight to R2; the stored reference is the public URL. Sizing/
+            # cropping is the client's job (it compresses before upload).
+            request.user.profile.picture = r2.upload_file(
+                serializer.validated_data['avatar'], 'profile_images')
             request.user.profile.save()
-            
+
             return Response(
                 self.get_serializer(request.user.profile).data,
                 status=status.HTTP_200_OK
             )
-        except CloudinaryError as e:
-            logger.error(f"Cloudinary upload failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Profile picture upload to R2 failed: {e}", exc_info=True)
             return Response(
-                {'error': 'Failed to upload image to Cloudinary'},
+                {'error': 'Failed to upload image'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

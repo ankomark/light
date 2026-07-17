@@ -335,26 +335,17 @@ class GroupViewSet(viewsets.ModelViewSet):
             )
             
         try:
-            # Upload to Cloudinary
-            result = upload(
-                request.FILES['cover_image'],
-                folder='group_covers',
-                resource_type='image',
-                transformation=[
-                    {'width': 1200, 'height': 630, 'crop': 'fill'},
-                    {'quality': 'auto'}
-                ]
-            )
-            # Save to group
-            group.cover_image = result['public_id']
+            # Upload to R2; store the public URL as the reference.
+            group.cover_image = r2.upload_file(request.FILES['cover_image'], 'group_covers')
             group.save()
             return Response(
                 GroupSerializer(group, context={'request': request}).data,
                 status=status.HTTP_200_OK
             )
-        except CloudinaryError as e:
+        except Exception as e:
+            logger.error(f"Group cover upload to R2 failed: {e}", exc_info=True)
             return Response(
-                {"error": str(e)},
+                {"error": "Cover upload failed. Please try again."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -447,7 +438,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                     file_type = 'video'
                 elif mime_type.startswith('audio/'):
                     file_type = 'audio'
-            GroupPostAttachment.objects.create(post=post, file=file, file_type=file_type)
+            file_url = r2.upload_file(file, 'group_posts', content_type=mime_type)
+            GroupPostAttachment.objects.create(post=post, file=file_url, file_type=file_type)
 
         Group.objects.filter(pk=group.pk).update(updated_at=post.created_at)
 

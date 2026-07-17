@@ -180,38 +180,14 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        try:
-            # Delete from Cloudinary if media exists
-            if instance.media_file:
-                # Get public_id from either CloudinaryResource or string
-                public_id = (
-                    instance.media_file.public_id 
-                    if hasattr(instance.media_file, 'public_id') 
-                    else str(instance.media_file))
-                
-                # If it's a URL, extract just the public_id
-                if 'res.cloudinary.com' in public_id:
-                    path = urlparse(public_id).path
-                    parts = path.split('/')
-                    try:
-                        upload_index = parts.index('upload') + 1
-                        public_id = '/'.join(parts[upload_index:])
-                        public_id = public_id.split('.')[0]  # Remove extension
-                    except ValueError:
-                        pass
-                
-                # Determine resource type from content_type
-                resource_type = 'video' if instance.content_type == 'video' else 'image'
-                
-                try:
-                    destroy(public_id, resource_type=resource_type)
-                    logger.info(f"Deleted Cloudinary {resource_type}: {public_id}")
-                except Exception as e:
-                    logger.error(f"Cloudinary deletion failed: {str(e)}")
-                    # Continue with DB deletion even if Cloudinary fails
-        
-        except Exception as e:
-            logger.error(f"Error during post deletion: {str(e)}", exc_info=True)
+        # Best-effort R2 asset cleanup (never blocks the DB delete). Gallery
+        # items too — each carries its own uploaded object.
+        if instance.media_file:
+            r2.delete(str(instance.media_file))
+        gallery = instance.gallery if isinstance(instance.gallery, list) else []
+        for it in gallery:
+            if isinstance(it, dict):
+                r2.delete(str(it.get('url') or it.get('public_id') or ''))
         
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -356,7 +332,10 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         return Response({
             'public_id': str(post.media_file),
             'content_type': post.content_type,
-            'media_url': post.media_file.url if hasattr(post.media_file, 'url') else str(post.media_file)
+            'media_url': media.resolve(
+                post.media_file,
+                resource_type='video' if post.content_type == 'video' else 'image',
+            ),
         }, status=status.HTTP_200_OK)
 
 
@@ -373,28 +352,20 @@ class SocialPostUploadView(APIView):
                 # Determine content type from file
                 media_file = serializer.validated_data['media_file']
                 content_type = 'video' if media_file.content_type.startswith('video/') else 'image'
-                
-                # Upload to Cloudinary
-                result = upload(
-                    media_file,
-                    folder='social_media',
-                    resource_type='auto',
-                    # transformation=[
-                    #     {'quality': 'auto'},
-                    #     {'fetch_format': 'auto'}
-                    # ]
-                )
-                
-                # Create post with Cloudinary public_id
+
+                # Straight to R2; the stored reference is the public URL.
+                # (Dimensions came from Cloudinary before — clients that need
+                # them send width/height explicitly on the main create path.)
+                folder = 'social_media/videos' if content_type == 'video' else 'social_media/images'
+                url = r2.upload_file(media_file, folder)
+
                 post_data = {
                     'content_type': content_type,
-                    'media_file': result['public_id'],
+                    'media_file': url,
                     'caption': serializer.validated_data.get('caption', ''),
                     'tags': serializer.validated_data.get('tags', ''),
                     'location': serializer.validated_data.get('location', ''),
                     'duration': serializer.validated_data.get('duration', None),
-                    'width': result.get('width'),
-                    'height': result.get('height'),
                 }
                 
                 post_serializer = SocialPostSerializer(data=post_data, context={'request': request})
@@ -403,9 +374,10 @@ class SocialPostUploadView(APIView):
                     return Response(post_serializer.data, status=status.HTTP_201_CREATED)
                 return Response(post_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
                 
-            except CloudinaryError as e:
+            except Exception as e:
+                logger.error(f"Post media upload to R2 failed: {e}", exc_info=True)
                 return Response(
-                    {'error': str(e)},
+                    {'error': 'Upload failed. Please try again.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -798,32 +770,13 @@ from django.shortcuts import get_object_or_404
 from django.utils.html import escape as _esc
 
 
-def _cloud_name():
-    return _settings.CLOUDINARY_STORAGE['CLOUD_NAME']
-
-
-def _post_public_id(post):
-    """Best-effort Cloudinary public_id for the post's media."""
-    mf = post.media_file
-    raw = mf if isinstance(mf, str) else (getattr(mf, 'url', '') or '')
-    pid = raw.split('/upload/')[-1] if '/upload/' in raw else raw
-    pid = _re.sub(r'^v\d+/', '', pid)            # strip version prefix
-    pid = _re.sub(r'\.[A-Za-z0-9]+$', '', pid)   # strip extension
-    return pid
-
-
 def _share_image(post):
-    """og:image — a 1200x630 social card. For videos this is a snapshot frame
-    (so_0) so the link preview shows a thumbnail instead of nothing."""
-    pid = _post_public_id(post)
-    if not pid:
-        return ''
-    cloud = _cloud_name()
-    if post.content_type == 'video':
-        return (f"https://res.cloudinary.com/{cloud}/video/upload/"
-                f"so_0,w_1200,h_630,c_fill,q_auto/{pid}.jpg")
-    return (f"https://res.cloudinary.com/{cloud}/image/upload/"
-            f"w_1200,h_630,c_fill,q_auto,f_jpg/{pid}.jpg")
+    """og:image for the link-preview card. Images use the stored URL directly.
+    Videos have no server-side thumbnail yet (R2 stores bytes verbatim) —
+    they'll get a poster once client-side thumbnails land."""
+    if post.content_type == 'image':
+        return media.resolve(post.media_file) or ''
+    return ''
 
 
 _SHARE_PAGE = """<!doctype html>
@@ -903,13 +856,13 @@ def post_share_page(request, post_id):
 
     video_tags = ''
     if is_video:
-        video_url = (f"https://res.cloudinary.com/{_cloud_name()}/video/upload/"
-                     f"q_auto/{_post_public_id(post)}.mp4")
-        video_tags = (
-            f'\n<meta property="og:video" content="{_esc(video_url)}">'
-            f'\n<meta property="og:video:secure_url" content="{_esc(video_url)}">'
-            f'\n<meta property="og:video:type" content="video/mp4">'
-        )
+        video_url = media.resolve(post.media_file)
+        if video_url:
+            video_tags = (
+                f'\n<meta property="og:video" content="{_esc(video_url)}">'
+                f'\n<meta property="og:video:secure_url" content="{_esc(video_url)}">'
+                f'\n<meta property="og:video:type" content="video/mp4">'
+            )
 
     img_block = f'<img src="{_esc(image)}" alt="">' if image else ''
     play_block = (

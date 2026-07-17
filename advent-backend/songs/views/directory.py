@@ -103,20 +103,11 @@ class ChurchViewSet(viewsets.ModelViewSet):
 
     def _handle_image_upload(self, church):
         """The serializer's `image` field is read-only, so the uploaded file is
-        handled here: push it to Cloudinary and store the resulting public_id."""
+        handled here: push it to R2 and store the resulting public URL."""
         image_file = self.request.FILES.get('image')
         if not image_file:
             return
-        result = upload(
-            image_file,
-            folder='churches',
-            resource_type='image',
-            transformation=[
-                {'width': 1200, 'height': 800, 'crop': 'fill'},
-                {'quality': 'auto'},
-            ],
-        )
-        church.image = result['public_id']
+        church.image = r2.upload_file(image_file, 'churches')
         church.save(update_fields=['image', 'updated_at'])
 
     def perform_create(self, serializer):

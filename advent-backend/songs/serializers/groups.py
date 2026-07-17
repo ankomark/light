@@ -9,7 +9,7 @@ class GroupSerializer(serializers.ModelSerializer):
     has_pending_request = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
-    cover_image = serializers.ImageField(required=False, allow_null=True)
+    cover_image = MediaReferenceImageField(required=False, allow_null=True)
     is_private = serializers.BooleanField(default=False)
     # Override the model field: the invite token is only ever revealed to admins.
     invite_code = serializers.SerializerMethodField()
@@ -18,6 +18,21 @@ class GroupSerializer(serializers.ModelSerializer):
         model = Group
         fields = '__all__'
         read_only_fields = ['creator', 'slug', 'created_at', 'updated_at']
+
+    @staticmethod
+    def _upload_cover(validated_data):
+        """An uploaded cover file becomes an R2 URL before it reaches the model
+        (the column stores string references, not files)."""
+        cover = validated_data.get('cover_image')
+        if cover is not None and hasattr(cover, 'read'):
+            validated_data['cover_image'] = r2.upload_file(cover, 'group_covers')
+        return validated_data
+
+    def create(self, validated_data):
+        return super().create(self._upload_cover(validated_data))
+
+    def update(self, instance, validated_data):
+        return super().update(instance, self._upload_cover(validated_data))
 
     def get_invite_code(self, obj):
         m = self._membership(obj)
@@ -97,7 +112,7 @@ class GroupMemberSerializer(serializers.ModelSerializer):
             'id': obj.user.id,
             'username': obj.user.username,
             'profile': {
-                'picture': obj.user.profile.picture.url if obj.user.profile and obj.user.profile.picture else None
+                'picture': media.resolve(obj.user.profile.picture) if obj.user.profile and obj.user.profile.picture else None
             }
         }
 

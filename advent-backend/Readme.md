@@ -64,3 +64,46 @@ The picture — what's already built
 
 
   "continue the social feed video experience"
+
+
+
+
+
+Full Cloudflare move with client-side processing, migrating everything — that's a clean end state. Here's the plan I'd propose, in dependency order:
+
+Phase 0 — Cloudflare setup (dashboard, ~30 min)
+
+- Create an R2 bucket (e.g. adventlife-media) and an S3 API token (access key + secret).
+- Attach a custom domain on your Cloudflare zone (e.g. media.<yourdomain>) to the bucket. This is required — the free r2.dev URL is rate-limited and can't use transformations.
+- Enable Image Transformations for that zone (this gives you f_auto/resize equivalents at the edge; free tier covers 5k unique transformations/month).
+- New env vars for backend: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE.
+
+Phase 1 — Backend: storage + presigned uploads
+
+- Add django-storages[s3] + boto3, configure the S3 backend against the R2 endpoint (https://<account>.r2.cloudflarestorage.com), replace DEFAULT_FILE_STORAGE.
+- Convert the ~9 CloudinaryFields in songs/models.py to FileField/ImageField with upload_to matching the existing folder names (one schema migration; existing rows keep their values until Phase 4 rewrites them).
+- New presign endpoint replacing get_cloudinary_signature in views/common.py: validates type/size caps server-side, returns a presigned PUT URL + the final public URL/key.
+- Keep the old Cloudinary signature endpoint alive — app versions already installed on phones will still call it until users update. This forces a transition window whether we like it or not.
+- Swap destroy() calls (stories cleanup command, delete paths) to S3 DeleteObject.
+
+Phase 2 — Frontend: upload path + client-side processing
+
+- Replace services/cloudinary.js with a services/uploads.js: fetch presign → XHR PUT (progress bars keep working) → return key/URL, with width/height/duration now measured client-side before upload.
+- Client-side processing to replace Cloudinary ingest transforms:
+  - Images: already compressed client-side (resize 1080/q0.8) — nearly done.
+  - Video trim + compress + thumbnail: the riskiest piece. ffmpeg-kit-react-native is retired (binaries pulled), so realistically react-native-compressor for compression + a trim library + expo-video-thumbnails for posters — I'd do a 1-day spike here first, since it gates everything video.
+- Rewrite getOptimizedUrl to emit /cdn-cgi/image/w=1080,f=auto/... URLs; port the avatar (300×300 fill) and feed (1080 limit) presets.
+- Update hardcoded res.cloudinary.com wallpaper URLs in App.js and the stale config.js block.
+
+Phase 3 — Migrate historical assets
+
+- A management command that walks every model/URL field, downloads from Cloudinary, uploads to R2 preserving folder structure, and rewrites DB references (public IDs → file paths; absolute URLs in media_url, song_audio_url, chat messages → new domain). Idempotent, --dry-run, failure log.
+- Run against production during a quiet window; Cloudinary stays read-only as a fallback until spot-checks pass.
+
+Phase 4 — Decommission
+
+- After a retention window (old app versions gone, migration verified): remove cloudinary* packages, the signature endpoint, model imports, and Railway env vars; close the account.
+
+Suggested order of attack: the video-processing spike (Phase 2's risk) first, then Phases 0–1 together, since everything else is low-risk plumbing.
+
+Want me to start with the spike (evaluate the video trim/compress options concretely), or begin with Phase 0/1 backend work while you set up the R2 bucket?

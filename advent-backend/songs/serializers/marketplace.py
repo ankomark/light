@@ -100,7 +100,10 @@ class ProductSerializer(serializers.ModelSerializer):
             **validated_data
         )
         for image in images:
-            ProductImage.objects.create(product=product, image=image)
+            ProductImage.objects.create(
+                product=product,
+                image=r2.upload_file(image, 'products/images'),
+            )
         return product
 
     def to_representation(self, instance):

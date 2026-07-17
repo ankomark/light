@@ -10,7 +10,6 @@ from urllib.parse import urlparse, parse_qs
 from datetime import timedelta
 import re
 import logging
-from cloudinary.models import CloudinaryField
 import os
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,8 @@ class User(AbstractUser):
     # Email is the account-recovery key, so it must be unique.
     email = models.EmailField('email address', unique=True)
     bio = models.TextField(blank=True)
-    avatar = CloudinaryField('image', folder='avatars/', blank=True, null=True)
+    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
+    avatar = models.CharField(max_length=500, blank=True, null=True)
     followers = models.ManyToManyField(
         'self', symmetrical=False, related_name='followed_by', blank=True
     )
@@ -164,8 +164,9 @@ class Track(models.Model):
     album = models.CharField(max_length=100, blank=True, null=True)
     # audio_file = models.FileField(upload_to='audio/')  
     # cover_image = models.ImageField(upload_to='covers/', blank=True, null=True)
-    audio_file = CloudinaryField(resource_type='video', folder='audio/')
-    cover_image = CloudinaryField('image', folder='covers/', blank=True, null=True)
+    # Media references: absolute URL (R2) or legacy Cloudinary public_id.
+    audio_file = models.CharField(max_length=500)
+    cover_image = models.CharField(max_length=500, blank=True, null=True)
     lyrics = models.TextField(blank=True, null=True)
     slug = models.SlugField(unique=True)
     views = models.PositiveIntegerField(default=0)
@@ -251,11 +252,8 @@ class Category(models.Model):
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     # picture = models.ImageField(upload_to='profiles/', blank=True, null=True)
-    picture = CloudinaryField(
-    'image',
-    folder='profiles/',
-    default='https://res.cloudinary.com/YOUR_CLOUD_NAME/image/upload/v1234567890/profiles/default.jpg',
-    transformation=[{'width': 400, 'height': 400, 'crop': 'fill', 'gravity': 'face'}])
+    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
+    picture = models.CharField(max_length=500, blank=True, default='')
 
 
     bio = models.TextField(blank=True, null=True)
@@ -278,16 +276,8 @@ class SocialPost(models.Model):
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='social_posts')
     content_type = models.CharField(max_length=5, choices=CONTENT_TYPES)
-    media_file = CloudinaryField(
-        'media',  # This is the folder in Cloudinary
-        resource_type='auto',
-        folder='social_media',  # Subfolder
-        overwrite=True,
-        use_filename=True,
-        unique_filename=True,
-        blank=True,
-        null=True
-    )
+    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
+    media_file = models.CharField(max_length=500, blank=True, null=True)
     song = models.ForeignKey(Track, null=True, blank=True, on_delete=models.SET_NULL)
     # Carousel of 1–4 images for image posts: list of {public_id, width, height}.
     # Empty for legacy/single-image posts (which fall back to media_file) and for
@@ -653,7 +643,8 @@ class Church(models.Model):
     # WhatsApp-style "Only admins can send messages" lock for the church community chat.
     only_admins_can_post = models.BooleanField(default=False)
     # image = models.ImageField(upload_to='churches/', blank=True, null=True)
-    image = CloudinaryField('image', folder='churches/', blank=True, null=True)
+    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
+    image = models.CharField(max_length=500, blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='churches')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1053,7 +1044,8 @@ class Group(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     # cover_image = models.ImageField(upload_to='group_covers/', blank=True, null=True)
-    cover_image = CloudinaryField('image', folder='group_covers/', blank=True, null=True)
+    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
+    cover_image = models.CharField(max_length=500, blank=True, null=True)
     is_private = models.BooleanField(default=True)
     # WhatsApp-style "Only admins can send messages" lock.
     only_admins_can_post = models.BooleanField(default=False)
@@ -1148,7 +1140,8 @@ class GroupPostAttachment(models.Model):
     
     post = models.ForeignKey(GroupPost, on_delete=models.CASCADE, related_name='attachments')
     # file = models.FileField(upload_to='group_posts/%Y/%m/%d/')
-    file = CloudinaryField(resource_type='auto', folder='group_posts/%Y/%m/%d/')
+    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
+    file = models.CharField(max_length=500)
     file_type = models.CharField(max_length=10, choices=ATTACHMENT_TYPES)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1267,7 +1260,8 @@ class Product(models.Model):
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
     # image = models.ImageField(upload_to='products/images/', validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png'])])
-    image = CloudinaryField('image', folder='products/images/')
+    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
+    image = models.CharField(max_length=500)
     is_primary = models.BooleanField(default=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 

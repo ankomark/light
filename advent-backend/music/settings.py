@@ -14,9 +14,6 @@ from pathlib import Path
 import os
 from datetime import timedelta
 from django.core.exceptions import ImproperlyConfigured
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
 import dj_database_url
 from dotenv import load_dotenv
 load_dotenv()
@@ -113,8 +110,6 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'rest_framework.authtoken',
-    'cloudinary',
-    'cloudinary_storage',
     ]
 
 MIDDLEWARE = [
@@ -192,6 +187,18 @@ AUTH_USER_MODEL = 'songs.User'
 LIVEKIT_URL = os.getenv('LIVEKIT_URL', '')
 LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY', '')
 LIVEKIT_API_SECRET = os.getenv('LIVEKIT_API_SECRET', '')
+
+# ── Cloudflare R2 (S3-compatible media storage) ───────────────────────────────
+# Replaces Cloudinary as the media store. The app uploads directly to R2 via
+# presigned PUT URLs minted by the backend (see songs/r2.py); Django never
+# proxies media bytes. R2_PUBLIC_BASE is the serving origin — the bucket's
+# r2.dev development URL for now, a custom domain later (env-only change).
+R2_ACCOUNT_ID = os.getenv('R2_ACCOUNT_ID', '')
+R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID', '')
+R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY', '')
+R2_BUCKET = os.getenv('R2_BUCKET', '')
+R2_ENDPOINT = os.getenv('R2_ENDPOINT', '')
+R2_PUBLIC_BASE = os.getenv('R2_PUBLIC_BASE', '')
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 SIMPLE_JWT = {
@@ -318,33 +325,6 @@ STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
 DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-
-
-cloudinary.config(
-    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
-    api_key=os.getenv('CLOUDINARY_API_KEY'),
-    api_secret=os.getenv('CLOUDINARY_API_SECRET'),
-    secure=True
-)
-
-CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME'),
-    'API_KEY': os.getenv('CLOUDINARY_API_KEY'),
-    'API_SECRET': os.getenv('CLOUDINARY_API_SECRET'),
-    'SECURE': True,
-    'MEDIA_TAG': 'media',
-    'INVALID_VIDEO_ERROR_MESSAGE': 'Please upload a valid video file',
-    'EXCLUDE_DELETE_ORPHANED_MEDIA_PATHS': (),
-    'STATIC_TAG': 'static',
-    'STATICFILES_MANIFEST_ROOT': os.path.join(BASE_DIR, 'manifest'),
-    'STATIC_IMAGES_EXTENSIONS': ['jpg', 'jpeg', 'png'],
-    'STATIC_VIDEOS_EXTENSIONS': ['mp4', 'webm'],
-}
-CLOUDINARY_UPLOAD_OPTIONS = {
-    'resource_type': 'auto',
-    'timeout': 30000  # 30 seconds timeout
-}
 
 # Log to stdout only (Railway captures it); level is env-tunable. No file
 # handler — writing debug.log on every request fills disk and slows I/O.

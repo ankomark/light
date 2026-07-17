@@ -1,4 +1,4 @@
-from rest_framework.routers import DefaultRouter
+﻿from rest_framework.routers import DefaultRouter
 from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
 from .views import (
@@ -56,7 +56,7 @@ from .views import (
     AvatarUploadView,
     TrackUploadView,
     SocialPostUploadView,
-    CloudinarySignView,
+    R2SignView,
     StripeWebhookView,
     AdminDashboardView,
     AdminAnalyticsView,
@@ -128,7 +128,7 @@ products_router = NestedSimpleRouter(router, r'marketplace/products', lookup='pr
 products_router.register(r'reviews', ProductReviewViewSet, basename='product-reviews')
 
 urlpatterns = [
-    path('upload/sign/', CloudinarySignView.as_view(), name='cloudinary-sign'),
+    path('upload/r2-sign/', R2SignView.as_view(), name='r2-sign'),
     path('auth/verify-email/', VerifyEmailView.as_view(), name='verify-email'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),

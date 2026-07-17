@@ -62,120 +62,27 @@ class SocialPostSerializer(serializers.ModelSerializer):
             return None  # or safe fallback
 
    
-    def _extract_public_id(self, obj):
-        """Best-effort Cloudinary public_id from media_file (string, resource, or
-        a delivery URL), stripping any version, extension, or stray prefix."""
-        import re
-        mf = obj.media_file
-        if isinstance(mf, str):
-            pid = mf
-        elif hasattr(mf, 'url'):
-            url = mf.url
-            pid = url.split('/upload/')[-1] if '/upload/' in url else url
-        else:
-            return None
-        pid = str(pid)
-        while pid.startswith('auto/upload/'):
-            pid = pid[len('auto/upload/'):]
-        pid = re.sub(r'^v\d+/', '', pid)              # drop version segment
-        last = pid.split('/')[-1]
-        if '.' in last:                               # drop extension
-            pid = pid[: pid.rfind('.')]
-        return pid or None
-
-    def _video_url(self, public_id, start=None, end=None, compress=False):
-        """Cloudinary video delivery URL, optionally trimmed to [start, end]
-        (seconds) and compressed (downscaled + q_auto:eco)."""
-        if not public_id:
-            return None
-        base = f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}"
-        parts = []
-        if start is not None and end is not None and end > start:
-            parts.append(f"so_{round(float(start), 2)}")
-            parts.append(f"eo_{round(float(end), 2)}")
-        if compress:
-            parts += ["w_720", "c_limit", "q_auto:eco"]
-        else:
-            parts.append("q_auto")
-        return f"{base}/video/upload/{','.join(parts)}/{public_id}.mp4"
-
     def get_media_url(self, obj):
-        if not obj.media_file:
-            return None
-
-        try:
-            if obj.content_type == 'video':
-                return self._video_url(
-                    self._extract_public_id(obj),
-                    obj.video_start_time, obj.video_end_time, compress=False,
-                )
-
-            # Image — handle both FileField and raw strings.
-            if hasattr(obj.media_file, 'url'):
-                url = obj.media_file.url
-                if '/auto/upload/' in url:
-                    return self._convert_auto_url(url, obj.content_type)
-                return url
-
-            if isinstance(obj.media_file, str):
-                return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/image/upload/{obj.media_file}.jpg"
-
-        except Exception as e:
-            logger.error(f"URL generation error for post {obj.id}: {str(e)}")
-            return None
-
-    def _convert_auto_url(self, url, content_type):
-        """Convert auto/upload URL to proper delivery URL"""
-        parts = url.split('/auto/upload/')
-        if len(parts) != 2:
-            return url
-            
-        public_id = parts[1]
-        ext = '.jpg' if content_type == 'image' else '.mp4'
-        
-        return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/{content_type}/upload/{public_id}{ext}"
+        # Stored references are absolute R2 URLs; new uploads arrive already
+        # trimmed/compressed client-side, so there are no URL transforms.
+        return media.resolve(obj.media_file)
 
     def get_optimized_url(self, obj):
-        if not obj.media_file:
-            return None
-            
-        try:
-            base_url = f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}"
-            ext = '.jpg' if obj.content_type == 'image' else '.mp4'
-            
-            if hasattr(obj.media_file, 'url') and '/auto/upload/' in obj.media_file.url:
-                public_id = obj.media_file.url.split('/auto/upload/')[1]
-            elif isinstance(obj.media_file, str):
-                public_id = obj.media_file
-            else:
-                return None
-                
-            if obj.content_type == 'image':
-                return f"{base_url}/image/upload/w_600,h_600,c_fill,q_auto,f_auto/{public_id}{ext}"
-            else:
-                return self._video_url(
-                    self._extract_public_id(obj),
-                    obj.video_start_time, obj.video_end_time, compress=True,
-                )
+        # No delivery-transform tier yet (comes with the custom media domain) —
+        # optimized == original.
+        return media.resolve(obj.media_file)
 
-        except Exception as e:
-            logger.error(f"Optimized URL error: {str(e)}")
+    def _gallery_item(self, it):
+        """Normalize a gallery entry ({url|public_id, width, height}) to the
+        uniform media-item payload; entries that don't resolve are dropped."""
+        url = media.resolve(it.get('url') or it.get('public_id'))
+        if not url:
             return None
-
-    def _image_urls(self, public_id, width=None, height=None):
-        """Build delivery + optimized URLs for an image public_id (gallery item)."""
-        if not public_id:
-            return None
-        base = f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}"
-        # Strip any accidental 'auto/upload/' prefix (legacy corruption guard).
-        public_id = str(public_id)
-        while public_id.startswith('auto/upload/'):
-            public_id = public_id[len('auto/upload/'):]
         return {
-            'media_url': f"{base}/image/upload/{public_id}.jpg",
-            'optimized_url': f"{base}/image/upload/w_1080,q_auto,f_auto/{public_id}.jpg",
-            'width': width,
-            'height': height,
+            'media_url': url,
+            'optimized_url': url,
+            'width': it.get('width'),
+            'height': it.get('height'),
         }
 
     def get_media_items(self, obj):
@@ -183,10 +90,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
         legacy/single posts fall back to a one-item list from media_file so the
         client can always render a uniform pager."""
         gallery = obj.gallery if isinstance(obj.gallery, list) else []
-        items = [
-            self._image_urls(it.get('public_id'), it.get('width'), it.get('height'))
-            for it in gallery if isinstance(it, dict) and it.get('public_id')
-        ]
+        items = [self._gallery_item(it) for it in gallery if isinstance(it, dict)]
         items = [it for it in items if it]
         if items:
             return items
@@ -197,40 +101,6 @@ class SocialPostSerializer(serializers.ModelSerializer):
             'width': obj.width,
             'height': obj.height,
         }]
-
-    def to_internal_value(self, data):
-        internal_data = super().to_internal_value(data)
-        
-        if 'media_file' in internal_data:
-            media_file = internal_data['media_file']
-            
-            # Handle CloudinaryResource objects first
-            if hasattr(media_file, 'public_id'):
-                internal_data['media_file'] = media_file.public_id
-                return internal_data
-                
-            # Then handle string paths
-            if isinstance(media_file, str):
-                # If it's already a full public_id with folder, keep it
-                if '/' in media_file:
-                    return internal_data
-                    
-                # Parse if it looks like a URL
-                if 'res.cloudinary.com' in media_file:
-                    try:
-                        path = urlparse(media_file).path
-                        parts = path.split('/')
-                        try:
-                            upload_index = parts.index('upload') + 1
-                            public_id = '/'.join(parts[upload_index:])
-                            public_id = os.path.splitext(public_id)[0]
-                            internal_data['media_file'] = public_id
-                        except ValueError:
-                            pass
-                    except Exception as e:
-                        logger.error(f"URL parsing error: {str(e)}")
-        
-        return internal_data
     def create(self, validated_data):
         """Create a new social post with enhanced logging"""
         logger.info(f"Creating new social post with data: {validated_data}")
@@ -258,61 +128,6 @@ class SocialPostSerializer(serializers.ModelSerializer):
         except Exception as e:
             logger.error(f"Post update failed: {str(e)}", exc_info=True)
             raise
-    def _convert_auto_url(self, url, content_type):
-        """Convert auto/upload URL to proper delivery URL"""
-        parts = url.split('/auto/upload/')
-        if len(parts) != 2:
-            return url
-            
-        public_id = parts[1]
-        ext = '.jpg' if content_type == 'image' else '.mp4'
-        
-        return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/{content_type}/upload/{public_id}{ext}"
-
-
-
-    def _ensure_proper_url(self, url, content_type):
-        """Convert any Cloudinary URL to proper delivery URL"""
-        if not url or 'res.cloudinary.com' not in url:
-            return url
-            
-        # Handle auto/upload URLs
-        if '/auto/upload/' in url:
-            parts = url.split('/auto/upload/')
-            base = parts[0].replace('/auto/upload', '')
-            public_id = parts[1]
-            
-            if content_type == 'image':
-                return f"{base}/image/upload/w_600,h_600,c_fill,q_auto,f_auto/{public_id}.jpg"
-            else:
-                return f"{base}/video/upload/q_auto,f_auto/{public_id}.mp4"
-                
-        # Already proper URL
-        return url
-
-    def _fix_auto_upload_url(self, url, content_type):
-        """
-        Convert auto/upload URLs to proper Cloudinary delivery URLs
-        Example: 
-        Input: https://res.cloudinary.com/dxdmo9j4v/auto/upload/vdv2gbt7zagsmongikwr
-        Output: https://res.cloudinary.com/dxdmo9j4v/image/upload/w_600,h_600,c_fill/vdv2gbt7zagsmongikwr.jpg
-        """
-        try:
-            parts = url.split('/auto/upload/')
-            if len(parts) != 2:
-                return url
-                
-            base = parts[0].replace('/auto/upload', '')
-            public_id = parts[1]
-            
-            if content_type == 'image':
-                return f"{base}/image/upload/w_600,h_600,c_fill,q_auto,f_auto/{public_id}.jpg"
-            else:
-                return f"{base}/video/upload/q_auto,f_auto/{public_id}.mp4"
-                
-        except Exception as e:
-            logger.error(f"Error fixing auto upload URL {url}: {str(e)}")
-            return url
     # Each of these prefers an annotation set by SocialPostViewSet.get_queryset
     # (one query for the whole page) and falls back to a per-object query for
     # other call sites (e.g. retrieve, nested serialization).
@@ -358,7 +173,8 @@ class SocialPostSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Trimmed video cannot exceed 30 seconds")
             data['video_start_time'] = vs
 
-        # Image carousel: 1–4 images, each carrying a Cloudinary public_id.
+        # Image carousel: 1–4 images, each carrying its uploaded R2 URL (the
+        # legacy key name public_id is still accepted for older clients).
         gallery = data.get('gallery')
         if gallery is not None:
             if not isinstance(gallery, list):
@@ -366,8 +182,8 @@ class SocialPostSerializer(serializers.ModelSerializer):
             if len(gallery) > 4:
                 raise serializers.ValidationError("A post can have at most 4 images")
             for it in gallery:
-                if not isinstance(it, dict) or not it.get('public_id'):
-                    raise serializers.ValidationError("Each gallery item needs a public_id")
+                if not isinstance(it, dict) or not (it.get('url') or it.get('public_id')):
+                    raise serializers.ValidationError("Each gallery item needs its uploaded media URL")
 
         # Validate the accompanying-audio trim window (seconds). Cap the clip at
         # 30s so the feed only plays the short section the user picked.

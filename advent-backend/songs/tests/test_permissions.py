@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 
 from django.core.cache import cache
 from rest_framework import status
@@ -12,8 +12,8 @@ class OwnershipPermissionTests(APITestCase):
 
     def setUp(self):
         cache.clear()  # reset DRF throttle counters between tests
-        self.alice = User.objects.create_user(username='alice', password='pw12345!')
-        self.bob = User.objects.create_user(username='bob', password='pw12345!')
+        self.alice = User.objects.create_user(username='alice', email='alice@x.com', password='pw12345!')
+        self.bob = User.objects.create_user(username='bob', email='bob@x.com', password='pw12345!')
 
     # ---- SocialPost ----
     def test_non_owner_cannot_edit_post(self):

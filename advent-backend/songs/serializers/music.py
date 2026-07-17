@@ -11,8 +11,8 @@ class TrackSerializer(serializers.ModelSerializer):
      # profile_picture) with no per-row queries.
      artist = SimpleUserSerializer(read_only=True)
      is_owner = serializers.SerializerMethodField() 
-     audio_file = CloudinaryFieldSerializer()
-     cover_image = CloudinaryFieldSerializer(required=False)
+     audio_file = MediaReferenceField()
+     cover_image = MediaReferenceField(required=False)
      class Meta:
         model = Track
         fields = [

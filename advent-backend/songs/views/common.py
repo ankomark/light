@@ -17,8 +17,6 @@ from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination, CursorPagination
 from rest_framework_simplejwt.views import TokenObtainPairView
 import time as time_module
-import cloudinary
-from cloudinary.utils import api_sign_request as cloudinary_sign_request
 from django.db import transaction
 from django.contrib.auth.decorators import login_required
 from rest_framework.exceptions import PermissionDenied
@@ -26,9 +24,8 @@ from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser,JSONParser
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
-from cloudinary.uploader import upload
-from cloudinary.uploader import destroy 
-from cloudinary.exceptions import Error as CloudinaryError
+from .. import media
+from .. import r2
 from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction, ChurchMembership, ChurchJoinRequest, ChurchMessage, ChurchMessageReaction, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress
 from ..push import notify_user
 from ..tasks import run_in_background

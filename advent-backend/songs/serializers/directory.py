@@ -80,9 +80,7 @@ class ChurchSerializer(serializers.ModelSerializer):
         # Null-safe: a creator may not have a profile or a picture set.
         profile = getattr(obj.created_by, 'profile', None)
         if profile and profile.picture:
-            request = self.context.get('request')
-            url = profile.picture.url
-            return request.build_absolute_uri(url) if request else url
+            return media.resolve(profile.picture)
         return None
 
 

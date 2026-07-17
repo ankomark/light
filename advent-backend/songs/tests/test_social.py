@@ -219,15 +219,16 @@ class GalleryTests(APITestCase):
         self.client.force_authenticate(self.alice)
 
     def test_create_carousel_returns_media_items(self):
+        base = 'https://pub-test.r2.dev/social_media/images'
         gallery = [
-            {'public_id': 'social_media/a', 'width': 1080, 'height': 1350},
-            {'public_id': 'social_media/b', 'width': 1080, 'height': 1080},
-            {'public_id': 'social_media/c', 'width': 1080, 'height': 720},
+            {'url': f'{base}/a.jpg', 'width': 1080, 'height': 1350},
+            {'url': f'{base}/b.jpg', 'width': 1080, 'height': 1080},
+            {'url': f'{base}/c.jpg', 'width': 1080, 'height': 720},
         ]
         res = self.client.post('/api/social-posts/', {
             'content_type': 'image',
             'caption': 'trip',
-            'media_file': 'social_media/a',
+            'media_file': f'{base}/a.jpg',
             'gallery': gallery,
         }, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
@@ -239,7 +240,7 @@ class GalleryTests(APITestCase):
         results = feed.data['results'] if isinstance(feed.data, dict) else feed.data
         item = next(p for p in results if p['id'] == post.id)
         self.assertEqual(len(item['media_items']), 3)
-        self.assertTrue(item['media_items'][0]['media_url'].endswith('social_media/a.jpg'))
+        self.assertEqual(item['media_items'][0]['media_url'], f'{base}/a.jpg')
         self.assertNotIn('gallery', item)  # write-only
 
     def test_single_image_without_gallery_yields_one_media_item(self):
@@ -294,8 +295,11 @@ class SavedPostsListTests(APITestCase):
 
 
 class VideoTrimTests(APITestCase):
-    """Video posts: trim window persists and is baked into the delivery URL
-    (so_/eo_ offsets) with compression on the optimized URL."""
+    """Video posts: the trim window persists (for the client player), and the
+    stored R2 URL is served verbatim — clips are trimmed client-side before
+    upload, so no trim offsets appear in the URL."""
+
+    VIDEO_URL = 'https://pub-test.r2.dev/social_media/videos/clip.mp4'
 
     def setUp(self):
         cache.clear()
@@ -305,13 +309,13 @@ class VideoTrimTests(APITestCase):
     def _create(self, start, end):
         return self.client.post('/api/social-posts/', {
             'content_type': 'video',
-            'media_file': 'social_media/clip',
+            'media_file': self.VIDEO_URL,
             'video_start_time': start,
             'video_end_time': end,
             'duration': int(end - start),
         }, format='json')
 
-    def test_trim_baked_into_urls(self):
+    def test_trim_window_persists_and_url_served_verbatim(self):
         res = self._create(10, 35)
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
         post = SocialPost.objects.get(id=res.data['id'])
@@ -321,11 +325,8 @@ class VideoTrimTests(APITestCase):
         feed = self.client.get('/api/social-posts/')
         results = feed.data['results'] if isinstance(feed.data, dict) else feed.data
         item = next(p for p in results if p['id'] == post.id)
-        url = item['media_items'][0]['optimized_url']
-        self.assertIn('so_10', url)
-        self.assertIn('eo_35', url)
-        self.assertIn('q_auto:eco', url)   # compressed
-        self.assertIn('w_720', url)        # downscaled
+        self.assertEqual(item['media_items'][0]['media_url'], self.VIDEO_URL)
+        self.assertEqual(item['media_items'][0]['optimized_url'], self.VIDEO_URL)
 
     def test_clip_over_30s_rejected(self):
         res = self._create(0, 45)
