@@ -1551,6 +1551,11 @@ export const fetchMessages = (conversationId, after) =>
   apiRequest('get', `/conversations/${conversationId}/messages/`, null,
     after ? { params: { after } } : {});
 
+// Scroll-up history: the page of older messages immediately before `beforeId`.
+export const fetchOlderMessages = (conversationId, beforeId) =>
+  apiRequest('get', `/conversations/${conversationId}/messages/`, null,
+    { params: { before: beforeId } });
+
 // payload: { content?, message_type?, attachment?, file_name?, duration? }
 export const sendMessage = (conversationId, payload) =>
   apiRequest('post', `/conversations/${conversationId}/send_message/`,

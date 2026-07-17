@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  View, Text, FlatList, TextInput, TouchableOpacity, Image, StyleSheet,
+  View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, AppState, Modal,
   ScrollView, Alert, Pressable, Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +15,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Audio } from 'expo-av';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { fetchMessages, sendMessage, markConversationRead } from '../services/api';
+import { fetchMessages, fetchOlderMessages, sendMessage, markConversationRead } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from './RotatingBackground';
@@ -90,6 +91,10 @@ const ChatScreen = ({ route, navigation }) => {
   const appState = useRef(AppState.currentState);
   const lastCountRef = useRef(0);
   const lastIdRef = useRef(0); // highest server message id we hold (for incremental polls)
+  const oldestIdRef = useRef(0);        // lowest id held (for scroll-up history)
+  const hasMoreOlderRef = useRef(true); // false once we've reached the start
+  const loadingOlderRef = useRef(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const isFocused = useRef(true);
   const recordingRef = useRef(null);
   const recordTimerRef = useRef(null);
@@ -99,6 +104,10 @@ const ChatScreen = ({ route, navigation }) => {
   // Highest numeric (server-assigned) id in a list, ignoring optimistic temps.
   const maxNumericId = (arr) =>
     arr.reduce((mx, m) => (typeof m.id === 'number' && m.id > mx ? m.id : mx), 0);
+
+  // Lowest numeric id in a list (0 if none), for paging older history.
+  const minNumericId = (arr) =>
+    arr.reduce((mn, m) => (typeof m.id === 'number' && (mn === 0 || m.id < mn) ? m.id : mn), 0);
 
   const loadMessages = useCallback(async (silent = false) => {
     try {
@@ -112,6 +121,8 @@ const ChatScreen = ({ route, navigation }) => {
         if (Array.isArray(data)) {
           setMessages(data);
           lastIdRef.current = maxNumericId(data);
+          oldestIdRef.current = minNumericId(data);
+          hasMoreOlderRef.current = data.length >= 100;  // a full page implies older exist
           if (data.length !== lastCountRef.current) {
             lastCountRef.current = data.length;
             setTimeout(() => listRef.current?.scrollToEnd({ animated: !silent }), 80);
@@ -148,6 +159,34 @@ const ChatScreen = ({ route, navigation }) => {
 
   const markRead = useCallback(() => {
     markConversationRead(conversationId).catch(() => {});
+  }, [conversationId]);
+
+  // Load a page of older messages when the user scrolls to the top. Prepended;
+  // the list's maintainVisibleContentPosition keeps the view from jumping, and
+  // the auto-scroll-to-end is suppressed while this runs.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current || !hasMoreOlderRef.current || !oldestIdRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const older = await fetchOlderMessages(conversationId, oldestIdRef.current);
+      if (Array.isArray(older) && older.length) {
+        setMessages((prev) => {
+          const have = new Set(prev.map((m) => m.id));
+          const fresh = older.filter((m) => !have.has(m.id));
+          return fresh.length ? [...fresh, ...prev] : prev;
+        });
+        oldestIdRef.current = minNumericId(older) || oldestIdRef.current;
+        hasMoreOlderRef.current = older.length >= 30;  // matches the server page size
+      } else {
+        hasMoreOlderRef.current = false;
+      }
+    } catch {
+      // ignore — user can retry by scrolling
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
   }, [conversationId]);
 
   useFocusEffect(
@@ -425,7 +464,9 @@ const ChatScreen = ({ route, navigation }) => {
             {showAvatar && (
               <Image
                 source={item.sender?.profile_picture ? { uri: item.sender.profile_picture } : DEFAULT_AVATAR}
-                defaultSource={DEFAULT_AVATAR}
+                placeholder={DEFAULT_AVATAR}
+                contentFit="cover"
+                transition={150}
                 style={styles.msgAvatar}
               />
             )}
@@ -434,7 +475,7 @@ const ChatScreen = ({ route, navigation }) => {
         <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, type === 'image' && styles.bubbleMedia]}>
           {type === 'image' && item.attachment ? (
             <Pressable onPress={() => setViewer(item.attachment)}>
-              <Image source={{ uri: cldThumb(item.attachment) }} style={styles.imageMsg} resizeMode="cover" />
+              <Image source={{ uri: cldThumb(item.attachment) }} style={styles.imageMsg} contentFit="cover" transition={150} />
             </Pressable>
           ) : type === 'file' ? (
             <Pressable style={styles.fileRow} onPress={() => openFile(item)}>
@@ -488,7 +529,9 @@ const ChatScreen = ({ route, navigation }) => {
           </TouchableOpacity>
           <Image
             source={otherUser?.profile_picture ? { uri: otherUser.profile_picture } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR}
+            placeholder={DEFAULT_AVATAR}
+            contentFit="cover"
+            transition={150}
             style={styles.headerAvatar}
           />
           <View style={styles.headerInfo}>
@@ -507,7 +550,17 @@ const ChatScreen = ({ route, navigation }) => {
           renderItem={renderMessage}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          // Don't yank the view to the bottom while we're prepending history.
+          onContentSizeChange={() => { if (!loadingOlderRef.current) listRef.current?.scrollToEnd({ animated: false }); }}
+          // Load older history when the user scrolls near the top.
+          onScroll={(e) => { if (e.nativeEvent.contentOffset.y <= 48) loadOlder(); }}
+          scrollEventThrottle={64}
+          maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+          ListHeaderComponent={
+            loadingOlder
+              ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 10 }} />
+              : null
+          }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Say hello to {otherUser?.username} 👋</Text>
@@ -583,7 +636,7 @@ const ChatScreen = ({ route, navigation }) => {
       {/* Full-screen image viewer */}
       <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
         <Pressable style={styles.viewerRoot} onPress={() => setViewer(null)}>
-          <Image source={{ uri: viewer }} style={styles.viewerImage} resizeMode="contain" />
+          <Image source={{ uri: viewer }} style={styles.viewerImage} contentFit="contain" transition={150} />
           <View style={styles.viewerClose}><Ionicons name="close" size={28} color={colors.white} /></View>
         </Pressable>
       </Modal>

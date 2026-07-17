@@ -105,8 +105,23 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 'read_ids': read_ids,
             })
 
+        # Scroll-up history: with ?before=<id> return the page of older messages
+        # immediately before it (chronological), for loading history on demand.
+        before = request.query_params.get('before')
+        if before is not None:
+            try:
+                before_id = int(before)
+            except (TypeError, ValueError):
+                before_id = 0
+            older = list(
+                conversation.messages.select_related('sender__profile')
+                .filter(id__lt=before_id).order_by('-created_at')[:30]
+            )
+            older.sort(key=lambda m: m.created_at)
+            return Response(MessageSerializer(older, many=True).data)
+
         # Bound the response: return the most recent 100 messages in
-        # chronological order (older history can be loaded later if needed).
+        # chronological order (older history is loaded on demand via ?before).
         recent = conversation.messages.select_related('sender__profile').order_by('-created_at')[:100]
         msgs = sorted(recent, key=lambda m: m.created_at)
         return Response(MessageSerializer(msgs, many=True).data)

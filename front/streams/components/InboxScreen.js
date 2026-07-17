@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
-  View, Text, FlatList, Image, TouchableOpacity, StyleSheet,
+  View, Text, FlatList, TouchableOpacity, StyleSheet,
   ActivityIndicator, AppState, RefreshControl,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchConversations } from '../services/api';
@@ -40,7 +41,9 @@ const ConversationItem = ({ item, onPress }) => {
       <View style={styles.avatarWrap}>
         <Image
           source={other?.profile_picture ? { uri: other.profile_picture } : DEFAULT_AVATAR}
-          defaultSource={DEFAULT_AVATAR}
+          placeholder={DEFAULT_AVATAR}
+          contentFit="cover"
+          transition={150}
           style={styles.avatar}
         />
         {hasUnread && <View style={styles.onlineDot} />}

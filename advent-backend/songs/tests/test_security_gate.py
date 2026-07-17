@@ -47,6 +47,21 @@ class DirectMessageSecurityTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn(b'secret hello', r.content)
 
+    def test_before_returns_older_page(self):
+        # Add several messages; ?before=<id> returns older ones chronologically.
+        ids = [self.convo.messages.first().id]
+        for i in range(5):
+            ids.append(Message.objects.create(
+                conversation=self.convo, sender=self.bob, content=f'm{i}').id)
+        self.client.force_authenticate(self.bob)
+        newest = max(ids)
+        r = self.client.get(f'/api/conversations/{self.convo.id}/messages/?before={newest}')
+        self.assertEqual(r.status_code, 200)
+        returned = [m['id'] for m in r.json()]
+        self.assertTrue(all(mid < newest for mid in returned))     # strictly older
+        self.assertEqual(returned, sorted(returned))               # chronological
+        self.assertNotIn(newest, returned)
+
 
 class AdminPanelGateTests(APITestCase):
     """The moderation panel is staff-only; regular clients are locked out."""
