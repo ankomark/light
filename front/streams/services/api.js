@@ -616,7 +616,22 @@ export const deleteMediaStation = async (id) => {
 // Long-form publications with nested chapters (markdown). Published items are
 // public; drafts are visible only to their author. Author-only edit/delete.
 export const fetchPublications = async (params = {}) => {
-  return apiRequest('get', '/publications/', null, { params: { page_size: 50, ...params } });
+  return apiRequest('get', '/publications/', null, { params: { page_size: 20, ...params } });
+};
+
+// Follow a paginated `next` link for infinite scroll. Preserves the URL's path
+// (e.g. /publications/ vs /publications/mine/) and its query (filters + page).
+export const fetchPublicationsByUrl = async (nextUrl) => {
+  if (!nextUrl) return null;
+  const [base, qs] = nextUrl.split('?');
+  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
+  const params = {};
+  (qs || '').split('&').forEach((kv) => {
+    if (!kv) return;
+    const [k, v] = kv.split('=');
+    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  });
+  return apiRequest('get', path, null, { params });
 };
 
 export const fetchMyPublications = async () => {

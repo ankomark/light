@@ -7,7 +7,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchPublications, fetchMyPublications } from '../services/api';
+import { fetchPublications, fetchMyPublications, fetchPublicationsByUrl } from '../services/api';
 import { CATEGORIES, categoryLabel } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -37,6 +37,8 @@ const Articles = ({ navigation }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState(null);
   const debounceRef = useRef(null);
 
   const load = useCallback(async (isRefresh = false) => {
@@ -54,15 +56,32 @@ const Articles = ({ navigation }) => {
         res = await fetchPublications(params);
       }
       setItems(Array.isArray(res) ? res : (res?.results ?? []));
+      setNextUrl(Array.isArray(res) ? null : (res?.next ?? null));
     } catch (err) {
       console.error('Error loading publications:', err);
       setItems([]);
+      setNextUrl(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
       lastLoadRef.current = Date.now();
     }
   }, [tab, query, category]);
+
+  // Infinite scroll: follow the server's `next` link (carries the filters).
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !nextUrl) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchPublicationsByUrl(nextUrl);
+      setItems(prev => [...prev, ...(res?.results ?? [])]);
+      setNextUrl(res?.next ?? null);
+    } catch {
+      // silent — pull-to-refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, nextUrl]);
 
   // A ref to the latest loader so the focus effect doesn't depend on load's
   // identity — that identity changes with `query`, which previously re-fired
@@ -239,6 +258,13 @@ const Articles = ({ navigation }) => {
           refreshing={refreshing}
           onRefresh={() => load(true)}
           extraData={category}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore
+              ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 16 }} />
+              : null
+          }
           ListHeaderComponent={featured ? renderFeatured(featured) : null}
           ListEmptyComponent={
             !featured ? (
