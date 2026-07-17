@@ -270,6 +270,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         ) if page_ids else []
         data = self.get_serializer(posts, many=True).data
 
+        # Remember what we served so later refreshes demote it (cache-only).
+        feedrank.mark_seen(user.id, page_ids)
+
         has_next = start + size < len(snapshot)
         base = request.build_absolute_uri(request.path)
 

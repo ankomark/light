@@ -20,7 +20,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import SocialPost, User, blocked_ids_for
+from .models import PostLike, SocialPost, User, blocked_ids_for
 
 
 def _cfg(name, default):
@@ -47,9 +47,21 @@ TRENDING_TTL = _cfg('FEED_TRENDING_TTL', 20 * 60)
 DISCOVERY_TTL = _cfg('FEED_DISCOVERY_TTL', 24 * 60 * 60)
 SNAPSHOT_TTL = _cfg('FEED_SNAPSHOT_TTL', 15 * 60)
 
+# Phase 2 — "seen" demotion + taste profile.
+SEEN_CAP = _cfg('FEED_SEEN_CAP', 500)                    # recent served ids remembered
+SEEN_TTL = _cfg('FEED_SEEN_TTL', 3 * 24 * 60 * 60)
+TASTE_TTL = _cfg('FEED_TASTE_TTL', 12 * 60 * 60)
+TASTE_LIKES_CAP = _cfg('FEED_TASTE_LIKES_CAP', 200)      # recent likes sampled
+TASTE_MAX_AUTHORS = _cfg('FEED_TASTE_MAX_AUTHORS', 15)
+TASTE_MAX_TAGS = _cfg('FEED_TASTE_MAX_TAGS', 15)
+TASTE_AUTHOR_BONUS = _cfg('FEED_TASTE_AUTHOR_BONUS', 4.0)
+TASTE_TAG_BONUS = _cfg('FEED_TASTE_TAG_BONUS', 3.0)
 
-def _score(row, now):
-    """Time-decayed engagement score for a candidate row (a .values() dict)."""
+
+def _score(row, now, taste=None):
+    """Time-decayed engagement score for a candidate row (a .values() dict),
+    plus a small affinity bonus when the post matches the viewer's taste
+    (authors/tags they engage with)."""
     age_h = max(0.0, (now - row['created_at']).total_seconds() / 3600.0)
     freshness = 1.0 / ((age_h + 2) ** GRAVITY)
     engagement = (
@@ -57,7 +69,57 @@ def _score(row, now):
         + (row.get('likes_count') or 0)
         + 0.1 * (row.get('view_count') or 0)
     )
-    return (engagement + 1) * freshness
+    bonus = 0.0
+    if taste:
+        if row.get('user_id') in taste['authors']:
+            bonus += TASTE_AUTHOR_BONUS
+        post_tags = (row.get('tags') or '').lower().split()
+        if post_tags and taste['tags'].intersection(post_tags):
+            bonus += TASTE_TAG_BONUS
+    return (engagement + bonus + 1) * freshness
+
+
+# ── "Seen" set (cache-only, best-effort — no per-impression DB write) ──────────
+def get_seen(user_id):
+    return cache.get(f'feed:seen:{user_id}') or []
+
+
+def mark_seen(user_id, ids):
+    """Record served post ids so later refreshes demote them. Most-recent-first,
+    capped — pure cache, so it costs nothing on the database."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return
+    key = f'feed:seen:{user_id}'
+    prev = cache.get(key) or []
+    fresh_set = set(ids)
+    merged = ids + [i for i in prev if i not in fresh_set]
+    cache.set(key, merged[:SEEN_CAP], SEEN_TTL)
+
+
+# ── Taste profile (authors/tags the viewer engages with; cached per user) ──────
+def taste_profile(user):
+    key = f'feed:taste:{user.id}'
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    rows = (
+        PostLike.objects.filter(user=user)
+        .order_by('-id')
+        .values_list('post__user_id', 'post__tags')[:TASTE_LIKES_CAP]
+    )
+    author_counts, tag_counts = {}, {}
+    for author_id, tags in rows:
+        if author_id is not None:
+            author_counts[author_id] = author_counts.get(author_id, 0) + 1
+        for t in (tags or '').lower().split():
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+    profile = {
+        'authors': set(sorted(author_counts, key=author_counts.get, reverse=True)[:TASTE_MAX_AUTHORS]),
+        'tags': set(sorted(tag_counts, key=tag_counts.get, reverse=True)[:TASTE_MAX_TAGS]),
+    }
+    cache.set(key, profile, TASTE_TTL)
+    return profile
 
 
 # ── Trending (global, cached, lazily refreshed) ───────────────────────────────
@@ -175,6 +237,8 @@ def build_ranked_feed(user):
     blocked = blocked_ids_for(user)
     followee_ids = set(user.followed_by.values_list('id', flat=True))
     discovery_ids = set(get_discovery_authors(user, list(followee_ids)))
+    seen = set(get_seen(user.id))       # demote (not exclude) already-served posts
+    taste = taste_profile(user)         # boost authors/tags the viewer engages with
 
     authors = {}   # post_id -> author_id, for diversity + dedup
 
@@ -192,8 +256,8 @@ def build_ranked_feed(user):
         if blocked:
             qs = qs.exclude(user_id__in=blocked)
         rows = list(qs.values('id', 'user_id', 'likes_count', 'comments_count',
-                              'view_count', 'created_at')[:CANDIDATE_CAP])
-        rows.sort(key=lambda r: _score(r, now), reverse=True)
+                              'view_count', 'created_at', 'tags')[:CANDIDATE_CAP])
+        rows.sort(key=lambda r: _score(r, now, taste), reverse=True)
         for r in rows:
             authors[r['id']] = r['user_id']
         return [r['id'] for r in rows]
@@ -211,7 +275,16 @@ def build_ranked_feed(user):
     merged = _weighted_interleave(
         [following_pool, trending_pool, discovery_pool], BLEND_WEIGHTS,
     )
-    return _diversify(merged, authors, DIVERSITY_WINDOW, SNAPSHOT_SIZE)
+    # Global seen-demotion: all unseen (diversified) first, then seen as a tail
+    # (also diversified) — so nothing repeats until the unseen run out, and the
+    # demotion holds ACROSS pools, not just within one.
+    unseen = [i for i in merged if i not in seen]
+    seen_tail = [i for i in merged if i in seen]
+    ranked = (
+        _diversify(unseen, authors, DIVERSITY_WINDOW, SNAPSHOT_SIZE)
+        + _diversify(seen_tail, authors, DIVERSITY_WINDOW, SNAPSHOT_SIZE)
+    )
+    return ranked[:SNAPSHOT_SIZE]
 
 
 def get_snapshot(user, *, fresh=False):

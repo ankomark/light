@@ -11,9 +11,9 @@ from songs import feed
 from songs.models import SocialPost, User
 
 
-def mkpost(user, **counts):
+def mkpost(user, tags='', **counts):
     return SocialPost.objects.create(
-        user=user, content_type='image', caption='p',
+        user=user, content_type='image', caption='p', tags=tags,
         likes_count=counts.get('likes', 0),
         comments_count=counts.get('comments', 0),
         view_count=counts.get('views', 0),
@@ -113,6 +113,31 @@ class RankedFeedEndpointTests(APITestCase):
             ids1, ids2 = set(self._ids(p1)), set(self._ids(p2))
             self.assertEqual(len(ids1), 3)
             self.assertTrue(ids1.isdisjoint(ids2), 'pages overlap — snapshot not stable')
+
+    def test_seen_posts_are_demoted_on_refresh(self):
+        # bob & carol are both followed; bob's post scores higher, so it leads.
+        follow(self.alice, self.carol)
+        hi = mkpost(self.bob, likes=50)     # ranks above...
+        lo = mkpost(self.carol, likes=1)    # ...this one
+        cache.clear()
+        from songs import feed
+        feed.mark_seen(self.alice.id, [hi.id])   # pretend hi was already served
+        snap = feed.build_ranked_feed(self.alice)
+        # The seen high-scorer is demoted below the unseen low-scorer.
+        self.assertLess(snap.index(lo.id), snap.index(hi.id))
+
+    def test_taste_boosts_matching_tag(self):
+        from songs import feed
+        # Alice likes a 'worship' post -> her taste tags include 'worship'.
+        seed = mkpost(self.dave, tags='worship', likes=1)
+        self.client.post(f'/api/social-posts/{seed.id}/like/')
+        # Two equal-engagement candidates from followed authors; only p1 matches.
+        follow(self.alice, self.carol)
+        p1 = mkpost(self.bob, tags='worship', likes=5)
+        p2 = mkpost(self.carol, tags='random', likes=5)
+        cache.clear()
+        snap = feed.build_ranked_feed(self.alice)
+        self.assertLess(snap.index(p1.id), snap.index(p2.id))
 
     def test_falls_back_to_chronological_when_no_candidates(self):
         # With ONLY the viewer's own content in existence, every pool is empty
