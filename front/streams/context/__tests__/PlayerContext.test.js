@@ -1,12 +1,13 @@
 import React from 'react';
 import { renderHook, act, waitFor } from '@testing-library/react-native';
-import { Audio } from 'expo-av';
+import { createSound } from '../../services/audioPlayer';
 import { PlayerProvider, usePlayer } from '../PlayerContext';
 import { PreferencesProvider } from '../PreferencesContext';
 
-// --- expo-av mock -----------------------------------------------------------
-// A single fake Sound whose status callback we capture so tests can simulate
-// playback events (status updates, track-finished).
+// --- audio adapter mock -----------------------------------------------------
+// PlayerContext now goes through services/audioPlayer (expo-audio under the
+// hood). A single fake Sound whose status callback we capture so tests can
+// simulate playback events (status updates, track-finished).
 const mockSound = {
   unloadAsync: jest.fn().mockResolvedValue(undefined),
   getStatusAsync: jest.fn().mockResolvedValue({ isLoaded: true, isPlaying: true }),
@@ -17,16 +18,12 @@ const mockSound = {
 };
 const mockAudioState = { onStatus: null };
 
-jest.mock('expo-av', () => ({
-  Audio: {
-    setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
-    Sound: {
-      createAsync: jest.fn(async (_src, _init, onStatus) => {
-        mockAudioState.onStatus = onStatus;
-        return { sound: mockSound };
-      }),
-    },
-  },
+jest.mock('../../services/audioPlayer', () => ({
+  setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
+  createSound: jest.fn(async (_src, _init, onStatus) => {
+    mockAudioState.onStatus = onStatus;
+    return { sound: mockSound };
+  }),
 }));
 
 // PlayerProvider reads audio-quality prefs via usePreferences(), so it must be
@@ -57,7 +54,7 @@ test('playTrack loads the track and exposes it as currentTrack', async () => {
     await result.current.playTrack(TRACK(1));
   });
 
-  expect(Audio.Sound.createAsync).toHaveBeenCalledWith(
+  expect(createSound).toHaveBeenCalledWith(
     { uri: 'uri-1' },
     expect.anything(),
     expect.any(Function),
@@ -95,7 +92,7 @@ test('a finished track auto-advances to the next in the queue', async () => {
   await emit({ didJustFinish: true, positionMillis: 1000, durationMillis: 1000 });
 
   await waitFor(() => expect(result.current.currentTrack?.id).toBe(2));
-  expect(Audio.Sound.createAsync).toHaveBeenLastCalledWith(
+  expect(createSound).toHaveBeenLastCalledWith(
     { uri: 'uri-2' },
     expect.anything(),
     expect.any(Function),

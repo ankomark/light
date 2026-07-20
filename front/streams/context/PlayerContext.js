@@ -6,7 +6,7 @@ import React, {
   useEffect,
   useCallback,
 } from 'react';
-import { Audio } from 'expo-av';
+import { createSound, setAudioModeAsync } from '../services/audioPlayer';
 import {
   makeOrder, reshuffleOrder, nextPos, prevPos, canNext, canPrev,
 } from '../utils/queueLogic';
@@ -70,7 +70,7 @@ export const PlayerProvider = ({ children }) => {
 
   // Configure background / silent-mode playback once.
   useEffect(() => {
-    Audio.setAudioModeAsync({
+    setAudioModeAsync({
       allowsRecordingIOS: false,
       staysActiveInBackground: true,
       playsInSilentModeIOS: true,
@@ -125,7 +125,7 @@ export const PlayerProvider = ({ children }) => {
           prefsRef.current.audioQuality,
           prefsRef.current.dataSaver
         );
-        const { sound } = await Audio.Sound.createAsync(
+        const { sound } = await createSound(
           { uri },
           { shouldPlay: true, progressUpdateIntervalMillis: 500 },
           onStatus
