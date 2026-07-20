@@ -13,7 +13,7 @@ import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { createProduct } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 

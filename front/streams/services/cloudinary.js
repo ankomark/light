@@ -5,7 +5,7 @@
 // Flow: ask the backend for a presigned ticket (/upload/r2-sign/), then PUT
 // the raw bytes straight to R2. No secrets on the client, and the backend
 // controls the key layout + content-type allowlist.
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getR2UploadTicket } from './api';
 
 // App-level upload types → backend `type` vocabulary.
