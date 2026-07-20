@@ -14,7 +14,8 @@ import {
   Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Video, Audio } from 'expo-av';
+import { Audio } from 'expo-av';
+import AppVideo from './AppVideo';
 import * as Haptics from 'expo-haptics';
 import GlassView from './GlassView';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -178,7 +179,7 @@ const HeartBurst = ({ scale }) => (
 );
 
 const PostMedia = React.memo(function PostMedia({
-  item, videoRefs, isFocused, isMuted, onToggleMute,
+  item, isFocused, isMuted, onToggleMute,
   isAudioActive, isAudioPlaying, onToggleAudio, onDoubleTapLike,
 }) {
   const { preferences } = usePreferences();
@@ -344,8 +345,7 @@ const PostMedia = React.memo(function PostMedia({
         style={[styles.mediaContainer, { aspectRatio }]}
         onPress={() => handleTap(() => setManualPaused((p) => !p))}
       >
-        <Video
-          ref={ref => { if (ref) videoRefs.current[item.id] = ref; else delete videoRefs.current[item.id]; }}
+        <AppVideo
           source={{ uri: videoUri }}
           style={[styles.media, { aspectRatio }]}
           resizeMode="cover"
@@ -487,7 +487,6 @@ const SocialFeed = ({ showBackground = true }) => {
   const [error, setError] = useState(null);
   const [followStates, setFollowStates] = useState({});
   const navigation = useNavigation();
-  const videoRefs = useRef({});
   const audioRef = useRef(null);
   const { currentUser } = useAuth();
   const { pause: pauseMusic } = usePlayer();
@@ -1031,7 +1030,6 @@ const SocialFeed = ({ showBackground = true }) => {
       {renderPostHeader({ item })}
       <PostMedia
         item={item}
-        videoRefs={videoRefs}
         isFocused={focusedVideoId === item.id}
         isMuted={isMuted}
         onToggleMute={toggleMute}

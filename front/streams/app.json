@@ -82,7 +82,9 @@
       ],
       "@react-native-community/datetimepicker",
       "@sentry/react-native",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-video",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true
