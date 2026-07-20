@@ -21,7 +21,10 @@ import { compressImage } from '../services/imageProcessing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { Audio } from 'expo-av';
+import {
+  createSound, setAudioModeAsync, requestRecordingPermissionsAsync,
+  createRecording, VOICE_NOTE_RECORDING_OPTIONS,
+} from '../services/audioPlayer';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
@@ -36,24 +39,6 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const MAX_ATTACH_BYTES = 8 * 1024 * 1024; // 8MB cap on a single attachment
-
-// Voice notes recorded mono at a low bitrate — plenty for speech, far smaller
-// than HIGH_QUALITY, so they upload and load fast. Format stays .m4a/AAC.
-const VOICE_RECORDING_OPTIONS = {
-  isMeteringEnabled: false,
-  android: {
-    extension: '.m4a', outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC, sampleRate: 22050,
-    numberOfChannels: 1, bitRate: 48000,
-  },
-  ios: {
-    extension: '.m4a', outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.LOW, sampleRate: 22050,
-    numberOfChannels: 1, bitRate: 48000,
-    linearPCMBitDepth: 16, linearPCMIsBigEndian: false, linearPCMIsFloat: false,
-  },
-  web: { mimeType: 'audio/webm', bitsPerSecond: 48000 },
-};
 
 // Light Cloudinary delivery transform for an image bubble thumbnail. Leaves
 // local (file://) and legacy base64 (data:) attachments untouched.
@@ -479,10 +464,10 @@ const ChurchCommunity = ({ navigation, route }) => {
 
   const startRecording = async () => {
     try {
-      const perm = await Audio.requestPermissionsAsync();
+      const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) { Alert.alert('Permission needed', 'Enable microphone access to record.'); return; }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording: rec } = await Audio.Recording.createAsync(VOICE_RECORDING_OPTIONS);
+      await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording: rec } = await createRecording(VOICE_NOTE_RECORDING_OPTIONS);
       recordingRef.current = rec;
       setRecording(true);
     } catch { Alert.alert('Church', 'Could not start recording.'); }
@@ -495,7 +480,7 @@ const ChurchCommunity = ({ navigation, route }) => {
     if (!rec) return;
     try {
       const st = await rec.stopAndUnloadAsync().then(() => rec.getStatusAsync()).catch(() => null);
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      await setAudioModeAsync({ allowsRecordingIOS: false });
       const uri = rec.getURI();
       if (cancel || !uri) return;
       sendMedia({
@@ -534,8 +519,8 @@ const ChurchCommunity = ({ navigation, route }) => {
         sourceUri = path;
       }
       if (!sourceUri) return;
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
-      const { sound } = await Audio.Sound.createAsync({ uri: sourceUri }, { shouldPlay: true });
+      await setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+      const { sound } = await createSound({ uri: sourceUri }, { shouldPlay: true });
       soundRef.current = sound;
       loadedIdRef.current = msg.id;
       setPlayingId(msg.id);

@@ -14,7 +14,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
-import { Audio } from 'expo-av';
+import {
+  createSound, setAudioModeAsync, requestRecordingPermissionsAsync,
+  Recording, VOICE_NOTE_RECORDING_OPTIONS,
+} from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
 import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, markGroupRead,
@@ -35,30 +38,6 @@ const SWIPE_TRIGGER = 56; // px of right-swipe to fire a reply
 
 // Voice notes recorded mono at a low bitrate — plenty for speech, far smaller
 // than HIGH_QUALITY, so they upload and load fast. Format stays .m4a/AAC.
-const VOICE_RECORDING_OPTIONS = {
-  isMeteringEnabled: false,
-  android: {
-    extension: '.m4a',
-    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC,
-    sampleRate: 22050,
-    numberOfChannels: 1,
-    bitRate: 48000,
-  },
-  ios: {
-    extension: '.m4a',
-    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.LOW,
-    sampleRate: 22050,
-    numberOfChannels: 1,
-    bitRate: 48000,
-    linearPCMBitDepth: 16,
-    linearPCMIsBigEndian: false,
-    linearPCMIsFloat: false,
-  },
-  web: { mimeType: 'audio/webm', bitsPerSecond: 48000 },
-};
-
 const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -464,11 +443,11 @@ const GroupDetail = ({ route, navigation }) => {
   // ── Voice ──
   const startRecording = useCallback(async () => {
     try {
-      const perm = await Audio.requestPermissionsAsync();
+      const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) { Alert.alert('Permission required', 'Enable microphone access.'); return; }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(VOICE_RECORDING_OPTIONS);
+      await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const rec = new Recording();
+      await rec.prepareToRecordAsync(VOICE_NOTE_RECORDING_OPTIONS);
       await rec.startAsync();
       recordingRef.current = rec; recordStartRef.current = Date.now();
       setShowEmoji(false); setIsRecording(true); setRecordSecs(0);
@@ -483,7 +462,7 @@ const GroupDetail = ({ route, navigation }) => {
     if (!rec) return;
     try {
       await rec.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      await setAudioModeAsync({ allowsRecordingIOS: false });
       if (cancel) return;
       const uri = rec.getURI();
       const seconds = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
@@ -511,8 +490,8 @@ const GroupDetail = ({ route, navigation }) => {
         sourceUri = path;
       }
       if (!sourceUri) return;
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
-      const { sound } = await Audio.Sound.createAsync({ uri: sourceUri }, { shouldPlay: true });
+      await setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+      const { sound } = await createSound({ uri: sourceUri }, { shouldPlay: true });
       soundRef.current = sound; setPlayingId(msg.id);
       sound.setOnPlaybackStatusUpdate((st) => { if (st.didJustFinish) { setPlayingId(null); sound.unloadAsync().catch(() => {}); soundRef.current = null; } });
     } catch { Alert.alert('Error', 'Could not play this voice note.'); setPlayingId(null); }

@@ -19,7 +19,10 @@ import {
 import { useAuth } from '../context/useAuth';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { Audio } from 'expo-av';
+import {
+  createSound, setAudioModeAsync, requestRecordingPermissionsAsync,
+  createRecording, VOICE_NOTE_RECORDING_OPTIONS,
+} from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
 import { processVideo } from '../services/videoProcessing';
 import { MaterialIcons, FontAwesome, Ionicons, Feather, AntDesign } from '@expo/vector-icons';
@@ -135,8 +138,8 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
   };
 
   const requestPermissions = async () => {
-    await Audio.requestPermissionsAsync();
-    await Audio.setAudioModeAsync({
+    await requestRecordingPermissionsAsync();
+    await setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
     });
@@ -216,9 +219,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
       await requestPermissions();
       setIsRecording(true);
       
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const { recording } = await createRecording(VOICE_NOTE_RECORDING_OPTIONS);
       setRecording(recording);
     } catch (error) {
       console.error('Failed to start recording:', error);
@@ -258,7 +259,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
 
   const playAudio = async (uri) => {
     try {
-      const { sound } = await Audio.Sound.createAsync({ uri });
+      const { sound } = await createSound({ uri });
       await sound.playAsync();
     } catch (error) {
       console.error('Failed to play audio:', error);

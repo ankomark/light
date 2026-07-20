@@ -11,7 +11,39 @@
 import {
   createAudioPlayer,
   setAudioModeAsync as expoSetAudioModeAsync,
+  requestRecordingPermissionsAsync,
+  RecordingPresets,
+  AudioModule,
 } from 'expo-audio';
+
+export { requestRecordingPermissionsAsync };
+
+// Shared voice-note recording config: mono, low bitrate .m4a/AAC — plenty for
+// speech at a fraction of HIGH_QUALITY's size. Built by overriding the preset's
+// numeric fields so we keep expo-audio's valid platform format/encoder constants
+// (the old code hardcoded expo-av's AndroidOutputFormat/IOSAudioQuality enums).
+export const VOICE_NOTE_RECORDING_OPTIONS = {
+  ...RecordingPresets.HIGH_QUALITY,
+  isMeteringEnabled: false,
+  extension: '.m4a',
+  sampleRate: 22050,
+  numberOfChannels: 1,
+  bitRate: 48000,
+  android: {
+    ...RecordingPresets.HIGH_QUALITY.android,
+    extension: '.m4a',
+    sampleRate: 22050,
+    numberOfChannels: 1,
+    bitRate: 48000,
+  },
+  ios: {
+    ...RecordingPresets.HIGH_QUALITY.ios,
+    extension: '.m4a',
+    sampleRate: 22050,
+    numberOfChannels: 1,
+    bitRate: 48000,
+  },
+};
 
 // expo-audio AudioStatus (seconds, renamed fields) -> the expo-av status shape
 // callers read (positionMillis/durationMillis/isPlaying/didJustFinish/...).
@@ -102,4 +134,36 @@ export const setAudioModeAsync = (mode = {}) => {
     next.interruptionMode = mode.shouldDuckAndroid ? 'duckOthers' : 'mixWithOthers';
   }
   return expoSetAudioModeAsync(next);
+};
+
+// Adapter presenting expo-av's Audio.Recording surface (prepareToRecordAsync/
+// startAsync/stopAndUnloadAsync/getURI/getStatusAsync) on top of expo-audio's
+// AudioModule.AudioRecorder, so the voice-note recorders migrate in place.
+export class Recording {
+  constructor() { this._rec = null; }
+  async prepareToRecordAsync(options = VOICE_NOTE_RECORDING_OPTIONS) {
+    // AudioModule is a native module; its AudioRecorder member isn't statically
+    // analyzable, but this is exactly how expo-audio instantiates it internally.
+    // eslint-disable-next-line import/namespace
+    this._rec = new AudioModule.AudioRecorder(options);
+    await this._rec.prepareToRecordAsync();
+  }
+  async startAsync() { this._rec?.record(); }
+  async stopAndUnloadAsync() { if (this._rec) await this._rec.stop(); }
+  getURI() { return this._rec?.uri ?? null; }
+  async getStatusAsync() {
+    return {
+      canRecord: true,
+      isRecording: !!this._rec?.isRecording,
+      durationMillis: Math.round((this._rec?.currentTime || 0) * 1000),
+    };
+  }
+}
+
+// Drop-in for Audio.Recording.createAsync: prepares + starts, returns { recording }.
+export const createRecording = async (options = VOICE_NOTE_RECORDING_OPTIONS) => {
+  const recording = new Recording();
+  await recording.prepareToRecordAsync(options);
+  await recording.startAsync();
+  return { recording };
 };
