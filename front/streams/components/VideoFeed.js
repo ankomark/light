@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, Dimensions, StyleSheet, ActivityIndicator,
   Pressable, TouchableOpacity, Image, StatusBar,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { setAudioModeAsync } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -211,7 +211,7 @@ const VideoFeed = () => {
 
   // Play sound even if the device is on silent (iOS).
   useEffect(() => {
-    Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: false }).catch(() => {});
+    setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: false }).catch(() => {});
   }, []);
 
   const load = useCallback(async ({ refresh = false } = {}) => {

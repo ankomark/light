@@ -14,7 +14,7 @@ import {
   Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Audio } from 'expo-av';
+import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import * as Haptics from 'expo-haptics';
 import GlassView from './GlassView';
@@ -722,7 +722,7 @@ const SocialFeed = ({ showBackground = true }) => {
     if (!post?.song_audio_url || playingSongPostIdRef.current === post.id) return;
     try {
       if (audioRef.current) await stopSong();
-      const { sound } = await Audio.Sound.createAsync(
+      const { sound } = await createSound(
         { uri: post.song_audio_url },
         { shouldPlay: false, isLooping: true }
       );

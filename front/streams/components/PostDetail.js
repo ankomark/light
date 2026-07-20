@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -110,7 +110,7 @@ const PostDetail = ({ route, navigation }) => {
             audioRef.current = null;
           }
 
-          const { sound } = await Audio.Sound.createAsync({ uri: songAudioUrl });
+          const { sound } = await createSound({ uri: songAudioUrl });
           audioRef.current = sound;
 
           await sound.playFromPositionAsync((songStart || 0) * 1000);

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { Audio } from 'expo-av';
+import { createSound } from '../services/audioPlayer';
 import * as FileSystem from 'expo-file-system/legacy';
 import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
@@ -123,7 +123,7 @@ const TrackUploadForm = () => {
         await previewSound.unloadAsync();
       }
 
-      const { sound } = await Audio.Sound.createAsync(
+      const { sound } = await createSound(
         { uri: trackData.audioFile.uri },
         { shouldPlay: true }
       );

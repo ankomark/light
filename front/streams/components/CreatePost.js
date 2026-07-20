@@ -7,7 +7,7 @@ import AudioTrimmer from './AudioTrimmer';
 import ImageCropper from './ImageCropper';
 import VideoTrimmer from './VideoTrimmer';
 import * as ImagePicker from 'expo-image-picker';
-import { Audio } from 'expo-av';
+import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { createSocialPost, fetchTracks } from '../services/api';
@@ -348,7 +348,7 @@ const CreatePost = ({ navigation }) => {
         soundRef.current = null;
       }
 
-      const { sound } = await Audio.Sound.createAsync(
+      const { sound } = await createSound(
         { uri },
         { shouldPlay: false, progressUpdateIntervalMillis: 50, isLooping: true },
         onPreviewStatus
