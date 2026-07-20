@@ -190,6 +190,11 @@ const PostMedia = React.memo(function PostMedia({
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  // Video-only: the poster stays painted on top of the <Video> until the decoder
+  // has a real first frame to show (onReadyForDisplay). This kills the black flash
+  // between the thumbnail and playback — see the video branch below.
+  const [videoReady, setVideoReady] = useState(false);
+  const posterFade = useRef(new Animated.Value(1)).current;
   // When autoplay is off, the video starts paused; tap toggles play/pause.
   const [manualPaused, setManualPaused] = useState(!autoplay);
   const aspectRatio = mediaAspectRatio(item.width, item.height);
@@ -198,15 +203,42 @@ const PostMedia = React.memo(function PostMedia({
     setCurrentUrl(item.mediaUrl);
     setIsLoading(true);
     setHasError(false);
-  }, [item.id, item.mediaUrl]);
+    setVideoReady(false);
+    posterFade.setValue(1);
+  }, [item.id, item.mediaUrl, posterFade]);
 
   // Apply the autoplay-derived default whenever focus changes OR the preference
   // is toggled — so flipping "Autoplay videos" in Settings immediately plays/
   // pauses the on-screen video. A manual tap only changes manualPaused (not these
   // deps), so user taps while focused are preserved until the next scroll/toggle.
+  // Losing focus unmounts the <Video>, so re-show the poster for the next focus.
   useEffect(() => {
     setManualPaused(!autoplay);
-  }, [isFocused, autoplay]);
+    if (!isFocused) {
+      setVideoReady(false);
+      posterFade.setValue(1);
+    }
+  }, [isFocused, autoplay, posterFade]);
+
+  // First frame is decoded and on-screen — fade the poster out over it so the
+  // hand-off from thumbnail to video is seamless instead of a black cut.
+  const revealVideo = useCallback(() => {
+    setIsLoading(false);
+    Animated.timing(posterFade, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(() => setVideoReady(true));
+  }, [posterFade]);
+
+  // Fallback: some Android builds don't emit onReadyForDisplay for a video that
+  // mounts paused (autoplay off). onLoad still fires, and the paused first frame
+  // is already rendered, so reveal it here too — but only when paused, so the
+  // autoplaying case still waits for the true first-frame signal below.
+  const handleVideoLoad = useCallback(() => {
+    setIsLoading(false);
+    if (manualPaused) revealVideo();
+  }, [manualPaused, revealVideo]);
 
   const handleError = useCallback(() => {
     if (currentUrl !== item.media_url) {
@@ -312,11 +344,6 @@ const PostMedia = React.memo(function PostMedia({
         style={[styles.mediaContainer, { aspectRatio }]}
         onPress={() => handleTap(() => setManualPaused((p) => !p))}
       >
-        {isLoading && (
-          <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color={colors.primary} />
-          </View>
-        )}
         <Video
           ref={ref => { if (ref) videoRefs.current[item.id] = ref; else delete videoRefs.current[item.id]; }}
           source={{ uri: videoUri }}
@@ -326,17 +353,39 @@ const PostMedia = React.memo(function PostMedia({
           shouldPlay={isFocused && !manualPaused}
           isMuted={isMuted}
           onError={handleError}
-          onLoad={handleLoad}
+          onLoad={handleVideoLoad}
+          onReadyForDisplay={revealVideo}
         />
+        {/* Poster held on top of the <Video> until the first frame is decoded,
+            then faded out — so the crisp thumbnail is what the user sees during
+            buffering instead of a black rectangle. */}
+        {!videoReady && item.thumbnailUrl && (
+          <Animated.View
+            style={[styles.videoPosterOverlay, { opacity: posterFade }]}
+            pointerEvents="none"
+          >
+            <Image
+              source={{ uri: item.thumbnailUrl }}
+              style={[styles.media, { aspectRatio }]}
+              contentFit="cover"
+            />
+          </Animated.View>
+        )}
+        {/* Buffering spinner sits over the poster, not a black screen. */}
+        {isLoading && (
+          <View style={styles.loadingOverlay} pointerEvents="none">
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        )}
         {/* Tap-to-pause indicator */}
-        {isFocused && !isLoading && manualPaused && (
+        {isFocused && videoReady && manualPaused && (
           <View style={styles.audioPausedOverlay} pointerEvents="none">
             <GlassView intensity={32} tint="dark" style={styles.audioPlayBadge}>
               <MaterialIcons name="play-arrow" size={40} color={colors.white} />
             </GlassView>
           </View>
         )}
-        {isFocused && !isLoading && (
+        {isFocused && videoReady && (
           <TouchableOpacity
             style={styles.muteButton}
             onPress={onToggleMute}
@@ -1375,6 +1424,12 @@ const styles = StyleSheet.create({
   // Dark placeholder for an off-screen video with no poster frame yet.
   videoPosterFallback: {
     backgroundColor: '#0A1628',
+  },
+  // Poster kept on top of the focused <Video> until its first frame is decoded.
+  videoPosterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    backgroundColor: colors.black,
   },
   // Double-tap-to-like heart burst, centered over the media.
   heartBurst: {
