@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import Markdown from 'react-native-markdown-display';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -125,11 +125,7 @@ const PublicationEditor = ({ route, navigation }) => {
         quality: 0.8,
       });
       if (!result.canceled && result.assets?.length) {
-        const processed = await manipulateAsync(
-          result.assets[0].uri,
-          [{ resize: { width: 600 } }],
-          { compress: 0.6, format: SaveFormat.JPEG }
-        );
+        const processed = await compressImage(result.assets[0].uri, { width: 600, quality: 0.6 });
         const uploaded = await uploadMedia(
           { uri: processed.uri, name: `cover_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
           'cover',
@@ -236,10 +232,9 @@ const PublicationEditor = ({ route, navigation }) => {
         quality: 0.8,
       });
       if (result.canceled || !result.assets?.length) return;
-      const processed = await manipulateAsync(
-        result.assets[0].uri, [{ resize: { width: 1000 } }],
-        { compress: 0.6, format: SaveFormat.JPEG, base64: true }
-      );
+      const processed = await compressImage(result.assets[0].uri, {
+        width: 1000, quality: 0.6, base64: true,
+      });
       const dataUri = `data:image/jpeg;base64,${processed.base64}`;
       // Insert only a short token into the text; keep the heavy data URI in the
       // side map so the TextInput never holds the giant base64 string.

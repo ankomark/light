@@ -15,7 +15,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
@@ -409,7 +409,7 @@ const GroupDetail = ({ route, navigation }) => {
       if (status !== 'granted') { Alert.alert('Permission required', 'Enable photo access.'); return; }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (res.canceled || !res.assets?.length) return;
-      const p = await manipulateAsync(res.assets[0].uri, [{ resize: { width: 1080 } }], { compress: 0.6, format: SaveFormat.JPEG });
+      const p = await compressImage(res.assets[0].uri, { width: 1080, quality: 0.6 });
       sendMediaMessage({ localUri: p.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg' });
     } catch { Alert.alert('Error', 'Could not attach image.'); }
   }, [sendMediaMessage]);

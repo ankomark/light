@@ -12,7 +12,7 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { createSocialPost, fetchTracks } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { processVideo, cleanupProcessedVideos } from '../services/videoProcessing';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { compressImage as compressImageFile } from '../services/imageProcessing';
 import * as DocumentPicker from 'expo-document-picker';
 
 // Instagram-style aspect-ratio clamp (matches the feed's mediaAspectRatio so the
@@ -257,14 +257,9 @@ const CreatePost = ({ navigation }) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Compress an image to a sane upload size (no upscaling).
-  const compressImage = async (uri, width) => {
-    const actions = width && width > 1080 ? [{ resize: { width: 1080 } }] : [];
-    return ImageManipulator.manipulateAsync(uri, actions, {
-      compress: 0.8,
-      format: ImageManipulator.SaveFormat.JPEG,
-    });
-  };
+  // Compress an image to a sane upload size (cap at 1080px wide, no upscaling).
+  const compressImage = (uri, width) =>
+    compressImageFile(uri, { maxWidth: 1080, sourceWidth: width, quality: 0.8 });
 
   // Cropper confirmed: compress the cropped output → single-image post.
   // (Crop is only offered for single-image posts, so this replaces the carousel.)
@@ -441,7 +436,8 @@ const CreatePost = ({ navigation }) => {
     } else {
       // R2 stores bytes verbatim, so cut + compress the clip ON-DEVICE first
       // (this is what Cloudinary used to do at ingest). Trims to the chosen
-      // window and downscales to <=1080p; the uploaded file IS the final clip.
+      // window and downscales to 720p at a capped bitrate; the uploaded file IS
+      // the final clip.
       const processed = await processVideo({
         uri: media.uri,
         startSec: videoTrim.start,

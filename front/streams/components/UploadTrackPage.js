@@ -9,7 +9,7 @@ import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL, getAccessToken } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
 const TrackUploadForm = () => {
@@ -102,11 +102,7 @@ const TrackUploadForm = () => {
       }
 
       // Compress cover image before upload
-      const compressed = await ImageManipulator.manipulateAsync(
-        image.uri,
-        [{ resize: { width: 800 } }],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-      );
+      const compressed = await compressImage(image.uri, { width: 800, quality: 0.8 });
       setTrackData({...trackData, coverImage: { ...image, uri: compressed.uri }});
       setStatusMessages(prev => ({ 
         ...prev, 

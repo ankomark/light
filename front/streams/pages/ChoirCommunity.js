@@ -17,7 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -446,8 +446,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8,
     });
     if (res.canceled || !res.assets?.length) return;
-    const out = await manipulateAsync(res.assets[0].uri, [{ resize: { width: 1280 } }],
-      { compress: 0.6, format: SaveFormat.JPEG });
+    const out = await compressImage(res.assets[0].uri, { width: 1280, quality: 0.6 });
     sendMedia({ localUri: out.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg' });
   };
 

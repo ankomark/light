@@ -9,7 +9,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import {
   fetchChoirs, fetchChoirsByUrl, createChoir, updateChoir, deleteChoir,
   toggleChoirActive, updateChoirMembers,
@@ -48,11 +48,7 @@ async function pickAndUpload(aspect, width, type) {
     quality: 0.8,
   });
   if (result.canceled || !result.assets?.length) return null;
-  const processed = await manipulateAsync(
-    result.assets[0].uri,
-    [{ resize: { width } }],
-    { compress: 0.6, format: SaveFormat.JPEG }
-  );
+  const processed = await compressImage(result.assets[0].uri, { width, quality: 0.6 });
   try {
     const uploaded = await uploadMedia(
       { uri: processed.uri, name: `choir_${Date.now()}.jpg`, mimeType: 'image/jpeg' },

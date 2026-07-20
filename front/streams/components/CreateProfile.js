@@ -5,7 +5,7 @@ import {
   StyleSheet, ScrollView, ActivityIndicator
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { fetchProfile, updateProfile, getAccessToken, API_URL } from '../services/api';
@@ -79,12 +79,8 @@ const CreateProfile = () => {
 
       if (!result.canceled && result.assets?.[0]?.uri) {
         // Compress image
-        const compressedImage = await ImageManipulator.manipulateAsync(
-          result.assets[0].uri,
-          [{ resize: { width: 800 } }],
-          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-        );
-        
+        const compressedImage = await compressImage(result.assets[0].uri, { width: 800, quality: 0.7 });
+
         setProfileData(prev => ({ ...prev, picture: compressedImage.uri }));
       }
     } catch (error) {

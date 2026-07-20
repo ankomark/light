@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import {
   fetchMediaStations, createMediaStation, updateMediaStation, deleteMediaStation,
 } from '../services/api';
@@ -94,11 +94,9 @@ const AdventistMedia = () => {
         quality: 0.8,
       });
       if (!result.canceled && result.assets?.length) {
-        const processed = await manipulateAsync(
-          result.assets[0].uri,
-          [{ resize: { width: 256, height: 256 } }],
-          { compress: 0.7, format: SaveFormat.JPEG }
-        );
+        const processed = await compressImage(result.assets[0].uri, {
+          width: 256, height: 256, quality: 0.7,
+        });
         const uploaded = await uploadMedia(
           { uri: processed.uri, name: `station_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
           'cover',

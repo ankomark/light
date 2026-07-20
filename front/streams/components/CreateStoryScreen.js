@@ -4,10 +4,10 @@ import {
   ActivityIndicator, Alert, Dimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { uploadMedia } from '../services/cloudinary';
+import { compressImage } from '../services/imageProcessing';
 import { processVideo } from '../services/videoProcessing';
 import { createStory } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -52,11 +52,7 @@ const CreateStoryScreen = () => {
       }
       if (asset.type === 'image') {
         // Compress image before upload
-        const compressed = await ImageManipulator.manipulateAsync(
-          asset.uri,
-          [{ resize: { width: 1080 } }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-        );
+        const compressed = await compressImage(asset.uri, { width: 1080, quality: 0.8 });
         setMedia({ ...asset, uri: compressed.uri });
       } else {
         setMedia(asset);
@@ -71,7 +67,7 @@ const CreateStoryScreen = () => {
       const isVideo = media.type === 'video';
       // R2 stores bytes verbatim, so compress/downscale story video on-device
       // (Cloudinary used to do this at ingest). Stories are already <=30s, so
-      // no trim window here — just compress to <=1080p.
+      // no trim window here — just compress to 720p at a capped bitrate.
       let uploadUri = media.uri;
       if (isVideo) {
         const processed = await processVideo({

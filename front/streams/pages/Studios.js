@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import {
   fetchVideoStudios, createVideoStudio, updateVideoStudio, deleteVideoStudio,
 } from '../services/api';
@@ -52,10 +52,7 @@ async function pickAndUpload(aspect, width, type) {
     mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect, quality: 0.8,
   });
   if (result.canceled || !result.assets?.length) return null;
-  const processed = await manipulateAsync(
-    result.assets[0].uri, [{ resize: { width } }],
-    { compress: 0.6, format: SaveFormat.JPEG }
-  );
+  const processed = await compressImage(result.assets[0].uri, { width, quality: 0.6 });
   try {
     const uploaded = await uploadMedia(
       { uri: processed.uri, name: `studio_${Date.now()}.jpg`, mimeType: 'image/jpeg' },

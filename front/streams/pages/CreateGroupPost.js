@@ -20,6 +20,8 @@ import { useAuth } from '../context/useAuth';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Audio } from 'expo-av';
+import { compressImage } from '../services/imageProcessing';
+import { processVideo } from '../services/videoProcessing';
 import { MaterialIcons, FontAwesome, Ionicons, Feather, AntDesign } from '@expo/vector-icons';
 
 const { height } = Dimensions.get('window');
@@ -144,19 +146,42 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
     try {
       if (type === 'image' || type === 'video') {
         const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: type === 'image' 
-            ? ImagePicker.MediaTypeOptions.Images 
+          mediaTypes: type === 'image'
+            ? ImagePicker.MediaTypeOptions.Images
             : ImagePicker.MediaTypeOptions.Videos,
           allowsEditing: true,
           quality: 0.8,
         });
 
-        if (!result.canceled) {
-          addAttachment({
-            type,
-            uri: result.assets[0].uri,
-            name: `${type}_${Date.now()}.${type === 'image' ? 'jpg' : 'mp4'}`,
-          });
+        if (result.canceled || !result.assets?.[0]) return;
+        const asset = result.assets[0];
+
+        if (type === 'image') {
+          // Downscale to <=1080px wide + JPEG 0.8 before upload (R2 stores bytes
+          // verbatim) — same as the feed. Falls back to the raw pick on failure.
+          let uri = asset.uri;
+          try {
+            const out = await compressImage(asset.uri, {
+              maxWidth: 1080, sourceWidth: asset.width, quality: 0.8,
+            });
+            uri = out.uri;
+          } catch (e) {
+            console.warn('[CreateGroupPost] image compress failed — using raw', e?.message);
+          }
+          addAttachment({ type, uri, name: `image_${Date.now()}.jpg` });
+        } else {
+          // Compress video to 720p + faststart on-device (R2 has no ingest
+          // transform). Falls back to the raw clip if the native module is absent.
+          let uri = asset.uri;
+          try {
+            const processed = await processVideo({
+              uri: asset.uri, width: asset.width, height: asset.height,
+            });
+            uri = processed.uri;
+          } catch (e) {
+            console.warn('[CreateGroupPost] video processing failed — using raw', e?.message);
+          }
+          addAttachment({ type, uri, name: `video_${Date.now()}.mp4` });
         }
       } else if (type === 'document') {
         const result = await DocumentPicker.getDocumentAsync({

@@ -14,7 +14,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Audio } from 'expo-av';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../services/imageProcessing';
 import { fetchMessages, fetchOlderMessages, sendMessage, markConversationRead } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
@@ -297,10 +297,7 @@ const ChatScreen = ({ route, navigation }) => {
       if (res.canceled || !res.assets?.length) return;
       // Compress on-device first (smaller upload); Cloudinary compresses again
       // on ingest. No base64 — we upload the file and store only the URL.
-      const processed = await manipulateAsync(
-        res.assets[0].uri, [{ resize: { width: 1080 } }],
-        { compress: 0.6, format: SaveFormat.JPEG }
-      );
+      const processed = await compressImage(res.assets[0].uri, { width: 1080, quality: 0.6 });
       sendMediaMessage({
         localUri: processed.uri, uploadType: 'chat-image',
         message_type: 'image', mimeType: 'image/jpeg',
