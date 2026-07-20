@@ -29,9 +29,11 @@ const AppVideo = forwardRef(function AppVideo(
     shouldPlay = false,
     isMuted = false,
     nativeControls = false,
+    useNativeControls = false,   // expo-av name; either turns controls on
     onReadyForDisplay,
     onLoad,
     onError,
+    onPlaybackStatusUpdate,
     ...viewProps
   },
   ref,
@@ -55,7 +57,13 @@ const AppVideo = forwardRef(function AppVideo(
   useEffect(() => {
     if (!onLoad && !onError) return undefined;
     const loadSub = onLoad
-      ? player.addListener('sourceLoad', (payload) => onLoad(payload))
+      ? player.addListener('sourceLoad', (payload) => onLoad({
+          // Shape like expo-av's onLoad status: callers read durationMillis.
+          // expo-video reports duration in seconds on the sourceLoad payload.
+          isLoaded: true,
+          durationMillis: Math.round((payload?.duration || player.duration || 0) * 1000),
+          ...payload,
+        }))
       : null;
     const statusSub = onError
       ? player.addListener('statusChange', ({ status, error }) => {
@@ -65,12 +73,35 @@ const AppVideo = forwardRef(function AppVideo(
     return () => { loadSub?.remove?.(); statusSub?.remove?.(); };
   }, [player, onLoad, onError]);
 
-  // Imperative handle mirroring the old <Video> ref methods used by the trimmer/feed.
+  // Synthesize expo-av's onPlaybackStatusUpdate from expo-video events for the
+  // callers that drive UI off playback progress (e.g. StoryViewer's progress bar
+  // + auto-advance). We emit the subset those callers read: isLoaded,
+  // positionMillis, durationMillis, didJustFinish, isPlaying.
+  useEffect(() => {
+    if (!onPlaybackStatusUpdate) return undefined;
+    player.timeUpdateEventInterval = 0.25; // seconds; 0 disables timeUpdate
+    const emit = (didJustFinish) => onPlaybackStatusUpdate({
+      isLoaded: player.status === 'readyToPlay',
+      positionMillis: Math.round((player.currentTime || 0) * 1000),
+      durationMillis: Math.round((player.duration || 0) * 1000),
+      didJustFinish: !!didJustFinish,
+      isPlaying: player.playing,
+    });
+    const timeSub = player.addListener('timeUpdate', () => emit(false));
+    const endSub = player.addListener('playToEnd', () => emit(true));
+    return () => { timeSub?.remove?.(); endSub?.remove?.(); };
+  }, [player, onPlaybackStatusUpdate]);
+
+  // Imperative handle mirroring the old expo-av <Video> ref methods the trimmer
+  // and full-screen feed call (playAsync/pauseAsync/setPositionAsync). Kept
+  // promise-returning so existing `await v.playAsync()` / `.catch()` call sites
+  // work unchanged. Old code seeked in ms; expo-video's currentTime is seconds.
   useImperativeHandle(ref, () => ({
+    playAsync: async () => player.play(),
+    pauseAsync: async () => player.pause(),
+    setPositionAsync: async (positionMillis) => { player.currentTime = (positionMillis || 0) / 1000; },
     play: () => player.play(),
     pause: () => player.pause(),
-    // Old code seeked in ms (setPositionAsync); expo-video seeks in seconds.
-    setPositionAsync: (positionMillis) => { player.currentTime = (positionMillis || 0) / 1000; },
     seekBy: (seconds) => player.seekBy(seconds),
     getPlayer: () => player,
   }), [player]);
@@ -80,7 +111,7 @@ const AppVideo = forwardRef(function AppVideo(
       player={player}
       style={style}
       contentFit={contentFit || resizeMode}
-      nativeControls={nativeControls}
+      nativeControls={nativeControls || useNativeControls}
       // Fires when the first real frame is painted — the seam we fade a poster
       // over (direct successor to expo-av's onReadyForDisplay).
       onFirstFrameRender={onReadyForDisplay}

@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, PanResponder, Dimensions, TouchableOpacity,
 } from 'react-native';
-import { Video } from 'expo-av';
+import AppVideo from './AppVideo';
 import { Feather } from '@expo/vector-icons';
 import { colors, radius } from '../constants/theme';
 
@@ -106,7 +106,7 @@ export default function VideoTrimmer({ uri, durationSec = 0, aspectRatio = 1, on
 
   return (
     <View>
-      <Video
+      <AppVideo
         ref={videoRef}
         source={{ uri }}
         style={[styles.video, { aspectRatio: aspectRatio || 1 }]}

@@ -3,7 +3,7 @@ import {
   View, Text, Image, TouchableOpacity, StyleSheet, Dimensions,
   StatusBar, Animated, Easing, PanResponder, ActivityIndicator,
 } from 'react-native';
-import { Video } from 'expo-av';
+import AppVideo from './AppVideo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -213,7 +213,7 @@ const StoryViewer = ({ route, navigation }) => {
 
       {/* Media */}
       {isVideo ? (
-        <Video
+        <AppVideo
           source={{ uri: currentStory.media_url }}
           style={styles.media}
           resizeMode="cover"

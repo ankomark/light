@@ -7,7 +7,8 @@ import AudioTrimmer from './AudioTrimmer';
 import ImageCropper from './ImageCropper';
 import VideoTrimmer from './VideoTrimmer';
 import * as ImagePicker from 'expo-image-picker';
-import { Video, Audio } from 'expo-av';
+import { Audio } from 'expo-av';
+import AppVideo from './AppVideo';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { createSocialPost, fetchTracks } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
@@ -561,7 +562,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
       {contentType === 'video' ? (
         media ? (
           <View style={styles.mediaPreviewContainer}>
-            <Video
+            <AppVideo
               source={{ uri: media.uri }}
               style={[styles.mediaPreview, { aspectRatio: clampAspect(media.width, media.height) }]}
               useNativeControls

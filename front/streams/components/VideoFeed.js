@@ -3,7 +3,8 @@ import {
   View, Text, FlatList, Dimensions, StyleSheet, ActivityIndicator,
   Pressable, TouchableOpacity, Image, StatusBar,
 } from 'react-native';
-import { Video, Audio } from 'expo-av';
+import { Audio } from 'expo-av';
+import AppVideo from './AppVideo';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -83,7 +84,7 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
     <View style={{ height, width: SCREEN_W, backgroundColor: '#000' }}>
       <Pressable style={StyleSheet.absoluteFill} onPress={() => isActive && setManualPaused((p) => !p)}>
         {uri && !errored ? (
-          <Video
+          <AppVideo
             ref={videoRef}
             source={{ uri }}
             style={StyleSheet.absoluteFill}
