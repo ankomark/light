@@ -16,9 +16,20 @@ try {
 
 export const isVideoProcessingAvailable = () => !!(VideoTrim && VideoTrim.trim);
 
-// Long edge cap for stored video. 1080 keeps feed/story clips crisp on phones
-// while cutting file size hard vs. a 4K original.
-const MAX_LONG_EDGE = 1080;
+// SHORT-edge cap for stored video: 720 → 720x1280 portrait / 1280x720 landscape,
+// i.e. true 720p HD. We cap the short (not long) edge so vertical feed clips stay
+// crisp at 720x1280 instead of the soft ~405x720 a long-edge cap would produce.
+const MAX_SHORT_EDGE = 720;
+
+// Poster frames are still images and upscale worse than video, so keep them a
+// touch sharper than the clip itself.
+const THUMB_MAX_EDGE = 1080;
+
+// Explicit H.264 target bitrate — this, not the resolution, is what actually
+// shrinks the file. ~2 Mbps keeps 720p looking crisp (TikTok runs ~2–4 Mbps)
+// while landing a 60s clip near ~15 MB instead of 100 MB+. Size ≈ bitrate × secs;
+// drop this toward ~1_500_000 for smaller files, raise it for higher-motion clips.
+const TARGET_BITRATE_BPS = 2_000_000;
 
 const toMs = (sec) => Math.max(0, Math.round((Number(sec) || 0) * 1000));
 
@@ -53,18 +64,20 @@ export const processVideo = async ({
     workingUri = res.outputPath;
   }
 
-  // 2. Downscale + compress. Cap the LONG edge to MAX_LONG_EDGE; the library
-  //    auto-derives the other side from the aspect ratio, so this works for
-  //    portrait and landscape. When we don't know the source size, cap width
-  //    and let height follow.
-  const longEdge = Math.max(width || 0, height || 0);
-  const needsDownscale = longEdge === 0 || longEdge > MAX_LONG_EDGE;
-  const compressOpts = { quality: 'medium' }; // CRF 23 — balanced
-  if (needsDownscale) {
-    if (width && height && height > width) {
-      compressOpts.height = MAX_LONG_EDGE; // portrait: cap height
+  // 2. Downscale to 720p + compress to a fixed bitrate. We cap the SHORT edge:
+  //    the library derives the other side from the aspect ratio (scale=w:-2), so
+  //    a portrait clip becomes 720x1280 (crisp) and a landscape one 1280x720. The
+  //    bitrate is the real file-size lever; the resolution cap just keeps quality
+  //    high per bit. We only ever scale DOWN — a source already ≤720 on its short
+  //    edge keeps its native size. With unknown dimensions we skip the resize
+  //    (avoids upscaling a small clip) and let the bitrate cap do the shrinking.
+  const shortEdge = Math.min(width || 0, height || 0);
+  const compressOpts = { bitrate: TARGET_BITRATE_BPS };
+  if (shortEdge > MAX_SHORT_EDGE) {
+    if (height >= width) {
+      compressOpts.width = MAX_SHORT_EDGE;  // portrait: the short edge is width
     } else {
-      compressOpts.width = MAX_LONG_EDGE;  // landscape/unknown: cap width
+      compressOpts.height = MAX_SHORT_EDGE; // landscape: the short edge is height
     }
   }
   const compressed = await VideoTrim.compress(workingUri, compressOpts);
@@ -75,7 +88,7 @@ export const processVideo = async ({
   if (thumbnail) {
     try {
       const frame = await VideoTrim.getFrameAt(finalUri, {
-        time: 0, maxWidth: MAX_LONG_EDGE, format: 'jpeg', quality: 80,
+        time: 0, maxWidth: THUMB_MAX_EDGE, format: 'jpeg', quality: 80,
       });
       thumbnailUri = frame.outputPath;
     } catch (e) {

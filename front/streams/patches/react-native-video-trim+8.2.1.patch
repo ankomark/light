@@ -1,0 +1,26 @@
+diff --git a/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/BaseVideoTrimModule.kt b/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/BaseVideoTrimModule.kt
+--- a/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/BaseVideoTrimModule.kt
++++ b/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/BaseVideoTrimModule.kt
+@@ -916,5 +916,8 @@
+       // occur when the source has an unusually high time-base (e.g. Pixel 7 recordings
+       // with 45k tbr). Without this, h264_mediacodec tries to encode at the tbr rate,
+       // producing hundreds of duplicate frames and then a fatal muxer DTS collision.
+-      cmds.addAll(listOf("-fps_mode", "vfr", "-y", outputFile))
++      // -movflags +faststart moves the moov atom to the front of the MP4 so feed
++      // videos can begin playing after the first bytes arrive instead of waiting
++      // for the whole file to download (kills the load-to-black delay on playback).
++      cmds.addAll(listOf("-fps_mode", "vfr", "-movflags", "+faststart", "-y", outputFile))
+       cmds.toTypedArray()
+diff --git a/node_modules/react-native-video-trim/ios/VideoTrim.swift b/node_modules/react-native-video-trim/ios/VideoTrim.swift
+--- a/node_modules/react-native-video-trim/ios/VideoTrim.swift
++++ b/node_modules/react-native-video-trim/ios/VideoTrim.swift
+@@ -1463,5 +1463,8 @@
+       cmds.append(contentsOf: ["-c:a", "aac"])
+     }
+
+-    cmds.append(contentsOf: ["-y", outputFile.path])
++    // -movflags +faststart moves the moov atom to the front of the MP4 so feed
++    // videos can begin playing after the first bytes arrive instead of waiting for
++    // the whole file to download (kills the load-to-black delay on playback).
++    cmds.append(contentsOf: ["-movflags", "+faststart", "-y", outputFile.path])
+     print("compress command:", cmds.joined(separator: " "))
