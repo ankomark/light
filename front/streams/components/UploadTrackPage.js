@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { API_URL, getAccessToken } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { compressImage } from '../services/imageProcessing';
+import { compressAudio } from '../services/audioProcessing';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 
 const TrackUploadForm = () => {
@@ -156,9 +157,22 @@ const TrackUploadForm = () => {
     setIsUploading(true);
 
     try {
-      // Upload audio to Cloudinary
-      setStatusMessages(prev => ({ ...prev, audio: 'Uploading audio...' }));
-      const audioResponse = await uploadToCloudinary(trackData.audioFile, 'audio');
+      // Transcode to ~128 kbps AAC before upload to cut R2 storage/egress cost.
+      // Keeps the crisp original if it was already low-bitrate (no size win).
+      setStatusMessages(prev => ({ ...prev, audio: 'Optimizing audio...' }));
+      const { uri: audioUri, compressed, savedPct } = await compressAudio({
+        uri: trackData.audioFile.uri,
+      });
+      const audioToUpload = compressed
+        ? { ...trackData.audioFile, uri: audioUri }
+        : trackData.audioFile;
+
+      // Upload audio to R2
+      setStatusMessages(prev => ({
+        ...prev,
+        audio: compressed ? `Uploading audio (−${savedPct}%)...` : 'Uploading audio...',
+      }));
+      const audioResponse = await uploadToCloudinary(audioToUpload, 'audio');
 
       // Upload cover image if exists
       let coverResponse = null;

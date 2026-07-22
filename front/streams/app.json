@@ -84,7 +84,8 @@
       "@sentry/react-native",
       "expo-secure-store",
       "expo-video",
-      "expo-audio"
+      "expo-audio",
+      "react-native-compressor"
     ],
     "experiments": {
       "typedRoutes": true

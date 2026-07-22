@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/react-native';
 
 import React from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { lockPortrait } from './utils/orientation';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -203,6 +204,7 @@ const App = () => {
   }
 
     return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
       <AuthProvider>
       <AuthInitializer>
@@ -308,6 +310,7 @@ const App = () => {
       </AuthInitializer>
       </AuthProvider>
       </ErrorBoundary>
+      </GestureHandlerRootView>
     );
 };
 

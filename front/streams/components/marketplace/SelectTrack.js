@@ -68,6 +68,7 @@ const SelectTrack = () => {
     <View style={styles.container}>
       <TextInput
         style={styles.searchInput}
+        placeholderTextColor="#888"
         placeholder="Search tracks..."
         value={searchQuery}
         onChangeText={setSearchQuery}
@@ -124,6 +125,7 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
     fontSize: 16,
+    color: '#111', // explicit dark text so it's never white-on-light in dark mode
   },
   currentTrack: {
     backgroundColor: '#f0f7ff',

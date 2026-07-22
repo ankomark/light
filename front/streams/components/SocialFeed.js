@@ -16,6 +16,7 @@ import {
 import { Image } from 'expo-image';
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import GlassView from './GlassView';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -71,15 +72,16 @@ const timeAgo = (dateStr) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-// Instagram-style aspect-ratio clamp: width:height between 1.91:1 (landscape)
-// and 4:5 (portrait, ratio 0.8). Media outside this range is center-cropped
-// (resizeMode="cover") rather than driving an arbitrary height — a 4:5 cap keeps
-// the tallest post at width/0.8 = 1.25×width, so it never runs past the screen.
+// Size the card to each image's true width:height so it shows uncropped, the way
+// it was uploaded. Only a generous safety guard remains — ratios are clamped to
+// [0.5, 1.91] so an extreme panorama can't crop and a pathological ultra-tall
+// image (max height = 2×width) can't run past the screen. Real photos (9:16
+// portrait = 0.5625 through 16:9 landscape = 1.78) fall inside and render whole.
 const mediaAspectRatio = (width, height) => {
   if (!width || !height) return 1;
   const r = width / height;
   if (!isFinite(r) || r <= 0) return 1;
-  return Math.min(1.91, Math.max(0.8, r));
+  return Math.min(1.91, Math.max(0.5, r));
 };
 
 const processPost = (post, existingFollowStates = {}) => {
@@ -108,10 +110,19 @@ const processPost = (post, existingFollowStates = {}) => {
 
   // 1–4 image carousel: prefer the per-item gallery URLs (media_items); fall
   // back to the single optimized/media URL for legacy/video posts.
-  const itemUrls = (Array.isArray(post.media_items) ? post.media_items : [])
+  const mediaList = Array.isArray(post.media_items) ? post.media_items : [];
+  const itemUrls = mediaList
     .map((it) => it?.optimized_url || it?.media_url)
     .filter(Boolean);
   const primaryUrl = itemUrls[0] || post.optimized_url || post.media_url;
+
+  // Primary media dimensions, resolved synchronously so the card mounts at the
+  // right aspect ratio (uncropped) with no post-load resize/jitter. Prefer the
+  // top-level width/height, then the first gallery item's — both are served by
+  // the API (see the social serializer).
+  const primaryItem = mediaList[0] || null;
+  const primaryW = Number(post.width) || Number(primaryItem?.width) || null;
+  const primaryH = Number(post.height) || Number(primaryItem?.height) || null;
 
   // Video poster: use the stored thumbnail_url (a real image). primaryUrl for a
   // video is the .mp4, which can't render in <Image>, so it's not a valid poster.
@@ -127,6 +138,8 @@ const processPost = (post, existingFollowStates = {}) => {
       followers_count: userFollowersCount,
       is_following: userIsFollowing
     },
+    width: primaryW,
+    height: primaryH,
     mediaUrl: primaryUrl,
     thumbnailUrl: posterUrl,
     mediaItems: itemUrls.length ? itemUrls : (primaryUrl ? [primaryUrl] : []),
@@ -283,6 +296,23 @@ const PostMedia = React.memo(function PostMedia({
     }
   }, [burstLike]);
 
+  // Video tap handling via gesture-handler: reliable single/double-tap
+  // discrimination over the native VideoView (the setTimeout+onPress approach the
+  // image branch uses is flaky on top of the native video surface). A drag past
+  // the tap slop cancels both, so vertical scrolling still passes to the FlatList.
+  const videoTapGesture = useMemo(() => {
+    const singleTap = Gesture.Tap()
+      .maxDuration(250)
+      .runOnJS(true)
+      .onEnd(() => setManualPaused((p) => !p));
+    const doubleTap = Gesture.Tap()
+      .numberOfTaps(2)
+      .maxDuration(250)
+      .runOnJS(true)
+      .onEnd(() => burstLike());
+    return Gesture.Exclusive(doubleTap, singleTap);
+  }, [burstLike]);
+
   if (!currentUrl || hasError) {
     return (
       <View style={[styles.errorMediaContainer, { aspectRatio: 1 }]}>
@@ -341,10 +371,7 @@ const PostMedia = React.memo(function PostMedia({
         ? (item.optimized_url || item.media_url)
         : (item.media_url || item.optimized_url);
     return (
-      <Pressable
-        style={[styles.mediaContainer, { aspectRatio }]}
-        onPress={() => handleTap(() => setManualPaused((p) => !p))}
-      >
+      <View style={[styles.mediaContainer, { aspectRatio }]}>
         <AppVideo
           source={{ uri: videoUri }}
           style={[styles.media, { aspectRatio }]}
@@ -377,6 +404,13 @@ const PostMedia = React.memo(function PostMedia({
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
         )}
+        {/* Transparent tap layer ON TOP of the native VideoView, which swallows
+            touches on Android (so a parent Pressable never sees them). Handles
+            tap-to-pause + double-tap-to-like via gesture-handler. The mute button
+            renders after this, so it stays on top and tappable. */}
+        <GestureDetector gesture={videoTapGesture}>
+          <View style={StyleSheet.absoluteFill} />
+        </GestureDetector>
         {/* Tap-to-pause indicator */}
         {isFocused && videoReady && manualPaused && (
           <View style={styles.audioPausedOverlay} pointerEvents="none">
@@ -401,7 +435,7 @@ const PostMedia = React.memo(function PostMedia({
           </TouchableOpacity>
         )}
         <HeartBurst scale={heartScale} />
-      </Pressable>
+      </View>
     );
   }
 

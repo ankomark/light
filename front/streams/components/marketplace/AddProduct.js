@@ -213,6 +213,7 @@ const AddProduct = () => {
 
       <TextInput
         style={styles.input}
+        placeholderTextColor="#888"
         placeholder="Product Title*"
         value={formData.title}
         onChangeText={(text) => handleChange('title', text)}
@@ -220,6 +221,7 @@ const AddProduct = () => {
 
       <TextInput
         style={[styles.input, styles.textArea]}
+        placeholderTextColor="#888"
         placeholder="Description*"
         value={formData.description}
         onChangeText={(text) => handleChange('description', text)}
@@ -231,6 +233,7 @@ const AddProduct = () => {
         <View style={styles.priceInputContainer}>
           <TextInput
             style={[styles.input, styles.priceInput]}
+            placeholderTextColor="#888"
             placeholder="Price*"
             value={formData.price_value}
             onChangeText={(text) => handleChange('price_value', text)}
@@ -246,6 +249,7 @@ const AddProduct = () => {
 
         <TextInput
           style={[styles.input, styles.quantityInput]}
+          placeholderTextColor="#888"
           placeholder="Quantity"
           value={formData.quantity}
           onChangeText={(text) => handleChange('quantity', text)}
@@ -255,6 +259,7 @@ const AddProduct = () => {
 
       <TextInput
         style={styles.input}
+        placeholderTextColor="#888"
         placeholder="Category (e.g., Clothes)*"
         value={formData.category}
         onChangeText={(text) => handleChange('category', text)}
@@ -271,6 +276,7 @@ const AddProduct = () => {
               ? styles.invalidInput 
               : null
           ]}
+          placeholderTextColor="#888"
           placeholder="WhatsApp Number (e.g., +254712345678)"
           value={formData.whatsapp_number}
           onChangeText={handleWhatsAppNumberChange}
@@ -286,6 +292,7 @@ const AddProduct = () => {
 
       <TextInput
         style={styles.input}
+        placeholderTextColor="#888"
         placeholder="Contact Number (optional)"
         value={formData.contact_number}
         onChangeText={(text) => handleChange('contact_number', text)}
@@ -294,6 +301,7 @@ const AddProduct = () => {
 
       <TextInput
         style={styles.input}
+        placeholderTextColor="#888"
         placeholder="Location (optional)"
         value={formData.location}
         onChangeText={(text) => handleChange('location', text)}
@@ -306,6 +314,7 @@ const AddProduct = () => {
 
       <TextInput
         style={styles.input}
+        placeholderTextColor="#888"
         placeholder="M-Pesa Number (e.g., 0712345678)"
         value={formData.mpesa_number}
         onChangeText={(text) => handleChange('mpesa_number', text)}
@@ -314,6 +323,7 @@ const AddProduct = () => {
 
       <TextInput
         style={styles.input}
+        placeholderTextColor="#888"
         placeholder="Till / Paybill Number (optional)"
         value={formData.till_number}
         onChangeText={(text) => handleChange('till_number', text)}
@@ -322,6 +332,7 @@ const AddProduct = () => {
 
       <TextInput
         style={styles.input}
+        placeholderTextColor="#888"
         placeholder="Bank details (optional)"
         value={formData.bank_details}
         onChangeText={(text) => handleChange('bank_details', text)}
@@ -329,6 +340,7 @@ const AddProduct = () => {
 
       <TextInput
         style={[styles.input, styles.textArea]}
+        placeholderTextColor="#888"
         placeholder="Other payment instructions (optional)"
         value={formData.payment_instructions}
         onChangeText={(text) => handleChange('payment_instructions', text)}
@@ -452,6 +464,7 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     fontSize: 16,
+    color: '#111', // explicit dark text so it's never white-on-light in dark mode
   },
   invalidInput: {
     borderColor: '#FF6347',

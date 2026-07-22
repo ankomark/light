@@ -1,5 +1,9 @@
 // metro.config.js
-const { getDefaultConfig } = require('@expo/metro-config');
+// SDK 54 moved this from the standalone @expo/metro-config package to a subpath
+// export of `expo` (same pattern as expo/config-plugins). Requiring the old path
+// throws MODULE_NOT_FOUND, which Metro's loader swallows and retries via a broken
+// import() — surfacing as a misleading ERR_UNSUPPORTED_ESM_URL_SCHEME on Windows.
+const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 

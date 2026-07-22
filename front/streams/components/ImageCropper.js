@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   View, Text, Modal, StyleSheet, TouchableOpacity, Animated, PanResponder,
   Dimensions, ActivityIndicator,
@@ -32,6 +32,10 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
   const [aspectKey, setAspectKey] = useState('4:5');
   const [zoom, setZoom] = useState(1);
   const [working, setWorking] = useState(false);
+  // A big picked image can take a moment to decode; show a spinner over the
+  // frame until it's on-screen so the cropper never looks frozen/failed.
+  const [imgLoading, setImgLoading] = useState(true);
+  useEffect(() => { setImgLoading(true); }, [uri]);
 
   const aspect = ASPECTS.find((a) => a.key === aspectKey)?.ratio ?? 0.8;
   const frameH = FRAME_W / aspect;
@@ -141,6 +145,8 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
           <View style={[styles.frame, { width: FRAME_W, height: frameH }]} {...responder.panHandlers}>
             <Animated.Image
               source={{ uri }}
+              onLoadStart={() => setImgLoading(true)}
+              onLoadEnd={() => setImgLoading(false)}
               style={{
                 position: 'absolute',
                 left: (FRAME_W - dispW) / 2,
@@ -150,6 +156,13 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
                 transform: [{ translateX: translate.x }, { translateY: translate.y }],
               }}
             />
+            {/* Spinner while the (possibly large) image decodes. */}
+            {imgLoading && (
+              <View style={styles.imgLoading} pointerEvents="none">
+                <ActivityIndicator size="large" color="#1DA1F2" />
+                <Text style={styles.imgLoadingText}>Loading image…</Text>
+              </View>
+            )}
             {/* Rule-of-thirds grid */}
             <View pointerEvents="none" style={styles.grid}>
               <View style={[styles.gridLineV, { left: '33.33%' }]} />
@@ -215,6 +228,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     borderRadius: 6,
   },
+  imgLoading: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+  },
+  imgLoadingText: { color: '#9bb0c4', fontSize: 13, fontWeight: '600' },
   grid: { ...StyleSheet.absoluteFillObject },
   gridLineV: { position: 'absolute', top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.35)' },
   gridLineH: { position: 'absolute', left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.35)' },

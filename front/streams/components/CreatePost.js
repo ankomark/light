@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Image, TextInput, StyleSheet,
-  ScrollView, Alert, Modal, Dimensions
+  ScrollView, Alert, Modal, Dimensions, ActivityIndicator
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AudioTrimmer from './AudioTrimmer';
 import ImageCropper from './ImageCropper';
 import VideoTrimmer from './VideoTrimmer';
@@ -14,6 +15,7 @@ import { createSocialPost, fetchTracks } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { processVideo, cleanupProcessedVideos } from '../services/videoProcessing';
 import { compressImage as compressImageFile } from '../services/imageProcessing';
+import { compressAudio } from '../services/audioProcessing';
 import * as DocumentPicker from 'expo-document-picker';
 
 // Instagram-style aspect-ratio clamp (matches the feed's mediaAspectRatio so the
@@ -39,6 +41,7 @@ const CreatePost = ({ navigation }) => {
   const [contentType, setContentType] = useState('image');
   const [media, setMedia] = useState(null);          // single video
   const [images, setImages] = useState([]);          // 1–4 image carousel: [{uri,width,height}]
+  const [preparingMedia, setPreparingMedia] = useState(false); // compressing picked images
   const [previewIndex, setPreviewIndex] = useState(0);
   const MAX_IMAGES = 4;
   const [caption, setCaption] = useState('');
@@ -228,26 +231,48 @@ const CreatePost = ({ navigation }) => {
       const picked = result.assets.slice(0, remaining);
 
       // A single image picked into an empty post → offer the crop editor.
+      // Pre-downscale to the upload cap (≤1080px) BEFORE opening the cropper, so
+      // it decodes a small file and opens fast instead of chewing on a full-res
+      // photo. The final post is capped at 1080 anyway, so there's no extra
+      // quality loss. The "Preparing…" overlay covers this brief step.
       if (picked.length === 1 && images.length === 0) {
         const sel = picked[0];
-        originalAssetRef.current = sel;
-        setCropTarget({ uri: sel.uri, width: sel.width, height: sel.height });
-        setShowCropper(true);
+        setPreparingMedia(true);
+        try {
+          let cropSrc = { uri: sel.uri, width: sel.width, height: sel.height };
+          try {
+            const out = await compressImage(sel.uri, sel.width);
+            cropSrc = { uri: out.uri, width: out.width || sel.width, height: out.height || sel.height };
+          } catch (e) {
+            console.error('Pre-crop downscale failed; using original:', e);
+          }
+          originalAssetRef.current = cropSrc;
+          setCropTarget(cropSrc);
+          setShowCropper(true);
+        } finally {
+          setPreparingMedia(false);
+        }
         return;
       }
 
-      // Otherwise just compress each and append to the carousel.
-      const compressed = await Promise.all(
-        picked.map(async (a) => {
-          try {
-            const out = await compressImage(a.uri, a.width);
-            return { uri: out.uri, width: out.width || a.width, height: out.height || a.height };
-          } catch {
-            return { uri: a.uri, width: a.width, height: a.height };
-          }
-        })
-      );
-      setImages((prev) => [...prev, ...compressed].slice(0, MAX_IMAGES));
+      // Otherwise just compress each and append to the carousel. Big images take
+      // a moment — show a "Preparing…" overlay so it doesn't look like it failed.
+      setPreparingMedia(true);
+      try {
+        const compressed = await Promise.all(
+          picked.map(async (a) => {
+            try {
+              const out = await compressImage(a.uri, a.width);
+              return { uri: out.uri, width: out.width || a.width, height: out.height || a.height };
+            } catch {
+              return { uri: a.uri, width: a.width, height: a.height };
+            }
+          })
+        );
+        setImages((prev) => [...prev, ...compressed].slice(0, MAX_IMAGES));
+      } finally {
+        setPreparingMedia(false);
+      }
     } catch (error) {
       console.error('Media picker error:', error);
       Alert.alert('Error', 'Failed to pick media. Please try again.');
@@ -264,15 +289,11 @@ const CreatePost = ({ navigation }) => {
 
   // Cropper confirmed: compress the cropped output → single-image post.
   // (Crop is only offered for single-image posts, so this replaces the carousel.)
-  const handleCropped = async ({ uri, width, height }) => {
+  // The cropper already outputs a compressed JPEG capped at 1080px (and the
+  // source was pre-downscaled), so use it directly — no redundant re-compress.
+  const handleCropped = ({ uri, width, height }) => {
     setShowCropper(false);
-    try {
-      const out = await compressImage(uri, width);
-      setImages([{ uri: out.uri, width: out.width || width, height: out.height || height }]);
-    } catch (e) {
-      console.error('Post-crop compress failed:', e);
-      setImages([{ uri, width, height }]);
-    }
+    setImages([{ uri, width, height }]);
   };
 
   // Cropper cancelled. On a re-crop, keep the current image. On the very first
@@ -280,14 +301,10 @@ const CreatePost = ({ navigation }) => {
   const handleCropCancel = async () => {
     setShowCropper(false);
     if (images.length) return; // re-crop cancelled — keep what's already there
+    // originalAssetRef already holds the pre-downscaled image, so use it directly.
     const asset = originalAssetRef.current;
     if (!asset) return;
-    try {
-      const out = await compressImage(asset.uri, asset.width);
-      setImages([{ uri: out.uri, width: asset.width, height: asset.height }]);
-    } catch {
-      setImages([{ uri: asset.uri, width: asset.width, height: asset.height }]);
-    }
+    setImages([{ uri: asset.uri, width: asset.width, height: asset.height }]);
   };
 
   // Re-open the cropper from the originally picked image.
@@ -358,11 +375,15 @@ const CreatePost = ({ navigation }) => {
       const status = await sound.getStatusAsync();
       setPlaybackStatus(status);
 
-      // Default trim range: first 30s (or the whole song if it's shorter).
+      // Default trim range: a 30s window centred on the song (or the whole song
+      // if it's shorter), so the user starts from the middle instead of the top.
       const songSeconds = (status.durationMillis || 0) / 1000;
-      const end = Math.min(MAX_CLIP, songSeconds || MAX_CLIP);
-      trimStartRef.current = 0;
+      const clip = Math.min(MAX_CLIP, songSeconds || MAX_CLIP);
+      const start = Math.max(0, (songSeconds - clip) / 2);
+      const end = start + clip;
+      trimStartRef.current = start;
       trimEndRef.current = end;
+      setTrimStart(start);
       setTrimEnd(end);
     } catch (error) {
       console.error('Error loading song:', error);
@@ -409,7 +430,21 @@ const CreatePost = ({ navigation }) => {
         const isLocal = isLocalSong(selectedSong);
         let audioUrl = songAudioUri(selectedSong);
         if (isLocal && localAudio) {
-          const audioUploadResult = await uploadToCloudinary(localAudio, 'audio', fileProgress);
+          // Transcode to ~128 kbps AAC before upload to cut R2 cost; keeps the
+          // original if it was already low-bitrate. Relabel as m4a when compressed
+          // so the stored file's type matches its (AAC) bytes.
+          const { uri: aUri, compressed } = await compressAudio({ uri: localAudio.uri });
+          const audioFile = compressed
+            ? {
+                ...localAudio,
+                uri: aUri,
+                name: `audio_${Date.now()}.m4a`,
+                fileName: `audio_${Date.now()}.m4a`,
+                mimeType: 'audio/mp4',
+                type: 'audio/mp4',
+              }
+            : localAudio;
+          const audioUploadResult = await uploadToCloudinary(audioFile, 'audio', fileProgress);
           audioUrl = audioUploadResult.secure_url;
           fileDone();
         }
@@ -512,12 +547,15 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
     onProgress,
     opts
   );
-  // Normalise to the shape the rest of CreatePost expects
+  // Normalise to the shape the rest of CreatePost expects. R2 stores bytes
+  // verbatim and returns no image dimensions, so fall back to the source asset's
+  // width/height (from the image picker) — without these, the feed can't know a
+  // post's aspect ratio and center-crops every image into a square.
   return {
     public_id: result.publicId,
     secure_url: result.url,
-    width: result.width,
-    height: result.height,
+    width: result.width ?? mediaFile.width ?? null,
+    height: result.height ?? mediaFile.height ?? null,
     duration: result.duration,
   };
 };
@@ -788,6 +826,10 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
     transparent={false}
     onRequestClose={async () => { await stopPreview(); setShowTrimModal(false); }}
   >
+    {/* Own GestureHandlerRootView: a RN Modal renders in a separate native
+        window that the app-root GestureHandlerRootView doesn't cover, so the
+        trimmer's pan gesture needs this wrapper to receive touches (Android). */}
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <View style={styles.modalContainer}>
       <View style={styles.modalHeader}>
         <TouchableOpacity onPress={async () => { await stopPreview(); setShowTrimModal(false); }}>
@@ -827,7 +869,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
         />
 
         <Text style={styles.trimHint}>
-          Drag the edges to trim · drag the middle to move · max {MAX_CLIP}s
+          Drag the edges to trim · drag the waveform to move · max {MAX_CLIP}s
         </Text>
 
         <TouchableOpacity
@@ -848,8 +890,20 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
         </TouchableOpacity>
       </View>
     </View>
+    </GestureHandlerRootView>
   </Modal>
 )}
+
+      {/* Preparing-media overlay: shown while big picked images are compressed,
+          so the wait before the cropper/carousel never looks like a failure. */}
+      <Modal visible={preparingMedia} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.preparingOverlay}>
+          <View style={styles.preparingCard}>
+            <ActivityIndicator size="large" color="#1DA1F2" />
+            <Text style={styles.preparingText}>Preparing image…</Text>
+          </View>
+        </View>
+      </Modal>
 
       {/* Image Cropper */}
       {showCropper && cropTarget && (
@@ -1186,6 +1240,26 @@ modalContainer: {
     flex: 1,
     backgroundColor: '#fff',
     padding: 20,
+  },
+  preparingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  preparingCard: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 28,
+    paddingVertical: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: 12,
+    minWidth: 160,
+  },
+  preparingText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0A1628',
   },
   modalHeader: {
     flexDirection: 'row',

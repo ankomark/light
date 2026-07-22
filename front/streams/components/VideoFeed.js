@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, Dimensions, StyleSheet, ActivityIndicator,
-  Pressable, TouchableOpacity, Image, StatusBar,
+  TouchableOpacity, Image, StatusBar, Animated,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { setAudioModeAsync } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { fetchSocialPosts, cursorFromUrl, followUser } from '../services/api';
+import { fetchSocialPosts, cursorFromUrl, followUser, likePost } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { usePreferences } from '../context/PreferencesContext';
@@ -37,6 +39,11 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
   // the feed's FollowButton uses.
   const [following, setFollowing] = useState(!!item.user?.is_following);
   const [followBusy, setFollowBusy] = useState(false);
+  // Like state lifted here so double-tap-to-like and the rail LikeButton stay in
+  // sync (LikeButton re-syncs from its isLiked / initialLikes props).
+  const [liked, setLiked] = useState(item.is_liked ?? item.liked_by_me ?? false);
+  const [likesCount, setLikesCount] = useState(item.likes_count || 0);
+  const heartScale = useRef(new Animated.Value(0)).current;
   // Pick the rendition that matches the chosen quality. The backend exposes two:
   // optimized_url (≈720p eco, smallest) and media_url (q_auto, up to the 1080p
   // master). Data saver / "data_saver" -> the small one; auto / hd -> the fuller
@@ -80,39 +87,86 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
     }
   };
 
+  // Double-tap-to-like: heart burst always; the like itself only ever ADDS
+  // (Instagram-style), never unlikes. Optimistic + reconciled with the server.
+  const handleDoubleTapLike = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    heartScale.setValue(0);
+    Animated.sequence([
+      Animated.spring(heartScale, { toValue: 1, friction: 4, useNativeDriver: true }),
+      Animated.timing(heartScale, { toValue: 0, duration: 250, delay: 350, useNativeDriver: true }),
+    ]).start();
+    if (liked) return; // already liked — burst only, no API call
+    setLiked(true);
+    setLikesCount((c) => c + 1);
+    likePost(item.id)
+      .then((res) => {
+        if (typeof res?.is_liked === 'boolean') setLiked(res.is_liked);
+        if (typeof res?.likes_count === 'number') setLikesCount(res.likes_count);
+      })
+      .catch(() => { setLiked(false); setLikesCount((c) => Math.max(0, c - 1)); });
+  }, [liked, heartScale, item.id]);
+
+  // Tap layer over the native video: single tap = pause, double tap = like.
+  const tapGesture = useMemo(() => {
+    const singleTap = Gesture.Tap()
+      .maxDuration(250)
+      .runOnJS(true)
+      .onEnd(() => { if (isActive) setManualPaused((p) => !p); });
+    const doubleTap = Gesture.Tap()
+      .numberOfTaps(2)
+      .maxDuration(250)
+      .runOnJS(true)
+      .onEnd(() => handleDoubleTapLike());
+    return Gesture.Exclusive(doubleTap, singleTap);
+  }, [isActive, handleDoubleTapLike]);
+
   return (
     <View style={{ height, width: SCREEN_W, backgroundColor: '#000' }}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={() => isActive && setManualPaused((p) => !p)}>
-        {uri && !errored ? (
-          <AppVideo
-            ref={videoRef}
-            source={{ uri }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="contain"
-            isLooping
-            shouldPlay={playing}
-            isMuted={muted}
-            onLoad={() => setLoading(false)}
-            onError={() => { setErrored(true); setLoading(false); }}
-          />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, styles.center]}>
-            <MaterialIcons name="videocam-off" size={44} color={colors.textMuted} />
-            <Text style={styles.unavailable}>Video unavailable</Text>
-          </View>
-        )}
+      {uri && !errored ? (
+        <AppVideo
+          ref={videoRef}
+          source={{ uri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="contain"
+          isLooping
+          shouldPlay={playing}
+          isMuted={muted}
+          onLoad={() => setLoading(false)}
+          onError={() => { setErrored(true); setLoading(false); }}
+        />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.center]}>
+          <MaterialIcons name="videocam-off" size={44} color={colors.textMuted} />
+          <Text style={styles.unavailable}>Video unavailable</Text>
+        </View>
+      )}
 
-        {loading && !errored && (
-          <View style={[StyleSheet.absoluteFill, styles.center]} pointerEvents="none">
-            <ActivityIndicator size="large" color="#fff" />
-          </View>
-        )}
-        {isActive && !loading && manualPaused && (
-          <View style={[StyleSheet.absoluteFill, styles.center]} pointerEvents="none">
-            <MaterialIcons name="play-arrow" size={72} color="rgba(255,255,255,0.85)" />
-          </View>
-        )}
-      </Pressable>
+      {loading && !errored && (
+        <View style={[StyleSheet.absoluteFill, styles.center]} pointerEvents="none">
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
+      {isActive && !loading && manualPaused && (
+        <View style={[StyleSheet.absoluteFill, styles.center]} pointerEvents="none">
+          <MaterialIcons name="play-arrow" size={72} color="rgba(255,255,255,0.85)" />
+        </View>
+      )}
+
+      {/* Tap layer above the native video surface: single tap = pause, double
+          tap = like. Rendered before the action rail / caption below, so those
+          stay on top and tappable. */}
+      <GestureDetector gesture={tapGesture}>
+        <View style={StyleSheet.absoluteFill} />
+      </GestureDetector>
+
+      {/* Double-tap heart burst, centered over the video. */}
+      <Animated.View
+        style={[styles.heartBurst, { opacity: heartScale, transform: [{ scale: heartScale }] }]}
+        pointerEvents="none"
+      >
+        <MaterialIcons name="favorite" size={100} color="rgba(255,255,255,0.95)" />
+      </Animated.View>
 
       {/* Legibility gradient behind the overlays */}
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.65)']} style={styles.bottomGradient} pointerEvents="none" />
@@ -138,7 +192,12 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
           )}
         </View>
         <View style={styles.railItem}>
-          <LikeButton postId={item.id} initialLikes={item.likes_count || 0} isLiked={item.is_liked ?? item.liked_by_me ?? false} />
+          <LikeButton
+            postId={item.id}
+            initialLikes={likesCount}
+            isLiked={liked}
+            onLikeChange={(d) => { setLiked(d.is_liked); setLikesCount(d.likes_count); }}
+          />
         </View>
         <View style={styles.railItem}>
           <CommentAction postId={item.id} commentCount={item.comments_count || 0} currentUserAvatar={currentUser?.profile_picture} />
@@ -387,6 +446,7 @@ const VideoFeed = () => {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
   center: { alignItems: 'center', justifyContent: 'center', gap: 8 },
+  heartBurst: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   unavailable: { ...typography.body, color: colors.textSecondary },
   retryBtn: { marginTop: 8, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.primary },
   retryText: { color: '#fff', fontWeight: '700' },

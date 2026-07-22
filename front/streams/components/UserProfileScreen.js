@@ -17,16 +17,16 @@ const AVATAR_SIZE = 96;
 const GRID_GAP = 2;
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
-/** Build a still-image thumbnail for a post (videos -> first-frame jpg). */
+/** Build a still-image thumbnail for a post (videos -> poster frame). */
 const getPostThumb = (post) => {
-  const url = post.optimized_url || post.media_url;
-  if (!url) return null;
+  // Videos: use the poster frame captured on-device at upload and served as
+  // thumbnail_url. R2 stores the raw mp4 verbatim — there's no server-side frame
+  // extraction or Cloudinary-style URL transform, so the old `.mp4`→`.jpg` /
+  // `/video/upload/so_0,.../` rewrite produced a broken URL and a blank tile.
   if (post.content_type === 'video') {
-    return url
-      .replace('/video/upload/', '/video/upload/so_0,w_400,h_400,c_fill/')
-      .replace(/\.(mp4|mov|webm|m4v)$/i, '.jpg');
+    return post.thumbnail_url || null;
   }
-  return url;
+  return post.optimized_url || post.media_url || null;
 };
 
 const StatBox = ({ value, label }) => (
