@@ -112,10 +112,52 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if current_user in user_to_follow.followers.all():
+        already_following = user_to_follow.followers.filter(pk=current_user.pk).exists()
+
+        if already_following:
             user_to_follow.followers.remove(current_user)
             action = 'unfollowed'
         else:
+            profile = getattr(user_to_follow, 'profile', None)
+            is_private = profile is not None and not profile.is_public
+
+            if is_private:
+                # Private account: don't follow — raise a request the owner
+                # approves. Toggling again withdraws a pending request, so the
+                # button stays a two-state toggle for the client.
+                existing = FollowRequest.objects.filter(
+                    requester=current_user, target=user_to_follow
+                ).first()
+                if existing and existing.status == 'pending':
+                    existing.delete()
+                    return Response({
+                        "status": "Follow request withdrawn",
+                        "follow_status": "none",
+                        "is_following": False,
+                        "followers_count": user_to_follow.followers.count(),
+                        "following_count": user_to_follow.followed_by.count(),
+                    })
+
+                FollowRequest.objects.update_or_create(
+                    requester=current_user, target=user_to_follow,
+                    defaults={'status': 'pending'},
+                )
+                msg = f"{current_user.username} requested to follow you"
+                Notification.objects.create(
+                    recipient=user_to_follow,
+                    sender=current_user,
+                    message=msg,
+                    notification_type='follow',
+                )
+                notify_user(user_to_follow, 'follow', msg)
+                return Response({
+                    "status": "Follow request sent",
+                    "follow_status": "requested",
+                    "is_following": False,
+                    "followers_count": user_to_follow.followers.count(),
+                    "following_count": user_to_follow.followed_by.count(),
+                })
+
             user_to_follow.followers.add(current_user)
             action = 'followed'
             msg = f"{current_user.username} started following you"
@@ -128,9 +170,11 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             notify_user(user_to_follow, 'follow', msg)
 
         # Return updated counts
+        is_following = user_to_follow.followers.filter(pk=current_user.pk).exists()
         return Response({
             "status": f"Successfully {action} {user_to_follow.username}",
-            "is_following": current_user in user_to_follow.followers.all(),
+            "is_following": is_following,
+            "follow_status": 'following' if is_following else 'none',
             "followers_count": user_to_follow.followers.count(),
             "following_count": user_to_follow.followed_by.count()
         })
@@ -348,3 +392,48 @@ class ProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+
+
+class FollowRequestViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Pending follow requests addressed to the current user, plus approve /
+    reject. Only the target can act on a request — the requester's only control
+    is withdrawing it, which they do by toggling follow again."""
+    serializer_class = FollowRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            FollowRequest.objects
+            .filter(target=self.request.user, status='pending')
+            .select_related('requester', 'requester__profile')
+        )
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        follow_request = self.get_object()
+        with transaction.atomic():
+            # The follow itself is the source of truth; the request row is just
+            # the pending state, so drop it once it has been acted on.
+            request.user.followers.add(follow_request.requester)
+            requester = follow_request.requester
+            follow_request.delete()
+
+        msg = f"{request.user.username} accepted your follow request"
+        Notification.objects.create(
+            recipient=requester,
+            sender=request.user,
+            message=msg,
+            notification_type='follow',
+        )
+        notify_user(requester, 'follow', msg)
+        return Response({'status': 'approved', 'requester_id': requester.id})
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        follow_request = self.get_object()
+        requester_id = follow_request.requester_id
+        # Deleted rather than kept as 'rejected' so the requester can ask again
+        # later without hitting the unique_together constraint. Silent by
+        # design — the requester isn't told they were turned down.
+        follow_request.delete()
+        return Response({'status': 'rejected', 'requester_id': requester_id})

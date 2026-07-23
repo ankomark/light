@@ -54,8 +54,10 @@ const UserProfileScreen = () => {
   const [error, setError] = useState(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
-  // Follow state (optimistic)
+  // Follow state (optimistic). followStatus carries the third case the boolean
+  // can't: a request to a private account that's still awaiting approval.
   const [isFollowing, setIsFollowing] = useState(false);
+  const [followStatus, setFollowStatus] = useState('none');
   const [followersCount, setFollowersCount] = useState(0);
   const [followBusy, setFollowBusy] = useState(false);
   const [messageBusy, setMessageBusy] = useState(false);
@@ -74,6 +76,7 @@ const UserProfileScreen = () => {
       setUser(data);
       setPosts(Array.isArray(data?.social_posts) ? data.social_posts : []);
       setIsFollowing(!!data?.is_following);
+      setFollowStatus(data?.follow_status ?? (data?.is_following ? 'following' : 'none'));
       setFollowersCount(data?.followers_count ?? 0);
       setAvatarFailed(false);
     } catch (err) {
@@ -115,10 +118,12 @@ const UserProfileScreen = () => {
     try {
       const res = await followUser(userId);
       setIsFollowing(res.is_following);
+      setFollowStatus(res.follow_status ?? (res.is_following ? 'following' : 'none'));
       setFollowersCount(res.followers_count);
     } catch {
       // Roll back on failure
       setIsFollowing(prevFollowing);
+      setFollowStatus(prevFollowing ? 'following' : 'none');
       setFollowersCount(prevCount);
       Alert.alert('Error', 'Could not update follow status. Please try again.');
     } finally {
@@ -199,7 +204,11 @@ const UserProfileScreen = () => {
             ) : (
               <>
                 <TouchableOpacity
-                  style={[styles.followBtn, isFollowing && styles.followingBtn]}
+                  style={[
+                    styles.followBtn,
+                    isFollowing && styles.followingBtn,
+                    followStatus === 'requested' && styles.requestedBtn,
+                  ]}
                   onPress={handleFollow}
                   disabled={followBusy}
                   activeOpacity={0.85}
@@ -208,7 +217,9 @@ const UserProfileScreen = () => {
                     <ActivityIndicator size="small" color={colors.white} />
                   ) : (
                     <Text style={styles.followBtnText}>
-                      {isFollowing ? 'Following' : 'Follow'}
+                      {isFollowing
+                        ? 'Following'
+                        : followStatus === 'requested' ? 'Requested' : 'Follow'}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -271,7 +282,7 @@ const UserProfileScreen = () => {
       </View>
     );
   }, [
-    user, avatarFailed, isOwnProfile, isFollowing, followBusy, followersCount,
+    user, avatarFailed, isOwnProfile, isFollowing, followStatus, followBusy, followersCount,
     messageBusy, posts.length, initialUsername, navigation, handleFollow, handleMessage,
   ]);
 
@@ -300,12 +311,31 @@ const UserProfileScreen = () => {
     );
   }, [navigation, cols, tileSize]);
 
-  const renderEmptyPosts = useCallback(() => (
-    <View style={styles.postsEmpty}>
-      <MaterialIcons name="photo-library" size={40} color={colors.textMuted} />
-      <Text style={styles.postsEmptyText}>No posts yet</Text>
-    </View>
-  ), []);
+  // A private account the viewer hasn't been approved for shows a locked state
+  // rather than "No posts yet", which would misrepresent an account that simply
+  // hasn't let them in. The server withholds the posts either way.
+  const renderEmptyPosts = useCallback(() => {
+    const locked = user?.is_private && user?.can_view === false;
+    if (locked) {
+      return (
+        <View style={styles.postsEmpty}>
+          <MaterialIcons name="lock-outline" size={40} color={colors.textMuted} />
+          <Text style={styles.postsEmptyText}>This account is private</Text>
+          <Text style={styles.postsLockedSub}>
+            {followStatus === 'requested'
+              ? 'Your follow request is waiting to be approved.'
+              : 'Follow this account to see their posts.'}
+          </Text>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.postsEmpty}>
+        <MaterialIcons name="photo-library" size={40} color={colors.textMuted} />
+        <Text style={styles.postsEmptyText}>No posts yet</Text>
+      </View>
+    );
+  }, [user?.is_private, user?.can_view, followStatus]);
 
   if (loading) {
     return (
@@ -401,6 +431,8 @@ const styles = StyleSheet.create({
     minWidth: 96, alignItems: 'center', ...shadows.sm,
   },
   followingBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  // Pending request: muted, so it reads as "waiting" rather than "done".
+  requestedBtn: { backgroundColor: colors.textMuted, borderWidth: 1, borderColor: colors.border },
   followBtnText: { ...typography.label, color: colors.white, fontWeight: '700' },
   messageBtn: {
     backgroundColor: colors.card, borderRadius: radius.full,
@@ -464,6 +496,13 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
   },
   postsEmptyText: { ...typography.body, color: colors.textMuted },
+  postsLockedSub: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
+  },
 });
 
 export default UserProfileScreen;

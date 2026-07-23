@@ -26,11 +26,12 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from .. import media
 from .. import r2
-from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction, ChurchMembership, ChurchJoinRequest, ChurchMessage, ChurchMessageReaction, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress
+from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction, ChurchMembership, ChurchJoinRequest, ChurchMessage, ChurchMessageReaction, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress,FollowRequest,can_view_profile,hidden_private_author_ids
 from ..push import notify_user
 from ..tasks import run_in_background
 from ..serializers import (
     UserSerializer,
+    FollowRequestSerializer,
     TrackSerializer,
     PlaylistSerializer,
     PlaylistListSerializer,

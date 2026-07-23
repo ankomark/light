@@ -502,6 +502,18 @@ export const followUser = async (userId) => {
   return apiRequest('post', `/users/${userId}/follow/`);
 };
 
+// ── Follow requests (private accounts) ───────────────────────────────────────
+// Following a private account raises a pending request instead of following;
+// only the target can approve or reject it.
+export const fetchFollowRequests = async () =>
+  apiRequest('get', '/follow-requests/');
+
+export const approveFollowRequest = async (requestId) =>
+  apiRequest('post', `/follow-requests/${requestId}/approve/`);
+
+export const rejectFollowRequest = async (requestId) =>
+  apiRequest('post', `/follow-requests/${requestId}/reject/`);
+
 // ── Blocking ─────────────────────────────────────────────────────────────────
 export const blockUser = async (userId) =>
   apiRequest('post', `/users/${userId}/block/`);

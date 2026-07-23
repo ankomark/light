@@ -65,8 +65,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         # comments_count are denormalised columns, so no DISTINCT COUNT joins.
         qs = feed_post_queryset(user).order_by('-created_at')
 
-        # Hide posts from anyone the user has blocked (or who blocked them).
-        hidden_ids = blocked_ids_for(user)
+        # Hide posts from anyone the user has blocked (or who blocked them),
+        # plus private accounts they haven't been approved to follow.
+        hidden_ids = blocked_ids_for(user) | hidden_private_author_ids(user)
         if hidden_ids:
             qs = qs.exclude(user_id__in=hidden_ids)
 
@@ -393,6 +394,11 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         from .. import feed as feedrank
         user = request.user
         qs = SocialPost.objects.filter(is_removed=False).exclude(user__is_deactivated=True)
+        # Private accounts are hidden from anonymous viewers too, so this runs
+        # outside the is_authenticated branch.
+        private_hidden = hidden_private_author_ids(user)
+        if private_hidden:
+            qs = qs.exclude(user_id__in=private_hidden)
         if user.is_authenticated:
             blocked = blocked_ids_for(user)
             if blocked:

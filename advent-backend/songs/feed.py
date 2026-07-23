@@ -20,7 +20,10 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import NotInterested, PostLike, SocialPost, User, WatchEvent, blocked_ids_for
+from .models import (
+    NotInterested, PostLike, SocialPost, User, WatchEvent,
+    blocked_ids_for, hidden_private_author_ids,
+)
 
 
 def _cfg(name, default):
@@ -307,7 +310,9 @@ def build_ranked_feed(user):
     """Assemble the user's ranked post-id snapshot. Empty list means "no ranked
     candidates" — the caller should fall back to the chronological feed."""
     now = timezone.now()
-    blocked = blocked_ids_for(user)
+    # Private accounts the viewer hasn't been approved to follow are hidden the
+    # same way blocked users are — the ranked feed filters on this set below.
+    blocked = blocked_ids_for(user) | hidden_private_author_ids(user)
     followee_ids = set(user.followed_by.values_list('id', flat=True))
     discovery_ids = set(get_discovery_authors(user, list(followee_ids)))
     seen = set(get_seen(user.id))       # demote (not exclude) already-served posts

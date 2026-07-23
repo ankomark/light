@@ -490,6 +490,16 @@ const Settings = () => {
               </View>
             }
           />
+          {/* Only meaningful while the account is private — public accounts are
+              followed instantly, so no request is ever raised. */}
+          {isPrivate && (
+            <Row
+              icon="account-clock-outline"
+              label="Follow requests"
+              sub="Approve or decline people asking to follow you"
+              onPress={() => navigation.navigate('FollowRequests')}
+            />
+          )}
           <Row
             icon="account-cancel-outline"
             label={t('settings.privacy.blocked')}

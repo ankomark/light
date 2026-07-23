@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from ..models import User
-from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,ChoirMembership,ChoirJoinRequest,ChoirMessage,ChoirMessageReaction,ChurchMembership,ChurchJoinRequest,ChurchMessage,ChurchMessageReaction
+from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,ChoirMembership,ChoirJoinRequest,ChoirMessage,ChoirMessageReaction,ChurchMembership,ChurchJoinRequest,ChurchMessage,ChurchMessageReaction,FollowRequest,can_view_profile
 import re
 from django.db.models import Avg
 from django.utils import timezone
@@ -128,13 +128,17 @@ class UserSerializer(serializers.ModelSerializer):
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
-    
+    is_private = serializers.SerializerMethodField()
+    can_view = serializers.SerializerMethodField()
+    follow_status = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'password',
             'profile', 'social_posts', 'followers_count',
-            'following_count', 'is_following','profile_picture'
+            'following_count', 'is_following', 'is_private', 'can_view',
+            'follow_status', 'profile_picture'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
@@ -169,6 +173,15 @@ class UserSerializer(serializers.ModelSerializer):
         # (no nested author/song, no per-row like/save lookups). media_file lives
         # on the row, so no joins/prefetch are needed — this removes the N+1 that
         # made the profile slow.
+        #
+        # A private account shows nothing to anyone it hasn't approved. The
+        # counts above stay visible (as on other networks) — it's the content
+        # that's withheld.
+        request = self.context.get('request')
+        viewer = getattr(request, 'user', None) if request else None
+        if not can_view_profile(viewer, obj):
+            return []
+
         posts = obj.social_posts.order_by('-created_at')
 
         if self.context.get('request'):
@@ -192,7 +205,31 @@ class UserSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated and request.user != obj:
             return obj.followers.filter(id=request.user.id).exists()
         return False
-    
+
+    def get_is_private(self, obj):
+        profile = getattr(obj, 'profile', None)
+        return profile is not None and not profile.is_public
+
+    def get_can_view(self, obj):
+        """Whether the requester may see this account's content. Drives the
+        locked state on the profile screen."""
+        request = self.context.get('request')
+        return can_view_profile(getattr(request, 'user', None) if request else None, obj)
+
+    def get_follow_status(self, obj):
+        """'following' | 'requested' | 'none' — lets the follow button show a
+        pending request rather than pretending the follow went through."""
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or request.user == obj:
+            return 'none'
+        if obj.followers.filter(id=request.user.id).exists():
+            return 'following'
+        if FollowRequest.objects.filter(
+            requester=request.user, target=obj, status='pending'
+        ).exists():
+            return 'requested'
+        return 'none'
+
     def create(self, validated_data):
         password = validated_data.pop('password')
         user = User.objects.create_user(password=password, **validated_data)
@@ -228,6 +265,17 @@ class FollowListSerializer(SimpleUserSerializer):
         if request and request.user.is_authenticated and request.user != obj:
             return obj.followers.filter(id=request.user.id).exists()
         return False
+
+
+class FollowRequestSerializer(serializers.ModelSerializer):
+    """A pending request to follow the current user, as shown in their
+    follow-requests list."""
+    requester = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = FollowRequest
+        fields = ['id', 'requester', 'status', 'created_at']
+        read_only_fields = fields
 
 
 class FileSizeValidator:

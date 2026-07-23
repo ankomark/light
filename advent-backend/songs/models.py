@@ -726,6 +726,67 @@ class Block(models.Model):
         return f"{self.blocker_id} blocked {self.blocked_id}"
 
 
+class FollowRequest(models.Model):
+    """A pending request to follow a private account. Public accounts never
+    create one — following them is immediate, as before. Mirrors the
+    Group/Choir/ChurchJoinRequest pattern."""
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    )
+
+    requester = models.ForeignKey('User', on_delete=models.CASCADE, related_name='follow_requests_made')
+    target = models.ForeignKey('User', on_delete=models.CASCADE, related_name='follow_requests_received')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('requester', 'target')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.requester.username} -> {self.target.username} ({self.status})"
+
+
+def can_view_profile(viewer, target):
+    """Whether `viewer` may see `target`'s profile detail and posts.
+
+    Public accounts are visible to everyone (including anonymous). A private
+    account is visible only to itself and to followers it has approved."""
+    if target is None:
+        return False
+    profile = getattr(target, 'profile', None)
+    # No profile row yet → treat as public, matching the field default.
+    if profile is None or profile.is_public:
+        return True
+    if not getattr(viewer, 'is_authenticated', False):
+        return False
+    if viewer.pk == target.pk:
+        return True
+    return target.followers.filter(pk=viewer.pk).exists()
+
+
+def hidden_private_author_ids(user):
+    """Ids of private-account users whose posts `user` may NOT see: every private
+    account they don't already follow (and aren't). Mirrors blocked_ids_for() so
+    feed queries can exclude both in one step.
+
+    Only private accounts are loaded — the overwhelming majority are public, so
+    this stays small. Move to a SQL-side exclude if that ever stops being true."""
+    private_ids = set(
+        Profile.objects.filter(is_public=False).values_list('user_id', flat=True)
+    )
+    if not private_ids:
+        return set()
+    if not getattr(user, 'is_authenticated', False):
+        return private_ids
+    # `followed_by` is the reverse of `followers`, i.e. the people `user` follows.
+    following = set(user.followed_by.values_list('id', flat=True))
+    return private_ids - following - {user.pk}
+
+
 def blocked_ids_for(user):
     """The set of user ids hidden from `user`: everyone they blocked plus
     everyone who blocked them. Empty for anonymous users."""
