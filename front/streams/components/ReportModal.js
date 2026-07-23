@@ -8,14 +8,15 @@ import { reportContent } from '../services/api';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
+// Module scope can't call t(); each row carries a key the render resolves.
 const REASONS = [
-  { key: 'spam', label: 'Spam', icon: 'mail-unread-outline' },
-  { key: 'hate', label: 'Hate Speech', icon: 'warning-outline' },
-  { key: 'violence', label: 'Violence or Threats', icon: 'skull-outline' },
-  { key: 'inappropriate', label: 'Inappropriate Content', icon: 'eye-off-outline' },
-  { key: 'misinformation', label: 'Misinformation', icon: 'information-circle-outline' },
-  { key: 'copyright', label: 'Copyright Violation', icon: 'copy-outline' },
-  { key: 'other', label: 'Other', icon: 'ellipsis-horizontal-outline' },
+  { key: 'spam', labelKey: 'report.reason.spam', icon: 'mail-unread-outline' },
+  { key: 'hate', labelKey: 'report.reason.hate', icon: 'warning-outline' },
+  { key: 'violence', labelKey: 'report.reason.violence', icon: 'skull-outline' },
+  { key: 'inappropriate', labelKey: 'report.reason.inappropriate', icon: 'eye-off-outline' },
+  { key: 'misinformation', labelKey: 'report.reason.misinformation', icon: 'information-circle-outline' },
+  { key: 'copyright', labelKey: 'report.reason.copyright', icon: 'copy-outline' },
+  { key: 'other', labelKey: 'report.reason.other', icon: 'ellipsis-horizontal-outline' },
 ];
 
 /**
@@ -105,7 +106,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
                   color={selectedReason === r.key ? colors.primary : colors.textSecondary}
                 />
                 <Text style={[styles.reasonLabel, selectedReason === r.key && styles.reasonLabelSelected]}>
-                  {r.label}
+                  {t(r.labelKey)}
                 </Text>
                 {selectedReason === r.key && (
                   <Ionicons name="checkmark-circle" size={18} color={colors.primary} />

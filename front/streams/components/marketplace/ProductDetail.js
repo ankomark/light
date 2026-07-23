@@ -379,7 +379,7 @@ const ProductDetail = () => {
           </View>
         )}
 
-        <Text style={styles.description}>{product.description || 'No description available'}</Text>
+        <Text style={styles.description}>{product.description || t('market.product.noDescription')}</Text>
 
         {product.track && (
           <View style={styles.trackInfo}>

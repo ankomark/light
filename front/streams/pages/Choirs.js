@@ -187,7 +187,7 @@ const Choirs = ({ navigation }) => {
       }
       closeForm();
     } catch (err) {
-      const msg = err?.response?.data?.error || 'Could not save the choir. Please try again.';
+      const msg = err?.response?.data?.error || t('choirs.saveFailed');
       Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);

@@ -20,7 +20,7 @@ const ForgotPasswordScreen = () => {
   const handleSend = async () => {
     const trimmed = email.trim();
     if (!trimmed || !trimmed.includes('@')) {
-      setError('Please enter a valid email address.');
+      setError(t('forgot.invalidEmail'));
       return;
     }
     setLoading(true);
@@ -30,7 +30,7 @@ const ForgotPasswordScreen = () => {
       setSent(true);
     } catch (err) {
       // Surface the backend message (e.g. "No account is registered with this email").
-      setError(err.response?.data?.error || 'Something went wrong. Please try again.');
+      setError(err.response?.data?.error || t('forgot.genericError'));
     } finally {
       setLoading(false);
     }

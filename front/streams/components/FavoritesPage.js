@@ -69,12 +69,12 @@ const FavoritesPage = () => {
       setFavoriteTracks(Array.isArray(tracks) ? tracks : []);
       setSavedPosts(Array.isArray(posts) ? posts : []);
     } catch {
-      setError('Could not load your favorites. Pull down to retry.');
+      setError(t('favorites.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   // Reload on focus so items favorited/saved elsewhere show up immediately.
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -143,8 +143,8 @@ const FavoritesPage = () => {
           ListEmptyComponent={
             <EmptyState
               icon="musical-notes-outline"
-              title={error ? 'Something went wrong' : 'No favorite tracks yet'}
-              text={error || 'Tap the heart on any track to save it here.'}
+              title={error ? t('common.somethingWrong') : t('favorites.noTracks')}
+              text={error || t('favorites.noTracksSub')}
             />
           }
         />
@@ -185,8 +185,8 @@ const FavoritesPage = () => {
           ListEmptyComponent={
             <EmptyState
               icon="bookmark-outline"
-              title={error ? 'Something went wrong' : 'No saved posts yet'}
-              text={error || 'Tap the bookmark on any post to save it here.'}
+              title={error ? t('common.somethingWrong') : 'No saved posts yet'}
+              text={error || t('favorites.noPostsSub')}
             />
           }
         />

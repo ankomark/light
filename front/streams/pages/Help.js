@@ -26,31 +26,14 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+// Module scope can't call t(); each entry carries keys the render resolves.
 const FAQS = [
-  {
-    q: 'How do I make my account private?',
-    a: 'Open Settings → Privacy and turn on “Private account”. Only approved followers will then be able to see your profile.',
-  },
-  {
-    q: 'I’m not receiving notifications.',
-    a: 'In Settings → Notifications, make sure “Push notifications” is on. If it stays off, enable notifications for ' + APP_NAME + ' in your device’s system settings.',
-  },
-  {
-    q: 'How do I reset my password?',
-    a: 'Go to Settings → Account → Change password. We’ll email a verification code you can use to set a new password.',
-  },
-  {
-    q: 'How do I sell on the marketplace?',
-    a: 'Open the menu → Marketplace, then use the seller dashboard to add a product. Buyers pay you directly using the M-Pesa, till or bank details you list on each product.',
-  },
-  {
-    q: 'How do I reduce data usage?',
-    a: 'In Settings → Playback & Data, turn on “Data saver”, switch off “Autoplay videos”, and set Audio quality to “Data saver”.',
-  },
-  {
-    q: 'How do I contact the team?',
-    a: 'Use “Contact admins” in Settings to send a private message, or email us using the button below.',
-  },
+  { qKey: 'help.faq.privateQ', aKey: 'help.faq.privateA' },
+  { qKey: 'help.faq.notifQ', aKey: 'help.faq.notifA', appendAppName: true },
+  { qKey: 'help.faq.passwordQ', aKey: 'help.faq.passwordA' },
+  { qKey: 'help.faq.sellQ', aKey: 'help.faq.sellA' },
+  { qKey: 'help.faq.dataQ', aKey: 'help.faq.dataA' },
+  { qKey: 'help.faq.contactQ', aKey: 'help.faq.contactA' },
 ];
 
 // Module scope: no hook here, so the caller passes t in.
@@ -79,7 +62,7 @@ const Help = () => {
   const emailUs = () =>
     openLink(
       `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} support`)}`,
-      'Email is not set up on this device.', t
+      t('help.emailUnavailable'), t
     );
 
   return (
@@ -103,16 +86,20 @@ const Help = () => {
           {FAQS.map((item, i) => {
             const expanded = open === i;
             return (
-              <View key={item.q} style={[i < FAQS.length - 1 && styles.divider]}>
+              <View key={item.qKey} style={[i < FAQS.length - 1 && styles.divider]}>
                 <TouchableOpacity style={styles.qRow} onPress={() => toggle(i)} activeOpacity={0.7}>
-                  <Text style={styles.qText}>{item.q}</Text>
+                  <Text style={styles.qText}>{t(item.qKey)}</Text>
                   <Ionicons
                     name={expanded ? 'chevron-up' : 'chevron-down'}
                     size={18}
                     color={colors.textMuted}
                   />
                 </TouchableOpacity>
-                {expanded && <Text style={styles.aText}>{item.a}</Text>}
+                {expanded && (
+                  <Text style={styles.aText}>
+                    {t(item.aKey)}{item.appendAppName ? `${APP_NAME}.` : ''}
+                  </Text>
+                )}
               </View>
             );
           })}

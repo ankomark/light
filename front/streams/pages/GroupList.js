@@ -51,14 +51,14 @@ const GroupList = ({ navigation }) => {
       console.error('Failed to load groups:', error);
       Alert.alert(
         'Error',
-        error.detail || error.message || 'Failed to load groups. Please try again.'
+        error.detail || error.message || t('group.list.loadFailed')
       );
       throw error;
     } finally {
       if (showLoader) setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   // Infinite scroll: append the next page of groups, deduped by slug.
   const loadMore = useCallback(async () => {
@@ -124,14 +124,14 @@ const GroupList = ({ navigation }) => {
               console.error('Failed to delete group:', error);
               Alert.alert(
                 'Error',
-                error.detail || error.message || 'Failed to delete group. Please try again.'
+                error.detail || error.message || t('group.list.deleteFailed')
               );
             }
           },
         },
       ]
     );
-  }, []);
+  }, [t]);
 
   const handleEditGroup = useCallback((group) => {
     navigation.navigate('CreateGroup', {
@@ -184,9 +184,9 @@ const GroupList = ({ navigation }) => {
   ), [currentUser?.id, handleDeleteGroup, handleEditGroup, navigation]);
 
   const emptyCopy = {
-    public: { title: 'No public groups yet', sub: 'Create one to get the conversation started' },
-    private: { title: 'No private groups', sub: 'Private groups you’re added to will appear here' },
-    mine: { title: 'You’re not in any groups', sub: 'Join a public group or use an invite link' },
+    public: { title: t('group.list.noPublic'), sub: t('group.list.noPublicSub') },
+    private: { title: 'No private groups', sub: t('group.list.privateNote') },
+    mine: { title: t('group.list.notInAny'), sub: t('group.list.notInAnySub') },
   }[activeTab];
 
   const renderEmptyComponent = useCallback(() => (

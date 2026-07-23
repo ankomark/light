@@ -48,7 +48,7 @@ const CreateStoryScreen = () => {
       if (asset.type === 'video' && asset.duration && asset.duration > MAX_VIDEO_TOLERANCE_MS) {
         Alert.alert(
           'Video too long',
-          'Stories can be up to 30 seconds. Please trim your clip and try again.',
+          t('story.tooLong'),
         );
         return;
       }

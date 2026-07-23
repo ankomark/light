@@ -10,9 +10,10 @@ import { createBroadcast } from '../../services/api';
 import { colors, typography, spacing, radius } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 
+// Module scope can't call t(); the hint key is resolved at render.
 const KINDS = [
-  { key: 'meet', label: 'Meet', icon: 'account-group', hint: 'Audio · 100 followers' },
-  { key: 'tv', label: 'Go-Live', icon: 'television-classic', hint: 'Video · 1,000 followers' },
+  { key: 'meet', label: 'Meet', icon: 'account-group', hintKey: 'live.kind.meetHint' },
+  { key: 'tv', label: 'Go-Live', icon: 'television-classic', hintKey: 'live.kind.tvHint' },
 ];
 
 const GoLive = ({ navigation, route }) => {
@@ -184,7 +185,7 @@ const GoLive = ({ navigation, route }) => {
               onPress={() => setKind(k.key)} activeOpacity={0.85}>
               <MaterialCommunityIcons name={k.icon} size={26} color={active ? '#0A1628' : colors.accent} />
               <Text style={[styles.kindLabel, active && styles.kindLabelActive]}>{k.label}</Text>
-              <Text style={[styles.kindHint, active && { color: '#0A1628' }]}>{k.hint}</Text>
+              <Text style={[styles.kindHint, active && { color: '#0A1628' }]}>{t(k.hintKey)}</Text>
             </TouchableOpacity>
           );
         })}

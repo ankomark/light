@@ -81,14 +81,14 @@ const BibleReader = () => {
       if (data.verses && data.verses.length) {
         setVerses(data.verses);
       } else {
-        setError('No verses found for this chapter.');
+        setError(t('bible.noVerses'));
       }
     } catch {
-      setError('Failed to load. Check your connection and try again.');
+      setError(t('bible.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const handleBookSelect = (book) => {
     setSelectedBook(book);
@@ -284,7 +284,7 @@ const BibleReader = () => {
   let subtitle = 'King James Version';
   if (inVerses) {
     title = `${selectedBook.name} ${selectedChapter}`;
-    subtitle = 'Tap Previous / Next to keep reading';
+    subtitle = t('bible.keepReading');
   } else if (selectedBook) {
     title = selectedBook.name;
     subtitle = `${selectedBook.chapters} chapters`;

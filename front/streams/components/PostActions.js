@@ -57,7 +57,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
   const handleDeletePost = () => {
     Alert.alert(
       'Delete Post',
-      'Are you sure you want to delete this post?',
+      t('post.deleteConfirm'),
       [
         {
           text: 'Cancel',

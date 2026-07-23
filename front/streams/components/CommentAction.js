@@ -200,7 +200,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
             <Text style={styles.commentBarText} numberOfLines={1}>
               {commentCount > 0
                 ? `View all ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}`
-                : 'Be the first to comment'}
+                : t('comments.beFirst')}
             </Text>
             <Feather name="chevron-right" size={18} color={colors.textMuted} />
           </TouchableOpacity>

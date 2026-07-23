@@ -129,7 +129,7 @@ const SellerGroup = ({ group, fallbackCurrency, isMySale, orderOpen, onConfirm, 
           />
           <View style={styles.lineTextWrap}>
             <Text style={styles.lineTitle} numberOfLines={2}>
-              {item.product?.title || 'Unavailable product'}
+              {item.product?.title || t('market.unavailableProduct')}
             </Text>
             <Text style={styles.lineMeta}>
               {formatPrice(item.price_at_purchase ?? item.product?.price, currency)} × {item.quantity}
@@ -230,10 +230,9 @@ const OrderDetail = () => {
   const handleConfirm = useCallback((sellerId) => {
     Alert.alert(
       'Confirm payment',
-      'Only confirm once the buyer’s payment has actually reached you. This '
-      + 'marks your items paid and takes them out of your stock.',
+      t('market.order.confirmWarning'),
       [
-        { text: 'Not yet', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
           text: 'I received payment',
           onPress: async () => {
@@ -244,7 +243,7 @@ const OrderDetail = () => {
               console.error('Error confirming payment:', err);
               Alert.alert(
                 'Error',
-                err.response?.data?.error || 'Could not confirm payment. Please try again.'
+                err.response?.data?.error || t('market.order.confirmFailed')
               );
             } finally {
               setConfirmingSeller(null);
@@ -253,7 +252,7 @@ const OrderDetail = () => {
         },
       ]
     );
-  }, [orderId]);
+  }, [orderId, t]);
 
   if (loading) {
     return (

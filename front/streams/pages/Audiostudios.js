@@ -158,7 +158,7 @@ const Audiostudios = () => {
   const handleDeleteAudiostudio = async (id) => {
     Alert.alert(
       'Confirm Delete',
-      'Are you sure you want to delete this audio studio?',
+      t('audio.deleteConfirm'),
       [
         {
           text: 'Cancel',
@@ -286,7 +286,7 @@ const Audiostudios = () => {
           <ScrollView style={styles.addForm}>
             <View style={styles.formHeader}>
               <Text style={styles.formTitle}>
-                {editingAudiostudio ? 'Edit Audio Studio' : 'Add New Audio Studio'}
+                {editingAudiostudio ? 'Edit Audio Studio' : t('audio.addNew')}
               </Text>
               <TouchableOpacity 
                 onPress={() => {

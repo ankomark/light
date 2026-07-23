@@ -106,7 +106,7 @@ const GroupForm = ({ navigation, route }) => {
       const nameErr = Array.isArray(body?.name) ? body.name[0]
         : (typeof body?.name === 'string' ? body.name : null);
       const msg = nameErr || body?.detail || body?.error || body?.message
-        || error?.message || 'Failed to save group. Please try again.';
+        || error?.message || t('group.create.saveFailed');
       Alert.alert(t('common.error'), msg);
     } finally {
       setIsLoading(false);
@@ -116,7 +116,7 @@ const GroupForm = ({ navigation, route }) => {
   const handleDelete = async () => {
     Alert.alert(
       'Delete Group',
-      'Are you sure you want to delete this group? This action cannot be undone.',
+      t('group.create.deleteConfirm'),
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -230,8 +230,8 @@ const GroupForm = ({ navigation, route }) => {
           </View>
           <Text style={styles.privacyHint}>
             {isPrivate 
-              ? 'Only invited members can join this group' 
-              : 'Anyone can find and join this group'}
+              ? t('group.create.privateHint') 
+              : t('group.create.publicHint')}
           </Text>
         </View>
       </View>

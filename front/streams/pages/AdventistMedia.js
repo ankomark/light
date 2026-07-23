@@ -167,7 +167,7 @@ const AdventistMedia = () => {
       }
       closeForm();
     } catch (err) {
-      const msg = err?.response?.data?.error || 'Could not save the station. Please try again.';
+      const msg = err?.response?.data?.error || t('media.saveFailed');
       Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);
@@ -194,7 +194,7 @@ const AdventistMedia = () => {
             await deleteMediaStation(item.id);
           } catch (err) {
             setStations(prev); // rollback
-            const msg = err?.response?.data?.error || 'Could not delete the station.';
+            const msg = err?.response?.data?.error || t('media.deleteFailed');
             Alert.alert(t('common.error'), msg);
           }
         },

@@ -300,7 +300,7 @@ const PublicationEditor = ({ route, navigation }) => {
       AsyncStorage.removeItem(draftKey).catch(() => {}); // work is safely on the server now
       navigation.navigate('PublicationDetail', { id: saved.id });
     } catch (err) {
-      const msg = err?.response?.data?.error || 'Could not save. Please try again.';
+      const msg = err?.response?.data?.error || t('pub.saveFailed');
       Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);

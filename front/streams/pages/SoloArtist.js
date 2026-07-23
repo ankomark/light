@@ -29,11 +29,12 @@ import { useI18n } from '../context/I18nContext';
 
 const { height } = Dimensions.get('window');
 
+// Values are the stored genre codes; the labels are resolved at render.
 const GENRE_CHOICES = {
-  gospel: 'Gospel',
-  contemporary: 'Contemporary Christian',
-  worship: 'Worship',
-  other: 'Other'
+  gospel: 'artists.genre.gospel',
+  contemporary: 'artists.genre.contemporary',
+  worship: 'artists.genre.worship',
+  other: 'artists.genre.other',
 };
 
 const SoloArtists = () => {
@@ -115,12 +116,12 @@ const SoloArtists = () => {
       results = results.filter(artist => 
         artist.stage_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         artist.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        GENRE_CHOICES[artist.genre]?.toLowerCase().includes(searchTerm.toLowerCase())
+        t(GENRE_CHOICES[artist.genre] || '')?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
     
     setFilteredArtists(results);
-  }, [searchTerm, artists]);
+  }, [searchTerm, artists, t]);
 
   const pickProfileImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -286,7 +287,7 @@ const SoloArtists = () => {
   const handleDeleteArtist = async (id) => {
     Alert.alert(
       'Confirm Delete',
-      'Are you sure you want to delete your profile?',
+      t('artists.deleteConfirm'),
       [
         {
           text: 'Cancel',
@@ -384,7 +385,7 @@ const SoloArtists = () => {
           )}
           <View style={styles.artistHeaderInfo}>
             <Text style={styles.artistName}>{item.stage_name}</Text>
-            <Text style={styles.artistGenre}>{GENRE_CHOICES[item.genre]}</Text>
+            <Text style={styles.artistGenre}>{item.genre ? t(GENRE_CHOICES[item.genre]) : ''}</Text>
             {item.is_verified && (
               <View style={styles.verifiedBadge}>
                 <MaterialIcons name="verified" size={16} color="#4CAF50" />
@@ -514,7 +515,7 @@ const SoloArtists = () => {
           <ScrollView style={styles.addForm}>
             <View style={styles.formHeader}>
               <Text style={styles.formTitle}>
-                {editingArtist ? 'Edit Profile' : 'Create Artist Profile'}
+                {editingArtist ? 'Edit Profile' : t('artists.create')}
               </Text>
               <TouchableOpacity 
                 onPress={() => {
@@ -589,7 +590,7 @@ const SoloArtists = () => {
             
             <Text style={styles.label}>{t('artists.genre')}</Text>
             <View style={styles.genreOptions}>
-              {Object.entries(GENRE_CHOICES).map(([value, label]) => (
+              {Object.entries(GENRE_CHOICES).map(([value, labelKey]) => (
                 <TouchableOpacity
                   key={value}
                   style={[
@@ -599,7 +600,7 @@ const SoloArtists = () => {
                   onPress={() => setNewArtist({...newArtist, genre: value})}
                 >
                   <Text style={newArtist.genre === value ? styles.selectedGenreText : styles.genreText}>
-                    {label}
+                    {t(labelKey)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -645,7 +646,7 @@ const SoloArtists = () => {
             <TouchableOpacity style={styles.imagePicker} onPress={pickProfileImage}>
               <MaterialIcons name="add-a-photo" size={24} color="#006064" />
               <Text style={styles.imagePickerText}>
-                {profileImage ? 'Change Profile Image' : 'Add Profile Image'}
+                {profileImage ? t('artists.changeImage') : 'Add Profile Image'}
               </Text>
             </TouchableOpacity>
             

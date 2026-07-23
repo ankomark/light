@@ -106,11 +106,11 @@ const ProductList = () => {
       setPage(1);
       setHasMore(!!data.next);
     } catch (err) {
-      setError(err.message || 'Failed to load products');
+      setError(err.message || t('market.list.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [route.params?.categoryId]);
+  }, [route.params?.categoryId, t]);
 
   const loadMoreProducts = useCallback(async () => {
     if (loadingMore || !hasMore) return;

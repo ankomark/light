@@ -62,12 +62,12 @@ const TrackList = () => {
       setHasMore(!!response?.next);
       lastFetchRef.current = Date.now();
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Failed to load tracks');
+      setError(err.response?.data?.message || err.message || t('music.loadTracksFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   const loadMoreTracks = useCallback(async () => {
     if (loadingMore || !hasMore) return;

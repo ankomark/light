@@ -74,11 +74,11 @@ const GroupMembers = (props) => {
       setMembers(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load members:', err);
-      setError('Failed to load members. Please try again.');
+      setError(t('group.members.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [groupSlug]);
+  }, [groupSlug, t]);
 
   useEffect(() => { load(); }, [load]);
 

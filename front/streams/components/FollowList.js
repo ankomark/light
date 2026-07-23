@@ -8,10 +8,12 @@ import { fetchFollowing, fetchFollowers } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import FollowButton from './FollowButton';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const FollowList = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   const { currentUser } = useAuth();
@@ -126,10 +128,10 @@ const FollowList = () => {
     <View style={styles.empty}>
       <MaterialIcons name="people-outline" size={48} color={colors.textMuted} />
       <Text style={styles.emptyText}>
-        {type === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
+        {type === 'followers' ? 'No followers yet' : t('follow.notFollowingAnyone')}
       </Text>
     </View>
-  ), [type]);
+  ), [type, t]);
 
   if (loading) {
     return (

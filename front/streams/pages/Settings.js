@@ -372,7 +372,7 @@ const Settings = () => {
       try { await logout(); } catch {}
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } catch (error) {
-      Alert.alert(t('common.error'), error.response?.data?.error || 'Could not deactivate your account.');
+      Alert.alert(t('common.error'), error.response?.data?.error || t('settings.deactivateFailed'));
     } finally {
       setDeactivating(false);
     }

@@ -168,7 +168,7 @@ const Studios = () => {
       }
       closeForm();
     } catch (err) {
-      const msg = err?.response?.data?.error || 'Could not save the studio. Please try again.';
+      const msg = err?.response?.data?.error || t('studios.saveFailed');
       Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);

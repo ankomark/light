@@ -343,7 +343,7 @@ const NotificationsBell = ({ navigation }) => {
                     <MaterialIcons name="notifications-none" size={52} color={colors.textSecondary} />
                     <Text style={styles.emptyText}>{t('notifications.caughtUp')}</Text>
                     <Text style={styles.emptySubtext}>
-                      {filter === 'all' ? 'New notifications will appear here' : 'Nothing here under this filter'}
+                      {filter === 'all' ? t('notifications.willAppear') : t('notifications.nothingUnderFilter')}
                     </Text>
                   </View>
                 }

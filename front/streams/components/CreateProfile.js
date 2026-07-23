@@ -108,11 +108,11 @@ const CreateProfile = () => {
     if (!profileData.bio.trim()) {
       newErrors.bio = 'Bio is required';
     } else if (profileData.bio.length > 150) {
-      newErrors.bio = 'Bio should be under 150 characters';
+      newErrors.bio = t('createProfile.bioTooLong');
     }
     
     if (!profileData.birth_date) {
-      newErrors.birth_date = 'Birth date is required';
+      newErrors.birth_date = t('createProfile.birthRequired');
     } else {
       const birthDate = new Date(profileData.birth_date);
       const currentDate = new Date();
@@ -120,12 +120,12 @@ const CreateProfile = () => {
       minAgeDate.setFullYear(minAgeDate.getFullYear() - 13);
       
       if (birthDate > minAgeDate) {
-        newErrors.birth_date = 'You must be at least 13 years old';
+        newErrors.birth_date = t('createProfile.tooYoung');
       }
     }
     
     if (!profileData.location.trim()) {
-      newErrors.location = 'Location is required';
+      newErrors.location = t('createProfile.locationRequired');
     }
     
     setErrors(newErrors);
@@ -176,7 +176,7 @@ const CreateProfile = () => {
     } catch (error) {
       console.error('Profile creation error:', error.response?.data || error);
       
-      let errorMessage = 'Could not create profile. Please try again.';
+      let errorMessage = t('createProfile.createFailed');
       
       if (error.response?.data) {
         // Handle backend validation errors
@@ -186,7 +186,7 @@ const CreateProfile = () => {
           errorMessage = error.response.data.non_field_errors[0];
         }
       } else if (error.message.includes('timeout')) {
-        errorMessage = 'Request timed out. Check your connection.';
+        errorMessage = t('createProfile.timeout');
       }
       
       Alert.alert(t('common.error'), errorMessage);
@@ -208,9 +208,9 @@ const CreateProfile = () => {
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.header}>{isEditMode ? 'Edit Profile' : 'Complete Your Profile'}</Text>
+      <Text style={styles.header}>{isEditMode ? 'Edit Profile' : t('createProfile.completeTitle')}</Text>
       <Text style={styles.subHeader}>
-        {isEditMode ? 'Update your personal details' : 'Add your personal details to help others connect with you'}
+        {isEditMode ? t('createProfile.updateSub') : t('createProfile.addSub')}
       </Text>
 
       {/* Profile Picture Section */}
@@ -259,7 +259,7 @@ const CreateProfile = () => {
           onPress={() => setShowDatePicker(true)}
         >
           <Text style={profileData.birth_date ? styles.dateText : styles.placeholderText}>
-            {profileData.birth_date || 'Select your birth date'}
+            {profileData.birth_date || t('createProfile.selectBirthDate')}
           </Text>
         </TouchableOpacity>
         {errors.birth_date && <Text style={styles.errorText}>{errors.birth_date}</Text>}

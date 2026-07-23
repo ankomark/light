@@ -1095,10 +1095,10 @@ const SocialFeed = ({ showBackground = true }) => {
           <MaterialIcons name="error-outline" size={48} color={colors.textMuted} />
           <Text style={styles.errorText}>
             {error.message?.includes('Session expired')
-              ? 'Session expired. Please log in again.'
+              ? t('feed.sessionExpired')
               : error.response?.status === 500
-                ? 'Server error. Please try again.'
-                : 'Failed to load posts.'}
+                ? t('feed.serverError')
+                : t('feed.loadFailedShort')}
           </Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => loadPosts()}>
             <Text style={styles.retryButtonText}>{t('common.retry')}</Text>

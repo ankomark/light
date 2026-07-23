@@ -102,8 +102,8 @@ const NoticeBoard = () => {
       await load();
     } catch (error) {
       const msg = error.response?.status === 403
-        ? 'Only admins can post notices.'
-        : (error.response?.data?.detail || 'Failed to post notice.');
+        ? t('notice.adminsOnly')
+        : (error.response?.data?.detail || t('notice.postFailed'));
       Alert.alert(t('common.error'), msg);
     } finally {
       setPosting(false);
@@ -243,7 +243,7 @@ const NoticeBoard = () => {
             <View style={styles.intro}>
               <MaterialCommunityIcons name="bullhorn-variant-outline" size={20} color={colors.primary} />
               <Text style={styles.introText}>
-                Official announcements from the leadership. {isAdmin ? 'Tap + to post a new notice.' : ''}
+                Official announcements from the leadership. {isAdmin ? t('notice.tapToPost') : ''}
               </Text>
             </View>
 
@@ -267,7 +267,7 @@ const NoticeBoard = () => {
             <MaterialCommunityIcons name="bulletin-board" size={56} color={colors.border} />
             <Text style={styles.emptyTitle}>{t('notice.none')}</Text>
             <Text style={styles.emptySub}>
-              {isAdmin ? 'Post the first notice with the + button.' : 'Check back soon for announcements.'}
+              {isAdmin ? t('notice.postFirst') : t('notice.checkBack')}
             </Text>
           </View>
         }

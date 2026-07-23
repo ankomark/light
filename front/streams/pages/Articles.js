@@ -276,8 +276,8 @@ const Articles = ({ navigation }) => {
                   {tab === 'mine'
                     ? "You haven't written anything yet"
                     : tab === 'saved'
-                      ? 'No saved publications yet'
-                      : 'No publications found'}
+                      ? t('articles.noSaved')
+                      : t('articles.none')}
                 </Text>
                 {tab === 'mine' && (
                   <TouchableOpacity style={styles.writeNow} onPress={() => navigation.navigate('PublicationEditor', {})}>

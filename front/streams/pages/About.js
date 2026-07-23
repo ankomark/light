@@ -23,7 +23,8 @@ import { useI18n } from '../context/I18nContext';
 // ── Easily-editable brand/contact constants ──────────────────────────────────
 const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
-const TAGLINE = 'Faith, music & community — in one place';
+// Resolved at render — module scope can't call t().
+const TAGLINE_KEY = 'about.tagline';
 const SUPPORT_EMAIL = 'ankomark76@gmail.com';
 const WEBSITE_URL = '';        // set when available
 const PRIVACY_URL = '';        // set when available
@@ -31,14 +32,14 @@ const TERMS_URL = '';          // set when available
 const LOGO = require('../assets/logo.png');
 
 const FEATURES = [
-  { icon: 'book-music-outline', label: 'Hymnals', desc: 'Sing in 4 languages' },
-  { icon: 'headphones', label: 'Music & Audio', desc: 'Stream & playlists' },
-  { icon: 'heart-multiple-outline', label: 'Social Feed', desc: 'Share & connect' },
-  { icon: 'account-group-outline', label: 'Groups & Chat', desc: 'Fellowship together' },
-  { icon: 'storefront-outline', label: 'Marketplace', desc: 'Buy & sell' },
-  { icon: 'broadcast', label: 'Live Events', desc: 'Worship in real time' },
-  { icon: 'book-open-variant', label: 'Bible & Studies', desc: 'Read & reflect' },
-  { icon: 'church', label: 'Churches', desc: 'Find a community' },
+  { icon: 'book-music-outline', labelKey: 'about.feature.hymnals', descKey: 'about.feature.hymnalsDesc' },
+  { icon: 'headphones', labelKey: 'about.feature.music', descKey: 'about.feature.musicDesc' },
+  { icon: 'heart-multiple-outline', labelKey: 'about.feature.social', descKey: 'about.feature.socialDesc' },
+  { icon: 'account-group-outline', labelKey: 'about.feature.groups', descKey: 'about.feature.groupsDesc' },
+  { icon: 'storefront-outline', labelKey: 'about.feature.market', descKey: 'about.feature.marketDesc' },
+  { icon: 'broadcast', labelKey: 'about.feature.live', descKey: 'about.feature.liveDesc' },
+  { icon: 'book-open-variant', labelKey: 'about.feature.bible', descKey: 'about.feature.bibleDesc' },
+  { icon: 'church', labelKey: 'about.feature.churches', descKey: 'about.feature.churchesDesc' },
 ];
 
 // Module scope: no hook here, so the caller passes t in.
@@ -66,7 +67,7 @@ const About = () => {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `${APP_NAME} — ${TAGLINE}. Join me on the app!`,
+        message: `${APP_NAME} — ${t(TAGLINE_KEY)}. Join me on the app!`,
       });
     } catch {
       /* user dismissed */
@@ -76,7 +77,7 @@ const About = () => {
   const handleEmail = () =>
     openLink(
       `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} feedback`)}`,
-      'Email is not set up on this device.', t
+      t('about.emailUnavailable'), t
     );
 
   return (
@@ -102,7 +103,7 @@ const About = () => {
               <Image source={LOGO} style={styles.logo} resizeMode="contain" />
             </View>
             <Text style={styles.appName}>{APP_NAME}</Text>
-            <Text style={styles.tagline}>{TAGLINE}</Text>
+            <Text style={styles.tagline}>{t(TAGLINE_KEY)}</Text>
 
             <View style={styles.versionPill}>
               <MaterialCommunityIcons name="shield-check" size={13} color={colors.white} />
@@ -127,12 +128,12 @@ const About = () => {
           <Text style={[styles.sectionTitle, styles.gridTitle]}>{t('about.whatsInside')}</Text>
           <View style={styles.grid}>
             {FEATURES.map((f) => (
-              <View key={f.label} style={styles.featureCard}>
+              <View key={f.labelKey} style={styles.featureCard}>
                 <View style={styles.featureIcon}>
                   <MaterialCommunityIcons name={f.icon} size={22} color={colors.primary} />
                 </View>
-                <Text style={styles.featureLabel}>{f.label}</Text>
-                <Text style={styles.featureDesc}>{f.desc}</Text>
+                <Text style={styles.featureLabel}>{t(f.labelKey)}</Text>
+                <Text style={styles.featureDesc}>{t(f.descKey)}</Text>
               </View>
             ))}
           </View>
@@ -147,7 +148,7 @@ const About = () => {
             <ActionRow
               icon="globe-outline"
               label={t('about.website')}
-              onPress={() => openLink(WEBSITE_URL, 'Our website is coming soon.', t)}
+              onPress={() => openLink(WEBSITE_URL, t('about.websiteSoon'), t)}
             />
           </View>
 
@@ -156,13 +157,13 @@ const About = () => {
             <ActionRow
               icon="shield-checkmark-outline"
               label={t('about.privacy')}
-              onPress={() => openLink(PRIVACY_URL, 'Our privacy policy is coming soon.', t)}
+              onPress={() => openLink(PRIVACY_URL, t('about.privacySoon'), t)}
             />
             <Divider />
             <ActionRow
               icon="document-text-outline"
               label={t('about.terms')}
-              onPress={() => openLink(TERMS_URL, 'Our terms of service are coming soon.', t)}
+              onPress={() => openLink(TERMS_URL, t('about.termsSoon'), t)}
             />
           </View>
 

@@ -197,8 +197,8 @@ const CreatePost = ({ navigation }) => {
           : 0;
         if (shortSide > MAX_VIDEO_SHORT_SIDE) {
           Alert.alert(
-            'Resolution too high',
-            'Please upload a 1080p video or lower. 2K and 4K videos are not supported.',
+            t('create.post.resolutionTitle'),
+            t('create.post.resolutionBody'),
           );
           return;
         }

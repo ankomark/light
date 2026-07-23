@@ -238,7 +238,7 @@ const Churches = ({ navigation }) => {
   const handleDeleteChurch = async (id) => {
     Alert.alert(
       'Confirm Delete',
-      'Are you sure you want to delete this church?',
+      t('churches.deleteConfirm'),
       [
         {
           text: 'Cancel',
@@ -446,7 +446,7 @@ const Churches = ({ navigation }) => {
                 ) : (
                   <View style={styles.coverPlaceholder}>
                     <MaterialIcons name="add-a-photo" size={26} color={colors.accent} />
-                    <Text style={styles.coverHint}>{editingChurch ? 'Change church image' : 'Add church image'}</Text>
+                    <Text style={styles.coverHint}>{editingChurch ? t('churches.changeImage') : 'Add church image'}</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -624,8 +624,8 @@ const Churches = ({ navigation }) => {
             <Text style={styles.emptyText}>{t('churches.none')}</Text>
             <Text style={styles.emptySubtext}>
               {searchTerm || filterValues.country || filterValues.conference
-                ? 'Try adjusting your search or filters'
-                : 'Be the first to add a church'}
+                ? t('churches.adjustSearch')
+                : t('churches.beFirst')}
             </Text>
           </View>
         }

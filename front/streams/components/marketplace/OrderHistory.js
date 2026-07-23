@@ -132,7 +132,7 @@ const OrderHistory = () => {
               <View style={styles.orderItemsPreview}>
                 {(item.items || []).slice(0, 2).map((orderItem, index) => (
                   <Text key={index} style={styles.orderItemText} numberOfLines={1}>
-                    {orderItem.quantity}x {orderItem.product?.title || 'Unavailable product'}
+                    {orderItem.quantity}x {orderItem.product?.title || t('market.unavailableProduct')}
                   </Text>
                 ))}
                 {(item.items?.length || 0) > 2 && (

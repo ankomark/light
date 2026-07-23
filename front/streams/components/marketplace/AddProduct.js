@@ -118,8 +118,8 @@ const AddProduct = () => {
 
     if (formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number)) {
       Alert.alert(
-        'Invalid WhatsApp Number',
-        'Please enter a valid Kenyan WhatsApp number starting with +254 (12 digits total)',
+        t('market.form.invalidWhatsappTitle'),
+        t('market.form.invalidWhatsappBody'),
         [
           { 
             text: 'OK', 
@@ -171,11 +171,11 @@ const AddProduct = () => {
       navigation.goBack();
     } catch (error) {
       console.error('Error creating product:', error);
-      let errorMessage = 'Failed to create product';
+      let errorMessage = t('market.form.createFailed');
       if (error.response) {
         errorMessage = Object.values(error.response.data).flat().join('\n');
       } else if (error.request) {
-        errorMessage = 'No response from server. Check network or server status.';
+        errorMessage = t('market.form.noResponse');
       }
       Alert.alert(t('common.error'), errorMessage);
     } finally {
@@ -398,7 +398,7 @@ const AddProduct = () => {
         onPress={() => navigation.navigate('SelectTrack', { onSelect: setTrack })}
       >
         <Text style={styles.linkButtonText}>
-          {track ? `Linked Track: ${track.title}` : 'Link to a Track (Optional)'}
+          {track ? `Linked Track: ${track.title}` : t('market.form.linkTrack')}
         </Text>
       </TouchableOpacity>
 
@@ -408,7 +408,7 @@ const AddProduct = () => {
         disabled={loading}
       >
         <Text style={styles.submitButtonText}>
-          {loading ? 'Creating Product...' : 'Create Product'}
+          {loading ? t('market.form.creating') : 'Create Product'}
         </Text>
       </TouchableOpacity>
 

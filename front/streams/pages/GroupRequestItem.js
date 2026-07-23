@@ -22,7 +22,7 @@ const GroupRequestItem = ({ request, onApprove, onReject }) => {
       />
       <View style={styles.info}>
         <Text style={styles.name}>{request.user?.username || 'Username'}</Text>
-        <Text style={styles.message}>{request.message || 'No message provided'}</Text>
+        <Text style={styles.message}>{request.message || t('group.request.noMessage')}</Text>
       </View>
       <View style={styles.actions}>
         <TouchableOpacity style={styles.approveButton} onPress={onApprove}>

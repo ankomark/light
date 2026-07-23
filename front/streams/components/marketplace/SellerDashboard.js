@@ -136,7 +136,7 @@ const SellerDashboard = () => {
   const handleDeleteProduct = async (slug) => {
     Alert.alert(
       'Delete Product',
-      'Are you sure you want to delete this product?',
+      t('market.seller.deleteConfirm'),
       [
         {
           text: 'Cancel',
@@ -253,8 +253,8 @@ const SellerDashboard = () => {
       />
       <Text style={styles.emptyText}>
         {activeTab === 'products' 
-          ? 'You have no products listed yet' 
-          : 'You have no orders yet'}
+          ? t('market.seller.noProducts') 
+          : t('market.seller.noOrders')}
       </Text>
       {activeTab === 'products' && (
         <TouchableOpacity 

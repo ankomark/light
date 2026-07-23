@@ -74,7 +74,7 @@ const TrackUploadForm = () => {
       }));
     } catch (error) {
       console.error('Error picking audio file:', error);
-      setStatusMessages(prev => ({ ...prev, audio: 'Failed to select audio' }));
+      setStatusMessages(prev => ({ ...prev, audio: t('track.selectAudioFailed') }));
     }
   };
 
@@ -113,7 +113,7 @@ const TrackUploadForm = () => {
       }));
     } catch (error) {
       console.error('Error picking image:', error);
-      setStatusMessages(prev => ({ ...prev, image: 'Failed to select image' }));
+      setStatusMessages(prev => ({ ...prev, image: t('track.selectImageFailed') }));
     }
   };
 
@@ -161,7 +161,7 @@ const TrackUploadForm = () => {
     try {
       // Transcode to ~128 kbps AAC before upload to cut R2 storage/egress cost.
       // Keeps the crisp original if it was already low-bitrate (no size win).
-      setStatusMessages(prev => ({ ...prev, audio: 'Optimizing audio...' }));
+      setStatusMessages(prev => ({ ...prev, audio: t('track.optimizing') }));
       const { uri: audioUri, compressed, savedPct } = await compressAudio({
         uri: trackData.audioFile.uri,
       });

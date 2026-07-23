@@ -84,14 +84,14 @@ const PostDetail = ({ route, navigation }) => {
         setCommentsCount(response.data.comments_count || 0);
       } catch (err) {
         console.error('Error fetching post details:', err);
-        setError('Failed to load post details.');
+        setError(t('post.loadFailed'));
       } finally {
         setLoading(false);
       }
     };
 
     fetchPostDetail();
-  }, [postId]);
+  }, [postId, t]);
 
   // Normalized song fields — prefer the post's denormalized snapshot, fall
   // back to the nested track. (track.artist is an object, so read .username.)

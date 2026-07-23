@@ -549,7 +549,7 @@ const GroupDetail = ({ route, navigation }) => {
       Alert.alert(t('group.detail.requestSentTitle'), t('group.detail.requestSentBody'));
     } catch (e) {
       // requestJoinGroup rejects with the response body itself ({ error } / { message }).
-      const msg = e?.error || e?.response?.data?.error || e?.message || 'Could not send request.';
+      const msg = e?.error || e?.response?.data?.error || e?.message || t('group.detail.requestFailed');
       if (/already/i.test(msg)) setRequested(true);
       Alert.alert(t('common.notice'), msg);
     }
@@ -839,7 +839,7 @@ const GroupDetail = ({ route, navigation }) => {
                 </View>
                 <View style={styles.sheetOptionText}>
                   <Text style={styles.sheetOptionLabel}>{t('group.detail.onlyAdminsMessage')}</Text>
-                  <Text style={styles.sheetOptionHint}>{adminsOnly ? 'On — members can’t send messages' : 'Off — everyone can send messages'}</Text>
+                  <Text style={styles.sheetOptionHint}>{adminsOnly ? t('group.detail.adminsOnlyOn') : t('group.detail.adminsOnlyOff')}</Text>
                 </View>
                 <View style={[styles.toggle, adminsOnly && styles.toggleOn]}>
                   <View style={[styles.toggleKnob, adminsOnly && styles.toggleKnobOn]} />

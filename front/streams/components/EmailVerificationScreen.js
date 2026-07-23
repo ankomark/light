@@ -78,7 +78,7 @@ const EmailVerificationScreen = () => {
       const target = status?.hasProfile ? 'Home' : 'CreateProfile';
       navigation.reset({ index: 0, routes: [{ name: target }] });
     } catch (err) {
-      const msg = err.response?.data?.error ?? 'Invalid or expired code. Please try again.';
+      const msg = err.response?.data?.error ?? t('verify.invalidCode');
       Alert.alert(t('verify.failedTitle'), msg);
       setCode(['', '', '', '', '', '']);
       inputs.current[0]?.focus();

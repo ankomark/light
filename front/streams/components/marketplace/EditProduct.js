@@ -416,7 +416,7 @@ const EditProduct = () => {
         })}
       >
         <Text style={styles.linkButtonText}>
-          {track ? `Linked Track: ${track.title}` : 'Link to a Track (Optional)'}
+          {track ? `Linked Track: ${track.title}` : t('market.form.linkTrack')}
         </Text>
       </TouchableOpacity>
 

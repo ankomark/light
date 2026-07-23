@@ -67,7 +67,7 @@ const Cart = () => {
       if (error.response?.status !== 401) { // Don't show alert for unauthorized
         Alert.alert(
           'Error', 
-          isOnline ? 'Failed to load cart data' : 'You are offline. Connect to load your cart.'
+          isOnline ? t('market.cart.loadFailed') : t('market.cart.offline')
         );
       }
       return false;
@@ -142,7 +142,7 @@ const Cart = () => {
       navigation.navigate('Checkout', { orderId: order.id });
     } catch (error) {
       console.error('Error during checkout:', error);
-      const msg = error.response?.data?.error || 'Failed to connect you with the seller';
+      const msg = error.response?.data?.error || t('market.cart.checkoutFailed');
       Alert.alert(t('common.error'), msg);
     } finally {
       setCheckingOut(false);
@@ -191,7 +191,7 @@ const Cart = () => {
               style={styles.productImage}
             />
             <View style={styles.itemDetails}>
-              <Text style={styles.productTitle} numberOfLines={1}>{item.product?.title || 'Unavailable product'}</Text>
+              <Text style={styles.productTitle} numberOfLines={1}>{item.product?.title || t('market.unavailableProduct')}</Text>
 
               <View style={styles.priceContainer}>
                 <Text style={styles.price}>
@@ -240,7 +240,7 @@ const Cart = () => {
         disabled={!isOnline || checkingOut}
       >
         <Text style={styles.checkoutButtonText}>
-          {isOnline ? 'Continue to Sellers' : 'Offline - Unavailable'}
+          {isOnline ? t('market.cart.continueToSellers') : t('market.cart.offlineButton')}
         </Text>
       </TouchableOpacity>
 

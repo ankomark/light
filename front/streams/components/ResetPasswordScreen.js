@@ -26,15 +26,15 @@ const ResetPasswordScreen = () => {
 
   const handleReset = async () => {
     if (!code.trim() || !password || !confirm) {
-      setError('Please fill in all fields.');
+      setError(t('reset.fillAll'));
       return;
     }
     if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+      setError(t('reset.tooShort'));
       return;
     }
     if (password !== confirm) {
-      setError('Passwords do not match.');
+      setError(t('reset.mismatch'));
       return;
     }
     setLoading(true);
@@ -45,7 +45,7 @@ const ResetPasswordScreen = () => {
         { text: 'Log In', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Login' }] }) },
       ]);
     } catch (err) {
-      setError(err.response?.data?.error || 'Invalid or expired code. Please try again.');
+      setError(err.response?.data?.error || t('verify.invalidCode'));
     } finally {
       setLoading(false);
     }

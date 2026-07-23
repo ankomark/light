@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer } from '../context/PlayerContext';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const { width } = Dimensions.get('window');
 const ART = Math.min(width - spacing.lg * 2, 340);
@@ -30,6 +31,7 @@ const upscaleCover = (url) => {
 };
 
 const NowPlaying = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const {
     currentTrack,
@@ -132,7 +134,7 @@ const NowPlaying = () => {
             onLayout={(e) => { viewH.current = e.nativeEvent.layout.height; }}
             onContentSizeChange={(_, h) => { contentH.current = h; }}
           >
-            <Text style={styles.lyricsText}>{lyrics || 'No lyrics for this track.'}</Text>
+            <Text style={styles.lyricsText}>{lyrics || t('music.noLyrics')}</Text>
           </ScrollView>
         ) : cover ? (
           <Image

@@ -965,7 +965,7 @@ const ChoirCommunity = ({ navigation, route }) => {
             )}
             ListEmptyComponent={
               <Text style={styles.addHint}>
-                {addQuery.trim().length < 2 ? 'Type at least 2 letters to search.' : 'No matching people.'}
+                {addQuery.trim().length < 2 ? t('community.typeTwoLetters') : t('community.noMatchingPeople')}
               </Text>
             }
             contentContainerStyle={{ paddingBottom: spacing.xl }}

@@ -284,7 +284,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
               showsVerticalScrollIndicator={false}
             >
               <Text style={styles.lyricsText}>
-                {track.lyrics?.trim() || 'No lyrics added for this track.'}
+                {track.lyrics?.trim() || t('music.noLyricsAdded')}
               </Text>
             </ScrollView>
           </View>

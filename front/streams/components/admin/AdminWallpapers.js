@@ -33,9 +33,10 @@ import { useI18n } from '../../context/I18nContext';
 const MAX_EDGE = 1920;
 
 // Surfaces an admin can curate independently. Must match Wallpaper.SCOPE_CHOICES.
+// Module scope can't call t(); labels resolved at render.
 const SCOPES = [
-  { key: 'general', label: 'Most screens' },
-  { key: 'music', label: 'Music' },
+  { key: 'general', labelKey: 'wallpaper.scopeGeneral' },
+  { key: 'music', labelKey: 'wallpaper.scopeMusic' },
 ];
 
 const AdminWallpapers = () => {
@@ -141,12 +142,12 @@ const AdminWallpapers = () => {
 
   const handleDelete = (item) => {
     Alert.alert(
-      'Delete wallpaper',
-      'This removes the image permanently. Deactivate it instead if you might want it back.',
+      t('wallpaper.deleteTitle'),
+      t('wallpaper.deleteBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             setBusyId(item.id);
@@ -210,7 +211,7 @@ const AdminWallpapers = () => {
           )}
         </View>
         <Text style={styles.cardMeta}>
-          {item.is_active ? 'In rotation' : 'Hidden'}
+          {item.is_active ? t('wallpaper.inRotation') : t('wallpaper.hidden')}
           {item.uploaded_by_username ? ` · by ${item.uploaded_by_username}` : ''}
         </Text>
 
@@ -267,19 +268,19 @@ const AdminWallpapers = () => {
                   activeOpacity={0.8}
                 >
                   <Text style={[styles.tabText, scope === s.key && styles.tabTextActive]}>
-                    {s.label}
+                    {t(s.labelKey)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
             <Text style={styles.introText}>
               {scope === 'music'
-                ? 'Backgrounds for the Music tab. Order sets the rotation; hidden ones stay uploaded but drop out.'
-                : 'Backgrounds for most screens. Order sets the rotation; hidden ones stay uploaded but drop out.'}
+                ? t('wallpaper.introMusic')
+                : t('wallpaper.introGeneral')}
             </Text>
             {activeCount === 0 && items.length > 0 && (
               <Text style={styles.warnText}>
-                Nothing is in rotation — these screens show a plain dark background.
+                {t('wallpaper.noneWarning')}
               </Text>
             )}
           </View>
@@ -289,7 +290,7 @@ const AdminWallpapers = () => {
             <MaterialCommunityIcons name="image-multiple-outline" size={56} color={colors.border} />
             <Text style={styles.emptyTitle}>{t('wallpaper.none')}</Text>
             <Text style={styles.emptySub}>
-              These screens show a plain dark background until you add one.
+              {t('wallpaper.emptySub')}
             </Text>
           </View>
         }

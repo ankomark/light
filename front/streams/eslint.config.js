@@ -23,6 +23,11 @@ module.exports = defineConfig([
         afterEach: 'readonly',
         beforeAll: 'readonly',
         afterAll: 'readonly',
+        // Node globals — some tests read the source tree from disk.
+        require: 'readonly',
+        __dirname: 'readonly',
+        module: 'readonly',
+        process: 'readonly',
       },
     },
   },
