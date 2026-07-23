@@ -37,16 +37,9 @@ class IsSuperAdmin(BasePermission):
         return bool(u and u.is_authenticated and u.is_super_admin)
 
 
-def Cap(*caps):
-    """Permission factory: allow if the user has ANY of the given capabilities
-    (super admins implicitly have all)."""
-    class _CapPermission(BasePermission):
-        message = 'You do not have permission for this action.'
-
-        def has_permission(self, request, view):
-            u = request.user
-            return bool(u and u.is_authenticated and any(u.has_capability(c) for c in caps))
-    return _CapPermission
+# Cap() now lives in views/common.py so non-admin modules (which import before
+# this one) can gate on capabilities too. It still arrives here via the star
+# import at the top of this file.
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

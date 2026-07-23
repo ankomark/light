@@ -455,3 +455,36 @@ class LiveEventSerializer(serializers.ModelSerializer):
         # Return the fully serialized event
         return LiveEvent.objects.get(id=event.id)
 
+
+
+class WallpaperSerializer(serializers.ModelSerializer):
+    """An app-wide background. `image` is the public R2 URL the client already
+    holds after its presigned PUT; `image_url` is the resolved form the app
+    renders (stray non-URL leftovers resolve to None rather than a broken src)."""
+    image_url = serializers.SerializerMethodField()
+    uploaded_by_username = serializers.CharField(
+        source='uploaded_by.username', read_only=True, default=None
+    )
+
+    class Meta:
+        model = Wallpaper
+        fields = [
+            'id', 'image', 'image_url', 'title', 'scope', 'is_active', 'sort_order',
+            'uploaded_by', 'uploaded_by_username', 'created_at',
+        ]
+        read_only_fields = ['uploaded_by', 'created_at']
+        extra_kwargs = {'image': {'write_only': True}}
+
+    def get_image_url(self, obj):
+        return media.resolve(obj.image)
+
+    def validate_image(self, value):
+        # The client uploads straight to R2 and posts back the public URL, so
+        # anything else is a malformed payload rather than a usable reference.
+        if not media.is_absolute(value):
+            raise serializers.ValidationError(
+                'Expected the public URL returned by the upload.'
+            )
+        if len(value) > 500:
+            raise serializers.ValidationError('Image URL is too long.')
+        return value

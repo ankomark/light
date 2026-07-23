@@ -76,6 +76,7 @@ const ADMIN_ITEMS = [
   { label: 'Content', route: 'AdminContent', set: 'mci', icon: 'file-document-multiple-outline', cap: 'remove_content' },
   { label: 'Appeals', route: 'AdminAppeals', set: 'mci', icon: 'gavel', cap: 'manage_appeals' },
   { label: 'Audit Log', route: 'AdminLogs', set: 'mci', icon: 'history', cap: 'view_audit_log' },
+  { label: 'Wallpapers', route: 'AdminWallpapers', set: 'mci', icon: 'image-multiple-outline', cap: 'manage_wallpapers' },
   { label: 'Roles', route: 'AdminRoles', set: 'mci', icon: 'shield-key-outline', superOnly: true },
 ];
 

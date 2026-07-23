@@ -1059,3 +1059,59 @@ class LiveEventViewSet(viewsets.ModelViewSet):
             logger.error(f"Error listing events: {str(e)}")
             raise
 
+
+
+class WallpaperViewSet(viewsets.ModelViewSet):
+    """App-wide backgrounds. Everyone reads the active set (that is what every
+    RotatingBackground renders); only admins holding `manage_wallpapers` may
+    upload, reorder, deactivate or delete.
+
+    Read is open — these are decorative images with no user data, and keeping it
+    unauthenticated means a cold start never races the token refresh and drops
+    back to the bundled fallbacks."""
+    serializer_class = WallpaperSerializer
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            return [AllowAny()]
+        return [Cap('manage_wallpapers')()]
+
+    def get_queryset(self):
+        queryset = Wallpaper.objects.select_related('uploaded_by')
+        # ?scope=music narrows to one surface; omitted means every scope, which
+        # is what the client wants (it groups them itself in one round trip).
+        scope = self.request.query_params.get('scope')
+        if scope:
+            queryset = queryset.filter(scope=scope)
+        # The app consumes the active set; admins managing the library need to
+        # see deactivated rows too, so they pass ?all=1.
+        if self.request.query_params.get('all') and self.action == 'list':
+            return queryset
+        return queryset.filter(is_active=True)
+
+    def perform_create(self, serializer):
+        serializer.save(uploaded_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        # Best-effort: drop the R2 object too, so deleting a wallpaper doesn't
+        # leave the bytes paying storage forever. r2.delete never raises.
+        r2.delete(instance.image)
+        instance.delete()
+
+    @action(detail=False, methods=['post'], url_path='reorder')
+    def reorder(self, request):
+        """Persist a new rotation order in one round trip: [{id, sort_order}]."""
+        items = request.data.get('items')
+        if not isinstance(items, list):
+            return Response({'error': 'items must be a list of {id, sort_order}'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            for entry in items:
+                if not isinstance(entry, dict) or 'id' not in entry:
+                    continue
+                try:
+                    order = int(entry.get('sort_order', 0))
+                except (TypeError, ValueError):
+                    continue
+                Wallpaper.objects.filter(pk=entry['id']).update(sort_order=order)
+        return Response({'status': 'reordered'})

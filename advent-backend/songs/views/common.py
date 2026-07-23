@@ -26,7 +26,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from .. import media
 from .. import r2
-from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction, ChurchMembership, ChurchJoinRequest, ChurchMessage, ChurchMessageReaction, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress,FollowRequest,can_view_profile,hidden_private_author_ids
+from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction, ChurchMembership, ChurchJoinRequest, ChurchMessage, ChurchMessageReaction, Group, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress,FollowRequest,can_view_profile,hidden_private_author_ids,Wallpaper
 from ..push import notify_user
 from ..tasks import run_in_background
 from ..serializers import (
@@ -46,6 +46,7 @@ from ..serializers import (
     NotificationSerializer,
     ChurchSerializer,
     NoticeSerializer,
+    WallpaperSerializer,
     AdminNoteSerializer,
     NotificationPreferenceSerializer,
     MediaStationSerializer,
@@ -106,6 +107,21 @@ class IsNotSuspended(BasePermission):
         u = request.user
         # Honour temporary suspensions: a lapsed `suspended_until` no longer blocks.
         return not (u and u.is_authenticated and getattr(u, 'is_currently_suspended', False))
+
+
+def Cap(*caps):
+    """Permission factory: allow if the user has ANY of the given capabilities
+    (super admins implicitly have all).
+
+    Lives here rather than in views/admin.py so modules imported earlier (e.g.
+    directory) can gate on a capability without a forward import."""
+    class _CapPermission(BasePermission):
+        message = 'You do not have permission for this action.'
+
+        def has_permission(self, request, view):
+            u = request.user
+            return bool(u and u.is_authenticated and any(u.has_capability(c) for c in caps))
+    return _CapPermission
 
 
 class StandardPagination(PageNumberPagination):

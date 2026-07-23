@@ -26,6 +26,7 @@ ADMIN_CAPABILITIES = (
     ('ban_users', 'Ban users'),
     ('manage_appeals', 'Review appeals'),
     ('view_audit_log', 'View audit log'),
+    ('manage_wallpapers', 'Manage app wallpapers'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 
@@ -675,6 +676,40 @@ class Notice(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class Wallpaper(models.Model):
+    """An app-wide background image, managed by admins and served to every
+    screen that renders RotatingBackground. Replaces the hardcoded R2 URL list
+    the client used to ship with; that list stays in the app as the fallback for
+    a cold start or an empty/unreachable table, so the background is never blank.
+    """
+    # Which surface this wallpaper belongs to. The music tab has always had its
+    # own set; keeping them separate preserves that instead of merging every
+    # image into one rotation.
+    SCOPE_CHOICES = (
+        ('general', 'General (most screens)'),
+        ('music', 'Music'),
+    )
+
+    # Media reference: absolute R2 URL, uploaded via the presigned PUT flow.
+    image = models.CharField(max_length=500)
+    title = models.CharField(max_length=120, blank=True)
+    scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='general', db_index=True)
+    # Deactivate to pull a wallpaper from rotation without deleting the file.
+    is_active = models.BooleanField(default=True)
+    # Lower sorts first; ties fall back to upload order for a stable rotation.
+    sort_order = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='wallpapers'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sort_order', 'created_at']
+
+    def __str__(self):
+        return self.title or f'Wallpaper {self.pk}'
 
 
 class AdminNote(models.Model):

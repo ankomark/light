@@ -46,6 +46,7 @@ from .views import (
     GroupViewSet,
     GroupJoinRequestViewSet,
     FollowRequestViewSet,
+    WallpaperViewSet,
     GroupPostViewSet,
     WishlistViewSet,
     ProductReviewViewSet,
@@ -77,6 +78,7 @@ router.register(r'tracks', TrackViewSet)
 router.register(r'playlists', PlaylistViewSet)
 router.register(r'profiles', ProfileViewSet, basename='profiles')
 router.register(r'follow-requests', FollowRequestViewSet, basename='follow-requests')
+router.register(r'wallpapers', WallpaperViewSet, basename='wallpapers')
 router.register(r'likes', LikeViewSet)
 router.register(r'categories', CategoryViewSet)
 router.register(r'social-posts', SocialPostViewSet)

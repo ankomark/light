@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from ..models import User
-from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,ChoirMembership,ChoirJoinRequest,ChoirMessage,ChoirMessageReaction,ChurchMembership,ChurchJoinRequest,ChurchMessage,ChurchMessageReaction,FollowRequest,can_view_profile
+from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,Church,Choir,Group,Videostudio,Choir, GroupMember, GroupJoinRequest, GroupPost,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,ChoirMembership,ChoirJoinRequest,ChoirMessage,ChoirMessageReaction,ChurchMembership,ChurchJoinRequest,ChurchMessage,ChurchMessageReaction,FollowRequest,can_view_profile,Wallpaper
 import re
 from django.db.models import Avg
 from django.utils import timezone

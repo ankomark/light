@@ -20,6 +20,7 @@ const SIGN_TYPES = {
   'profile-image': 'profile',
   cover: 'cover',
   avatar: 'avatar',
+  wallpaper: 'wallpaper',
 };
 
 const DEFAULT_MIME = (type) =>

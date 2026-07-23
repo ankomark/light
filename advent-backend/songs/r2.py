@@ -36,6 +36,9 @@ FOLDER_MAP = {
     'profile': 'profile_images',
     'cover': 'cover_images',
     'avatar': 'avatars',
+    # Admin-managed app backgrounds; matches the existing /wallpapers prefix
+    # the hardcoded client list already pointed at.
+    'wallpaper': 'wallpapers',
 }
 
 # Per-type content-type allowlist (prefix match). chat_file is intentionally
@@ -51,6 +54,7 @@ ALLOWED_CONTENT_TYPES = {
     'profile': ('image/',),
     'cover': ('image/',),
     'avatar': ('image/',),
+    'wallpaper': ('image/',),
 }
 
 

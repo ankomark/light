@@ -1579,6 +1579,26 @@ export const logWatchEvents = (events) =>
 export const fetchLatestPostId = (feed = null) =>
   apiRequest('get', '/social-posts/latest/', null, { params: feed ? { feed } : {} });
 
+// ── Wallpapers (admin-managed app backgrounds) ───────────────────────────────
+// Read is public so a cold start never races the token refresh; writes need the
+// `manage_wallpapers` capability server-side.
+export const fetchWallpapers = () => apiRequest('get', '/wallpapers/');
+
+// Admin library view — includes deactivated ones.
+export const fetchAllWallpapers = () =>
+  apiRequest('get', '/wallpapers/', null, { params: { all: 1 } });
+
+export const createWallpaper = (image, title = '', scope = 'general') =>
+  apiRequest('post', '/wallpapers/', { image, title, scope });
+
+export const updateWallpaper = (id, fields) =>
+  apiRequest('patch', `/wallpapers/${id}/`, fields);
+
+export const deleteWallpaper = (id) => apiRequest('delete', `/wallpapers/${id}/`);
+
+export const reorderWallpapers = (items) =>
+  apiRequest('post', '/wallpapers/reorder/', { items });
+
 // ── R2 presigned upload ───────────────────────────────────────────────────────
 // Returns { upload_url, key, public_url, content_type, expires_in }; the app
 // PUTs the raw bytes to upload_url and stores public_url as the media ref.

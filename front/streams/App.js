@@ -70,6 +70,7 @@ import AdminAnalytics from './components/admin/AdminAnalytics';
 import AdminAppeals from './components/admin/AdminAppeals';
 import AppealScreen from './components/admin/AppealScreen';
 import AdminRoles from './components/admin/AdminRoles';
+import AdminWallpapers from './components/admin/AdminWallpapers';
 import VideoFeed from './components/VideoFeed';
 import LiveHub from './components/Live/LiveHub';
 import GoLive from './components/Live/GoLive';
@@ -99,6 +100,7 @@ import { PlayerProvider } from './context/PlayerContext';
 import { PreferencesProvider } from './context/PreferencesContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { I18nProvider } from './context/I18nContext';
+import { WallpaperProvider } from './context/WallpaperContext';
 import MiniPlayer from './components/MiniPlayer';
 import { addNotificationResponseListener } from './services/pushNotifications';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -140,16 +142,10 @@ const navTheme = {
   colors: { ...DefaultTheme.colors, background: '#0A1628' },
 };
 
-// Per-tab wallpapers. Home/SocialFeed keeps the rotating set (in RotatingBackground's
-// defaults); other tabs pass their own here (re-hosted on Cloudinary, optimized).
-const CLD_W = 'https://pub-9c5a2f0a7a2244be84e39a116c2dc4d5.r2.dev/wallpapers';
-const MUSIC_WALLPAPERS = [
-  `${CLD_W}/wg19rbjnqphztrcsan0b.jpg`,
-  `${CLD_W}/fjcbdllwljh0dvglousp.jpg`,
-  `${CLD_W}/jxggwl3ltobv4l0o8sqq.jpg`,
-  `${CLD_W}/ikinna96rzqdle0ztcoy.jpg`,
-  `${CLD_W}/gvwuacmn04nq1b25axs1.jpg`,
-];
+// Per-tab wallpapers are admin-managed now: each surface asks for its own
+// `scope` and RotatingBackground resolves it from the server-curated set. The
+// music images that used to be hardcoded here are seeded as scope='music' rows
+// by migration 0078, so admins can reorder, hide or delete them.
 
 const Stack = createNativeStackNavigator();
 const AuthInitializer = ({ children }) => {
@@ -214,6 +210,7 @@ const App = () => {
       <PreferencesProvider>
       <ThemeProvider>
       <I18nProvider>
+      <WallpaperProvider>
       <PlayerProvider>
 
         <NavigationContainer ref={navigationRef} linking={linking} theme={navTheme}>
@@ -288,6 +285,7 @@ const App = () => {
                 <Stack.Screen name="AdminAppeals" component={AdminAppealsWrapper} />
                 <Stack.Screen name="Appeal" component={AppealWrapper} />
                 <Stack.Screen name="AdminRoles" component={AdminRolesWrapper} />
+                <Stack.Screen name="AdminWallpapers" component={AdminWallpapersWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxWrapper} />
@@ -310,6 +308,7 @@ const App = () => {
             <MiniPlayer />
         </NavigationContainer>
       </PlayerProvider>
+      </WallpaperProvider>
       </I18nProvider>
       </ThemeProvider>
       </PreferencesProvider>
@@ -422,7 +421,7 @@ const HomePageWrapper = ({ navigation }) => (
 
 const MusicPageWrapper = ({ navigation }) => (
     <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-        <RotatingBackground images={MUSIC_WALLPAPERS} intervalMs={60000} scrimColor="rgba(10,22,40,0.45)" />
+        <RotatingBackground scope="music" intervalMs={60000} scrimColor="rgba(10,22,40,0.45)" />
         <Header navigation={navigation} transparentBg />
         <Music />
     </View>
@@ -531,6 +530,7 @@ const LiveHubWrapper = ({ navigation }) => (
 const AdminAnalyticsWrapper = adminWrap(AdminAnalytics);
 const AdminAppealsWrapper = adminWrap(AdminAppeals);
 const AdminRolesWrapper = adminWrap(AdminRoles);
+const AdminWallpapersWrapper = adminWrap(AdminWallpapers);
 
 // Appeal is available to any signed-in user (a suspended user can't reach admin
 // screens), so it gets the luxury backdrop without the RequireAdmin gate.
