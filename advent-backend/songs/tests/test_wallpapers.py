@@ -208,3 +208,62 @@ class LegacyWallpaperSeedTests(APITestCase):
         res = self.client.delete(f'/api/wallpapers/{target.id}/')
         self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Wallpaper.objects.filter(id=target.id).exists())
+
+
+class WallpaperReactivateTests(APITestCase):
+    """Regression: a deactivated wallpaper must stay reachable for detail
+    actions. It used to fall out of get_queryset() once is_active went False,
+    so switching it back ON 404d — you could hide a wallpaper but never unhide
+    it."""
+
+    def setUp(self):
+        cache.clear()
+        Wallpaper.objects.all().delete()
+        self.admin = User.objects.create_user(username='wpreact', email='wpr@t.local', password='pw')
+        self.admin.admin_role = 'super_admin'
+        self.admin.save(update_fields=['admin_role'])
+        self.hidden = Wallpaper.objects.create(image=f'{R2}/h.jpg', title='H', is_active=False)
+
+    def test_a_hidden_wallpaper_can_be_switched_back_on(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.patch(f'/api/wallpapers/{self.hidden.id}/', {'is_active': True})
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.hidden.refresh_from_db()
+        self.assertTrue(self.hidden.is_active)
+
+    def test_hide_then_unhide_round_trips(self):
+        self.client.force_authenticate(self.admin)
+        active = Wallpaper.objects.create(image=f'{R2}/r.jpg', title='R', is_active=True)
+
+        off = self.client.patch(f'/api/wallpapers/{active.id}/', {'is_active': False})
+        self.assertEqual(off.status_code, status.HTTP_200_OK)
+        on = self.client.patch(f'/api/wallpapers/{active.id}/', {'is_active': True})
+        self.assertEqual(on.status_code, status.HTTP_200_OK)
+
+        active.refresh_from_db()
+        self.assertTrue(active.is_active)
+
+    def test_a_hidden_wallpaper_can_still_be_deleted(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.delete(f'/api/wallpapers/{self.hidden.id}/')
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_hidden_rows_stay_out_of_the_public_list(self):
+        res = self.client.get('/api/wallpapers/')
+        self.assertEqual(res.data, [])
+
+    def test_all_flag_is_ignored_for_a_caller_without_the_capability(self):
+        # Otherwise anyone could enumerate wallpapers taken out of rotation.
+        res = self.client.get('/api/wallpapers/', {'all': '1'})
+        self.assertEqual(res.data, [])
+
+        plain = User.objects.create_user(username='wpnosee', email='wpn@t.local', password='pw')
+        self.client.force_authenticate(plain)
+        res = self.client.get('/api/wallpapers/', {'all': '1'})
+        self.assertEqual(res.data, [])
+
+    def test_all_flag_works_for_an_admin(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.get('/api/wallpapers/', {'all': '1'})
+        self.assertEqual([w['title'] for w in res.data], ['H'])

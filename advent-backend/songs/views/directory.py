@@ -1076,6 +1076,14 @@ class WallpaperViewSet(viewsets.ModelViewSet):
             return [AllowAny()]
         return [Cap('manage_wallpapers')()]
 
+    def _may_manage(self):
+        user = self.request.user
+        return bool(
+            user and user.is_authenticated
+            and getattr(user, 'has_capability', None)
+            and user.has_capability('manage_wallpapers')
+        )
+
     def get_queryset(self):
         queryset = Wallpaper.objects.select_related('uploaded_by')
         # ?scope=music narrows to one surface; omitted means every scope, which
@@ -1083,9 +1091,16 @@ class WallpaperViewSet(viewsets.ModelViewSet):
         scope = self.request.query_params.get('scope')
         if scope:
             queryset = queryset.filter(scope=scope)
-        # The app consumes the active set; admins managing the library need to
-        # see deactivated rows too, so they pass ?all=1.
-        if self.request.query_params.get('all') and self.action == 'list':
+
+        # ONLY the public list is limited to the active set. Detail actions must
+        # see everything, or a deactivated wallpaper would fall out of the
+        # queryset and an admin could never switch it back on (it 404s).
+        if self.action != 'list':
+            return queryset
+
+        # ?all=1 exposes hidden rows for the admin library — capability-gated, so
+        # a passer-by can't enumerate wallpapers the admin took out of rotation.
+        if self.request.query_params.get('all') and self._may_manage():
             return queryset
         return queryset.filter(is_active=True)
 
