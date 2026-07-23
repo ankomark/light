@@ -30,6 +30,7 @@ const AppVideo = forwardRef(function AppVideo(
     isMuted = false,
     nativeControls = false,
     useNativeControls = false,   // expo-av name; either turns controls on
+    bufferOptions,               // how far ahead to buffer (data-saver lever)
     onReadyForDisplay,
     onLoad,
     onError,
@@ -47,6 +48,18 @@ const AppVideo = forwardRef(function AppVideo(
   // Keep player state in sync with props (setup only runs on player creation).
   useEffect(() => { player.muted = isMuted; }, [player, isMuted]);
   useEffect(() => { player.loop = isLooping; }, [player, isLooping]);
+  // expo-video requires the whole BufferOptions object — individual properties
+  // can't be set. Serialized as the dep so a caller passing an inline object
+  // literal doesn't re-assign on every render.
+  const bufferKey = bufferOptions ? JSON.stringify(bufferOptions) : null;
+  useEffect(() => {
+    if (!bufferKey) return;
+    try {
+      player.bufferOptions = JSON.parse(bufferKey);
+    } catch {
+      // Older expo-video builds don't expose bufferOptions — playback still works.
+    }
+  }, [player, bufferKey]);
   useEffect(() => {
     if (shouldPlay) player.play();
     else player.pause();

@@ -67,11 +67,19 @@ const toAvStatus = (s, player) => {
 
 class SoundAdapter {
   constructor(source, initialStatus = {}) {
+    // expo-audio takes its options as one object; build it from the expo-av-ish
+    // keys the callers pass. `downloadFirst` is the data-saver lever — when off,
+    // the track streams instead of being pulled down in full.
+    const options = {};
+    if (initialStatus.progressUpdateIntervalMillis) {
+      options.updateInterval = initialStatus.progressUpdateIntervalMillis;
+    }
+    if (typeof initialStatus.downloadFirst === 'boolean') {
+      options.downloadFirst = initialStatus.downloadFirst;
+    }
     this._player = createAudioPlayer(
       source,
-      initialStatus.progressUpdateIntervalMillis
-        ? { updateInterval: initialStatus.progressUpdateIntervalMillis }
-        : undefined,
+      Object.keys(options).length ? options : undefined,
     );
     if (initialStatus.isLooping) this._player.loop = true;
     if (typeof initialStatus.volume === 'number') this._player.volume = initialStatus.volume;

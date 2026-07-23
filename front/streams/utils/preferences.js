@@ -70,10 +70,74 @@ export const setPreference = async (key, value) => {
   }
 };
 
+// Whether the media host can serve per-quality renditions.
+//
+// FALSE today: media lives on R2, which has no delivery-transform tier, and the
+// serializers return the same URL for `media_url` and `optimized_url`. The old
+// Cloudinary references (the only URLs the transforms below could rewrite) were
+// blanked by migration 0070, so applyAudioQuality/applyVideoQuality are no-ops
+// against every URL now in the database.
+//
+// Flip to true once a transform tier exists (the planned custom media domain).
+// Consumers gate on this instead of silently offering choices that do nothing.
+export const MEDIA_QUALITY_TIERS_AVAILABLE = false;
+
+// Resolve the video-quality preference into knobs that work on ANY host, since
+// we can't pick a rendition. Data saver / "data_saver" suppresses autoplay and
+// buffers the bare minimum — in a swipe feed most videos are skipped, so
+// buffering less is where the real saving is. "hd" buffers further ahead.
+export const resolveVideoQuality = (videoQuality, dataSaver) => {
+  const low = dataSaver || videoQuality === 'data_saver';
+  if (low) {
+    return {
+      tier: 'data_saver',
+      autoplayAllowed: false,
+      // Android accepts a hard byte cap; iOS honours the duration.
+      bufferOptions: {
+        preferredForwardBufferDuration: 2,
+        minBufferForPlayback: 1,
+        maxBufferBytes: 2 * 1024 * 1024,
+      },
+    };
+  }
+  if (videoQuality === 'hd') {
+    return {
+      tier: 'hd',
+      autoplayAllowed: true,
+      bufferOptions: {
+        preferredForwardBufferDuration: 30,
+        minBufferForPlayback: 2,
+        maxBufferBytes: 0,  // 0 = let the player decide
+      },
+    };
+  }
+  return {
+    tier: 'auto',
+    autoplayAllowed: true,
+    bufferOptions: {
+      preferredForwardBufferDuration: 10,
+      minBufferForPlayback: 2,
+      maxBufferBytes: 0,
+    },
+  };
+};
+
+// Audio has no rendition tiers to choose between (see above), so the only real
+// data lever left is whether we pull the whole file up front. Data saver streams
+// instead, so skipping a track after a few seconds doesn't cost the full
+// download; otherwise we prefetch for gap-free playback.
+export const resolveAudioQuality = (audioQuality, dataSaver) => {
+  const low = dataSaver || audioQuality === 'data_saver';
+  return { downloadFirst: !low };
+};
+
 // Rewrite a Cloudinary delivery URL to request a lower-bandwidth rendition based
 // on the user's audio-quality preference (Data saver forces the lowest). Only
 // touches Cloudinary `/upload/` URLs and never double-applies; anything else is
 // returned unchanged so non-Cloudinary sources keep working.
+//
+// NOTE: a no-op in practice — see MEDIA_QUALITY_TIERS_AVAILABLE. Kept so the
+// tier lands working the day renditions exist.
 export const applyAudioQuality = (url, audioQuality, dataSaver) => {
   if (!url || typeof url !== 'string' || !url.includes('/upload/')) return url;
   if (/\/upload\/q_/.test(url)) return url; // already has a quality transform
@@ -91,6 +155,9 @@ export const applyAudioQuality = (url, audioQuality, dataSaver) => {
 // 1080p-capped high-quality rendition; 'auto' lets Cloudinary pick; Data saver
 // (or the data_saver choice) caps to 480p low. Only touches Cloudinary
 // `/upload/` URLs and never double-applies.
+//
+// NOTE: a no-op in practice — see MEDIA_QUALITY_TIERS_AVAILABLE. Playback-side
+// quality is carried by resolveVideoQuality() instead.
 export const applyVideoQuality = (url, videoQuality, dataSaver) => {
   if (!url || typeof url !== 'string' || !url.includes('/upload/')) return url;
   if (/\/upload\/(q_|w_|h_|c_limit)/.test(url)) return url; // already transformed

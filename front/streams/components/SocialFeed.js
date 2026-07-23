@@ -25,7 +25,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
-import { PREF_KEYS } from '../utils/preferences';
+import { PREF_KEYS, resolveVideoQuality } from '../utils/preferences';
 import SearchBaar from '../components/SearchBaar';
 import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, fetchLatestPostId, likePost } from '../services/api';
 import FollowButton from '../components/FollowButton';
@@ -196,10 +196,15 @@ const PostMedia = React.memo(function PostMedia({
   isAudioActive, isAudioPlaying, onToggleAudio, onDoubleTapLike,
 }) {
   const { preferences } = usePreferences();
-  // Honor the user's "Autoplay videos" choice; Data saver also suppresses
-  // autoplay so videos only stream when the user explicitly taps to play.
-  const autoplay =
-    !!preferences[PREF_KEYS.autoplayVideo] && !preferences[PREF_KEYS.dataSaver];
+  // One resolver drives autoplay and buffering, so "Data saver" and the Video
+  // quality tiers stay consistent.
+  const quality = resolveVideoQuality(
+    preferences[PREF_KEYS.videoQuality],
+    preferences[PREF_KEYS.dataSaver],
+  );
+  // Honor the user's "Autoplay videos" choice; the data-saver tier also
+  // suppresses autoplay so videos only stream when the user taps to play.
+  const autoplay = !!preferences[PREF_KEYS.autoplayVideo] && quality.autoplayAllowed;
 
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
@@ -359,15 +364,15 @@ const PostMedia = React.memo(function PostMedia({
       );
     }
 
-    // Pick the rendition that matches the chosen quality: optimized_url (≈720p
-    // eco) for data saver, media_url (q_auto, up to the 1080p master) otherwise.
-    // If an onError already swapped currentUrl to media_url, stick with that.
-    const lowData =
-      preferences[PREF_KEYS.dataSaver] ||
-      preferences[PREF_KEYS.videoQuality] === 'data_saver';
+    // There is only ONE rendition today: R2 has no delivery-transform tier, so
+    // the serializer returns the same URL for media_url and optimized_url.
+    // Quality rides on buffering/autoplay (resolveVideoQuality) instead of file
+    // choice; preferring optimized_url means this starts picking the lighter
+    // file automatically once renditions exist. If an onError already swapped
+    // currentUrl to media_url, stick with that.
     const videoUri = currentUrl === item.media_url
       ? item.media_url
-      : lowData
+      : quality.tier === 'data_saver'
         ? (item.optimized_url || item.media_url)
         : (item.media_url || item.optimized_url);
     return (
@@ -379,6 +384,7 @@ const PostMedia = React.memo(function PostMedia({
           isLooping
           shouldPlay={isFocused && !manualPaused}
           isMuted={isMuted}
+          bufferOptions={quality.bufferOptions}
           onError={handleError}
           onLoad={handleVideoLoad}
           onReadyForDisplay={revealVideo}

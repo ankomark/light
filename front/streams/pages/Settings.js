@@ -36,7 +36,7 @@ import {
   registerForPushNotifications,
   unregisterPushToken,
 } from '../services/pushNotifications';
-import { PREF_KEYS } from '../utils/preferences';
+import { PREF_KEYS, MEDIA_QUALITY_TIERS_AVAILABLE } from '../utils/preferences';
 import { usePreferences } from '../context/PreferencesContext';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
@@ -611,8 +611,9 @@ const Settings = () => {
           <Row
             icon="video-outline"
             label={t('settings.playback.videoQuality')}
-            sub={VIDEO_QUALITY_LABELS[prefs[PREF_KEYS.videoQuality]] || 'Automatic'}
+            sub="Higher tiers buffer further ahead; Data saver only loads what you watch"
             onPress={cycleVideoQuality}
+            last={!MEDIA_QUALITY_TIERS_AVAILABLE}
             right={
               <View style={styles.valuePill}>
                 <Text style={styles.valuePillText}>
@@ -621,20 +622,27 @@ const Settings = () => {
               </View>
             }
           />
-          <Row
-            icon="music-note-outline"
-            label={t('settings.playback.audioQuality')}
-            sub={AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
-            onPress={cycleAudioQuality}
-            right={
-              <View style={styles.valuePill}>
-                <Text style={styles.valuePillText}>
-                  {AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
-                </Text>
-              </View>
-            }
-            last
-          />
+          {/* Audio has no per-quality renditions to choose between while media is
+              served straight from R2, so offering a picker here would be a
+              control that does nothing. Data saver still governs whether a track
+              streams or is pulled down in full. Returns automatically once
+              MEDIA_QUALITY_TIERS_AVAILABLE flips. */}
+          {MEDIA_QUALITY_TIERS_AVAILABLE && (
+            <Row
+              icon="music-note-outline"
+              label={t('settings.playback.audioQuality')}
+              sub={AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
+              onPress={cycleAudioQuality}
+              right={
+                <View style={styles.valuePill}>
+                  <Text style={styles.valuePillText}>
+                    {AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
+                  </Text>
+                </View>
+              }
+              last
+            />
+          )}
         </Section>
 
         {/* ── Support ───────────────────────────────────────────── */}

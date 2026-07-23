@@ -15,7 +15,7 @@ import { fetchSocialPosts, cursorFromUrl, followUser, likePost } from '../servic
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { usePreferences } from '../context/PreferencesContext';
-import { PREF_KEYS } from '../utils/preferences';
+import { PREF_KEYS, resolveVideoQuality } from '../utils/preferences';
 import { LikeButton, SaveButton, ShareButton } from './SocialActions';
 import CommentAction from './CommentAction';
 import { colors, typography } from '../constants/theme';
@@ -27,10 +27,15 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute, currentUser, navigation, bottomOffset = 120 }) => {
   const videoRef = useRef(null);
   const { preferences } = usePreferences();
-  // Respect the "Autoplay videos" choice here too; Data saver suppresses
-  // autoplay so a video only streams once the user taps to play.
-  const autoplay =
-    !!preferences[PREF_KEYS.autoplayVideo] && !preferences[PREF_KEYS.dataSaver];
+  // One resolver drives both autoplay and buffering, so "Data saver" and the
+  // Video quality tiers stay consistent.
+  const quality = resolveVideoQuality(
+    preferences[PREF_KEYS.videoQuality],
+    preferences[PREF_KEYS.dataSaver],
+  );
+  // Respect the "Autoplay videos" choice here too; the data-saver tier
+  // suppresses autoplay so a video only streams once the user taps to play.
+  const autoplay = !!preferences[PREF_KEYS.autoplayVideo] && quality.autoplayAllowed;
 
   const [manualPaused, setManualPaused] = useState(!autoplay);
   const [loading, setLoading] = useState(true);
@@ -44,15 +49,12 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
   const [liked, setLiked] = useState(item.is_liked ?? item.liked_by_me ?? false);
   const [likesCount, setLikesCount] = useState(item.likes_count || 0);
   const heartScale = useRef(new Animated.Value(0)).current;
-  // Pick the rendition that matches the chosen quality. The backend exposes two:
-  // optimized_url (≈720p eco, smallest) and media_url (q_auto, up to the 1080p
-  // master). Data saver / "data_saver" -> the small one; auto / hd -> the fuller
-  // one. (applyVideoQuality can't be used here: both URLs already carry
-  // Cloudinary transforms, which it deliberately leaves untouched.)
-  const lowData =
-    preferences[PREF_KEYS.dataSaver] ||
-    preferences[PREF_KEYS.videoQuality] === 'data_saver';
-  const uri = lowData
+  // There is only ONE rendition: R2 has no delivery-transform tier, so the
+  // serializer returns the same URL for media_url and optimized_url. Quality is
+  // therefore expressed through buffering/autoplay (see resolveVideoQuality),
+  // not by picking a smaller file. Prefer optimized_url so this starts choosing
+  // the lighter file automatically once renditions exist.
+  const uri = quality.tier === 'data_saver'
     ? (item.optimized_url || item.media_url)
     : (item.media_url || item.optimized_url);
   const playing = isActive && screenFocused && !manualPaused;
@@ -132,6 +134,7 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
           isLooping
           shouldPlay={playing}
           isMuted={muted}
+          bufferOptions={quality.bufferOptions}
           onLoad={() => setLoading(false)}
           onError={() => { setErrored(true); setLoading(false); }}
         />

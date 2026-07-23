@@ -11,7 +11,7 @@ import {
   makeOrder, reshuffleOrder, nextPos, prevPos, canNext, canPrev,
 } from '../utils/queueLogic';
 import { usePreferences } from './PreferencesContext';
-import { applyAudioQuality } from '../utils/preferences';
+import { applyAudioQuality, resolveAudioQuality } from '../utils/preferences';
 
 const PlayerContext = createContext(null);
 
@@ -125,9 +125,13 @@ export const PlayerProvider = ({ children }) => {
           prefsRef.current.audioQuality,
           prefsRef.current.dataSaver
         );
+        const { downloadFirst } = resolveAudioQuality(
+          prefsRef.current.audioQuality,
+          prefsRef.current.dataSaver
+        );
         const { sound } = await createSound(
           { uri },
-          { shouldPlay: true, progressUpdateIntervalMillis: 500 },
+          { shouldPlay: true, progressUpdateIntervalMillis: 500, downloadFirst },
           onStatus
         );
         // A newer load may have superseded us while awaiting.
