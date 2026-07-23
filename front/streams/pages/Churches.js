@@ -22,6 +22,7 @@ import { fetchChurches, fetchChurchesByUrl, createChurch, updateChurch, deleteCh
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 const DEFAULT_PROFILE_IMAGE = require('../assets/user-placeholder.png');
 
 // Labeled dark input used across the luxury Add/Edit Church form.
@@ -42,6 +43,7 @@ const Field = ({ label, value, onChangeText, placeholder, keyboardType }) => (
 );
 
 const Churches = ({ navigation }) => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const [churches, setChurches] = useState([]);
   const [filteredChurches, setFilteredChurches] = useState([]);
@@ -80,10 +82,10 @@ const Churches = ({ navigation }) => {
       setNextUrl(response?.next ?? null);
       return list;
     } catch (error) {
-      Alert.alert('Error', 'Failed to load churches');
+      Alert.alert(t('common.error'), t('churches.loadFailed'));
       return null;
     }
-  }, []);
+  }, [t]);
 
   // Infinite scroll: append the next page (filteredChurches re-derives from
   // `churches`, so newly loaded rows flow into the visible list + search).
@@ -158,7 +160,7 @@ const Churches = ({ navigation }) => {
 
   const handleAddChurch = async () => {
     if (!newChurch.name.trim() || !newChurch.country.trim() || !newChurch.conference.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields (Name, Country, Conference)');
+      Alert.alert(t('common.error'), t('churches.requiredFields'));
       return;
     }
 
@@ -187,10 +189,10 @@ const Churches = ({ navigation }) => {
 
       if (editingChurch) {
         await updateChurch(editingChurch.id, formData);
-        Alert.alert('Success', 'Church updated successfully!');
+        Alert.alert(t('market.success'), t('churches.updatedOk'));
       } else {
         await createChurch(formData);
-        Alert.alert('Success', 'Church added successfully!');
+        Alert.alert(t('market.success'), t('churches.addedOk'));
       }
 
       // Refresh churches
@@ -212,7 +214,7 @@ const Churches = ({ navigation }) => {
       setEditingChurch(null);
       setShowAddForm(false);
     } catch (error) {
-      Alert.alert('Error', error.message || 'You can only edit churches you created');
+      Alert.alert(t('common.error'), error.message || t('choirs.editOwnOnly'));
     }
   };
 
@@ -248,9 +250,9 @@ const Churches = ({ navigation }) => {
             try {
               await deleteChurch(id);
               await loadChurches();
-              Alert.alert('Success', 'Church deleted successfully!');
+              Alert.alert(t('market.success'), t('churches.deletedOk'));
             } catch (error) {
-              Alert.alert('Error', 'You can only delete churches you created');
+              Alert.alert(t('common.error'), t('churches.deleteOwnOnly'));
             }
           },
           style: 'destructive',
@@ -322,7 +324,7 @@ const Churches = ({ navigation }) => {
             />
             <View>
               <Text style={styles.username}>{creatorName}</Text>
-              <Text style={styles.byline}>Added this church</Text>
+              <Text style={styles.byline}>{t('churches.added')}</Text>
             </View>
           </View>
           <ChurchActions church={item} />
@@ -398,7 +400,7 @@ const Churches = ({ navigation }) => {
           activeOpacity={0.9}
         >
           <MaterialIcons name="forum" size={16} color="#0A1628" />
-          <Text style={styles.communityBtnText}>Open community</Text>
+          <Text style={styles.communityBtnText}>{t('dir.openCommunity')}</Text>
           <MaterialIcons name="chevron-right" size={18} color="#0A1628" style={{ marginLeft: 'auto' }} />
         </TouchableOpacity>
       </View>
@@ -449,15 +451,15 @@ const Churches = ({ navigation }) => {
                 )}
               </TouchableOpacity>
 
-              <Field label="Church name *" value={newChurch.name} onChangeText={(t) => setNewChurch({ ...newChurch, name: t })} placeholder="e.g. Central SDA Church" />
-              <Field label="Country *" value={newChurch.country} onChangeText={(t) => setNewChurch({ ...newChurch, country: t })} placeholder="e.g. Kenya" />
-              <Field label="County / State" value={newChurch.county} onChangeText={(t) => setNewChurch({ ...newChurch, county: t })} placeholder="Optional" />
-              <Field label="Conference *" value={newChurch.conference} onChangeText={(t) => setNewChurch({ ...newChurch, conference: t })} placeholder="e.g. Central Kenya Conference" />
-              <Field label="District" value={newChurch.district} onChangeText={(t) => setNewChurch({ ...newChurch, district: t })} placeholder="Optional" />
-              <Field label="Physical location" value={newChurch.location} onChangeText={(t) => setNewChurch({ ...newChurch, location: t })} placeholder="Town / area" />
-              <Field label="Number of members" value={newChurch.members} onChangeText={(t) => setNewChurch({ ...newChurch, members: t })} placeholder="e.g. 250" keyboardType="numeric" />
-              <Field label="Pastor's name" value={newChurch.pastor} onChangeText={(t) => setNewChurch({ ...newChurch, pastor: t })} placeholder="Optional" />
-              <Field label="Contact phone" value={newChurch.contact} onChangeText={(t) => setNewChurch({ ...newChurch, contact: t })} placeholder="+254…" keyboardType="phone-pad" />
+              <Field label="Church name *" value={newChurch.name} onChangeText={(t) => setNewChurch({ ...newChurch, name: t })} placeholder={t('churches.namePlaceholder')} />
+              <Field label="Country *" value={newChurch.country} onChangeText={(t) => setNewChurch({ ...newChurch, country: t })} placeholder={t('churches.countryPlaceholder')} />
+              <Field label="County / State" value={newChurch.county} onChangeText={(t) => setNewChurch({ ...newChurch, county: t })} placeholder={t('churches.optional')} />
+              <Field label="Conference *" value={newChurch.conference} onChangeText={(t) => setNewChurch({ ...newChurch, conference: t })} placeholder={t('churches.conferencePlaceholder')} />
+              <Field label="District" value={newChurch.district} onChangeText={(t) => setNewChurch({ ...newChurch, district: t })} placeholder={t('churches.optional')} />
+              <Field label="Physical location" value={newChurch.location} onChangeText={(t) => setNewChurch({ ...newChurch, location: t })} placeholder={t('churches.townPlaceholder')} />
+              <Field label="Number of members" value={newChurch.members} onChangeText={(t) => setNewChurch({ ...newChurch, members: t })} placeholder={t('churches.membersPlaceholder')} keyboardType="numeric" />
+              <Field label="Pastor's name" value={newChurch.pastor} onChangeText={(t) => setNewChurch({ ...newChurch, pastor: t })} placeholder={t('churches.optional')} />
+              <Field label="Contact phone" value={newChurch.contact} onChangeText={(t) => setNewChurch({ ...newChurch, contact: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
 
               <View style={{ height: spacing.xl }} />
             </ScrollView>
@@ -465,7 +467,7 @@ const Churches = ({ navigation }) => {
 
           <View style={styles.saveBar}>
             <TouchableOpacity style={[styles.saveBtn, styles.cancelBtn]} onPress={closeForm}>
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.cancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={handleAddChurch}>
               <Text style={styles.submitText}>{editingChurch ? 'Save Changes' : 'Add Church'}</Text>
@@ -490,7 +492,7 @@ const Churches = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Seventh-day Adventist Churches</Text>
+      <Text style={styles.title}>{t('churches.title')}</Text>
       <Text style={styles.subtitle}>
         {filteredChurches.length} {filteredChurches.length === 1 ? 'church' : 'churches'}
       </Text>
@@ -501,7 +503,7 @@ const Churches = ({ navigation }) => {
           <MaterialIcons name="search" size={18} color="#555" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search churches..."
+            placeholder={t('churches.searchPlaceholder')}
             value={searchTerm}
             onChangeText={setSearchTerm}
           />
@@ -522,10 +524,10 @@ const Churches = ({ navigation }) => {
       {/* Filters Panel */}
       {showFilters && (
         <View style={styles.filtersPanel}>
-          <Text style={styles.filterTitle}>Filter By:</Text>
+          <Text style={styles.filterTitle}>{t('churches.filterBy')}</Text>
 
           <View style={styles.filterGroup}>
-            <Text style={styles.filterLabel}>Country:</Text>
+            <Text style={styles.filterLabel}>{t('churches.country')}</Text>
             <View style={styles.filterOptions}>
               <TouchableOpacity 
                 style={[
@@ -556,7 +558,7 @@ const Churches = ({ navigation }) => {
           </View>
           
           <View style={styles.filterGroup}>
-            <Text style={styles.filterLabel}>Conference:</Text>
+            <Text style={styles.filterLabel}>{t('churches.conference')}</Text>
             <View style={styles.filterOptions}>
               <TouchableOpacity 
                 style={[
@@ -590,7 +592,7 @@ const Churches = ({ navigation }) => {
             style={styles.clearFiltersButton}
             onPress={clearFilters}
           >
-            <Text style={styles.clearFiltersText}>Clear All Filters</Text>
+            <Text style={styles.clearFiltersText}>{t('churches.clearFilters')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -619,7 +621,7 @@ const Churches = ({ navigation }) => {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <MaterialIcons name="church" size={56} color="#3d567a" />
-            <Text style={styles.emptyText}>No churches found</Text>
+            <Text style={styles.emptyText}>{t('churches.none')}</Text>
             <Text style={styles.emptySubtext}>
               {searchTerm || filterValues.country || filterValues.conference
                 ? 'Try adjusting your search or filters'
@@ -635,7 +637,7 @@ const Churches = ({ navigation }) => {
           onPress={() => setShowAddForm(true)}
         >
           <MaterialIcons name="add" size={18} color="white" />
-          <Text style={styles.buttonText}>Add Your Church</Text>
+          <Text style={styles.buttonText}>{t('churches.add')}</Text>
         </TouchableOpacity>
       )}
 

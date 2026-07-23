@@ -19,10 +19,12 @@ import {
 } from '../utils/publications';
 import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const blankChapter = () => ({ key: `${Date.now()}_${Math.random()}`, title: '', body: '', images: {}, preview: false });
 
 const PublicationEditor = ({ route, navigation }) => {
+  const { t } = useI18n();
   const editId = route.params?.id || null;
   const [loading, setLoading] = useState(!!editId);
   const [saving, setSaving] = useState(false);
@@ -58,13 +60,13 @@ const PublicationEditor = ({ route, navigation }) => {
             : [blankChapter()]
         );
       } catch {
-        Alert.alert('Error', 'Could not load this publication.');
+        Alert.alert(t('common.error'), t('pub.loadFailed'));
         navigation.goBack();
       } finally {
         setLoading(false);
       }
     })();
-  }, [editId, navigation]);
+  }, [editId, navigation, t]);
 
   // ── Local autosave / crash recovery ──────────────────────────────────────
   const draftKey = `pubdraft:${editId || 'new'}`;
@@ -78,7 +80,7 @@ const PublicationEditor = ({ route, navigation }) => {
       try { d = JSON.parse(raw); } catch { return; }
       const hasContent = d?.title?.trim() || (d?.chapters || []).some((c) => c.title || c.body);
       if (!hasContent) return;
-      Alert.alert('Unsaved draft', 'Restore your last unsaved draft?', [
+      Alert.alert(t('pub.unsavedTitle'), t('pub.unsavedBody'), [
         { text: 'Discard', style: 'destructive', onPress: () => AsyncStorage.removeItem(draftKey).catch(() => {}) },
         { text: 'Restore', onPress: () => {
           setTitle(d.title || '');
@@ -115,7 +117,7 @@ const PublicationEditor = ({ route, navigation }) => {
     try {
       const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (perm !== 'granted') {
-        Alert.alert('Permission required', 'Please enable photo library access to add a cover.');
+        Alert.alert(t('chat.permissionRequired'), t('pub.permissionCover'));
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -134,7 +136,7 @@ const PublicationEditor = ({ route, navigation }) => {
       }
     } catch (err) {
       console.error('Cover picker error:', err);
-      Alert.alert('Error', 'Failed to upload image.');
+      Alert.alert(t('common.error'), t('pub.uploadFailed'));
     }
   };
 
@@ -225,7 +227,7 @@ const PublicationEditor = ({ route, navigation }) => {
   const insertImage = async (key) => {
     try {
       const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm !== 'granted') { Alert.alert('Permission required', 'Enable photo access to add images.'); return; }
+      if (perm !== 'granted') { Alert.alert(t('chat.permissionRequired'), t('pub.permissionImages')); return; }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true, // gives the crop UI
@@ -244,7 +246,7 @@ const PublicationEditor = ({ route, navigation }) => {
         return { ...c, body: next.body, images: next.images, preview: false };
       }));
     } catch {
-      Alert.alert('Error', 'Could not add the image.');
+      Alert.alert(t('common.error'), t('pub.addImageFailed'));
     }
   };
 
@@ -252,7 +254,7 @@ const PublicationEditor = ({ route, navigation }) => {
 
   const removeChapter = (key) => {
     if (chapters.length === 1) {
-      Alert.alert('Keep one chapter', 'A publication needs at least one chapter.');
+      Alert.alert(t('pub.keepChapterTitle'), t('pub.keepChapterBody'));
       return;
     }
     setChapters((prev) => prev.filter((c) => c.key !== key));
@@ -270,7 +272,7 @@ const PublicationEditor = ({ route, navigation }) => {
 
   const save = async (publish) => {
     if (!title.trim()) {
-      Alert.alert('Missing title', 'Please give your publication a title.');
+      Alert.alert(t('pub.missingTitleTitle'), t('pub.missingTitleBody'));
       return;
     }
     const cleaned = chapters
@@ -278,7 +280,7 @@ const PublicationEditor = ({ route, navigation }) => {
       .map((c, i) => ({ order: i + 1, title: c.title.trim(), body: expandInlineImages(c.body, c.images).trim() }))
       .filter((c) => c.title || c.body);
     if (cleaned.length === 0) {
-      Alert.alert('Add content', 'Add at least one chapter with a title or text.');
+      Alert.alert(t('pub.addContentTitle'), t('pub.addContentBody'));
       return;
     }
     const payload = {
@@ -299,7 +301,7 @@ const PublicationEditor = ({ route, navigation }) => {
       navigation.navigate('PublicationDetail', { id: saved.id });
     } catch (err) {
       const msg = err?.response?.data?.error || 'Could not save. Please try again.';
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);
     }
@@ -337,39 +339,39 @@ const PublicationEditor = ({ route, navigation }) => {
             ) : (
               <>
                 <Ionicons name="image-outline" size={26} color={colors.textMuted} />
-                <Text style={styles.coverHint}>Cover</Text>
+                <Text style={styles.coverHint}>{t('pub.cover')}</Text>
               </>
             )}
           </TouchableOpacity>
           <View style={styles.coverSide}>
-            <Text style={styles.label}>Cover image</Text>
-            <Text style={styles.hint}>Optional. A portrait image looks best.</Text>
+            <Text style={styles.label}>{t('pub.coverImage')}</Text>
+            <Text style={styles.hint}>{t('pub.coverHint')}</Text>
             {cover ? (
-              <TouchableOpacity onPress={() => setCover('')}><Text style={styles.removeLink}>Remove</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setCover('')}><Text style={styles.removeLink}>{t('common.remove')}</Text></TouchableOpacity>
             ) : null}
           </View>
         </View>
 
-        <Text style={styles.label}>Title</Text>
+        <Text style={styles.label}>{t('pub.title')}</Text>
         <TextInput
           style={styles.input}
-          placeholder="Publication title"
+          placeholder={t('pub.titlePlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={title}
           onChangeText={setTitle}
         />
 
-        <Text style={styles.label}>Summary</Text>
+        <Text style={styles.label}>{t('pub.summary')}</Text>
         <TextInput
           style={[styles.input, styles.multiline]}
-          placeholder="A short description shown in the list"
+          placeholder={t('pub.summaryPlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={summary}
           onChangeText={setSummary}
           multiline
         />
 
-        <Text style={styles.label}>Category</Text>
+        <Text style={styles.label}>{t('pub.category')}</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -395,7 +397,7 @@ const PublicationEditor = ({ route, navigation }) => {
         {/* Reading design: background, font, text colour */}
         <TouchableOpacity style={styles.designToggle} onPress={() => setShowDesign((s) => !s)} activeOpacity={0.85}>
           <MaterialIcons name="palette" size={18} color={colors.accent} />
-          <Text style={styles.designToggleText}>Reading design</Text>
+          <Text style={styles.designToggleText}>{t('pub.readingDesign')}</Text>
           <View style={[styles.designPeek, { backgroundColor: theme.bg }]}>
             <Text style={[styles.designPeekText, { color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}>Aa</Text>
           </View>
@@ -410,7 +412,7 @@ const PublicationEditor = ({ route, navigation }) => {
               </Text>
             </View>
 
-            <Text style={styles.designLabel}>Background</Text>
+            <Text style={styles.designLabel}>{t('pub.background')}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
               {WRITING_BGS.map((b) => (
                 <TouchableOpacity
@@ -424,7 +426,7 @@ const PublicationEditor = ({ route, navigation }) => {
               ))}
             </ScrollView>
 
-            <Text style={styles.designLabel}>Text colour</Text>
+            <Text style={styles.designLabel}>{t('pub.textColour')}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
               {WRITING_TEXT_COLORS.map((c) => (
                 <TouchableOpacity
@@ -436,7 +438,7 @@ const PublicationEditor = ({ route, navigation }) => {
               ))}
             </ScrollView>
 
-            <Text style={styles.designLabel}>Font</Text>
+            <Text style={styles.designLabel}>{t('pub.font')}</Text>
             <View style={styles.fontRow}>
               {WRITING_FONTS.map((f) => {
                 const active = theme.font === f.key;
@@ -448,7 +450,7 @@ const PublicationEditor = ({ route, navigation }) => {
               })}
             </View>
 
-            <Text style={styles.designLabel}>Reading size</Text>
+            <Text style={styles.designLabel}>{t('pub.readingSize')}</Text>
             <View style={styles.sizeRow}>
               <TouchableOpacity style={styles.sizeBtn} onPress={() => setTheme((t) => ({ ...t, scale: Math.max(-2, t.scale - 1) }))}><Text style={styles.sizeBtnText}>A−</Text></TouchableOpacity>
               <Text style={styles.sizeValue}>{theme.scale > 0 ? `+${theme.scale}` : theme.scale}</Text>
@@ -459,8 +461,8 @@ const PublicationEditor = ({ route, navigation }) => {
 
         {/* Chapters */}
         <View style={styles.chaptersHeader}>
-          <Text style={styles.sectionTitle}>Chapters</Text>
-          <Text style={styles.hint}>Markdown supported · tap the image icon to add a photo</Text>
+          <Text style={styles.sectionTitle}>{t('pub.chapters')}</Text>
+          <Text style={styles.hint}>{t('pub.markdownHint')}</Text>
         </View>
 
         {chapters.map((ch, idx) => (
@@ -488,7 +490,7 @@ const PublicationEditor = ({ route, navigation }) => {
 
             <TextInput
               style={styles.chapterTitleInput}
-              placeholder="Chapter title"
+              placeholder={t('pub.chapterTitlePlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={ch.title}
               onChangeText={(t) => updateChapter(ch.key, { title: t })}
@@ -523,7 +525,7 @@ const PublicationEditor = ({ route, navigation }) => {
                 </ScrollView>
                 <TextInput
                   style={[styles.bodyInput, { backgroundColor: theme.bg, color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}
-                  placeholder="Write your chapter here… select text, then tap a format."
+                  placeholder={t('pub.chapterBodyPlaceholder')}
                   placeholderTextColor={`${theme.text}80`}
                   value={ch.body}
                   onChangeText={(t) => updateChapter(ch.key, { body: t })}
@@ -539,7 +541,7 @@ const PublicationEditor = ({ route, navigation }) => {
 
         <TouchableOpacity style={styles.addChapterBtn} onPress={addChapter} activeOpacity={0.85}>
           <Ionicons name="add" size={20} color={colors.primary} />
-          <Text style={styles.addChapterText}>Add chapter</Text>
+          <Text style={styles.addChapterText}>{t('pub.addChapter')}</Text>
         </TouchableOpacity>
 
         <View style={{ height: spacing.xxl }} />
@@ -553,7 +555,7 @@ const PublicationEditor = ({ route, navigation }) => {
           disabled={saving}
           activeOpacity={0.85}
         >
-          {saving ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.draftBtnText}>Save Draft</Text>}
+          {saving ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.draftBtnText}>{t('pub.saveDraft')}</Text>}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.saveBtn, styles.publishBtn]}
@@ -561,7 +563,7 @@ const PublicationEditor = ({ route, navigation }) => {
           disabled={saving}
           activeOpacity={0.85}
         >
-          {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishBtnText}>Publish</Text>}
+          {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishBtnText}>{t('pub.publish')}</Text>}
         </TouchableOpacity>
       </View>
     </SafeAreaView>

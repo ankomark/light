@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminContent, fetchAdminByUrl, removeContent, restoreContent, bulkContent } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -21,6 +22,7 @@ const TYPES = [
 ];
 
 const AdminContent = () => {
+  const { t } = useI18n();
   const [type, setType] = useState('post');
   const [query, setQuery] = useState('');
   const [removedOnly, setRemovedOnly] = useState(false);
@@ -95,14 +97,14 @@ const AdminContent = () => {
       setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, is_removed: action === 'remove' } : it)));
       exitSelect();
     } catch {
-      Alert.alert('Error', 'Bulk action failed.');
+      Alert.alert(t('common.error'), t('admin.bulkFailed'));
     } finally {
       setBulkBusy(false);
     }
   };
 
   const confirmBulkRemove = () =>
-    Alert.alert('Remove content', `Hide ${selected.size} ${type} item(s) from everyone?`, [
+    Alert.alert(t('admin.removeContentTitle'), t('admin.removeBulkConfirm', { count: selected.size, type }), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => runBulk('remove') },
     ]);
@@ -115,13 +117,13 @@ const AdminContent = () => {
         await (willRemove ? removeContent(type, item.id) : restoreContent(type, item.id));
         setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, is_removed: willRemove } : it)));
       } catch {
-        Alert.alert('Error', 'Action failed.');
+        Alert.alert(t('common.error'), t('admin.actionFailedShort'));
       } finally {
         setBusyId(null);
       }
     };
     if (willRemove) {
-      Alert.alert('Remove content', `Hide this ${type} from everyone? You can restore it later.`, [
+      Alert.alert(t('admin.removeContentTitle'), t('admin.removeOneConfirm', { type }), [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: doIt },
       ]);
@@ -179,7 +181,7 @@ const AdminContent = () => {
   return (
     <View style={styles.container}>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Content</Text>
+        <Text style={styles.title}>{t('admin.content')}</Text>
         <TouchableOpacity onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
           <Text style={styles.selectToggle}>{selectMode ? 'Cancel' : 'Select'}</Text>
         </TouchableOpacity>
@@ -210,7 +212,7 @@ const AdminContent = () => {
           <Ionicons name="search" size={16} color={colors.placeholder} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search…"
+            placeholder={t('admin.searchPlaceholder')}
             placeholderTextColor={colors.placeholder}
             value={query}
             onChangeText={onChangeQuery}
@@ -220,7 +222,7 @@ const AdminContent = () => {
         </View>
         <TouchableOpacity style={[styles.toggle, removedOnly && styles.toggleActive]} onPress={toggleRemoved} activeOpacity={0.85}>
           <Ionicons name={removedOnly ? 'eye-off' : 'eye-off-outline'} size={15} color={removedOnly ? '#0A1628' : colors.textSecondary} />
-          <Text style={[styles.toggleText, removedOnly && styles.toggleTextActive]}>Removed</Text>
+          <Text style={[styles.toggleText, removedOnly && styles.toggleTextActive]}>{t('admin.removed')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -238,7 +240,7 @@ const AdminContent = () => {
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
           ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
-          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>Nothing here</Text></View>}
+          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{t('admin.nothingHere')}</Text></View>}
         />
       )}
 
@@ -251,10 +253,10 @@ const AdminContent = () => {
           ) : (
             <View style={styles.bulkBtns}>
               <TouchableOpacity style={[styles.bulkBtn, styles.btnRestore]} onPress={() => runBulk('restore')}>
-                <Text style={styles.btnTextDark}>Restore</Text>
+                <Text style={styles.btnTextDark}>{t('admin.restore')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.bulkBtn, styles.btnRemove]} onPress={confirmBulkRemove}>
-                <Text style={styles.btnTextLight}>Remove</Text>
+                <Text style={styles.btnTextLight}>{t('common.remove')}</Text>
               </TouchableOpacity>
             </View>
           )}

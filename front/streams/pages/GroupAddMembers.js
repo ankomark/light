@@ -9,10 +9,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { searchGroupUsers, addGroupMember, getGroupInviteLink } from '../services/api';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/user-placeholder.png');
 
 const GroupAddMembers = ({ route, navigation }) => {
+  const { t } = useI18n();
   const groupSlug = route?.params?.groupSlug;
   const group = route?.params?.group;
 
@@ -50,11 +52,11 @@ const GroupAddMembers = ({ route, navigation }) => {
       await addGroupMember(groupSlug, user.id);
       setAddedIds(prev => [...prev, user.id]);
     } catch (e) {
-      Alert.alert('Error', e?.response?.data?.error || 'Could not add this member.');
+      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.add.addFailed'));
     } finally {
       setAddingId(null);
     }
-  }, [groupSlug]);
+  }, [groupSlug, t]);
 
   const fetchInvite = useCallback(async (regenerate = false) => {
     setLoadingInvite(true);
@@ -62,11 +64,11 @@ const GroupAddMembers = ({ route, navigation }) => {
       const res = await getGroupInviteLink(groupSlug, regenerate);
       setInvite(res);
     } catch {
-      Alert.alert('Error', 'Could not get an invite link.');
+      Alert.alert(t('common.error'), t('group.add.linkFailed'));
     } finally {
       setLoadingInvite(false);
     }
-  }, [groupSlug]);
+  }, [groupSlug, t]);
 
   const inviteLink = invite?.code ? `streams://join/${invite.code}` : '';
 
@@ -95,7 +97,7 @@ const GroupAddMembers = ({ route, navigation }) => {
         {added ? (
           <View style={styles.addedPill}>
             <Ionicons name="checkmark" size={14} color={colors.success} />
-            <Text style={styles.addedText}>Added</Text>
+            <Text style={styles.addedText}>{t('group.add.added')}</Text>
           </View>
         ) : (
           <TouchableOpacity style={styles.addBtn} onPress={() => add(item)} disabled={addingId === item.id} activeOpacity={0.85}>
@@ -122,7 +124,7 @@ const GroupAddMembers = ({ route, navigation }) => {
             <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Add members</Text>
+            <Text style={styles.title}>{t('group.add.title')}</Text>
             <Text style={styles.subtitle} numberOfLines={1}>{group?.name || 'Group'}</Text>
           </View>
         </View>
@@ -131,7 +133,7 @@ const GroupAddMembers = ({ route, navigation }) => {
         <View style={styles.inviteCard}>
           <View style={styles.inviteHead}>
             <Ionicons name="link" size={18} color={colors.accent} />
-            <Text style={styles.inviteTitle}>Invite by link</Text>
+            <Text style={styles.inviteTitle}>{t('group.add.inviteByLink')}</Text>
           </View>
           {invite?.code ? (
             <>
@@ -141,19 +143,19 @@ const GroupAddMembers = ({ route, navigation }) => {
               <View style={styles.inviteActions}>
                 <TouchableOpacity style={styles.shareBtn} onPress={shareInvite} activeOpacity={0.85}>
                   <Ionicons name="share-social" size={16} color="#0A1628" />
-                  <Text style={styles.shareBtnText}>Share invite</Text>
+                  <Text style={styles.shareBtnText}>{t('group.add.shareInvite')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.regenBtn} onPress={() => fetchInvite(true)} disabled={loadingInvite} activeOpacity={0.85}>
                   <Ionicons name="refresh" size={16} color={colors.textSecondary} />
-                  <Text style={styles.regenText}>Reset</Text>
+                  <Text style={styles.regenText}>{t('common.reset')}</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.inviteHint}>Anyone with this code can join. Reset to revoke old links.</Text>
+              <Text style={styles.inviteHint}>{t('group.add.linkWarning')}</Text>
             </>
           ) : (
             <TouchableOpacity style={styles.getLinkBtn} onPress={() => fetchInvite(false)} disabled={loadingInvite} activeOpacity={0.85}>
               {loadingInvite ? <ActivityIndicator size="small" color={colors.accent} /> : (
-                <Text style={styles.getLinkText}>Generate invite link</Text>
+                <Text style={styles.getLinkText}>{t('group.add.generateLink')}</Text>
               )}
             </TouchableOpacity>
           )}
@@ -164,7 +166,7 @@ const GroupAddMembers = ({ route, navigation }) => {
           <Ionicons name="search" size={18} color={colors.textMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search people by username"
+            placeholder={t('group.add.searchPlaceholder')}
             placeholderTextColor={colors.placeholder}
             value={query}
             onChangeText={setQuery}
@@ -189,13 +191,13 @@ const GroupAddMembers = ({ route, navigation }) => {
               ) : query.trim().length >= 2 ? (
                 <>
                   <Ionicons name="person-outline" size={44} color={colors.textMuted} />
-                  <Text style={styles.emptyText}>No people found</Text>
+                  <Text style={styles.emptyText}>{t('group.add.noPeople')}</Text>
                 </>
               ) : (
                 <>
                   <Ionicons name="search-outline" size={44} color={colors.textMuted} />
-                  <Text style={styles.emptyText}>Search to add people directly</Text>
-                  <Text style={styles.emptySub}>Or share an invite link above</Text>
+                  <Text style={styles.emptyText}>{t('group.add.searchHint')}</Text>
+                  <Text style={styles.emptySub}>{t('group.add.orShareLink')}</Text>
                 </>
               )}
             </View>

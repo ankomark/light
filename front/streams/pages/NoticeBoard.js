@@ -27,6 +27,7 @@ import {
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const formatDate = (iso) => {
   if (!iso) return '';
@@ -35,6 +36,7 @@ const formatDate = (iso) => {
 };
 
 const NoticeBoard = () => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const isAdmin = !!currentUser?.is_staff;
 
@@ -89,7 +91,7 @@ const NoticeBoard = () => {
 
   const handlePost = async () => {
     if (!title.trim() || !body.trim()) {
-      Alert.alert('Missing info', 'Please enter both a title and a message.');
+      Alert.alert(t('dir.missingInfo'), t('notice.missingInfo'));
       return;
     }
     try {
@@ -102,7 +104,7 @@ const NoticeBoard = () => {
       const msg = error.response?.status === 403
         ? 'Only admins can post notices.'
         : (error.response?.data?.detail || 'Failed to post notice.');
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setPosting(false);
     }
@@ -110,7 +112,7 @@ const NoticeBoard = () => {
 
   const handleSendNote = async () => {
     if (!noteText.trim()) {
-      Alert.alert('Empty note', 'Please write your message to the admins.');
+      Alert.alert(t('notice.emptyNoteTitle'), t('notice.emptyNoteBody'));
       return;
     }
     try {
@@ -118,9 +120,9 @@ const NoticeBoard = () => {
       await createAdminNote(noteText.trim());
       setNoteVisible(false);
       setNoteText('');
-      Alert.alert('Sent', 'Your note has been delivered to the admins. Only they can read it.');
+      Alert.alert(t('notice.sentTitle'), t('notice.sentBody'));
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to send your note.');
+      Alert.alert(t('common.error'), error.response?.data?.detail || t('notice.sendNoteFailed'));
     } finally {
       setSendingNote(false);
     }
@@ -134,7 +136,7 @@ const NoticeBoard = () => {
       setInboxNotes(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to load admin notes:', error);
-      Alert.alert('Error', 'Failed to load notes.');
+      Alert.alert(t('common.error'), t('notice.loadNotesFailed'));
     } finally {
       setInboxLoading(false);
     }
@@ -151,7 +153,7 @@ const NoticeBoard = () => {
   };
 
   const handleDeleteNote = (note) => {
-    Alert.alert('Delete note', 'Remove this note from the inbox?', [
+    Alert.alert(t('notice.deleteNoteTitle'), t('notice.deleteNoteBody'), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -163,7 +165,7 @@ const NoticeBoard = () => {
             await deleteAdminNote(note.id);
           } catch {
             setInboxNotes(prev);
-            Alert.alert('Error', 'Failed to delete note.');
+            Alert.alert(t('common.error'), t('notice.deleteNoteFailed'));
           }
         },
       },
@@ -171,7 +173,7 @@ const NoticeBoard = () => {
   };
 
   const handleDelete = (item) => {
-    Alert.alert('Delete notice', `Remove “${item.title}”?`, [
+    Alert.alert(t('notice.deleteNoticeTitle'), t('notice.deleteNoticeConfirm', { title: item.title }), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -181,7 +183,7 @@ const NoticeBoard = () => {
             await deleteNotice(item.id);
             setNotices((prev) => prev.filter((n) => n.id !== item.id));
           } catch {
-            Alert.alert('Error', 'Failed to delete notice.');
+            Alert.alert(t('common.error'), t('notice.deleteNoticeFailed'));
           }
         },
       },
@@ -193,7 +195,7 @@ const NoticeBoard = () => {
       {item.is_pinned && (
         <View style={styles.pinnedTag}>
           <MaterialCommunityIcons name="pin" size={12} color={colors.accent} />
-          <Text style={styles.pinnedText}>Pinned</Text>
+          <Text style={styles.pinnedText}>{t('notice.pinned')}</Text>
         </View>
       )}
 
@@ -248,13 +250,13 @@ const NoticeBoard = () => {
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.actionBtn} onPress={() => setNoteVisible(true)} activeOpacity={0.85}>
                 <MaterialCommunityIcons name="email-edit-outline" size={18} color={colors.primary} />
-                <Text style={styles.actionBtnText}>Note to admins</Text>
+                <Text style={styles.actionBtnText}>{t('notice.noteToAdmins')}</Text>
               </TouchableOpacity>
 
               {isAdmin && (
                 <TouchableOpacity style={styles.actionBtn} onPress={openInbox} activeOpacity={0.85}>
                   <MaterialCommunityIcons name="inbox-arrow-down-outline" size={18} color={colors.primary} />
-                  <Text style={styles.actionBtnText}>Admin inbox</Text>
+                  <Text style={styles.actionBtnText}>{t('notice.adminInbox')}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -263,7 +265,7 @@ const NoticeBoard = () => {
         ListEmptyComponent={
           <View style={styles.empty}>
             <MaterialCommunityIcons name="bulletin-board" size={56} color={colors.border} />
-            <Text style={styles.emptyTitle}>No notices yet</Text>
+            <Text style={styles.emptyTitle}>{t('notice.none')}</Text>
             <Text style={styles.emptySub}>
               {isAdmin ? 'Post the first notice with the + button.' : 'Check back soon for announcements.'}
             </Text>
@@ -291,7 +293,7 @@ const NoticeBoard = () => {
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>New Notice</Text>
+              <Text style={styles.modalTitle}>{t('notice.new')}</Text>
               <TouchableOpacity onPress={() => { setComposeVisible(false); resetCompose(); }}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -300,7 +302,7 @@ const NoticeBoard = () => {
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <TextInput
                 style={styles.input}
-                placeholder="Title"
+                placeholder={t('notice.titlePlaceholder')}
                 placeholderTextColor={colors.placeholder}
                 value={title}
                 onChangeText={setTitle}
@@ -308,7 +310,7 @@ const NoticeBoard = () => {
               />
               <TextInput
                 style={[styles.input, styles.bodyInput]}
-                placeholder="Write the announcement..."
+                placeholder={t('notice.bodyPlaceholder')}
                 placeholderTextColor={colors.placeholder}
                 value={body}
                 onChangeText={setBody}
@@ -319,7 +321,7 @@ const NoticeBoard = () => {
               <View style={styles.pinRow}>
                 <View style={styles.pinLabelWrap}>
                   <MaterialCommunityIcons name="pin-outline" size={18} color={colors.textSecondary} />
-                  <Text style={styles.pinLabel}>Pin to top</Text>
+                  <Text style={styles.pinLabel}>{t('notice.pinToTop')}</Text>
                 </View>
                 <Switch
                   value={pinned}
@@ -339,7 +341,7 @@ const NoticeBoard = () => {
                   ? <ActivityIndicator color={colors.white} />
                   : <>
                       <Ionicons name="megaphone-outline" size={18} color={colors.white} />
-                      <Text style={styles.postButtonText}>Post Notice</Text>
+                      <Text style={styles.postButtonText}>{t('notice.post')}</Text>
                     </>}
               </TouchableOpacity>
             </ScrollView>
@@ -361,7 +363,7 @@ const NoticeBoard = () => {
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Note to admins</Text>
+              <Text style={styles.modalTitle}>{t('notice.noteToAdmins')}</Text>
               <TouchableOpacity onPress={() => { setNoteVisible(false); setNoteText(''); }}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -377,7 +379,7 @@ const NoticeBoard = () => {
 
               <TextInput
                 style={[styles.input, styles.bodyInput]}
-                placeholder="Write your message to the admins..."
+                placeholder={t('notice.notePlaceholder')}
                 placeholderTextColor={colors.placeholder}
                 value={noteText}
                 onChangeText={setNoteText}
@@ -395,7 +397,7 @@ const NoticeBoard = () => {
                   ? <ActivityIndicator color={colors.white} />
                   : <>
                       <Ionicons name="send-outline" size={18} color={colors.white} />
-                      <Text style={styles.postButtonText}>Send to admins</Text>
+                      <Text style={styles.postButtonText}>{t('notice.sendToAdmins')}</Text>
                     </>}
               </TouchableOpacity>
             </ScrollView>
@@ -414,7 +416,7 @@ const NoticeBoard = () => {
           <View style={[styles.modalSheet, { maxHeight: '88%' }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Notes from users</Text>
+              <Text style={styles.modalTitle}>{t('notice.notesFromUsers')}</Text>
               <TouchableOpacity onPress={() => setInboxVisible(false)}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -433,7 +435,7 @@ const NoticeBoard = () => {
                 ListEmptyComponent={
                   <View style={styles.empty}>
                     <MaterialCommunityIcons name="email-open-outline" size={48} color={colors.border} />
-                    <Text style={styles.emptyTitle}>No notes yet</Text>
+                    <Text style={styles.emptyTitle}>{t('notice.noNotes')}</Text>
                   </View>
                 }
                 renderItem={({ item }) => (
@@ -456,7 +458,7 @@ const NoticeBoard = () => {
                       </TouchableOpacity>
                       <TouchableOpacity style={styles.noteActionBtn} onPress={() => handleDeleteNote(item)}>
                         <Ionicons name="trash-outline" size={16} color={colors.error} />
-                        <Text style={[styles.noteActionText, { color: colors.error }]}>Delete</Text>
+                        <Text style={[styles.noteActionText, { color: colors.error }]}>{t('common.delete')}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>

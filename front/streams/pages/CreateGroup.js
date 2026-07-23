@@ -5,9 +5,11 @@ import { useAuth } from '../context/useAuth';
 import { createGroup, updateGroup, deleteGroup } from '../services/api';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { useI18n } from '../context/I18nContext';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 const GroupForm = ({ navigation, route }) => {
+  const { t } = useI18n();
   const { group: existingGroup } = route.params || {};
   const isEditMode = !!existingGroup;
   
@@ -38,7 +40,7 @@ const GroupForm = ({ navigation, route }) => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Please enable photo library access in settings');
+        Alert.alert(t('chat.permissionRequired'), t('group.create.permissionPhotos'));
         return;
       }
 
@@ -59,13 +61,13 @@ const GroupForm = ({ navigation, route }) => {
       }
     } catch (error) {
       console.error('Image picker error:', error);
-      Alert.alert('Error', 'Failed to select image');
+      Alert.alert(t('common.error'), t('group.create.imageFailed'));
     }
   };
 
   const handleSubmit = async () => {
     if (!name.trim()) {
-      Alert.alert('Validation Error', 'Group name is required');
+      Alert.alert(t('group.create.nameRequiredTitle'), t('group.create.nameRequired'));
       return;
     }
 
@@ -105,7 +107,7 @@ const GroupForm = ({ navigation, route }) => {
         : (typeof body?.name === 'string' ? body.name : null);
       const msg = nameErr || body?.detail || body?.error || body?.message
         || error?.message || 'Failed to save group. Please try again.';
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setIsLoading(false);
     }
@@ -128,7 +130,7 @@ const GroupForm = ({ navigation, route }) => {
               navigation.goBack();
             } catch (error) {
               console.error('Delete error:', error);
-              Alert.alert('Error', 'Failed to delete group');
+              Alert.alert(t('common.error'), t('group.create.deleteFailed'));
             } finally {
               setIsLoading(false);
             }
@@ -170,18 +172,18 @@ const GroupForm = ({ navigation, route }) => {
           ) : (
             <View style={styles.coverImagePlaceholder}>
               <MaterialIcons name="add-a-photo" size={32} color="#6b7280" />
-              <Text style={styles.coverImageText}>Add Cover Image</Text>
+              <Text style={styles.coverImageText}>{t('group.create.addCover')}</Text>
             </View>
           )}
         </TouchableOpacity>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Group Name *</Text>
+          <Text style={styles.label}>{t('group.create.name')}</Text>
           <TextInput
             style={styles.input}
             value={name}
             onChangeText={setName}
-            placeholder="Enter group name"
+            placeholder={t('group.create.namePlaceholder')}
             placeholderTextColor="#9ca3af"
             autoCapitalize="words"
             autoFocus={!isEditMode}
@@ -189,12 +191,12 @@ const GroupForm = ({ navigation, route }) => {
         </View>
         
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Description</Text>
+          <Text style={styles.label}>{t('group.create.description')}</Text>
           <TextInput
             style={[styles.input, styles.multilineInput]}
             value={description}
             onChangeText={setDescription}
-            placeholder="What's this group about?"
+            placeholder={t('group.create.descriptionPlaceholder')}
             placeholderTextColor="#9ca3af"
             multiline
             numberOfLines={4}
@@ -202,7 +204,7 @@ const GroupForm = ({ navigation, route }) => {
         </View>
         
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Privacy Settings</Text>
+          <Text style={styles.sectionTitle}>{t('group.create.privacy')}</Text>
           <View style={styles.privacyContainer}>
             <TouchableOpacity
               style={[styles.privacyOption, isPrivate && styles.selectedOption]}
@@ -212,7 +214,7 @@ const GroupForm = ({ navigation, route }) => {
               <View style={styles.radioCircle}>
                 {isPrivate && <View style={styles.radioInnerCircle} />}
               </View>
-              <Text style={isPrivate ? styles.selectedText : styles.optionText}>Private</Text>
+              <Text style={isPrivate ? styles.selectedText : styles.optionText}>{t('group.create.private')}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity
@@ -223,7 +225,7 @@ const GroupForm = ({ navigation, route }) => {
               <View style={styles.radioCircle}>
                 {!isPrivate && <View style={styles.radioInnerCircle} />}
               </View>
-              <Text style={!isPrivate ? styles.selectedText : styles.optionText}>Public</Text>
+              <Text style={!isPrivate ? styles.selectedText : styles.optionText}>{t('group.create.public')}</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.privacyHint}>
@@ -241,7 +243,7 @@ const GroupForm = ({ navigation, route }) => {
           disabled={isLoading}
           activeOpacity={0.7}
         >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
+          <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
         </TouchableOpacity>
         
         <TouchableOpacity

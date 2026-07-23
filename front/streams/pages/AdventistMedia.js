@@ -12,6 +12,7 @@ import {
 } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const TYPES = ['TV', 'Radio', 'Podcast'];
 const FILTERS = ['All', ...TYPES];
@@ -43,6 +44,7 @@ const typeMeta = (type) => {
 };
 
 const AdventistMedia = () => {
+  const { t } = useI18n();
   const [stations, setStations] = useState([]);
   const [newStation, setNewStation] = useState(EMPTY_STATION);
   const [editingId, setEditingId] = useState(null);
@@ -76,15 +78,15 @@ const AdventistMedia = () => {
   );
 
   const openUrl = useCallback((url) => {
-    Linking.openURL(url).catch(() => Alert.alert('Error', 'Could not open this link.'));
-  }, []);
+    Linking.openURL(url).catch(() => Alert.alert(t('common.error'), t('media.openLinkFailed')));
+  }, [t]);
 
   // Pick a logo, downscale to a small square, upload to R2, and store the URL.
   const pickLogo = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Please enable photo library access to add a logo.');
+        Alert.alert(t('chat.permissionRequired'), t('media.permissionPhotos'));
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -105,7 +107,7 @@ const AdventistMedia = () => {
       }
     } catch (error) {
       console.error('Logo picker error:', error);
-      Alert.alert('Error', 'Failed to upload image.');
+      Alert.alert(t('common.error'), t('media.uploadFailed'));
     }
   };
 
@@ -133,7 +135,7 @@ const AdventistMedia = () => {
   const submitStation = async () => {
     const name = newStation.name.trim();
     if (!name) {
-      Alert.alert('Missing info', 'Please enter a station name.');
+      Alert.alert(t('dir.missingInfo'), t('media.nameRequired'));
       return;
     }
     // Build the payload: name, type, logo, and any filled-in links.
@@ -143,14 +145,14 @@ const AdventistMedia = () => {
       const val = (newStation[f.key] || '').trim();
       if (!val) { payload[f.key] = ''; continue; }
       if (!/^https?:\/\//i.test(val)) {
-        Alert.alert('Invalid link', `The ${f.label} link must start with http:// or https://`);
+        Alert.alert(t('media.invalidLinkTitle'), t('media.invalidLinkBody', { label: f.label }));
         return;
       }
       payload[f.key] = val;
       linkCount += 1;
     }
     if (linkCount === 0) {
-      Alert.alert('Add a link', 'Please add at least one link (website, YouTube, Facebook, etc.).');
+      Alert.alert(t('media.addLinkTitle'), t('media.addLinkBody'));
       return;
     }
 
@@ -166,7 +168,7 @@ const AdventistMedia = () => {
       closeForm();
     } catch (err) {
       const msg = err?.response?.data?.error || 'Could not save the station. Please try again.';
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);
     }
@@ -180,7 +182,7 @@ const AdventistMedia = () => {
   };
 
   const deleteStation = (item) => {
-    Alert.alert('Delete station', `Delete “${item.name}”? This affects everyone.`, [
+    Alert.alert(t('media.deleteTitle'), t('media.deleteConfirm', { name: item.name }), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -193,7 +195,7 @@ const AdventistMedia = () => {
           } catch (err) {
             setStations(prev); // rollback
             const msg = err?.response?.data?.error || 'Could not delete the station.';
-            Alert.alert('Error', msg);
+            Alert.alert(t('common.error'), msg);
           }
         },
       },
@@ -262,7 +264,7 @@ const AdventistMedia = () => {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <View>
-          <Text style={styles.title}>Adventist Media</Text>
+          <Text style={styles.title}>{t('media.title')}</Text>
           <Text style={styles.subtitle}>TV · Radio · Podcasts</Text>
         </View>
         <View style={styles.countPill}>
@@ -303,7 +305,7 @@ const AdventistMedia = () => {
             </Text>
             {error && (
               <TouchableOpacity style={styles.retryBtn} onPress={() => loadStations(true)}>
-                <Text style={styles.retryBtnText}>Try Again</Text>
+                <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -312,7 +314,7 @@ const AdventistMedia = () => {
 
       <TouchableOpacity style={styles.fab} onPress={openCreateForm} activeOpacity={0.9}>
         <MaterialIcons name="add" size={22} color={colors.white} />
-        <Text style={styles.fabText}>Add a Station</Text>
+        <Text style={styles.fabText}>{t('media.add')}</Text>
       </TouchableOpacity>
 
       {/* Add-station bottom sheet — lifts above the keyboard */}
@@ -350,11 +352,11 @@ const AdventistMedia = () => {
                   )}
                 </TouchableOpacity>
                 <View style={styles.logoHint}>
-                  <Text style={styles.logoHintTitle}>Logo / thumbnail</Text>
-                  <Text style={styles.logoHintSub}>Optional — a default icon is used if none.</Text>
+                  <Text style={styles.logoHintTitle}>{t('media.logo')}</Text>
+                  <Text style={styles.logoHintSub}>{t('media.logoHint')}</Text>
                   {newStation.logo ? (
                     <TouchableOpacity onPress={() => setNewStation({ ...newStation, logo: '' })}>
-                      <Text style={styles.logoRemove}>Remove</Text>
+                      <Text style={styles.logoRemove}>{t('common.remove')}</Text>
                     </TouchableOpacity>
                   ) : null}
                 </View>
@@ -362,14 +364,14 @@ const AdventistMedia = () => {
 
               <TextInput
                 style={styles.input}
-                placeholder="Station name"
+                placeholder={t('media.namePlaceholder')}
                 placeholderTextColor={colors.placeholder}
                 value={newStation.name}
                 onChangeText={(text) => setNewStation({ ...newStation, name: text })}
                 returnKeyType="next"
               />
 
-              <Text style={styles.fieldLabel}>Type</Text>
+              <Text style={styles.fieldLabel}>{t('media.type')}</Text>
               <View style={styles.typeSelector}>
                 {TYPES.map((t) => {
                   const active = newStation.type === t;
@@ -386,7 +388,7 @@ const AdventistMedia = () => {
                 })}
               </View>
 
-              <Text style={styles.fieldLabel}>Links — add at least one (all optional)</Text>
+              <Text style={styles.fieldLabel}>{t('media.links')}</Text>
               {LINK_FIELDS.map((f) => (
                 <View key={f.key} style={styles.linkInputRow}>
                   <Ionicons name={f.icon} size={20} color={f.color} style={styles.linkInputIcon} />
@@ -406,7 +408,7 @@ const AdventistMedia = () => {
 
             <View style={styles.formButtons}>
               <TouchableOpacity style={[styles.formBtn, styles.cancelBtn]} onPress={closeForm} disabled={saving}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+                <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.formBtn, styles.submitBtn, saving && styles.submitBtnDisabled]}

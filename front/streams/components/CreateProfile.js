@@ -14,8 +14,10 @@ import axios from 'axios';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useAuth } from '../context/useAuth';
+import { useI18n } from '../context/I18nContext';
 
 const CreateProfile = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { updateUser } = useAuth();
   const [isEditMode, setIsEditMode] = useState(false);
@@ -66,7 +68,7 @@ const CreateProfile = () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please enable photo access to upload a profile picture');
+        Alert.alert(t('createProfile.permissionTitle'), t('createProfile.permissionBody'));
         return;
       }
 
@@ -85,7 +87,7 @@ const CreateProfile = () => {
       }
     } catch (error) {
       console.error('Image selection error:', error);
-      Alert.alert('Error', 'Could not process the image. Please try another one.');
+      Alert.alert(t('common.error'), t('createProfile.imageFailed'));
     }
   };
 
@@ -154,11 +156,11 @@ const CreateProfile = () => {
 
       if (isEditMode) {
         await updateProfile(payload);
-        Alert.alert('Updated!', 'Your profile has been updated.');
+        Alert.alert(t('createProfile.updatedTitle'), t('createProfile.updatedBody'));
       } else {
         const token = await getAccessToken().catch(() => null);
         if (!token) {
-          Alert.alert('Session Expired', 'Please log in again');
+          Alert.alert(t('createProfile.sessionExpiredTitle'), t('createProfile.sessionExpiredBody'));
           navigation.navigate('Login');
           return;
         }
@@ -166,7 +168,7 @@ const CreateProfile = () => {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           timeout: 15000,
         });
-        Alert.alert('Profile Created!', 'Your profile has been successfully set up');
+        Alert.alert(t('createProfile.createdTitle'), t('createProfile.createdBody'));
       }
       // Refresh the shared auth state so the new/updated profile shows app-wide.
       await updateUser();
@@ -187,7 +189,7 @@ const CreateProfile = () => {
         errorMessage = 'Request timed out. Check your connection.';
       }
       
-      Alert.alert('Error', errorMessage);
+      Alert.alert(t('common.error'), errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -236,7 +238,7 @@ const CreateProfile = () => {
         <Text style={styles.label}>Bio</Text>
         <TextInput
           style={[styles.input, errors.bio && styles.inputError]}
-          placeholder="Tell others about yourself"
+          placeholder={t('createProfile.bioPlaceholder')}
           placeholderTextColor="#a0aec0"
           value={profileData.bio}
           onChangeText={(value) => handleChange('bio', value)}
@@ -251,7 +253,7 @@ const CreateProfile = () => {
 
       {/* Birth Date Input */}
       <View style={styles.inputContainer}>
-        <Text style={styles.label}>Birth Date</Text>
+        <Text style={styles.label}>{t('createProfile.birthDate')}</Text>
         <TouchableOpacity 
           style={[styles.input, errors.birth_date && styles.inputError]}
           onPress={() => setShowDatePicker(true)}
@@ -275,10 +277,10 @@ const CreateProfile = () => {
 
       {/* Location Input */}
       <View style={styles.inputContainer}>
-        <Text style={styles.label}>Location</Text>
+        <Text style={styles.label}>{t('createProfile.location')}</Text>
         <TextInput
           style={[styles.input, errors.location && styles.inputError]}
-          placeholder="City, Country"
+          placeholder={t('createProfile.locationPlaceholder')}
           placeholderTextColor="#a0aec0"
           value={profileData.location}
           onChangeText={(value) => handleChange('location', value)}

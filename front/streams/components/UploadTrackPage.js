@@ -12,8 +12,10 @@ import { uploadMedia } from '../services/cloudinary';
 import { compressImage } from '../services/imageProcessing';
 import { compressAudio } from '../services/audioProcessing';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const TrackUploadForm = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const [trackData, setTrackData] = useState({
     title: '',
@@ -132,7 +134,7 @@ const TrackUploadForm = () => {
       await sound.playAsync();
     } catch (error) {
       console.error('Error playing preview:', error);
-      Alert.alert('Playback Error', 'Could not play audio file');
+      Alert.alert(t('track.playbackErrorTitle'), t('track.playbackErrorBody'));
     }
   };
 
@@ -150,7 +152,7 @@ const TrackUploadForm = () => {
 
   const uploadTrack = async () => {
     if (!trackData.title || !trackData.audioFile) {
-      Alert.alert('Error', 'Title and audio file are required');
+      Alert.alert(t('common.error'), t('track.required'));
       return;
     }
 
@@ -207,7 +209,7 @@ const TrackUploadForm = () => {
         }
       );
 
-      Alert.alert('Success', 'Track uploaded successfully!');
+      Alert.alert(t('market.success'), t('track.uploadedOk'));
       navigation.goBack();
     } catch (error) {
       console.error('Upload error:', error);
@@ -227,7 +229,7 @@ const TrackUploadForm = () => {
         errorMessage = error.message;
       }
       
-      Alert.alert('Upload Failed', errorMessage);
+      Alert.alert(t('track.uploadFailedTitle'), errorMessage);
     } finally {
       setIsUploading(false);
       setStatusMessages({ audio: '', image: '' });
@@ -245,22 +247,22 @@ const TrackUploadForm = () => {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
-          <Text style={styles.header}>Upload New Track</Text>
+          <Text style={styles.header}>{t('track.upload.title')}</Text>
           
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Track Title *</Text>
+            <Text style={styles.label}>{t('track.title')}</Text>
             <TextInput
               style={styles.input}
               value={trackData.title}
               onChangeText={(text) => setTrackData({...trackData, title: text})}
-              placeholder="Enter track title"
+              placeholder={t('track.titlePlaceholder')}
               placeholderTextColor={colors.placeholder}
               editable={!isUploading}
             />
           </View>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Audio File *</Text>
+            <Text style={styles.label}>{t('track.audioFile')}</Text>
             <TouchableOpacity 
               style={[
                 styles.button,
@@ -299,7 +301,7 @@ const TrackUploadForm = () => {
           </View>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Cover Image</Text>
+            <Text style={styles.label}>{t('track.coverImage')}</Text>
             <TouchableOpacity 
               style={[
                 styles.button,
@@ -321,24 +323,24 @@ const TrackUploadForm = () => {
           </View>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Album</Text>
+            <Text style={styles.label}>{t('track.album')}</Text>
             <TextInput
               style={styles.input}
               value={trackData.album}
               onChangeText={(text) => setTrackData({...trackData, album: text})}
-              placeholder="Enter album name"
+              placeholder={t('track.albumPlaceholder')}
               placeholderTextColor={colors.placeholder}
               editable={!isUploading}
             />
           </View>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Lyrics</Text>
+            <Text style={styles.label}>{t('track.lyrics')}</Text>
             <TextInput
               style={styles.textArea}
               value={trackData.lyrics}
               onChangeText={(text) => setTrackData({...trackData, lyrics: text})}
-              placeholder="Enter lyrics"
+              placeholder={t('track.lyricsPlaceholder')}
               placeholderTextColor={colors.placeholder}
               multiline
               numberOfLines={6}
@@ -357,7 +359,7 @@ const TrackUploadForm = () => {
             {isUploading ? (
               <ActivityIndicator color={colors.white} size="small" />
             ) : (
-              <Text style={styles.submitButtonText}>Upload Track</Text>
+              <Text style={styles.submitButtonText}>{t('track.upload.button')}</Text>
             )}
           </TouchableOpacity>
         </View>

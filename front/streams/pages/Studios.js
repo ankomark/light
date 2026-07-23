@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../context/useAuth';
 import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 // Keys MUST match the backend Videostudio.SERVICE_TYPES choices.
 const SERVICES = [
@@ -42,10 +43,10 @@ const EMPTY = {
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
-async function pickAndUpload(aspect, width, type) {
+async function pickAndUpload(aspect, width, type, t) {
   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status !== 'granted') {
-    Alert.alert('Permission required', 'Please enable photo library access.');
+    Alert.alert(t('chat.permissionRequired'), t('dir.permissionPhotos'));
     return null;
   }
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -60,12 +61,13 @@ async function pickAndUpload(aspect, width, type) {
     );
     return uploaded.url;
   } catch (e) {
-    Alert.alert('Upload failed', e?.message ?? 'Could not upload the image.');
+    Alert.alert(t('common.uploadFailedTitle'), e?.message ?? t('common.uploadImageFailed'));
     return null;
   }
 }
 
 const Studios = () => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const [studios, setStudios] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -89,12 +91,12 @@ const Studios = () => {
       setStudios(list.map((s) => ({ ...s, service_types: Array.isArray(s.service_types) ? s.service_types : [] })));
     } catch (err) {
       console.error('fetchVideoStudios error:', err);
-      Alert.alert('Error', 'Failed to load studios');
+      Alert.alert(t('common.error'), t('studios.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -137,7 +139,7 @@ const Studios = () => {
 
   const submit = async () => {
     if (!form.name.trim() || !form.location.trim() || form.service_types.length === 0) {
-      Alert.alert('Missing info', 'Name, location, and at least one service are required.');
+      Alert.alert(t('dir.missingInfo'), t('studios.missingInfo'));
       return;
     }
     const payload = {
@@ -167,14 +169,14 @@ const Studios = () => {
       closeForm();
     } catch (err) {
       const msg = err?.response?.data?.error || 'Could not save the studio. Please try again.';
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);
     }
   };
 
   const onDelete = (s) => {
-    Alert.alert('Delete studio', `Delete “${s.name}”?`, [
+    Alert.alert(t('studios.deleteTitle'), t('common.deleteConfirm', { name: s.name }), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
@@ -182,13 +184,13 @@ const Studios = () => {
           const prev = studios;
           setStudios((cur) => cur.filter((x) => x.id !== s.id));
           try { await deleteVideoStudio(s.id); }
-          catch { setStudios(prev); Alert.alert('Error', 'Could not delete this studio.'); }
+          catch { setStudios(prev); Alert.alert(t('common.error'), t('studios.deleteFailed')); }
         },
       },
     ]);
   };
 
-  const openLink = (url) => Linking.openURL(url).catch(() => Alert.alert('Error', 'Could not open link.'));
+  const openLink = (url) => Linking.openURL(url).catch(() => Alert.alert(t('common.error'), t('dir.openLinkFailed')));
   const openWhatsApp = (num) => openLink(`https://wa.me/${num.replace(/[^\d]/g, '')}`);
 
   const rateText = (s) => {
@@ -273,19 +275,19 @@ const Studios = () => {
           {item.contact_phone ? (
             <TouchableOpacity style={styles.contactBtn} onPress={() => openLink(`tel:${item.contact_phone}`)}>
               <Ionicons name="call" size={16} color={colors.textPrimary} />
-              <Text style={styles.contactText}>Call</Text>
+              <Text style={styles.contactText}>{t('studios.call')}</Text>
             </TouchableOpacity>
           ) : null}
           {item.whatsapp_number ? (
             <TouchableOpacity style={styles.contactBtn} onPress={() => openWhatsApp(item.whatsapp_number)}>
               <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
-              <Text style={styles.contactText}>WhatsApp</Text>
+              <Text style={styles.contactText}>{t('studios.whatsapp')}</Text>
             </TouchableOpacity>
           ) : null}
           {item.youtube_link ? (
             <TouchableOpacity style={styles.contactBtn} onPress={() => openLink(item.youtube_link)}>
               <Ionicons name="logo-youtube" size={16} color="#FF0000" />
-              <Text style={styles.contactText}>YouTube</Text>
+              <Text style={styles.contactText}>{t('studios.youtube')}</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -300,15 +302,15 @@ const Studios = () => {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.title}>Media &  Production</Text>
-        <Text style={styles.subtitle}>Find production  Media &amp; services</Text>
+        <Text style={styles.title}>{t('studios.title')}</Text>
+        <Text style={styles.subtitle}>{t('studios.subtitle')}</Text>
       </View>
 
       <View style={styles.searchBar}>
         <Ionicons name="search" size={18} color={colors.placeholder} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search studios…"
+          placeholder={t('studios.searchPlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={search}
           onChangeText={setSearch}
@@ -348,7 +350,7 @@ const Studios = () => {
         ListEmptyComponent={
           <View style={styles.empty}>
             <MaterialIcons name="movie-filter" size={46} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No studios found</Text>
+            <Text style={styles.emptyText}>{t('studios.none')}</Text>
           </View>
         }
       />
@@ -356,7 +358,7 @@ const Studios = () => {
       {currentUser && (
         <TouchableOpacity style={styles.fab} onPress={openCreate} activeOpacity={0.9}>
           <Ionicons name="add" size={20} color={colors.white} />
-          <Text style={styles.fabText}>Create Studio</Text>
+          <Text style={styles.fabText}>{t('studios.create')}</Text>
         </TouchableOpacity>
       )}
 
@@ -379,27 +381,27 @@ const Studios = () => {
             enableResetScrollToCoords={false}
             extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
           >
-            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover'); if (u) setCoverImage(u); }} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover', t); if (u) setCoverImage(u); }} activeOpacity={0.85}>
               {coverImage ? <Image source={{ uri: coverImage }} style={styles.coverPreview} /> : (
                 <View style={styles.coverPlaceholder}>
                   <Ionicons name="image-outline" size={26} color={colors.textMuted} />
-                  <Text style={styles.pickerHint}>Add cover image</Text>
+                  <Text style={styles.pickerHint}>{t('dir.addCover')}</Text>
                 </View>
               )}
             </TouchableOpacity>
 
             <View style={styles.profileRow}>
-              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'cover'); if (u) setLogo(u); }} activeOpacity={0.85}>
+              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'cover', t); if (u) setLogo(u); }} activeOpacity={0.85}>
                 {logo ? <Image source={{ uri: logo }} style={styles.profilePreview} /> : <Ionicons name="camera-outline" size={24} color={colors.textMuted} />}
               </TouchableOpacity>
-              <Text style={styles.profileHint}>Studio logo (optional)</Text>
+              <Text style={styles.profileHint}>{t('studios.logo')}</Text>
             </View>
 
-            <Field label="Studio name *" value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder="e.g. HopeWorks Media" />
-            <Field label="Description" value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder="What your studio offers" multiline />
-            <Field label="Location *" value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder="City, country" />
+            <Field label="Studio name *" value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder={t('studios.namePlaceholder')} />
+            <Field label="Description" value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder={t('studios.aboutPlaceholder')} multiline />
+            <Field label="Location *" value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder={t('dir.cityCountry')} />
 
-            <Text style={styles.fieldLabel}>Services * (tap to select)</Text>
+            <Text style={styles.fieldLabel}>{t('studios.services')}</Text>
             <View style={styles.serviceWrap}>
               {SERVICES.map((s) => {
                 const active = form.service_types.includes(s.key);
@@ -412,7 +414,7 @@ const Studios = () => {
               })}
             </View>
 
-            <Text style={styles.fieldLabel}>Rate (optional)</Text>
+            <Text style={styles.fieldLabel}>{t('studios.rate')}</Text>
             <View style={styles.rateInputRow}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.currencyScroll} contentContainerStyle={styles.currencyRow}>
                 {CURRENCIES.map((c) => {
@@ -429,23 +431,23 @@ const Studios = () => {
               style={styles.input}
               value={form.service_rates}
               onChangeText={(t) => setForm({ ...form, service_rates: t })}
-              placeholder="Amount (e.g. 150)"
+              placeholder={t('studios.amountPlaceholder')}
               placeholderTextColor={colors.placeholder}
               keyboardType="numeric"
             />
-            <Field label="" value={form.rate_description} onChange={(t) => setForm({ ...form, rate_description: t })} placeholder="Rate note (e.g. per project)" />
+            <Field label="" value={form.rate_description} onChange={(t) => setForm({ ...form, rate_description: t })} placeholder={t('studios.rateNotePlaceholder')} />
 
-            <Field label="WhatsApp number" value={form.whatsapp_number} onChange={(t) => setForm({ ...form, whatsapp_number: t })} placeholder="+254…" keyboardType="phone-pad" />
-            <Field label="Contact phone" value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder="+254…" keyboardType="phone-pad" />
-            <Field label="Contact email" value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder="studio@email.com" keyboardType="email-address" />
-            <Field label="YouTube link" value={form.youtube_link} onChange={(t) => setForm({ ...form, youtube_link: t })} placeholder="https://youtube.com/…" keyboardType="url" />
+            <Field label="WhatsApp number" value={form.whatsapp_number} onChange={(t) => setForm({ ...form, whatsapp_number: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
+            <Field label="Contact phone" value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
+            <Field label="Contact email" value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder={t('studios.emailPlaceholder')} keyboardType="email-address" />
+            <Field label="YouTube link" value={form.youtube_link} onChange={(t) => setForm({ ...form, youtube_link: t })} placeholder={t('dir.youtubePlaceholder')} keyboardType="url" />
 
             <View style={{ height: spacing.xl }} />
           </KeyboardAwareScrollView>
 
           <View style={styles.saveBar}>
             <TouchableOpacity style={[styles.saveBtn, styles.cancelBtn]} onPress={closeForm} disabled={saving}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
+              <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={submit} disabled={saving}>
               {saving ? <ActivityIndicator color={colors.white} /> : (

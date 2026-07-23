@@ -26,10 +26,12 @@ import {
 import { compressImage } from '../services/imageProcessing';
 import { processVideo } from '../services/videoProcessing';
 import { MaterialIcons, FontAwesome, Ionicons, Feather, AntDesign } from '@expo/vector-icons';
+import { useI18n } from '../context/I18nContext';
 
 const { height } = Dimensions.get('window');
 
 const CreateGroupPost = ({ onSubmit, onCancel }) => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState([]);
@@ -203,7 +205,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
       }
     } catch (error) {
       console.error(`Error picking ${type}:`, error);
-      Alert.alert('Error', `Failed to select ${type}. Please try again.`);
+      Alert.alert(t('common.error'), t('group.post.selectFailed', { type }));
     }
   };
 
@@ -224,7 +226,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
     } catch (error) {
       console.error('Failed to start recording:', error);
       setIsRecording(false);
-      Alert.alert('Error', 'Failed to start recording. Please try again.');
+      Alert.alert(t('common.error'), t('group.post.startRecordingFailed'));
     }
   };
 
@@ -245,7 +247,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
       setRecordingDuration(0);
     } catch (error) {
       console.error('Failed to stop recording:', error);
-      Alert.alert('Error', 'Failed to save recording.');
+      Alert.alert(t('common.error'), t('group.post.saveRecordingFailed'));
     }
   };
 
@@ -263,13 +265,13 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
       await sound.playAsync();
     } catch (error) {
       console.error('Failed to play audio:', error);
-      Alert.alert('Error', 'Failed to play audio.');
+      Alert.alert(t('common.error'), t('group.post.audioFailed'));
     }
   };
 
   const handleSubmit = async () => {
     if (!content.trim() && attachments.length === 0) {
-      Alert.alert('Empty Post', 'Please add content or an attachment');
+      Alert.alert(t('group.post.emptyTitle'), t('group.post.emptyBody'));
       return;
     }
 
@@ -292,7 +294,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
       setAttachments([]);
     } catch (error) {
       console.error('Failed to create post:', error);
-      Alert.alert('Error', error.message || 'Failed to create post. Please try again.');
+      Alert.alert(t('common.error'), error.message || t('group.post.createFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -359,7 +361,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
         content: (
           <>
             <Ionicons name="videocam" size={24} color="#FFFFFF" />
-            <Text style={styles.attachmentVideoText}>Video</Text>
+            <Text style={styles.attachmentVideoText}>{t('group.post.video')}</Text>
           </>
         )
       },
@@ -443,7 +445,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
                 <Text style={styles.username}>
                   {currentUser?.username || 'User'}
                 </Text>
-                <Text style={styles.postingTo}>Create Post</Text>
+                <Text style={styles.postingTo}>{t('group.post.create')}</Text>
               </View>
             </View>
             
@@ -487,7 +489,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
               <TextInput
                 ref={inputRef}
                 style={styles.input}
-                placeholder="What's on your mind?"
+                placeholder={t('group.post.placeholder')}
                 placeholderTextColor="#9CA3AF"
                 value={content}
                 onChangeText={setContent}
@@ -572,7 +574,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
               {isSubmitting ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Text style={styles.postButtonText}>Post</Text>
+                <Text style={styles.postButtonText}>{t('common.post')}</Text>
               )}
             </TouchableOpacity>
           </View>

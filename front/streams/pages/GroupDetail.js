@@ -27,6 +27,7 @@ import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const POLL_MS = 4000;
@@ -53,6 +54,7 @@ const GroupMessageRow = ({
   item, isOwn, showName, playingId,
   onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry,
 }) => {
+  const { t } = useI18n();
   const tx = useRef(new Animated.Value(0)).current;
   const armed = useRef(false);
   const pan = useRef(
@@ -151,7 +153,7 @@ const GroupMessageRow = ({
                   failed ? (
                     <View style={styles.statusWrap}>
                       <Ionicons name="alert-circle" size={13} color={colors.error} />
-                      <Text style={styles.retryText}>Tap to retry</Text>
+                      <Text style={styles.retryText}>{t('group.detail.tapToRetry')}</Text>
                     </View>
                   ) : sending ? (
                     <Ionicons name="time-outline" size={12} color="rgba(255,255,255,0.7)" style={styles.statusIcon} />
@@ -188,6 +190,7 @@ const mergeMessages = (a, b) => {
 };
 
 const GroupDetail = ({ route, navigation }) => {
+  const { t } = useI18n();
   const { groupSlug, group: initialGroup } = route.params;
   const { currentUser } = useAuth();
 
@@ -254,13 +257,13 @@ const GroupDetail = ({ route, navigation }) => {
       setRequested(!!g.has_pending_request);
       if (!postsPromise && (g.is_member || !g.is_private)) await loadPosts();
     } catch {
-      Alert.alert('Error', 'Could not load this group.');
+      Alert.alert(t('common.error'), t('group.detail.loadFailed'));
     } finally {
       if (postsPromise) await postsPromise.catch(() => {});
       setLoading(false);
       setFirstLoad(false);
     }
-  }, [groupSlug, loadPosts, initialGroup]);
+  }, [groupSlug, loadPosts, initialGroup, t]);
 
   const loadEarlier = useCallback(async () => {
     try {
@@ -385,26 +388,26 @@ const GroupDetail = ({ route, navigation }) => {
   const attachImage = useCallback(async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Permission required', 'Enable photo access.'); return; }
+      if (status !== 'granted') { Alert.alert(t('chat.permissionRequired'), t('chat.permissionPhotos')); return; }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (res.canceled || !res.assets?.length) return;
       const p = await compressImage(res.assets[0].uri, { width: 1080, quality: 0.6 });
       sendMediaMessage({ localUri: p.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg' });
-    } catch { Alert.alert('Error', 'Could not attach image.'); }
-  }, [sendMediaMessage]);
+    } catch { Alert.alert(t('common.error'), t('chat.attachImageFailed')); }
+  }, [sendMediaMessage, t]);
 
   const attachFile = useCallback(async () => {
     try {
       const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.length) return;
       const f = res.assets[0];
-      if (f.size && f.size > MAX_FILE_BYTES) { Alert.alert('File too large', 'Choose a file under 6 MB.'); return; }
+      if (f.size && f.size > MAX_FILE_BYTES) { Alert.alert(t('chat.fileTooLargeTitle'), t('group.detail.fileTooLargeBody')); return; }
       sendMediaMessage({
         localUri: f.uri, uploadType: 'chat-file', message_type: 'file',
         file_name: f.name || 'file', mimeType: f.mimeType || 'application/octet-stream',
       });
-    } catch { Alert.alert('Error', 'Could not attach file.'); }
-  }, [sendMediaMessage]);
+    } catch { Alert.alert(t('common.error'), t('chat.attachFileFailed')); }
+  }, [sendMediaMessage, t]);
 
   const onAttachPress = useCallback(() => {
     setShowEmoji(false);
@@ -436,15 +439,15 @@ const GroupDetail = ({ route, navigation }) => {
       }
       if (!path) return;
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
-      else Alert.alert('Saved', `Saved as ${msg.file_name}.`);
-    } catch { Alert.alert('Error', 'Could not open this file.'); }
-  }, []);
+      else Alert.alert(t('chat.savedTitle'), t('common.savedAs', { name: msg.file_name }));
+    } catch { Alert.alert(t('common.error'), t('chat.openFileFailed')); }
+  }, [t]);
 
   // ── Voice ──
   const startRecording = useCallback(async () => {
     try {
       const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission required', 'Enable microphone access.'); return; }
+      if (!perm.granted) { Alert.alert(t('chat.permissionRequired'), t('chat.permissionMic')); return; }
       await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const rec = new Recording();
       await rec.prepareToRecordAsync(VOICE_NOTE_RECORDING_OPTIONS);
@@ -452,8 +455,8 @@ const GroupDetail = ({ route, navigation }) => {
       recordingRef.current = rec; recordStartRef.current = Date.now();
       setShowEmoji(false); setIsRecording(true); setRecordSecs(0);
       recordTimerRef.current = setInterval(() => setRecordSecs((s) => s + 1), 1000);
-    } catch { Alert.alert('Error', 'Could not start recording.'); setIsRecording(false); }
-  }, []);
+    } catch { Alert.alert(t('common.error'), t('chat.recordFailed')); setIsRecording(false); }
+  }, [t]);
 
   const stopRecording = useCallback(async (cancel = false) => {
     clearInterval(recordTimerRef.current);
@@ -471,8 +474,8 @@ const GroupDetail = ({ route, navigation }) => {
         localUri: uri, uploadType: 'chat-audio', message_type: 'audio',
         duration: seconds, mimeType: 'audio/m4a',
       });
-    } catch { Alert.alert('Error', 'Could not save the voice note.'); }
-  }, [sendMediaMessage]);
+    } catch { Alert.alert(t('common.error'), t('chat.saveVoiceFailed')); }
+  }, [sendMediaMessage, t]);
 
   const playAudio = useCallback(async (msg) => {
     try {
@@ -494,8 +497,8 @@ const GroupDetail = ({ route, navigation }) => {
       const { sound } = await createSound({ uri: sourceUri }, { shouldPlay: true });
       soundRef.current = sound; setPlayingId(msg.id);
       sound.setOnPlaybackStatusUpdate((st) => { if (st.didJustFinish) { setPlayingId(null); sound.unloadAsync().catch(() => {}); soundRef.current = null; } });
-    } catch { Alert.alert('Error', 'Could not play this voice note.'); setPlayingId(null); }
-  }, [playingId]);
+    } catch { Alert.alert(t('common.error'), t('chat.playVoiceFailed')); setPlayingId(null); }
+  }, [playingId, t]);
 
   // ── Group menu (luxury sheet) ──
   const openMenu = useCallback(() => setMenuSheet(true), []);
@@ -523,8 +526,8 @@ const GroupDetail = ({ route, navigation }) => {
   const doLeave = useCallback(async () => {
     setLeaveConfirm(false);
     try { await leaveGroup(groupSlug); navigation.goBack(); }
-    catch { Alert.alert('Error', 'Could not leave the group.'); }
-  }, [groupSlug, navigation]);
+    catch { Alert.alert(t('common.error'), t('group.detail.leaveFailed')); }
+  }, [groupSlug, navigation, t]);
 
   const canLeave = isMember && group?.creator?.id !== currentUser?.id;
 
@@ -535,20 +538,20 @@ const GroupDetail = ({ route, navigation }) => {
       const updated = await setGroupPostingPolicy(groupSlug, next);
       setGroup(updated);
     } catch {
-      Alert.alert('Error', 'Could not update this setting.');
+      Alert.alert(t('common.error'), t('group.detail.settingFailed'));
     }
-  }, [group, groupSlug]);
+  }, [group, groupSlug, t]);
 
   const join = async () => {
     try {
       await requestJoinGroup(groupSlug, '');
       setRequested(true);
-      Alert.alert('Request sent', 'The group admins will review your request.');
+      Alert.alert(t('group.detail.requestSentTitle'), t('group.detail.requestSentBody'));
     } catch (e) {
       // requestJoinGroup rejects with the response body itself ({ error } / { message }).
       const msg = e?.error || e?.response?.data?.error || e?.message || 'Could not send request.';
       if (/already/i.test(msg)) setRequested(true);
-      Alert.alert('Notice', msg);
+      Alert.alert(t('common.notice'), msg);
     }
   };
 
@@ -570,14 +573,14 @@ const GroupDetail = ({ route, navigation }) => {
   const confirmDelete = useCallback((m) => {
     setMenuMsg(null);
     if (!canDelete(m)) return;
-    Alert.alert('Message', 'Delete this message?', [
+    Alert.alert(t('group.detail.deleteMessageTitle'), t('group.detail.deleteMessageBody'), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try { await deleteGroupPost(groupSlug, m.id); setMessages((prev) => prev.filter((x) => x.id !== m.id)); }
-        catch { Alert.alert('Error', 'Could not delete this message.'); }
+        catch { Alert.alert(t('common.error'), t('group.detail.deleteMessageFailed')); }
       } },
     ]);
-  }, [groupSlug, currentUser, isAdmin]);
+  }, [groupSlug, currentUser, isAdmin, t]);
 
   // Toggle an emoji reaction; the API returns the post's fresh reaction state.
   const reactToPost = useCallback(async (m, emoji) => {
@@ -663,7 +666,7 @@ const GroupDetail = ({ route, navigation }) => {
         showsVerticalScrollIndicator={false}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
         ListHeaderComponent={hasEarlier ? (
-          <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>Load earlier messages</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
         ) : null}
         ListEmptyComponent={firstLoad ? (
           <View style={styles.emptyContainer}><ActivityIndicator color={colors.accent} /></View>
@@ -706,7 +709,7 @@ const GroupDetail = ({ route, navigation }) => {
             <>
               <TouchableOpacity style={styles.iconBtn} onPress={() => setShowEmoji((s) => !s)}><Ionicons name={showEmoji ? 'close' : 'happy-outline'} size={24} color={colors.textSecondary} /></TouchableOpacity>
               <TouchableOpacity style={styles.iconBtn} onPress={onAttachPress}><Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} /></TouchableOpacity>
-              <TextInput style={styles.input} placeholder="Message…" placeholderTextColor={colors.placeholder} value={text} onChangeText={setText} onFocus={() => setShowEmoji(false)} multiline maxLength={2000} />
+              <TextInput style={styles.input} placeholder={t('chat.messagePlaceholder')} placeholderTextColor={colors.placeholder} value={text} onChangeText={setText} onFocus={() => setShowEmoji(false)} multiline maxLength={2000} />
               {text.trim() ? (
                 <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
                   <Ionicons name="send" size={18} color={colors.white} />
@@ -721,20 +724,20 @@ const GroupDetail = ({ route, navigation }) => {
         <View style={styles.joinBar}>
           <View style={styles.lockedPill}>
             <Ionicons name="lock-closed" size={16} color={colors.textSecondary} />
-            <Text style={styles.lockedText}>Only admins can send messages</Text>
+            <Text style={styles.lockedText}>{t('group.detail.onlyAdminsSend')}</Text>
           </View>
         </View>
       ) : requested ? (
         <View style={styles.joinBar}>
           <View style={styles.pendingPill}>
             <Ionicons name="time-outline" size={18} color={colors.warning} />
-            <Text style={styles.pendingText}>Waiting for approval</Text>
+            <Text style={styles.pendingText}>{t('group.detail.waitingApproval')}</Text>
           </View>
         </View>
       ) : (
         <View style={styles.joinBar}>
-          <Text style={styles.joinText}>You're not a member of this group.</Text>
-          <TouchableOpacity style={styles.joinBtn} onPress={join}><Text style={styles.joinBtnText}>Request to Join</Text></TouchableOpacity>
+          <Text style={styles.joinText}>{t('group.detail.notAMember')}</Text>
+          <TouchableOpacity style={styles.joinBtn} onPress={join}><Text style={styles.joinBtnText}>{t('group.detail.requestToJoin')}</Text></TouchableOpacity>
         </View>
       )}
 
@@ -750,16 +753,16 @@ const GroupDetail = ({ route, navigation }) => {
         <Pressable style={styles.sheetBackdrop} onPress={() => setAttachSheet(false)}>
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Share to the group</Text>
-            <Text style={styles.sheetSubtitle}>Choose what to send</Text>
+            <Text style={styles.sheetTitle}>{t('group.detail.shareToGroup')}</Text>
+            <Text style={styles.sheetSubtitle}>{t('chat.chooseWhatToSend')}</Text>
 
             <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => pickFromSheet(attachImage)}>
               <View style={[styles.sheetIcon, styles.sheetIconPhoto]}>
                 <Ionicons name="image" size={24} color={colors.accent} />
               </View>
               <View style={styles.sheetOptionText}>
-                <Text style={styles.sheetOptionLabel}>Photo</Text>
-                <Text style={styles.sheetOptionHint}>Send a picture from your gallery</Text>
+                <Text style={styles.sheetOptionLabel}>{t('chat.photo')}</Text>
+                <Text style={styles.sheetOptionHint}>{t('chat.photoSub')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
@@ -769,14 +772,14 @@ const GroupDetail = ({ route, navigation }) => {
                 <Ionicons name="document-text" size={24} color={colors.primary} />
               </View>
               <View style={styles.sheetOptionText}>
-                <Text style={styles.sheetOptionLabel}>Document</Text>
-                <Text style={styles.sheetOptionHint}>Share a file up to 6 MB</Text>
+                <Text style={styles.sheetOptionLabel}>{t('chat.document')}</Text>
+                <Text style={styles.sheetOptionHint}>{t('chat.documentSub')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setAttachSheet(false)}>
-              <Text style={styles.sheetCancelText}>Cancel</Text>
+              <Text style={styles.sheetCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -796,8 +799,8 @@ const GroupDetail = ({ route, navigation }) => {
                   <Ionicons name="people" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.sheetOptionText}>
-                  <Text style={styles.sheetOptionLabel}>View members</Text>
-                  <Text style={styles.sheetOptionHint}>See everyone in this group</Text>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.viewMembers')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.seeEveryone')}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
@@ -809,8 +812,8 @@ const GroupDetail = ({ route, navigation }) => {
                   <Ionicons name="person-add" size={22} color={colors.accent} />
                 </View>
                 <View style={styles.sheetOptionText}>
-                  <Text style={styles.sheetOptionLabel}>Add members</Text>
-                  <Text style={styles.sheetOptionHint}>Search people or share an invite link</Text>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.addMembers')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.searchOrInvite')}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
@@ -822,8 +825,8 @@ const GroupDetail = ({ route, navigation }) => {
                   <Ionicons name="mail-unread" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.sheetOptionText}>
-                  <Text style={styles.sheetOptionLabel}>Join requests</Text>
-                  <Text style={styles.sheetOptionHint}>Review people who want to join</Text>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.joinRequests')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.reviewRequests')}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
@@ -835,7 +838,7 @@ const GroupDetail = ({ route, navigation }) => {
                   <Ionicons name={adminsOnly ? 'lock-closed' : 'lock-open'} size={22} color={colors.primary} />
                 </View>
                 <View style={styles.sheetOptionText}>
-                  <Text style={styles.sheetOptionLabel}>Only admins can message</Text>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.onlyAdminsMessage')}</Text>
                   <Text style={styles.sheetOptionHint}>{adminsOnly ? 'On — members can’t send messages' : 'Off — everyone can send messages'}</Text>
                 </View>
                 <View style={[styles.toggle, adminsOnly && styles.toggleOn]}>
@@ -850,14 +853,14 @@ const GroupDetail = ({ route, navigation }) => {
                   <Ionicons name="exit-outline" size={22} color={colors.error} />
                 </View>
                 <View style={styles.sheetOptionText}>
-                  <Text style={[styles.sheetOptionLabel, { color: colors.error }]}>Leave group</Text>
-                  <Text style={styles.sheetOptionHint}>You'll stop receiving messages</Text>
+                  <Text style={[styles.sheetOptionLabel, { color: colors.error }]}>{t('group.detail.leaveGroup')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.leaveWarning')}</Text>
                 </View>
               </TouchableOpacity>
             )}
 
             <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setMenuSheet(false)}>
-              <Text style={styles.sheetCancelText}>Cancel</Text>
+              <Text style={styles.sheetCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -869,13 +872,13 @@ const GroupDetail = ({ route, navigation }) => {
           <Pressable style={styles.confirmCard}>
             <View style={styles.confirmIcon}><Ionicons name="exit-outline" size={28} color={colors.error} /></View>
             <Text style={styles.confirmTitle} numberOfLines={2}>Leave “{group?.name || 'this group'}”?</Text>
-            <Text style={styles.confirmText}>You'll no longer receive its messages. You can request to join again anytime.</Text>
+            <Text style={styles.confirmText}>{t('group.detail.leaveBody')}</Text>
             <View style={styles.confirmActions}>
               <TouchableOpacity style={[styles.confirmBtn, styles.confirmCancelBtn]} activeOpacity={0.85} onPress={() => setLeaveConfirm(false)}>
-                <Text style={styles.confirmCancelText}>Stay</Text>
+                <Text style={styles.confirmCancelText}>{t('common.stay')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.confirmBtn, styles.confirmLeaveBtn]} activeOpacity={0.85} onPress={doLeave}>
-                <Text style={styles.confirmLeaveText}>Leave</Text>
+                <Text style={styles.confirmLeaveText}>{t('common.leave')}</Text>
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -899,12 +902,12 @@ const GroupDetail = ({ route, navigation }) => {
             </View>
             <TouchableOpacity style={styles.menuItem} onPress={() => startReply(menuMsg)}>
               <Ionicons name="arrow-undo" size={20} color={colors.textPrimary} />
-              <Text style={styles.menuItemText}>Reply</Text>
+              <Text style={styles.menuItemText}>{t('group.detail.reply')}</Text>
             </TouchableOpacity>
             {canDelete(menuMsg) && (
               <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
                 <Ionicons name="trash-outline" size={20} color={colors.error} />
-                <Text style={[styles.menuItemText, { color: colors.error }]}>Delete</Text>
+                <Text style={[styles.menuItemText, { color: colors.error }]}>{t('common.delete')}</Text>
               </TouchableOpacity>
             )}
           </Pressable>

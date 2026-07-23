@@ -9,8 +9,10 @@ import {
   fetchRoles, fetchCapabilities, createRole, updateRole, deleteRole,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const AdminRoles = () => {
+  const { t } = useI18n();
   const [roles, setRoles] = useState([]);
   const [caps, setCaps] = useState([]);          // [{key,label}]
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ const AdminRoles = () => {
 
   const save = async () => {
     const payload = { name: name.trim(), capabilities: [...selectedCaps] };
-    if (!payload.name) { Alert.alert('Role', 'Please enter a role name.'); return; }
+    if (!payload.name) { Alert.alert(t('admin.roleTitle'), t('admin.roleNameRequired')); return; }
     setSaving(true);
     try {
       if (editing.id) await updateRole(editing.id, payload);
@@ -56,14 +58,14 @@ const AdminRoles = () => {
       close();
       load();
     } catch (e) {
-      Alert.alert('Role', e?.response?.data?.name?.[0] || e?.response?.data?.error || 'Could not save the role.');
+      Alert.alert(t('admin.roleTitle'), e?.response?.data?.name?.[0] || e?.response?.data?.error || t('admin.roleSaveFailed'));
     } finally {
       setSaving(false);
     }
   };
 
   const confirmDelete = (role) =>
-    Alert.alert('Delete role', `Delete “${role.name}”? Staff with this role lose its access.`, [
+    Alert.alert(t('admin.deleteRoleTitle'), t('admin.deleteRoleConfirm', { name: role.name }), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => { await deleteRole(role.id); load(); } },
     ]);
@@ -76,7 +78,7 @@ const AdminRoles = () => {
       </View>
       <View style={styles.capWrap}>
         {(item.capabilities || []).length === 0
-          ? <Text style={styles.noCaps}>No capabilities</Text>
+          ? <Text style={styles.noCaps}>{t('admin.noCapabilities')}</Text>
           : item.capabilities.map((k) => (
             <View key={k} style={styles.capChip}><Text style={styles.capChipText}>{capLabel(k)}</Text></View>
           ))}
@@ -84,11 +86,11 @@ const AdminRoles = () => {
       <View style={styles.cardActions}>
         <TouchableOpacity style={styles.linkBtn} onPress={() => openEdit(item)}>
           <Ionicons name="create-outline" size={16} color={colors.accent} />
-          <Text style={styles.linkText}>Edit</Text>
+          <Text style={styles.linkText}>{t('profile.edit')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.linkBtn} onPress={() => confirmDelete(item)}>
           <Ionicons name="trash-outline" size={16} color={colors.error} />
-          <Text style={[styles.linkText, { color: colors.error }]}>Delete</Text>
+          <Text style={[styles.linkText, { color: colors.error }]}>{t('common.delete')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -97,10 +99,10 @@ const AdminRoles = () => {
   return (
     <View style={styles.container}>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Roles</Text>
+        <Text style={styles.title}>{t('admin.roles')}</Text>
         <TouchableOpacity style={styles.newBtn} onPress={openNew}>
           <Ionicons name="add" size={18} color="#0A1628" />
-          <Text style={styles.newBtnText}>New role</Text>
+          <Text style={styles.newBtnText}>{t('admin.newRole')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -115,7 +117,7 @@ const AdminRoles = () => {
           showsVerticalScrollIndicator={false}
           onRefresh={load}
           refreshing={loading}
-          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>No roles yet — create one</Text></View>}
+          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{t('admin.noRoles')}</Text></View>}
         />
       )}
 
@@ -127,12 +129,12 @@ const AdminRoles = () => {
             <Text style={styles.sheetTitle}>{editing?.id ? 'Edit role' : 'New role'}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Role name (e.g. Content Moderator)"
+              placeholder={t('admin.rolePlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={name}
               onChangeText={setName}
             />
-            <Text style={styles.capsLabel}>Capabilities</Text>
+            <Text style={styles.capsLabel}>{t('admin.capabilities')}</Text>
             <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
               {caps.map((c) => {
                 const on = selectedCaps.has(c.key);
@@ -147,9 +149,9 @@ const AdminRoles = () => {
               })}
             </ScrollView>
             <View style={styles.sheetActions}>
-              <TouchableOpacity onPress={close} disabled={saving}><Text style={styles.cancel}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity onPress={close} disabled={saving}><Text style={styles.cancel}>{t('common.cancel')}</Text></TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}>
-                {saving ? <ActivityIndicator color="#0A1628" /> : <Text style={styles.saveText}>Save</Text>}
+                {saving ? <ActivityIndicator color="#0A1628" /> : <Text style={styles.saveText}>{t('common.save')}</Text>}
               </TouchableOpacity>
             </View>
           </View>

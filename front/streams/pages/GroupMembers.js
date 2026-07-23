@@ -7,10 +7,13 @@ import { fetchGroupMembers, removeGroupMember, setGroupAdmin } from '../services
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/user-placeholder.png');
 
-const GroupMemberItem = ({ member, isCreator, canManage, isSelf, onPress }) => (
+const GroupMemberItem = ({ member, isCreator, canManage, isSelf, onPress }) => {
+  const { t } = useI18n();
+  return (
   <TouchableOpacity
     style={styles.memberItem}
     activeOpacity={canManage && !isSelf ? 0.7 : 1}
@@ -32,21 +35,23 @@ const GroupMemberItem = ({ member, isCreator, canManage, isSelf, onPress }) => (
     {isCreator ? (
       <View style={[styles.badge, styles.ownerBadge]}>
         <Ionicons name="star" size={11} color="#0A1628" />
-        <Text style={styles.ownerBadgeText}>Owner</Text>
+        <Text style={styles.ownerBadgeText}>{t('common.owner')}</Text>
       </View>
     ) : member.is_admin ? (
       <View style={styles.badge}>
         <Ionicons name="shield-checkmark" size={12} color={colors.accent} />
-        <Text style={styles.badgeText}>Admin</Text>
+        <Text style={styles.badgeText}>{t('common.admin')}</Text>
       </View>
     ) : null}
     {canManage && !isSelf && (
       <Ionicons name="ellipsis-vertical" size={18} color={colors.textMuted} style={{ marginLeft: spacing.xs }} />
     )}
   </TouchableOpacity>
-);
+  );
+};
 
 const GroupMembers = (props) => {
+  const { t } = useI18n();
   // Works both as a navigation screen (route.params) and as an inline modal (props).
   const groupSlug = props.groupSlug ?? props.route?.params?.groupSlug;
   const group = props.group ?? props.route?.params?.group;
@@ -84,11 +89,11 @@ const GroupMembers = (props) => {
       await setGroupAdmin(groupSlug, member.user.id, makeAdmin);
       await load();
     } catch (e) {
-      Alert.alert('Error', e?.response?.data?.error || 'Could not update this member.');
+      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.members.updateFailed'));
     } finally {
       setBusy(false);
     }
-  }, [groupSlug, load]);
+  }, [groupSlug, load, t]);
 
   const doRemove = useCallback(async (member) => {
     setConfirmRemove(null);
@@ -97,11 +102,11 @@ const GroupMembers = (props) => {
       await removeGroupMember(groupSlug, member.user.id);
       await load();
     } catch (e) {
-      Alert.alert('Error', e?.response?.data?.error || 'Could not remove this member.');
+      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.members.removeFailed'));
     } finally {
       setBusy(false);
     }
-  }, [groupSlug, load]);
+  }, [groupSlug, load, t]);
 
   const am = actionMember;
   const amIsCreator = am && am.user?.id === creatorId;
@@ -113,7 +118,7 @@ const GroupMembers = (props) => {
         <SafeAreaView style={styles.safe} edges={['top']}>
           <View style={styles.header}>
             <View style={styles.headerTitleWrap}>
-              <Text style={styles.title}>Members</Text>
+              <Text style={styles.title}>{t('group.members.title')}</Text>
               {!loading && !error && (
                 <Text style={styles.subtitle}>
                   {members.length} {members.length === 1 ? 'person' : 'people'}
@@ -133,7 +138,7 @@ const GroupMembers = (props) => {
               <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
               <Text style={styles.emptyText}>{error}</Text>
               <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); load(); }}>
-                <Text style={styles.retryText}>Retry</Text>
+                <Text style={styles.retryText}>{t('feed.retry')}</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -152,7 +157,7 @@ const GroupMembers = (props) => {
               ListEmptyComponent={
                 <View style={styles.emptyWrap}>
                   <Ionicons name="people-outline" size={48} color={colors.textMuted} />
-                  <Text style={styles.emptyText}>No members yet</Text>
+                  <Text style={styles.emptyText}>{t('group.members.empty')}</Text>
                 </View>
               }
               contentContainerStyle={styles.listContent}
@@ -188,8 +193,8 @@ const GroupMembers = (props) => {
                 <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => changeAdmin(am, true)}>
                   <View style={[styles.sheetIcon, styles.sheetIconPhoto]}><Ionicons name="shield-checkmark" size={22} color={colors.accent} /></View>
                   <View style={styles.sheetOptionText}>
-                    <Text style={styles.sheetOptionLabel}>Make group admin</Text>
-                    <Text style={styles.sheetOptionHint}>Can manage members & settings</Text>
+                    <Text style={styles.sheetOptionLabel}>{t('group.members.makeAdmin')}</Text>
+                    <Text style={styles.sheetOptionHint}>{t('group.members.canManage')}</Text>
                   </View>
                 </TouchableOpacity>
               )}
@@ -198,8 +203,8 @@ const GroupMembers = (props) => {
                 <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => changeAdmin(am, false)}>
                   <View style={[styles.sheetIcon, styles.sheetIconFile]}><Ionicons name="remove-circle-outline" size={22} color={colors.primary} /></View>
                   <View style={styles.sheetOptionText}>
-                    <Text style={styles.sheetOptionLabel}>Dismiss as admin</Text>
-                    <Text style={styles.sheetOptionHint}>Revoke admin privileges</Text>
+                    <Text style={styles.sheetOptionLabel}>{t('group.members.dismissAdmin')}</Text>
+                    <Text style={styles.sheetOptionHint}>{t('group.members.revokeAdmin')}</Text>
                   </View>
                 </TouchableOpacity>
               )}
@@ -208,18 +213,18 @@ const GroupMembers = (props) => {
                 <TouchableOpacity style={[styles.sheetOption, styles.sheetOptionDanger]} activeOpacity={0.85} onPress={() => { const m = am; setActionMember(null); setTimeout(() => setConfirmRemove(m), 220); }}>
                   <View style={[styles.sheetIcon, styles.sheetIconDanger]}><Ionicons name="person-remove-outline" size={22} color={colors.error} /></View>
                   <View style={styles.sheetOptionText}>
-                    <Text style={[styles.sheetOptionLabel, { color: colors.error }]}>Remove from group</Text>
-                    <Text style={styles.sheetOptionHint}>They'll lose access to this chat</Text>
+                    <Text style={[styles.sheetOptionLabel, { color: colors.error }]}>{t('group.members.removeFromGroup')}</Text>
+                    <Text style={styles.sheetOptionHint}>{t('group.members.loseChatAccess')}</Text>
                   </View>
                 </TouchableOpacity>
               )}
 
               {amIsCreator && (
-                <Text style={styles.sheetNote}>The group owner can't be removed or demoted.</Text>
+                <Text style={styles.sheetNote}>{t('group.members.ownerProtected')}</Text>
               )}
 
               <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setActionMember(null)}>
-                <Text style={styles.sheetCancelText}>Cancel</Text>
+                <Text style={styles.sheetCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
             </Pressable>
           </Pressable>
@@ -231,13 +236,13 @@ const GroupMembers = (props) => {
             <Pressable style={styles.confirmCard}>
               <View style={styles.confirmIcon}><Ionicons name="person-remove-outline" size={26} color={colors.error} /></View>
               <Text style={styles.confirmTitle} numberOfLines={2}>Remove {confirmRemove?.user?.username}?</Text>
-              <Text style={styles.confirmText}>They'll be removed from the group and lose access to its messages.</Text>
+              <Text style={styles.confirmText}>{t('group.members.removeBody')}</Text>
               <View style={styles.confirmActions}>
                 <TouchableOpacity style={[styles.confirmBtn, styles.confirmCancelBtn]} activeOpacity={0.85} onPress={() => setConfirmRemove(null)}>
-                  <Text style={styles.confirmCancelText}>Cancel</Text>
+                  <Text style={styles.confirmCancelText}>{t('common.cancel')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.confirmBtn, styles.confirmDangerBtn]} activeOpacity={0.85} onPress={() => doRemove(confirmRemove)}>
-                  <Text style={styles.confirmDangerText}>Remove</Text>
+                  <Text style={styles.confirmDangerText}>{t('common.remove')}</Text>
                 </TouchableOpacity>
               </View>
             </Pressable>

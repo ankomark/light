@@ -11,6 +11,7 @@ import {
   assignReport, addReportNote, bulkReports,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -25,7 +26,8 @@ const FILTERS = [
 const REMOVABLE = new Set(['post', 'comment', 'track']);
 
 const TargetPreview = ({ target }) => {
-  if (!target) return <Text style={styles.targetGone}>Content no longer available</Text>;
+  const { t } = useI18n();
+  if (!target) return <Text style={styles.targetGone}>{t('admin.contentGone')}</Text>;
   const author = target.author;
   return (
     <View style={styles.targetCard}>
@@ -50,6 +52,7 @@ const TargetPreview = ({ target }) => {
 };
 
 const AdminReports = () => {
+  const { t } = useI18n();
   const [filter, setFilter] = useState('pending');
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +105,7 @@ const AdminReports = () => {
       await fn();
       setReports((prev) => prev.filter((r) => r.id !== id));
     } catch {
-      Alert.alert('Error', 'Action failed. Please try again.');
+      Alert.alert(t('common.error'), t('admin.actionFailed'));
     } finally {
       setBusyId(null);
     }
@@ -115,7 +118,7 @@ const AdminReports = () => {
       const updated = await fn();
       setReports((prev) => prev.map((r) => (r.id === id ? updated : r)));
     } catch {
-      Alert.alert('Error', 'Action failed. Please try again.');
+      Alert.alert(t('common.error'), t('admin.actionFailed'));
     } finally {
       setBusyId(null);
     }
@@ -147,7 +150,7 @@ const AdminReports = () => {
       setReports((prev) => prev.filter((r) => !ids.includes(r.id)));
       exitSelect();
     } catch {
-      Alert.alert('Error', 'Bulk action failed.');
+      Alert.alert(t('common.error'), t('admin.bulkFailed'));
     } finally {
       setBulkBusy(false);
     }
@@ -207,15 +210,15 @@ const AdminReports = () => {
             <View style={styles.actions}>
               <TouchableOpacity style={[styles.btn, styles.btnResolve]} onPress={() => act(item.id, () => resolveReport(item.id))}>
                 <Ionicons name="checkmark-circle-outline" size={16} color="#0A1628" />
-                <Text style={styles.btnTextDark}>Resolve</Text>
+                <Text style={styles.btnTextDark}>{t('admin.resolve')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => act(item.id, () => dismissReport(item.id))}>
-                <Text style={styles.btnTextLight}>Dismiss</Text>
+                <Text style={styles.btnTextLight}>{t('admin.dismiss')}</Text>
               </TouchableOpacity>
               {canRemove && (
                 <TouchableOpacity style={[styles.btn, styles.btnRemove]} onPress={() => confirmRemove(item)}>
                   <Ionicons name="trash-outline" size={16} color={colors.white} />
-                  <Text style={styles.btnTextLight}>Remove</Text>
+                  <Text style={styles.btnTextLight}>{t('common.remove')}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -238,7 +241,7 @@ const AdminReports = () => {
   return (
     <View style={styles.container}>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Reports</Text>
+        <Text style={styles.title}>{t('admin.reports')}</Text>
         <TouchableOpacity onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
           <Text style={styles.selectToggle}>{selectMode ? 'Cancel' : 'Select'}</Text>
         </TouchableOpacity>
@@ -287,10 +290,10 @@ const AdminReports = () => {
           ) : (
             <View style={styles.bulkBtns}>
               <TouchableOpacity style={[styles.bulkBtn, styles.bulkResolve]} onPress={() => runBulk('resolve')}>
-                <Text style={styles.btnTextDark}>Resolve</Text>
+                <Text style={styles.btnTextDark}>{t('admin.resolve')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.bulkBtn, styles.bulkDismiss]} onPress={() => runBulk('dismiss')}>
-                <Text style={styles.btnTextLight}>Dismiss</Text>
+                <Text style={styles.btnTextLight}>{t('admin.dismiss')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -301,10 +304,10 @@ const AdminReports = () => {
       <Modal visible={!!noteFor} transparent animationType="fade" onRequestClose={() => setNoteFor(null)}>
         <View style={styles.noteBackdrop}>
           <View style={styles.noteCard}>
-            <Text style={styles.noteTitle}>Internal note</Text>
+            <Text style={styles.noteTitle}>{t('admin.internalNote')}</Text>
             <TextInput
               style={styles.noteInput}
-              placeholder="Visible to moderators only…"
+              placeholder={t('admin.internalNotePlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={noteText}
               onChangeText={setNoteText}
@@ -312,8 +315,8 @@ const AdminReports = () => {
               autoFocus
             />
             <View style={styles.noteActions}>
-              <TouchableOpacity onPress={() => setNoteFor(null)}><Text style={styles.noteCancel}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.noteSave} onPress={saveNote}><Text style={styles.noteSaveText}>Save</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setNoteFor(null)}><Text style={styles.noteCancel}>{t('common.cancel')}</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.noteSave} onPress={saveNote}><Text style={styles.noteSaveText}>{t('common.save')}</Text></TouchableOpacity>
             </View>
           </View>
         </View>

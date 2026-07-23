@@ -6,8 +6,10 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { apiRequest } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const EditTrackScreen = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { track } = useRoute().params;
 
@@ -18,7 +20,7 @@ const EditTrackScreen = () => {
 
   const handleUpdate = async () => {
     if (!title.trim()) {
-      Alert.alert('Required', 'Track title is required');
+      Alert.alert(t('track.edit.requiredTitle'), t('track.edit.requiredBody'));
       return;
     }
     setSaving(true);
@@ -32,7 +34,7 @@ const EditTrackScreen = () => {
       // TrackList reloads on focus, so just go back.
       navigation.goBack();
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to update track. Please try again.');
+      Alert.alert(t('common.error'), error.message || t('track.edit.updateFailed'));
     } finally {
       setSaving(false);
     }
@@ -45,34 +47,34 @@ const EditTrackScreen = () => {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 85 : 0}
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.header}>Edit Track</Text>
+        <Text style={styles.header}>{t('track.edit.title')}</Text>
 
-        <Text style={styles.label}>Title</Text>
+        <Text style={styles.label}>{t('track.edit.titleLabel')}</Text>
         <TextInput
           style={styles.input}
           value={title}
           onChangeText={setTitle}
-          placeholder="Track title"
+          placeholder={t('track.edit.titlePlaceholder')}
           placeholderTextColor={colors.placeholder}
           maxLength={100}
         />
 
-        <Text style={styles.label}>Album</Text>
+        <Text style={styles.label}>{t('track.album')}</Text>
         <TextInput
           style={styles.input}
           value={album}
           onChangeText={setAlbum}
-          placeholder="Album name"
+          placeholder={t('track.edit.albumPlaceholder')}
           placeholderTextColor={colors.placeholder}
           maxLength={100}
         />
 
-        <Text style={styles.label}>Lyrics</Text>
+        <Text style={styles.label}>{t('track.lyrics')}</Text>
         <TextInput
           style={[styles.input, styles.lyrics]}
           value={lyrics}
           onChangeText={setLyrics}
-          placeholder="Add lyrics..."
+          placeholder={t('track.edit.lyricsPlaceholder')}
           placeholderTextColor={colors.placeholder}
           multiline
           textAlignVertical="top"
@@ -85,11 +87,11 @@ const EditTrackScreen = () => {
           disabled={saving}
           activeOpacity={0.85}
         >
-          {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Save Changes</Text>}
+          {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>{t('track.edit.save')}</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.cancel} onPress={() => navigation.goBack()} disabled={saving}>
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>{t('common.cancel')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -17,10 +17,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchAudiostudios, createAudiostudio, updateAudiostudio, deleteAudiostudio } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { useI18n } from '../context/I18nContext';
 
 const { height } = Dimensions.get('window');
 
 const Audiostudios = () => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const [audiostudios, setAudiostudios] = useState([]);
   const [filteredAudiostudios, setFilteredAudiostudios] = useState([]);
@@ -47,14 +49,14 @@ const Audiostudios = () => {
         setAudiostudios(response);
         setFilteredAudiostudios(response);
       } catch (error) {
-        Alert.alert('Error', 'Failed to load audio studios');
+        Alert.alert(t('common.error'), t('audio.loadFailed'));
       } finally {
         setIsLoading(false);
       }
     };
 
     loadAudiostudios();
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     let results = audiostudios;
@@ -85,7 +87,7 @@ const Audiostudios = () => {
 
   const handleAddAudiostudio = async () => {
     if (!newAudiostudio.name.trim() || !newAudiostudio.location.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields (Name, Location)');
+      Alert.alert(t('common.error'), t('audio.requiredFields'));
       return;
     }
 
@@ -111,10 +113,10 @@ const Audiostudios = () => {
 
       if (editingAudiostudio) {
         await updateAudiostudio(editingAudiostudio.id, formData);
-        Alert.alert('Success', 'Audio studio updated successfully!');
+        Alert.alert(t('market.success'), t('audio.updatedOk'));
       } else {
         await createAudiostudio(formData);
-        Alert.alert('Success', 'Audio studio added successfully!');
+        Alert.alert(t('market.success'), t('audio.addedOk'));
       }
 
       const response = await fetchAudiostudios();
@@ -134,7 +136,7 @@ const Audiostudios = () => {
       setEditingAudiostudio(null);
       setShowAddForm(false);
     } catch (error) {
-      Alert.alert('Error', error.message || 'You can only edit audio studios you created');
+      Alert.alert(t('common.error'), error.message || t('audio.editOwnOnly'));
     }
   };
 
@@ -170,9 +172,9 @@ const Audiostudios = () => {
               const response = await fetchAudiostudios();
               setAudiostudios(response);
               setFilteredAudiostudios(response);
-              Alert.alert('Success', 'Audio studio deleted successfully!');
+              Alert.alert(t('market.success'), t('audio.deletedOk'));
             } catch (error) {
-              Alert.alert('Error', 'You can only delete audio studios you created');
+              Alert.alert(t('common.error'), t('audio.deleteOwnOnly'));
             }
           },
           style: 'destructive',
@@ -309,21 +311,21 @@ const Audiostudios = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="Studio Name *"
+              placeholder={t('audio.namePlaceholder')}
               value={newAudiostudio.name}
               onChangeText={text => setNewAudiostudio({...newAudiostudio, name: text})}
             />
             
             <TextInput
               style={styles.input}
-              placeholder="Location *"
+              placeholder={t('audio.locationPlaceholder')}
               value={newAudiostudio.location}
               onChangeText={text => setNewAudiostudio({...newAudiostudio, location: text})}
             />
             
             <TextInput
               style={styles.input}
-              placeholder="Phone Number"
+              placeholder={t('audio.phonePlaceholder')}
               value={newAudiostudio.contact_phone}
               onChangeText={text => setNewAudiostudio({...newAudiostudio, contact_phone: text})}
               keyboardType="phone-pad"
@@ -331,7 +333,7 @@ const Audiostudios = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="Email"
+              placeholder={t('audio.emailPlaceholder')}
               value={newAudiostudio.contact_email}
               onChangeText={text => setNewAudiostudio({...newAudiostudio, contact_email: text})}
               keyboardType="email-address"
@@ -339,14 +341,14 @@ const Audiostudios = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="Services Offered"
+              placeholder={t('audio.servicesPlaceholder')}
               value={newAudiostudio.services}
               onChangeText={text => setNewAudiostudio({...newAudiostudio, services: text})}
             />
             
             <TextInput
               style={styles.input}
-              placeholder="Equipment Available"
+              placeholder={t('audio.equipmentPlaceholder')}
               value={newAudiostudio.equipment}
               onChangeText={text => setNewAudiostudio({...newAudiostudio, equipment: text})}
               multiline
@@ -354,7 +356,7 @@ const Audiostudios = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="Hourly Rate (USD)"
+              placeholder={t('audio.ratePlaceholder')}
               value={newAudiostudio.hourly_rate}
               onChangeText={text => setNewAudiostudio({...newAudiostudio, hourly_rate: text})}
               keyboardType="numeric"
@@ -401,14 +403,14 @@ const Audiostudios = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Audio Recording Studios</Text>
+      <Text style={styles.title}>{t('audio.title')}</Text>
       
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
           <MaterialIcons name="search" size={20} color="#555" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search audio studios..."
+            placeholder={t('audio.searchPlaceholder')}
             value={searchTerm}
             onChangeText={setSearchTerm}
           />
@@ -426,7 +428,7 @@ const Audiostudios = () => {
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No audio studios found matching your criteria</Text>
+          <Text style={styles.emptyText}>{t('audio.none')}</Text>
         }
       />
 
@@ -436,7 +438,7 @@ const Audiostudios = () => {
           onPress={() => setShowAddForm(true)}
         >
           <MaterialIcons name="add" size={24} color="white" />
-          <Text style={styles.buttonText}>Add Audio Studio</Text>
+          <Text style={styles.buttonText}>{t('audio.add')}</Text>
         </TouchableOpacity>
       )}
 

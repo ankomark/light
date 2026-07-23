@@ -118,7 +118,7 @@ const EditProduct = () => {
   };
 
   loadData();
-}, [slug, currentUser]);
+}, [slug, currentUser, t]);
 
 
   const handleChange = (name, value) => {

@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../context/useAuth';
 import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const GENRES = [
   { key: 'gospel', label: 'Gospel' },
@@ -35,10 +36,10 @@ const EMPTY = {
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 // Pick an image, compress it, upload to R2, and return the public URL.
-async function pickAndUpload(aspect, width, type) {
+async function pickAndUpload(aspect, width, type, t) {
   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status !== 'granted') {
-    Alert.alert('Permission required', 'Please enable photo library access.');
+    Alert.alert(t('chat.permissionRequired'), t('dir.permissionPhotos'));
     return null;
   }
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -56,12 +57,13 @@ async function pickAndUpload(aspect, width, type) {
     );
     return uploaded.url;
   } catch (e) {
-    Alert.alert('Upload failed', e?.message ?? 'Could not upload the image.');
+    Alert.alert(t('common.uploadFailedTitle'), e?.message ?? t('common.uploadImageFailed'));
     return null;
   }
 }
 
 const Choirs = ({ navigation }) => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const [choirs, setChoirs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -89,12 +91,12 @@ const Choirs = ({ navigation }) => {
       setNextUrl(res?.next ?? null);
     } catch (err) {
       console.error('fetchChoirs error:', err);
-      Alert.alert('Error', 'Failed to load choirs');
+      Alert.alert(t('common.error'), t('choirs.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   // Infinite scroll: append the next page of choirs, deduped.
   const loadMore = useCallback(async () => {
@@ -149,11 +151,11 @@ const Choirs = ({ navigation }) => {
 
   const submit = async () => {
     if (!form.name.trim() || !form.location.trim()) {
-      Alert.alert('Missing info', 'Choir name and location are required.');
+      Alert.alert(t('dir.missingInfo'), t('choirs.missingInfo'));
       return;
     }
     if (form.founded_date && !/^\d{4}-\d{2}-\d{2}$/.test(form.founded_date.trim())) {
-      Alert.alert('Invalid date', 'Founded date must be in YYYY-MM-DD format.');
+      Alert.alert(t('choirs.invalidDateTitle'), t('choirs.invalidDate'));
       return;
     }
     const payload = {
@@ -186,14 +188,14 @@ const Choirs = ({ navigation }) => {
       closeForm();
     } catch (err) {
       const msg = err?.response?.data?.error || 'Could not save the choir. Please try again.';
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setSaving(false);
     }
   };
 
   const onDelete = (c) => {
-    Alert.alert('Delete choir', `Delete “${c.name}”?`, [
+    Alert.alert(t('choirs.deleteTitle'), t('common.deleteConfirm', { name: c.name }), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
@@ -201,7 +203,7 @@ const Choirs = ({ navigation }) => {
           const prev = choirs;
           setChoirs((cur) => cur.filter((x) => x.id !== c.id));
           try { await deleteChoir(c.id); }
-          catch { setChoirs(prev); Alert.alert('Error', 'Could not delete this choir.'); }
+          catch { setChoirs(prev); Alert.alert(t('common.error'), t('choirs.deleteFailed')); }
         },
       },
     ]);
@@ -212,19 +214,19 @@ const Choirs = ({ navigation }) => {
       const res = await toggleChoirActive(c.id);
       setChoirs((prev) => prev.map((x) => (x.id === c.id ? { ...x, is_active: res.is_active } : x)));
     } catch {
-      Alert.alert('Error', 'Could not update status.');
+      Alert.alert(t('common.error'), t('choirs.statusFailed'));
     }
   };
 
   const saveMembers = async (c) => {
     const n = parseInt(membersDraft, 10);
-    if (isNaN(n) || n < 0) { Alert.alert('Invalid', 'Enter a valid number.'); return; }
+    if (isNaN(n) || n < 0) { Alert.alert(t('dir.invalidTitle'), t('dir.invalidNumber')); return; }
     try {
       const res = await updateChoirMembers(c.id, n);
       setChoirs((prev) => prev.map((x) => (x.id === c.id ? { ...x, members_count: res.members_count } : x)));
       setEditMembersId(null);
     } catch {
-      Alert.alert('Error', 'Could not update members count.');
+      Alert.alert(t('common.error'), t('choirs.membersFailed'));
     }
   };
 
@@ -289,11 +291,11 @@ const Choirs = ({ navigation }) => {
         {item.youtube_link ? (
           <TouchableOpacity
             style={styles.youtubeBtn}
-            onPress={() => Linking.openURL(item.youtube_link).catch(() => Alert.alert('Error', 'Could not open link.'))}
+            onPress={() => Linking.openURL(item.youtube_link).catch(() => Alert.alert(t('common.error'), t('dir.openLinkFailed')))}
             activeOpacity={0.85}
           >
             <Ionicons name="logo-youtube" size={18} color="#FF0000" />
-            <Text style={styles.youtubeText}>YouTube channel</Text>
+            <Text style={styles.youtubeText}>{t('choirs.youtubeChannel')}</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -304,7 +306,7 @@ const Choirs = ({ navigation }) => {
           activeOpacity={0.9}
         >
           <Ionicons name="chatbubbles" size={18} color="#0A1628" />
-          <Text style={styles.communityText}>Open community</Text>
+          <Text style={styles.communityText}>{t('dir.openCommunity')}</Text>
           <Ionicons name="chevron-forward" size={16} color="#0A1628" style={{ marginLeft: 'auto' }} />
         </TouchableOpacity>
 
@@ -318,7 +320,7 @@ const Choirs = ({ navigation }) => {
                   value={membersDraft}
                   onChangeText={setMembersDraft}
                   keyboardType="numeric"
-                  placeholder="Members"
+                  placeholder={t('choirs.members')}
                   placeholderTextColor={colors.placeholder}
                   autoFocus
                 />
@@ -335,7 +337,7 @@ const Choirs = ({ navigation }) => {
                 onPress={() => { setEditMembersId(item.id); setMembersDraft(String(item.members_count || 0)); }}
               >
                 <MaterialIcons name="groups" size={16} color={colors.primary} />
-                <Text style={styles.ctrlText}>Members</Text>
+                <Text style={styles.ctrlText}>{t('choirs.members')}</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity style={styles.ctrlBtn} onPress={() => onToggleActive(item)}>
@@ -356,15 +358,15 @@ const Choirs = ({ navigation }) => {
     <View style={styles.root}>
       <View style={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.title}>Choirs</Text>
-        <Text style={styles.subtitle}>Discover Adventist choirs</Text>
+        <Text style={styles.title}>{t('choirs.title')}</Text>
+        <Text style={styles.subtitle}>{t('choirs.subtitle')}</Text>
       </View>
 
       <View style={styles.searchBar}>
         <Ionicons name="search" size={18} color={colors.placeholder} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search choirs…"
+          placeholder={t('choirs.searchPlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={search}
           onChangeText={setSearch}
@@ -415,7 +417,7 @@ const Choirs = ({ navigation }) => {
         ListEmptyComponent={
           <View style={styles.empty}>
             <MaterialIcons name="library-music" size={46} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No choirs found</Text>
+            <Text style={styles.emptyText}>{t('choirs.none')}</Text>
           </View>
         }
       />
@@ -423,7 +425,7 @@ const Choirs = ({ navigation }) => {
       {currentUser && (
         <TouchableOpacity style={styles.fab} onPress={openCreate} activeOpacity={0.9}>
           <Ionicons name="add" size={20} color={colors.white} />
-          <Text style={styles.fabText}>Add Choir</Text>
+          <Text style={styles.fabText}>{t('choirs.add')}</Text>
         </TouchableOpacity>
       )}
 
@@ -448,33 +450,33 @@ const Choirs = ({ navigation }) => {
             extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
           >
             {/* Cover + profile pickers */}
-            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover'); if (u) setCoverImage(u); }} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover', t); if (u) setCoverImage(u); }} activeOpacity={0.85}>
               {coverImage ? (
                 <Image source={{ uri: coverImage }} style={styles.coverPreview} contentFit="cover" transition={150} />
               ) : (
                 <View style={styles.coverPlaceholder}>
                   <Ionicons name="image-outline" size={26} color={colors.textMuted} />
-                  <Text style={styles.pickerHint}>Add cover image</Text>
+                  <Text style={styles.pickerHint}>{t('dir.addCover')}</Text>
                 </View>
               )}
             </TouchableOpacity>
 
             <View style={styles.profileRow}>
-              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'profile-image'); if (u) setProfileImage(u); }} activeOpacity={0.85}>
+              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'profile-image', t); if (u) setProfileImage(u); }} activeOpacity={0.85}>
                 {profileImage ? (
                   <Image source={{ uri: profileImage }} style={styles.profilePreview} contentFit="cover" transition={150} />
                 ) : (
                   <Ionicons name="camera-outline" size={24} color={colors.textMuted} />
                 )}
               </TouchableOpacity>
-              <Text style={styles.profileHint}>Choir logo / photo (optional)</Text>
+              <Text style={styles.profileHint}>{t('choirs.logo')}</Text>
             </View>
 
-            <Field label="Choir name *" value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder="e.g. Voices of Hope" />
-            <Field label="Description" value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder="Tell people about your choir" multiline />
-            <Field label="Location *" value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder="City, country" />
+            <Field label="Choir name *" value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder={t('choirs.namePlaceholder')} />
+            <Field label="Description" value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder={t('choirs.aboutPlaceholder')} multiline />
+            <Field label="Location *" value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder={t('dir.cityCountry')} />
 
-            <Text style={styles.fieldLabel}>Genre</Text>
+            <Text style={styles.fieldLabel}>{t('choirs.genre')}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.genreRow}>
               {GENRES.map((g) => {
                 const active = form.genre === g.key;
@@ -486,17 +488,17 @@ const Choirs = ({ navigation }) => {
               })}
             </ScrollView>
 
-            <Field label="Contact phone" value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder="+254…" keyboardType="phone-pad" />
-            <Field label="Contact email" value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder="choir@email.com" keyboardType="email-address" />
-            <Field label="YouTube link" value={form.youtube_link} onChange={(t) => setForm({ ...form, youtube_link: t })} placeholder="https://youtube.com/…" keyboardType="url" />
-            <Field label="Founded date" value={form.founded_date} onChange={(t) => setForm({ ...form, founded_date: t })} placeholder="YYYY-MM-DD" />
+            <Field label="Contact phone" value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
+            <Field label="Contact email" value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder={t('choirs.emailPlaceholder')} keyboardType="email-address" />
+            <Field label="YouTube link" value={form.youtube_link} onChange={(t) => setForm({ ...form, youtube_link: t })} placeholder={t('dir.youtubePlaceholder')} keyboardType="url" />
+            <Field label="Founded date" value={form.founded_date} onChange={(t) => setForm({ ...form, founded_date: t })} placeholder={t('choirs.datePlaceholder')} />
 
             <View style={{ height: spacing.xl }} />
           </KeyboardAwareScrollView>
 
           <View style={styles.saveBar}>
             <TouchableOpacity style={[styles.saveBtn, styles.cancelBtn]} onPress={closeForm} disabled={saving}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
+              <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={submit} disabled={saving}>
               {saving ? <ActivityIndicator color={colors.white} /> : (

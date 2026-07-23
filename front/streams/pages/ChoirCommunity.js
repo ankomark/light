@@ -36,6 +36,7 @@ import {
   searchChoirUsers, addChoirMember, setChoirMemberRole, setChoirPostingPolicy,
 } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const MAX_ATTACH_BYTES = 8 * 1024 * 1024; // 8MB cap on a single attachment
@@ -64,6 +65,7 @@ const previewOf = (m) =>
  * inverted FlatList keeps its vertical scroll.
  */
 const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry }) => {
+  const { t } = useI18n();
   const tx = useRef(new Animated.Value(0)).current;
   const armed = useRef(false); // crossed the trigger threshold this gesture
 
@@ -162,7 +164,7 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
                   failed ? (
                     <View style={styles.statusWrap}>
                       <Ionicons name="alert-circle" size={13} color={colors.error} />
-                      <Text style={styles.retryText}>Tap to retry</Text>
+                      <Text style={styles.retryText}>{t('community.tapToRetry')}</Text>
                     </View>
                   ) : sending ? (
                     <Ionicons name="time-outline" size={12} color="rgba(255,255,255,0.6)" style={styles.statusIcon} />
@@ -193,6 +195,7 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
 };
 
 const ChoirCommunity = ({ navigation, route }) => {
+  const { t } = useI18n();
   const choir = route.params?.choir || {};
   const choirId = route.params?.choirId || choir.id;
   const insets = useSafeAreaInsets();
@@ -417,7 +420,7 @@ const ChoirCommunity = ({ navigation, route }) => {
 
   const tooBig = (bytes) => {
     if (bytes && bytes > MAX_ATTACH_BYTES) {
-      Alert.alert('Too large', 'Please pick a file under 8 MB.');
+      Alert.alert(t('community.tooLargeTitle'), t('community.tooLargeBody'));
       return true;
     }
     return false;
@@ -426,7 +429,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   const attachImage = async () => {
     setShowAttach(false);
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Enable photo access to share images.'); return; }
+    if (!perm.granted) { Alert.alert(t('community.permissionNeeded'), t('community.permissionPhotos')); return; }
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8,
     });
@@ -457,12 +460,12 @@ const ChoirCommunity = ({ navigation, route }) => {
   const startRecording = async () => {
     try {
       const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission needed', 'Enable microphone access to record.'); return; }
+      if (!perm.granted) { Alert.alert(t('community.permissionNeeded'), t('community.permissionMic')); return; }
       await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording: rec } = await createRecording(VOICE_NOTE_RECORDING_OPTIONS);
       recordingRef.current = rec;
       setRecording(true);
-    } catch { Alert.alert('Choir', 'Could not start recording.'); }
+    } catch { Alert.alert(t('community.choir'), t('community.startRecordingFailed')); }
   };
 
   const stopRecording = async (cancel = false) => {
@@ -480,7 +483,7 @@ const ChoirCommunity = ({ navigation, route }) => {
         file_name: 'voice-note.m4a', duration: (st?.durationMillis || 0) / 1000,
         mimeType: 'audio/m4a',
       });
-    } catch { Alert.alert('Choir', 'Could not save the recording.'); }
+    } catch { Alert.alert(t('community.choir'), t('community.saveRecordingFailed')); }
   };
 
 
@@ -522,7 +525,7 @@ const ChoirCommunity = ({ navigation, route }) => {
           sound.setPositionAsync(0).catch(() => {}); // rewind so the next tap plays from the start
         }
       });
-    } catch { Alert.alert('Choir', 'Could not play this audio.'); }
+    } catch { Alert.alert(t('community.choir'), t('community.playAudioFailed')); }
   };
 
   // Open/share a document (or any non-image file, incl. a picture sent "as
@@ -534,12 +537,12 @@ const ChoirCommunity = ({ navigation, route }) => {
     try {
       if (isData(att)) {
         const m = /^data:(.*?);base64,(.*)$/.exec(att);
-        if (!m) { Alert.alert('Choir', 'This file is unavailable.'); return; }
+        if (!m) { Alert.alert(t('community.choir'), t('community.fileUnavailable')); return; }
         if ((m[1] || '').startsWith('image/')) { setViewerUri(att); return; }
         const path = `${FileSystem.cacheDirectory}${safeName}`;
         await FileSystem.writeAsStringAsync(path, m[2], { encoding: FileSystem.EncodingType.Base64 });
         if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path, { mimeType: m[1] || undefined });
-        else Alert.alert('Saved', `Saved as ${msg.file_name || 'file'}.`);
+        else Alert.alert(t('chat.savedTitle'), t('common.savedAs', { name: msg.file_name || 'file' }));
         return;
       }
       if (att.startsWith('http')) {
@@ -547,9 +550,9 @@ const ChoirCommunity = ({ navigation, route }) => {
         const path = `${FileSystem.cacheDirectory}${safeName}`;
         const dl = await FileSystem.downloadAsync(att, path);
         if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(dl.uri);
-        else Alert.alert('Saved', `Saved as ${msg.file_name || 'file'}.`);
+        else Alert.alert(t('chat.savedTitle'), t('common.savedAs', { name: msg.file_name || 'file' }));
       }
-    } catch { Alert.alert('Choir', 'Could not open this file.'); }
+    } catch { Alert.alert(t('community.choir'), t('community.openFileFailed')); }
   };
 
   // Long-press opens an action menu (react / reply / delete).
@@ -571,7 +574,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   const confirmDelete = (m) => {
     setMenuMsg(null);
     if (!canModerate(m)) return;
-    Alert.alert('Message', 'Delete this message?', [
+    Alert.alert(t('group.detail.deleteMessageTitle'), t('group.detail.deleteMessageBody'), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try { await deleteChoirMessage(choirId, m.id); setMessages((p) => p.filter((x) => x.id !== m.id)); } catch {}
@@ -595,7 +598,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       await requestJoinChoir(choirId);
       setCommunity((c) => ({ ...c, has_pending_request: true }));
     } catch (e) {
-      Alert.alert('Choir', e?.response?.data?.error || 'Could not send your request.');
+      Alert.alert(t('community.choir'), e?.response?.data?.error || t('community.requestFailed'));
     }
   };
 
@@ -618,7 +621,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     try { await rejectChoirRequest(choirId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); } catch {}
   };
   const remove = (m) => {
-    Alert.alert('Remove', `Remove @${m.user?.username} from the community?`, [
+    Alert.alert(t('community.removeTitle'), t('community.removeConfirm', { name: m.user?.username }), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         try { await removeChoirMember(choirId, m.user.id); setMembers((p) => p.filter((x) => x.id !== m.id)); } catch {}
@@ -632,7 +635,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     setMembers((p) => p.map((x) => (x.id === m.id ? { ...x, role: nextRole } : x)));
     setChoirMemberRole(choirId, m.user.id, nextRole).catch(() => {
       setMembers((p) => p.map((x) => (x.id === m.id ? { ...x, role: m.role } : x)));
-      Alert.alert('Choir', 'Could not update this role.');
+      Alert.alert(t('community.choir'), t('community.roleFailed'));
     });
   };
 
@@ -644,7 +647,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       await setChoirPostingPolicy(choirId, value);
     } catch {
       setCommunity((c) => ({ ...c, only_admins_can_post: !value }));
-      Alert.alert('Choir', 'Could not change this setting.');
+      Alert.alert(t('community.choir'), t('community.settingFailed'));
     } finally { setPolicyBusy(false); }
   };
 
@@ -666,14 +669,14 @@ const ChoirCommunity = ({ navigation, route }) => {
       fetchChoirMembers(choirId).then(setMembers).catch(() => {});
       setCommunity((c) => ({ ...c, members_count: (c?.members_count || 0) + 1 }));
     } catch (e) {
-      Alert.alert('Choir', e?.response?.data?.error || 'Could not add this person.');
+      Alert.alert(t('community.choir'), e?.response?.data?.error || t('community.addPersonFailed'));
     } finally { setAddBusyId(null); }
   };
   const onLeave = () => {
-    Alert.alert('Leave community', `Leave ${choir.name || 'this choir'}?`, [
+    Alert.alert(t('community.leaveTitle'), t('community.leaveConfirm', { name: choir.name || t('community.thisChoir') }), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
-        try { await leaveChoir(choirId); navigation.goBack(); } catch (e) { Alert.alert('Choir', e?.response?.data?.error || 'Could not leave.'); }
+        try { await leaveChoir(choirId); navigation.goBack(); } catch (e) { Alert.alert(t('community.choir'), e?.response?.data?.error || t('community.leaveFailed')); }
       } },
     ]);
   };
@@ -732,11 +735,11 @@ const ChoirCommunity = ({ navigation, route }) => {
             Become a friend of this choir to join the conversation — chat, share photos, documents and voice notes with members.
           </Text>
           {community?.has_pending_request ? (
-            <View style={styles.pendingPill}><Ionicons name="time-outline" size={16} color={colors.warning} /><Text style={styles.pendingText}>Request pending</Text></View>
+            <View style={styles.pendingPill}><Ionicons name="time-outline" size={16} color={colors.warning} /><Text style={styles.pendingText}>{t('community.requestPending')}</Text></View>
           ) : (
             <TouchableOpacity style={styles.joinBtn} onPress={onRequestJoin} activeOpacity={0.9}>
               <Ionicons name="hand-left-outline" size={18} color="#0A1628" />
-              <Text style={styles.joinBtnText}>Request to join</Text>
+              <Text style={styles.joinBtnText}>{t('community.requestToJoin')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -802,13 +805,13 @@ const ChoirCommunity = ({ navigation, route }) => {
           {!canPost ? (
             <View style={[styles.lockedBar, { paddingBottom: insets.bottom || spacing.sm }]}>
               <Ionicons name="lock-closed" size={15} color={colors.textMuted} />
-              <Text style={styles.lockedBarText}>Only admins can send messages</Text>
+              <Text style={styles.lockedBarText}>{t('community.onlyAdminsSend')}</Text>
             </View>
           ) : recording ? (
             <View style={styles.recordBar}>
               <View style={styles.recDot} />
-              <Text style={styles.recText}>Recording… release to send</Text>
-              <TouchableOpacity onPress={() => stopRecording(true)} style={styles.recCancel}><Text style={styles.recCancelText}>Cancel</Text></TouchableOpacity>
+              <Text style={styles.recText}>{t('community.recording')}</Text>
+              <TouchableOpacity onPress={() => stopRecording(true)} style={styles.recCancel}><Text style={styles.recCancelText}>{t('common.cancel')}</Text></TouchableOpacity>
               <TouchableOpacity onPress={() => stopRecording(false)} style={styles.recSend}><Ionicons name="send" size={18} color="#0A1628" /></TouchableOpacity>
             </View>
           ) : (
@@ -820,7 +823,7 @@ const ChoirCommunity = ({ navigation, route }) => {
                 style={styles.input}
                 value={draft}
                 onChangeText={setDraft}
-                placeholder="Message…"
+                placeholder={t('chat.messagePlaceholder')}
                 placeholderTextColor={colors.placeholder}
                 multiline
               />
@@ -829,7 +832,7 @@ const ChoirCommunity = ({ navigation, route }) => {
                   <Ionicons name="send" size={18} color="#0A1628" />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity onLongPress={startRecording} onPress={() => Alert.alert('Voice note', 'Press and hold the mic to record.')} style={styles.micBtn}>
+                <TouchableOpacity onLongPress={startRecording} onPress={() => Alert.alert(t('community.voiceNoteTitle'), t('community.voiceNoteHint'))} style={styles.micBtn}>
                   <Ionicons name="mic" size={22} color={colors.textPrimary} />
                 </TouchableOpacity>
               )}
@@ -853,11 +856,11 @@ const ChoirCommunity = ({ navigation, route }) => {
               <View>
                 {isAdmin && (
                   <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>Admin controls</Text>
+                    <Text style={styles.sectionLabel}>{t('community.adminControls')}</Text>
                     <View style={styles.policyRow}>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.policyTitle}>Only admins can send messages</Text>
-                        <Text style={styles.policySub}>Members can read but not post.</Text>
+                        <Text style={styles.policyTitle}>{t('community.onlyAdminsSend')}</Text>
+                        <Text style={styles.policySub}>{t('community.readOnly')}</Text>
                       </View>
                       <Switch
                         value={onlyAdmins}
@@ -869,24 +872,24 @@ const ChoirCommunity = ({ navigation, route }) => {
                     </View>
                     <TouchableOpacity style={styles.addBtn} onPress={openAdd} activeOpacity={0.85}>
                       <Ionicons name="person-add" size={18} color="#0A1628" />
-                      <Text style={styles.addBtnText}>Add members</Text>
+                      <Text style={styles.addBtnText}>{t('community.addMembers')}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
                 {isAdmin && requests.length > 0 && (
                   <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>Requests to join</Text>
+                    <Text style={styles.sectionLabel}>{t('community.requestsToJoin')}</Text>
                     {requests.map((r) => (
                       <View key={r.id} style={styles.memberRow}>
                         <Image source={r.user?.profile_picture ? { uri: r.user.profile_picture } : DEFAULT_AVATAR} placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.memberAvatar} />
                         <Text style={styles.memberName} numberOfLines={1}>@{r.user?.username}</Text>
-                        <TouchableOpacity style={[styles.smallBtn, styles.approveBtn]} onPress={() => approve(r)}><Text style={styles.approveText}>Approve</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => reject(r)}><Text style={styles.rejectText}>Decline</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.smallBtn, styles.approveBtn]} onPress={() => approve(r)}><Text style={styles.approveText}>{t('community.approve')}</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => reject(r)}><Text style={styles.rejectText}>{t('community.decline')}</Text></TouchableOpacity>
                       </View>
                     ))}
                   </View>
                 )}
-                <Text style={[styles.sectionLabel, { paddingHorizontal: spacing.md, paddingTop: spacing.md }]}>Members</Text>
+                <Text style={[styles.sectionLabel, { paddingHorizontal: spacing.md, paddingTop: spacing.md }]}>{t('community.members')}</Text>
               </View>
             }
             renderItem={({ item: m }) => {
@@ -909,7 +912,7 @@ const ChoirCommunity = ({ navigation, route }) => {
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => remove(m)}>
-                        <Text style={styles.rejectText}>Remove</Text>
+                        <Text style={styles.rejectText}>{t('common.remove')}</Text>
                       </TouchableOpacity>
                     </>
                   )}
@@ -918,7 +921,7 @@ const ChoirCommunity = ({ navigation, route }) => {
             }}
             ListFooterComponent={
               !isAdmin ? (
-                <TouchableOpacity style={styles.leaveBtn} onPress={onLeave}><Text style={styles.leaveText}>Leave community</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.leaveBtn} onPress={onLeave}><Text style={styles.leaveText}>{t('community.leave')}</Text></TouchableOpacity>
               ) : null
             }
             contentContainerStyle={{ paddingBottom: spacing.xl }}
@@ -931,7 +934,7 @@ const ChoirCommunity = ({ navigation, route }) => {
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.modalBar}>
             <TouchableOpacity onPress={() => setShowAdd(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.textPrimary} /></TouchableOpacity>
-            <Text style={styles.modalTitle}>Add members</Text>
+            <Text style={styles.modalTitle}>{t('community.addMembers')}</Text>
             <View style={{ width: 24 }} />
           </View>
           <View style={styles.searchWrap}>
@@ -940,7 +943,7 @@ const ChoirCommunity = ({ navigation, route }) => {
               style={styles.searchInput}
               value={addQuery}
               onChangeText={runSearch}
-              placeholder="Search by username…"
+              placeholder={t('community.searchPlaceholder')}
               placeholderTextColor={colors.placeholder}
               autoFocus
               autoCapitalize="none"
@@ -988,12 +991,12 @@ const ChoirCommunity = ({ navigation, route }) => {
             </View>
             <TouchableOpacity style={styles.menuItem} onPress={() => startReply(menuMsg)}>
               <Ionicons name="arrow-undo" size={20} color={colors.textPrimary} />
-              <Text style={styles.menuItemText}>Reply</Text>
+              <Text style={styles.menuItemText}>{t('community.reply')}</Text>
             </TouchableOpacity>
             {canModerate(menuMsg) && (
               <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
                 <Ionicons name="trash-outline" size={20} color={colors.error} />
-                <Text style={[styles.menuItemText, { color: colors.error }]}>Delete</Text>
+                <Text style={[styles.menuItemText, { color: colors.error }]}>{t('common.delete')}</Text>
               </TouchableOpacity>
             )}
           </Pressable>

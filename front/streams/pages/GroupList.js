@@ -18,6 +18,7 @@ import { fetchGroups, fetchGroupsByUrl, deleteGroup, joinGroupByCode } from '../
 import GroupItem from './GroupItem';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const TABS = [
   { key: 'public', label: 'Public', icon: 'earth' },
@@ -26,6 +27,7 @@ const TABS = [
 ];
 
 const GroupList = ({ navigation }) => {
+  const { t } = useI18n();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -153,11 +155,11 @@ const GroupList = ({ navigation }) => {
       await loadGroups(false);
       navigation.navigate('GroupDetail', { groupSlug: group.slug, group });
     } catch (e) {
-      Alert.alert('Couldn’t join', e?.response?.data?.error || 'This invite link is invalid or has expired.');
+      Alert.alert(t('group.list.joinFailedTitle'), e?.response?.data?.error || t('group.list.inviteInvalid'));
     } finally {
       setJoining(false);
     }
-  }, [joinCode, loadGroups, navigation]);
+  }, [joinCode, loadGroups, navigation, t]);
 
   // Split the visible groups into the three tabs. Private groups only ever reach
   // the client when the user is already a member (server-enforced), so the
@@ -234,11 +236,11 @@ const GroupList = ({ navigation }) => {
             activeOpacity={0.85}
           >
             <Ionicons name="add" size={18} color="#0A1628" />
-            <Text style={styles.createButtonText}>New Group</Text>
+            <Text style={styles.createButtonText}>{t('group.list.new')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.codeButton} onPress={() => setJoinOpen(true)} activeOpacity={0.85}>
             <Ionicons name="link" size={18} color={colors.accent} />
-            <Text style={styles.codeButtonText}>Join with code</Text>
+            <Text style={styles.codeButtonText}>{t('group.list.joinWithCode')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -274,11 +276,11 @@ const GroupList = ({ navigation }) => {
         <Pressable style={styles.modalBackdrop} onPress={() => setJoinOpen(false)}>
           <Pressable style={styles.modalCard}>
             <View style={styles.modalIcon}><Ionicons name="link" size={26} color={colors.accent} /></View>
-            <Text style={styles.modalTitle}>Join with an invite</Text>
-            <Text style={styles.modalText}>Paste the invite code an admin shared with you.</Text>
+            <Text style={styles.modalTitle}>{t('group.list.joinWithInvite')}</Text>
+            <Text style={styles.modalText}>{t('group.list.invitePrompt')}</Text>
             <TextInput
               style={styles.codeInput}
-              placeholder="Invite code"
+              placeholder={t('group.list.invitePlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={joinCode}
               onChangeText={setJoinCode}
@@ -287,10 +289,10 @@ const GroupList = ({ navigation }) => {
             />
             <View style={styles.modalActions}>
               <TouchableOpacity style={[styles.modalBtn, styles.modalCancelBtn]} onPress={() => setJoinOpen(false)} activeOpacity={0.85}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtn, styles.modalJoinBtn, !joinCode.trim() && styles.disabledButton]} onPress={handleJoinByCode} disabled={!joinCode.trim() || joining} activeOpacity={0.85}>
-                {joining ? <ActivityIndicator color="#0A1628" size="small" /> : <Text style={styles.modalJoinText}>Join</Text>}
+                {joining ? <ActivityIndicator color="#0A1628" size="small" /> : <Text style={styles.modalJoinText}>{t('common.join')}</Text>}
               </TouchableOpacity>
             </View>
           </Pressable>

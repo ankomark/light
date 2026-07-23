@@ -13,10 +13,12 @@ import {
   fetchRoles, setUserSuperAdmin, assignUserRole,
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
 const AdminUsers = () => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const superAdmin = isSuperAdmin(currentUser);
   const canManage = hasCapability(currentUser, 'manage_users');
@@ -83,7 +85,7 @@ const AdminUsers = () => {
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
       setSelected(updated);
     } catch (e) {
-      Alert.alert('Error', e?.response?.data?.error || 'Action failed.');
+      Alert.alert(t('common.error'), e?.response?.data?.error || t('admin.actionFailedShort'));
     } finally {
       setBusy(false);
     }
@@ -112,10 +114,10 @@ const AdminUsers = () => {
       </View>
       <View style={styles.badges}>
         {item.is_super_admin
-          ? <Text style={[styles.tag, styles.tagRole]}>Super Admin</Text>
+          ? <Text style={[styles.tag, styles.tagRole]}>{t('admin.superAdmin')}</Text>
           : item.role ? <Text style={[styles.tag, styles.tagRole]}>{item.role.name}</Text> : null}
-        {!item.is_active ? <Text style={[styles.tag, styles.tagBan]}>Banned</Text>
-          : item.is_currently_suspended ? <Text style={[styles.tag, styles.tagSusp]}>Suspended</Text> : null}
+        {!item.is_active ? <Text style={[styles.tag, styles.tagBan]}>{t('admin.banned')}</Text>
+          : item.is_currently_suspended ? <Text style={[styles.tag, styles.tagSusp]}>{t('admin.suspended')}</Text> : null}
         {item.strikes > 0 ? <Text style={[styles.tag, styles.tagStrike]}>{item.strikes}⚠</Text> : null}
       </View>
     </TouchableOpacity>
@@ -123,12 +125,12 @@ const AdminUsers = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Users</Text>
+      <Text style={styles.title}>{t('admin.users')}</Text>
       <View style={styles.searchBar}>
         <Ionicons name="search" size={18} color={colors.placeholder} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search username or email…"
+          placeholder={t('admin.userSearchPlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={query}
           onChangeText={onChangeQuery}
@@ -151,7 +153,7 @@ const AdminUsers = () => {
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
           ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
-          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>No users found</Text></View>}
+          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{t('admin.noUsers')}</Text></View>}
         />
       )}
 
@@ -203,12 +205,12 @@ const AdminUsers = () => {
                 {/* Role assignment (super-admin only) */}
                 {superAdmin && (
                   <View style={styles.roleSection}>
-                    <Text style={styles.roleLabel}>Assign role</Text>
+                    <Text style={styles.roleLabel}>{t('admin.assignRole')}</Text>
                     <View style={styles.roleChips}>
                       <TouchableOpacity
                         style={[styles.roleChip, selected.is_super_admin && styles.roleChipOn]}
                         onPress={() => run((id) => setUserSuperAdmin(id, true))} disabled={busy}>
-                        <Text style={[styles.roleChipText, selected.is_super_admin && styles.roleChipTextOn]}>Super Admin</Text>
+                        <Text style={[styles.roleChipText, selected.is_super_admin && styles.roleChipTextOn]}>{t('admin.superAdmin')}</Text>
                       </TouchableOpacity>
                       {roles.map((r) => {
                         const on = !selected.is_super_admin && selected.role?.id === r.id;
@@ -223,14 +225,14 @@ const AdminUsers = () => {
                       <TouchableOpacity
                         style={[styles.roleChip, !selected.is_super_admin && !selected.role && styles.roleChipOn]}
                         onPress={() => run((id) => (selected.is_super_admin ? setUserSuperAdmin(id, false) : assignUserRole(id, null)))} disabled={busy}>
-                        <Text style={[styles.roleChipText, !selected.is_super_admin && !selected.role && styles.roleChipTextOn]}>No access</Text>
+                        <Text style={[styles.roleChipText, !selected.is_super_admin && !selected.role && styles.roleChipTextOn]}>{t('admin.noAccess')}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
                 )}
 
                 <TouchableOpacity style={styles.sheetClose} onPress={() => setSelected(null)} disabled={busy}>
-                  <Text style={styles.sheetCloseText}>Close</Text>
+                  <Text style={styles.sheetCloseText}>{t('admin.close')}</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -243,7 +245,7 @@ const AdminUsers = () => {
         <TouchableOpacity style={styles.durBackdrop} activeOpacity={1} onPress={() => setSuspendFor(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.durCard}>
             <Text style={styles.durTitle}>Suspend @{suspendFor?.username}</Text>
-            <Text style={styles.durSub}>How long should the suspension last?</Text>
+            <Text style={styles.durSub}>{t('admin.suspensionLength')}</Text>
             {[
               { label: '1 day', days: 1 },
               { label: '7 days', days: 7 },
@@ -255,7 +257,7 @@ const AdminUsers = () => {
               </TouchableOpacity>
             ))}
             <TouchableOpacity style={styles.durCancel} onPress={() => setSuspendFor(null)}>
-              <Text style={styles.durCancelText}>Cancel</Text>
+              <Text style={styles.durCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>

@@ -25,6 +25,7 @@ import {
   toggleSoloArtistActive
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { useI18n } from '../context/I18nContext';
 
 const { height } = Dimensions.get('window');
 
@@ -36,6 +37,7 @@ const GENRE_CHOICES = {
 };
 
 const SoloArtists = () => {
+  const { t } = useI18n();
   const { currentUser, isLoading: authLoading } = useAuth();
   const [artists, setArtists] = useState([]);
   const [filteredArtists, setFilteredArtists] = useState([]);
@@ -95,7 +97,7 @@ const SoloArtists = () => {
           }
         }
       } catch (error) {
-        Alert.alert('Error', 'Failed to load solo artists');
+        Alert.alert(t('common.error'), t('artists.loadFailed'));
         console.error('fetchSoloArtists Error:', error);
       } finally {
         setIsLoading(false);
@@ -103,7 +105,7 @@ const SoloArtists = () => {
     };
 
     loadArtists();
-  }, [authLoading, currentUser]);
+  }, [authLoading, currentUser, t]);
 
   // Filter artists
   useEffect(() => {
@@ -148,7 +150,7 @@ const SoloArtists = () => {
 
   const handleAddArtist = async () => {
     if (!newArtist.stage_name.trim() || !newArtist.location.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields');
+      Alert.alert(t('common.error'), t('artists.requiredFields'));
       return;
     }
 
@@ -187,10 +189,10 @@ const SoloArtists = () => {
 
       if (editingArtist) {
         await updateSoloArtist(editingArtist.id, formData);
-        Alert.alert('Success', 'Profile updated successfully!');
+        Alert.alert(t('market.success'), t('artists.updatedOk'));
       } else {
         await createSoloArtist(formData);
-        Alert.alert('Success', 'Profile created successfully!');
+        Alert.alert(t('market.success'), t('artists.createdOk'));
       }
 
       const response = await fetchSoloArtists();
@@ -229,7 +231,7 @@ const SoloArtists = () => {
       setEditingArtist(null);
       setShowAddForm(false);
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to save profile');
+      Alert.alert(t('common.error'), error.message || t('artists.saveFailed'));
       console.error('handleAddArtist Error:', error);
     }
   };
@@ -256,10 +258,10 @@ const SoloArtists = () => {
           setMyProfile(null);
         }
       }
-      Alert.alert('Success', 'Active status updated!');
+      Alert.alert(t('market.success'), t('artists.statusUpdated'));
     } catch (error) {
       console.error('handleToggleActive Error:', error);
-      Alert.alert('Error', error.message || 'Failed to toggle active status');
+      Alert.alert(t('common.error'), error.message || t('artists.toggleFailed'));
     }
   };
 
@@ -303,9 +305,9 @@ const SoloArtists = () => {
               setArtists(normalizedArtists);
               setFilteredArtists(normalizedArtists);
               setMyProfile(null);
-              Alert.alert('Success', 'Profile deleted successfully!');
+              Alert.alert(t('market.success'), t('artists.deletedOk'));
             } catch (error) {
-              Alert.alert('Error', error.message || 'Failed to delete profile');
+              Alert.alert(t('common.error'), error.message || t('artists.deleteFailed'));
               console.error('handleDeleteArtist Error:', error);
             }
           },
@@ -319,7 +321,7 @@ const SoloArtists = () => {
   const openLink = (url) => {
     if (url) {
       Linking.openURL(url).catch(err => {
-        Alert.alert('Error', 'Failed to open link');
+        Alert.alert(t('common.error'), t('artists.openLinkFailed'));
       });
     }
   };
@@ -386,7 +388,7 @@ const SoloArtists = () => {
             {item.is_verified && (
               <View style={styles.verifiedBadge}>
                 <MaterialIcons name="verified" size={16} color="#4CAF50" />
-                <Text style={styles.verifiedText}>Verified Artist</Text>
+                <Text style={styles.verifiedText}>{t('artists.verified')}</Text>
               </View>
             )}
           </View>
@@ -444,7 +446,7 @@ const SoloArtists = () => {
           </View>
           
           <View style={styles.socialMediaContainer}>
-            <Text style={styles.socialMediaTitle}>Social Media:</Text>
+            <Text style={styles.socialMediaTitle}>{t('artists.socialMedia')}</Text>
             {Object.entries(item.social_media_links || { facebook: '', twitter: '', instagram: '' }).map(([platform, url]) => (
               <View key={platform} style={styles.socialMediaLink}>
                 <Text style={styles.socialMediaText}>
@@ -489,7 +491,7 @@ const SoloArtists = () => {
           
           {/* Debug Section */}
           <View style={styles.debugContainer}>
-            <Text style={styles.debugText}>Debug Info:</Text>
+            <Text style={styles.debugText}>{'Debug Info:'}</Text>
             <Text style={styles.debugText}>isCreator: {String(isCreator)}</Text>
             <Text style={styles.debugText}>is_active: {String(item.is_active)}</Text>
             <Text style={styles.debugText}>WhatsApp: {JSON.stringify(item.whatsapp_number)}</Text>
@@ -540,14 +542,14 @@ const SoloArtists = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="Stage Name *"
+              placeholder={t('artists.stageNamePlaceholder')}
               value={newArtist.stage_name}
               onChangeText={text => setNewArtist({...newArtist, stage_name: text})}
             />
             
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Bio"
+              placeholder={t('artists.bioPlaceholder')}
               value={newArtist.bio}
               onChangeText={text => setNewArtist({...newArtist, bio: text})}
               multiline
@@ -556,14 +558,14 @@ const SoloArtists = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="Location *"
+              placeholder={t('artists.locationPlaceholder')}
               value={newArtist.location}
               onChangeText={text => setNewArtist({...newArtist, location: text})}
             />
             
             <TextInput
               style={styles.input}
-              placeholder="Contact Phone"
+              placeholder={t('artists.phonePlaceholder')}
               value={newArtist.contact_phone}
               onChangeText={text => setNewArtist({...newArtist, contact_phone: text})}
               keyboardType="phone-pad"
@@ -571,7 +573,7 @@ const SoloArtists = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="Contact Email"
+              placeholder={t('artists.emailPlaceholder')}
               value={newArtist.contact_email}
               onChangeText={text => setNewArtist({...newArtist, contact_email: text})}
               keyboardType="email-address"
@@ -579,13 +581,13 @@ const SoloArtists = () => {
             
             <TextInput
               style={styles.input}
-              placeholder="WhatsApp Number"
+              placeholder={t('artists.whatsappPlaceholder')}
               value={newArtist.whatsapp_number}
               onChangeText={text => setNewArtist({...newArtist, whatsapp_number: text})}
               keyboardType="phone-pad"
             />
             
-            <Text style={styles.label}>Genre:</Text>
+            <Text style={styles.label}>{t('artists.genre')}</Text>
             <View style={styles.genreOptions}>
               {Object.entries(GENRE_CHOICES).map(([value, label]) => (
                 <TouchableOpacity
@@ -603,18 +605,18 @@ const SoloArtists = () => {
               ))}
             </View>
             
-            <Text style={styles.label}>YouTube Link (optional):</Text>
+            <Text style={styles.label}>{t('artists.youtubeLink')}</Text>
             <TextInput
               style={styles.input}
-              placeholder="YouTube Link"
+              placeholder={t('artists.youtubePlaceholder')}
               value={newArtist.youtube_link}
               onChangeText={text => setNewArtist({...newArtist, youtube_link: text})}
             />
             
-            <Text style={styles.label}>Social Media Links (optional):</Text>
+            <Text style={styles.label}>{t('artists.socialLinks')}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Facebook URL"
+              placeholder={t('artists.facebookPlaceholder')}
               value={newArtist.social_media_links.facebook}
               onChangeText={text => setNewArtist({
                 ...newArtist,
@@ -623,7 +625,7 @@ const SoloArtists = () => {
             />
             <TextInput
               style={styles.input}
-              placeholder="Twitter URL"
+              placeholder={t('artists.twitterPlaceholder')}
               value={newArtist.social_media_links.twitter}
               onChangeText={text => setNewArtist({
                 ...newArtist,
@@ -632,7 +634,7 @@ const SoloArtists = () => {
             />
             <TextInput
               style={styles.input}
-              placeholder="Instagram URL"
+              placeholder={t('artists.instagramPlaceholder')}
               value={newArtist.social_media_links.instagram}
               onChangeText={text => setNewArtist({
                 ...newArtist,
@@ -694,14 +696,14 @@ const SoloArtists = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Solo Artists</Text>
+      <Text style={styles.title}>{t('artists.title')}</Text>
       
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
           <MaterialIcons name="search" size={20} color="#555" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search artists..."
+            placeholder={t('artists.searchPlaceholder')}
             value={searchTerm}
             onChangeText={setSearchTerm}
           />
@@ -715,7 +717,7 @@ const SoloArtists = () => {
       
       {myProfile && (
         <View style={styles.myProfileContainer}>
-          <Text style={styles.myProfileTitle}>My Profile</Text>
+          <Text style={styles.myProfileTitle}>{t('artists.mine')}</Text>
           <FlatList
             data={[myProfile]}
             renderItem={renderItem}
@@ -725,14 +727,14 @@ const SoloArtists = () => {
         </View>
       )}
       
-      <Text style={styles.sectionTitle}>All Artists</Text>
+      <Text style={styles.sectionTitle}>{t('artists.all')}</Text>
       <FlatList
         data={filteredArtists.filter(artist => !myProfile || artist.id !== myProfile.id)}
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No artists found</Text>
+          <Text style={styles.emptyText}>{t('artists.none')}</Text>
         }
       />
 
@@ -742,7 +744,7 @@ const SoloArtists = () => {
           onPress={() => setShowAddForm(true)}
         >
           <MaterialIcons name="add" size={24} color="#ffffff" />
-          <Text style={styles.buttonText}>Create Artist Profile</Text>
+          <Text style={styles.buttonText}>{t('artists.create')}</Text>
         </TouchableOpacity>
       )}
 

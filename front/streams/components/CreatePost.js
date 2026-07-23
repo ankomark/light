@@ -17,6 +17,7 @@ import { processVideo, cleanupProcessedVideos } from '../services/videoProcessin
 import { compressImage as compressImageFile } from '../services/imageProcessing';
 import { compressAudio } from '../services/audioProcessing';
 import * as DocumentPicker from 'expo-document-picker';
+import { useI18n } from '../context/I18nContext';
 
 // Instagram-style aspect-ratio clamp (matches the feed's mediaAspectRatio so the
 // preview is WYSIWYG): width:height between 1.91:1 (landscape) and 4:5 (portrait,
@@ -38,6 +39,7 @@ const PREVIEW_W = Dimensions.get('window').width - 40; // contentContainer paddi
 const MAX_VIDEO_SHORT_SIDE = 1130;
 
 const CreatePost = ({ navigation }) => {
+  const { t } = useI18n();
   const [contentType, setContentType] = useState('image');
   const [media, setMedia] = useState(null);          // single video
   const [images, setImages] = useState([]);          // 1–4 image carousel: [{uri,width,height}]
@@ -162,10 +164,10 @@ const CreatePost = ({ navigation }) => {
     (async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required!', 'We need access to your media library to upload files');
+        Alert.alert(t('create.post.permissionTitle'), t('create.post.permissionBody'));
       }
     })();
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (contentType === 'image') {
@@ -203,7 +205,7 @@ const CreatePost = ({ navigation }) => {
         // Any length is allowed — the user trims to ≤30s next. Only guard against
         // an unreasonably large raw file (the full file still uploads).
         if (selected.fileSize && selected.fileSize > 300 * 1024 * 1024) {
-          Alert.alert('Error', 'Video file is too large (max 300MB).');
+          Alert.alert(t('common.error'), t('create.post.videoTooLarge'));
           return;
         }
         setMedia(selected);
@@ -216,7 +218,7 @@ const CreatePost = ({ navigation }) => {
       // Images: select up to the remaining slots (max 4 total).
       const remaining = MAX_IMAGES - images.length;
       if (remaining <= 0) {
-        Alert.alert('Limit reached', `You can add up to ${MAX_IMAGES} images`);
+        Alert.alert(t('create.post.limitTitle'), t('create.post.limitBody', { max: MAX_IMAGES }));
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -275,7 +277,7 @@ const CreatePost = ({ navigation }) => {
       }
     } catch (error) {
       console.error('Media picker error:', error);
-      Alert.alert('Error', 'Failed to pick media. Please try again.');
+      Alert.alert(t('common.error'), t('create.post.pickMediaFailed'));
     }
   };
 
@@ -343,13 +345,13 @@ const CreatePost = ({ navigation }) => {
     });
   } catch (error) {
     console.error('Error picking audio:', error);
-    Alert.alert('Error', 'Failed to pick audio file');
+    Alert.alert(t('common.error'), t('create.post.pickAudioFailed'));
   }
 };
   const handleTrimSong = async (song) => {
     const uri = songAudioUri(song);
     if (!uri) {
-      Alert.alert('Error', 'This song has no playable audio');
+      Alert.alert(t('common.error'), t('create.post.noPlayableAudio'));
       return;
     }
     setSelectedSong(song);
@@ -387,13 +389,13 @@ const CreatePost = ({ navigation }) => {
       setTrimEnd(end);
     } catch (error) {
       console.error('Error loading song:', error);
-      Alert.alert('Error', 'Failed to load song for trimming');
+      Alert.alert(t('common.error'), t('create.post.trimLoadFailed'));
     }
   };
 
   const handlePost = async () => {
   if (contentType === 'image' ? images.length === 0 : !media) {
-    Alert.alert('Error', contentType === 'image' ? 'Please add at least one image' : 'Please select a video');
+    Alert.alert(t('common.error'), contentType === 'image' ? t('create.post.needImage') : t('create.post.needVideo'));
     return;
   }
 
@@ -521,11 +523,11 @@ const CreatePost = ({ navigation }) => {
     setUploadProgress(1);
     await createSocialPost(postData);
     cleanupProcessedVideos();  // best-effort: drop the on-device scratch files
-    Alert.alert('Success', 'Post created successfully!');
+    Alert.alert(t('market.success'), t('create.post.createdOk'));
     navigation.goBack();
   } catch (error) {
     console.error('Upload error:', error);
-    Alert.alert('Error', error.message || 'Failed to create post. Please try again.');
+    Alert.alert(t('common.error'), error.message || t('create.post.createFailed'));
   } finally {
     setIsUploading(false);
   }
@@ -562,7 +564,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.title}>Create New Post</Text>
+      <Text style={styles.title}>{t('create.post.title')}</Text>
 
       {/* Media Type Selector */}
       <View style={styles.typeSelector}>
@@ -619,7 +621,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
         ) : (
           <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
             <Feather name="upload" size={32} color="#666" />
-            <Text style={styles.uploadText}>Select Video (any length · trim to 30s)</Text>
+            <Text style={styles.uploadText}>{t('create.post.selectVideo')}</Text>
           </TouchableOpacity>
         )
       ) : images.length > 0 ? (
@@ -661,7 +663,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
             {images.length === 1 && (
               <TouchableOpacity style={styles.imageActionBtn} onPress={reopenCropper}>
                 <Feather name="crop" size={16} color="#1DA1F2" />
-                <Text style={styles.imageActionText}>Crop</Text>
+                <Text style={styles.imageActionText}>{t('create.post.crop')}</Text>
               </TouchableOpacity>
             )}
             {images.length < MAX_IMAGES && (
@@ -681,10 +683,10 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
 
       {/* Caption Input */}
       <View style={styles.inputContainer}>
-        <Text style={styles.inputLabel}>Caption *</Text>
+        <Text style={styles.inputLabel}>{t('create.post.caption')}</Text>
         <TextInput
           style={styles.captionInput}
-          placeholder="Write a caption..."
+          placeholder={t('create.post.captionPlaceholder')}
           placeholderTextColor="#999"
           value={caption}
           onChangeText={setCaption}
@@ -697,7 +699,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
       {/* Song Picker (only for images) */}
       {contentType === 'image' && (
   <View style={styles.inputContainer}>
-    <Text style={styles.inputLabel}>Accompanying Song (optional)</Text>
+    <Text style={styles.inputLabel}>{t('create.post.song')}</Text>
     
     <View style={styles.songOptionsContainer}>
       <TouchableOpacity
@@ -705,7 +707,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
         onPress={pickLocalAudio}
       >
         <MaterialIcons name="audiotrack" size={24} color="#1DA1F2" />
-        <Text style={styles.audioOptionText}>Pick Local Audio</Text>
+        <Text style={styles.audioOptionText}>{t('create.post.pickLocalAudio')}</Text>
       </TouchableOpacity>
       
       <TouchableOpacity
@@ -713,7 +715,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
         onPress={() => setShowSongModal(true)}
       >
         <MaterialIcons name="library-music" size={24} color="#1DA1F2" />
-        <Text style={styles.audioOptionText}>Choose from Library</Text>
+        <Text style={styles.audioOptionText}>{t('create.post.chooseLibrary')}</Text>
       </TouchableOpacity>
     </View>
 
@@ -792,7 +794,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
             <TouchableOpacity onPress={() => setShowSongModal(false)}>
               <Feather name="x" size={24} color="#1DA1F2" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Select a Song</Text>
+            <Text style={styles.modalTitle}>{t('create.post.selectSong')}</Text>
             <View style={{ width: 24 }} />
           </View>
 
@@ -835,7 +837,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
         <TouchableOpacity onPress={async () => { await stopPreview(); setShowTrimModal(false); }}>
           <Feather name="x" size={24} color="#1DA1F2" />
         </TouchableOpacity>
-        <Text style={styles.modalTitle}>Trim Song</Text>
+        <Text style={styles.modalTitle}>{t('create.post.trimSong')}</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -886,7 +888,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
           style={styles.confirmButton}
           onPress={async () => { await stopPreview(); setShowTrimModal(false); }}
         >
-          <Text style={styles.confirmButtonText}>Confirm Selection</Text>
+          <Text style={styles.confirmButtonText}>{t('create.post.confirmSelection')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -900,7 +902,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
         <View style={styles.preparingOverlay}>
           <View style={styles.preparingCard}>
             <ActivityIndicator size="large" color="#1DA1F2" />
-            <Text style={styles.preparingText}>Preparing image…</Text>
+            <Text style={styles.preparingText}>{t('create.post.preparingImage')}</Text>
           </View>
         </View>
       </Modal>
@@ -930,7 +932,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
               <TouchableOpacity onPress={() => setShowVideoTrimmer(false)}>
                 <Feather name="x" size={24} color="#1DA1F2" />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>Trim Video</Text>
+              <Text style={styles.modalTitle}>{t('create.post.trimVideo')}</Text>
               <View style={{ width: 24 }} />
             </View>
             <View style={styles.trimContainer}>
@@ -944,7 +946,7 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
                 style={styles.confirmButton}
                 onPress={() => setShowVideoTrimmer(false)}
               >
-                <Text style={styles.confirmButtonText}>Done</Text>
+                <Text style={styles.confirmButtonText}>{t('common.done')}</Text>
               </TouchableOpacity>
             </View>
           </View>

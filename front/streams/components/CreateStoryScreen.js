@@ -11,6 +11,7 @@ import { compressImage } from '../services/imageProcessing';
 import { processVideo } from '../services/videoProcessing';
 import { createStory } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const { width } = Dimensions.get('window');
 
@@ -21,6 +22,7 @@ const MAX_VIDEO_MS = 30000;
 const MAX_VIDEO_TOLERANCE_MS = 31000;
 
 const CreateStoryScreen = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const [media, setMedia] = useState(null);
   const [caption, setCaption] = useState('');
@@ -29,7 +31,7 @@ const CreateStoryScreen = () => {
   const pickMedia = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow access to your media library to add a story.');
+      Alert.alert(t('story.permissionTitle'), t('story.permissionBody'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -61,7 +63,7 @@ const CreateStoryScreen = () => {
   };
 
   const handlePost = async () => {
-    if (!media) { Alert.alert('No media', 'Please select a photo or video first.'); return; }
+    if (!media) { Alert.alert(t('story.noMediaTitle'), t('story.noMediaBody')); return; }
     setUploading(true);
     try {
       const isVideo = media.type === 'video';
@@ -88,7 +90,7 @@ const CreateStoryScreen = () => {
       });
       navigation.goBack();
     } catch (err) {
-      Alert.alert('Upload failed', err.message ?? 'Could not post your story. Try again.');
+      Alert.alert(t('common.uploadFailedTitle'), err.message ?? t('story.uploadFailed'));
     } finally {
       setUploading(false);
     }
@@ -101,7 +103,7 @@ const CreateStoryScreen = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="close" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>New Story</Text>
+        <Text style={styles.title}>{t('story.new')}</Text>
         <TouchableOpacity
           style={[styles.postBtn, (!media || uploading) && styles.postBtnDisabled]}
           onPress={handlePost}
@@ -109,7 +111,7 @@ const CreateStoryScreen = () => {
         >
           {uploading
             ? <ActivityIndicator size="small" color={colors.white} />
-            : <Text style={styles.postBtnText}>Share</Text>
+            : <Text style={styles.postBtnText}>{t('story.share')}</Text>
           }
         </TouchableOpacity>
       </View>
@@ -120,14 +122,14 @@ const CreateStoryScreen = () => {
           <Image source={{ uri: media.uri }} style={styles.previewImage} resizeMode="cover" />
           <View style={styles.changeOverlay}>
             <Ionicons name="images-outline" size={22} color="#fff" />
-            <Text style={styles.changeText}>Change</Text>
+            <Text style={styles.changeText}>{t('story.change')}</Text>
           </View>
         </TouchableOpacity>
       ) : (
         <TouchableOpacity style={styles.picker} onPress={pickMedia} activeOpacity={0.8}>
           <Ionicons name="images-outline" size={52} color={colors.textMuted} />
-          <Text style={styles.pickerTitle}>Add Photo or Video</Text>
-          <Text style={styles.pickerSub}>Stories disappear after 24 hours</Text>
+          <Text style={styles.pickerTitle}>{t('story.addMedia')}</Text>
+          <Text style={styles.pickerSub}>{t('story.expiryNote')}</Text>
         </TouchableOpacity>
       )}
 
@@ -135,7 +137,7 @@ const CreateStoryScreen = () => {
       <View style={styles.captionWrap}>
         <TextInput
           style={styles.captionInput}
-          placeholder="Add a caption..."
+          placeholder={t('story.captionPlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={caption}
           onChangeText={setCaption}
