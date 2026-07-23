@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { reportContent } from '../services/api';
 import { colors, typography, spacing, radius } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const REASONS = [
   { key: 'spam', label: 'Spam', icon: 'mail-unread-outline' },
@@ -27,6 +28,7 @@ const REASONS = [
  *   />
  */
 const ReportModal = ({ visible, onClose, contentType, objectId }) => {
+  const { t } = useI18n();
   const [selectedReason, setSelectedReason] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
@@ -42,7 +44,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
 
   const handleSubmit = async () => {
     if (!selectedReason) {
-      Alert.alert('Select a reason', 'Please choose why you are reporting this content.');
+      Alert.alert(t('report.selectReasonTitle'), t('report.selectReasonBody'));
       return;
     }
     setLoading(true);
@@ -54,7 +56,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
       if (msg?.includes('Already')) {
         setSubmitted(true); // treat duplicate as success
       } else {
-        Alert.alert('Error', 'Could not submit report. Please try again.');
+        Alert.alert(t('common.error'), t('report.submitFailed'));
       }
     } finally {
       setLoading(false);
@@ -77,18 +79,18 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
         {submitted ? (
           <View style={styles.successBox}>
             <Ionicons name="checkmark-circle" size={52} color={colors.success ?? '#43A047'} />
-            <Text style={styles.successTitle}>Report submitted</Text>
+            <Text style={styles.successTitle}>{t('report.submitted')}</Text>
             <Text style={styles.successSub}>
               Thanks for keeping Adventist Life safe. We'll review this within 24 hours.
             </Text>
             <TouchableOpacity style={styles.doneBtn} onPress={handleClose}>
-              <Text style={styles.doneBtnText}>Done</Text>
+              <Text style={styles.doneBtnText}>{t('common.done')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>Report {contentType}</Text>
-            <Text style={styles.subtitle}>Why are you reporting this?</Text>
+            <Text style={styles.subtitle}>{t('report.why')}</Text>
 
             {REASONS.map(r => (
               <TouchableOpacity
@@ -113,7 +115,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
 
             <TextInput
               style={styles.descInput}
-              placeholder="Additional details (optional)..."
+              placeholder={t('report.detailsPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={description}
               onChangeText={setDescription}
@@ -129,12 +131,12 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
             >
               {loading
                 ? <ActivityIndicator color={colors.white} />
-                : <Text style={styles.submitText}>Submit Report</Text>
+                : <Text style={styles.submitText}>{t('report.submit')}</Text>
               }
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.cancelBtn} onPress={handleClose}>
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.cancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </ScrollView>
         )}

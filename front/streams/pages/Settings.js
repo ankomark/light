@@ -68,23 +68,25 @@ const VIDEO_QUALITY_LABELS = {
 const VIDEO_QUALITY_CYCLE = ['auto', 'hd', 'data_saver'];
 
 // User-facing notification categories (key must match the serializer fields).
+// Module scope can't call t(), so each row carries a key the render resolves.
 const NOTIFICATION_CATEGORIES = [
-  { key: 'likes', label: 'Likes', icon: 'heart-outline' },
-  { key: 'comments', label: 'Comments', icon: 'comment-outline' },
-  { key: 'follows', label: 'New followers', icon: 'account-plus-outline' },
-  { key: 'messages', label: 'Messages', icon: 'message-text-outline' },
-  { key: 'groups', label: 'Group activity', icon: 'account-group-outline' },
-  { key: 'communities', label: 'Churches & choirs', icon: 'church' },
-  { key: 'live', label: 'Live events', icon: 'broadcast' },
+  { key: 'likes', labelKey: 'settings.notif.likes', icon: 'heart-outline' },
+  { key: 'comments', labelKey: 'settings.notif.comments', icon: 'comment-outline' },
+  { key: 'follows', labelKey: 'settings.notif.follows', icon: 'account-plus-outline' },
+  { key: 'messages', labelKey: 'settings.notif.messages', icon: 'message-text-outline' },
+  { key: 'groups', labelKey: 'settings.notif.groups', icon: 'account-group-outline' },
+  { key: 'communities', labelKey: 'settings.notif.communities', icon: 'church' },
+  { key: 'live', labelKey: 'settings.notif.live', icon: 'broadcast' },
 ];
 
-const openLink = async (url, fallbackMsg) => {
+// Module scope: no hook here, so the caller passes t in.
+const openLink = async (url, fallbackMsg, t) => {
   try {
     const ok = await Linking.canOpenURL(url);
     if (ok) await Linking.openURL(url);
-    else Alert.alert('Unavailable', fallbackMsg || 'Could not open this link.');
+    else Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
   } catch {
-    Alert.alert('Unavailable', fallbackMsg || 'Could not open this link.');
+    Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
   }
 };
 
@@ -189,20 +191,20 @@ const Settings = () => {
   const handleLogoutOthers = () => {
     Alert.alert(
       t('settings.security.logoutOthers'),
-      'Sign out of all other devices? This device stays signed in.',
+      t('settings.logoutOthersBody'),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Log out others',
+          text: t('settings.logoutOthersAction'),
           style: 'destructive',
           onPress: async () => {
             setRevokingOthers(true);
             try {
               const res = await revokeOtherSessions();
               loadSessions();
-              Alert.alert('Done', `Signed out of ${res?.revoked ?? 0} other session(s).`);
+              Alert.alert(t('common.done'), t('settings.sessionsRevoked', { count: res?.revoked ?? 0 }));
             } catch {
-              Alert.alert(t('common.error'), 'Could not revoke other sessions.');
+              Alert.alert(t('common.error'), t('settings.revokeFailed'));
             } finally {
               setRevokingOthers(false);
             }
@@ -217,11 +219,11 @@ const Settings = () => {
     try {
       const data = await exportMyData();
       await Share.share({
-        title: 'My Adventist Life data',
+        title: t('settings.exportTitle'),
         message: JSON.stringify(data, null, 2),
       });
     } catch {
-      Alert.alert(t('common.error'), 'Could not export your data.');
+      Alert.alert(t('common.error'), t('settings.exportFailed'));
     } finally {
       setExporting(false);
     }
@@ -242,7 +244,7 @@ const Settings = () => {
       await updateNotificationPreferences({ [key]: value });
     } catch {
       setNotifPrefs((prev) => ({ ...(prev || {}), [key]: !value })); // revert
-      Alert.alert('Error', 'Could not update this notification setting.');
+      Alert.alert(t('common.error'), t('settings.notifPrefFailed'));
     }
   };
 
@@ -255,7 +257,7 @@ const Settings = () => {
       await updateUser();
     } catch {
       setIsPrivate(!next); // revert on failure
-      Alert.alert('Error', 'Could not update your privacy setting. Please try again.');
+      Alert.alert(t('common.error'), t('settings.privacyFailed'));
     } finally {
       setSavingPrivacy(false);
     }
@@ -271,8 +273,8 @@ const Settings = () => {
         if (!token) {
           await updatePref(PREF_KEYS.pushEnabled, false);
           Alert.alert(
-            'Notifications blocked',
-            'Enable notifications for ' + APP_NAME + ' in your device settings to receive alerts.'
+            t('settings.notif.blockedTitle'),
+            t('settings.notif.blockedBody', { app: APP_NAME })
           );
         }
       } else {
@@ -313,15 +315,15 @@ const Settings = () => {
 
   const handleChangePassword = async () => {
     if (!currentPw || !newPw) {
-      Alert.alert('Missing info', 'Enter your current and new password.');
+      Alert.alert(t('settings.pw.missingTitle'), t('settings.pw.missingBody'));
       return;
     }
     if (newPw.length < 8) {
-      Alert.alert('Weak password', 'New password must be at least 8 characters.');
+      Alert.alert(t('settings.pw.weakTitle'), t('settings.pw.weakBody'));
       return;
     }
     if (newPw !== confirmPw) {
-      Alert.alert('Mismatch', 'New password and confirmation do not match.');
+      Alert.alert(t('settings.pw.mismatchTitle'), t('settings.pw.mismatchBody'));
       return;
     }
     try {
@@ -329,9 +331,9 @@ const Settings = () => {
       await changePassword(currentPw, newPw);
       setPwVisible(false);
       resetPwForm();
-      Alert.alert('Done', 'Your password has been changed.');
+      Alert.alert(t('common.done'), t('settings.pw.changed'));
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.error || 'Could not change your password.');
+      Alert.alert(t('common.error'), error.response?.data?.error || t('settings.pw.changeFailed'));
     } finally {
       setChangingPw(false);
     }
@@ -339,7 +341,7 @@ const Settings = () => {
 
   const handleDeleteAccount = async () => {
     if (!deletePw) {
-      Alert.alert('Password required', 'Enter your password to confirm deletion.');
+      Alert.alert(t('settings.pwRequiredTitle'), t('settings.pwRequiredDelete'));
       return;
     }
     try {
@@ -351,7 +353,7 @@ const Settings = () => {
       try { await logout(); } catch {}
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.error || 'Could not delete your account.');
+      Alert.alert(t('common.error'), error.response?.data?.error || t('settings.deleteAccountFailed'));
     } finally {
       setDeleting(false);
     }
@@ -359,7 +361,7 @@ const Settings = () => {
 
   const handleDeactivate = async () => {
     if (!deactivatePw) {
-      Alert.alert('Password required', 'Enter your password to confirm.');
+      Alert.alert(t('settings.pwRequiredTitle'), t('settings.pwRequiredConfirm'));
       return;
     }
     try {
@@ -379,28 +381,28 @@ const Settings = () => {
   const confirmDeactivate = () => {
     Alert.alert(
       t('settings.session.deactivate'),
-      'Your profile and content will be hidden until you sign in again. You can reactivate anytime by logging back in.',
+      t('settings.deactivateBody'),
       [
         { text: t('common.cancel'), style: 'cancel' },
-        { text: 'Continue', onPress: () => setDeactivateVisible(true) },
+        { text: t('common.continue'), onPress: () => setDeactivateVisible(true) },
       ]
     );
   };
 
   const confirmDeleteAccount = () => {
     Alert.alert(
-      'Delete account',
-      'This permanently deletes your account and all your content. This cannot be undone.',
+      t('settings.deleteTitle'),
+      t('settings.deleteBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Continue', style: 'destructive', onPress: () => setDeleteVisible(true) },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('common.continue'), style: 'destructive', onPress: () => setDeleteVisible(true) },
       ]
     );
   };
 
   const handleSendContact = async () => {
     if (!contactText.trim()) {
-      Alert.alert('Empty message', 'Please write a message for the admins.');
+      Alert.alert(t('settings.contact.emptyTitle'), t('settings.contact.emptyBody'));
       return;
     }
     try {
@@ -408,16 +410,16 @@ const Settings = () => {
       await createAdminNote(contactText.trim());
       setContactVisible(false);
       setContactText('');
-      Alert.alert('Sent', 'Your message has been delivered to the admins. Only they can read it.');
+      Alert.alert(t('settings.contact.sentTitle'), t('settings.contact.sentBody'));
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to send your message.');
+      Alert.alert(t('common.error'), error.response?.data?.detail || t('settings.contact.sendFailed'));
     } finally {
       setSendingContact(false);
     }
   };
 
   const handleLogout = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
+    Alert.alert(t('settings.logoutTitle'), t('settings.logoutConfirm'), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log out',
@@ -450,14 +452,14 @@ const Settings = () => {
           <Row
             icon="account-circle-outline"
             label={currentUser?.username || 'Your profile'}
-            sub={currentUser?.email || 'Tap to edit your profile'}
+            sub={currentUser?.email || t('settings.tapToEdit')}
             onPress={() => navigation.navigate('Profile')}
           />
           <Row
             icon={isEmailVerified ? 'email-check-outline' : 'email-alert-outline'}
             iconColor={isEmailVerified ? colors.success : colors.warning}
-            label="Email"
-            sub={isEmailVerified ? 'Verified' : 'Not verified — tap to verify'}
+            label={t('settings.emailLabel')}
+            sub={isEmailVerified ? t('settings.account.emailVerified') : t('settings.account.emailUnverified')}
             onPress={isEmailVerified ? undefined : () => navigation.navigate('EmailVerification')}
             right={isEmailVerified ? (
               <Ionicons name="checkmark-circle" size={20} color={colors.success} />
@@ -495,8 +497,8 @@ const Settings = () => {
           {isPrivate && (
             <Row
               icon="account-clock-outline"
-              label="Follow requests"
-              sub="Approve or decline people asking to follow you"
+              label={t('settings.followRequests')}
+              sub={t('settings.followRequestsSub')}
               onPress={() => navigation.navigate('FollowRequests')}
             />
           )}
@@ -558,8 +560,8 @@ const Settings = () => {
         <Section title={t('settings.section.notifications')}>
           <Row
             icon="bell-outline"
-            label="Push notifications"
-            sub="Master switch for all push alerts on this device"
+            label={t('settings.notif.push')}
+            sub={t('settings.notif.pushSub')}
             last={!prefs[PREF_KEYS.pushEnabled]}
             right={
               <Switch
@@ -575,7 +577,7 @@ const Settings = () => {
             <Row
               key={cat.key}
               icon={cat.icon}
-              label={cat.label}
+              label={t(cat.labelKey)}
               last={i === NOTIFICATION_CATEGORIES.length - 1}
               right={
                 <Switch
@@ -595,7 +597,7 @@ const Settings = () => {
           <Row
             icon="play-circle-outline"
             label={t('settings.playback.autoplay')}
-            sub="Play videos automatically in the feed"
+            sub={t('settings.autoplaySub')}
             right={
               <Switch
                 value={!!prefs[PREF_KEYS.autoplayVideo]}
@@ -608,7 +610,7 @@ const Settings = () => {
           <Row
             icon="cellphone-arrow-down"
             label={t('settings.playback.dataSaver')}
-            sub="Reduce data usage on mobile networks"
+            sub={t('settings.dataSaverSub')}
             right={
               <Switch
                 value={!!prefs[PREF_KEYS.dataSaver]}
@@ -621,7 +623,7 @@ const Settings = () => {
           <Row
             icon="video-outline"
             label={t('settings.playback.videoQuality')}
-            sub="Higher tiers buffer further ahead; Data saver only loads what you watch"
+            sub={t('settings.videoQualitySub')}
             onPress={cycleVideoQuality}
             last={!MEDIA_QUALITY_TIERS_AVAILABLE}
             right={
@@ -660,13 +662,13 @@ const Settings = () => {
           <Row
             icon="email-edit-outline"
             label={t('settings.support.contact')}
-            sub="Send a private message to the team"
+            sub={t('settings.contactSub')}
             onPress={() => setContactVisible(true)}
           />
           <Row
             icon="star-outline"
-            label={`Rate ${APP_NAME}`}
-            onPress={() => openLink(STORE_URL, 'The app store is unavailable on this device.')}
+            label={t('settings.rateApp', { app: APP_NAME })}
+            onPress={() => openLink(STORE_URL, t('settings.storeUnavailable'), t)}
           />
           <Row
             icon="information-outline"
@@ -701,7 +703,7 @@ const Settings = () => {
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Contact admins</Text>
+              <Text style={styles.modalTitle}>{t('settings.contact.title')}</Text>
               <TouchableOpacity onPress={() => { setContactVisible(false); setContactText(''); }}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -709,12 +711,12 @@ const Settings = () => {
 
             <View style={styles.privacyHint}>
               <MaterialCommunityIcons name="lock-outline" size={16} color={colors.textMuted} />
-              <Text style={styles.privacyHintText}>This message is private — only admins can read it.</Text>
+              <Text style={styles.privacyHintText}>{t('settings.contact.hint')}</Text>
             </View>
 
             <TextInput
               style={styles.input}
-              placeholder="How can we help?"
+              placeholder={t('settings.contact.placeholder')}
               placeholderTextColor={colors.placeholder}
               value={contactText}
               onChangeText={setContactText}
@@ -732,7 +734,7 @@ const Settings = () => {
                 ? <ActivityIndicator color={colors.white} />
                 : <>
                     <Ionicons name="send-outline" size={18} color={colors.white} />
-                    <Text style={styles.sendBtnText}>Send to admins</Text>
+                    <Text style={styles.sendBtnText}>{t('settings.contact.send')}</Text>
                   </>}
             </TouchableOpacity>
           </View>
@@ -753,7 +755,7 @@ const Settings = () => {
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Change password</Text>
+              <Text style={styles.modalTitle}>{t('settings.pw.title')}</Text>
               <TouchableOpacity onPress={() => { setPwVisible(false); resetPwForm(); }}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -761,7 +763,7 @@ const Settings = () => {
 
             <TextInput
               style={styles.pwInput}
-              placeholder="Current password"
+              placeholder={t('settings.pw.currentPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={currentPw}
               onChangeText={setCurrentPw}
@@ -770,7 +772,7 @@ const Settings = () => {
             />
             <TextInput
               style={styles.pwInput}
-              placeholder="New password (min 8 chars)"
+              placeholder={t('settings.pw.newPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={newPw}
               onChangeText={setNewPw}
@@ -779,7 +781,7 @@ const Settings = () => {
             />
             <TextInput
               style={styles.pwInput}
-              placeholder="Confirm new password"
+              placeholder={t('settings.pw.confirmPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={confirmPw}
               onChangeText={setConfirmPw}
@@ -797,7 +799,7 @@ const Settings = () => {
                 ? <ActivityIndicator color={colors.white} />
                 : <>
                     <Ionicons name="lock-closed-outline" size={18} color={colors.white} />
-                    <Text style={styles.sendBtnText}>Update password</Text>
+                    <Text style={styles.sendBtnText}>{t('settings.pw.update')}</Text>
                   </>}
             </TouchableOpacity>
           </View>
@@ -818,7 +820,7 @@ const Settings = () => {
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Delete account</Text>
+              <Text style={styles.modalTitle}>{t('settings.deleteTitle')}</Text>
               <TouchableOpacity onPress={() => { setDeleteVisible(false); setDeletePw(''); }}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -827,13 +829,13 @@ const Settings = () => {
             <View style={styles.privacyHint}>
               <MaterialCommunityIcons name="alert-outline" size={16} color={colors.error} />
               <Text style={[styles.privacyHintText, { color: colors.error }]}>
-                This permanently deletes your account and content. It cannot be undone.
+                {t('settings.deleteWarning')}
               </Text>
             </View>
 
             <TextInput
               style={styles.pwInput}
-              placeholder="Enter your password to confirm"
+              placeholder={t('settings.deleteConfirmPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={deletePw}
               onChangeText={setDeletePw}
@@ -851,7 +853,7 @@ const Settings = () => {
                 ? <ActivityIndicator color={colors.white} />
                 : <>
                     <Ionicons name="trash-outline" size={18} color={colors.white} />
-                    <Text style={styles.sendBtnText}>Delete my account</Text>
+                    <Text style={styles.sendBtnText}>{t('settings.deleteButton')}</Text>
                   </>}
             </TouchableOpacity>
           </View>
@@ -881,13 +883,13 @@ const Settings = () => {
             <View style={styles.privacyHint}>
               <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
               <Text style={styles.privacyHintText}>
-                Your profile and posts are hidden until you sign in again. Reactivate anytime by logging back in.
+                {t('settings.deactivateHint')}
               </Text>
             </View>
 
             <TextInput
               style={styles.pwInput}
-              placeholder="Enter your password to confirm"
+              placeholder={t('settings.deleteConfirmPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={deactivatePw}
               onChangeText={setDeactivatePw}
@@ -905,7 +907,7 @@ const Settings = () => {
                 ? <ActivityIndicator color={colors.white} />
                 : <>
                     <MaterialCommunityIcons name="account-off-outline" size={18} color={colors.white} />
-                    <Text style={styles.sendBtnText}>Deactivate</Text>
+                    <Text style={styles.sendBtnText}>{t('settings.deactivateButton')}</Text>
                   </>}
             </TouchableOpacity>
           </View>

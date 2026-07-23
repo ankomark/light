@@ -10,6 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchPublications, fetchMyPublications, fetchPublicationsByUrl } from '../services/api';
 import { CATEGORIES, categoryLabel } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const { width } = Dimensions.get('window');
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -31,6 +32,7 @@ const AuthorAvatar = ({ uri, size = 18 }) => (
 );
 
 const Articles = ({ navigation }) => {
+  const { t } = useI18n();
   const [tab, setTab] = useState('discover');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
@@ -188,8 +190,8 @@ const Articles = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Publishing</Text>
-        <Text style={styles.headerSub}>Read and publish long-form writing</Text>
+        <Text style={styles.headerTitle}>{t('articles.title')}</Text>
+        <Text style={styles.headerSub}>{t('articles.subtitle')}</Text>
       </View>
 
       {/* Segmented tabs */}
@@ -215,7 +217,7 @@ const Articles = ({ navigation }) => {
             <Ionicons name="search" size={18} color={colors.placeholder} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search titles…"
+              placeholder={t('articles.searchPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={query}
               onChangeText={setQuery}
@@ -279,7 +281,7 @@ const Articles = ({ navigation }) => {
                 </Text>
                 {tab === 'mine' && (
                   <TouchableOpacity style={styles.writeNow} onPress={() => navigation.navigate('PublicationEditor', {})}>
-                    <Text style={styles.writeNowText}>Start writing</Text>
+                    <Text style={styles.writeNowText}>{t('articles.startWriting')}</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -294,7 +296,7 @@ const Articles = ({ navigation }) => {
         activeOpacity={0.9}
       >
         <Ionicons name="create-outline" size={20} color={colors.white} />
-        <Text style={styles.fabText}>Write</Text>
+        <Text style={styles.fabText}>{t('articles.write')}</Text>
       </TouchableOpacity>
     </View>
   );

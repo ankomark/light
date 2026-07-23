@@ -15,11 +15,13 @@ import { usePlayer } from '../context/PlayerContext';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import ReportModal from './ReportModal';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist }) => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { currentTrack, isPlaying, isLoading, isBuffering, playTrack, togglePlay } = usePlayer();
   const isOwner = track.is_owner;
@@ -70,7 +72,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
   };
 
   const handleDelete = () => {
-    Alert.alert('Delete Track', 'Are you sure you want to delete this track?', [
+    Alert.alert(t('trackItem.deleteTitle'), t('trackItem.deleteConfirm'), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -83,7 +85,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
             });
             onDelete?.(track.id);
           } catch (error) {
-            Alert.alert('Error', 'Failed to delete track');
+            Alert.alert(t('common.error'), t('trackItem.deleteFailed'));
           }
         },
       },
@@ -92,7 +94,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
 
   const handleDownload = async () => {
     if (!track.audio_file) {
-      Alert.alert('Error', 'Track file is missing!');
+      Alert.alert(t('common.error'), t('trackItem.fileMissing'));
       return;
     }
     try {
@@ -123,10 +125,10 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
         console.warn('Album creation failed:', albumError);
       }
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
-      Alert.alert('Success', 'Track downloaded successfully');
+      Alert.alert(t('market.success'), t('trackItem.downloadedOk'));
     } catch (error) {
       setDownloadError(error.message);
-      Alert.alert('Download Failed', error.message || 'An unexpected error occurred', [
+      Alert.alert(t('trackItem.downloadFailedTitle'), error.message || t('trackItem.downloadFailedBody'), [
         { text: 'OK' },
         { text: 'Retry', onPress: handleDownload },
       ]);
@@ -305,14 +307,14 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
               onPress={() => { setMenuVisible(false); navigation.navigate('EditTrack', { track }); }}
             >
               <MaterialIcons name="edit" size={22} color={colors.primary} />
-              <Text style={styles.sheetLabel}>Edit track</Text>
+              <Text style={styles.sheetLabel}>{t('trackItem.edit')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.sheetItem}
               onPress={() => { setMenuVisible(false); handleDelete(); }}
             >
               <MaterialIcons name="delete-outline" size={22} color={colors.error} />
-              <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>Delete track</Text>
+              <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>{t('trackItem.delete')}</Text>
             </TouchableOpacity>
           </View>
         </View>

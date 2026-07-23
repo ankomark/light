@@ -8,8 +8,10 @@ import { fetchPlaylist, deletePlaylist, removeTrackFromPlaylist } from '../servi
 import { usePlayer } from '../context/PlayerContext';
 import TrackItem from './TrackItem';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const PlaylistDetail = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   const { playQueue } = usePlayer();
@@ -60,12 +62,12 @@ const PlaylistDetail = () => {
     setTracks((cur) => cur.filter((t) => t.id !== trackId));
     removeTrackFromPlaylist(playlistId, trackId).catch(() => {
       setTracks(prev);
-      Alert.alert('Error', 'Could not remove the track. Please try again.');
+      Alert.alert(t('common.error'), t('playlist.removeTrackFailed'));
     });
-  }, [tracks, playlistId]);
+  }, [tracks, playlistId, t]);
 
   const handleDeletePlaylist = useCallback(() => {
-    Alert.alert('Delete Playlist', `Delete "${playlist?.name || 'this playlist'}"?`, [
+    Alert.alert(t('playlist.deleteTitle'), t('playlist.deleteConfirm', { name: playlist?.name || t('playlist.thisPlaylist') }), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -75,12 +77,12 @@ const PlaylistDetail = () => {
             await deletePlaylist(playlistId);
             navigation.goBack();
           } catch {
-            Alert.alert('Error', 'Could not delete the playlist.');
+            Alert.alert(t('common.error'), t('playlist.deleteFailed'));
           }
         },
       },
     ]);
-  }, [playlist?.name, playlistId, navigation]);
+  }, [playlist?.name, playlistId, navigation, t]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.header}>
@@ -97,7 +99,7 @@ const PlaylistDetail = () => {
           activeOpacity={0.85}
         >
           <Ionicons name="play" size={16} color={colors.white} />
-          <Text style={styles.actionText}>Play all</Text>
+          <Text style={styles.actionText}>{t('playlist.playAll')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionBtn, styles.shuffleBtn, tracks.length === 0 && styles.actionDisabled]}
@@ -106,14 +108,14 @@ const PlaylistDetail = () => {
           activeOpacity={0.85}
         >
           <Ionicons name="shuffle" size={16} color={colors.primary} />
-          <Text style={styles.shuffleText}>Shuffle</Text>
+          <Text style={styles.shuffleText}>{t('playlist.shuffle')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.deleteBtn} onPress={handleDeletePlaylist} activeOpacity={0.85}>
           <MaterialIcons name="delete-outline" size={20} color={colors.error} />
         </TouchableOpacity>
       </View>
     </View>
-  ), [playlist?.name, tracks.length, buildQueue, playQueue, handleDeletePlaylist]);
+  ), [playlist?.name, tracks.length, buildQueue, playQueue, handleDeletePlaylist, t]);
 
   if (loading) {
     return (
@@ -129,7 +131,7 @@ const PlaylistDetail = () => {
         <MaterialIcons name="error-outline" size={48} color={colors.textMuted} />
         <Text style={styles.errorText}>{"Couldn't load this playlist."}</Text>
         <TouchableOpacity style={styles.retryBtn} onPress={load}>
-          <Text style={styles.retryText}>Try Again</Text>
+          <Text style={styles.retryText}>{t('common.retry')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -151,8 +153,8 @@ const PlaylistDetail = () => {
       ListEmptyComponent={
         <View style={styles.empty}>
           <MaterialIcons name="queue-music" size={48} color={colors.textMuted} />
-          <Text style={styles.emptyText}>No tracks in this playlist yet.</Text>
-          <Text style={styles.emptySub}>Add tracks from the music list.</Text>
+          <Text style={styles.emptyText}>{t('playlist.empty')}</Text>
+          <Text style={styles.emptySub}>{t('playlist.addFromMusic')}</Text>
         </View>
       }
       contentContainerStyle={styles.listContent}

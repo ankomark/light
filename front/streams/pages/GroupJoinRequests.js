@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity } from 'react-native';
 import { fetchGroupJoinRequests, approveJoinRequest, rejectJoinRequest } from '../services/api';
 import GroupRequestItem from './GroupRequestItem';
+import { useI18n } from '../context/I18nContext';
 
 const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClose: onCloseProp }) => {
+  const { t } = useI18n();
   // This screen is reached via React Navigation (props are route/navigation) but
   // can also be rendered directly with groupSlug/onClose props. Support both.
   const groupSlug = groupSlugProp ?? route?.params?.groupSlug;
@@ -61,9 +63,9 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
     >
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>Join Requests</Text>
+          <Text style={styles.title}>{t('groupReq.title')}</Text>
           <TouchableOpacity onPress={onClose}>
-            <Text style={styles.closeButton}>Close</Text>
+            <Text style={styles.closeButton}>{t('common.close')}</Text>
           </TouchableOpacity>
         </View>
         
@@ -81,7 +83,7 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
               />
             )}
             ListEmptyComponent={
-              <Text style={styles.emptyText}>No pending requests</Text>
+              <Text style={styles.emptyText}>{t('groupReq.none')}</Text>
             }
           />
         )}

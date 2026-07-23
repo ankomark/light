@@ -53,13 +53,14 @@ const FAQS = [
   },
 ];
 
-const openLink = async (url, fallbackMsg) => {
+// Module scope: no hook here, so the caller passes t in.
+const openLink = async (url, fallbackMsg, t) => {
   try {
     const ok = await Linking.canOpenURL(url);
     if (ok) await Linking.openURL(url);
-    else Alert.alert('Unavailable', fallbackMsg || 'Could not open this link.');
+    else Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
   } catch {
-    Alert.alert('Unavailable', fallbackMsg || 'Could not open this link.');
+    Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
   }
 };
 
@@ -78,7 +79,7 @@ const Help = () => {
   const emailUs = () =>
     openLink(
       `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} support`)}`,
-      'Email is not set up on this device.'
+      'Email is not set up on this device.', t
     );
 
   return (
@@ -96,7 +97,7 @@ const Help = () => {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={styles.intro}>Frequently asked questions</Text>
+        <Text style={styles.intro}>{t('help.faq')}</Text>
 
         <View style={styles.group}>
           {FAQS.map((item, i) => {
@@ -117,13 +118,13 @@ const Help = () => {
           })}
         </View>
 
-        <Text style={styles.intro}>Still need help?</Text>
+        <Text style={styles.intro}>{t('help.stillNeedHelp')}</Text>
         <View style={styles.group}>
           <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('Settings')} activeOpacity={0.7}>
             <View style={styles.actionIcon}>
               <MaterialCommunityIcons name="email-edit-outline" size={20} color={colors.primary} />
             </View>
-            <Text style={styles.actionLabel}>Contact admins in Settings</Text>
+            <Text style={styles.actionLabel}>{t('help.contactInSettings')}</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
           <View style={styles.divider} />
@@ -132,7 +133,7 @@ const Help = () => {
               <MaterialCommunityIcons name="email-outline" size={20} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.actionLabel}>Email support</Text>
+              <Text style={styles.actionLabel}>{t('help.emailSupport')}</Text>
               <Text style={styles.actionSub}>{SUPPORT_EMAIL}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />

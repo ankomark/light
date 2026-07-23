@@ -42,7 +42,7 @@ const BlockedUsers = () => {
   useEffect(() => { load(); }, [load]);
 
   const handleUnblock = (item) => {
-    Alert.alert('Unblock', `Unblock @${item.username}? They'll be able to see your content and message you again.`, [
+    Alert.alert(t('blocked.unblockTitle'), t('blocked.unblockConfirm', { name: item.username }), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Unblock',
@@ -54,7 +54,7 @@ const BlockedUsers = () => {
             await unblockUser(item.id);
           } catch {
             setUsers(prev); // revert
-            Alert.alert('Error', 'Could not unblock this user. Please try again.');
+            Alert.alert(t('common.error'), t('blocked.unblockFailed'));
           } finally {
             setBusyId(null);
           }
@@ -112,7 +112,7 @@ const BlockedUsers = () => {
             <View style={styles.empty}>
               <MaterialCommunityIcons name="account-cancel-outline" size={56} color={colors.border} />
               <Text style={styles.emptyTitle}>{t('blocked.empty')}</Text>
-              <Text style={styles.emptySub}>People you block will appear here.</Text>
+              <Text style={styles.emptySub}>{t('blocked.emptySub')}</Text>
             </View>
           }
         />

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const ChatRow = ({ item }) => (
   <View style={styles.row}>
@@ -18,6 +19,7 @@ const ChatRow = ({ item }) => (
 );
 
 const LiveChat = ({ messages, draft, onChangeDraft, onSend, style }) => {
+  const { t } = useI18n();
   const listRef = useRef(null);
 
   useEffect(() => {
@@ -51,7 +53,7 @@ const LiveChat = ({ messages, draft, onChangeDraft, onSend, style }) => {
           style={styles.input}
           value={draft}
           onChangeText={onChangeDraft}
-          placeholder="Say something…"
+          placeholder={t('live.chatPlaceholder')}
           placeholderTextColor={colors.placeholder}
           maxLength={200}
           returnKeyType="send"

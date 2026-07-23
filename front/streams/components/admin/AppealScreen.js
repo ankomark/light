@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchMyAppeal, submitAppeal } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const STATUS_META = {
   pending: { color: colors.warning, label: 'Under review', icon: 'hourglass-outline' },
@@ -14,6 +15,7 @@ const STATUS_META = {
 };
 
 const AppealScreen = ({ navigation }) => {
+  const { t } = useI18n();
   const [appeal, setAppeal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -35,7 +37,7 @@ const AppealScreen = ({ navigation }) => {
   const submit = async () => {
     const msg = message.trim();
     if (msg.length < 10) {
-      Alert.alert('Appeal', 'Please describe your appeal (at least 10 characters).');
+      Alert.alert(t('appeal.title'), t('appeal.tooShort'));
       return;
     }
     setSubmitting(true);
@@ -44,7 +46,7 @@ const AppealScreen = ({ navigation }) => {
       setAppeal(created);
       setMessage('');
     } catch (e) {
-      Alert.alert('Appeal', e?.response?.data?.error || 'Could not submit your appeal.');
+      Alert.alert(t('appeal.title'), e?.response?.data?.error || t('appeal.submitFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -58,7 +60,7 @@ const AppealScreen = ({ navigation }) => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <Text style={styles.title}>Appeal</Text>
+      <Text style={styles.title}>{t('appeal.title')}</Text>
 
       {appeal ? (
         <View style={styles.card}>
@@ -68,11 +70,11 @@ const AppealScreen = ({ navigation }) => {
               {STATUS_META[appeal.status]?.label}
             </Text>
           </View>
-          <Text style={styles.label}>Your message</Text>
+          <Text style={styles.label}>{t('appeal.yourMessage')}</Text>
           <Text style={styles.body}>{appeal.message}</Text>
           {appeal.review_notes ? (
             <>
-              <Text style={styles.label}>Moderator note</Text>
+              <Text style={styles.label}>{t('appeal.moderatorNote')}</Text>
               <Text style={styles.body}>{appeal.review_notes}</Text>
             </>
           ) : null}
@@ -85,7 +87,7 @@ const AppealScreen = ({ navigation }) => {
           </Text>
           <TextInput
             style={styles.input}
-            placeholder="Explain your appeal…"
+            placeholder={t('appeal.placeholder')}
             placeholderTextColor={colors.placeholder}
             value={message}
             onChangeText={setMessage}
@@ -99,7 +101,7 @@ const AppealScreen = ({ navigation }) => {
           >
             {submitting
               ? <ActivityIndicator color="#0A1628" />
-              : <Text style={styles.btnText}>Submit appeal</Text>}
+              : <Text style={styles.btnText}>{t('appeal.submit')}</Text>}
           </TouchableOpacity>
         </View>
       )}

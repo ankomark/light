@@ -8,6 +8,7 @@ import { fetchBroadcasts, fetchBroadcastToken, endBroadcast } from '../../servic
 import { useAuth } from '../../context/useAuth';
 import { isSuperAdmin } from '../../utils/roles';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -19,6 +20,7 @@ const KINDS = [
 const KIND_ICON = { meet: 'account-group', tv: 'television-classic' };
 
 const LiveHub = ({ navigation }) => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const isSuper = isSuperAdmin(currentUser);
   const [items, setItems] = useState([]);
@@ -46,7 +48,7 @@ const LiveHub = ({ navigation }) => {
       const res = await fetchBroadcastToken(b.id);
       navigation.navigate('LiveRoom', { url: res.url, token: res.token, broadcast: res.broadcast, role: 'viewer' });
     } catch {
-      Alert.alert('Live', 'This broadcast is no longer available.');
+      Alert.alert(t('live.title'), t('live.notAvailable'));
       load();
     } finally {
       setOpening(null);
@@ -69,7 +71,7 @@ const LiveHub = ({ navigation }) => {
               await endBroadcast(b.id);
               setItems((prev) => prev.filter((x) => x.id !== b.id));
             } catch {
-              Alert.alert('Live', 'Could not end this session.');
+              Alert.alert(t('live.title'), t('live.endSessionFailed'));
             } finally {
               setEndingId(null);
             }
@@ -117,7 +119,7 @@ const LiveHub = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Live</Text>
+      <Text style={styles.title}>{t('live.title')}</Text>
 
       {/* Go Live CTA */}
       <View style={styles.goLiveRow}>
@@ -130,7 +132,7 @@ const LiveHub = ({ navigation }) => {
         ))}
       </View>
 
-      <Text style={styles.sectionTitle}>Live now</Text>
+      <Text style={styles.sectionTitle}>{t('live.now')}</Text>
       {loading ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
       ) : (
@@ -145,8 +147,8 @@ const LiveHub = ({ navigation }) => {
           ListEmptyComponent={
             <View style={styles.empty}>
               <MaterialCommunityIcons name="broadcast-off" size={48} color={colors.textSecondary} />
-              <Text style={styles.emptyText}>No one is live right now</Text>
-              <Text style={styles.emptySub}>Tap Meet or Go-Live above to start your own</Text>
+              <Text style={styles.emptyText}>{t('live.noOneLive')}</Text>
+              <Text style={styles.emptySub}>{t('live.startYourOwn')}</Text>
             </View>
           }
         />

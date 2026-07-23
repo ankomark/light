@@ -20,12 +20,14 @@ import {
 } from '../services/api';
 import { typography, spacing, radius, shadows } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 // People asking to follow a private account. Only the account owner sees this —
 // the server scopes the list to the requester's own pending rows.
 const FollowRequests = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -61,7 +63,7 @@ const FollowRequests = () => {
       await (approve ? approveFollowRequest(item.id) : rejectFollowRequest(item.id));
     } catch {
       setRequests(previous);  // revert
-      Alert.alert('Error', 'Could not update that request. Please try again.');
+      Alert.alert(t('common.error'), t('followReq.updateFailed'));
     } finally {
       setBusyId(null);
     }
@@ -104,14 +106,14 @@ const FollowRequests = () => {
               onPress={() => handleReject(item)}
               activeOpacity={0.8}
             >
-              <Text style={styles.declineText}>Decline</Text>
+              <Text style={styles.declineText}>{t('common.decline')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.approveBtn}
               onPress={() => act(item, true)}
               activeOpacity={0.8}
             >
-              <Text style={styles.approveText}>Approve</Text>
+              <Text style={styles.approveText}>{t('common.approve')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -129,7 +131,7 @@ const FollowRequests = () => {
         >
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Follow requests</Text>
+        <Text style={styles.headerTitle}>{t('followReq.title')}</Text>
         <View style={styles.backBtn} />
       </SafeAreaView>
 
@@ -149,7 +151,7 @@ const FollowRequests = () => {
           ListEmptyComponent={
             <View style={styles.empty}>
               <MaterialCommunityIcons name="account-clock-outline" size={56} color={colors.border} />
-              <Text style={styles.emptyTitle}>No pending requests</Text>
+              <Text style={styles.emptyTitle}>{t('followReq.none')}</Text>
               <Text style={styles.emptySub}>
                 While your account is private, people who want to follow you appear here first.
               </Text>

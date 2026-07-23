@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminAppeals, fetchAdminByUrl, approveAppeal, rejectAppeal } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -17,6 +18,7 @@ const FILTERS = [
 ];
 
 const AdminAppeals = () => {
+  const { t } = useI18n();
   const [filter, setFilter] = useState('pending');
   const [appeals, setAppeals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -63,14 +65,14 @@ const AdminAppeals = () => {
       await fn();
       setAppeals((prev) => prev.filter((a) => a.id !== id));
     } catch {
-      Alert.alert('Error', 'Action failed.');
+      Alert.alert(t('common.error'), t('admin.actionFailedShort'));
     } finally {
       setBusyId(null);
     }
   };
 
   const confirmApprove = (item) =>
-    Alert.alert('Approve appeal', `Lift the suspension on @${item.user?.username}?`, [
+    Alert.alert(t('appeal.approveTitle'), t('appeal.approveConfirm', { name: item.user?.username }), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Approve', onPress: () => act(item.id, () => approveAppeal(item.id)) },
     ]);
@@ -100,10 +102,10 @@ const AdminAppeals = () => {
             <View style={styles.actions}>
               <TouchableOpacity style={[styles.btn, styles.btnApprove]} onPress={() => confirmApprove(item)}>
                 <Ionicons name="checkmark-circle-outline" size={16} color="#0A1628" />
-                <Text style={styles.btnTextDark}>Approve & lift</Text>
+                <Text style={styles.btnTextDark}>{t('appeal.approveLift')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.btn, styles.btnReject]} onPress={() => act(item.id, () => rejectAppeal(item.id))}>
-                <Text style={styles.btnTextLight}>Reject</Text>
+                <Text style={styles.btnTextLight}>{t('common.reject')}</Text>
               </TouchableOpacity>
             </View>
           )
@@ -114,7 +116,7 @@ const AdminAppeals = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Appeals</Text>
+      <Text style={styles.title}>{t('appeal.listTitle')}</Text>
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = filter === f.key;

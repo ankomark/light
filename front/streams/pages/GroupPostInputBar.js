@@ -9,8 +9,10 @@ import {
   Platform
 } from 'react-native';
 import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { useI18n } from '../context/I18nContext';
 
 const GroupPostInputBar = ({ onSubmit, onAttachPress }) => {
+  const { t } = useI18n();
   const [content, setContent] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef(null);
@@ -38,7 +40,7 @@ const GroupPostInputBar = ({ onSubmit, onAttachPress }) => {
         <TextInput
           ref={inputRef}
           style={[styles.input, isFocused && styles.inputFocused]}
-          placeholder="What's on your mind?"
+          placeholder={t('group.post.placeholder')}
           placeholderTextColor="#9CA3AF"
           value={content}
           onChangeText={setContent}

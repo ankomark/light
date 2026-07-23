@@ -8,6 +8,7 @@ import Constants from 'expo-constants';
 import { mediaDevices, RTCView } from '@livekit/react-native-webrtc';
 import { createBroadcast } from '../../services/api';
 import { colors, typography, spacing, radius } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const KINDS = [
   { key: 'meet', label: 'Meet', icon: 'account-group', hint: 'Audio · 100 followers' },
@@ -15,6 +16,7 @@ const KINDS = [
 ];
 
 const GoLive = ({ navigation, route }) => {
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const [stage, setStage] = useState('setup'); // setup | lobby
   const [kind, setKind] = useState(route.params?.kind || 'meet');
@@ -51,11 +53,11 @@ const GoLive = ({ navigation, route }) => {
         streamRef.current = s;
         setStream(s);
       } catch {
-        if (!cancelled) Alert.alert('Go Live', 'Camera/microphone permission is needed to broadcast.');
+        if (!cancelled) Alert.alert(t('live.goLive'), t('live.permissionNeeded'));
       }
     })();
     return () => { cancelled = true; stopPreview(); };
-  }, [stage, isVideo, inExpoGo, stopPreview]);
+  }, [stage, isVideo, inExpoGo, stopPreview, t]);
 
   const toggleMicPreview = () => {
     const next = !micOn;
@@ -76,7 +78,7 @@ const GoLive = ({ navigation, route }) => {
   };
 
   const goToLobby = () => {
-    if (title.trim().length < 3) { Alert.alert('Go Live', 'Give your broadcast a title.'); return; }
+    if (title.trim().length < 3) { Alert.alert(t('live.goLive'), t('live.titleRequired')); return; }
     setMicOn(true);
     setCamOn(isVideo);
     setStage('lobby');
@@ -93,7 +95,7 @@ const GoLive = ({ navigation, route }) => {
         initialMicOn: micOn, initialCamOn: camOn,
       });
     } catch (e) {
-      Alert.alert('Go Live', e?.response?.data?.error || 'Could not start the broadcast.');
+      Alert.alert(t('live.goLive'), e?.response?.data?.error || t('live.startFailed'));
       setBusy(false);
     }
   };
@@ -106,7 +108,7 @@ const GoLive = ({ navigation, route }) => {
           <TouchableOpacity onPress={() => setStage('setup')} hitSlop={10}>
             <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.topTitle}>Ready?</Text>
+          <Text style={styles.topTitle}>{t('live.ready')}</Text>
           <View style={{ width: 26 }} />
         </View>
 
@@ -144,7 +146,7 @@ const GoLive = ({ navigation, route }) => {
           {isVideo && camOn && (
             <TouchableOpacity style={styles.lobbyBtn} onPress={flipPreview}>
               <MaterialCommunityIcons name="camera-flip-outline" size={24} color="#fff" />
-              <Text style={styles.lobbyBtnText}>Flip</Text>
+              <Text style={styles.lobbyBtnText}>{t('live.flip')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -153,11 +155,11 @@ const GoLive = ({ navigation, route }) => {
           {busy ? <ActivityIndicator color="#0A1628" /> : (
             <>
               <Ionicons name="radio" size={20} color="#0A1628" />
-              <Text style={styles.goBtnText}>Go Live</Text>
+              <Text style={styles.goBtnText}>{t('live.goLive')}</Text>
             </>
           )}
         </TouchableOpacity>
-        <Text style={styles.note}>Your followers will be notified that you’re on air. Nothing is recorded.</Text>
+        <Text style={styles.note}>{t('live.notifyNote')}</Text>
       </View>
     );
   }
@@ -169,11 +171,11 @@ const GoLive = ({ navigation, route }) => {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.topTitle}>Go Live</Text>
+        <Text style={styles.topTitle}>{t('live.goLive')}</Text>
         <View style={{ width: 26 }} />
       </View>
 
-      <Text style={styles.label}>Type</Text>
+      <Text style={styles.label}>{t('live.broadcastType')}</Text>
       <View style={styles.kindRow}>
         {KINDS.map((k) => {
           const active = kind === k.key;
@@ -188,10 +190,10 @@ const GoLive = ({ navigation, route }) => {
         })}
       </View>
 
-      <Text style={styles.label}>Title</Text>
+      <Text style={styles.label}>{t('live.broadcastTitle')}</Text>
       <TextInput
         style={styles.input}
-        placeholder="e.g. Morning Devotion"
+        placeholder={t('live.titlePlaceholder')}
         placeholderTextColor={colors.placeholder}
         value={title}
         onChangeText={setTitle}
@@ -200,7 +202,7 @@ const GoLive = ({ navigation, route }) => {
 
       <TouchableOpacity style={styles.goBtn} onPress={goToLobby} activeOpacity={0.85}>
         <Ionicons name="arrow-forward" size={20} color="#0A1628" />
-        <Text style={styles.goBtnText}>Continue</Text>
+        <Text style={styles.goBtnText}>{t('common.continue')}</Text>
       </TouchableOpacity>
       <Text style={styles.note}>Next you’ll preview your {isVideo ? 'camera and mic' : 'mic'} before going live.</Text>
     </View>

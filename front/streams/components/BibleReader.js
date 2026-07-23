@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import useGridColumns from '../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const API_URL = 'https://bible-api.com';
 
@@ -51,6 +52,7 @@ const BIBLE_BOOKS = [
 ];
 
 const BibleReader = () => {
+  const { t } = useI18n();
   // Responsive chapter chips: 5 per row on a phone, more on tablets / landscape.
   const { cols: chipCols, tileSize: chipSize } = useGridColumns({
     target: 64, min: 5, max: 10, horizontalPadding: spacing.md * 2, gap: spacing.sm,
@@ -150,7 +152,7 @@ const BibleReader = () => {
           <Ionicons name="search" size={18} color={colors.placeholder} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search a book..."
+            placeholder={t('bible.searchPlaceholder')}
             placeholderTextColor={colors.placeholder}
             value={bookQuery}
             onChangeText={setBookQuery}
@@ -192,7 +194,7 @@ const BibleReader = () => {
         columnWrapperStyle={styles.chipRow}
         contentContainerStyle={styles.chipGrid}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={<Text style={styles.pickPrompt}>Select a chapter</Text>}
+        ListHeaderComponent={<Text style={styles.pickPrompt}>{t('bible.selectChapter')}</Text>}
         renderItem={({ item }) => (
           <TouchableOpacity
             style={[styles.chip, { width: chipSize, height: chipSize }]}
@@ -225,7 +227,7 @@ const BibleReader = () => {
             style={styles.retryBtn}
             onPress={() => fetchChapter(selectedBook, selectedChapter)}
           >
-            <Text style={styles.retryBtnText}>Try Again</Text>
+            <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
           </TouchableOpacity>
         </View>
       );
@@ -257,7 +259,7 @@ const BibleReader = () => {
             activeOpacity={0.8}
           >
             <Ionicons name="chevron-back" size={18} color={canPrev ? colors.white : colors.textMuted} />
-            <Text style={[styles.navBtnText, !canPrev && styles.navBtnTextDisabled]}>Previous</Text>
+            <Text style={[styles.navBtnText, !canPrev && styles.navBtnTextDisabled]}>{t('common.previous')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.navBtn, !canNext && styles.navBtnDisabled]}
@@ -265,7 +267,7 @@ const BibleReader = () => {
             onPress={() => fetchChapter(selectedBook, selectedChapter + 1)}
             activeOpacity={0.8}
           >
-            <Text style={[styles.navBtnText, !canNext && styles.navBtnTextDisabled]}>Next</Text>
+            <Text style={[styles.navBtnText, !canNext && styles.navBtnTextDisabled]}>{t('common.next')}</Text>
             <Ionicons name="chevron-forward" size={18} color={canNext ? colors.white : colors.textMuted} />
           </TouchableOpacity>
         </View>

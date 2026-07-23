@@ -7,6 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminLogs, fetchAdminByUrl } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -31,6 +32,7 @@ function timeAgo(dateStr) {
 }
 
 const AdminLogs = () => {
+  const { t } = useI18n();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -101,7 +103,7 @@ const AdminLogs = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Audit Log</Text>
+      <Text style={styles.title}>{t('admin.auditLog')}</Text>
       {loading ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
       ) : (
@@ -116,7 +118,7 @@ const AdminLogs = () => {
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
           ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
-          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>No actions logged yet</Text></View>}
+          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{t('admin.noActions')}</Text></View>}
         />
       )}
     </View>

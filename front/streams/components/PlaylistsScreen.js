@@ -8,6 +8,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { fetchPlaylists, createPlaylist } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const CoverCollage = ({ images = [] }) => {
   if (!images.length) {
@@ -33,6 +34,7 @@ const CoverCollage = ({ images = [] }) => {
 };
 
 const PlaylistsScreen = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const [playlists, setPlaylists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,11 +76,11 @@ const PlaylistsScreen = () => {
       setPlaylists((prev) => [{ ...created, track_count: 0, cover_images: [] }, ...prev]);
       navigation.navigate('PlaylistDetail', { playlistId: created.id, name: created.name });
     } catch {
-      Alert.alert('Error', 'Could not create the playlist. Please try again.');
+      Alert.alert(t('common.error'), t('playlist.createFailed'));
     } finally {
       setCreating(false);
     }
-  }, [newName, creating, navigation]);
+  }, [newName, creating, navigation, t]);
 
   const renderItem = useCallback(({ item }) => (
     <TouchableOpacity
@@ -120,7 +122,7 @@ const PlaylistsScreen = () => {
             <Text style={styles.emptyText}>
               {error ? "Couldn't load your playlists." : 'No playlists yet'}
             </Text>
-            <Text style={styles.emptySub}>Create one and add your favorite tracks.</Text>
+            <Text style={styles.emptySub}>{t('playlist.createPrompt')}</Text>
           </View>
         }
       />
@@ -136,12 +138,12 @@ const PlaylistsScreen = () => {
       <Modal visible={createVisible} transparent animationType="fade" onRequestClose={() => setCreateVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setCreateVisible(false)}>
           <Pressable style={styles.modalCard}>
-            <Text style={styles.modalTitle}>New Playlist</Text>
+            <Text style={styles.modalTitle}>{t('playlist.new')}</Text>
             <TextInput
               style={styles.input}
               value={newName}
               onChangeText={setNewName}
-              placeholder="Playlist name"
+              placeholder={t('playlist.namePlaceholder')}
               placeholderTextColor={colors.placeholder}
               autoFocus
               maxLength={100}
@@ -150,7 +152,7 @@ const PlaylistsScreen = () => {
             />
             <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setCreateVisible(false)} style={styles.modalBtn}>
-                <Text style={styles.modalCancel}>Cancel</Text>
+                <Text style={styles.modalCancel}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleCreate}
@@ -159,7 +161,7 @@ const PlaylistsScreen = () => {
               >
                 {creating
                   ? <ActivityIndicator size="small" color={colors.white} />
-                  : <Text style={styles.modalCreateText}>Create</Text>}
+                  : <Text style={styles.modalCreateText}>{t('common.create')}</Text>}
               </TouchableOpacity>
             </View>
           </Pressable>

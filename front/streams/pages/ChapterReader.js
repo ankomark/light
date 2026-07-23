@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveReadingProgress } from '../services/api';
 import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 // expo-speech is a native module; on a dev client that hasn't been rebuilt since
 // it was added it isn't present. Load it defensively so the reader still works
@@ -28,6 +29,7 @@ const toSpeech = (md = '') => md
   .trim();
 
 const ChapterReader = ({ route, navigation }) => {
+  const { t } = useI18n();
   const { publication } = route.params;
   const chapters = publication?.chapters || [];
   const [index, setIndex] = useState(route.params?.index ?? 0);
@@ -150,7 +152,7 @@ const ChapterReader = ({ route, navigation }) => {
             activeOpacity={0.85}
           >
             <Ionicons name="chevron-back" size={18} color={canPrev ? colors.white : colors.textMuted} />
-            <Text style={[styles.navBtnText, !canPrev && styles.navBtnTextDisabled]}>Previous</Text>
+            <Text style={[styles.navBtnText, !canPrev && styles.navBtnTextDisabled]}>{t('common.previous')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.navBtn, !canNext && styles.navBtnDisabled]}
@@ -158,7 +160,7 @@ const ChapterReader = ({ route, navigation }) => {
             onPress={() => go(index + 1)}
             activeOpacity={0.85}
           >
-            <Text style={[styles.navBtnText, !canNext && styles.navBtnTextDisabled]}>Next</Text>
+            <Text style={[styles.navBtnText, !canNext && styles.navBtnTextDisabled]}>{t('common.next')}</Text>
             <Ionicons name="chevron-forward" size={18} color={canNext ? colors.white : colors.textMuted} />
           </TouchableOpacity>
         </View>
@@ -169,7 +171,7 @@ const ChapterReader = ({ route, navigation }) => {
       <Modal visible={tocOpen} transparent animationType="fade" onRequestClose={() => setTocOpen(false)}>
         <Pressable style={styles.tocBackdrop} onPress={() => setTocOpen(false)}>
           <Pressable style={styles.tocCard}>
-            <Text style={styles.tocTitle}>Contents</Text>
+            <Text style={styles.tocTitle}>{t('common.contents')}</Text>
             <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
               {chapters.map((c, i) => {
                 const active = i === index;

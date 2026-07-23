@@ -2,6 +2,10 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, typography, spacing, radius } from '../constants/theme';
 
+// NOTE: deliberately NOT localised. This is a class component (no hooks), and
+// more importantly it is the last-resort crash screen — it must render even if
+// the i18n provider is itself part of what failed. English is the safe default
+// for the one component that can never be allowed to throw.
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);

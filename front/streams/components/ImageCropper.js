@@ -6,6 +6,7 @@ import {
 import Slider from '@react-native-community/slider';
 import { Feather } from '@expo/vector-icons';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { useI18n } from '../context/I18nContext';
 
 const SCREEN_W = Dimensions.get('window').width;
 const FRAME_W = SCREEN_W - 32;
@@ -29,6 +30,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * expo-image-manipulator.
  */
 export default function ImageCropper({ visible, uri, imageWidth, imageHeight, onCancel, onCropped }) {
+  const { t } = useI18n();
   const [aspectKey, setAspectKey] = useState('4:5');
   const [zoom, setZoom] = useState(1);
   const [working, setWorking] = useState(false);
@@ -133,11 +135,11 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
       <View style={styles.root}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onCancel} disabled={working} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={styles.headerCancel}>Cancel</Text>
+            <Text style={styles.headerCancel}>{t('common.cancel')}</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Crop</Text>
+          <Text style={styles.headerTitle}>{t('cropper.title')}</Text>
           <TouchableOpacity onPress={handleDone} disabled={working} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            {working ? <ActivityIndicator color="#1DA1F2" /> : <Text style={styles.headerDone}>Done</Text>}
+            {working ? <ActivityIndicator color="#1DA1F2" /> : <Text style={styles.headerDone}>{t('common.done')}</Text>}
           </TouchableOpacity>
         </View>
 
@@ -160,7 +162,7 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
             {imgLoading && (
               <View style={styles.imgLoading} pointerEvents="none">
                 <ActivityIndicator size="large" color="#1DA1F2" />
-                <Text style={styles.imgLoadingText}>Loading image…</Text>
+                <Text style={styles.imgLoadingText}>{t('cropper.loading')}</Text>
               </View>
             )}
             {/* Rule-of-thirds grid */}
@@ -202,7 +204,7 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={styles.hint}>Drag to reposition · pick a ratio · zoom</Text>
+          <Text style={styles.hint}>{t('cropper.hint')}</Text>
         </View>
       </View>
     </Modal>

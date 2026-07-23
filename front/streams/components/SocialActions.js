@@ -18,12 +18,14 @@ import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import config from '../config';
 import { likePost, savePost, PUBLIC_BASE } from '../services/api';
+import { useI18n } from '../context/I18nContext';
 
 // Brand gold for the "liked" state — ties the action into the app's gold
 // wordmark + medallion for a premium feel.
 const LIKE_GOLD = '#E8C66B';
 
 export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
+  const { t } = useI18n();
   const [likes, setLikes] = useState(initialLikes || 0);
   const [liked, setLiked] = useState(!!isLiked);
   const [loading, setLoading] = useState(false);
@@ -59,7 +61,7 @@ export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
       setLiked(prevLiked);                                // rollback
       setLikes(prevLikes);
       onLikeChange?.({ is_liked: prevLiked, likes_count: prevLikes });
-      Alert.alert('Error', 'Failed to like post. Please try again.');
+      Alert.alert(t('common.error'), t('social.likeFailed'));
     } finally {
       setLoading(false);
     }
@@ -90,6 +92,7 @@ export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
 };
 
 export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
+  const { t } = useI18n();
   const [saved, setSaved] = useState(!!initialSaved);
   const [loading, setLoading] = useState(false);
 
@@ -112,7 +115,7 @@ export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
       console.error('Save error:', error);
       setSaved(previous);     // rollback
       onSaveChange?.(previous);
-      Alert.alert('Error', 'Failed to save post. Please try again.');
+      Alert.alert(t('common.error'), t('social.saveFailed'));
     } finally {
       setLoading(false);
     }

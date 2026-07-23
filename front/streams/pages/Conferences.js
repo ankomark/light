@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, StatusBar,Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useI18n } from '../context/I18nContext';
 
 const Conferences = () => {
+  const { t } = useI18n();
   const [selectedConference, setSelectedConference] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -64,7 +66,7 @@ const Conferences = () => {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>SEVENTH-DAY ADVENTIST STRUCTURE</Text>
-        <Text style={styles.subtitle}>Global Organization & Regional Divisions</Text>
+        <Text style={styles.subtitle}>{t('conferences.title')}</Text>
         
         {conferences.map((conference) => (
           <TouchableOpacity 
@@ -120,7 +122,7 @@ const Conferences = () => {
               onPress={() => setModalVisible(false)}
               activeOpacity={0.7}
             >
-              <Text style={styles.closeButtonText}>Close</Text>
+              <Text style={styles.closeButtonText}>{t('common.close')}</Text>
             </TouchableOpacity>
           </View>
         </View>

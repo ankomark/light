@@ -2,7 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
 import { toggleTrackLike } from '../services/api';
+import { useI18n } from '../context/I18nContext';
 const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
+  const { t } = useI18n();
     const [likes, setLikes] = useState(initialLikes);
     const [isLiked, setIsLiked] = useState(initialIsLiked);
     // const [isLiked, setIsLiked] = useState(false);
@@ -20,7 +22,7 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
               setIsLiked(response.is_liked);
             }
           } catch (error) {
-            Alert.alert('Error', error.message || 'Failed to update like status');
+            Alert.alert(t('common.error'), error.message || t('social.likeStatusFailed'));
           }
         };
 

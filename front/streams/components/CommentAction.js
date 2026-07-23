@@ -17,6 +17,7 @@ import { commentOnPost, fetchSocialPostComments, getAccessToken, API_URL } from 
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -37,6 +38,7 @@ const CommentSkeleton = () => (
 );
 
 const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, currentUserAvatar, triggerVariant = 'icon' }) => {
+  const { t } = useI18n();
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(autoOpen || false);
   const [newComment, setNewComment] = useState('');
@@ -75,12 +77,12 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
       setComments(Array.isArray(data) ? data : (data ?? []));
     } catch (error) {
       // Only surface an error if there's nothing to show.
-      if (!hadCache) Alert.alert('Error', 'Failed to load comments');
+      if (!hadCache) Alert.alert(t('common.error'), t('comments.loadFailed'));
       console.error('Comments fetch error:', error);
     } finally {
       setLoading(false);
     }
-  }, [postId]);
+  }, [postId, t]);
 
   const fetchUserProfile = async () => {
     try {
@@ -114,7 +116,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
   const handlePostComment = async () => {
     const content = newComment.trim();
     if (!content) {
-      Alert.alert('Error', 'Comment cannot be empty');
+      Alert.alert(t('common.error'), t('comments.cannotBeEmpty'));
       return;
     }
 
@@ -153,7 +155,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
       // Roll back and restore the text so the user can retry.
       setComments((prev) => prev.filter((c) => c.id !== tempId));
       setNewComment(content);
-      Alert.alert('Error', 'Failed to post comment');
+      Alert.alert(t('common.error'), t('comments.postFailed'));
       console.error('Comment post error:', error);
     }
   };
@@ -226,7 +228,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
 
           <SafeAreaView edges={['top']} style={styles.content}>
             <View style={styles.headerRow}>
-              <Text style={styles.headerTitle}>Comments</Text>
+              <Text style={styles.headerTitle}>{t('comments.title')}</Text>
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={() => setShowComments(false)}
@@ -259,7 +261,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
               )}
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>No comments yet</Text>
+                  <Text style={styles.emptyText}>{t('comments.empty')}</Text>
                 </View>
               }
               onScrollToIndexFailed={handleScrollToIndexFailed}
@@ -283,7 +285,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
             />
             <TextInput
               style={styles.input}
-              placeholder="Write a comment..."
+              placeholder={t('comments.placeholder')}
               placeholderTextColor={colors.placeholder}
               value={newComment}
               onChangeText={setNewComment}

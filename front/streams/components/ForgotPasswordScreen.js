@@ -7,8 +7,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { forgotPassword } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const ForgotPasswordScreen = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -48,7 +50,7 @@ const ForgotPasswordScreen = () => {
           <Ionicons name="lock-open-outline" size={52} color={colors.primary} />
         </View>
 
-        <Text style={styles.title}>Reset Password</Text>
+        <Text style={styles.title}>{t('reset.title')}</Text>
 
         {sent ? (
           <>
@@ -61,7 +63,7 @@ const ForgotPasswordScreen = () => {
               onPress={() => navigation.navigate('ResetPassword', { email: email.trim() })}
               activeOpacity={0.8}
             >
-              <Text style={styles.buttonText}>Enter Reset Code</Text>
+              <Text style={styles.buttonText}>{t('reset.enterCode')}</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -71,12 +73,12 @@ const ForgotPasswordScreen = () => {
             </Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>{t('auth.email')}</Text>
               <View style={styles.inputWrapper}>
                 <Ionicons name="mail-outline" size={18} color={colors.placeholder} style={styles.icon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="your@email.com"
+                  placeholder={t('forgot.emailPlaceholder')}
                   placeholderTextColor={colors.placeholder}
                   value={email}
                   onChangeText={v => { setEmail(v); setError(''); }}
@@ -96,14 +98,14 @@ const ForgotPasswordScreen = () => {
             >
               {loading
                 ? <ActivityIndicator color={colors.white} />
-                : <Text style={styles.buttonText}>Send Reset Code</Text>
+                : <Text style={styles.buttonText}>{t('forgot.sendCode')}</Text>
               }
             </TouchableOpacity>
           </>
         )}
 
         <TouchableOpacity style={styles.loginLink} onPress={() => navigation.navigate('Login')}>
-          <Text style={styles.loginLinkText}>Back to Log In</Text>
+          <Text style={styles.loginLinkText}>{t('forgot.backToLogin')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>

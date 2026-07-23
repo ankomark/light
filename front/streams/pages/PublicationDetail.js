@@ -11,8 +11,10 @@ import {
 import FollowButton from '../components/FollowButton';
 import { categoryLabel } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const PublicationDetail = ({ route, navigation }) => {
+  const { t } = useI18n();
   const { id } = route.params;
   const [pub, setPub] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -71,7 +73,7 @@ const PublicationDetail = ({ route, navigation }) => {
   };
 
   const onDelete = () => {
-    Alert.alert('Delete publication', `Delete “${pub.title}”? This cannot be undone.`, [
+    Alert.alert(t('pubDetail.deleteTitle'), t('pubDetail.deleteConfirm', { title: pub.title }), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
@@ -80,7 +82,7 @@ const PublicationDetail = ({ route, navigation }) => {
             await deletePublication(id);
             navigation.goBack();
           } catch {
-            Alert.alert('Error', 'Could not delete this publication.');
+            Alert.alert(t('common.error'), t('pubDetail.deleteFailed'));
           }
         },
       },
@@ -94,9 +96,9 @@ const PublicationDetail = ({ route, navigation }) => {
     return (
       <View style={styles.centered}>
         <MaterialIcons name="error-outline" size={46} color={colors.textMuted} />
-        <Text style={styles.errorText}>This publication is unavailable.</Text>
+        <Text style={styles.errorText}>{t('pubDetail.unavailable')}</Text>
         <TouchableOpacity style={styles.retryBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.retryBtnText}>Go Back</Text>
+          <Text style={styles.retryBtnText}>{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -134,7 +136,7 @@ const PublicationDetail = ({ route, navigation }) => {
           <View style={styles.heroInfo}>
             <View style={styles.badgeRow}>
               <Text style={styles.catBadge}>{categoryLabel(pub.category)}</Text>
-              {pub.status === 'draft' && <Text style={styles.draftBadge}>Draft</Text>}
+              {pub.status === 'draft' && <Text style={styles.draftBadge}>{t('pubDetail.draft')}</Text>}
             </View>
             <Text style={styles.title}>{pub.title}</Text>
             <Text style={styles.author}>by {pub.author?.username || 'Unknown'}</Text>
@@ -191,9 +193,9 @@ const PublicationDetail = ({ route, navigation }) => {
           </TouchableOpacity>
         )}
 
-        <Text style={styles.tocTitle}>Contents</Text>
+        <Text style={styles.tocTitle}>{t('common.contents')}</Text>
         {chapters.length === 0 ? (
-          <Text style={styles.emptyToc}>No chapters yet.</Text>
+          <Text style={styles.emptyToc}>{t('pubDetail.noChapters')}</Text>
         ) : (
           chapters.map((ch, idx) => (
             <TouchableOpacity

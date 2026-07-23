@@ -29,6 +29,7 @@ import {
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import LiveChat from './LiveChat';
 import FloatingReactions from './FloatingReactions';
+import { useI18n } from '../../context/I18nContext';
 
 // ── data-channel codec (manual UTF-8, no TextEncoder/escape dependency) ───────
 const encodeData = (obj) => {
@@ -92,6 +93,7 @@ const isPublisher = (p) => {
 };
 
 const LiveRoom = ({ navigation, route }) => {
+  const { t } = useI18n();
   const {
     url, token: initialToken, broadcast, role: initialRole,
     initialMicOn, initialCamOn,
@@ -135,10 +137,10 @@ const LiveRoom = ({ navigation, route }) => {
     return (
       <View style={styles.guard}>
         <MaterialCommunityIcons name="broadcast-off" size={56} color={colors.textSecondary} />
-        <Text style={styles.guardTitle}>Live needs the full app</Text>
-        <Text style={styles.guardText}>Live broadcasting uses native WebRTC, which isn’t available in Expo Go. Open a development build to go live or watch.</Text>
+        <Text style={styles.guardTitle}>{t('live.needsFullApp')}</Text>
+        <Text style={styles.guardText}>{t('live.expoGoNote')}</Text>
         <TouchableOpacity style={styles.guardBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.guardBtnText}>Go back</Text>
+          <Text style={styles.guardBtnText}>{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -188,6 +190,7 @@ const LiveRoom = ({ navigation, route }) => {
 const RoomInner = ({
   broadcast, role, canPublish, isVideo, initialMicOn, initialCamOn, navigation, onPromoted,
 }) => {
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const { width: winW, height: winH } = useWindowDimensions();
   const landscape = winW > winH;
@@ -379,7 +382,7 @@ const RoomInner = ({
   const toggleMic = async () => {
     const next = !micOn;
     try { await localParticipant?.setMicrophoneEnabled(next); setMicOn(next); }
-    catch (e) { if (__DEV__) Alert.alert('Mic failed', String(e?.message || e)); }
+    catch (e) { if (__DEV__) Alert.alert(t('live.micFailed'), String(e?.message || e)); }
   };
   const toggleCam = async () => {
     const next = !camOn;
@@ -387,7 +390,7 @@ const RoomInner = ({
       await localParticipant?.setCameraEnabled(next);
       setCamOn(next);
     } catch (e) {
-      if (__DEV__) Alert.alert('Camera publish failed', String(e?.message || e));
+      if (__DEV__) Alert.alert(t('live.cameraPublishFailed'), String(e?.message || e));
     }
   };
   const flipCam = async () => {
@@ -399,7 +402,7 @@ const RoomInner = ({
       const vt = pub?.videoTrack || pub?.track;
       const mst = vt?.mediaStreamTrack || vt?._mediaStreamTrack;
       if (!vt && !mst) {
-        Alert.alert('Flip camera', 'Turn your camera on first.');
+        Alert.alert(t('live.flipCamera'), t('live.turnCameraOn'));
         return;
       }
 
@@ -419,16 +422,16 @@ const RoomInner = ({
         facingRef.current = next;
         return;
       }
-      Alert.alert('Flip camera', "This device doesn't support switching cameras here.");
+      Alert.alert(t('live.flipCamera'), t('live.flipUnsupported'));
     } catch (e) {
-      Alert.alert('Flip camera', "Couldn't switch the camera. Please try again.");
+      Alert.alert(t('live.flipCamera'), t('live.flipFailed'));
       if (__DEV__) console.warn('flipCam failed', e);
     }
   };
 
   const leave = () => { try { room?.disconnect(); } catch {} };
   const endLive = () => {
-    Alert.alert('End broadcast', 'Stop broadcasting for everyone?', [
+    Alert.alert(t('live.endBroadcastTitle'), t('live.endBroadcastBody'), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'End', style: 'destructive', onPress: async () => {
         try { await endBroadcast(broadcast.id); } catch {}
@@ -439,7 +442,7 @@ const RoomInner = ({
 
   const askToJoin = async () => {
     try { await requestCohost(broadcast.id); setRequested(true); startPromotionPoll(); }
-    catch { Alert.alert('Live', 'Could not send your request.'); }
+    catch { Alert.alert(t('live.title'), t('live.requestFailed')); }
   };
   const approve = async (req) => {
     try { await approveCohost(broadcast.id, req.id); setRequests((p) => p.filter((r) => r.id !== req.id)); } catch {}
@@ -455,16 +458,16 @@ const RoomInner = ({
   // (portrait) or the side panel (landscape) without duplicating the markup.
   const inboxNode = isHost && requests.length > 0 ? (
     <View style={styles.inbox}>
-      <Text style={styles.sectionLabel}>Requests to join</Text>
+      <Text style={styles.sectionLabel}>{t('live.requestsToJoin')}</Text>
       <ScrollView style={{ maxHeight: 140 }}>
         {requests.map((r) => (
           <View key={r.id} style={styles.reqRow}>
             <Text style={styles.reqName} numberOfLines={1}>@{r.user?.username || 'user'}</Text>
             <TouchableOpacity style={[styles.reqBtn, styles.reqApprove]} onPress={() => approve(r)}>
-              <Text style={styles.reqApproveText}>Approve</Text>
+              <Text style={styles.reqApproveText}>{t('common.approve')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.reqBtn, styles.reqReject]} onPress={() => reject(r)}>
-              <Text style={styles.reqRejectText}>Decline</Text>
+              <Text style={styles.reqRejectText}>{t('common.decline')}</Text>
             </TouchableOpacity>
           </View>
         ))}
@@ -488,14 +491,14 @@ const RoomInner = ({
   const reconnectNode = reconnecting ? (
     <View style={styles.reconnect}>
       <ActivityIndicator size="small" color="#fff" />
-      <Text style={styles.reconnectText}>Reconnecting…</Text>
+      <Text style={styles.reconnectText}>{t('live.reconnecting')}</Text>
     </View>
   ) : null;
 
   const stageNode = connecting ? (
     <View style={[styles.connecting, !landscape && styles.centerFill]}>
       <ActivityIndicator color={colors.accent} />
-      <Text style={styles.connectingText}>Connecting…</Text>
+      <Text style={styles.connectingText}>{t('live.connecting')}</Text>
     </View>
   ) : isVideo ? (
     <VideoStage
@@ -556,7 +559,7 @@ const RoomInner = ({
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
-              <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>Leave</Text>
+              <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>{t('live.leave')}</Text>
             </TouchableOpacity>
           )}
         </>
@@ -571,7 +574,7 @@ const RoomInner = ({
             <Text style={styles.ctrlText}>{requested ? 'Requested…' : 'Request to join'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
-            <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>Leave</Text>
+            <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>{t('live.leave')}</Text>
           </TouchableOpacity>
         </>
       )}

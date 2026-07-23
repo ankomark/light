@@ -13,12 +13,14 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import axios from 'axios';
+import { useI18n } from '../context/I18nContext';
 
 // Get the screen width
 const screenWidth = Dimensions.get('window').width;
 
 // SearchBar Component
 const SearchBar = ({ onSearch }) => {
+  const { t } = useI18n();
   const [isExpanded, setIsExpanded] = useState(false);
   const [query, setQuery] = useState('');
   const widthAnim = useRef(new Animated.Value(40)).current;
@@ -50,7 +52,7 @@ const SearchBar = ({ onSearch }) => {
       <Animated.View style={{ flex: 1, opacity: opacityAnim }}>
         <TextInput
           style={styles.input}
-          placeholder="Search versions..."
+          placeholder={t('bible.versionsPlaceholder')}
           placeholderTextColor="white"
           value={query}
           onChangeText={(text) => {
@@ -69,6 +71,7 @@ const SearchBar = ({ onSearch }) => {
 
 // BookScreen Component
 const BookScreen = ({ route, navigation }) => {
+  const { t } = useI18n();
   const { version } = route.params || { version: 'en-kjv' };
   const [versions, setVersions] = useState([]);
   const [filteredVersions, setFilteredVersions] = useState([]);

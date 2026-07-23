@@ -17,8 +17,10 @@ import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-ic
 
 import { usePlayer } from '../context/PlayerContext';
 import { colors } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const TrackList = () => {
+  const { t } = useI18n();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -111,7 +113,7 @@ const TrackList = () => {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading tracks...</Text>
+        <Text style={styles.loadingText}>{t('music.loading')}</Text>
       </View>
     );
   }
@@ -124,7 +126,7 @@ const TrackList = () => {
           style={styles.retryButton}
           onPress={() => loadTracks()}
         >
-          <Text style={styles.retryText}>Retry</Text>
+          <Text style={styles.retryText}>{t('feed.retry')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -143,7 +145,7 @@ const TrackList = () => {
               activeOpacity={0.85}
             >
               <Ionicons name="play" size={16} color="white" />
-              <Text style={styles.queueBtnText}>Play all</Text>
+              <Text style={styles.queueBtnText}>{t('music.playAll')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.queueBtn, styles.shuffleBtn]}
@@ -151,7 +153,7 @@ const TrackList = () => {
               activeOpacity={0.85}
             >
               <Ionicons name="shuffle" size={16} color={colors.primary} />
-              <Text style={styles.shuffleBtnText}>Shuffle</Text>
+              <Text style={styles.shuffleBtnText}>{t('music.shuffle')}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -161,7 +163,7 @@ const TrackList = () => {
           activeOpacity={0.85}
         >
           <MaterialCommunityIcons name="playlist-music" size={16} color={colors.primary} />
-          <Text style={styles.shuffleBtnText}>Playlists</Text>
+          <Text style={styles.shuffleBtnText}>{t('playlist.title')}</Text>
         </TouchableOpacity>
       </View>
 

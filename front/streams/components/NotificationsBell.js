@@ -11,6 +11,7 @@ import * as Notifications from 'expo-notifications';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const POLL_INTERVAL_MS = 15000;
@@ -55,6 +56,7 @@ function sectionLabel(dateStr) {
 }
 
 const NotificationsBell = ({ navigation }) => {
+  const { t } = useI18n();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showPanel, setShowPanel] = useState(false);
@@ -284,7 +286,7 @@ const NotificationsBell = ({ navigation }) => {
           <View style={styles.modalContent}>
             {/* Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Activity</Text>
+              <Text style={styles.modalTitle}>{t('notifications.title')}</Text>
               <View style={styles.headerActions}>
                 {unreadCount > 0 && (
                   <TouchableOpacity
@@ -294,7 +296,7 @@ const NotificationsBell = ({ navigation }) => {
                   >
                     {markingAll
                       ? <ActivityIndicator size="small" color={colors.accent} />
-                      : <Text style={styles.markAllText}>Mark all read</Text>
+                      : <Text style={styles.markAllText}>{t('notifications.markAllRead')}</Text>
                     }
                   </TouchableOpacity>
                 )}
@@ -339,7 +341,7 @@ const NotificationsBell = ({ navigation }) => {
                 ListEmptyComponent={
                   <View style={styles.emptyContainer}>
                     <MaterialIcons name="notifications-none" size={52} color={colors.textSecondary} />
-                    <Text style={styles.emptyText}>You're all caught up</Text>
+                    <Text style={styles.emptyText}>{t('notifications.caughtUp')}</Text>
                     <Text style={styles.emptySubtext}>
                       {filter === 'all' ? 'New notifications will appear here' : 'Nothing here under this filter'}
                     </Text>

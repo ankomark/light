@@ -5,10 +5,12 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { getOrCreateConversation } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const UserProfile = ({ profile, size = 56 }) => {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const navigation = useNavigation();
   const [starting, setStarting] = React.useState(false);
@@ -26,11 +28,11 @@ const UserProfile = ({ profile, size = 56 }) => {
         otherUser: conversation.other_participant ?? displayedProfile,
       });
     } catch {
-      Alert.alert('Error', 'Could not open conversation. Please try again.');
+      Alert.alert(t('common.error'), t('profile.messageFailed'));
     } finally {
       setStarting(false);
     }
-  }, [displayedProfile, navigation]);
+  }, [displayedProfile, navigation, t]);
 
   if (!displayedProfile) return null;
 
@@ -72,7 +74,7 @@ const UserProfile = ({ profile, size = 56 }) => {
             ? <ActivityIndicator size="small" color={colors.white} />
             : <>
                 <Ionicons name="chatbubble-outline" size={14} color={colors.white} />
-                <Text style={styles.msgBtnText}>Message</Text>
+                <Text style={styles.msgBtnText}>{t('userProfile.message')}</Text>
               </>
           }
         </TouchableOpacity>

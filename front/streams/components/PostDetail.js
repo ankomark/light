@@ -20,6 +20,7 @@ import PostActions from '../components/PostActions';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -53,6 +54,7 @@ const processPost = (post) => ({
 });
 
 const PostDetail = ({ route, navigation }) => {
+  const { t } = useI18n();
   const { postId, commentId, shouldOpenComments } = route.params;
   const [commentsVisible, setCommentsVisible] = useState(false);
   const flatListRef = useRef(null);
@@ -174,7 +176,7 @@ const PostDetail = ({ route, navigation }) => {
         <Feather name="alert-circle" size={48} color={colors.textMuted} />
         <Text style={styles.errorText}>{error || 'Post not found.'}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.retryButtonText}>Go Back</Text>
+          <Text style={styles.retryButtonText}>{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -194,7 +196,7 @@ const PostDetail = ({ route, navigation }) => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
           <Feather name="arrow-left" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.topBarTitle}>Post</Text>
+        <Text style={styles.topBarTitle}>{t('post.title')}</Text>
         <View style={styles.iconBtn} />
       </View>
 
@@ -254,9 +256,9 @@ const PostDetail = ({ route, navigation }) => {
           {mediaError ? (
             <View style={styles.errorMediaContainer}>
               <Feather name="image" size={44} color={colors.textMuted} />
-              <Text style={styles.errorMediaText}>Media unavailable</Text>
+              <Text style={styles.errorMediaText}>{t('feed.mediaUnavailable')}</Text>
               <TouchableOpacity style={styles.retryButton} onPress={() => setMediaError(false)}>
-                <Text style={styles.retryButtonText}>Retry</Text>
+                <Text style={styles.retryButtonText}>{t('feed.retry')}</Text>
               </TouchableOpacity>
             </View>
           ) : post.content_type === 'video' ? (

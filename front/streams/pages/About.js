@@ -41,17 +41,18 @@ const FEATURES = [
   { icon: 'church', label: 'Churches', desc: 'Find a community' },
 ];
 
-const openLink = async (url, fallbackMsg) => {
+// Module scope: no hook here, so the caller passes t in.
+const openLink = async (url, fallbackMsg, t) => {
   if (!url) {
-    Alert.alert('Coming soon', fallbackMsg || 'This will be available shortly.');
+    Alert.alert(t('common.comingSoon'), fallbackMsg || t('common.comingSoonBody'));
     return;
   }
   try {
     const ok = await Linking.canOpenURL(url);
     if (ok) await Linking.openURL(url);
-    else Alert.alert('Unavailable', 'Could not open this link on your device.');
+    else Alert.alert(t('common.unavailable'), t('common.openLinkDeviceFailed'));
   } catch {
-    Alert.alert('Unavailable', 'Could not open this link on your device.');
+    Alert.alert(t('common.unavailable'), t('common.openLinkDeviceFailed'));
   }
 };
 
@@ -75,7 +76,7 @@ const About = () => {
   const handleEmail = () =>
     openLink(
       `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} feedback`)}`,
-      'Email is not set up on this device.'
+      'Email is not set up on this device.', t
     );
 
   return (
@@ -146,7 +147,7 @@ const About = () => {
             <ActionRow
               icon="globe-outline"
               label={t('about.website')}
-              onPress={() => openLink(WEBSITE_URL, 'Our website is coming soon.')}
+              onPress={() => openLink(WEBSITE_URL, 'Our website is coming soon.', t)}
             />
           </View>
 
@@ -155,20 +156,20 @@ const About = () => {
             <ActionRow
               icon="shield-checkmark-outline"
               label={t('about.privacy')}
-              onPress={() => openLink(PRIVACY_URL, 'Our privacy policy is coming soon.')}
+              onPress={() => openLink(PRIVACY_URL, 'Our privacy policy is coming soon.', t)}
             />
             <Divider />
             <ActionRow
               icon="document-text-outline"
               label={t('about.terms')}
-              onPress={() => openLink(TERMS_URL, 'Our terms of service are coming soon.')}
+              onPress={() => openLink(TERMS_URL, 'Our terms of service are coming soon.', t)}
             />
           </View>
 
           {/* ── Footer ─────────────────────────────────────────── */}
           <View style={styles.footer}>
             <View style={styles.madeWith}>
-              <Text style={styles.footerText}>Made with </Text>
+              <Text style={styles.footerText}>{t('about.madeWith')}</Text>
               <Ionicons name="heart" size={13} color={colors.accent} />
               <Text style={styles.footerText}> for the Adventist community</Text>
             </View>

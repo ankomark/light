@@ -4,8 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const HymnDetail = ({ route }) => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { hymn, hymnalName } = route.params;
   const verses = Array.isArray(hymn.verses) ? hymn.verses : [];
@@ -47,7 +49,7 @@ const HymnDetail = ({ route }) => {
               <View style={styles.refrainBlock}>
                 <View style={styles.refrainLabelRow}>
                   <Ionicons name="musical-notes" size={15} color={colors.accent} />
-                  <Text style={styles.refrainLabel}>Refrain</Text>
+                  <Text style={styles.refrainLabel}>{t('hymns.refrain')}</Text>
                 </View>
                 {hymn.refrain.split('\n').map((line, i) => (
                   <Text key={i} style={styles.refrainLine}>{line}</Text>

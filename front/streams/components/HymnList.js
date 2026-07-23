@@ -6,8 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { HYMNALS, HYMNAL_ORDER } from '../utils/hymnals';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const HymnList = ({ navigation }) => {
+  const { t } = useI18n();
   const [lang, setLang] = useState('en');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -57,7 +59,7 @@ const HymnList = ({ navigation }) => {
           <Ionicons name="musical-notes" size={20} color={colors.primary} />
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.headerTitle}>Hymnal</Text>
+          <Text style={styles.headerTitle}>{t('hymns.title')}</Text>
           <Text style={styles.headerSubtitle}>{hymnal.name} · {hymns.length} hymns</Text>
         </View>
       </View>
@@ -91,7 +93,7 @@ const HymnList = ({ navigation }) => {
         <Ionicons name="search" size={18} color={colors.placeholder} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by number, title, or lyrics…"
+          placeholder={t('hymns.searchPlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -123,8 +125,8 @@ const HymnList = ({ navigation }) => {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="musical-notes-outline" size={44} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No hymns found</Text>
-            <Text style={styles.emptySub}>Try a different number or word</Text>
+            <Text style={styles.emptyText}>{t('hymns.none')}</Text>
+            <Text style={styles.emptySub}>{t('hymns.tryDifferent')}</Text>
           </View>
         }
       />

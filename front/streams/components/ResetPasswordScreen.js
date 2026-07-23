@@ -7,8 +7,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { resetPassword, forgotPassword } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const ResetPasswordScreen = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   const initialEmail = route.params?.email || '';
@@ -39,7 +41,7 @@ const ResetPasswordScreen = () => {
     setError('');
     try {
       await resetPassword(email, code.trim(), password);
-      Alert.alert('Success', 'Your password has been reset. Please log in.', [
+      Alert.alert(t('market.success'), t('reset.doneBody'), [
         { text: 'Log In', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Login' }] }) },
       ]);
     } catch (err) {
@@ -54,9 +56,9 @@ const ResetPasswordScreen = () => {
     setResending(true);
     try {
       await forgotPassword(email);
-      Alert.alert('Code sent', `A new reset code was sent to ${email}.`);
+      Alert.alert(t('reset.codeSentTitle'), t('reset.codeSentBody', { email }));
     } catch {
-      Alert.alert('Error', 'Could not resend the code. Please try again.');
+      Alert.alert(t('common.error'), t('reset.resendFailed'));
     } finally {
       setResending(false);
     }
@@ -76,19 +78,19 @@ const ResetPasswordScreen = () => {
           <Ionicons name="key-outline" size={52} color={colors.primary} />
         </View>
 
-        <Text style={styles.title}>Enter Reset Code</Text>
+        <Text style={styles.title}>{t('reset.enterCode')}</Text>
         <Text style={styles.subtitle}>
           Enter the 6-digit code sent to{'\n'}
           <Text style={styles.highlight}>{email || 'your email'}</Text> and choose a new password.
         </Text>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Reset Code</Text>
+          <Text style={styles.label}>{t('reset.code')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="shield-checkmark-outline" size={18} color={colors.placeholder} style={styles.icon} />
             <TextInput
               style={styles.input}
-              placeholder="123456"
+              placeholder={t('reset.codePlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={code}
               onChangeText={v => { setCode(v.replace(/[^0-9]/g, '')); setError(''); }}
@@ -99,12 +101,12 @@ const ResetPasswordScreen = () => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>New Password</Text>
+          <Text style={styles.label}>{t('reset.newPassword')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="lock-closed-outline" size={18} color={colors.placeholder} style={styles.icon} />
             <TextInput
               style={[styles.input, { flex: 1 }]}
-              placeholder="At least 8 characters"
+              placeholder={t('reset.newPasswordPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={password}
               onChangeText={v => { setPassword(v); setError(''); }}
@@ -117,12 +119,12 @@ const ResetPasswordScreen = () => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Confirm Password</Text>
+          <Text style={styles.label}>{t('reset.confirmPassword')}</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="lock-closed-outline" size={18} color={colors.placeholder} style={styles.icon} />
             <TextInput
               style={styles.input}
-              placeholder="Re-enter your password"
+              placeholder={t('reset.confirmPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={confirm}
               onChangeText={v => { setConfirm(v); setError(''); }}
@@ -141,7 +143,7 @@ const ResetPasswordScreen = () => {
         >
           {loading
             ? <ActivityIndicator color={colors.white} />
-            : <Text style={styles.buttonText}>Reset Password</Text>
+            : <Text style={styles.buttonText}>{t('reset.title')}</Text>
           }
         </TouchableOpacity>
 

@@ -16,6 +16,7 @@ import { getFavoriteTracks, fetchSavedPosts } from '../services/api';
 import TrackItem from './TrackItem';
 import useGridColumns from '../utils/useGridColumns';
 import { colors, spacing, typography, radius } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const GRID_PAD = 2;
 
@@ -45,6 +46,7 @@ const EmptyState = ({ icon, title, text }) => (
 );
 
 const FavoritesPage = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   // Responsive grid: 3 columns on a phone, more on tablets / landscape.
   const { cols, tileSize } = useGridColumns({
@@ -100,7 +102,7 @@ const FavoritesPage = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>My Favorites</Text>
+      <Text style={styles.header}>{t('profile.myFavorites')}</Text>
 
       <View style={styles.tabs}>
         <TouchableOpacity

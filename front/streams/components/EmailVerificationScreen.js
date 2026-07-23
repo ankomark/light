@@ -9,6 +9,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { apiRequest } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const CODE_LENGTH = 6;
 
@@ -16,6 +17,7 @@ const verifyEmail = (code) => apiRequest('post', '/auth/verify-email/', { code }
 const resendCode = () => apiRequest('post', '/auth/resend-verification/');
 
 const EmailVerificationScreen = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   const { updateUser, logout } = useAuth();
@@ -65,7 +67,7 @@ const EmailVerificationScreen = () => {
   const handleVerify = async () => {
     const fullCode = code.join('');
     if (fullCode.length < CODE_LENGTH) {
-      Alert.alert('Incomplete', 'Please enter all 6 digits.');
+      Alert.alert(t('verify.incompleteTitle'), t('verify.incompleteBody'));
       return;
     }
     setLoading(true);
@@ -77,7 +79,7 @@ const EmailVerificationScreen = () => {
       navigation.reset({ index: 0, routes: [{ name: target }] });
     } catch (err) {
       const msg = err.response?.data?.error ?? 'Invalid or expired code. Please try again.';
-      Alert.alert('Verification Failed', msg);
+      Alert.alert(t('verify.failedTitle'), msg);
       setCode(['', '', '', '', '', '']);
       inputs.current[0]?.focus();
     } finally {
@@ -90,10 +92,10 @@ const EmailVerificationScreen = () => {
     setResending(true);
     try {
       await resendCode();
-      Alert.alert('Sent!', 'A new code has been sent to your email.');
+      Alert.alert(t('verify.sentTitle'), t('verify.sentBody'));
       startCooldown();
     } catch {
-      Alert.alert('Error', 'Could not resend code. Please try again.');
+      Alert.alert(t('common.error'), t('verify.resendFailed'));
     } finally {
       setResending(false);
     }
@@ -113,7 +115,7 @@ const EmailVerificationScreen = () => {
           <Ionicons name="mail-open-outline" size={56} color={colors.primary} />
         </View>
 
-        <Text style={styles.title}>Check your email</Text>
+        <Text style={styles.title}>{t('verify.checkEmail')}</Text>
         <Text style={styles.subtitle}>
           We sent a 6-digit code to{'\n'}
           <Text style={styles.email}>{email || 'your email address'}</Text>
@@ -145,12 +147,12 @@ const EmailVerificationScreen = () => {
         >
           {loading
             ? <ActivityIndicator color={colors.white} />
-            : <Text style={styles.buttonText}>Verify Email</Text>
+            : <Text style={styles.buttonText}>{t('verify.title')}</Text>
           }
         </TouchableOpacity>
 
         <View style={styles.resendRow}>
-          <Text style={styles.resendLabel}>Didn't get the code?  </Text>
+          <Text style={styles.resendLabel}>{t('verify.noCode')}</Text>
           <TouchableOpacity onPress={handleResend} disabled={resendCooldown > 0 || resending}>
             {resending
               ? <ActivityIndicator size="small" color={colors.primary} />

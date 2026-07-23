@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
+import { useI18n } from '../context/I18nContext';
 
 const GroupRequestItem = ({ request, onApprove, onReject }) => {
+  const { t } = useI18n();
   return (
     <View style={styles.container}>
       <Image
@@ -24,10 +26,10 @@ const GroupRequestItem = ({ request, onApprove, onReject }) => {
       </View>
       <View style={styles.actions}>
         <TouchableOpacity style={styles.approveButton} onPress={onApprove}>
-          <Text style={styles.buttonText}>Approve</Text>
+          <Text style={styles.buttonText}>{t('common.approve')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.rejectButton} onPress={onReject}>
-          <Text style={styles.buttonText}>Reject</Text>
+          <Text style={styles.buttonText}>{t('common.reject')}</Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -9,6 +9,7 @@ import { useNavigation } from '@react-navigation/native';
 import { fetchProfile, fetchUserPosts } from '../services/api';
 import useGridColumns from '../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const AVATAR_SIZE = 90;
 const GRID_GAP = 6;
@@ -45,6 +46,7 @@ const StatBox = ({ value, label, onPress }) => {
 };
 
 const Profile = () => {
+  const { t } = useI18n();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -119,7 +121,7 @@ const Profile = () => {
             activeOpacity={0.8}
           >
             <Ionicons name="pencil-outline" size={15} color={colors.white} />
-            <Text style={styles.editBtnText}>Edit Profile</Text>
+            <Text style={styles.editBtnText}>{t('profile.editProfile')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -161,7 +163,7 @@ const Profile = () => {
           activeOpacity={0.85}
         >
           <Ionicons name="heart" size={18} color={colors.accent} />
-          <Text style={styles.favoritesLinkText}>My Favorites</Text>
+          <Text style={styles.favoritesLinkText}>{t('profile.myFavorites')}</Text>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
         </TouchableOpacity>
 
@@ -193,10 +195,10 @@ const Profile = () => {
           ) : null}
         </View>
 
-        <Text style={styles.sectionTitle}>Posts</Text>
+        <Text style={styles.sectionTitle}>{t('profile.posts')}</Text>
       </View>
     );
-  }, [profile, avatarFailed, posts.length, navigation]);
+  }, [profile, avatarFailed, posts.length, navigation, t]);
 
   const renderPost = useCallback(({ item }) => {
     const thumb = getPostThumb(item);
@@ -225,9 +227,9 @@ const Profile = () => {
   const renderEmptyPosts = useCallback(() => (
     <View style={styles.postsEmpty}>
       <MaterialIcons name="photo-library" size={40} color={colors.textMuted} />
-      <Text style={styles.postsEmptyText}>No posts yet</Text>
+      <Text style={styles.postsEmptyText}>{t('profile.noPosts')}</Text>
     </View>
-  ), []);
+  ), [t]);
 
   if (loading) {
     return (
@@ -241,12 +243,12 @@ const Profile = () => {
     return (
       <View style={styles.centered}>
         <MaterialIcons name="person-off" size={56} color={colors.textMuted} />
-        <Text style={styles.emptyText}>No profile found</Text>
+        <Text style={styles.emptyText}>{t('profile.notFound')}</Text>
         <TouchableOpacity
           style={styles.createBtn}
           onPress={() => navigation.navigate('CreateProfile')}
         >
-          <Text style={styles.createBtnText}>Create Profile</Text>
+          <Text style={styles.createBtnText}>{t('profile.create')}</Text>
         </TouchableOpacity>
       </View>
     );

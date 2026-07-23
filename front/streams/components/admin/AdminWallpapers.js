@@ -25,6 +25,7 @@ import { uploadMedia } from '../../services/cloudinary';
 import { compressImage } from '../../services/imageProcessing';
 import { useWallpapers } from '../../context/WallpaperContext';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 // Wallpapers are full-screen backdrops, so a generous cap — but still
 // downscaled before upload, since R2 stores bytes verbatim (no ingest
@@ -38,6 +39,7 @@ const SCOPES = [
 ];
 
 const AdminWallpapers = () => {
+  const { t } = useI18n();
   const { refresh: refreshLiveWallpapers } = useWallpapers();
   const [scope, setScope] = useState('general');
   const [allItems, setAllItems] = useState([]);
@@ -52,12 +54,12 @@ const AdminWallpapers = () => {
       const data = await fetchAllWallpapers();
       setAllItems(Array.isArray(data) ? data : (data?.results || []));
     } catch {
-      Alert.alert('Error', 'Could not load wallpapers.');
+      Alert.alert(t('common.error'), t('wallpaper.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   // One fetch covers every scope; the tabs just filter what's already loaded.
   const items = useMemo(
@@ -83,7 +85,7 @@ const AdminWallpapers = () => {
   const handleAdd = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'We need photo access to add a wallpaper.');
+      Alert.alert(t('chat.permissionRequired'), t('wallpaper.permissionPhotos'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -115,7 +117,7 @@ const AdminWallpapers = () => {
       await refreshLiveWallpapers();   // apply it app-wide immediately
     } catch (error) {
       console.error('Wallpaper upload failed:', error);
-      Alert.alert('Upload failed', error.message || 'Could not upload that image.');
+      Alert.alert(t('common.uploadFailedTitle'), error.message || t('wallpaper.uploadFailed'));
     } finally {
       setUploading(false);
       setProgress(0);
@@ -131,7 +133,7 @@ const AdminWallpapers = () => {
       await refreshLiveWallpapers();
     } catch {
       setItems(previous);
-      Alert.alert('Error', 'Could not update that wallpaper.');
+      Alert.alert(t('common.error'), t('wallpaper.updateFailed'));
     } finally {
       setBusyId(null);
     }
@@ -155,7 +157,7 @@ const AdminWallpapers = () => {
               await refreshLiveWallpapers();
             } catch {
               setItems(previous);
-              Alert.alert('Error', 'Could not delete that wallpaper.');
+              Alert.alert(t('common.error'), t('wallpaper.deleteFailed'));
             } finally {
               setBusyId(null);
             }
@@ -177,7 +179,7 @@ const AdminWallpapers = () => {
       await refreshLiveWallpapers();
     } catch {
       load();  // fall back to server truth
-      Alert.alert('Error', 'Could not save the new order.');
+      Alert.alert(t('common.error'), t('wallpaper.reorderFailed'));
     }
   };
 
@@ -285,7 +287,7 @@ const AdminWallpapers = () => {
         ListEmptyComponent={
           <View style={styles.empty}>
             <MaterialCommunityIcons name="image-multiple-outline" size={56} color={colors.border} />
-            <Text style={styles.emptyTitle}>No wallpapers here</Text>
+            <Text style={styles.emptyTitle}>{t('wallpaper.none')}</Text>
             <Text style={styles.emptySub}>
               These screens show a plain dark background until you add one.
             </Text>
@@ -307,7 +309,7 @@ const AdminWallpapers = () => {
         ) : (
           <>
             <MaterialCommunityIcons name="plus" size={20} color={colors.white} />
-            <Text style={styles.fabText}>Add wallpaper</Text>
+            <Text style={styles.fabText}>{t('wallpaper.add')}</Text>
           </>
         )}
       </TouchableOpacity>

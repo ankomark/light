@@ -5,8 +5,10 @@ import axios from 'axios';
 import { API_URL, getAccessToken, markNotInterested } from '../services/api';
 import ReportModal from './ReportModal';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) => {
+  const { t } = useI18n();
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -29,7 +31,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
 
   const handleEditPost = async () => {
     if (!editedCaption.trim()) {
-      Alert.alert('Error', 'Caption cannot be empty');
+      Alert.alert(t('common.error'), t('post.captionEmpty'));
       return;
     }
 
@@ -43,10 +45,10 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
       );
       onUpdate(response.data);
       setEditModalVisible(false);
-      Alert.alert('Success', 'Post updated successfully');
+      Alert.alert(t('market.success'), t('post.updatedOk'));
     } catch (error) {
       console.error('Error updating post:', error);
-      Alert.alert('Error', 'Failed to update post');
+      Alert.alert(t('common.error'), t('post.updateFailed'));
     } finally {
       setLoading(false);
     }
@@ -72,10 +74,10 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
               });
               onDelete();
               if (navigation) navigation.goBack();
-              Alert.alert('Success', 'Post deleted successfully');
+              Alert.alert(t('market.success'), t('post.deletedOk'));
             } catch (error) {
               console.error('Error deleting post:', error);
-              Alert.alert('Error', 'Failed to delete post');
+              Alert.alert(t('common.error'), t('post.deleteFailed'));
             } finally {
               setLoading(false);
             }
@@ -114,14 +116,14 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
             <View style={styles.sheetHandle} />
             <TouchableOpacity style={styles.sheetItem} onPress={handleNotInterested}>
               <MaterialIcons name="not-interested" size={22} color={colors.textSecondary} />
-              <Text style={styles.sheetLabel}>Not interested</Text>
+              <Text style={styles.sheetLabel}>{t('post.notInterested')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.sheetItem}
               onPress={() => { setOtherMenuVisible(false); setReportVisible(true); }}
             >
               <MaterialIcons name="flag" size={22} color={colors.warning} />
-              <Text style={styles.sheetLabel}>Report post</Text>
+              <Text style={styles.sheetLabel}>{t('post.report')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -156,14 +158,14 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
               onPress={() => { setMenuVisible(false); setEditModalVisible(true); }}
             >
               <MaterialIcons name="edit" size={22} color={colors.primary} />
-              <Text style={styles.sheetLabel}>Edit post</Text>
+              <Text style={styles.sheetLabel}>{t('post.edit')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.sheetItem}
               onPress={() => { setMenuVisible(false); handleDeletePost(); }}
             >
               <MaterialIcons name="delete" size={22} color={colors.error} />
-              <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>Delete post</Text>
+              <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>{t('post.delete')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -191,13 +193,13 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
             <Feather name="x" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
 
-          <Text style={styles.modalTitle}>Edit Post</Text>
+          <Text style={styles.modalTitle}>{t('post.editTitle')}</Text>
 
           <TextInput
             style={styles.editInput}
             value={editedCaption}
             onChangeText={setEditedCaption}
-            placeholder="Edit your caption..."
+            placeholder={t('post.captionPlaceholder')}
             placeholderTextColor={colors.placeholder}
             multiline
             numberOfLines={4}

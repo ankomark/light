@@ -5,6 +5,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminAnalytics } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const RANGES = [
   { key: 14, label: '14d' },
@@ -53,6 +54,7 @@ const ChartCard = ({ title, data, tint }) => (
 );
 
 const AdminAnalytics = () => {
+  const { t } = useI18n();
   const [days, setDays] = useState(14);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -77,7 +79,7 @@ const AdminAnalytics = () => {
       showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(days)} tintColor={colors.accent} />}
     >
-      <Text style={styles.title}>Analytics</Text>
+      <Text style={styles.title}>{t('admin.analytics')}</Text>
 
       <View style={styles.rangeRow}>
         {RANGES.map((r) => {
@@ -101,7 +103,7 @@ const AdminAnalytics = () => {
           <View style={{ height: spacing.xxl }} />
         </>
       ) : (
-        <View style={styles.centered}><Text style={styles.empty}>Couldn't load analytics</Text></View>
+        <View style={styles.centered}><Text style={styles.empty}>{t('admin.analyticsFailed')}</Text></View>
       )}
     </ScrollView>
   );

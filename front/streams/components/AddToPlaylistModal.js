@@ -7,12 +7,14 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { fetchPlaylists, createPlaylist, addTrackToPlaylist } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 /**
  * Bottom-sheet modal to add a track to one of the user's playlists, or create
  * a new playlist and add it there. Self-contained: loads playlists on open.
  */
 const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const [playlists, setPlaylists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -41,11 +43,11 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
   // Confirmation with a "View" button that jumps straight into the playlist
   // so the user sees the song they just added (and can play it).
   const confirmAdded = useCallback((playlistId, name, message) => {
-    Alert.alert('Added', message, [
+    Alert.alert(t('playlist.added'), message, [
       { text: 'View', onPress: () => navigation.navigate('PlaylistDetail', { playlistId, name }) },
       { text: 'OK', style: 'cancel' },
     ]);
-  }, [navigation]);
+  }, [navigation, t]);
 
   const addTo = useCallback(async (playlist) => {
     if (busyId) return;
@@ -55,11 +57,11 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
       onClose?.();
       confirmAdded(playlist.id, playlist.name, `Added to "${playlist.name}".`);
     } catch {
-      Alert.alert('Error', 'Could not add the track. Please try again.');
+      Alert.alert(t('common.error'), t('playlist.addTrackFailed'));
     } finally {
       setBusyId(null);
     }
-  }, [busyId, trackId, onClose, confirmAdded]);
+  }, [busyId, trackId, onClose, confirmAdded, t]);
 
   const createAndAdd = useCallback(async () => {
     const name = newName.trim();
@@ -71,18 +73,18 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
       onClose?.();
       confirmAdded(created.id, name, `Created "${name}" and added the track.`);
     } catch {
-      Alert.alert('Error', 'Could not create the playlist. Please try again.');
+      Alert.alert(t('common.error'), t('playlist.createFailed'));
     } finally {
       setCreating(false);
     }
-  }, [newName, creating, trackId, onClose, confirmAdded]);
+  }, [newName, creating, trackId, onClose, confirmAdded, t]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={styles.title}>Add to playlist</Text>
+          <Text style={styles.title}>{t('playlist.addTo')}</Text>
           {trackTitle ? <Text style={styles.subtitle} numberOfLines={1}>{trackTitle}</Text> : null}
 
           {/* Create new */}
@@ -91,7 +93,7 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
               style={styles.input}
               value={newName}
               onChangeText={setNewName}
-              placeholder="New playlist name"
+              placeholder={t('playlist.newNamePlaceholder')}
               placeholderTextColor={colors.placeholder}
               maxLength={100}
               returnKeyType="done"
@@ -126,13 +128,13 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
                 </TouchableOpacity>
               )}
               ListEmptyComponent={
-                <Text style={styles.emptyText}>No playlists yet — create one above.</Text>
+                <Text style={styles.emptyText}>{t('playlist.none')}</Text>
               }
             />
           )}
 
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-            <Text style={styles.closeText}>Done</Text>
+            <Text style={styles.closeText}>{t('common.done')}</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>

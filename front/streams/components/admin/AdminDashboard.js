@@ -10,6 +10,7 @@ import { useAuth } from '../../context/useAuth';
 import { isSuperAdmin, hasCapability } from '../../utils/roles';
 import useGridColumns from '../../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { useI18n } from '../../context/I18nContext';
 
 const StatCard = ({ icon, set: Set = Ionicons, label, value, tint, width }) => (
   <View style={[styles.statCard, { width }]}>
@@ -39,6 +40,7 @@ const QuickLink = ({ icon, label, sub, onPress, badge }) => (
 );
 
 const AdminDashboard = ({ navigation }) => {
+  const { t: tr } = useI18n();
   const { currentUser } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -86,7 +88,7 @@ const AdminDashboard = ({ navigation }) => {
       showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.accent} />}
     >
-      <Text style={styles.title}>Dashboard</Text>
+      <Text style={styles.title}>{tr('adminDash.title')}</Text>
 
       <View style={styles.grid}>
         <StatCard width={cardW} icon="people" label="Users" value={t.users} tint="#1DA1F2" />
@@ -99,7 +101,7 @@ const AdminDashboard = ({ navigation }) => {
         <StatCard width={cardW} set={MaterialCommunityIcons} icon="cancel" label="Banned" value={m.banned} tint="#E53935" />
       </View>
 
-      <Text style={styles.sectionTitle}>Manage</Text>
+      <Text style={styles.sectionTitle}>{tr('adminDash.manage')}</Text>
       {canAnalytics && (
         <QuickLink icon="chart-line" label="Analytics" sub="Signups, posts & reports over time"
           onPress={() => navigation.navigate('AdminAnalytics')} />
@@ -131,7 +133,7 @@ const AdminDashboard = ({ navigation }) => {
 
       {canReports && data?.recent_reports?.length > 0 && (
         <>
-          <Text style={styles.sectionTitle}>Recent reports</Text>
+          <Text style={styles.sectionTitle}>{tr('adminDash.recentReports')}</Text>
           {data.recent_reports.slice(0, 5).map((rep) => (
             <TouchableOpacity key={rep.id} style={styles.recentRow}
               onPress={() => navigation.navigate('AdminReports')} activeOpacity={0.85}>
