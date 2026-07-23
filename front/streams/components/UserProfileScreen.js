@@ -8,6 +8,7 @@ import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { fetchUserById, followUser, getOrCreateConversation, blockUser } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { useI18n } from '../context/I18nContext';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import useGridColumns from '../utils/useGridColumns';
@@ -44,6 +45,7 @@ const UserProfileScreen = () => {
   });
   const route = useRoute();
   const { currentUser } = useAuth();
+  const { t } = useI18n();
   const userId = route.params?.userId;
   const initialUsername = route.params?.username;
 
@@ -95,12 +97,12 @@ const UserProfileScreen = () => {
   // native header dark so it sits cohesively over the wallpaper.
   useEffect(() => {
     navigation.setOptions?.({
-      title: user?.username || initialUsername || 'Profile',
+      title: user?.username || initialUsername || t('profile.title'),
       headerStyle: { backgroundColor: '#0A1628' },
       headerTintColor: colors.textPrimary,
       headerShadowVisible: false,
     });
-  }, [navigation, user?.username, initialUsername]);
+  }, [navigation, user?.username, initialUsername, t]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -125,36 +127,36 @@ const UserProfileScreen = () => {
       setIsFollowing(prevFollowing);
       setFollowStatus(prevFollowing ? 'following' : 'none');
       setFollowersCount(prevCount);
-      Alert.alert('Error', 'Could not update follow status. Please try again.');
+      Alert.alert(t('common.error'), t('profile.followFailed'));
     } finally {
       setFollowBusy(false);
     }
-  }, [followBusy, isOwnProfile, isFollowing, followersCount, userId]);
+  }, [followBusy, isOwnProfile, isFollowing, followersCount, userId, t]);
 
   const handleBlock = useCallback(() => {
     if (isOwnProfile || !userId) return;
-    const name = user?.username || initialUsername || 'this user';
+    const name = user?.username || initialUsername || t('profile.thisUser');
     Alert.alert(
-      `Block @${name}?`,
-      "They won't be able to see your content or message you, and you won't see theirs. You can undo this in Settings → Privacy.",
+      t('profile.blockTitle', { name }),
+      t('profile.blockBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Block',
+          text: t('common.block'),
           style: 'destructive',
           onPress: async () => {
             try {
               await blockUser(userId);
-              Alert.alert('Blocked', `You've blocked @${name}.`);
+              Alert.alert(t('common.blocked'), t('profile.blockDone', { name }));
               navigation.goBack();
             } catch {
-              Alert.alert('Error', 'Could not block this user. Please try again.');
+              Alert.alert(t('common.error'), t('profile.blockFailed'));
             }
           },
         },
       ]
     );
-  }, [isOwnProfile, userId, user, initialUsername, navigation]);
+  }, [isOwnProfile, userId, user, initialUsername, navigation, t]);
 
   const handleMessage = useCallback(async () => {
     if (messageBusy || !userId) return;
@@ -166,11 +168,11 @@ const UserProfileScreen = () => {
         otherUser: conversation.other_participant ?? user,
       });
     } catch {
-      Alert.alert('Error', 'Could not open conversation. Please try again.');
+      Alert.alert(t('common.error'), t('profile.messageFailed'));
     } finally {
       setMessageBusy(false);
     }
-  }, [messageBusy, userId, navigation, user]);
+  }, [messageBusy, userId, navigation, user, t]);
 
   const renderHeader = useCallback(() => {
     const profile = user?.profile || {};
@@ -199,7 +201,7 @@ const UserProfileScreen = () => {
                 activeOpacity={0.85}
               >
                 <Ionicons name="pencil-outline" size={15} color={colors.white} />
-                <Text style={styles.editBtnText}>Edit</Text>
+                <Text style={styles.editBtnText}>{t('profile.edit')}</Text>
               </TouchableOpacity>
             ) : (
               <>
@@ -218,8 +220,8 @@ const UserProfileScreen = () => {
                   ) : (
                     <Text style={styles.followBtnText}>
                       {isFollowing
-                        ? 'Following'
-                        : followStatus === 'requested' ? 'Requested' : 'Follow'}
+                        ? t('profile.following')
+                        : followStatus === 'requested' ? t('profile.requested') : t('profile.follow')}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -254,11 +256,11 @@ const UserProfileScreen = () => {
         </View>
 
         <View style={styles.statsRow}>
-          <StatBox value={posts.length} label="Posts" />
+          <StatBox value={posts.length} label={t('profile.posts')} />
           <View style={styles.statDivider} />
-          <StatBox value={followersCount} label="Followers" />
+          <StatBox value={followersCount} label={t('profile.followers')} />
           <View style={styles.statDivider} />
-          <StatBox value={user?.following_count ?? 0} label="Following" />
+          <StatBox value={user?.following_count ?? 0} label={t('profile.following')} />
         </View>
 
         {(profile.bio || profile.location) ? (
@@ -278,12 +280,12 @@ const UserProfileScreen = () => {
           </View>
         ) : null}
 
-        <Text style={styles.sectionTitle}>Posts</Text>
+        <Text style={styles.sectionTitle}>{t('profile.posts')}</Text>
       </View>
     );
   }, [
     user, avatarFailed, isOwnProfile, isFollowing, followStatus, followBusy, followersCount,
-    messageBusy, posts.length, initialUsername, navigation, handleFollow, handleMessage,
+    messageBusy, posts.length, initialUsername, navigation, handleFollow, handleMessage, t,
   ]);
 
   const renderPost = useCallback(({ item, index }) => {
@@ -320,11 +322,11 @@ const UserProfileScreen = () => {
       return (
         <View style={styles.postsEmpty}>
           <MaterialIcons name="lock-outline" size={40} color={colors.textMuted} />
-          <Text style={styles.postsEmptyText}>This account is private</Text>
+          <Text style={styles.postsEmptyText}>{t('profile.private')}</Text>
           <Text style={styles.postsLockedSub}>
             {followStatus === 'requested'
-              ? 'Your follow request is waiting to be approved.'
-              : 'Follow this account to see their posts.'}
+              ? t('profile.privateRequestPending')
+              : t('profile.privateFollowPrompt')}
           </Text>
         </View>
       );
@@ -332,10 +334,10 @@ const UserProfileScreen = () => {
     return (
       <View style={styles.postsEmpty}>
         <MaterialIcons name="photo-library" size={40} color={colors.textMuted} />
-        <Text style={styles.postsEmptyText}>No posts yet</Text>
+        <Text style={styles.postsEmptyText}>{t('profile.noPosts')}</Text>
       </View>
     );
-  }, [user?.is_private, user?.can_view, followStatus]);
+  }, [user?.is_private, user?.can_view, followStatus, t]);
 
   if (loading) {
     return (
@@ -351,11 +353,11 @@ const UserProfileScreen = () => {
         <MaterialIcons name="person-off" size={56} color={colors.textMuted} />
         <Text style={styles.errorText}>
           {error?.message?.includes('not found') || error?.message?.includes('404')
-            ? 'This profile is unavailable.'
-            : "Couldn't load this profile."}
+            ? t('profile.unavailable')
+            : t('profile.loadFailed')}
         </Text>
         <TouchableOpacity style={styles.retryBtn} onPress={loadProfile} activeOpacity={0.85}>
-          <Text style={styles.retryBtnText}>Try Again</Text>
+          <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
         </TouchableOpacity>
       </View>
     );

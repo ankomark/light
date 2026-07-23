@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useI18n } from '../../context/I18nContext';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -27,6 +28,7 @@ const formatPrice = (price, currency) => {
 };
 
 const MarketplaceHome = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const [categories, setCategories] = useState([]);
   const [featuredProducts, setFeaturedProducts] = useState([]);
@@ -55,7 +57,7 @@ const MarketplaceHome = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading marketplace...</Text>
+        <Text style={styles.loadingText}>{t('market.home.loading')}</Text>
       </View>
     );
   }
@@ -64,13 +66,13 @@ const MarketplaceHome = () => {
     <ScrollView style={styles.container}>
       {/* Hero Banner */}
       <View style={styles.heroContainer}>
-        <Text style={styles.heroText}>Open Air Market</Text>
-        <Text style={styles.heroSubtext}> Sell and Buy Products </Text>
+        <Text style={styles.heroText}>{t('market.home.title')}</Text>
+        <Text style={styles.heroSubtext}>{t('market.home.subtitle')}</Text>
       </View>
 
       {/* Categories */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Shop by Category</Text>
+        <Text style={styles.sectionTitle}>{t('market.home.shopByCategory')}</Text>
         <FlatList
           horizontal
           data={categories}
@@ -93,7 +95,7 @@ const MarketplaceHome = () => {
 
       {/* Featured Products */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Featured Products</Text>
+        <Text style={styles.sectionTitle}>{t('market.home.featured')}</Text>
         <FlatList
           horizontal
           data={featuredProducts}
@@ -127,13 +129,13 @@ const MarketplaceHome = () => {
           style={styles.primaryButton}
           onPress={() => navigation.navigate('ProductList')}
         >
-          <Text style={styles.primaryButtonText}>Browse All Products</Text>
+          <Text style={styles.primaryButtonText}>{t('market.home.browseAll')}</Text>
         </TouchableOpacity>
         <TouchableOpacity 
           style={styles.secondaryButton}
           onPress={() => navigation.navigate('SellerDashboard')}
         >
-          <Text style={styles.secondaryButtonText}>Sell Your Products</Text>
+          <Text style={styles.secondaryButtonText}>{t('market.home.sell')}</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>

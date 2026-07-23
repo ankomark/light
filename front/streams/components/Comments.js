@@ -19,6 +19,7 @@ import { useAuth } from '../context/useAuth';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import { colors } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -38,6 +39,7 @@ const CommentSkeleton = () => (
 );
 
 const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
+    const { t } = useI18n();
     const flatListRef = useRef(null);
     const [highlightedComment, setHighlightedComment] = useState(null);
     const [comments, setComments] = useState([]);
@@ -56,7 +58,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
             setComments(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error('Failed to fetch comments:', error);
-            Alert.alert('Error', 'Failed to load comments');
+            Alert.alert(t('common.error'), t('comments.loadFailed'));
         } finally {
             setLoading(false);
         }
@@ -113,12 +115,12 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
     const handlePostComment = async () => {
         const content = newComment.trim();
         if (!content) {
-            Alert.alert('Error', 'Comment cannot be empty');
+            Alert.alert(t('common.error'), t('comments.cannotBeEmpty'));
             return;
         }
         const token = await getAccessToken();
         if (!token) {
-            Alert.alert('Error', 'You need to be logged in to post a comment.');
+            Alert.alert(t('common.error'), t('comments.loginRequired'));
             return;
         }
 
@@ -147,7 +149,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
             console.error('Failed to post comment:', error);
             setComments(prev => prev.filter(c => c.id !== tempId));
             setNewComment(content);
-            Alert.alert('Error', 'Failed to post comment');
+            Alert.alert(t('common.error'), t('comments.postFailed'));
         }
     };
 
@@ -178,7 +180,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
 
                     <SafeAreaView edges={['top']} style={styles.content}>
                         <View style={styles.headerRow}>
-                            <Text style={styles.headerTitle}>Comments</Text>
+                            <Text style={styles.headerTitle}>{t('comments.title')}</Text>
                             <TouchableOpacity
                                 onPress={toggleComments}
                                 style={styles.closeButton}
@@ -215,7 +217,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                                 )}
                                 ListEmptyComponent={
                                     <View style={styles.emptyContainer}>
-                                        <Text style={styles.emptyText}>No comments yet</Text>
+                                        <Text style={styles.emptyText}>{t('comments.empty')}</Text>
                                     </View>
                                 }
                                 onScrollToIndexFailed={handleScrollToIndexFailed}
@@ -237,7 +239,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                                 style={styles.input}
                                 value={newComment}
                                 onChangeText={setNewComment}
-                                placeholder="Write a comment..."
+                                placeholder={t('comments.placeholder')}
                                 placeholderTextColor={colors.placeholder}
                                 multiline
                             />

@@ -21,6 +21,7 @@ import { compressImage } from '../services/imageProcessing';
 import { fetchMessages, fetchOlderMessages, sendMessage, markConversationRead } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
+import { useI18n } from '../context/I18nContext';
 import RotatingBackground from './RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
@@ -53,6 +54,7 @@ const fmtDuration = (s) => {
 const ChatScreen = ({ route, navigation }) => {
   const { conversationId, otherUser } = route.params;
   const { currentUser } = useAuth();
+  const { t } = useI18n();
 
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -211,11 +213,11 @@ const ChatScreen = ({ route, navigation }) => {
       }
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
-      Alert.alert('Error', 'Message could not be sent.');
+      Alert.alert(t('common.error'), t('chat.sendFailed'));
     } finally {
       setSending(false);
     }
-  }, [conversationId, currentUser]);
+  }, [conversationId, currentUser, t]);
 
   // Media send: show the local file instantly (optimistic), upload it to
   // Cloudinary in the background, then persist the message with just the URL.
@@ -252,11 +254,11 @@ const ChatScreen = ({ route, navigation }) => {
       }
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
-      Alert.alert('Error', 'Could not send attachment.');
+      Alert.alert(t('common.error'), t('chat.attachmentFailed'));
     } finally {
       setSending(false);
     }
-  }, [conversationId, currentUser]);
+  }, [conversationId, currentUser, t]);
 
   const handleSendText = useCallback(() => {
     const content = text.trim();
@@ -269,7 +271,7 @@ const ChatScreen = ({ route, navigation }) => {
   const attachImage = useCallback(async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Permission required', 'Enable photo access.'); return; }
+      if (status !== 'granted') { Alert.alert(t('chat.permissionRequired'), t('chat.permissionPhotos')); return; }
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7,
       });
@@ -282,9 +284,9 @@ const ChatScreen = ({ route, navigation }) => {
         message_type: 'image', mimeType: 'image/jpeg',
       });
     } catch (e) {
-      Alert.alert('Error', 'Could not attach image.');
+      Alert.alert(t('common.error'), t('chat.attachImageFailed'));
     }
-  }, [sendMediaMessage]);
+  }, [sendMediaMessage, t]);
 
   const attachFile = useCallback(async () => {
     try {
@@ -292,7 +294,7 @@ const ChatScreen = ({ route, navigation }) => {
       if (res.canceled || !res.assets?.length) return;
       const file = res.assets[0];
       if (file.size && file.size > MAX_FILE_BYTES) {
-        Alert.alert('File too large', 'Please choose a file under 6 MB.');
+        Alert.alert(t('chat.fileTooLargeTitle'), t('chat.fileTooLargeBody'));
         return;
       }
       sendMediaMessage({
@@ -300,9 +302,9 @@ const ChatScreen = ({ route, navigation }) => {
         file_name: file.name || 'file', mimeType: file.mimeType || 'application/octet-stream',
       });
     } catch (e) {
-      Alert.alert('Error', 'Could not attach file.');
+      Alert.alert(t('common.error'), t('chat.attachFileFailed'));
     }
-  }, [sendMediaMessage]);
+  }, [sendMediaMessage, t]);
 
   const onAttachPress = useCallback(() => {
     setShowEmoji(false);
@@ -336,18 +338,18 @@ const ChatScreen = ({ route, navigation }) => {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(path);
       } else {
-        Alert.alert('Saved', `File saved to app cache as ${msg.file_name}.`);
+        Alert.alert(t('chat.savedTitle'), t('chat.savedBody', { name: msg.file_name }));
       }
     } catch {
-      Alert.alert('Error', 'Could not open this file.');
+      Alert.alert(t('common.error'), t('chat.openFileFailed'));
     }
-  }, []);
+  }, [t]);
 
   // ── Voice notes ──
   const startRecording = useCallback(async () => {
     try {
       const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission required', 'Enable microphone access to record.'); return; }
+      if (!perm.granted) { Alert.alert(t('chat.permissionRequired'), t('chat.permissionMic')); return; }
       await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const rec = new Recording();
       await rec.prepareToRecordAsync(VOICE_NOTE_RECORDING_OPTIONS);
@@ -359,10 +361,10 @@ const ChatScreen = ({ route, navigation }) => {
       setRecordSecs(0);
       recordTimerRef.current = setInterval(() => setRecordSecs((s) => s + 1), 1000);
     } catch {
-      Alert.alert('Error', 'Could not start recording.');
+      Alert.alert(t('common.error'), t('chat.recordFailed'));
       setIsRecording(false);
     }
-  }, []);
+  }, [t]);
 
   const stopRecording = useCallback(async (cancel = false) => {
     clearInterval(recordTimerRef.current);
@@ -382,9 +384,9 @@ const ChatScreen = ({ route, navigation }) => {
         duration: seconds, mimeType: 'audio/m4a',
       });
     } catch {
-      Alert.alert('Error', 'Could not save the voice note.');
+      Alert.alert(t('common.error'), t('chat.saveVoiceFailed'));
     }
-  }, [sendMediaMessage]);
+  }, [sendMediaMessage, t]);
 
   const playAudio = useCallback(async (msg) => {
     try {
@@ -416,10 +418,10 @@ const ChatScreen = ({ route, navigation }) => {
         }
       });
     } catch {
-      Alert.alert('Error', 'Could not play this voice note.');
+      Alert.alert(t('common.error'), t('chat.playVoiceFailed'));
       setPlayingId(null);
     }
-  }, [playingId]);
+  }, [playingId, t]);
 
   // Cleanup audio on unmount.
   useEffect(() => () => {
@@ -583,7 +585,7 @@ const ChatScreen = ({ route, navigation }) => {
             </TouchableOpacity>
             <TextInput
               style={styles.input}
-              placeholder="Message…"
+              placeholder={t('chat.messagePlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={text}
               onChangeText={setText}
@@ -623,15 +625,15 @@ const ChatScreen = ({ route, navigation }) => {
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Send to {otherUser?.username ?? 'chat'}</Text>
-            <Text style={styles.sheetSubtitle}>Choose what to send</Text>
+            <Text style={styles.sheetSubtitle}>{t('chat.chooseWhatToSend')}</Text>
 
             <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => pickFromSheet(attachImage)}>
               <View style={[styles.sheetIcon, styles.sheetIconPhoto]}>
                 <Ionicons name="image" size={24} color={colors.accent} />
               </View>
               <View style={styles.sheetOptionText}>
-                <Text style={styles.sheetOptionLabel}>Photo</Text>
-                <Text style={styles.sheetOptionHint}>Send a picture from your gallery</Text>
+                <Text style={styles.sheetOptionLabel}>{t('chat.photo')}</Text>
+                <Text style={styles.sheetOptionHint}>{t('chat.photoSub')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
@@ -641,14 +643,14 @@ const ChatScreen = ({ route, navigation }) => {
                 <Ionicons name="document-text" size={24} color={colors.primary} />
               </View>
               <View style={styles.sheetOptionText}>
-                <Text style={styles.sheetOptionLabel}>Document</Text>
-                <Text style={styles.sheetOptionHint}>Share a file up to 6 MB</Text>
+                <Text style={styles.sheetOptionLabel}>{t('chat.document')}</Text>
+                <Text style={styles.sheetOptionHint}>{t('chat.documentSub')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setAttachSheet(false)}>
-              <Text style={styles.sheetCancelText}>Cancel</Text>
+              <Text style={styles.sheetCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>

@@ -26,6 +26,7 @@ import { useAuth } from '../context/useAuth';
 import { usePlayer } from '../context/PlayerContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS, resolveVideoQuality } from '../utils/preferences';
+import { useI18n } from '../context/I18nContext';
 import SearchBaar from '../components/SearchBaar';
 import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, fetchLatestPostId, likePost } from '../services/api';
 import FollowButton from '../components/FollowButton';
@@ -44,10 +45,11 @@ const AVATAR_FAILED = '__failed__';
 
 // "Why you're seeing this" chip for the ranked For You feed (backend sends
 // feed_reason). Turns the ranking into a visible, made-for-me signal.
+// Module scope can't call t(), so these carry a key the render site resolves.
 const FEED_REASON = {
-  following: { label: 'From someone you follow', icon: 'people' },
-  discovery: { label: 'Popular in your circles', icon: 'explore' },
-  trending: { label: 'Trending now', icon: 'trending-up' },
+  following: { key: 'feed.reason.following', icon: 'people' },
+  discovery: { key: 'feed.reason.discovery', icon: 'explore' },
+  trending: { key: 'feed.reason.trending', icon: 'trending-up' },
 };
 // Post card width. Capped on wide screens (tablets/landscape) so the feed reads
 // as a centered column instead of stretching edge-to-edge; on phones it's just
@@ -198,6 +200,7 @@ const PostMedia = React.memo(function PostMedia({
   const { preferences } = usePreferences();
   // One resolver drives autoplay and buffering, so "Data saver" and the Video
   // quality tiers stay consistent.
+  const { t } = useI18n();
   const quality = resolveVideoQuality(
     preferences[PREF_KEYS.videoQuality],
     preferences[PREF_KEYS.dataSaver],
@@ -322,7 +325,7 @@ const PostMedia = React.memo(function PostMedia({
     return (
       <View style={[styles.errorMediaContainer, { aspectRatio: 1 }]}>
         <MaterialIcons name="broken-image" size={48} color={colors.textMuted} />
-        <Text style={styles.errorMediaText}>Media unavailable</Text>
+        <Text style={styles.errorMediaText}>{t('feed.mediaUnavailable')}</Text>
         <TouchableOpacity 
           style={styles.retryButton}
           onPress={() => {
@@ -331,7 +334,7 @@ const PostMedia = React.memo(function PostMedia({
             setHasError(false);
           }}
         >
-          <Text style={styles.retryButtonText}>Retry</Text>
+          <Text style={styles.retryButtonText}>{t('feed.retry')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -514,6 +517,7 @@ const PostMedia = React.memo(function PostMedia({
 });
 
 const SocialFeed = ({ showBackground = true }) => {
+  const { t } = useI18n();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -625,10 +629,10 @@ const SocialFeed = ({ showBackground = true }) => {
       setError(err);
       if (!isRefresh) {
         Alert.alert(
-          'Error Loading Posts',
+          t('feed.loadErrorTitle'),
           err.response?.status === 500
-            ? 'Server error. Please try again later.'
-            : 'Failed to load posts. Please check your connection.',
+            ? t('feed.loadErrorServer')
+            : t('feed.loadErrorNetwork'),
           [{ text: 'OK' }, { text: 'Retry', onPress: () => loadPosts(false) }]
         );
       }
@@ -636,7 +640,7 @@ const SocialFeed = ({ showBackground = true }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [followStates, feedType, prefetchMedia]);
+  }, [followStates, feedType, prefetchMedia, t]);
 
   const loadMorePosts = useCallback(async () => {
     if (loadingMore || !hasMore || loading || !nextUrl) return;
@@ -1000,7 +1004,7 @@ const SocialFeed = ({ showBackground = true }) => {
                   color={colors.primary}
                 />
                 <Text style={styles.reasonChipText} numberOfLines={1}>
-                  {FEED_REASON[item.feed_reason].label}
+                  {t(FEED_REASON[item.feed_reason].key)}
                 </Text>
               </View>
             )}
@@ -1024,7 +1028,7 @@ const SocialFeed = ({ showBackground = true }) => {
         </View>
       </View>
     );
-  }, [currentUser?.id, handleFollowChange, handlePostUpdate, handlePostDelete, navigation]);
+  }, [currentUser?.id, handleFollowChange, handlePostUpdate, handlePostDelete, navigation, t]);
 
   const renderPostFooter = useCallback(({ item }) => (
     <View style={styles.postFooter}>
@@ -1097,7 +1101,7 @@ const SocialFeed = ({ showBackground = true }) => {
                 : 'Failed to load posts.'}
           </Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => loadPosts()}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
+            <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
           </TouchableOpacity>
         </View>
       );
@@ -1114,10 +1118,10 @@ const SocialFeed = ({ showBackground = true }) => {
       return (
         <View style={styles.emptyContainer}>
           <MaterialIcons name="people-outline" size={48} color={colors.textMuted} />
-          <Text style={styles.emptyText}>Your following feed is quiet</Text>
-          <Text style={styles.emptySub}>Follow people, or see what everyone&apos;s posting.</Text>
+          <Text style={styles.emptyText}>{t('feed.followingQuiet')}</Text>
+          <Text style={styles.emptySub}>{t('feed.followingQuietSub')}</Text>
           <TouchableOpacity style={styles.createFirstPostButton} onPress={() => selectFeed('for_you')}>
-            <Text style={styles.createFirstPostText}>Explore For You</Text>
+            <Text style={styles.createFirstPostText}>{t('feed.exploreForYou')}</Text>
           </TouchableOpacity>
         </View>
       );
@@ -1125,13 +1129,13 @@ const SocialFeed = ({ showBackground = true }) => {
     return (
       <View style={styles.emptyContainer}>
         <MaterialIcons name="photo-library" size={48} color={colors.textMuted} />
-        <Text style={styles.emptyText}>No posts yet</Text>
+        <Text style={styles.emptyText}>{t('feed.noPosts')}</Text>
         <TouchableOpacity style={styles.createFirstPostButton} onPress={() => navigation.navigate('CreatePost')}>
-          <Text style={styles.createFirstPostText}>Share Something</Text>
+          <Text style={styles.createFirstPostText}>{t('feed.shareSomething')}</Text>
         </TouchableOpacity>
       </View>
     );
-  }, [loading, error, searchQuery, feedType, navigation, loadPosts, selectFeed]);
+  }, [loading, error, searchQuery, feedType, navigation, loadPosts, selectFeed, t]);
 
   const keyExtractor = useCallback(item => `post_${item.id}`, []);
 
@@ -1174,7 +1178,7 @@ const SocialFeed = ({ showBackground = true }) => {
           <View style={{ flex: 1 }}>
             <SearchBaar
               onSearch={handleSearch}
-              placeholder="Search posts, users, locations..."
+              placeholder={t('feed.searchPlaceholder')}
             />
           </View>
           <TouchableOpacity
@@ -1218,7 +1222,7 @@ const SocialFeed = ({ showBackground = true }) => {
           activeOpacity={0.85}
         >
           <MaterialIcons name="arrow-upward" size={16} color={colors.white} />
-          <Text style={styles.newPostsText}>New posts</Text>
+          <Text style={styles.newPostsText}>{t('feed.newPosts')}</Text>
         </TouchableOpacity>
       )}
 

@@ -14,6 +14,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchProductById, updateProduct, fetchProductCategories } from '../../services/api';
+import { useI18n } from '../../context/I18nContext';
 import { useAuth } from '../../context/useAuth';
 
 // Constants
@@ -31,6 +32,7 @@ const COLORS = {
 const DEFAULT_IMAGE = 'https://via.placeholder.com/120';
 
 const EditProduct = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   const { slug } = route.params;
@@ -108,7 +110,7 @@ const EditProduct = () => {
 
     } catch (error) {
       console.error('❌ Error loading product:', error);
-      Alert.alert('Error', error.message || 'Failed to load product details');
+      Alert.alert(t('common.error'), error.message || t('market.form.loadFailed'));
       navigation.goBack();
     } finally {
       setLoading(false);
@@ -129,7 +131,7 @@ const EditProduct = () => {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'We need camera roll permissions to upload images');
+      Alert.alert(t('chat.permissionRequired'), t('market.form.permissionPhotos'));
       return;
     }
 
@@ -158,12 +160,12 @@ const EditProduct = () => {
 
   const handleSubmit = async () => {
     if (!formData.title || !formData.description || !formData.price) {
-      Alert.alert('Error', 'Please fill in all required fields');
+      Alert.alert(t('common.error'), t('market.form.fillRequired'));
       return;
     }
 
     if (existingImages.length + newImages.length - removedImages.length === 0) {
-      Alert.alert('Error', 'Please keep at least one product image');
+      Alert.alert(t('common.error'), t('market.form.needKeepImage'));
       return;
     }
 
@@ -203,11 +205,11 @@ const EditProduct = () => {
       });
 
       await updateProduct(slug, data);
-      Alert.alert('Success', 'Product updated successfully');
+      Alert.alert(t('market.success'), t('market.form.updated'));
       navigation.goBack();
     } catch (error) {
       console.error('Error updating product:', error);
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to update product');
+      Alert.alert(t('common.error'), error.response?.data?.detail || t('market.form.updateFailed'));
     } finally {
       setUpdating(false);
     }
@@ -223,12 +225,12 @@ const EditProduct = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.sectionTitle}>Product Information</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.productInfo')}</Text>
       
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="Product Title*"
+        placeholder={t('market.form.title')}
         value={formData.title}
         onChangeText={(text) => handleChange('title', text)}
       />
@@ -236,7 +238,7 @@ const EditProduct = () => {
       <TextInput
         style={[styles.input, styles.textArea]}
         placeholderTextColor={COLORS.gray}
-        placeholder="Description*"
+        placeholder={t('market.form.description')}
         value={formData.description}
         onChangeText={(text) => handleChange('description', text)}
         multiline
@@ -247,7 +249,7 @@ const EditProduct = () => {
         <TextInput
           style={[styles.input, styles.halfInput]}
           placeholderTextColor={COLORS.gray}
-          placeholder="Price*"
+          placeholder={t('market.form.price')}
           value={formData.price}
           onChangeText={(text) => handleChange('price', text)}
           keyboardType="numeric"
@@ -256,7 +258,7 @@ const EditProduct = () => {
         <TextInput
           style={[styles.input, styles.halfInput]}
           placeholderTextColor={COLORS.gray}
-          placeholder="Quantity"
+          placeholder={t('market.form.quantity')}
           value={formData.quantity}
           onChangeText={(text) => handleChange('quantity', text)}
           keyboardType="numeric"
@@ -266,17 +268,17 @@ const EditProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="Category*"
+        placeholder={t('market.form.categoryEdit')}
         value={formData.category}
         onChangeText={(text) => handleChange('category', text)}
       />
 
-      <Text style={styles.sectionTitle}>Contact Information</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.contactInfo')}</Text>
 
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="WhatsApp Number (e.g., +254712345678)"
+        placeholder={t('market.form.whatsapp')}
         value={formData.whatsapp_number}
         onChangeText={(text) => handleChange('whatsapp_number', text)}
         keyboardType="phone-pad"
@@ -285,7 +287,7 @@ const EditProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="Contact Number (optional)"
+        placeholder={t('market.form.contactNumber')}
         value={formData.contact_number}
         onChangeText={(text) => handleChange('contact_number', text)}
         keyboardType="phone-pad"
@@ -294,18 +296,18 @@ const EditProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="Location (optional)"
+        placeholder={t('market.form.location')}
         value={formData.location}
         onChangeText={(text) => handleChange('location', text)}
       />
 
-      <Text style={styles.sectionTitle}>Payment Details</Text>
-      <Text style={styles.subtitle}>How buyers pay you directly</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.paymentDetails')}</Text>
+      <Text style={styles.subtitle}>{t('market.form.howBuyersPay')}</Text>
 
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="M-Pesa Number (e.g., 0712345678)"
+        placeholder={t('market.form.mpesa')}
         value={formData.mpesa_number}
         onChangeText={(text) => handleChange('mpesa_number', text)}
         keyboardType="phone-pad"
@@ -314,7 +316,7 @@ const EditProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="Till / Paybill Number (optional)"
+        placeholder={t('market.form.tillNumber')}
         value={formData.till_number}
         onChangeText={(text) => handleChange('till_number', text)}
         keyboardType="numbers-and-punctuation"
@@ -323,7 +325,7 @@ const EditProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor={COLORS.gray}
-        placeholder="Bank details (optional)"
+        placeholder={t('market.form.bankDetails')}
         value={formData.bank_details}
         onChangeText={(text) => handleChange('bank_details', text)}
       />
@@ -331,15 +333,15 @@ const EditProduct = () => {
       <TextInput
         style={[styles.input, styles.textArea]}
         placeholderTextColor={COLORS.gray}
-        placeholder="Other payment instructions (optional)"
+        placeholder={t('market.form.otherInstructions')}
         value={formData.payment_instructions}
         onChangeText={(text) => handleChange('payment_instructions', text)}
         multiline
         numberOfLines={3}
       />
 
-      <Text style={styles.sectionTitle}>Product Images*</Text>
-      <Text style={styles.subtitle}>Keep at least one image</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.productImages')}</Text>
+      <Text style={styles.subtitle}>{t('market.form.keepOneImage')}</Text>
       
       <View style={styles.imageContainer}>
         {existingImages.map((image) => (
@@ -386,10 +388,10 @@ const EditProduct = () => {
         )}
       </View>
 
-      <Text style={styles.sectionTitle}>Additional Information</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.additionalInfo')}</Text>
       
       <View style={styles.radioGroup}>
-        <Text style={styles.radioLabel}>Condition:</Text>
+        <Text style={styles.radioLabel}>{t('market.form.condition')}</Text>
         <View style={styles.radioOptions}>
           {['NEW', 'USED', 'REFURBISHED'].map((option) => (
             <TouchableOpacity
@@ -426,7 +428,7 @@ const EditProduct = () => {
         {updating ? (
           <ActivityIndicator color={COLORS.white} />
         ) : (
-          <Text style={styles.submitButtonText}>Update Product</Text>
+          <Text style={styles.submitButtonText}>{t('market.form.update')}</Text>
         )}
       </TouchableOpacity>
     </ScrollView>

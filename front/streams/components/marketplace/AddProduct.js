@@ -16,6 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { createProduct } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+import { useI18n } from '../../context/I18nContext';
 
 const CURRENCIES = [
   { code: 'KES', label: 'KES (Ksh)' },
@@ -26,6 +27,7 @@ const CURRENCIES = [
 ];
 
 const AddProduct = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { currentUser } = useAuth();
   const [formData, setFormData] = useState({
@@ -61,7 +63,7 @@ const AddProduct = () => {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'We need camera roll permissions to upload images');
+      Alert.alert(t('chat.permissionRequired'), t('market.form.permissionPhotos'));
       return;
     }
 
@@ -76,7 +78,7 @@ const AddProduct = () => {
       const uri = result.assets[0].uri;
       const fileInfo = await FileSystem.getInfoAsync(uri);
       if (fileInfo.size > 5 * 1024 * 1024) {
-        Alert.alert('Error', 'Image size must be less than 5MB');
+        Alert.alert(t('common.error'), t('market.form.imageTooLarge'));
         return;
       }
       setImages([...images, uri]);
@@ -100,17 +102,17 @@ const AddProduct = () => {
 
   const handleSubmit = async () => {
     if (!formData.title || !formData.description || !formData.price_value) {
-      Alert.alert('Error', 'Please fill in all required fields');
+      Alert.alert(t('common.error'), t('market.form.fillRequired'));
       return;
     }
 
     if (images.length === 0) {
-      Alert.alert('Error', 'Please add at least one product image');
+      Alert.alert(t('common.error'), t('market.form.needImage'));
       return;
     }
 
     if (!formData.category.trim()) {
-      Alert.alert('Error', 'Please enter a category name');
+      Alert.alert(t('common.error'), t('market.form.needCategory'));
       return;
     }
 
@@ -165,7 +167,7 @@ const AddProduct = () => {
       }
 
       const response = await createProduct(data);
-      Alert.alert('Success', 'Product created successfully');
+      Alert.alert(t('market.success'), t('market.form.created'));
       navigation.goBack();
     } catch (error) {
       console.error('Error creating product:', error);
@@ -175,7 +177,7 @@ const AddProduct = () => {
       } else if (error.request) {
         errorMessage = 'No response from server. Check network or server status.';
       }
-      Alert.alert('Error', errorMessage);
+      Alert.alert(t('common.error'), errorMessage);
     } finally {
       setLoading(false);
     }
@@ -209,12 +211,12 @@ const AddProduct = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.sectionTitle}>Product Information</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.productInfo')}</Text>
 
       <TextInput
         style={styles.input}
         placeholderTextColor="#888"
-        placeholder="Product Title*"
+        placeholder={t('market.form.title')}
         value={formData.title}
         onChangeText={(text) => handleChange('title', text)}
       />
@@ -222,7 +224,7 @@ const AddProduct = () => {
       <TextInput
         style={[styles.input, styles.textArea]}
         placeholderTextColor="#888"
-        placeholder="Description*"
+        placeholder={t('market.form.description')}
         value={formData.description}
         onChangeText={(text) => handleChange('description', text)}
         multiline
@@ -234,7 +236,7 @@ const AddProduct = () => {
           <TextInput
             style={[styles.input, styles.priceInput]}
             placeholderTextColor="#888"
-            placeholder="Price*"
+            placeholder={t('market.form.price')}
             value={formData.price_value}
             onChangeText={(text) => handleChange('price_value', text)}
             keyboardType="numeric"
@@ -250,7 +252,7 @@ const AddProduct = () => {
         <TextInput
           style={[styles.input, styles.quantityInput]}
           placeholderTextColor="#888"
-          placeholder="Quantity"
+          placeholder={t('market.form.quantity')}
           value={formData.quantity}
           onChangeText={(text) => handleChange('quantity', text)}
           keyboardType="numeric"
@@ -260,12 +262,12 @@ const AddProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor="#888"
-        placeholder="Category (e.g., Clothes)*"
+        placeholder={t('market.form.category')}
         value={formData.category}
         onChangeText={(text) => handleChange('category', text)}
       />
 
-      <Text style={styles.sectionTitle}>Contact Information</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.contactInfo')}</Text>
 
       <View>
         <TextInput
@@ -277,7 +279,7 @@ const AddProduct = () => {
               : null
           ]}
           placeholderTextColor="#888"
-          placeholder="WhatsApp Number (e.g., +254712345678)"
+          placeholder={t('market.form.whatsapp')}
           value={formData.whatsapp_number}
           onChangeText={handleWhatsAppNumberChange}
           keyboardType="phone-pad"
@@ -293,7 +295,7 @@ const AddProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor="#888"
-        placeholder="Contact Number (optional)"
+        placeholder={t('market.form.contactNumber')}
         value={formData.contact_number}
         onChangeText={(text) => handleChange('contact_number', text)}
         keyboardType="phone-pad"
@@ -302,12 +304,12 @@ const AddProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor="#888"
-        placeholder="Location (optional)"
+        placeholder={t('market.form.location')}
         value={formData.location}
         onChangeText={(text) => handleChange('location', text)}
       />
 
-      <Text style={styles.sectionTitle}>Payment Details</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.paymentDetails')}</Text>
       <Text style={styles.subtitle}>
         How should buyers pay you? Buyers pay you directly — these details are shown on your listing.
       </Text>
@@ -315,7 +317,7 @@ const AddProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor="#888"
-        placeholder="M-Pesa Number (e.g., 0712345678)"
+        placeholder={t('market.form.mpesa')}
         value={formData.mpesa_number}
         onChangeText={(text) => handleChange('mpesa_number', text)}
         keyboardType="phone-pad"
@@ -324,7 +326,7 @@ const AddProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor="#888"
-        placeholder="Till / Paybill Number (optional)"
+        placeholder={t('market.form.tillNumber')}
         value={formData.till_number}
         onChangeText={(text) => handleChange('till_number', text)}
         keyboardType="numbers-and-punctuation"
@@ -333,7 +335,7 @@ const AddProduct = () => {
       <TextInput
         style={styles.input}
         placeholderTextColor="#888"
-        placeholder="Bank details (optional)"
+        placeholder={t('market.form.bankDetails')}
         value={formData.bank_details}
         onChangeText={(text) => handleChange('bank_details', text)}
       />
@@ -341,15 +343,15 @@ const AddProduct = () => {
       <TextInput
         style={[styles.input, styles.textArea]}
         placeholderTextColor="#888"
-        placeholder="Other payment instructions (optional)"
+        placeholder={t('market.form.otherInstructions')}
         value={formData.payment_instructions}
         onChangeText={(text) => handleChange('payment_instructions', text)}
         multiline
         numberOfLines={3}
       />
 
-      <Text style={styles.sectionTitle}>Product Images*</Text>
-      <Text style={styles.subtitle}>Add at least one image (max 5)</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.productImages')}</Text>
+      <Text style={styles.subtitle}>{t('market.form.imagesHint')}</Text>
 
       <View style={styles.imageContainer}>
         {images.map((uri, index) => (
@@ -371,10 +373,10 @@ const AddProduct = () => {
         )}
       </View>
 
-      <Text style={styles.sectionTitle}>Additional Information</Text>
+      <Text style={styles.sectionTitle}>{t('market.form.additionalInfo')}</Text>
 
       <View style={styles.radioGroup}>
-        <Text style={styles.radioLabel}>Condition:</Text>
+        <Text style={styles.radioLabel}>{t('market.form.condition')}</Text>
         <View style={styles.radioOptions}>
           {['NEW', 'USED', 'REFURBISHED'].map((option) => (
             <TouchableOpacity
@@ -414,7 +416,7 @@ const AddProduct = () => {
       <Modal visible={currencyOpen} transparent animationType="fade" onRequestClose={() => setCurrencyOpen(false)}>
         <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setCurrencyOpen(false)}>
           <TouchableOpacity activeOpacity={1} style={styles.pickerCard}>
-            <Text style={styles.pickerTitle}>Select currency</Text>
+            <Text style={styles.pickerTitle}>{t('market.form.selectCurrency')}</Text>
             {CURRENCIES.map((c) => (
               <TouchableOpacity
                 key={c.code}
@@ -426,7 +428,7 @@ const AddProduct = () => {
               </TouchableOpacity>
             ))}
             <TouchableOpacity style={styles.pickerCancel} onPress={() => setCurrencyOpen(false)}>
-              <Text style={styles.pickerCancelText}>Cancel</Text>
+              <Text style={styles.pickerCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>

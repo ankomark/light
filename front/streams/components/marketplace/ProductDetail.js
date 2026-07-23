@@ -24,6 +24,7 @@ import {
   addProductReview,
 } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+import { useI18n } from '../../context/I18nContext';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
@@ -42,6 +43,7 @@ const ProductDetail = () => {
   const [myComment, setMyComment] = useState('');
   const [postingReview, setPostingReview] = useState(false);
   const { currentUser } = useAuth();
+  const { t } = useI18n();
 
   useEffect(() => {
     const loadProduct = async () => {
@@ -58,9 +60,9 @@ const ProductDetail = () => {
       } catch (error) {
         console.error('Error loading product:', error);
         const message = error.message === 'Product not found' 
-          ? 'This product is no longer available.'
-          : 'Failed to load product details. Please try again.';
-        Alert.alert('Error', message, [
+          ? t('market.product.noLongerAvailable')
+          : t('market.product.loadFailed');
+        Alert.alert(t('common.error'), message, [
           { text: 'Go Back', onPress: () => navigation.goBack() }
         ]);
       } finally {
@@ -68,7 +70,7 @@ const ProductDetail = () => {
       }
     };
     loadProduct();
-  }, [slug, navigation]);
+  }, [slug, navigation, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +89,7 @@ const ProductDetail = () => {
 
   const handleAddToCart = async () => {
     if (!currentUser) {
-      Alert.alert('Login Required', 'Please login to add items to your cart', [
+      Alert.alert(t('market.loginRequired'), t('market.product.loginToCart'), [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Login', onPress: () => navigation.navigate('Login') }
       ]);
@@ -96,16 +98,16 @@ const ProductDetail = () => {
 
     try {
       await addToCart(product.id, quantity);
-      Alert.alert('Success', 'Item added to your cart');
+      Alert.alert(t('market.success'), t('market.product.addedToCart'));
     } catch (error) {
       console.error('Error adding to cart:', error);
-      Alert.alert('Error', error.message || 'Failed to add item to cart');
+      Alert.alert(t('common.error'), error.message || t('market.product.addToCartFailed'));
     }
   };
 
   const handleToggleWishlist = async () => {
     if (!currentUser) {
-      Alert.alert('Login Required', 'Please login to use your wishlist', [
+      Alert.alert(t('market.loginRequired'), t('market.product.loginToWishlist'), [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Login', onPress: () => navigation.navigate('Login') }
       ]);
@@ -123,7 +125,7 @@ const ProductDetail = () => {
     } catch (error) {
       console.error('Error updating wishlist:', error);
       setWishlisted(!next);  // revert
-      Alert.alert('Error', error.message || 'Failed to update your wishlist');
+      Alert.alert(t('common.error'), error.message || t('market.product.wishlistFailed'));
     } finally {
       setWishlistBusy(false);
     }
@@ -131,14 +133,14 @@ const ProductDetail = () => {
 
   const handleSubmitReview = async () => {
     if (!currentUser) {
-      Alert.alert('Login Required', 'Please login to leave a review', [
+      Alert.alert(t('market.loginRequired'), t('market.product.loginToReview'), [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Login', onPress: () => navigation.navigate('Login') }
       ]);
       return;
     }
     if (!myRating) {
-      Alert.alert('Rating required', 'Tap a star to rate this product.');
+      Alert.alert(t('market.product.ratingRequiredTitle'), t('market.product.ratingRequiredBody'));
       return;
     }
     try {
@@ -152,10 +154,10 @@ const ProductDetail = () => {
       setReviews(Array.isArray(freshReviews) ? freshReviews : (freshReviews?.results || []));
       setProduct((prev) => ({ ...prev, ...freshProduct }));
       setMyComment('');
-      Alert.alert('Thanks', 'Your review has been saved.');
+      Alert.alert(t('market.product.reviewThanks'), t('market.product.reviewSaved'));
     } catch (error) {
       console.error('Error posting review:', error);
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to save your review');
+      Alert.alert(t('common.error'), error.response?.data?.detail || t('market.product.reviewFailed'));
     } finally {
       setPostingReview(false);
     }
@@ -173,29 +175,29 @@ const ProductDetail = () => {
       });
     } catch (error) {
       console.error('Error sharing:', error);
-      Alert.alert('Error', 'Failed to share product');
+      Alert.alert(t('common.error'), t('market.product.shareFailed'));
     }
   };
 
   const handleWhatsAppPress = () => {
     if (!product.whatsapp_number) {
-      Alert.alert('Error', 'No WhatsApp number provided for this product');
+      Alert.alert(t('common.error'), t('market.product.noWhatsapp'));
       return;
     }
     const url = `https://wa.me/${product.whatsapp_number}`;
     Linking.openURL(url).catch(() => {
-      Alert.alert('Error', 'Could not open WhatsApp');
+      Alert.alert(t('common.error'), t('market.product.whatsappFailed'));
     });
   };
 
   const handleCallPress = () => {
     if (!product.contact_number) {
-      Alert.alert('Error', 'No contact number provided for this product');
+      Alert.alert(t('common.error'), t('market.product.noPhone'));
       return;
     }
     const url = `tel:${product.contact_number}`;
     Linking.openURL(url).catch(() => {
-      Alert.alert('Error', 'Could not make a call');
+      Alert.alert(t('common.error'), t('market.product.callFailed'));
     });
   };
 
@@ -223,7 +225,7 @@ const ProductDetail = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#FFC46B" />
-        <Text style={styles.loadingText}>Loading product details...</Text>
+        <Text style={styles.loadingText}>{t('market.product.loading')}</Text>
       </View>
     );
   }
@@ -232,9 +234,9 @@ const ProductDetail = () => {
     return (
       <View style={styles.errorContainer}>
         <Icon name="exclamation-circle" size={50} color="#888" />
-        <Text style={styles.errorText}>Product not found</Text>
+        <Text style={styles.errorText}>{t('market.product.notFound')}</Text>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.retryText}>Go Back</Text>
+          <Text style={styles.retryText}>{t('market.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -287,7 +289,7 @@ const ProductDetail = () => {
           {product.quantity > 0 ? (
             <Text style={styles.inStock}>In Stock ({product.quantity} available)</Text>
           ) : (
-            <Text style={styles.outOfStock}>Out of Stock</Text>
+            <Text style={styles.outOfStock}>{t('market.product.outOfStock')}</Text>
           )}
         </View>
 
@@ -302,19 +304,19 @@ const ProductDetail = () => {
 
         {/* Contact Information Section */}
         <View style={styles.contactInfoContainer}>
-          <Text style={styles.sectionTitle}>Contact Information</Text>
+          <Text style={styles.sectionTitle}>{t('market.product.contactInfo')}</Text>
           
           {product.whatsapp_number && (
             <TouchableOpacity style={styles.contactButton} onPress={handleWhatsAppPress}>
               <Icon name="whatsapp" size={20} color="#25D366" />
-              <Text style={styles.contactButtonText}>Chat via WhatsApp</Text>
+              <Text style={styles.contactButtonText}>{t('market.product.whatsapp')}</Text>
             </TouchableOpacity>
           )}
           
           {product.contact_number && (
             <TouchableOpacity style={styles.contactButton} onPress={handleCallPress}>
               <Icon name="phone" size={20} color="#1D478B" />
-              <Text style={styles.contactButtonText}>Call Seller</Text>
+              <Text style={styles.contactButtonText}>{t('market.product.call')}</Text>
             </TouchableOpacity>
           )}
           
@@ -329,7 +331,7 @@ const ProductDetail = () => {
         {/* Payment Details — buyer pays the seller directly */}
         {hasPaymentInfo(product) && (
           <View style={styles.paymentContainer}>
-            <Text style={styles.sectionTitle}>Payment Details</Text>
+            <Text style={styles.sectionTitle}>{t('market.product.paymentDetails')}</Text>
             <Text style={styles.paymentNote}>
               Pay the seller directly using the details below, then arrange delivery with them.
               Long-press a value to copy it.
@@ -349,7 +351,7 @@ const ProductDetail = () => {
               <View style={styles.paymentRow}>
                 <Icon name="credit-card" size={18} color="#2E8B57" style={styles.paymentIcon} />
                 <View style={styles.paymentTextWrap}>
-                  <Text style={styles.paymentLabel}>Till / Paybill</Text>
+                  <Text style={styles.paymentLabel}>{t('market.product.till')}</Text>
                   <Text style={styles.paymentValue} selectable>{product.till_number}</Text>
                 </View>
               </View>
@@ -359,7 +361,7 @@ const ProductDetail = () => {
               <View style={styles.paymentRow}>
                 <Icon name="bank" size={18} color="#2E8B57" style={styles.paymentIcon} />
                 <View style={styles.paymentTextWrap}>
-                  <Text style={styles.paymentLabel}>Bank</Text>
+                  <Text style={styles.paymentLabel}>{t('market.product.bank')}</Text>
                   <Text style={styles.paymentValue} selectable>{product.bank_details}</Text>
                 </View>
               </View>
@@ -369,7 +371,7 @@ const ProductDetail = () => {
               <View style={styles.paymentRow}>
                 <Icon name="info-circle" size={18} color="#2E8B57" style={styles.paymentIcon} />
                 <View style={styles.paymentTextWrap}>
-                  <Text style={styles.paymentLabel}>Instructions</Text>
+                  <Text style={styles.paymentLabel}>{t('market.product.instructions')}</Text>
                   <Text style={styles.paymentValue} selectable>{product.payment_instructions}</Text>
                 </View>
               </View>
@@ -381,7 +383,7 @@ const ProductDetail = () => {
 
         {product.track && (
           <View style={styles.trackInfo}>
-            <Text style={styles.sectionTitle}>Related Track</Text>
+            <Text style={styles.sectionTitle}>{t('market.product.relatedTrack')}</Text>
             <Text style={styles.trackTitle}>{product.track.title || 'Untitled Track'}</Text>
             <Text style={styles.trackArtist}>by {product.track.artist?.username || 'Unknown Artist'}</Text>
           </View>
@@ -389,7 +391,7 @@ const ProductDetail = () => {
       </View>
 
       <View style={styles.quantityContainer}>
-        <Text style={styles.quantityLabel}>Quantity:</Text>
+        <Text style={styles.quantityLabel}>{t('market.product.quantity')}</Text>
         <View style={styles.quantityControls}>
           <TouchableOpacity 
             style={styles.quantityButton}
@@ -416,7 +418,7 @@ const ProductDetail = () => {
           disabled={product.quantity <= 0}
         >
           <Icon name="shopping-cart" size={20} color="#fff" />
-          <Text style={styles.cartButtonText}>Add to Cart</Text>
+          <Text style={styles.cartButtonText}>{t('market.product.addToCart')}</Text>
         </TouchableOpacity>
         
         <TouchableOpacity
@@ -425,7 +427,7 @@ const ProductDetail = () => {
           disabled={wishlistBusy}
         >
           <Icon name={wishlisted ? 'heart' : 'heart-o'} size={20} color="#1D478B" />
-          <Text style={styles.wishlistButtonText}>{wishlisted ? 'Wishlisted' : 'Wishlist'}</Text>
+          <Text style={styles.wishlistButtonText}>{wishlisted ? t('market.product.wishlisted') : t('market.wishlist.title')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -434,13 +436,13 @@ const ProductDetail = () => {
         onPress={handleShare}
       >
         <Icon name="share-alt" size={20} color="#1D478B" />
-        <Text style={styles.shareButtonText}>Share this product</Text>
+        <Text style={styles.shareButtonText}>{t('market.product.share')}</Text>
       </TouchableOpacity>
 
       {/* Reviews */}
       <View style={styles.reviewsContainer}>
         <View style={styles.reviewsHeader}>
-          <Text style={styles.sectionTitle}>Reviews</Text>
+          <Text style={styles.sectionTitle}>{t('market.product.reviews')}</Text>
           {product.average_rating != null && (
             <View style={styles.aggregateRow}>
               <Icon name="star" size={15} color="#FFC107" />
@@ -453,7 +455,7 @@ const ProductDetail = () => {
         </View>
 
         {reviews.length === 0 ? (
-          <Text style={styles.noReviewsText}>No reviews yet — be the first.</Text>
+          <Text style={styles.noReviewsText}>{t('market.product.noReviews')}</Text>
         ) : (
           reviews.map((review) => (
             <View key={review.id} style={styles.reviewRow}>
@@ -482,7 +484,7 @@ const ProductDetail = () => {
         {/* Own review. Posting again updates it — one review per person. */}
         {!product.is_owner && (
           <View style={styles.reviewForm}>
-            <Text style={styles.reviewFormLabel}>Rate this product</Text>
+            <Text style={styles.reviewFormLabel}>{t('market.product.rateThis')}</Text>
             <View style={styles.starPicker}>
               {[1, 2, 3, 4, 5].map((n) => (
                 <TouchableOpacity key={n} onPress={() => setMyRating(n)} hitSlop={6}>
@@ -497,7 +499,7 @@ const ProductDetail = () => {
             </View>
             <TextInput
               style={styles.reviewInput}
-              placeholder="Add a comment (optional)"
+              placeholder={t('market.product.commentPlaceholder')}
               placeholderTextColor="#888"
               value={myComment}
               onChangeText={setMyComment}
@@ -510,7 +512,7 @@ const ProductDetail = () => {
             >
               {postingReview
                 ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={styles.reviewSubmitText}>Submit review</Text>}
+                : <Text style={styles.reviewSubmitText}>{t('market.product.submitReview')}</Text>}
             </TouchableOpacity>
           </View>
         )}

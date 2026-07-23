@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useI18n } from '../../context/I18nContext';
 import { 
   View, 
   Text, 
@@ -22,6 +23,7 @@ const formatPrice = (price, currency = 'USD') => {
 };
 
 const OrderHistory = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   const [orders, setOrders] = useState([]);
@@ -50,7 +52,7 @@ const OrderHistory = () => {
       setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
     } catch (error) {
       console.error('Error loading orders:', error);
-      Alert.alert('Error', 'Failed to load order history');
+      Alert.alert(t('common.error'), t('market.orders.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -93,12 +95,12 @@ const OrderHistory = () => {
       {orders.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Icon name="box-open" size={50} color="#888" />
-          <Text style={styles.emptyText}>No orders yet</Text>
+          <Text style={styles.emptyText}>{t('market.orders.empty')}</Text>
           <TouchableOpacity 
             style={styles.shopButton}
             onPress={() => navigation.navigate('ProductList')}
           >
-            <Text style={styles.shopButtonText}>Browse Products</Text>
+            <Text style={styles.shopButtonText}>{t('market.browseProducts')}</Text>
           </TouchableOpacity>
         </View>
       ) : (

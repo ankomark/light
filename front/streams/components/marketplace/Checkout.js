@@ -6,6 +6,7 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { apiRequest } from '../../services/api';
+import { useI18n } from '../../context/I18nContext';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', KES: 'Ksh', NGN: '₦' };
@@ -51,22 +52,23 @@ const PaymentLine = ({ icon, label, value }) => (
 );
 
 const SellerGroup = ({ group, currency }) => {
+  const { t } = useI18n();
   const { product } = group;
   // Each seller sets their own product currency; never assume the order's first.
   const gCurrency = product?.currency || currency;
 
   const openWhatsApp = () => {
     const num = (product.whatsapp_number || '').replace(/[^\d]/g, '');
-    if (!num) return Alert.alert('Unavailable', 'This seller has no WhatsApp number.');
+    if (!num) return Alert.alert(t('market.unavailable'), t('market.checkout.noWhatsapp'));
     Linking.openURL(`https://wa.me/${num}`).catch(() =>
-      Alert.alert('Error', 'Could not open WhatsApp.'));
+      Alert.alert(t('common.error'), t('market.checkout.whatsappFailed')));
   };
 
   const callSeller = () => {
     const num = product.contact_number || product.whatsapp_number;
-    if (!num) return Alert.alert('Unavailable', 'This seller has no phone number.');
+    if (!num) return Alert.alert(t('market.unavailable'), t('market.checkout.noPhone'));
     Linking.openURL(`tel:${num}`).catch(() =>
-      Alert.alert('Error', 'Could not start the call.'));
+      Alert.alert(t('common.error'), t('market.checkout.callFailed')));
   };
 
   return (
@@ -87,7 +89,7 @@ const SellerGroup = ({ group, currency }) => {
       ))}
 
       <View style={styles.sellerSubtotalRow}>
-        <Text style={styles.sellerSubtotalLabel}>Pay this seller</Text>
+        <Text style={styles.sellerSubtotalLabel}>{t('market.checkout.payThisSeller')}</Text>
         <Text style={styles.sellerSubtotalValue}>{formatPrice(group.subtotal, gCurrency)}</Text>
       </View>
 
@@ -107,11 +109,11 @@ const SellerGroup = ({ group, currency }) => {
       <View style={styles.contactRow}>
         <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtn]} onPress={openWhatsApp} activeOpacity={0.85}>
           <Ionicons name="logo-whatsapp" size={18} color="#fff" />
-          <Text style={styles.contactBtnText}>WhatsApp</Text>
+          <Text style={styles.contactBtnText}>{t('market.checkout.whatsapp')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.contactBtn, styles.callBtn]} onPress={callSeller} activeOpacity={0.85}>
           <Ionicons name="call-outline" size={18} color="#fff" />
-          <Text style={styles.contactBtnText}>Call</Text>
+          <Text style={styles.contactBtnText}>{t('market.checkout.call')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -119,6 +121,7 @@ const SellerGroup = ({ group, currency }) => {
 };
 
 const Checkout = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { orderId } = useRoute().params;
   const [order, setOrder] = useState(null);
@@ -133,12 +136,12 @@ const Checkout = () => {
         setOrder(data);
         setAddress(data?.shipping_address || '');
       } catch {
-        Alert.alert('Error', 'Could not load order details.');
+        Alert.alert(t('common.error'), t('market.checkout.loadFailed'));
       } finally {
         setLoading(false);
       }
     })();
-  }, [orderId]);
+  }, [orderId, t]);
 
   const handleDone = useCallback(async () => {
     // Optionally save a delivery note/address for the seller's reference.
@@ -169,7 +172,7 @@ const Checkout = () => {
     return (
       <View style={styles.centered}>
         <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
-        <Text style={styles.emptyText}>Order not found</Text>
+        <Text style={styles.emptyText}>{t('market.checkout.notFound')}</Text>
       </View>
     );
   }
@@ -194,18 +197,18 @@ const Checkout = () => {
       ))}
 
       <View style={styles.totalCard}>
-        <Text style={styles.totalLabel}>Order total</Text>
+        <Text style={styles.totalLabel}>{t('market.checkout.orderTotal')}</Text>
         {mixedCurrency ? (
-          <Text style={styles.totalNote}>See each seller above</Text>
+          <Text style={styles.totalNote}>{t('market.checkout.seeEachSeller')}</Text>
         ) : (
           <Text style={styles.totalAmount}>{formatPrice(order.total_amount, currency)}</Text>
         )}
       </View>
 
-      <Text style={styles.sectionTitle}>Delivery note (optional)</Text>
+      <Text style={styles.sectionTitle}>{t('market.checkout.deliveryNoteOptional')}</Text>
       <TextInput
         style={styles.input}
-        placeholder="Address or delivery instructions to share with sellers..."
+        placeholder={t('market.checkout.addressPlaceholder')}
         placeholderTextColor={colors.placeholder}
         value={address}
         onChangeText={setAddress}

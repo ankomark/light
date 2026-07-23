@@ -10,6 +10,7 @@ import HamburgerMenu from '../components/HamburgerMenu';
 import ScreenVignette from './ScreenVignette';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the image
 // Wallpaper behind the header — re-hosted on our Cloudinary CDN, optimized.
@@ -37,6 +38,7 @@ const NavItem = ({ set: Set = Ionicons, active, inactive, label, isActive, onPre
 const Header = ({ transparentBg = false }) => {
   const navigation = useNavigation();
   const { currentUser, isAuthenticated } = useAuth();
+  const { t } = useI18n();
 
   // Responsive brand sizing: recomputes on rotation / different devices so the
   // title never wraps or crowds the icons on small phones, and scales up a
@@ -149,7 +151,7 @@ const Header = ({ transparentBg = false }) => {
 
           <View style={styles.navItem}>
             <NotificationsBell navigation={navigation} />
-            <Text style={styles.navLabel} numberOfLines={1}>Alerts</Text>
+            <Text style={styles.navLabel} numberOfLines={1}>{t('header.alerts')}</Text>
           </View>
 
           <NavItem
@@ -179,10 +181,10 @@ const Header = ({ transparentBg = false }) => {
           ) : (
             <View style={styles.authRow}>
               <TouchableOpacity onPress={() => navigation.navigate('SignUp')} accessibilityRole="button">
-                <Text style={styles.navLink}>Sign Up</Text>
+                <Text style={styles.navLink}>{t('auth.signUp')}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => navigation.navigate('Login')} accessibilityRole="button">
-                <Text style={styles.navLink}>Log In</Text>
+                <Text style={styles.navLink}>{t('auth.login')}</Text>
               </TouchableOpacity>
             </View>
           )}

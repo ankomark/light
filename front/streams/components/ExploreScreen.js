@@ -9,6 +9,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { apiRequest } from '../services/api';
 import useGridColumns from '../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -95,6 +96,7 @@ const SearchUserRow = ({ user, onPress }) => (
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 const ExploreScreen = ({ navigation }) => {
+  const { t } = useI18n();
   // Responsive grid tile: 2 across on a phone, more on tablets / landscape.
   const { tileSize } = useGridColumns({
     target: 175, min: 2, max: 5, horizontalPadding: spacing.md * 2, gap: spacing.xs,
@@ -154,7 +156,7 @@ const ExploreScreen = ({ navigation }) => {
       {/* Suggested people */}
       {suggested.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>People to Follow</Text>
+          <Text style={styles.sectionTitle}>{t('explore.peopleToFollow')}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestedRow}>
             {suggested.map(u => (
               <SuggestedUser key={u.id} user={u} onPress={openUser} />
@@ -166,7 +168,7 @@ const ExploreScreen = ({ navigation }) => {
       {/* Trending posts grid */}
       {trending.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Trending This Week</Text>
+          <Text style={styles.sectionTitle}>{t('explore.trending')}</Text>
           <View style={styles.grid}>
             {trending.map(post => (
               <TrendingPostCard key={post.id} post={post} onPress={openPost} size={tileSize} />
@@ -178,7 +180,7 @@ const ExploreScreen = ({ navigation }) => {
       {!loading && trending.length === 0 && suggested.length === 0 && (
         <View style={styles.centered}>
           <MaterialIcons name="explore" size={52} color={colors.textMuted} />
-          <Text style={styles.emptyText}>Nothing trending yet</Text>
+          <Text style={styles.emptyText}>{t('explore.nothingTrending')}</Text>
         </View>
       )}
     </ScrollView>
@@ -206,13 +208,13 @@ const ExploreScreen = ({ navigation }) => {
       <ScrollView showsVerticalScrollIndicator={false}>
         {users.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>People</Text>
+            <Text style={styles.sectionTitle}>{t('explore.people')}</Text>
             {users.map(u => <SearchUserRow key={u.id} user={u} onPress={openUser} />)}
           </View>
         )}
         {posts.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Posts</Text>
+            <Text style={styles.sectionTitle}>{t('explore.posts')}</Text>
             <View style={styles.grid}>
               {posts.map(post => <TrendingPostCard key={post.id} post={post} onPress={openPost} size={tileSize} />)}
             </View>
@@ -220,7 +222,7 @@ const ExploreScreen = ({ navigation }) => {
         )}
         {tracks.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Music</Text>
+            <Text style={styles.sectionTitle}>{t('explore.music')}</Text>
             {tracks.map(track => (
               <TouchableOpacity key={track.id} style={styles.resultRow} activeOpacity={0.7}>
                 <View style={styles.trackThumb}>
@@ -239,7 +241,7 @@ const ExploreScreen = ({ navigation }) => {
         )}
         {(searchResults.groups ?? []).length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Groups</Text>
+            <Text style={styles.sectionTitle}>{t('explore.groups')}</Text>
             {searchResults.groups.map(group => (
               <TouchableOpacity
                 key={group.id}
@@ -271,7 +273,7 @@ const ExploreScreen = ({ navigation }) => {
         <Ionicons name="search" size={18} color={colors.placeholder} style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search people, posts, music..."
+          placeholder={t('explore.searchPlaceholder')}
           placeholderTextColor={colors.placeholder}
           value={query}
           onChangeText={setQuery}

@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchConversations, fetchConversationsByUrl } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -75,6 +76,7 @@ const ConversationItem = ({ item, onPress }) => {
 };
 
 const InboxScreen = ({ navigation }) => {
+  const { t } = useI18n();
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -169,7 +171,7 @@ const InboxScreen = ({ navigation }) => {
     <View style={styles.container}>
       <View style={styles.titleRow}>
         <Ionicons name="chatbubble-ellipses" size={18} color={colors.accent} />
-        <Text style={styles.headerTitle}>Messages</Text>
+        <Text style={styles.headerTitle}>{t('inbox.title')}</Text>
         {conversations.length > 0 && (
           <View style={styles.countPill}><Text style={styles.countText}>{conversations.length}</Text></View>
         )}
@@ -194,7 +196,7 @@ const InboxScreen = ({ navigation }) => {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubbles-outline" size={56} color={colors.textMuted} />
-            <Text style={styles.emptyTitle}>No conversations yet</Text>
+            <Text style={styles.emptyTitle}>{t('inbox.empty')}</Text>
             <Text style={styles.emptySubtext}>
               Follow someone and tap their profile to send a message
             </Text>

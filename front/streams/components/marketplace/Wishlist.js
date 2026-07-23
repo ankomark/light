@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useI18n } from '../../context/I18nContext';
 import {
   View,
   Text,
@@ -25,6 +26,7 @@ const formatPrice = (price, currency = 'USD') => {
 };
 
 const Wishlist = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { currentUser } = useAuth();
   const [products, setProducts] = useState([]);
@@ -41,12 +43,12 @@ const Wishlist = () => {
       setProducts(data?.products || []);
     } catch (error) {
       console.error('Error loading wishlist:', error);
-      Alert.alert('Error', 'Failed to load your wishlist');
+      Alert.alert(t('common.error'), t('market.wishlist.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [currentUser]);
+  }, [currentUser, t]);
 
   // Re-read on focus: the heart can be toggled over on the product screen.
   useFocusEffect(
@@ -68,7 +70,7 @@ const Wishlist = () => {
     } catch (error) {
       console.error('Error removing from wishlist:', error);
       setProducts(previous);  // revert
-      Alert.alert('Error', 'Could not remove that item. Please try again.');
+      Alert.alert(t('common.error'), t('market.wishlist.removeFailed'));
     }
   };
 
@@ -76,9 +78,9 @@ const Wishlist = () => {
     return (
       <View style={styles.centered}>
         <Icon name="heart-o" size={50} color="#888" />
-        <Text style={styles.emptyText}>Please login to use your wishlist</Text>
+        <Text style={styles.emptyText}>{t('market.wishlist.loginPrompt')}</Text>
         <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('Login')}>
-          <Text style={styles.primaryButtonText}>Login</Text>
+          <Text style={styles.primaryButtonText}>{t('market.login')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -96,9 +98,9 @@ const Wishlist = () => {
     return (
       <View style={styles.centered}>
         <Icon name="heart-o" size={50} color="#888" />
-        <Text style={styles.emptyText}>Your wishlist is empty</Text>
+        <Text style={styles.emptyText}>{t('market.wishlist.empty')}</Text>
         <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('ProductList')}>
-          <Text style={styles.primaryButtonText}>Browse Products</Text>
+          <Text style={styles.primaryButtonText}>{t('market.browseProducts')}</Text>
         </TouchableOpacity>
       </View>
     );

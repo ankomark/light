@@ -13,6 +13,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts } from '../../services/api';
 import useGridColumns from '../../utils/useGridColumns';
+import { useI18n } from '../../context/I18nContext';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
@@ -79,6 +80,7 @@ const ITEM_MARGIN = SPACING.small;
 // Main Component
 // =====================
 const ProductList = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   // Responsive grid: 2 columns on a phone, more on tablets / landscape.
@@ -159,7 +161,7 @@ const ProductList = () => {
         <Icon name="exclamation-circle" size={50} color={COLORS.error} />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity onPress={loadProducts}>
-          <Text style={styles.retryText}>Retry</Text>
+          <Text style={styles.retryText}>{t('feed.retry')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -172,7 +174,7 @@ const ProductList = () => {
         <Icon name="search" size={20} color={COLORS.gray} style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search products..."
+          placeholder={t('market.list.searchPlaceholder')}
           placeholderTextColor={COLORS.gray}
           value={searchQuery}
           onChangeText={handleSearchChange}
@@ -216,6 +218,7 @@ const ProductList = () => {
 // Product Card Component
 // =====================
 const ProductCard = ({ product, onPress, style }) => {
+  const { t } = useI18n();
   const hasDiscount = product.original_price && (product.original_price > product.price);
   const inStock = product.quantity > 0;
   
@@ -281,7 +284,7 @@ const ProductCard = ({ product, onPress, style }) => {
               </Text>
             </>
           ) : (
-            <Text style={styles.ratingText}>No reviews yet</Text>
+            <Text style={styles.ratingText}>{t('market.list.noReviews')}</Text>
           )}
         </View>
       </View>
@@ -292,19 +295,22 @@ const ProductCard = ({ product, onPress, style }) => {
 // =====================
 // Empty State Component
 // =====================
-const EmptyState = ({ query, onClear }) => (
+const EmptyState = ({ query, onClear }) => {
+  const { t } = useI18n();
+  return (
   <View style={styles.centerContainer}>
     <Icon name="exclamation-circle" size={50} color={COLORS.gray} />
     <Text style={styles.emptyText}>
-      {query.trim() ? 'No matching products found' : 'No products available'}
+      {query.trim() ? t('market.list.noMatches') : t('market.list.none')}
     </Text>
     {query.trim() && (
       <TouchableOpacity onPress={onClear}>
-        <Text style={styles.actionText}>Clear search</Text>
+        <Text style={styles.actionText}>{t('market.list.clearSearch')}</Text>
       </TouchableOpacity>
     )}
   </View>
-);
+  );
+};
 
 // =====================
 // Styles

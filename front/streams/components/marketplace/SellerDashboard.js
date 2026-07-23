@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts, fetchOrders, deleteProduct } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+import { useI18n } from '../../context/I18nContext';
 
 // Constants
 const COLORS = {
@@ -68,6 +69,7 @@ const formatPrice = (price, currency = 'USD') => {
 };
 
 const SellerDashboard = () => {
+  const { t } = useI18n();
   // Hooks and State
   const navigation = useNavigation();
   const { currentUser, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -101,14 +103,14 @@ const SellerDashboard = () => {
         setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
       } catch (error) {
         console.error('Error loading seller data:', error);
-        Alert.alert('Error', 'Failed to load seller dashboard');
+        Alert.alert(t('common.error'), t('market.seller.loadFailed'));
       } finally {
         setLoading(false);
       }
     };
 
     loadData();
-  }, [isAuthenticated, currentUser]);
+  }, [isAuthenticated, currentUser, t]);
 
   // Append the next page of the seller's own products (deduped by id).
   const loadMoreProducts = async () => {
@@ -147,10 +149,10 @@ const SellerDashboard = () => {
               await deleteProduct(slug);
               const productsData = await fetchProducts(1, { seller: currentUser?.id });
               setProducts(productsData?.results || []);
-              Alert.alert('Success', 'Product deleted successfully');
+              Alert.alert(t('market.success'), t('market.seller.deleted'));
             } catch (error) {
               console.error('Error deleting product:', error);
-              Alert.alert('Error', 'Failed to delete product');
+              Alert.alert(t('common.error'), t('market.seller.deleteFailed'));
             }
           },
         },
@@ -193,17 +195,17 @@ const SellerDashboard = () => {
       <View style={styles.statsContainer}>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{products.length}</Text>
-          <Text style={styles.statLabel}>Products</Text>
+          <Text style={styles.statLabel}>{t('market.seller.products')}</Text>
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{orders.length}</Text>
-          <Text style={styles.statLabel}>Orders</Text>
+          <Text style={styles.statLabel}>{t('market.seller.orders')}</Text>
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>
             {formatPrice(calculateEarnings(), 'USD')}
           </Text>
-          <Text style={styles.statLabel}>Earnings</Text>
+          <Text style={styles.statLabel}>{t('market.seller.earnings')}</Text>
         </View>
       </View>
 
@@ -259,7 +261,7 @@ const SellerDashboard = () => {
           style={styles.addButton}
           onPress={() => navigation.navigate('AddProduct')}
         >
-          <Text style={styles.addButtonText}>Add Your First Product</Text>
+          <Text style={styles.addButtonText}>{t('market.seller.addFirst')}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -342,7 +344,7 @@ const SellerDashboard = () => {
           <View style={styles.confirmPrompt}>
             <Icon name="exclamation-circle" size={13} color="#FFA500" />
             <Text style={styles.confirmPromptText}>
-              Tap to confirm payment received
+              {t('market.seller.confirmPrompt')}
             </Text>
           </View>
         )}
@@ -363,12 +365,12 @@ const SellerDashboard = () => {
     return (
       <View style={styles.authContainer}>
         <Icon name="user-circle" size={50} color={COLORS.gray} />
-        <Text style={styles.authText}>Please login to access seller dashboard</Text>
+        <Text style={styles.authText}>{t('market.seller.loginPrompt')}</Text>
         <TouchableOpacity 
           style={styles.authButton}
           onPress={() => navigation.navigate('Login')}
         >
-          <Text style={styles.authButtonText}>Login</Text>
+          <Text style={styles.authButtonText}>{t('market.login')}</Text>
         </TouchableOpacity>
       </View>
     );

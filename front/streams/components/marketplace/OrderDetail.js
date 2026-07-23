@@ -14,6 +14,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchOrderById, confirmOrderPayment } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+import { useI18n } from '../../context/I18nContext';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
@@ -81,6 +82,7 @@ const PaymentLine = ({ icon, label, value }) => (
 );
 
 const SellerGroup = ({ group, fallbackCurrency, isMySale, orderOpen, onConfirm, confirming }) => {
+  const { t } = useI18n();
   const { product } = group;
   // Each seller prices in their own currency; never assume the order's first.
   const currency = product?.currency || fallbackCurrency;
@@ -89,16 +91,16 @@ const SellerGroup = ({ group, fallbackCurrency, isMySale, orderOpen, onConfirm, 
 
   const openWhatsApp = () => {
     const num = (product.whatsapp_number || '').replace(/[^\d]/g, '');
-    if (!num) return Alert.alert('Unavailable', 'This seller has no WhatsApp number.');
+    if (!num) return Alert.alert(t('market.unavailable'), t('market.checkout.noWhatsapp'));
     Linking.openURL(`https://wa.me/${num}`).catch(() =>
-      Alert.alert('Error', 'Could not open WhatsApp.'));
+      Alert.alert(t('common.error'), t('market.checkout.whatsappFailed')));
   };
 
   const callSeller = () => {
     const num = product.contact_number || product.whatsapp_number;
-    if (!num) return Alert.alert('Unavailable', 'This seller has no phone number.');
+    if (!num) return Alert.alert(t('market.unavailable'), t('market.checkout.noPhone'));
     Linking.openURL(`tel:${num}`).catch(() =>
-      Alert.alert('Error', 'Could not start the call.'));
+      Alert.alert(t('common.error'), t('market.checkout.callFailed')));
   };
 
   return (
@@ -109,7 +111,7 @@ const SellerGroup = ({ group, fallbackCurrency, isMySale, orderOpen, onConfirm, 
         {confirmed ? (
           <View style={styles.paidPill}>
             <Icon name="check" size={11} color="#fff" />
-            <Text style={styles.paidPillText}>Paid</Text>
+            <Text style={styles.paidPillText}>{t('market.order.paid')}</Text>
           </View>
         ) : null}
       </View>
@@ -143,7 +145,7 @@ const SellerGroup = ({ group, fallbackCurrency, isMySale, orderOpen, onConfirm, 
       ))}
 
       <View style={styles.subtotalRow}>
-        <Text style={styles.subtotalLabel}>Pay this seller</Text>
+        <Text style={styles.subtotalLabel}>{t('market.checkout.payThisSeller')}</Text>
         <Text style={styles.subtotalValue}>{formatPrice(group.subtotal, currency)}</Text>
       </View>
 
@@ -163,11 +165,11 @@ const SellerGroup = ({ group, fallbackCurrency, isMySale, orderOpen, onConfirm, 
       <View style={styles.contactRow}>
         <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtn]} onPress={openWhatsApp} activeOpacity={0.85}>
           <Icon name="whatsapp" size={16} color="#fff" />
-          <Text style={styles.contactBtnText}>WhatsApp</Text>
+          <Text style={styles.contactBtnText}>{t('market.checkout.whatsapp')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.contactBtn, styles.callBtn]} onPress={callSeller} activeOpacity={0.85}>
           <Icon name="phone" size={16} color="#fff" />
-          <Text style={styles.contactBtnText}>Call</Text>
+          <Text style={styles.contactBtnText}>{t('market.checkout.call')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -185,14 +187,14 @@ const SellerGroup = ({ group, fallbackCurrency, isMySale, orderOpen, onConfirm, 
           ) : (
             <>
               <Icon name="check-circle" size={16} color="#fff" />
-              <Text style={styles.confirmBtnText}>Confirm payment received</Text>
+              <Text style={styles.confirmBtnText}>{t('market.order.confirmPayment')}</Text>
             </>
           )}
         </TouchableOpacity>
       ) : null}
 
       {!isMySale && !confirmed ? (
-        <Text style={styles.awaitingNote}>Awaiting this seller’s confirmation.</Text>
+        <Text style={styles.awaitingNote}>{t('market.order.awaitingSeller')}</Text>
       ) : null}
     </View>
   );
@@ -202,6 +204,7 @@ const OrderDetail = () => {
   const navigation = useNavigation();
   const { orderId } = useRoute().params ?? {};
   const { currentUser } = useAuth();
+  const { t } = useI18n();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -215,12 +218,12 @@ const OrderDetail = () => {
     } catch (err) {
       console.error('Error loading order:', err);
       setError(err.response?.status === 404
-        ? 'This order could not be found.'
-        : 'Failed to load this order.');
+        ? t('market.checkout.notFound')
+        : t('market.order.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [orderId]);
+  }, [orderId, t]);
 
   useEffect(() => { loadOrder(); }, [loadOrder]);
 
@@ -264,9 +267,9 @@ const OrderDetail = () => {
     return (
       <View style={styles.centered}>
         <Icon name="exclamation-circle" size={50} color="#888" />
-        <Text style={styles.errorText}>{error || 'Order not found'}</Text>
+        <Text style={styles.errorText}>{error || t('market.checkout.notFound')}</Text>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.retryText}>Go Back</Text>
+          <Text style={styles.retryText}>{t('market.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -296,7 +299,7 @@ const OrderDetail = () => {
         </View>
       </View>
 
-      <Text style={styles.sectionTitle}>Items</Text>
+      <Text style={styles.sectionTitle}>{t('market.order.items')}</Text>
       {sellerGroups.map((group, i) => (
         <SellerGroup
           key={i}
@@ -310,9 +313,9 @@ const OrderDetail = () => {
       ))}
 
       <View style={[styles.card, styles.totalCard]}>
-        <Text style={styles.totalLabel}>Order total</Text>
+        <Text style={styles.totalLabel}>{t('market.checkout.orderTotal')}</Text>
         {mixedCurrency ? (
-          <Text style={styles.totalNote}>See each seller above</Text>
+          <Text style={styles.totalNote}>{t('market.checkout.seeEachSeller')}</Text>
         ) : (
           <Text style={styles.totalAmount}>
             {formatPrice(order.total_amount, fallbackCurrency)}
@@ -322,7 +325,7 @@ const OrderDetail = () => {
 
       {order.shipping_address ? (
         <>
-          <Text style={styles.sectionTitle}>Delivery note</Text>
+          <Text style={styles.sectionTitle}>{t('market.checkout.deliveryNote')}</Text>
           <View style={styles.card}>
             <Text style={styles.addressText} selectable>{order.shipping_address}</Text>
           </View>

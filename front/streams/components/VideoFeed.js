@@ -16,6 +16,7 @@ import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS, resolveVideoQuality } from '../utils/preferences';
+import { useI18n } from '../context/I18nContext';
 import { LikeButton, SaveButton, ShareButton } from './SocialActions';
 import CommentAction from './CommentAction';
 import { colors, typography } from '../constants/theme';
@@ -27,6 +28,7 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute, currentUser, navigation, bottomOffset = 120 }) => {
   const videoRef = useRef(null);
   const { preferences } = usePreferences();
+  const { t } = useI18n();
   // One resolver drives both autoplay and buffering, so "Data saver" and the
   // Video quality tiers stay consistent.
   const quality = resolveVideoQuality(
@@ -141,7 +143,7 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.center]}>
           <MaterialIcons name="videocam-off" size={44} color={colors.textMuted} />
-          <Text style={styles.unavailable}>Video unavailable</Text>
+          <Text style={styles.unavailable}>{t('video.unavailable')}</Text>
         </View>
       )}
 
@@ -248,6 +250,7 @@ const FooterBtn = ({ icon, label, onPress }) => (
 
 // ── The vertical pager ──────────────────────────────────────────────────────
 const VideoFeed = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
@@ -372,13 +375,13 @@ const VideoFeed = () => {
       ) : error ? (
         <View style={[StyleSheet.absoluteFill, styles.center]}>
           <MaterialIcons name="cloud-off" size={48} color={colors.textMuted} />
-          <Text style={styles.unavailable}>Couldn't load videos</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => load()}><Text style={styles.retryText}>Retry</Text></TouchableOpacity>
+          <Text style={styles.unavailable}>{t('video.loadFailed')}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => load()}><Text style={styles.retryText}>{t('feed.retry')}</Text></TouchableOpacity>
         </View>
       ) : posts.length === 0 ? (
         <View style={[StyleSheet.absoluteFill, styles.center]}>
           <MaterialIcons name="videocam-off" size={48} color={colors.textMuted} />
-          <Text style={styles.unavailable}>No videos yet</Text>
+          <Text style={styles.unavailable}>{t('video.noVideos')}</Text>
         </View>
       ) : (
         <FlatList
@@ -417,11 +420,11 @@ const VideoFeed = () => {
         </View>
         <View style={styles.tabs}>
           <TouchableOpacity onPress={() => switchTab('following')}>
-            <Text style={[styles.tabText, tab === 'following' && styles.tabActive]}>Following</Text>
+            <Text style={[styles.tabText, tab === 'following' && styles.tabActive]}>{t('video.following')}</Text>
           </TouchableOpacity>
           <Text style={styles.tabDot}>•</Text>
           <TouchableOpacity onPress={() => switchTab('foryou')}>
-            <Text style={[styles.tabText, tab === 'foryou' && styles.tabActive]}>For You</Text>
+            <Text style={[styles.tabText, tab === 'foryou' && styles.tabActive]}>{t('video.forYou')}</Text>
           </TouchableOpacity>
         </View>
         <View style={[styles.topSide, { justifyContent: 'flex-end' }]}>

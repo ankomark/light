@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useI18n } from '../../context/I18nContext';
 import {
   View,
   Text,
@@ -36,6 +37,7 @@ const formatPrice = (price, currency) => {
 };
 
 const Cart = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { currentUser } = useAuth();
   const [cartItems, setCartItems] = useState([]);
@@ -119,7 +121,7 @@ const Cart = () => {
       // Revert on error
       const success = await loadCartData();
       if (!success) {
-        Alert.alert('Error', 'Failed to remove item. Please try again.');
+        Alert.alert(t('common.error'), t('market.cart.removeFailed'));
       }
     }
   };
@@ -127,7 +129,7 @@ const Cart = () => {
   // Handle checkout
   const handleCheckout = async () => {
     if (!currentUser) {
-      Alert.alert('Login Required', 'Please login to proceed to checkout', [
+      Alert.alert(t('market.loginRequired'), t('market.cart.loginToCheckout'), [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Login', onPress: () => navigation.navigate('Login') }
       ]);
@@ -141,7 +143,7 @@ const Cart = () => {
     } catch (error) {
       console.error('Error during checkout:', error);
       const msg = error.response?.data?.error || 'Failed to connect you with the seller';
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setCheckingOut(false);
     }
@@ -151,7 +153,7 @@ const Cart = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#FFC46B" />
-        <Text style={styles.loadingText}>Loading your cart...</Text>
+        <Text style={styles.loadingText}>{t('market.cart.loading')}</Text>
       </View>
     );
   }
@@ -160,12 +162,12 @@ const Cart = () => {
     return (
       <View style={styles.emptyContainer}>
         <Icon name="shopping-cart" size={50} color="#888" />
-        <Text style={styles.emptyText}>Your cart is empty</Text>
+        <Text style={styles.emptyText}>{t('market.cart.empty')}</Text>
         <TouchableOpacity 
           style={styles.shopButton}
           onPress={() => navigation.navigate('ProductList')}
         >
-          <Text style={styles.shopButtonText}>Browse Products</Text>
+          <Text style={styles.shopButtonText}>{t('market.browseProducts')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -224,7 +226,7 @@ const Cart = () => {
 
       <View style={styles.summaryContainer}>
         <View style={[styles.summaryRow, styles.totalRow]}>
-          <Text style={styles.totalLabel}>Total:</Text>
+          <Text style={styles.totalLabel}>{t('market.cart.total')}</Text>
           <Text style={styles.totalPrice}>{formatPrice(subtotal, currency)}</Text>
         </View>
         <Text style={styles.shippingNote}>

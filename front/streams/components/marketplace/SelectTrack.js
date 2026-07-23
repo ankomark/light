@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useI18n } from '../../context/I18nContext';
 import { 
   View, 
   Text, 
@@ -14,6 +15,7 @@ import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchTracks } from '../../services/api';
 
 const SelectTrack = () => {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
   const { onSelect, currentTrack } = route.params;
@@ -30,14 +32,14 @@ const SelectTrack = () => {
         setFilteredTracks(tracksData);
       } catch (error) {
         console.error('Error loading tracks:', error);
-        Alert.alert('Error', 'Failed to load tracks');
+        Alert.alert(t('common.error'), t('market.track.loadFailed'));
       } finally {
         setLoading(false);
       }
     };
 
     loadTracks();
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (searchQuery.trim() === '') {
@@ -69,7 +71,7 @@ const SelectTrack = () => {
       <TextInput
         style={styles.searchInput}
         placeholderTextColor="#888"
-        placeholder="Search tracks..."
+        placeholder={t('market.track.searchPlaceholder')}
         value={searchQuery}
         onChangeText={setSearchQuery}
       />
@@ -100,7 +102,7 @@ const SelectTrack = () => {
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No tracks found</Text>
+            <Text style={styles.emptyText}>{t('market.track.none')}</Text>
           </View>
         }
       />
