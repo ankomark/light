@@ -1,6 +1,7 @@
 from .common import *  # noqa: F401,F403
 from rest_framework import mixins
 from rest_framework.exceptions import APIException
+from django.db.models import Avg, Exists, OuterRef
 from django.http import Http404
 
 
@@ -91,14 +92,15 @@ class StripeWebhookView(APIView):
             if not order or order.payment_status == 'PAID':
                 return  # Unknown order or already fulfilled — idempotent no-op.
 
-            # Commit inventory under a row lock to prevent overselling.
+            # Commit inventory under a row lock to prevent overselling. Goes
+            # through OrderItem.commit_stock() so a line already committed by a
+            # seller's direct-pay confirmation is never decremented twice.
+            now = timezone.now()
             for item in order.items.select_related('product').all():
-                product = item.product
-                if product is None:
-                    continue
-                locked = Product.objects.select_for_update().get(pk=product.pk)
-                locked.quantity = max(0, locked.quantity - item.quantity)
-                locked.save(update_fields=['quantity'])
+                item.commit_stock()
+                if item.payment_confirmed_at is None:
+                    item.payment_confirmed_at = now
+                    item.save(update_fields=['payment_confirmed_at'])
 
             order.payment_status = 'PAID'
             order.status = 'PROCESSING'
@@ -122,7 +124,20 @@ class ProductViewSet(viewsets.ModelViewSet):
             super().get_queryset()
             .select_related('seller', 'seller__profile', 'category')
             .prefetch_related('images')
+            # Rating + wishlist state as annotations, so a page of products costs
+            # a couple of joins instead of 3 extra queries per product.
+            .annotate(
+                avg_rating=Avg('reviews__rating'),
+                num_reviews=Count('reviews', distinct=True),
+            )
         )
+        user = self.request.user
+        if user.is_authenticated:
+            queryset = queryset.annotate(
+                wishlisted_by_me=Exists(
+                    Wishlist.objects.filter(user=user, products=OuterRef('pk'))
+                )
+            )
         seller_id = self.request.query_params.get('seller')
         if seller_id:
             try:
@@ -366,6 +381,60 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
         order.save(update_fields=['shipping_address'])
         return Response(OrderSerializer(order, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='confirm-payment')
+    def confirm_payment(self, request, pk=None):
+        """Direct-pay fulfilment. Buyers pay each seller off-platform, so THIS —
+        not the Stripe webhook — is what marks a line paid and commits its stock.
+
+        Scoped to the caller's own line items: an order can span several sellers,
+        and each confirms only their own. The order as a whole becomes PAID once
+        every line has been confirmed."""
+        order = self.get_object()
+
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+
+            if order.status in ('CANCELLED', 'REFUNDED'):
+                return Response(
+                    {"error": f"This order is {order.status.lower()} and can no longer be confirmed"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            items = list(order.items.select_related('product').filter(seller=request.user))
+            if not items:
+                return Response(
+                    {"error": "You have no items in this order"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            pending = [i for i in items if i.payment_confirmed_at is None]
+            if pending:
+                # Nothing was reserved at checkout, so stock must be re-checked
+                # here — this is the point where overselling would otherwise happen.
+                for item in pending:
+                    if item.product and item.quantity > item.product.quantity:
+                        return Response(
+                            {"error": f"Not enough stock left for '{item.product.title}' "
+                                      f"(ordered {item.quantity}, available {item.product.quantity})"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                now = timezone.now()
+                for item in pending:
+                    item.payment_confirmed_at = now
+                    item.save(update_fields=['payment_confirmed_at'])
+                    item.commit_stock()
+
+                # Only once every seller on the order has confirmed.
+                if not order.items.filter(payment_confirmed_at__isnull=True).exists():
+                    order.payment_status = 'PAID'
+                    if order.status == 'PENDING':
+                        order.status = 'PROCESSING'
+                    order.save(update_fields=['payment_status', 'status'])
+
+        order.refresh_from_db()
+        return Response(OrderSerializer(order, context={'request': request}).data)
+
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
         order = self.get_object()
@@ -398,8 +467,16 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        order.status = new_status
-        order.save(update_fields=['status'])
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            # Cancelling/refunding after a seller confirmed payment must hand the
+            # inventory back, or the stock those lines took is lost for good.
+            if new_status in ('CANCELLED', 'REFUNDED'):
+                for item in order.items.select_related('product').all():
+                    item.release_stock()
+            order.status = new_status
+            order.save(update_fields=['status'])
+
         return Response({"status": "Order status updated"}, status=status.HTTP_200_OK)
 
 
@@ -408,15 +485,35 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ProductReviewSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
     owner_field = 'reviewer'
-    
+
+    def _product_slug(self):
+        # The nested router builds its kwarg from the PARENT viewset's
+        # lookup_field, and ProductViewSet looks products up by slug — so this is
+        # 'product_slug', not 'product_pk'. Reading the wrong key silently
+        # returned every review in the table and made creates 404.
+        return self.kwargs.get('product_slug')
+
     def get_queryset(self):
-        product_id = self.kwargs.get('product_pk')
-        if product_id:
-            return ProductReview.objects.filter(product_id=product_id)
-        return ProductReview.objects.all()
-    
+        slug = self._product_slug()
+        queryset = ProductReview.objects.select_related('reviewer', 'reviewer__profile')
+        if slug:
+            return queryset.filter(product__slug=slug)
+        return queryset.none()  # never leak the whole review table
+
+    def create(self, request, *args, **kwargs):
+        # One review per buyer per product (unique_together), so a second POST
+        # updates the existing one instead of blowing up on the constraint.
+        product = get_object_or_404(Product, slug=self._product_slug())
+        existing = ProductReview.objects.filter(product=product, reviewer=request.user).first()
+        if existing is not None:
+            serializer = self.get_serializer(existing, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
-        product = get_object_or_404(Product, id=self.kwargs.get('product_pk'))
+        product = get_object_or_404(Product, slug=self._product_slug())
         serializer.save(reviewer=self.request.user, product=product)
 
 
@@ -427,7 +524,23 @@ class WishlistViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         return Wishlist.objects.filter(user=self.request.user)
-    
+
+    @action(detail=False, methods=['get'], url_path='my_wishlist')
+    def my_wishlist(self, request):
+        """The caller's single wishlist (user is a OneToOne), created on first
+        access. Mirrors cart/my_cart so the client gets one object, not a list."""
+        wishlist, _ = Wishlist.objects.get_or_create(user=request.user)
+        wishlist = (
+            Wishlist.objects
+            .prefetch_related(
+                'products__images',
+                'products__seller__profile',
+                'products__category',
+            )
+            .get(pk=wishlist.pk)
+        )
+        return Response(self.get_serializer(wishlist).data)
+
     @action(detail=False, methods=['post'])
     def add_product(self, request):
         product_id = request.data.get('product_id')
@@ -460,7 +573,9 @@ class WishlistViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        wishlist = get_object_or_404(Wishlist, user=request.user)
+        # get_or_create, not get_object_or_404: removing from a wishlist the user
+        # never created is a harmless no-op, not a 404.
+        wishlist, _ = Wishlist.objects.get_or_create(user=request.user)
         wishlist.products.remove(product)
         
         return Response(

@@ -41,13 +41,26 @@ class ProductSerializer(serializers.ModelSerializer):
         allow_null=True
     )
     is_owner = serializers.SerializerMethodField()
+    average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
+    is_wishlisted = serializers.SerializerMethodField()
+    # Ids of this product's existing ProductImage rows to drop on update. Not a
+    # model field — write-only, and ListField reads the repeated multipart keys
+    # the client sends via getlist().
+    remove_images = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True
+    )
 
     class Meta:
         model = Product
         fields = [
             'id', 'seller', 'title', 'description', 'price', 'condition',
             'quantity', 'category', 'is_digital', 'is_available', 'created_at',
-            'updated_at', 'views', 'slug', 'images', 'is_owner', 'track', 'currency',
+            'updated_at', 'views', 'slug', 'images', 'remove_images', 'is_owner',
+            'average_rating', 'review_count', 'is_wishlisted', 'track', 'currency',
             'whatsapp_number', 'contact_number', 'location',
             'mpesa_number', 'till_number', 'bank_details', 'payment_instructions',
         ]
@@ -70,6 +83,29 @@ class ProductSerializer(serializers.ModelSerializer):
             return obj.seller == request.user
         return False
 
+    # The three below read annotations set by ProductViewSet.get_queryset() —
+    # computing them per object would be an N+1 across a page of products. When
+    # ProductSerializer is nested somewhere unannotated (order/wishlist payloads)
+    # they degrade to a direct count/avg rather than silently reporting zero.
+    def get_average_rating(self, obj):
+        avg = getattr(obj, 'avg_rating', None)
+        if avg is None:
+            avg = obj.reviews.aggregate(v=Avg('rating'))['v']
+        return round(float(avg), 1) if avg is not None else None
+
+    def get_review_count(self, obj):
+        count = getattr(obj, 'num_reviews', None)
+        return count if count is not None else obj.reviews.count()
+
+    def get_is_wishlisted(self, obj):
+        annotated = getattr(obj, 'wishlisted_by_me', None)
+        if annotated is not None:
+            return bool(annotated)
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.wishlisted_by.filter(user=request.user).exists()
+
     def validate_category(self, value):
         value = value.strip()
         if not value:
@@ -86,6 +122,8 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         images = validated_data.pop('images', [])
+        # Meaningless on create, but must not survive into Product(**validated_data).
+        validated_data.pop('remove_images', None)
         category_name = validated_data.pop('category')
         category, _ = ProductCategory.objects.get_or_create(
             name=category_name,
@@ -117,6 +155,12 @@ class ProductSerializer(serializers.ModelSerializer):
         return representation
     
     def update(self, instance, validated_data):
+        # Both are write-only helpers, not model fields — pop them before the
+        # setattr loop below. ('images' is the reverse FK manager; assigning to
+        # it would raise "Direct assignment to the reverse side is prohibited".)
+        images = validated_data.pop('images', [])
+        remove_ids = validated_data.pop('remove_images', [])
+
         category_name = validated_data.pop('category', None)
         if category_name:
             category, _ = ProductCategory.objects.get_or_create(
@@ -130,6 +174,17 @@ class ProductSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
 
         instance.save()
+
+        # Scoped to this product, so a caller can't delete another seller's images.
+        if remove_ids:
+            instance.images.filter(id__in=remove_ids).delete()
+
+        for image in images:
+            ProductImage.objects.create(
+                product=instance,
+                image=r2.upload_file(image, 'products/images'),
+            )
+
         return instance
 
 
@@ -196,8 +251,11 @@ class OrderItemSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = OrderItem
-        fields = ['id', 'product', 'quantity', 'price_at_purchase', 'total_price', 'seller']
-        read_only_fields = ['price_at_purchase', 'seller']
+        fields = [
+            'id', 'product', 'quantity', 'price_at_purchase', 'total_price', 'seller',
+            'payment_confirmed_at',
+        ]
+        read_only_fields = ['price_at_purchase', 'seller', 'payment_confirmed_at']
     
     def get_total_price(self, obj):
         return obj.price_at_purchase * obj.quantity
@@ -224,12 +282,16 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class ProductReviewSerializer(serializers.ModelSerializer):
-    reviewer = UserSerializer(read_only=True)
-    
+    # SimpleUserSerializer, not UserSerializer: the full one pulls the reviewer's
+    # whole social-post history plus ~5 COUNT queries per review.
+    reviewer = SimpleUserSerializer(read_only=True)
+
     class Meta:
         model = ProductReview
         fields = ['id', 'product', 'reviewer', 'rating', 'comment', 'created_at']
-        read_only_fields = ['reviewer', 'created_at']
+        # 'product' comes from the nested route, never the request body — a
+        # writable field here would let a caller review some other product.
+        read_only_fields = ['product', 'reviewer', 'created_at']
 
 
 

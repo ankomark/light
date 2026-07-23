@@ -271,10 +271,18 @@ const ProductCard = ({ product, onPress, style }) => {
           </Text>
         </View>
         
-        {/* Rating */}
+        {/* Rating — real aggregate from the API; absent until someone reviews. */}
         <View style={styles.ratingContainer}>
-          <Icon name="star" size={14} color={COLORS.star} />
-          <Text style={styles.ratingText}>4.5</Text>
+          {product.average_rating != null ? (
+            <>
+              <Icon name="star" size={14} color={COLORS.star} />
+              <Text style={styles.ratingText}>
+                {product.average_rating} ({product.review_count})
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.ratingText}>No reviews yet</Text>
+          )}
         </View>
       </View>
     </TouchableOpacity>

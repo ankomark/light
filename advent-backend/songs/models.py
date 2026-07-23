@@ -1381,16 +1381,47 @@ class OrderItem(models.Model):
     quantity = models.PositiveIntegerField()
     price_at_purchase = models.DecimalField(max_digits=10, decimal_places=2)
     seller = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, related_name='sales')
-    
+    # Direct-pay marketplace: buyers pay each seller off-platform (M-Pesa, till,
+    # bank), so there is no payment webhook to trust. The seller confirming
+    # receipt for their own lines is what marks this item paid.
+    payment_confirmed_at = models.DateTimeField(null=True, blank=True)
+    # Separate from the timestamp above so inventory can only ever move once,
+    # whichever path (seller confirmation or Stripe) triggered it.
+    stock_committed = models.BooleanField(default=False)
+
     class Meta:
         ordering = ['-id']
-    
+
     def __str__(self):
         return f"{self.quantity} x {self.product.title if self.product else '[Deleted Product]'}"
-    
+
     @property
     def total_price(self):
         return self.price_at_purchase * self.quantity
+
+    def commit_stock(self):
+        """Decrement this line's product inventory exactly once. Caller must
+        already hold an atomic block. Returns True if it actually committed."""
+        if self.stock_committed or self.product_id is None:
+            return False
+        locked = Product.objects.select_for_update().get(pk=self.product_id)
+        locked.quantity = max(0, locked.quantity - self.quantity)
+        locked.save(update_fields=['quantity'])
+        self.stock_committed = True
+        self.save(update_fields=['stock_committed'])
+        return True
+
+    def release_stock(self):
+        """Give inventory back — an order cancelled after the seller had already
+        confirmed payment. Caller must already hold an atomic block."""
+        if not self.stock_committed or self.product_id is None:
+            return False
+        locked = Product.objects.select_for_update().get(pk=self.product_id)
+        locked.quantity = locked.quantity + self.quantity
+        locked.save(update_fields=['quantity'])
+        self.stock_committed = False
+        self.save(update_fields=['stock_committed'])
+        return True
 
 # Product Review Model
 class ProductReview(models.Model):

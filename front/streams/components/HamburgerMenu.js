@@ -51,6 +51,9 @@ const SECTIONS = [
     items: [
       { label: 'Marketplace', route: 'MarketplaceHome', set: 'mci', icon: 'storefront-outline' },
       { label: 'Cart', route: 'Cart', set: 'mci', icon: 'cart-outline' },
+      { label: 'Wishlist', route: 'Wishlist', set: 'mci', icon: 'heart-outline' },
+      { label: 'My Orders', route: 'OrderHistory', set: 'mci', icon: 'package-variant-closed' },
+      { label: 'Sell', route: 'SellerDashboard', set: 'mci', icon: 'store-outline' },
     ],
   },
   {

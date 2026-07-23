@@ -1302,6 +1302,12 @@ export const processPayment = async (paymentData) => {
   return apiRequest('post', '/marketplace/payments/', paymentData);
 };
 
+// Direct-pay fulfilment: the seller confirms they received the buyer's payment
+// for their own lines. This is what commits stock — there is no payment webhook.
+export const confirmOrderPayment = async (orderId) => {
+  return apiRequest('post', `/marketplace/orders/${orderId}/confirm-payment/`);
+};
+
 export const createProduct = async (formData) => {
   try {
     if (formData.price) formData.price = parseFloat(formData.price);
@@ -1355,20 +1361,26 @@ export const addProductReview = async (slug, rating, comment) => {
   });
 };
 
+// The caller's single wishlist (user is a OneToOne server-side), as one object.
 export const fetchWishlist = async () => {
-  return apiRequest('get', '/marketplace/wishlist/');
+  return apiRequest('get', '/marketplace/wishlist/my_wishlist/');
 };
 
-export const addToWishlist = async (slug) => {
-  return apiRequest('post', '/marketplace/wishlist/add_product/', { 
-    product_id: slug  // Update backend to accept slug or update to product_slug
+// Takes the numeric product id — the endpoint looks up by pk, not slug.
+export const addToWishlist = async (productId) => {
+  return apiRequest('post', '/marketplace/wishlist/add_product/', {
+    product_id: productId,
   });
 };
 
-export const removeFromWishlist = async (slug) => {
-  return apiRequest('post', '/marketplace/wishlist/remove_product/', { 
-    product_id: slug  // Update backend to accept slug or update to product_slug
+export const removeFromWishlist = async (productId) => {
+  return apiRequest('post', '/marketplace/wishlist/remove_product/', {
+    product_id: productId,
   });
+};
+
+export const fetchProductReviews = async (slug) => {
+  return apiRequest('get', `/marketplace/products/${slug}/reviews/`);
 };
 
 
@@ -1820,8 +1832,10 @@ export default {
   addToWishlist,
   removeFromWishlist,
   fetchWishlist,
+  fetchProductReviews,
   removeFromCart,
   processPayment,
+  confirmOrderPayment,
   createProduct,
   updateProduct,
   deleteProduct

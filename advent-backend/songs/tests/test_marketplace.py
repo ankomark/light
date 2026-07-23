@@ -1,10 +1,12 @@
 from decimal import Decimal
+from unittest import mock
 
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from songs.models import Product, Cart, CartItem, Order, OrderItem, User
+from songs.models import Product, ProductImage, ProductReview, Cart, CartItem, Order, OrderItem, User
 from songs.views import StripeWebhookView
 
 
@@ -179,3 +181,317 @@ class OrderMutationLockdownTests(APITestCase):
             status.HTTP_405_METHOD_NOT_ALLOWED,
         )
         self.assertTrue(Order.objects.filter(id=self.order.id).exists())
+
+
+class ProductImageUpdateTests(APITestCase):
+    """A PATCH that adds or removes images must go through the write-only
+    'images'/'remove_images' helpers — never fall into the setattr loop, which
+    would blow up on the reverse FK manager."""
+
+    def setUp(self):
+        cache.clear()
+        self.seller = User.objects.create_user(username='imgseller', email='imgseller@test.local', password='pw')
+        self.other = User.objects.create_user(username='imgother', email='imgother@test.local', password='pw')
+        self.product = Product.objects.create(
+            seller=self.seller, title='Guitar', description='d',
+            price=Decimal('50.00'), quantity=1, slug='guitar-img-test',
+        )
+        self.img_a = ProductImage.objects.create(product=self.product, image='products/images/a.jpg')
+        self.img_b = ProductImage.objects.create(product=self.product, image='products/images/b.jpg')
+
+    def _gif(self, name):
+        # Smallest valid GIF, so ImageField validation passes without Pillow gymnastics.
+        raw = (b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!'
+               b'\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
+        return SimpleUploadedFile(name, raw, content_type='image/gif')
+
+    def test_patch_without_images_still_works(self):
+        self.client.force_authenticate(self.seller)
+        res = self.client.patch(
+            f'/api/marketplace/products/{self.product.slug}/', {'title': 'Renamed'}, format='multipart',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.title, 'Renamed')
+
+    @mock.patch('songs.serializers.marketplace.r2.upload_file', return_value='products/images/new.jpg')
+    def test_patch_with_new_image_creates_row(self, _upload):
+        self.client.force_authenticate(self.seller)
+        res = self.client.patch(
+            f'/api/marketplace/products/{self.product.slug}/',
+            {'title': 'With image', 'images': [self._gif('new.gif')]},
+            format='multipart',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.product.images.count(), 3)
+
+    def test_remove_images_deletes_only_the_listed_rows(self):
+        self.client.force_authenticate(self.seller)
+        res = self.client.patch(
+            f'/api/marketplace/products/{self.product.slug}/',
+            {'remove_images': [self.img_a.id]},
+            format='multipart',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertFalse(ProductImage.objects.filter(id=self.img_a.id).exists())
+        self.assertTrue(ProductImage.objects.filter(id=self.img_b.id).exists())
+
+    def test_remove_images_cannot_touch_another_products_images(self):
+        foreign = Product.objects.create(
+            seller=self.other, title='Foreign', description='d',
+            price=Decimal('5.00'), quantity=1, slug='foreign-img-test',
+        )
+        foreign_img = ProductImage.objects.create(product=foreign, image='products/images/f.jpg')
+
+        self.client.force_authenticate(self.seller)
+        res = self.client.patch(
+            f'/api/marketplace/products/{self.product.slug}/',
+            {'remove_images': [foreign_img.id]},
+            format='multipart',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertTrue(ProductImage.objects.filter(id=foreign_img.id).exists())
+
+
+class DirectPayConfirmationTests(APITestCase):
+    """Direct-pay fulfilment: the seller confirming receipt — not Stripe — is
+    what marks a line paid and commits its inventory."""
+
+    def setUp(self):
+        cache.clear()
+        self.seller_a = User.objects.create_user(username='dpa', email='dpa@test.local', password='pw')
+        self.seller_b = User.objects.create_user(username='dpb', email='dpb@test.local', password='pw')
+        self.buyer = User.objects.create_user(username='dpbuyer', email='dpbuyer@test.local', password='pw')
+
+        self.prod_a = Product.objects.create(
+            seller=self.seller_a, title='Drum', description='d',
+            price=Decimal('10.00'), quantity=5, slug='dp-drum',
+        )
+        self.prod_b = Product.objects.create(
+            seller=self.seller_b, title='Flute', description='d',
+            price=Decimal('20.00'), quantity=5, slug='dp-flute',
+        )
+        self.order = Order.objects.create(buyer=self.buyer, status='PENDING', total_amount=Decimal('40.00'))
+        self.item_a = OrderItem.objects.create(
+            order=self.order, product=self.prod_a, quantity=2,
+            price_at_purchase=Decimal('10.00'), seller=self.seller_a,
+        )
+        self.item_b = OrderItem.objects.create(
+            order=self.order, product=self.prod_b, quantity=1,
+            price_at_purchase=Decimal('20.00'), seller=self.seller_b,
+        )
+
+    def _confirm(self, user):
+        self.client.force_authenticate(user)
+        return self.client.post(f'/api/marketplace/orders/{self.order.id}/confirm-payment/')
+
+    def test_seller_confirmation_commits_only_their_own_lines(self):
+        res = self._confirm(self.seller_a)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.prod_a.refresh_from_db()
+        self.prod_b.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 3)  # 5 - 2, committed
+        self.assertEqual(self.prod_b.quantity, 5)  # seller B hasn't confirmed
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, 'PENDING')  # not all sellers in yet
+
+    def test_order_becomes_paid_once_every_seller_confirms(self):
+        self._confirm(self.seller_a)
+        self._confirm(self.seller_b)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, 'PAID')
+        self.assertEqual(self.order.status, 'PROCESSING')
+        self.prod_b.refresh_from_db()
+        self.assertEqual(self.prod_b.quantity, 4)
+
+    def test_confirmation_is_idempotent(self):
+        self._confirm(self.seller_a)
+        self._confirm(self.seller_a)
+        self._confirm(self.seller_a)
+
+        self.prod_a.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 3)  # decremented exactly once
+
+    def test_buyer_cannot_confirm_payment(self):
+        res = self._confirm(self.buyer)
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.prod_a.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 5)
+
+    def test_unrelated_seller_cannot_confirm(self):
+        # 404 rather than 403: get_queryset() scopes orders to buyer-or-seller,
+        # so an outsider never resolves the object — it doesn't leak that the
+        # order exists. The buyer, who IS in that queryset, gets the explicit 403.
+        outsider = User.objects.create_user(username='dpout', email='dpout@test.local', password='pw')
+        res = self._confirm(outsider)
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_confirmation_rejected_when_stock_ran_out(self):
+        # Nothing is reserved at checkout, so the seller may confirm too late.
+        self.prod_a.quantity = 1
+        self.prod_a.save(update_fields=['quantity'])
+
+        res = self._confirm(self.seller_a)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.prod_a.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 1)  # never goes negative
+
+    def test_cancelling_after_confirmation_returns_stock(self):
+        self._confirm(self.seller_a)
+        self.prod_a.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 3)
+
+        self.client.force_authenticate(self.seller_a)
+        res = self.client.post(
+            f'/api/marketplace/orders/{self.order.id}/update_status/', {'status': 'CANCELLED'},
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.prod_a.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 5)  # handed back
+        self.item_a.refresh_from_db()
+        self.assertFalse(self.item_a.stock_committed)
+
+    def test_cannot_confirm_a_cancelled_order(self):
+        self.order.status = 'CANCELLED'
+        self.order.save(update_fields=['status'])
+
+        res = self._confirm(self.seller_a)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.prod_a.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 5)
+
+    def test_stripe_path_does_not_double_decrement_confirmed_lines(self):
+        self._confirm(self.seller_a)  # direct-pay commits A
+        StripeWebhookView._fulfill_order(self.order.id)  # legacy path runs too
+
+        self.prod_a.refresh_from_db()
+        self.prod_b.refresh_from_db()
+        self.assertEqual(self.prod_a.quantity, 3)  # NOT decremented twice
+        self.assertEqual(self.prod_b.quantity, 4)
+
+
+class ProductReviewTests(APITestCase):
+    """Reviews hang off the nested product route, which keys on slug."""
+
+    def setUp(self):
+        cache.clear()
+        self.seller = User.objects.create_user(username='rvseller', email='rvs@test.local', password='pw')
+        self.buyer = User.objects.create_user(username='rvbuyer', email='rvb@test.local', password='pw')
+        self.other = User.objects.create_user(username='rvother', email='rvo@test.local', password='pw')
+        self.product = Product.objects.create(
+            seller=self.seller, title='Kalimba', description='d',
+            price=Decimal('15.00'), quantity=4, slug='rv-kalimba',
+        )
+        self.decoy = Product.objects.create(
+            seller=self.seller, title='Decoy', description='d',
+            price=Decimal('15.00'), quantity=4, slug='rv-decoy',
+        )
+        ProductReview.objects.create(product=self.decoy, reviewer=self.other, rating=1, comment='decoy')
+
+    def _url(self, slug=None):
+        return f'/api/marketplace/products/{slug or self.product.slug}/reviews/'
+
+    def test_create_review_succeeds_and_attaches_to_the_right_product(self):
+        self.client.force_authenticate(self.buyer)
+        res = self.client.post(self._url(), {'rating': 5, 'comment': 'Lovely tone'})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        review = ProductReview.objects.get(product=self.product, reviewer=self.buyer)
+        self.assertEqual(review.rating, 5)
+
+    def test_list_returns_only_this_products_reviews(self):
+        ProductReview.objects.create(product=self.product, reviewer=self.buyer, rating=4, comment='good')
+        res = self.client.get(self._url())
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        comments = [r['comment'] for r in res.data]
+        self.assertEqual(comments, ['good'])  # the decoy product's review is excluded
+
+    def test_second_review_updates_instead_of_500ing_on_unique_together(self):
+        self.client.force_authenticate(self.buyer)
+        self.client.post(self._url(), {'rating': 2, 'comment': 'first'})
+        res = self.client.post(self._url(), {'rating': 5, 'comment': 'changed my mind'})
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProductReview.objects.filter(product=self.product, reviewer=self.buyer).count(), 1)
+        review = ProductReview.objects.get(product=self.product, reviewer=self.buyer)
+        self.assertEqual(review.rating, 5)
+        self.assertEqual(review.comment, 'changed my mind')
+
+    def test_body_cannot_retarget_the_review_at_another_product(self):
+        self.client.force_authenticate(self.buyer)
+        res = self.client.post(
+            self._url(), {'rating': 5, 'comment': 'x', 'product': self.decoy.id},
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        # 'product' is read-only, so the route's slug wins over the body.
+        self.assertTrue(ProductReview.objects.filter(product=self.product, reviewer=self.buyer).exists())
+        self.assertFalse(ProductReview.objects.filter(product=self.decoy, reviewer=self.buyer).exists())
+
+    def test_product_payload_carries_real_rating_aggregates(self):
+        ProductReview.objects.create(product=self.product, reviewer=self.buyer, rating=4, comment='a')
+        ProductReview.objects.create(product=self.product, reviewer=self.other, rating=5, comment='b')
+
+        res = self.client.get(f'/api/marketplace/products/{self.product.slug}/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['average_rating'], 4.5)
+        self.assertEqual(res.data['review_count'], 2)
+
+    def test_unreviewed_product_reports_null_rating_not_a_fake_one(self):
+        res = self.client.get(f'/api/marketplace/products/{self.product.slug}/')
+        self.assertIsNone(res.data['average_rating'])
+        self.assertEqual(res.data['review_count'], 0)
+
+
+class WishlistTests(APITestCase):
+    """Wishlist add/remove/read, and the is_wishlisted flag products carry."""
+
+    def setUp(self):
+        cache.clear()
+        self.seller = User.objects.create_user(username='wlseller', email='wls@test.local', password='pw')
+        self.user = User.objects.create_user(username='wluser', email='wlu@test.local', password='pw')
+        self.product = Product.objects.create(
+            seller=self.seller, title='Shaker', description='d',
+            price=Decimal('7.00'), quantity=9, slug='wl-shaker',
+        )
+
+    def test_my_wishlist_creates_and_returns_a_single_object(self):
+        self.client.force_authenticate(self.user)
+        res = self.client.get('/api/marketplace/wishlist/my_wishlist/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['products'], [])
+
+    def test_add_then_remove_round_trips(self):
+        self.client.force_authenticate(self.user)
+
+        add = self.client.post('/api/marketplace/wishlist/add_product/', {'product_id': self.product.id})
+        self.assertEqual(add.status_code, status.HTTP_200_OK)
+        res = self.client.get('/api/marketplace/wishlist/my_wishlist/')
+        self.assertEqual(len(res.data['products']), 1)
+
+        rm = self.client.post('/api/marketplace/wishlist/remove_product/', {'product_id': self.product.id})
+        self.assertEqual(rm.status_code, status.HTTP_200_OK)
+        res = self.client.get('/api/marketplace/wishlist/my_wishlist/')
+        self.assertEqual(res.data['products'], [])
+
+    def test_remove_without_an_existing_wishlist_is_a_no_op_not_404(self):
+        self.client.force_authenticate(self.user)
+        res = self.client.post('/api/marketplace/wishlist/remove_product/', {'product_id': self.product.id})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+    def test_is_wishlisted_reflects_server_state(self):
+        self.client.force_authenticate(self.user)
+        before = self.client.get(f'/api/marketplace/products/{self.product.slug}/')
+        self.assertFalse(before.data['is_wishlisted'])
+
+        self.client.post('/api/marketplace/wishlist/add_product/', {'product_id': self.product.id})
+        after = self.client.get(f'/api/marketplace/products/{self.product.slug}/')
+        self.assertTrue(after.data['is_wishlisted'])
+
+    def test_is_wishlisted_is_false_for_anonymous_callers(self):
+        res = self.client.get(f'/api/marketplace/products/{self.product.slug}/')
+        self.assertFalse(res.data['is_wishlisted'])

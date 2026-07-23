@@ -58,6 +58,8 @@ import AddProduct from './components/marketplace/AddProduct';
 import SellerDashboard from './components/marketplace/SellerDashboard';
 import Checkout from './components/marketplace/Checkout';
 import OrderHistory from './components/marketplace/OrderHistory';
+import OrderDetail from './components/marketplace/OrderDetail';
+import Wishlist from './components/marketplace/Wishlist';
 import AdminDashboard from './components/admin/AdminDashboard';
 import AdminReports from './components/admin/AdminReports';
 import AdminUsers from './components/admin/AdminUsers';
@@ -272,6 +274,8 @@ const App = () => {
                 <Stack.Screen name="Cart" component={CartWrapper} />
                 <Stack.Screen name="Checkout" component={CheckoutWrapper} />
                 <Stack.Screen name="OrderHistory" component={OrderHistoryWrapper} />
+                <Stack.Screen name="OrderDetail" component={OrderDetailWrapper} />
+                <Stack.Screen name="Wishlist" component={WishlistWrapper} />
                 <Stack.Screen name="SellerDashboard" component={SellerDashboardWrapper} />
                 <Stack.Screen name="AdminDashboard" component={AdminDashboardWrapper} />
                 <Stack.Screen name="AdminReports" component={AdminReportsWrapper} />
@@ -460,6 +464,8 @@ const ProductDetailWrapper = marketWrap(ProductDetail, 'This product couldn’t 
 const CartWrapper = marketWrap(Cart);
 const CheckoutWrapper = marketWrap(Checkout);
 const OrderHistoryWrapper = marketWrap(OrderHistory);
+const OrderDetailWrapper = marketWrap(OrderDetail, 'This order couldn’t load.');
+const WishlistWrapper = marketWrap(Wishlist, 'Your wishlist couldn’t load.');
 const SellerDashboardWrapper = marketWrap(SellerDashboard);
 
 // Playlists share the same luxury backdrop + custom nav header as the rest of

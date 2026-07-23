@@ -9,12 +9,20 @@ import {
   Alert,
   Share,
   ActivityIndicator,
-  Linking
+  Linking,
+  TextInput
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
-import { fetchProductById, addToCart, addToWishlist } from '../../services/api';
+import {
+  fetchProductById,
+  addToCart,
+  addToWishlist,
+  removeFromWishlist,
+  fetchProductReviews,
+  addProductReview,
+} from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
@@ -28,6 +36,11 @@ const ProductDetail = () => {
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
   const [wishlisted, setWishlisted] = useState(false);
+  const [wishlistBusy, setWishlistBusy] = useState(false);
+  const [reviews, setReviews] = useState([]);
+  const [myRating, setMyRating] = useState(0);
+  const [myComment, setMyComment] = useState('');
+  const [postingReview, setPostingReview] = useState(false);
   const { currentUser } = useAuth();
 
   useEffect(() => {
@@ -40,6 +53,8 @@ const ProductDetail = () => {
           quantity: typeof data.quantity === 'number' ? data.quantity : 0,
           price: typeof data.price === 'number' ? data.price : parseFloat(data.price) || 0,
         });
+        // Server state, not a local guess — the heart must survive a reopen.
+        setWishlisted(!!data.is_wishlisted);
       } catch (error) {
         console.error('Error loading product:', error);
         const message = error.message === 'Product not found' 
@@ -54,6 +69,21 @@ const ProductDetail = () => {
     };
     loadProduct();
   }, [slug, navigation]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchProductReviews(slug);
+        if (cancelled) return;
+        setReviews(Array.isArray(data) ? data : (data?.results || []));
+      } catch (error) {
+        // Non-fatal: the product itself still renders without its reviews.
+        console.error('Error loading reviews:', error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
 
   const handleAddToCart = async () => {
     if (!currentUser) {
@@ -73,7 +103,7 @@ const ProductDetail = () => {
     }
   };
 
-  const handleAddToWishlist = async () => {
+  const handleToggleWishlist = async () => {
     if (!currentUser) {
       Alert.alert('Login Required', 'Please login to use your wishlist', [
         { text: 'Cancel', style: 'cancel' },
@@ -81,13 +111,53 @@ const ProductDetail = () => {
       ]);
       return;
     }
+    const next = !wishlisted;
     try {
-      await addToWishlist(product.id);
-      setWishlisted(true);
-      Alert.alert('Success', 'Added to your wishlist');
+      setWishlistBusy(true);
+      setWishlisted(next);  // optimistic
+      if (next) {
+        await addToWishlist(product.id);
+      } else {
+        await removeFromWishlist(product.id);
+      }
     } catch (error) {
-      console.error('Error adding to wishlist:', error);
-      Alert.alert('Error', error.message || 'Failed to add to wishlist');
+      console.error('Error updating wishlist:', error);
+      setWishlisted(!next);  // revert
+      Alert.alert('Error', error.message || 'Failed to update your wishlist');
+    } finally {
+      setWishlistBusy(false);
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    if (!currentUser) {
+      Alert.alert('Login Required', 'Please login to leave a review', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Login', onPress: () => navigation.navigate('Login') }
+      ]);
+      return;
+    }
+    if (!myRating) {
+      Alert.alert('Rating required', 'Tap a star to rate this product.');
+      return;
+    }
+    try {
+      setPostingReview(true);
+      await addProductReview(slug, myRating, myComment.trim());
+      // Re-read both: the review list and the product's rating aggregate.
+      const [freshReviews, freshProduct] = await Promise.all([
+        fetchProductReviews(slug),
+        fetchProductById(slug),
+      ]);
+      setReviews(Array.isArray(freshReviews) ? freshReviews : (freshReviews?.results || []));
+      setProduct((prev) => ({ ...prev, ...freshProduct }));
+      setMyComment('');
+      Alert.alert('Thanks', 'Your review has been saved.');
+    } catch (error) {
+      console.error('Error posting review:', error);
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to save your review');
+    } finally {
+      setPostingReview(false);
     }
   };
 
@@ -351,20 +421,100 @@ const ProductDetail = () => {
         
         <TouchableOpacity
           style={styles.wishlistButton}
-          onPress={handleAddToWishlist}
+          onPress={handleToggleWishlist}
+          disabled={wishlistBusy}
         >
           <Icon name={wishlisted ? 'heart' : 'heart-o'} size={20} color="#1D478B" />
           <Text style={styles.wishlistButtonText}>{wishlisted ? 'Wishlisted' : 'Wishlist'}</Text>
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.shareButton}
         onPress={handleShare}
       >
         <Icon name="share-alt" size={20} color="#1D478B" />
         <Text style={styles.shareButtonText}>Share this product</Text>
       </TouchableOpacity>
+
+      {/* Reviews */}
+      <View style={styles.reviewsContainer}>
+        <View style={styles.reviewsHeader}>
+          <Text style={styles.sectionTitle}>Reviews</Text>
+          {product.average_rating != null && (
+            <View style={styles.aggregateRow}>
+              <Icon name="star" size={15} color="#FFC107" />
+              <Text style={styles.aggregateText}>
+                {product.average_rating} · {product.review_count} review
+                {product.review_count === 1 ? '' : 's'}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {reviews.length === 0 ? (
+          <Text style={styles.noReviewsText}>No reviews yet — be the first.</Text>
+        ) : (
+          reviews.map((review) => (
+            <View key={review.id} style={styles.reviewRow}>
+              <View style={styles.reviewHeader}>
+                <Text style={styles.reviewAuthor}>
+                  {review.reviewer?.username || 'Someone'}
+                </Text>
+                <View style={styles.reviewStars}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Icon
+                      key={n}
+                      name={n <= review.rating ? 'star' : 'star-o'}
+                      size={12}
+                      color="#FFC107"
+                    />
+                  ))}
+                </View>
+              </View>
+              {review.comment ? (
+                <Text style={styles.reviewComment}>{review.comment}</Text>
+              ) : null}
+            </View>
+          ))
+        )}
+
+        {/* Own review. Posting again updates it — one review per person. */}
+        {!product.is_owner && (
+          <View style={styles.reviewForm}>
+            <Text style={styles.reviewFormLabel}>Rate this product</Text>
+            <View style={styles.starPicker}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <TouchableOpacity key={n} onPress={() => setMyRating(n)} hitSlop={6}>
+                  <Icon
+                    name={n <= myRating ? 'star' : 'star-o'}
+                    size={26}
+                    color="#FFC107"
+                    style={styles.starPickerIcon}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              style={styles.reviewInput}
+              placeholder="Add a comment (optional)"
+              placeholderTextColor="#888"
+              value={myComment}
+              onChangeText={setMyComment}
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.reviewSubmit, postingReview && styles.reviewSubmitDisabled]}
+              onPress={handleSubmitReview}
+              disabled={postingReview}
+            >
+              {postingReview
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={styles.reviewSubmitText}>Submit review</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
      </View>
     </ScrollView>
   );
@@ -675,6 +825,105 @@ const styles = StyleSheet.create({
     color: '#1D478B',
     fontSize: 16,
     marginLeft: 8,
+  },
+  reviewsContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 20,
+    borderTopWidth: 1,
+    borderColor: '#eee',
+  },
+  reviewsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  aggregateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  aggregateText: {
+    fontSize: 14,
+    color: '#555',
+    marginLeft: 6,
+  },
+  noReviewsText: {
+    fontSize: 14,
+    color: '#888',
+    fontStyle: 'italic',
+    marginBottom: 8,
+  },
+  reviewRow: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reviewAuthor: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  reviewStars: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  reviewComment: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 4,
+    lineHeight: 20,
+  },
+  reviewForm: {
+    marginTop: 16,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 12,
+  },
+  reviewFormLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  starPicker: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  starPickerIcon: {
+    marginRight: 8,
+  },
+  reviewInput: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    padding: 12,
+    fontSize: 15,
+    color: '#111', // explicit dark text so it's never white-on-light in dark mode
+    minHeight: 60,
+    textAlignVertical: 'top',
+    marginBottom: 12,
+  },
+  reviewSubmit: {
+    backgroundColor: '#1D478B',
+    borderRadius: 8,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reviewSubmitDisabled: {
+    backgroundColor: '#a0c4ff',
+  },
+  reviewSubmitText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 15,
   },
 });
 

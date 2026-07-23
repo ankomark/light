@@ -159,18 +159,27 @@ const SellerDashboard = () => {
     );
   };
 
+  // Only this seller's own lines, and only those they've confirmed payment for —
+  // order.total_amount spans every seller on the order and counts unpaid lines.
   const calculateEarnings = () => {
     try {
       if (!Array.isArray(orders)) return 0;
-      return orders.reduce((sum, order) => {
-        const amount = Number(order?.total_amount);
-        return sum + (isNaN(amount) ? 0 : amount);
-      }, 0);
+      return orders.reduce((sum, order) => sum + (order?.items || [])
+        .filter((item) => item.seller === currentUser?.id && item.payment_confirmed_at)
+        .reduce((lineSum, item) => {
+          const unit = parseFloat(item.price_at_purchase) || 0;
+          return lineSum + unit * item.quantity;
+        }, 0), 0);
     } catch (error) {
       console.error('Error calculating earnings:', error);
       return 0;
     }
   };
+
+  // Lines this seller still needs to confirm payment for (nothing ships, and no
+  // stock moves, until they do).
+  const awaitingConfirmation = (order) =>
+    (order?.items || []).some((item) => item.seller === currentUser?.id && !item.payment_confirmed_at);
 
   const getOrderStatusCount = (status) => {
     return orders.filter(order => 
@@ -321,7 +330,7 @@ const SellerDashboard = () => {
           </Text>
         </View>
         <Text style={styles.orderDate}>
-          {item.ordered_at ? new Date(item.ordered_at).toLocaleDateString() : 'No date'}
+          {item.created_at ? new Date(item.created_at).toLocaleDateString() : 'No date'}
         </Text>
         <Text style={styles.orderTotal}>
           Total: {formatPrice(item.total_amount, currency)}
@@ -329,6 +338,14 @@ const SellerDashboard = () => {
         <Text style={styles.orderItems}>
           {item.items?.length || 0} item{item.items?.length !== 1 ? 's' : ''}
         </Text>
+        {awaitingConfirmation(item) && (
+          <View style={styles.confirmPrompt}>
+            <Icon name="exclamation-circle" size={13} color="#FFA500" />
+            <Text style={styles.confirmPromptText}>
+              Tap to confirm payment received
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -602,6 +619,20 @@ const styles = StyleSheet.create({
   orderItems: {
     fontSize: 14,
     color: COLORS.black,
+  },
+  confirmPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderColor: '#eee',
+  },
+  confirmPromptText: {
+    fontSize: 13,
+    color: COLORS.warning,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   floatingButton: {
     position: 'absolute',

@@ -12,6 +12,15 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchOrders } from '../../services/api';
 
+const CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', KES: 'Ksh', NGN: '₦' };
+
+// total_amount/price arrive as strings (DRF serializes DecimalField that way),
+// so parse before formatting — never call .toFixed() on the raw value.
+const formatPrice = (price, currency = 'USD') => {
+  const symbol = CURRENCY_SYMBOLS[currency] || currency;
+  return `${symbol}${(parseFloat(price) || 0).toFixed(2)}`;
+};
+
 const OrderHistory = () => {
   const navigation = useNavigation();
   const route = useRoute();
@@ -37,7 +46,8 @@ const OrderHistory = () => {
     try {
       setRefreshing(true);
       const ordersData = await fetchOrders();
-      setOrders(ordersData);
+      // Orders list is unpaginated today; tolerate a paginated envelope too.
+      setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
     } catch (error) {
       console.error('Error loading orders:', error);
       Alert.alert('Error', 'Failed to load order history');
@@ -48,12 +58,15 @@ const OrderHistory = () => {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
     const options = { year: 'numeric', month: 'short', day: 'numeric' };
-    return new Date(dateString).toLocaleDateString(undefined, options);
+    return date.toLocaleDateString(undefined, options);
   };
 
   const getStatusColor = (status) => {
-    switch (status.toLowerCase()) {
+    switch ((status || '').toLowerCase()) {
       case 'delivered':
         return '#2E8B57';
       case 'shipped':
@@ -99,9 +112,9 @@ const OrderHistory = () => {
             >
               <View style={styles.orderHeader}>
                 <Text style={styles.orderId}>Order #{item.id}</Text>
-                <Text style={styles.orderDate}>{formatDate(item.ordered_at)}</Text>
+                <Text style={styles.orderDate}>{formatDate(item.created_at)}</Text>
               </View>
-              
+
               <View style={styles.orderStatusContainer}>
                 <View style={[
                   styles.statusBadge,
@@ -109,16 +122,18 @@ const OrderHistory = () => {
                 ]}>
                   <Text style={styles.statusText}>{item.status}</Text>
                 </View>
-                <Text style={styles.orderTotal}>${item.total_amount.toFixed(2)}</Text>
+                <Text style={styles.orderTotal}>
+                  {formatPrice(item.total_amount, item.items?.[0]?.product?.currency)}
+                </Text>
               </View>
 
               <View style={styles.orderItemsPreview}>
-                {item.items.slice(0, 2).map((orderItem, index) => (
+                {(item.items || []).slice(0, 2).map((orderItem, index) => (
                   <Text key={index} style={styles.orderItemText} numberOfLines={1}>
-                    {orderItem.quantity}x {orderItem.product.title}
+                    {orderItem.quantity}x {orderItem.product?.title || 'Unavailable product'}
                   </Text>
                 ))}
-                {item.items.length > 2 && (
+                {(item.items?.length || 0) > 2 && (
                   <Text style={styles.moreItemsText}>
                     +{item.items.length - 2} more items
                   </Text>

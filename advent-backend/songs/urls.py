@@ -228,3 +228,4 @@ urlpatterns += router.urls
 urlpatterns += tracks_router.urls 
 urlpatterns += social_posts_router.urls
 urlpatterns += groups_router.urls
+urlpatterns += products_router.urls
