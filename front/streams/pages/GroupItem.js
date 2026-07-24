@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -31,6 +31,8 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
   const { t } = useI18n();
   const unread = group.unread_count || 0;
   const lm = group.last_message;
+  // Edit/Delete stay hidden behind a "…" so they can't be tapped by accident.
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.8}>
@@ -59,14 +61,23 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
           {unread > 0 ? (
             <View style={styles.badge}><Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text></View>
           ) : isCreator ? (
-            <View style={styles.actions}>
-              <TouchableOpacity onPress={onEdit} hitSlop={8} style={styles.actionBtn}>
-                <MaterialIcons name="edit" size={16} color={colors.textMuted} />
+            expanded ? (
+              <View style={styles.actions}>
+                <TouchableOpacity onPress={() => { setExpanded(false); onEdit(); }} hitSlop={8} style={styles.actionBtn}>
+                  <MaterialIcons name="edit" size={17} color={colors.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { setExpanded(false); onDelete(); }} hitSlop={8} style={styles.actionBtn}>
+                  <MaterialIcons name="delete-outline" size={18} color={colors.error} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setExpanded(false)} hitSlop={8} style={styles.actionBtn}>
+                  <MaterialIcons name="close" size={17} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity onPress={() => setExpanded(true)} hitSlop={8} style={styles.actionBtn}>
+                <MaterialIcons name="more-horiz" size={20} color={colors.textMuted} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={onDelete} hitSlop={8} style={styles.actionBtn}>
-                <MaterialIcons name="delete-outline" size={17} color={colors.error} />
-              </TouchableOpacity>
-            </View>
+            )
           ) : null}
         </View>
       </View>
