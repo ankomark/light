@@ -65,9 +65,12 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+        # Announce myself, carrying my channel so those already online can reply
+        # directly and I learn the current online set (channels has no roster API).
         await self.channel_layer.group_send(self.group_name, {
             'type': 'presence', 'event': 'online',
             'user_id': self.user.id, 'username': self.user.username,
+            'channel': self.channel_name,
         })
 
     async def disconnect(self, code):
@@ -122,3 +125,11 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
             'type': 'presence', 'event': event['event'],
             'user_id': event['user_id'], 'username': event['username'],
         })
+        # When someone new comes online, tell them (directly) that I'm here too,
+        # so their online roster is complete. The direct reply carries no channel,
+        # so it never triggers another reply (no storm).
+        if event['event'] == 'online' and event.get('channel') and event['user_id'] != self.user.id:
+            await self.channel_layer.send(event['channel'], {
+                'type': 'presence', 'event': 'online',
+                'user_id': self.user.id, 'username': self.user.username,
+            })

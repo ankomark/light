@@ -72,6 +72,27 @@ class GroupWebSocketTests(TransactionTestCase):
         self.assertEqual(event['message']['content'], 'hello realtime')
         await comm.disconnect()
 
+    async def test_presence_roster_on_join(self):
+        """A newcomer learns who is already online (the direct-reply handshake)."""
+        import asyncio
+        owner_comm, _ = await _connect(self.group.slug, _token(self.owner))
+        member_comm, _ = await _connect(self.group.slug, _token(self.member))
+
+        seen = set()
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 2
+        while loop.time() < deadline and self.owner.id not in seen:
+            try:
+                evt = await member_comm.receive_json_from(timeout=1)
+            except Exception:
+                break
+            if evt.get('type') == 'presence' and evt.get('event') == 'online':
+                seen.add(evt['user_id'])
+        self.assertIn(self.owner.id, seen, 'newcomer never learned the owner was already online')
+
+        await owner_comm.disconnect()
+        await member_comm.disconnect()
+
     async def test_typing_reaches_other_members_not_self(self):
         owner_comm, _ = await _connect(self.group.slug, _token(self.owner))
         member_comm, _ = await _connect(self.group.slug, _token(self.member))

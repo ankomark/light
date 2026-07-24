@@ -242,6 +242,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [playingId, setPlayingId] = useState(null);
   const [hasEarlier, setHasEarlier] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]); // usernames currently typing
+  const [onlineIds, setOnlineIds] = useState([]);     // user ids currently connected
   const [pinnedMsg, setPinnedMsg] = useState(initialGroup?.pinned_message || null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -363,6 +364,15 @@ const GroupDetail = ({ route, navigation }) => {
         markUserTyping(evt.username, evt.is_typing);
       },
       onPinned: (evt) => setPinnedMsg(evt.pinned || null),
+      onPresence: (evt) => {
+        if (!evt.user_id) return;
+        setOnlineIds((prev) => (
+          evt.event === 'online'
+            ? (prev.includes(evt.user_id) ? prev : [...prev, evt.user_id])
+            : prev.filter((id) => id !== evt.user_id)
+        ));
+      },
+      onStatus: (s) => { if (s === 'closed') setOnlineIds([]); }, // stale on disconnect
     });
     socketRef.current = sock;
     return () => { sock.close(); socketRef.current = null; };
@@ -824,6 +834,7 @@ const GroupDetail = ({ route, navigation }) => {
 
   const adminsOnly = !!group?.only_admins_can_post;
   const canChat = isMember && (!adminsOnly || isAdmin);
+  const onlineCount = onlineIds.filter((id) => id !== currentUser?.id).length;
 
   return (
     <View style={styles.root}>
@@ -846,7 +857,14 @@ const GroupDetail = ({ route, navigation }) => {
             )}
             <View style={{ flex: 1 }}>
               <Text style={styles.headerName} numberOfLines={1}>{group?.name ?? 'Group'}</Text>
-              <Text style={styles.headerSub} numberOfLines={1}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
+              {onlineCount > 0 ? (
+                <View style={styles.headerSubRow}>
+                  <View style={styles.onlineDot} />
+                  <Text style={styles.headerOnline} numberOfLines={1}>{t('group.detail.onlineCount', { count: onlineCount })}</Text>
+                </View>
+              ) : (
+                <Text style={styles.headerSub} numberOfLines={1}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
+              )}
             </View>
           </TouchableOpacity>
           {isMember && (
@@ -1312,6 +1330,9 @@ const styles = StyleSheet.create({
   groupAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
   headerName: { ...typography.h3, color: colors.textPrimary },
   headerSub: { ...typography.caption, color: colors.textSecondary },
+  headerSubRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  onlineDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#25D366' },
+  headerOnline: { ...typography.caption, color: '#25D366', fontWeight: '700' },
 
   listContent: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md, flexGrow: 1 },
   earlierBtn: { alignSelf: 'center', backgroundColor: colors.card, borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, marginBottom: spacing.sm },
