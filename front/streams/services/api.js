@@ -1012,6 +1012,9 @@ export const fetchGroupMedia = async (slug, page = 1) =>
 export const searchGroupMessages = async (slug, q) =>
   apiRequest('get', `/groups/${slug}/posts/search/?q=${encodeURIComponent(q)}`);
 
+export const fetchGroupMessageContext = async (slug, messageId) =>
+  apiRequest('get', `/groups/${slug}/posts/context/?message_id=${messageId}`);
+
 export const fetchMessageReceipts = async (slug, id) =>
   apiRequest('get', `/groups/${slug}/posts/${id}/receipts/`);
 

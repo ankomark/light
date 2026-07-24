@@ -23,6 +23,7 @@ import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
   pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts, setGroupJoinQuestion,
+  fetchGroupMessageContext,
 } from '../services/api';
 import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
@@ -61,7 +62,7 @@ const replyLabel = (m, t) => m.content || ({
  */
 const GroupMessageRow = ({
   item, isOwn, showName, playingId,
-  onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry, onDoubleTap,
+  onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry, onDoubleTap, highlighted,
 }) => {
   const { t } = useI18n();
   const lastTapRef = useRef(0);
@@ -137,7 +138,7 @@ const GroupMessageRow = ({
         <Pressable
           onLongPress={() => onLongPress(item)} delayLongPress={250}
           onPress={onTap}
-          style={[styles.msgRow, isOwn ? styles.msgRowOwn : styles.msgRowOther]}
+          style={[styles.msgRow, isOwn ? styles.msgRowOwn : styles.msgRowOther, highlighted && styles.msgRowHighlight]}
         >
           {!isOwn && (
             <View style={styles.avatarPlaceholder}>
@@ -273,6 +274,9 @@ const GroupDetail = ({ route, navigation }) => {
   const [hasEarlier, setHasEarlier] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]); // usernames currently typing
   const [onlineIds, setOnlineIds] = useState([]);     // user ids currently connected
+  const [showJump, setShowJump] = useState(false);    // "jump to newest" FAB
+  const [viewingHistory, setViewingHistory] = useState(false); // showing a search-context window, not live
+  const [highlightId, setHighlightId] = useState(null); // message to briefly flash after a jump
   const [pinnedMsg, setPinnedMsg] = useState(initialGroup?.pinned_message || null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -286,6 +290,8 @@ const GroupDetail = ({ route, navigation }) => {
 
   const listRef = useRef(null);
   const atBottomRef = useRef(true);      // is the chat scrolled to the newest message?
+  const viewingHistoryRef = useRef(false); // mirrors viewingHistory for socket callbacks
+  const highlightTimerRef = useRef(null);
   const pollRef = useRef(null);
   const socketRef = useRef(null);        // realtime chat socket
   const typingTimersRef = useRef({});    // per-user auto-expire timers
@@ -390,6 +396,9 @@ const GroupDetail = ({ route, navigation }) => {
     const sock = createGroupSocket(groupSlug, {
       onMessage: (msg) => {
         if (msg?.user?.id === currentUser?.id) return; // already shown optimistically
+        // While viewing a search-context window, don't splice live messages into
+        // the historical window (it would leave a gap); they're there on return.
+        if (viewingHistoryRef.current) return;
         setMessages((prev) => mergeMessages([msg], prev));
         // Only jump to the newest if they were already at the bottom — don't yank
         // someone out of scrolled-up history.
@@ -441,6 +450,7 @@ const GroupDetail = ({ route, navigation }) => {
     Object.values(typingTimersRef.current).forEach(clearTimeout);
     clearTimeout(myTypingRef.current.idle);
     clearTimeout(searchTimerRef.current);
+    clearTimeout(highlightTimerRef.current);
   }, []);
 
   // ── Send (optimistic, WhatsApp-style states) ──
@@ -790,10 +800,54 @@ const GroupDetail = ({ route, navigation }) => {
     }, 350);
   }, [groupSlug]);
 
-  const onTapResult = useCallback((m) => {
+  const flashMessage = useCallback((id) => {
+    clearTimeout(highlightTimerRef.current);
+    setHighlightId(id);
+    highlightTimerRef.current = setTimeout(() => setHighlightId(null), 1800);
+  }, []);
+
+  const enterHistory = useCallback((on) => { viewingHistoryRef.current = on; setViewingHistory(on); }, []);
+
+  // Return from a search-context window to the live newest messages.
+  const resetToLatest = useCallback(async () => {
+    try {
+      const res = await fetchGroupPosts(groupSlug, 1);
+      const rows = (res?.results ?? []).slice().reverse();
+      atBottomRef.current = true;
+      setMessages(rows);
+      setHasEarlier(!!res?.next);
+      pageRef.current = 1;
+      enterHistory(false);
+      setShowJump(false);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
+    } catch { /* ignore */ }
+  }, [groupSlug, enterHistory]);
+
+  const onJumpNewest = useCallback(() => {
+    if (viewingHistoryRef.current) resetToLatest();
+    else listRef.current?.scrollToEnd({ animated: true });
+  }, [resetToLatest]);
+
+  const onTapResult = useCallback(async (m) => {
     closeSearch();
-    setTimeout(() => jumpToMessage(m.id), 120);
-  }, [closeSearch, jumpToMessage]);
+    // Already loaded → just scroll to it.
+    if (messages.some((x) => String(x.id) === String(m.id))) {
+      setTimeout(() => { jumpToMessage(m.id); flashMessage(m.id); }, 150);
+      return;
+    }
+    // Otherwise load a window of context around it and jump there.
+    try {
+      const res = await fetchGroupMessageContext(groupSlug, m.id);
+      const rows = res?.results ?? [];
+      if (!rows.length) { setTimeout(() => jumpToMessage(m.id), 150); return; }
+      atBottomRef.current = false;  // stop the content-size auto-scroll from fighting the jump
+      setMessages(rows);            // server returns them ascending
+      enterHistory(!!res?.has_newer);
+      setShowJump(true);
+      setHasEarlier(false);         // page-based "load earlier" is disabled in this window
+      setTimeout(() => { jumpToMessage(m.id); flashMessage(m.id); }, 320);
+    } catch { /* ignore */ }
+  }, [messages, groupSlug, closeSearch, jumpToMessage, flashMessage, enterHistory]);
 
   const showReceipts = useCallback(async (m) => {
     setMenuMsg(null);
@@ -880,6 +934,7 @@ const GroupDetail = ({ route, navigation }) => {
         isOwn={isOwn}
         showName={showName}
         playingId={playingId}
+        highlighted={String(item.id) === String(highlightId)}
         onReply={startReply}
         onLongPress={openMsgMenu}
         onDoubleTap={(m) => reactToPost(m, '❤️')}
@@ -890,7 +945,7 @@ const GroupDetail = ({ route, navigation }) => {
         onRetry={retrySend}
       />
     );
-  }, [currentUser?.id, messages, playingId, openFile, playAudio, startReply, openMsgMenu, reactToPost, retrySend]);
+  }, [currentUser?.id, messages, playingId, highlightId, openFile, playAudio, startReply, openMsgMenu, reactToPost, retrySend]);
 
   if (loading) {
     return (
@@ -1022,7 +1077,10 @@ const GroupDetail = ({ route, navigation }) => {
           }}
           onScroll={(e) => {
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            atBottomRef.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+            const atBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+            atBottomRef.current = atBottom;
+            const shouldShow = !atBottom || viewingHistoryRef.current;
+            setShowJump((prev) => (prev === shouldShow ? prev : shouldShow));
           }}
           scrollEventThrottle={100}
           onContentSizeChange={() => { if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false }); }}
@@ -1046,6 +1104,12 @@ const GroupDetail = ({ route, navigation }) => {
             <Text style={styles.lockedDesc} numberOfLines={4}>{group.description}</Text>
           ) : null}
         </View>
+      )}
+
+      {isMember && showJump && (
+        <TouchableOpacity style={styles.jumpFab} onPress={onJumpNewest} activeOpacity={0.85}>
+          <Ionicons name={viewingHistory ? 'arrow-down' : 'chevron-down'} size={22} color={colors.white} />
+        </TouchableOpacity>
       )}
 
       {showEmoji && canChat && (
@@ -1580,6 +1644,12 @@ const styles = StyleSheet.create({
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   emptyText: { ...typography.body, color: colors.textMuted },
 
+  jumpFab: {
+    position: 'absolute', right: spacing.md, bottom: 76, zIndex: 30,
+    width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent,
+    alignItems: 'center', justifyContent: 'center', ...shadows.lg,
+  },
+  msgRowHighlight: { backgroundColor: 'rgba(244,162,97,0.22)', borderRadius: radius.md },
   lockedPreview: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.xl, gap: spacing.sm },
   lockedIconWrap: {
     width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center',

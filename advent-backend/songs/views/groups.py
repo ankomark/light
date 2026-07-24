@@ -704,6 +704,29 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(self.get_serializer(page, many=True).data)
         return Response(self.get_serializer(qs, many=True).data)
 
+    @action(detail=False, methods=['get'], url_path='context')
+    def context(self, request, *args, **kwargs):
+        """A window of messages around a given one (for jumping to a search hit
+        that isn't currently loaded). Members-only. Returns the window plus flags
+        for whether older/newer messages exist beyond it."""
+        message_id = request.query_params.get('message_id')
+        radius = 20
+        base = self.get_queryset()  # membership-gated, group-scoped
+        target = base.filter(pk=message_id).first() if message_id else None
+        if not target:
+            return Response({'results': [], 'has_earlier': False, 'has_newer': False})
+        # `older` = target + up to `radius` older (newest-first); reverse to ascending.
+        older = list(base.filter(created_at__lte=target.created_at).order_by('-created_at')[:radius + 1])
+        newer = list(base.filter(created_at__gt=target.created_at).order_by('created_at')[:radius])
+        window = older[::-1] + newer
+        has_earlier = base.filter(created_at__lt=target.created_at).count() > radius
+        has_newer = base.filter(created_at__gt=target.created_at).count() > radius
+        return Response({
+            'results': self.get_serializer(window, many=True).data,
+            'has_earlier': has_earlier,
+            'has_newer': has_newer,
+        })
+
     @action(detail=False, methods=['get'], url_path='media')
     def media(self, request, *args, **kwargs):
         """Every image / file / voice note shared in the group, newest first

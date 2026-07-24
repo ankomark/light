@@ -371,6 +371,29 @@ class GroupPrivacyScanTests(APITestCase):
         self.assertEqual(r1['count'], 1)
         self.assertEqual(r1['readers'][0]['user']['username'], 'rcreader')
 
+    def test_message_context_window(self):
+        """The context endpoint returns a window around a message with the target
+        included, and flags older/newer beyond the window."""
+        owner = User.objects.create_user('ctxowner', 'cx@x.com', 'x')
+        g = Group.objects.create(creator=owner, name='Ctx Room', is_private=False)
+        GroupMember.objects.create(group=g, user=owner, is_admin=True)
+        self.client.force_authenticate(owner)
+        ids = []
+        for i in range(50):
+            ids.append(self.client.post(
+                f'/api/groups/{g.slug}/posts/', {'content': f'm{i}', 'message_type': 'text'},
+                format='json').json()['id'])
+        target = ids[25]
+        res = self.client.get(f'/api/groups/{g.slug}/posts/context/?message_id={target}')
+        body = res.json()
+        rows = body['results']
+        self.assertIn(target, [r['id'] for r in rows])
+        self.assertTrue(body['has_earlier'])
+        self.assertTrue(body['has_newer'])
+        # Ascending by created_at.
+        times = [r['created_at'] for r in rows]
+        self.assertEqual(times, sorted(times))
+
     def test_search_finds_text_messages(self):
         """Search returns matching text messages to a member and is members-only."""
         owner = User.objects.create_user('srchowner', 's1@x.com', 'x')
