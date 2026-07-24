@@ -285,6 +285,10 @@ class ProductReviewSerializer(serializers.ModelSerializer):
     # SimpleUserSerializer, not UserSerializer: the full one pulls the reviewer's
     # whole social-post history plus ~5 COUNT queries per review.
     reviewer = SimpleUserSerializer(read_only=True)
+    # The UI presents the comment as optional (a star rating alone is valid), so
+    # accept a blank/omitted comment instead of rejecting it. The model's
+    # TextField stores '' fine; only serializer validation was blocking it.
+    comment = serializers.CharField(required=False, allow_blank=True, default='')
 
     class Meta:
         model = ProductReview

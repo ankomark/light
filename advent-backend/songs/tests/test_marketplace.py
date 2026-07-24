@@ -416,6 +416,21 @@ class ProductReviewTests(APITestCase):
         comments = [r['comment'] for r in res.data]
         self.assertEqual(comments, ['good'])  # the decoy product's review is excluded
 
+    def test_rating_only_review_is_accepted(self):
+        # The UI marks the comment optional, so a star rating with no comment
+        # must succeed (previously 400 "This field may not be blank").
+        self.client.force_authenticate(self.buyer)
+        res = self.client.post(self._url(), {'rating': 4, 'comment': ''})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        review = ProductReview.objects.get(product=self.product, reviewer=self.buyer)
+        self.assertEqual(review.rating, 4)
+        self.assertEqual(review.comment, '')
+
+    def test_rating_only_without_comment_field_at_all(self):
+        self.client.force_authenticate(self.buyer)
+        res = self.client.post(self._url(), {'rating': 3})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
     def test_second_review_updates_instead_of_500ing_on_unique_together(self):
         self.client.force_authenticate(self.buyer)
         self.client.post(self._url(), {'rating': 2, 'comment': 'first'})
