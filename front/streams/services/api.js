@@ -1015,6 +1015,13 @@ export const searchGroupMessages = async (slug, q) =>
 export const fetchGroupMessageContext = async (slug, messageId) =>
   apiRequest('get', `/groups/${slug}/posts/context/?message_id=${messageId}`);
 
+// Cursor loads: messages immediately older / newer than a given one.
+export const fetchGroupPostsBefore = async (slug, id) =>
+  apiRequest('get', `/groups/${slug}/posts/?before=${id}`);
+
+export const fetchGroupPostsAfter = async (slug, id) =>
+  apiRequest('get', `/groups/${slug}/posts/?after=${id}`);
+
 export const fetchMessageReceipts = async (slug, id) =>
   apiRequest('get', `/groups/${slug}/posts/${id}/receipts/`);
 

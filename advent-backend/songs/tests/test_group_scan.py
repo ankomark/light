@@ -2,6 +2,7 @@
 
     python manage.py test songs.tests.test_group_scan
 """
+from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
@@ -11,6 +12,9 @@ from songs.models import User, Group, GroupMember, GroupPost, GroupJoinRequest
 
 class GroupPrivacyScanTests(APITestCase):
     def setUp(self):
+        # Throttle counters live in the (process-global) cache; clear them so the
+        # bulk-message tests here don't trip the group_post rate limit.
+        cache.clear()
         self.creator = User.objects.create_user('scancreator', 'sc@x.com', 'x')
         self.outsider = User.objects.create_user('scanoutsider', 'so@x.com', 'x')
         self.group = Group.objects.create(creator=self.creator, name='Secret Council', is_private=True)
@@ -370,6 +374,27 @@ class GroupPrivacyScanTests(APITestCase):
         r1 = self.client.get(f'/api/groups/{g.slug}/posts/{pid}/receipts/').json()
         self.assertEqual(r1['count'], 1)
         self.assertEqual(r1['readers'][0]['user']['username'], 'rcreader')
+
+    def test_cursor_before_after(self):
+        """?before / ?after load messages older / newer than an anchor."""
+        owner = User.objects.create_user('curowner', 'cu@x.com', 'x')
+        g = Group.objects.create(creator=owner, name='Cursor Room', is_private=False)
+        GroupMember.objects.create(group=g, user=owner, is_admin=True)
+        self.client.force_authenticate(owner)
+        ids = [self.client.post(
+            f'/api/groups/{g.slug}/posts/', {'content': f'm{i}', 'message_type': 'text'},
+            format='json').json()['id'] for i in range(40)]
+        anchor = ids[30]  # 30 older (ids[0..29]), 9 newer (ids[31..39])
+
+        before = self.client.get(f'/api/groups/{g.slug}/posts/?before={anchor}').json()
+        self.assertTrue(all(r['id'] < anchor for r in before['results']))
+        self.assertEqual(len(before['results']), 25)   # capped at the limit
+        self.assertTrue(before['has_more'])            # 30 older > 25
+
+        after = self.client.get(f'/api/groups/{g.slug}/posts/?after={anchor}').json()
+        self.assertTrue(all(r['id'] > anchor for r in after['results']))
+        self.assertEqual(len(after['results']), 9)
+        self.assertFalse(after['has_more'])            # 9 newer < 25
 
     def test_message_context_window(self):
         """The context endpoint returns a window around a message with the target

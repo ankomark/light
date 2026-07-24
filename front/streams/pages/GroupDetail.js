@@ -23,7 +23,7 @@ import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
   pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts, setGroupJoinQuestion,
-  fetchGroupMessageContext,
+  fetchGroupMessageContext, fetchGroupPostsBefore, fetchGroupPostsAfter,
 } from '../services/api';
 import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
@@ -292,6 +292,10 @@ const GroupDetail = ({ route, navigation }) => {
   const atBottomRef = useRef(true);      // is the chat scrolled to the newest message?
   const viewingHistoryRef = useRef(false); // mirrors viewingHistory for socket callbacks
   const highlightTimerRef = useRef(null);
+  const messagesRef = useRef([]);          // latest messages, for cursor callbacks
+  const hasNewerRef = useRef(false);
+  const loadingOlderRef = useRef(false);
+  const loadingNewerRef = useRef(false);
   const pollRef = useRef(null);
   const socketRef = useRef(null);        // realtime chat socket
   const typingTimersRef = useRef({});    // per-user auto-expire timers
@@ -312,6 +316,7 @@ const GroupDetail = ({ route, navigation }) => {
       const res = await fetchGroupPosts(groupSlug, 1);
       const incoming = (res?.results ?? []).slice().reverse();
       setHasEarlier(!!res?.next);
+      hasNewerRef.current = false; // this is the live newest page
       setMessages((prev) => {
         // Keep optimistic rows that are still sending or failed so they don't
         // blink out between polls; drop only the ones already confirmed gone.
@@ -350,15 +355,39 @@ const GroupDetail = ({ route, navigation }) => {
     }
   }, [groupSlug, loadPosts, initialGroup, t]);
 
-  const loadEarlier = useCallback(async () => {
+  // Cursor loads from the ends of the loaded window (works from a search-context
+  // window too, unlike page numbers).
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    const oldest = messagesRef.current[0];
+    if (!oldest || String(oldest.id).startsWith('temp_')) return;
+    loadingOlderRef.current = true;
     try {
-      const next = pageRef.current + 1;
-      const res = await fetchGroupPosts(groupSlug, next);
-      const older = (res?.results ?? []).slice().reverse();
-      if (older.length) { pageRef.current = next; setMessages((prev) => mergeMessages(older, prev)); }
-      setHasEarlier(!!res?.next);
-    } catch { /* ignore */ }
+      const res = await fetchGroupPostsBefore(groupSlug, oldest.id);
+      const older = (res?.results ?? []).slice().reverse(); // was newest-first → ascending
+      if (older.length) setMessages((prev) => mergeMessages(older, prev));
+      setHasEarlier(!!res?.has_more);
+    } catch { /* ignore */ } finally { loadingOlderRef.current = false; }
   }, [groupSlug]);
+
+  const loadNewer = useCallback(async () => {
+    if (loadingNewerRef.current || !hasNewerRef.current) return;
+    const arr = messagesRef.current;
+    const newest = arr[arr.length - 1];
+    if (!newest || String(newest.id).startsWith('temp_')) return;
+    loadingNewerRef.current = true;
+    try {
+      const res = await fetchGroupPostsAfter(groupSlug, newest.id);
+      const newer = res?.results ?? []; // already ascending
+      // Don't let the content-size auto-scroll yank past the batch we just added.
+      if (newer.length) { atBottomRef.current = false; setMessages((prev) => mergeMessages(newer, prev)); }
+      const more = !!res?.has_more;
+      hasNewerRef.current = more;
+      if (!more) { viewingHistoryRef.current = false; setViewingHistory(false); } // caught up to live
+    } catch { /* ignore */ } finally { loadingNewerRef.current = false; }
+  }, [groupSlug]);
+
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   const markRead = useCallback(() => { markGroupRead(groupSlug).catch(() => {}); }, [groupSlug]);
 
@@ -366,9 +395,9 @@ const GroupDetail = ({ route, navigation }) => {
     useCallback(() => {
       loadGroup();
       markRead();
-      pollRef.current = setInterval(() => { if (canReadRef.current) loadPosts(true); }, POLL_MS);
+      pollRef.current = setInterval(() => { if (canReadRef.current && !viewingHistoryRef.current) loadPosts(true); }, POLL_MS);
       const sub = AppState.addEventListener('change', (n) => {
-        if (n === 'active' && appState.current !== 'active' && canReadRef.current) { loadPosts(true); markRead(); }
+        if (n === 'active' && appState.current !== 'active' && canReadRef.current && !viewingHistoryRef.current) { loadPosts(true); markRead(); }
         appState.current = n;
       });
       return () => { clearInterval(pollRef.current); sub.remove(); markRead(); };
@@ -816,6 +845,7 @@ const GroupDetail = ({ route, navigation }) => {
       atBottomRef.current = true;
       setMessages(rows);
       setHasEarlier(!!res?.next);
+      hasNewerRef.current = false;
       pageRef.current = 1;
       enterHistory(false);
       setShowJump(false);
@@ -844,7 +874,8 @@ const GroupDetail = ({ route, navigation }) => {
       setMessages(rows);            // server returns them ascending
       enterHistory(!!res?.has_newer);
       setShowJump(true);
-      setHasEarlier(false);         // page-based "load earlier" is disabled in this window
+      setHasEarlier(!!res?.has_earlier);   // cursor "load earlier" works from here
+      hasNewerRef.current = !!res?.has_newer;
       setTimeout(() => { jumpToMessage(m.id); flashMessage(m.id); }, 320);
     } catch { /* ignore */ }
   }, [messages, groupSlug, closeSearch, jumpToMessage, flashMessage, enterHistory]);
@@ -1084,8 +1115,10 @@ const GroupDetail = ({ route, navigation }) => {
           }}
           scrollEventThrottle={100}
           onContentSizeChange={() => { if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false }); }}
+          onEndReachedThreshold={0.15}
+          onEndReached={loadNewer}
           ListHeaderComponent={hasEarlier ? (
-            <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.earlierBtn} onPress={loadOlder}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
           ) : null}
           ListEmptyComponent={firstLoad ? (
             <View style={styles.emptyContainer}><ActivityIndicator color={colors.accent} /></View>

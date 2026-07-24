@@ -605,6 +605,35 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             )
         return post
 
+    CURSOR_LIMIT = 25
+
+    def list(self, request, *args, **kwargs):
+        """Default = newest page (paginated). With ?before=<id> or ?after=<id> it
+        becomes a cursor load — the messages immediately older / newer than that
+        one — so the client can page in either direction from any anchor."""
+        before = request.query_params.get('before')
+        after = request.query_params.get('after')
+        if not (before or after):
+            return super().list(request, *args, **kwargs)
+
+        qs = self.get_queryset()  # membership-gated, group-scoped
+        anchor_id = before or after
+        anchor = qs.filter(pk=anchor_id).first()
+        if not anchor:
+            return Response({'results': [], 'has_more': False})
+        if before:
+            rows = list(qs.filter(created_at__lt=anchor.created_at)
+                        .order_by('-created_at')[:self.CURSOR_LIMIT + 1])  # newest-first
+        else:
+            rows = list(qs.filter(created_at__gt=anchor.created_at)
+                        .order_by('created_at')[:self.CURSOR_LIMIT + 1])   # oldest-first
+        has_more = len(rows) > self.CURSOR_LIMIT
+        rows = rows[:self.CURSOR_LIMIT]
+        return Response({
+            'results': self.get_serializer(rows, many=True).data,
+            'has_more': has_more,
+        })
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
