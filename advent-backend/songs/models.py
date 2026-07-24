@@ -952,6 +952,12 @@ class Videostudio(models.Model):
         help_text="List of service types the studio offers (stored as JSON array)"
     )
     youtube_link = models.URLField(blank=True, null=True)
+    # Optional social / web presence — all blank by default.
+    website_link = models.URLField(blank=True, null=True)
+    facebook_link = models.URLField(blank=True, null=True)
+    instagram_link = models.URLField(blank=True, null=True)
+    tiktok_link = models.URLField(blank=True, null=True)
+    twitter_link = models.URLField(blank=True, null=True)
     service_rates = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
     is_verified = models.BooleanField(default=False)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videostudios')

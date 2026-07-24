@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { compressImage } from '../services/imageProcessing';
 import {
@@ -86,6 +87,30 @@ const SERVICE_LABEL_KEY = Object.fromEntries(
 );
 const serviceLabel = (key, t) => (SERVICE_LABEL_KEY[key] ? t(SERVICE_LABEL_KEY[key]) : key);
 
+// Web + social presence. `key` maps to a Videostudio field; brand colour tints
+// the icon on both the form and the card.
+const SOCIAL_LINKS = [
+  { key: 'website_link', icon: 'globe-outline', color: '#0EA5E9', labelKey: 'services.link.website' },
+  { key: 'whatsapp_number', icon: 'logo-whatsapp', color: '#25D366', labelKey: 'services.link.whatsapp', phone: true },
+  { key: 'facebook_link', icon: 'logo-facebook', color: '#1877F2', labelKey: 'services.link.facebook' },
+  { key: 'instagram_link', icon: 'logo-instagram', color: '#E4405F', labelKey: 'services.link.instagram' },
+  { key: 'tiktok_link', icon: 'logo-tiktok', color: '#111111', labelKey: 'services.link.tiktok' },
+  { key: 'twitter_link', icon: 'logo-twitter', color: '#111111', labelKey: 'services.link.twitter' },
+  { key: 'youtube_link', icon: 'logo-youtube', color: '#FF0000', labelKey: 'services.link.youtube' },
+];
+// Links shown as circular icon buttons on the card (whatsapp keeps its own text
+// button in the primary row, so it's excluded here).
+const CARD_SOCIALS = SOCIAL_LINKS.filter((s) => s.key !== 'whatsapp_number');
+
+// Banner fallback + pill icon per category.
+const CATEGORY_ICON = {
+  media: 'movie', hospitality: 'hotel', health: 'favorite',
+  professional: 'work', home: 'handyman',
+};
+
+// Users often type "instagram.com/foo" without a scheme; make it openable.
+const withScheme = (url) => (/^[a-z]+:\/\//i.test(url) ? url : `https://${url}`);
+
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN', 'GHS', 'ZAR', 'TZS', 'UGX'];
 const CURRENCY_SYMBOL = {
   USD: '$', EUR: '€', GBP: '£', KES: 'KSh', NGN: '₦', GHS: 'GH₵', ZAR: 'R', TZS: 'TSh', UGX: 'USh',
@@ -95,6 +120,7 @@ const EMPTY = {
   name: '', description: '', location: '', contact_phone: '', contact_email: '',
   whatsapp_number: '', category: 'media', service_types: [], youtube_link: '', service_rates: '',
   rate_description: '', currency: 'USD',
+  website_link: '', facebook_link: '', instagram_link: '', tiktok_link: '', twitter_link: '',
 };
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -186,6 +212,9 @@ const Studios = () => {
       service_types: s.service_types || [],
       youtube_link: s.youtube_link || '', service_rates: s.service_rates ? String(s.service_rates) : '',
       rate_description: s.rate_description || '', currency: s.currency || 'USD',
+      website_link: s.website_link || '', facebook_link: s.facebook_link || '',
+      instagram_link: s.instagram_link || '', tiktok_link: s.tiktok_link || '',
+      twitter_link: s.twitter_link || '',
     });
     setLogo(s.logo || ''); setCoverImage(s.cover_image || ''); setShowForm(true);
   };
@@ -220,9 +249,15 @@ const Studios = () => {
       contact_phone: form.contact_phone.trim(), contact_email: form.contact_email.trim(),
       whatsapp_number: form.whatsapp_number.trim(), category: form.category,
       service_types: form.service_types,
-      youtube_link: form.youtube_link.trim(), rate_description: form.rate_description.trim(),
+      rate_description: form.rate_description.trim(),
       currency: form.currency,
     };
+    // Links are optional; only send those filled in, normalised to a real URL so
+    // the backend URLField accepts a pasted "instagram.com/…" without a scheme.
+    ['youtube_link', 'website_link', 'facebook_link', 'instagram_link', 'tiktok_link', 'twitter_link'].forEach((k) => {
+      const v = form[k].trim();
+      payload[k] = v ? withScheme(v) : '';
+    });
     const rate = form.service_rates.trim();
     payload.service_rates = rate ? rate : null;
     // Only send an image when it's a freshly-picked data URI. On edit the field
@@ -282,9 +317,18 @@ const Studios = () => {
             <Image source={{ uri: item.cover_image }} style={styles.cover} />
           ) : (
             <View style={[styles.cover, styles.coverFallback]}>
-              <MaterialIcons name="videocam" size={34} color={colors.textMuted} />
+              <MaterialIcons name={CATEGORY_ICON[item.category] || 'storefront'} size={36} color={colors.textMuted} />
             </View>
           )}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.35)']}
+            style={styles.bannerScrim}
+            pointerEvents="none"
+          />
+          <View style={styles.categoryPill}>
+            <MaterialIcons name={CATEGORY_ICON[item.category] || 'storefront'} size={12} color={colors.white} />
+            <Text style={styles.categoryPillText}>{t(`services.cat.${item.category || 'media'}`)}</Text>
+          </View>
           {owner && (
             <View style={styles.ownerActions}>
               {actionsOpenId === item.id ? (
@@ -339,32 +383,51 @@ const Studios = () => {
         )}
 
         {rateText(item) ? (
-          <View style={styles.rateRow}>
-            <MaterialIcons name="payments" size={16} color={colors.accent} />
+          <View style={styles.ratePill}>
+            <MaterialIcons name="payments" size={15} color={colors.primary} />
             <Text style={styles.rateText}>{rateText(item)}</Text>
           </View>
         ) : null}
 
-        <View style={styles.contactRow}>
-          {item.contact_phone ? (
-            <TouchableOpacity style={styles.contactBtn} onPress={() => openLink(`tel:${item.contact_phone}`)}>
-              <Ionicons name="call" size={16} color={colors.textPrimary} />
-              <Text style={styles.contactText}>{t('studios.call')}</Text>
-            </TouchableOpacity>
-          ) : null}
-          {item.whatsapp_number ? (
-            <TouchableOpacity style={styles.contactBtn} onPress={() => openWhatsApp(item.whatsapp_number)}>
-              <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
-              <Text style={styles.contactText}>{t('studios.whatsapp')}</Text>
-            </TouchableOpacity>
-          ) : null}
-          {item.youtube_link ? (
-            <TouchableOpacity style={styles.contactBtn} onPress={() => openLink(item.youtube_link)}>
-              <Ionicons name="logo-youtube" size={16} color="#FF0000" />
-              <Text style={styles.contactText}>{t('studios.youtube')}</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+        {(item.contact_phone || item.whatsapp_number || item.contact_email) ? (
+          <View style={styles.contactRow}>
+            {item.contact_phone ? (
+              <TouchableOpacity style={styles.contactBtn} onPress={() => openLink(`tel:${item.contact_phone}`)} activeOpacity={0.85}>
+                <Ionicons name="call" size={15} color={colors.white} />
+                <Text style={styles.contactText}>{t('studios.call')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {item.whatsapp_number ? (
+              <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtn]} onPress={() => openWhatsApp(item.whatsapp_number)} activeOpacity={0.85}>
+                <Ionicons name="logo-whatsapp" size={15} color={colors.white} />
+                <Text style={styles.contactText}>{t('studios.whatsapp')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {item.contact_email ? (
+              <TouchableOpacity style={[styles.contactBtn, styles.emailBtn]} onPress={() => openLink(`mailto:${item.contact_email}`)} activeOpacity={0.85}>
+                <Ionicons name="mail" size={15} color={colors.textPrimary} />
+                <Text style={[styles.contactText, styles.emailText]}>{t('services.link.email')}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+
+        {CARD_SOCIALS.some((s) => item[s.key]) ? (
+          <View style={styles.socialRow}>
+            {CARD_SOCIALS.filter((s) => item[s.key]).map((s) => (
+              <TouchableOpacity
+                key={s.key}
+                style={styles.socialBtn}
+                onPress={() => openLink(withScheme(item[s.key]))}
+                activeOpacity={0.8}
+              >
+                <Ionicons name={s.icon} size={18} color={s.color} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
+
+        <View style={{ height: spacing.md }} />
       </View>
     );
   };
@@ -501,7 +564,12 @@ const Studios = () => {
               })}
             </View>
 
-            <Text style={styles.fieldLabel}>{t('studios.rate')}</Text>
+            <View style={styles.sectionDivider} />
+            <View style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>{t('services.pricingSection')}</Text>
+              <Text style={styles.sectionOptional}>{t('services.optional')}</Text>
+            </View>
+            <Text style={styles.fieldHint}>{t('services.pricingHint')}</Text>
             <View style={styles.rateInputRow}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.currencyScroll} contentContainerStyle={styles.currencyRow}>
                 {CURRENCIES.map((c) => {
@@ -524,10 +592,37 @@ const Studios = () => {
             />
             <Field label="" value={form.rate_description} onChange={(t) => setForm({ ...form, rate_description: t })} placeholder={t('studios.rateNotePlaceholder')} />
 
-            <Field label="WhatsApp number" value={form.whatsapp_number} onChange={(t) => setForm({ ...form, whatsapp_number: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
-            <Field label="Contact phone" value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
-            <Field label="Contact email" value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder={t('studios.emailPlaceholder')} keyboardType="email-address" />
-            <Field label="YouTube link" value={form.youtube_link} onChange={(t) => setForm({ ...form, youtube_link: t })} placeholder={t('dir.youtubePlaceholder')} keyboardType="url" />
+            <View style={styles.sectionDivider} />
+            <View style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>{t('services.contactSection')}</Text>
+              <Text style={styles.sectionOptional}>{t('services.optional')}</Text>
+            </View>
+            <Field label={t('services.whatsappLabel')} value={form.whatsapp_number} onChange={(t) => setForm({ ...form, whatsapp_number: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
+            <Field label={t('services.phoneLabel')} value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
+            <Field label={t('services.emailLabel')} value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder={t('studios.emailPlaceholder')} keyboardType="email-address" />
+
+            <View style={styles.sectionDivider} />
+            <View style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>{t('services.linksSection')}</Text>
+              <Text style={styles.sectionOptional}>{t('services.optional')}</Text>
+            </View>
+            {SOCIAL_LINKS.filter((s) => s.key !== 'whatsapp_number').map((s) => (
+              <View key={s.key} style={styles.linkRow}>
+                <View style={[styles.linkIcon, { backgroundColor: `${s.color}1A` }]}>
+                  <Ionicons name={s.icon} size={18} color={s.color} />
+                </View>
+                <TextInput
+                  style={styles.linkInput}
+                  value={form[s.key]}
+                  onChangeText={(v) => setForm({ ...form, [s.key]: v })}
+                  placeholder={t(s.labelKey)}
+                  placeholderTextColor={colors.placeholder}
+                  keyboardType="url"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            ))}
 
             <View style={{ height: spacing.xl }} />
           </KeyboardAwareScrollView>
@@ -538,7 +633,7 @@ const Studios = () => {
             </TouchableOpacity>
             <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={submit} disabled={saving}>
               {saving ? <ActivityIndicator color={colors.white} /> : (
-                <Text style={styles.submitBtnText}>{editingId ? 'Save Changes' : 'Create Studio'}</Text>
+                <Text style={styles.submitBtnText}>{editingId ? t('services.saveChanges') : t('studios.create')}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -594,10 +689,16 @@ const styles = StyleSheet.create({
 
   listContent: { paddingHorizontal: spacing.md, paddingBottom: 96 },
 
-  card: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border },
-  banner: { height: 120, backgroundColor: colors.surface },
+  card: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadows.md },
+  banner: { height: 130, backgroundColor: colors.surface },
   cover: { width: '100%', height: '100%' },
   coverFallback: { alignItems: 'center', justifyContent: 'center' },
+  bannerScrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 56 },
+  categoryPill: {
+    position: 'absolute', top: spacing.sm, left: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 3,
+  },
+  categoryPillText: { ...typography.caption, color: colors.white, fontWeight: '700', fontSize: 11 },
   ownerActions: { position: 'absolute', top: spacing.sm, right: spacing.sm, flexDirection: 'row', gap: spacing.xs },
   ownerBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
 
@@ -615,12 +716,26 @@ const styles = StyleSheet.create({
   serviceTag: { backgroundColor: colors.surface, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 3 },
   serviceTagText: { ...typography.caption, color: colors.textSecondary, fontSize: 11 },
 
-  rateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, marginTop: spacing.sm },
-  rateText: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
+  ratePill: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs, alignSelf: 'flex-start',
+    marginHorizontal: spacing.md, marginTop: spacing.sm,
+    backgroundColor: colors.primarySoft || `${colors.primary}14`, borderRadius: radius.full,
+    paddingHorizontal: spacing.sm + 2, paddingVertical: 5,
+  },
+  rateText: { ...typography.label, color: colors.primary, fontWeight: '800', fontSize: 13 },
 
-  contactRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: spacing.md, marginBottom: spacing.md },
-  contactBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.surface, borderRadius: radius.md, paddingVertical: spacing.xs + 2, paddingHorizontal: spacing.md },
-  contactText: { ...typography.caption, color: colors.textPrimary, fontWeight: '600' },
+  contactRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  contactBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.full, paddingVertical: spacing.xs + 3, paddingHorizontal: spacing.md },
+  whatsappBtn: { backgroundColor: '#25D366' },
+  emailBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  contactText: { ...typography.caption, color: colors.white, fontWeight: '700' },
+  emailText: { color: colors.textPrimary },
+
+  socialRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: spacing.sm },
+  socialBtn: {
+    width: 40, height: 40, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+  },
 
   empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textMuted },
@@ -658,6 +773,23 @@ const styles = StyleSheet.create({
     color: colors.textPrimary, backgroundColor: colors.inputBg, fontSize: 15,
   },
   multiline: { minHeight: 80, textAlignVertical: 'top' },
+
+  sectionDivider: { height: 1, backgroundColor: colors.border, marginTop: spacing.lg },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.md },
+  sectionTitle: { ...typography.label, color: colors.textPrimary, fontWeight: '800', fontSize: 15 },
+  sectionOptional: {
+    ...typography.caption, color: colors.textMuted, fontWeight: '600', fontSize: 11,
+    backgroundColor: colors.surface, borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2,
+  },
+  fieldHint: { ...typography.caption, color: colors.textMuted, marginTop: 2, marginBottom: spacing.xs },
+
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  linkIcon: { width: 38, height: 38, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  linkInput: {
+    flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    color: colors.textPrimary, backgroundColor: colors.inputBg, fontSize: 15,
+  },
 
   serviceWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   serviceChip: {

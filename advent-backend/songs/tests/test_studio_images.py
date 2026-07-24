@@ -61,6 +61,22 @@ class StudioImageTests(APITestCase):
         self.assertEqual(row['category'], 'hospitality')
         self.assertEqual(row['service_types'], ['hotel', 'restaurant'])
 
+    def test_social_links_round_trip(self):
+        """Optional web/social links persist and come back on the listing."""
+        self.client.force_authenticate(self.user)
+        res = self.client.post('/api/video-studios/', {
+            'name': 'Palm Hotel', 'location': 'Diani', 'category': 'hospitality',
+            'service_types': ['hotel'],
+            'website_link': 'https://palmhotel.example',
+            'instagram_link': 'https://instagram.com/palmhotel',
+            'facebook_link': 'https://facebook.com/palmhotel',
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        row = res.json()
+        self.assertEqual(row['website_link'], 'https://palmhotel.example')
+        self.assertEqual(row['instagram_link'], 'https://instagram.com/palmhotel')
+        self.assertEqual(row['facebook_link'], 'https://facebook.com/palmhotel')
+
     def test_category_filter(self):
         """?category= narrows the directory to one bucket."""
         self.client.force_authenticate(self.user)
