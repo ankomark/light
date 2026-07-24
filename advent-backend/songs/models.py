@@ -918,7 +918,21 @@ class Videostudio(models.Model):
     )
     
     SERVICE_TYPE_CHOICES = [choice[0] for choice in SERVICE_TYPES]
-    
+
+    # This directory started as media studios but is the app's general "Services"
+    # listing. `category` is the top-level bucket; per-category service tags live
+    # in `service_types` (free-form now, so new categories need no schema change).
+    SERVICE_CATEGORIES = (
+        ('media', 'Media & Production'),
+        ('hospitality', 'Hospitality'),
+        ('health', 'Health & Wellness'),
+        ('professional', 'Professional'),
+        ('home', 'Home & Trades'),
+    )
+    category = models.CharField(
+        max_length=20, choices=SERVICE_CATEGORIES, default='media', db_index=True,
+    )
+
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, null=True)
     location = models.CharField(max_length=300)
@@ -957,14 +971,15 @@ class Videostudio(models.Model):
                 raise ValidationError({
                     'service_types': 'Must be a list of service type strings'
                 })
-            
-            # Validate each service type
-            invalid = [s for s in self.service_types 
-                      if s not in self.SERVICE_TYPE_CHOICES]
-            if invalid:
+
+            # Tags are free-form now (the directory covers many categories, each
+            # with its own service types suggested by the frontend). We only guard
+            # the shape: non-empty strings, max 50 chars — no fixed enum.
+            bad = [s for s in self.service_types
+                   if not isinstance(s, str) or not s.strip() or len(s) > 50]
+            if bad:
                 raise ValidationError({
-                    'service_types': f'Invalid service types: {", ".join(invalid)}. '
-                                  f'Valid options: {", ".join(self.SERVICE_TYPE_CHOICES)}'
+                    'service_types': 'Each service type must be a non-empty string of at most 50 characters.'
                 })
 
     def save(self, *args, **kwargs):

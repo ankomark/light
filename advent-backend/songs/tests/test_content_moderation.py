@@ -90,37 +90,30 @@ class ContentModerationTests(APITestCase):
         return obj_id in {r['id'] for r in _rows(res)}
 
     def test_removed_content_disappears_from_public_lists(self):
+        # (public list url, ctype, instance). ctype travels with each row: these
+        # objects live in different tables and all get id=1 in a fresh DB, so a
+        # dict keyed by .id would collide and remove the wrong type.
         checks = [
-            ('/api/publications/', self.pub.id, {}),
-            ('/api/marketplace/products/', self.product.id, {}),
-            (f'/api/marketplace/products/{self.product.slug}/reviews/', self.review.id, {}),
-            ('/api/churches/', self.church.id, {}),
-            ('/api/choirs/', self.choir.id, {}),
-            ('/api/video-studios/', self.studio.id, {}),
-            ('/api/media-stations/', self.station.id, {}),
+            ('/api/publications/', 'publication', self.pub, {}),
+            ('/api/marketplace/products/', 'product', self.product, {}),
+            (f'/api/marketplace/products/{self.product.slug}/reviews/', 'productreview', self.review, {}),
+            ('/api/churches/', 'church', self.church, {}),
+            ('/api/choirs/', 'choir', self.choir, {}),
+            ('/api/video-studios/', 'videostudio', self.studio, {}),
+            ('/api/media-stations/', 'mediastation', self.station, {}),
         ]
-        type_by_obj = {
-            self.pub.id: ('publication', self.pub),
-            self.product.id: ('product', self.product),
-            self.review.id: ('productreview', self.review),
-            self.church.id: ('church', self.church),
-            self.choir.id: ('choir', self.choir),
-            self.studio.id: ('videostudio', self.studio),
-            self.station.id: ('mediastation', self.station),
-        }
 
         self.client.force_authenticate(self.author)  # a normal signed-in user
-        for url, oid, params in checks:
-            self.assertTrue(self._visible(url, oid, **params), f'{url} should show {oid} before removal')
+        for url, _ctype, obj, params in checks:
+            self.assertTrue(self._visible(url, obj.id, **params), f'{url} should show {obj.id} before removal')
 
         self.client.force_authenticate(self.admin)
-        for url, oid, params in checks:
-            ctype, obj = type_by_obj[oid]
-            self.assertEqual(self._remove(ctype, obj).status_code, status.HTTP_200_OK)
+        for _url, ctype, obj, _params in checks:
+            self.assertEqual(self._remove(ctype, obj).status_code, status.HTTP_200_OK, ctype)
 
         self.client.force_authenticate(self.author)
-        for url, oid, params in checks:
-            self.assertFalse(self._visible(url, oid, **params), f'{url} still shows removed {oid}')
+        for url, _ctype, obj, params in checks:
+            self.assertFalse(self._visible(url, obj.id, **params), f'{url} still shows removed {obj.id}')
 
     def test_removing_a_review_drops_the_products_rating(self):
         # A five-star review lifts the average; removing it must pull it back.

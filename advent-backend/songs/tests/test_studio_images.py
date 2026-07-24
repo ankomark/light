@@ -40,3 +40,40 @@ class StudioImageTests(APITestCase):
         row = next(s for s in (lst.json().get('results') or lst.json()) if s['id'] == sid)
         self.assertEqual(row['logo'], '')
         self.assertEqual(row['cover_image'], '')
+
+    def test_default_category_is_media(self):
+        """Listings created without a category land in the legacy 'media' bucket."""
+        self.client.force_authenticate(self.user)
+        row = self.client.post('/api/video-studios/', {
+            'name': 'Legacy Studio', 'location': 'Nairobi', 'service_types': ['editing'],
+        }, format='json').json()
+        self.assertEqual(row['category'], 'media')
+
+    def test_new_category_and_freeform_service_types(self):
+        """A hospitality listing accepts its own free-form service tags."""
+        self.client.force_authenticate(self.user)
+        res = self.client.post('/api/video-studios/', {
+            'name': 'Palm Hotel', 'location': 'Diani', 'category': 'hospitality',
+            'service_types': ['hotel', 'restaurant'],
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        row = res.json()
+        self.assertEqual(row['category'], 'hospitality')
+        self.assertEqual(row['service_types'], ['hotel', 'restaurant'])
+
+    def test_category_filter(self):
+        """?category= narrows the directory to one bucket."""
+        self.client.force_authenticate(self.user)
+        self.client.post('/api/video-studios/', {
+            'name': 'Media One', 'location': 'Nairobi', 'service_types': ['editing'],
+        }, format='json')
+        self.client.post('/api/video-studios/', {
+            'name': 'Palm Hotel', 'location': 'Diani', 'category': 'hospitality',
+            'service_types': ['hotel'],
+        }, format='json')
+
+        res = self.client.get('/api/video-studios/?category=hospitality')
+        rows = res.json().get('results') or res.json()
+        names = {r['name'] for r in rows}
+        self.assertIn('Palm Hotel', names)
+        self.assertNotIn('Media One', names)

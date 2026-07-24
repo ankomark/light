@@ -462,11 +462,16 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
     def get_queryset(self):
-        # Add filtering by user if requested
+        qs = super().get_queryset()
+        # ?category=hotel narrows the Services directory to one bucket; omitted
+        # returns every category.
+        category = self.request.query_params.get('category')
+        if category:
+            qs = qs.filter(category=category)
         user_id = self.request.query_params.get('user_id')
         if user_id:
-            return self.queryset.filter(created_by=user_id)
-        return super().get_queryset()
+            qs = qs.filter(created_by=user_id)
+        return qs
 
     # ── Image serving: stream the stored base64 as a real, cacheable image ────
     def _serve_data_uri(self, data_uri):

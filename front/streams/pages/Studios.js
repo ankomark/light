@@ -16,19 +16,75 @@ import { uploadMedia } from '../services/cloudinary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-// Keys MUST match the backend Videostudio.SERVICE_TYPES choices.
-const SERVICES = [
-  { key: 'music_video', label: 'Music Video' },
-  { key: 'live_event', label: 'Live Event' },
-  { key: 'editing', label: 'Video Editing' },
-  { key: 'recording', label: 'Audio Recording' },
-  { key: 'mixing', label: 'Mixing & Mastering' },
-  { key: 'voice_over', label: 'Voice Over' },
-  { key: 'podcast', label: 'Podcast' },
-  { key: 'documentary', label: 'Documentary' },
-  { key: 'other', label: 'Other' },
+// Top-level Services buckets. `key` is stored in Videostudio.category.
+const CATEGORIES = [
+  { key: 'media', labelKey: 'services.cat.media' },
+  { key: 'hospitality', labelKey: 'services.cat.hospitality' },
+  { key: 'health', labelKey: 'services.cat.health' },
+  { key: 'professional', labelKey: 'services.cat.professional' },
+  { key: 'home', labelKey: 'services.cat.home' },
 ];
-const SERVICE_LABEL = Object.fromEntries(SERVICES.map((s) => [s.key, s.label]));
+
+// Per-category service-type tags. Keys are stored (free-form) in
+// Videostudio.service_types; labels are localised via i18n keys.
+const SERVICE_TYPES_BY_CATEGORY = {
+  media: [
+    ['music_video', 'services.type.music_video'],
+    ['live_event', 'services.type.live_event'],
+    ['editing', 'services.type.editing'],
+    ['recording', 'services.type.recording'],
+    ['mixing', 'services.type.mixing'],
+    ['voice_over', 'services.type.voice_over'],
+    ['podcast', 'services.type.podcast'],
+    ['documentary', 'services.type.documentary'],
+    ['other', 'services.type.other'],
+  ],
+  hospitality: [
+    ['hotel', 'services.type.hotel'],
+    ['lodge', 'services.type.lodge'],
+    ['restaurant', 'services.type.restaurant'],
+    ['catering', 'services.type.catering'],
+    ['event_venue', 'services.type.event_venue'],
+    ['tours', 'services.type.tours'],
+    ['transport', 'services.type.transport'],
+    ['other', 'services.type.other'],
+  ],
+  health: [
+    ['clinic', 'services.type.clinic'],
+    ['counseling', 'services.type.counseling'],
+    ['dental', 'services.type.dental'],
+    ['pharmacy', 'services.type.pharmacy'],
+    ['fitness', 'services.type.fitness'],
+    ['nutrition', 'services.type.nutrition'],
+    ['home_care', 'services.type.home_care'],
+    ['other', 'services.type.other'],
+  ],
+  professional: [
+    ['legal', 'services.type.legal'],
+    ['accounting', 'services.type.accounting'],
+    ['consulting', 'services.type.consulting'],
+    ['it_services', 'services.type.it_services'],
+    ['design', 'services.type.design'],
+    ['tutoring', 'services.type.tutoring'],
+    ['translation', 'services.type.translation'],
+    ['other', 'services.type.other'],
+  ],
+  home: [
+    ['plumbing', 'services.type.plumbing'],
+    ['electrical', 'services.type.electrical'],
+    ['cleaning', 'services.type.cleaning'],
+    ['carpentry', 'services.type.carpentry'],
+    ['painting', 'services.type.painting'],
+    ['gardening', 'services.type.gardening'],
+    ['moving', 'services.type.moving'],
+    ['other', 'services.type.other'],
+  ],
+};
+// Flat key -> i18n label-key map across every category (for card tags / search).
+const SERVICE_LABEL_KEY = Object.fromEntries(
+  Object.values(SERVICE_TYPES_BY_CATEGORY).flat(),
+);
+const serviceLabel = (key, t) => (SERVICE_LABEL_KEY[key] ? t(SERVICE_LABEL_KEY[key]) : key);
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN', 'GHS', 'ZAR', 'TZS', 'UGX'];
 const CURRENCY_SYMBOL = {
@@ -37,7 +93,7 @@ const CURRENCY_SYMBOL = {
 
 const EMPTY = {
   name: '', description: '', location: '', contact_phone: '', contact_email: '',
-  whatsapp_number: '', service_types: [], youtube_link: '', service_rates: '',
+  whatsapp_number: '', category: 'media', service_types: [], youtube_link: '', service_rates: '',
   rate_description: '', currency: 'USD',
 };
 
@@ -73,7 +129,7 @@ const Studios = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
-  const [serviceFilter, setServiceFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   const [actionsOpenId, setActionsOpenId] = useState(null); // card whose edit/delete is revealed
   const [showForm, setShowForm] = useState(false);
@@ -102,25 +158,32 @@ const Studios = () => {
 
   const filtered = useMemo(() => {
     let list = studios;
-    if (serviceFilter !== 'all') list = list.filter((s) => s.service_types?.includes(serviceFilter));
+    if (categoryFilter !== 'all') list = list.filter((s) => (s.category || 'media') === categoryFilter);
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((s) =>
         s.name?.toLowerCase().includes(q) ||
         s.location?.toLowerCase().includes(q) ||
-        s.service_types?.some((t) => SERVICE_LABEL[t]?.toLowerCase().includes(q))
+        s.service_types?.some((k) => serviceLabel(k, t).toLowerCase().includes(q))
       );
     }
     return list;
-  }, [studios, serviceFilter, search]);
+  }, [studios, categoryFilter, search, t]);
 
-  const openCreate = () => { setEditingId(null); setForm(EMPTY); setLogo(''); setCoverImage(''); setShowForm(true); };
+  const openCreate = () => {
+    setEditingId(null);
+    // Pre-select the category the user is currently browsing.
+    const cat = categoryFilter !== 'all' ? categoryFilter : 'media';
+    setForm({ ...EMPTY, category: cat });
+    setLogo(''); setCoverImage(''); setShowForm(true);
+  };
   const openEdit = (s) => {
     setEditingId(s.id);
     setForm({
       name: s.name || '', description: s.description || '', location: s.location || '',
       contact_phone: s.contact_phone || '', contact_email: s.contact_email || '',
-      whatsapp_number: s.whatsapp_number || '', service_types: s.service_types || [],
+      whatsapp_number: s.whatsapp_number || '', category: s.category || 'media',
+      service_types: s.service_types || [],
       youtube_link: s.youtube_link || '', service_rates: s.service_rates ? String(s.service_rates) : '',
       rate_description: s.rate_description || '', currency: s.currency || 'USD',
     });
@@ -137,6 +200,16 @@ const Studios = () => {
     }));
   };
 
+  const selectCategory = (cat) => {
+    // Switching category clears tags that don't belong to the new one.
+    const allowed = new Set(SERVICE_TYPES_BY_CATEGORY[cat].map(([k]) => k));
+    setForm((p) => ({
+      ...p,
+      category: cat,
+      service_types: p.service_types.filter((k) => allowed.has(k)),
+    }));
+  };
+
   const submit = async () => {
     if (!form.name.trim() || !form.location.trim() || form.service_types.length === 0) {
       Alert.alert(t('dir.missingInfo'), t('studios.missingInfo'));
@@ -145,7 +218,8 @@ const Studios = () => {
     const payload = {
       name: form.name.trim(), description: form.description.trim(), location: form.location.trim(),
       contact_phone: form.contact_phone.trim(), contact_email: form.contact_email.trim(),
-      whatsapp_number: form.whatsapp_number.trim(), service_types: form.service_types,
+      whatsapp_number: form.whatsapp_number.trim(), category: form.category,
+      service_types: form.service_types,
       youtube_link: form.youtube_link.trim(), rate_description: form.rate_description.trim(),
       currency: form.currency,
     };
@@ -256,9 +330,9 @@ const Studios = () => {
 
         {item.service_types?.length > 0 && (
           <View style={styles.serviceTags}>
-            {item.service_types.map((t) => (
-              <View key={t} style={styles.serviceTag}>
-                <Text style={styles.serviceTagText}>{SERVICE_LABEL[t] || t}</Text>
+            {item.service_types.map((k) => (
+              <View key={k} style={styles.serviceTag}>
+                <Text style={styles.serviceTagText}>{serviceLabel(k, t)}</Text>
               </View>
             ))}
           </View>
@@ -332,16 +406,16 @@ const Studios = () => {
         onRefresh={() => load(true)}
         ListHeaderComponent={
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.filterRow}>
-            {[{ key: 'all', label: 'All' }, ...SERVICES].map((s) => {
-              const active = s.key === serviceFilter;
+            {[{ key: 'all', labelKey: 'services.cat.all' }, ...CATEGORIES].map((c) => {
+              const active = c.key === categoryFilter;
               return (
                 <TouchableOpacity
-                  key={s.key}
+                  key={c.key}
                   style={[styles.filterChip, active && styles.filterChipActive]}
-                  onPress={() => setServiceFilter(s.key)}
+                  onPress={() => setCategoryFilter(c.key)}
                   activeOpacity={0.85}
                 >
-                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{s.label}</Text>
+                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{t(c.labelKey)}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -368,7 +442,7 @@ const Studios = () => {
             <TouchableOpacity onPress={closeForm} style={styles.iconBtn} hitSlop={10}>
               <Ionicons name="close" size={24} color={colors.textPrimary} />
             </TouchableOpacity>
-            <Text style={styles.topTitle}>{editingId ? 'Edit Studio' : 'New Studio'}</Text>
+            <Text style={styles.topTitle}>{editingId ? t('services.editTitle') : t('services.newTitle')}</Text>
             <View style={styles.iconBtn} />
           </View>
 
@@ -397,18 +471,31 @@ const Studios = () => {
               <Text style={styles.profileHint}>{t('studios.logo')}</Text>
             </View>
 
-            <Field label="Studio name *" value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder={t('studios.namePlaceholder')} />
-            <Field label="Description" value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder={t('studios.aboutPlaceholder')} multiline />
-            <Field label="Location *" value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder={t('dir.cityCountry')} />
+            <Field label={t('services.nameLabel')} value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder={t('studios.namePlaceholder')} />
+            <Field label={t('services.descLabel')} value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder={t('studios.aboutPlaceholder')} multiline />
+            <Field label={t('services.locationLabel')} value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder={t('dir.cityCountry')} />
+
+            <Text style={styles.fieldLabel}>{t('services.category')}</Text>
+            <View style={styles.serviceWrap}>
+              {CATEGORIES.map((c) => {
+                const active = form.category === c.key;
+                return (
+                  <TouchableOpacity key={c.key} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => selectCategory(c.key)} activeOpacity={0.85}>
+                    {active && <Ionicons name="checkmark" size={13} color={colors.white} />}
+                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{t(c.labelKey)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
             <Text style={styles.fieldLabel}>{t('studios.services')}</Text>
             <View style={styles.serviceWrap}>
-              {SERVICES.map((s) => {
-                const active = form.service_types.includes(s.key);
+              {(SERVICE_TYPES_BY_CATEGORY[form.category] || []).map(([key, labelKey]) => {
+                const active = form.service_types.includes(key);
                 return (
-                  <TouchableOpacity key={s.key} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => toggleService(s.key)} activeOpacity={0.85}>
+                  <TouchableOpacity key={key} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => toggleService(key)} activeOpacity={0.85}>
                     {active && <Ionicons name="checkmark" size={13} color={colors.white} />}
-                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{s.label}</Text>
+                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{t(labelKey)}</Text>
                   </TouchableOpacity>
                 );
               })}

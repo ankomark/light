@@ -92,8 +92,10 @@ class ChurchSerializer(serializers.ModelSerializer):
 class VideoStudioSerializer(serializers.ModelSerializer):
     created_by = SimpleUserSerializer(read_only=True)
     is_owner = serializers.SerializerMethodField()
+    # Free-form tags (max 50 chars each). The frontend suggests category-specific
+    # options, but the backend accepts any so new categories need no enum change.
     service_types = serializers.ListField(
-        child=serializers.ChoiceField(choices=Videostudio.SERVICE_TYPES), default=list
+        child=serializers.CharField(max_length=50), default=list, required=False,
     )
 
     class Meta:
