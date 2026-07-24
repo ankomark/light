@@ -1286,6 +1286,25 @@ class GroupJoinRequest(models.Model):
     def __str__(self):
         return f"{self.user.username} -> {self.group.name} ({self.status})"
 
+
+class GroupAuditLog(models.Model):
+    """Admin/moderator accountability trail for a group — who did what (delete a
+    message, pin, change roles, remove a member, approve a join, etc.). Visible
+    only to the group's admins/moderators."""
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='audit_logs')
+    actor = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    action = models.CharField(max_length=40)      # machine key, e.g. 'delete_message'
+    detail = models.CharField(max_length=300, blank=True, default='')  # human summary
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['group', '-created_at'])]
+
+    def __str__(self):
+        return f"{self.group_id}:{self.action} by {self.actor_id}"
+
+
 class GroupPost(models.Model):
     """A message in a group chat (text / image / file / voice / system notice)."""
     # Soft-removed by a moderator (remove_content). Excluded from public

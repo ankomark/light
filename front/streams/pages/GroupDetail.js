@@ -662,6 +662,11 @@ const GroupDetail = ({ route, navigation }) => {
     navigation.navigate('GroupMedia', { groupSlug, group });
   }, [navigation, groupSlug, group]);
 
+  const goAuditLog = useCallback(() => {
+    setMenuSheet(false);
+    navigation.navigate('GroupAuditLog', { groupSlug, group });
+  }, [navigation, groupSlug, group]);
+
   const goAddMembers = useCallback(() => {
     setMenuSheet(false);
     navigation.navigate('GroupAddMembers', { groupSlug, group });
@@ -1238,6 +1243,19 @@ const GroupDetail = ({ route, navigation }) => {
                 <View style={styles.sheetOptionText}>
                   <Text style={styles.sheetOptionLabel}>{t('group.detail.joinQuestion')}</Text>
                   <Text style={styles.sheetOptionHint} numberOfLines={1}>{group?.join_question || t('group.detail.joinQuestionHint')}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+
+            {canModerate && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={goAuditLog}>
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name="document-text" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.auditLog')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.auditLogHint')}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>

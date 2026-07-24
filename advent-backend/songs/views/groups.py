@@ -8,7 +8,7 @@ from django.db.models.functions import Coalesce
 
 from .common import *  # noqa: F401,F403
 from ..consumers import broadcast_group_message, broadcast_group_deleted, broadcast_group_pinned
-from ..serializers.groups import pinned_preview
+from ..serializers.groups import pinned_preview, GroupAuditLogSerializer
 
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
 # never-opened group counts every message as unread (matches the old behaviour).
@@ -23,6 +23,11 @@ def group_system_message(group, text, actor):
     return GroupPost.objects.create(
         group=group, user=actor, message_type='system', content=text,
     )
+
+
+def log_group_action(group, actor, action, detail=''):
+    """Record an admin/moderator action in the group's audit trail."""
+    GroupAuditLog.objects.create(group=group, actor=actor, action=action, detail=(detail or '')[:300])
 
 
 @method_decorator(cache_control(no_cache=True, no_store=True, must_revalidate=True), name='dispatch')
@@ -251,6 +256,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             uname = removed.user.username
             removed.delete()
             group_system_message(group, f"{uname} was removed", request.user)
+            log_group_action(group, request.user, 'remove_member', f"Removed {uname}")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post'], url_path='set-admin')
@@ -277,6 +283,8 @@ class GroupViewSet(viewsets.ModelViewSet):
             target.save(update_fields=['is_admin'])
             verb = "is now an admin" if make_admin else "is no longer an admin"
             group_system_message(group, f"{target.user.username} {verb}", request.user)
+            log_group_action(group, request.user, 'grant_admin' if make_admin else 'revoke_admin',
+                             f"{target.user.username} {verb}")
         return Response(GroupMemberSerializer(target, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='set-moderator')
@@ -301,6 +309,8 @@ class GroupViewSet(viewsets.ModelViewSet):
             target.save(update_fields=['is_moderator'])
             verb = "is now a moderator" if make_mod else "is no longer a moderator"
             group_system_message(group, f"{target.user.username} {verb}", request.user)
+            log_group_action(group, request.user, 'grant_moderator' if make_mod else 'revoke_moderator',
+                             f"{target.user.username} {verb}")
         return Response(GroupMemberSerializer(target, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='posting-policy')
@@ -316,6 +326,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             group.save(update_fields=['only_admins_can_post'])
             msg = "Only admins can send messages now" if only_admins else "Everyone can send messages now"
             group_system_message(group, msg, request.user)
+            log_group_action(group, request.user, 'posting_policy', msg)
         return Response(GroupSerializer(group, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='join-question')
@@ -326,7 +337,24 @@ class GroupViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only admins can change this setting")
         group.join_question = (request.data.get('join_question') or '').strip()[:200]
         group.save(update_fields=['join_question'])
+        log_group_action(group, request.user, 'join_question',
+                         'Set a join question' if group.join_question else 'Removed the join question')
         return Response(GroupSerializer(group, context={'request': request}).data)
+
+    @action(detail=True, methods=['get'], url_path='audit-log')
+    def audit_log(self, request, slug=None):
+        """The group's moderation trail. Visible to admins and moderators only."""
+        group = self.get_object()
+        is_staff = request.user.is_super_admin or GroupMember.objects.filter(
+            group=group, user=request.user).filter(Q(is_admin=True) | Q(is_moderator=True)).exists()
+        if not is_staff:
+            raise PermissionDenied("Only admins and moderators can view the log")
+        qs = group.audit_logs.select_related('actor', 'actor__profile')
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(
+                GroupAuditLogSerializer(page, many=True, context={'request': request}).data)
+        return Response(GroupAuditLogSerializer(qs, many=True, context={'request': request}).data)
 
     @action(detail=True, methods=['get'], url_path='search-users')
     def search_users(self, request, slug=None):
@@ -596,12 +624,16 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                 {"error": "You don't have permission to delete this post"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        slug, post_id = instance.group.slug, instance.id
-        was_pinned = instance.group.pinned_post_id == instance.id
+        group_obj, post_id = instance.group, instance.id
+        was_pinned = group_obj.pinned_post_id == instance.id
+        author_name = instance.user.username if instance.user_id else '?'
+        moderated = instance.user_id != request.user.id
         self.perform_destroy(instance)  # SET_NULL clears pinned_post automatically
-        broadcast_group_deleted(slug, post_id)
+        broadcast_group_deleted(group_obj.slug, post_id)
         if was_pinned:
-            broadcast_group_pinned(slug, None)
+            broadcast_group_pinned(group_obj.slug, None)
+        if moderated:  # a mod/admin removing someone else's message — worth logging
+            log_group_action(group_obj, request.user, 'delete_message', f"Deleted a message from {author_name}")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['patch'], url_path='edit')
@@ -689,6 +721,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         group.save(update_fields=['pinned_post'])
         preview = pinned_preview(post)
         broadcast_group_pinned(group.slug, preview)
+        log_group_action(group, request.user, 'pin', 'Pinned a message')
         return Response(preview)
 
     @action(detail=True, methods=['post'], url_path='unpin')
@@ -701,6 +734,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         group.pinned_post = None
         group.save(update_fields=['pinned_post'])
         broadcast_group_pinned(group.slug, None)
+        log_group_action(group, request.user, 'unpin', 'Unpinned the message')
         return Response({'status': 'unpinned'})
 
     @action(detail=True, methods=['post'], url_path='react', permission_classes=[IsAuthenticated])
@@ -782,6 +816,7 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         )
         notify_user(join_request.user, 'group_join_approved', msg,
                     data={'groupSlug': group.slug, 'type': 'group_join_approved'})
+        log_group_action(group, request.user, 'approve_join', f"Approved {join_request.user.username}")
 
         return Response({"status": "Request approved"}, status=status.HTTP_200_OK)
 
@@ -809,6 +844,7 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         )
         notify_user(join_request.user, 'group_join_rejected', msg,
                     data={'groupSlug': group.slug, 'type': 'group_join_rejected'})
+        log_group_action(group, request.user, 'reject_join', f"Declined {join_request.user.username}")
 
         return Response({"status": "Request rejected"}, status=status.HTTP_200_OK)
 

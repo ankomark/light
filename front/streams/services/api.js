@@ -1122,6 +1122,9 @@ export const setGroupPostingPolicy = async (slug, onlyAdmins) =>
 export const setGroupJoinQuestion = async (slug, question) =>
   apiRequest('post', `/groups/${slug}/join-question/`, { join_question: question });
 
+export const fetchGroupAuditLog = async (slug, page = 1) =>
+  apiRequest('get', `/groups/${slug}/audit-log/?page=${page}`);
+
 // Admin: search users to add (excludes existing members).
 export const searchGroupUsers = async (slug, q) =>
   apiRequest('get', `/groups/${slug}/search-users/`, null, { params: { q } });

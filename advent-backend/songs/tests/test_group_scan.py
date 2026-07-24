@@ -208,6 +208,33 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_audit_log_records_moderation(self):
+        """Moderation actions land in the group's audit log, which only
+        admins/moderators can read."""
+        admin = User.objects.create_user('aladmin', 'al1@x.com', 'x')
+        member = User.objects.create_user('almember', 'al2@x.com', 'x')
+        g = Group.objects.create(creator=admin, name='Audit Room', is_private=False)
+        GroupMember.objects.create(group=g, user=admin, is_admin=True)
+        GroupMember.objects.create(group=g, user=member)
+
+        # Admin deletes a member's message → logged.
+        self.client.force_authenticate(member)
+        pid = self.client.post(
+            f'/api/groups/{g.slug}/posts/', {'content': 'delete me', 'message_type': 'text'},
+            format='json').json()['id']
+        self.client.force_authenticate(admin)
+        self.client.delete(f'/api/groups/{g.slug}/posts/{pid}/')
+
+        log = self.client.get(f'/api/groups/{g.slug}/audit-log/')
+        self.assertEqual(log.status_code, 200)
+        rows = log.json().get('results', log.json())
+        self.assertTrue(any(r['action'] == 'delete_message' for r in rows))
+        self.assertEqual(rows[0]['actor']['username'], 'aladmin')
+
+        # A plain member can't read the log.
+        self.client.force_authenticate(member)
+        self.assertEqual(self.client.get(f'/api/groups/{g.slug}/audit-log/').status_code, 403)
+
     def test_report_group_message(self):
         """A member can report a message; it lands as a Report the admin panel
         can act on (content_type 'grouppost')."""

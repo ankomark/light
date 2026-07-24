@@ -200,6 +200,14 @@ class GroupJoinRequestSerializer(serializers.ModelSerializer):
         }
 
 
+class GroupAuditLogSerializer(serializers.ModelSerializer):
+    actor = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = GroupAuditLog
+        fields = ['id', 'actor', 'action', 'detail', 'created_at']
+
+
 
 class GroupPostAttachmentSerializer(serializers.ModelSerializer):
     class Meta:
