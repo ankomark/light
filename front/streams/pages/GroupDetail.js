@@ -847,7 +847,12 @@ const GroupDetail = ({ route, navigation }) => {
     Alert.alert(t('group.detail.deleteMessageTitle'), t('group.detail.deleteMessageBody'), [
       { text: t('common.cancel'), style: 'cancel' },
       { text: t('common.delete'), style: 'destructive', onPress: async () => {
-        try { await deleteGroupPost(groupSlug, m.id); setMessages((prev) => prev.filter((x) => x.id !== m.id)); }
+        try {
+          await deleteGroupPost(groupSlug, m.id);
+          setMessages((prev) => prev.filter((x) => x.id !== m.id));
+          // Clear the pinned banner locally too (don't just wait on the WS event).
+          setPinnedMsg((p) => (p && String(p.id) === String(m.id) ? null : p));
+        }
         catch { Alert.alert(t('common.error'), t('group.detail.deleteMessageFailed')); }
       } },
     ]);
