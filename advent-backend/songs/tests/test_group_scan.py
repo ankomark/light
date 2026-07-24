@@ -168,6 +168,46 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(ok.status_code, 201, ok.content[:200])
 
+    def test_edit_own_text_message(self):
+        """The author can edit their text message; it gets an edited_at stamp.
+        Others can't edit it, and non-text messages can't be edited."""
+        author = User.objects.create_user('editor', 'ed@x.com', 'x')
+        other = User.objects.create_user('other', 'ot@x.com', 'x')
+        g = Group.objects.create(creator=author, name='Edit Room', is_private=False)
+        GroupMember.objects.create(group=g, user=author, is_admin=True)
+        GroupMember.objects.create(group=g, user=other)
+
+        self.client.force_authenticate(author)
+        pid = self.client.post(
+            f'/api/groups/{g.slug}/posts/',
+            {'content': 'hpelo', 'message_type': 'text'}, format='json',
+        ).json()['id']
+
+        edited = self.client.patch(
+            f'/api/groups/{g.slug}/posts/{pid}/edit/', {'content': 'hello'}, format='json',
+        )
+        self.assertEqual(edited.status_code, 200, edited.content[:200])
+        self.assertEqual(edited.json()['content'], 'hello')
+        self.assertIsNotNone(edited.json()['edited_at'])
+
+        # Someone else can't edit it.
+        self.client.force_authenticate(other)
+        forbidden = self.client.patch(
+            f'/api/groups/{g.slug}/posts/{pid}/edit/', {'content': 'hacked'}, format='json',
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        # A non-text message can't be edited.
+        self.client.force_authenticate(author)
+        img = self.client.post(
+            f'/api/groups/{g.slug}/posts/',
+            {'message_type': 'image', 'attachment': 'https://cdn.example/r2/p.jpg'}, format='json',
+        ).json()['id']
+        bad = self.client.patch(
+            f'/api/groups/{g.slug}/posts/{img}/edit/', {'content': 'x'}, format='json',
+        )
+        self.assertEqual(bad.status_code, 400)
+
     def test_attachment_blurhash_round_trips(self):
         """The image placeholder hash is stored on send and returned on read."""
         member = User.objects.create_user('bhuser', 'bh@x.com', 'x')

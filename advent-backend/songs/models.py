@@ -1299,6 +1299,8 @@ class GroupPost(models.Model):
     # the real image downloads.
     attachment_blurhash = models.CharField(max_length=60, blank=True, default='')
     duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
+    # Set when the author edits a text message; drives the "edited" label.
+    edited_at = models.DateTimeField(null=True, blank=True)
     reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

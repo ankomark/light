@@ -20,7 +20,7 @@ import {
 } from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
 import {
-  fetchGroupDetails, fetchGroupPosts, sendGroupMessage, markGroupRead,
+  fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
 } from '../services/api';
 import { Blurhash } from 'react-native-blurhash';
@@ -168,6 +168,9 @@ const GroupMessageRow = ({
               )}
 
               <View style={styles.metaRow}>
+                {item.edited_at && (
+                  <Text style={[styles.bubbleTime, isOwn ? styles.timeOwn : styles.timeOther]}>{t('group.detail.editedLabel')} · </Text>
+                )}
                 <Text style={[styles.bubbleTime, isOwn ? styles.timeOwn : styles.timeOther]}>{fmtTime(item.created_at)}</Text>
                 {isOwn && (
                   failed ? (
@@ -228,6 +231,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [viewer, setViewer] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [menuMsg, setMenuMsg] = useState(null); // long-press action menu target
+  const [editingMsg, setEditingMsg] = useState(null); // message being edited
   const [attachSheet, setAttachSheet] = useState(false); // luxury "what to send" sheet
   const [menuSheet, setMenuSheet] = useState(false);      // group options sheet
   const [leaveConfirm, setLeaveConfirm] = useState(false);// leave-group confirm
@@ -653,6 +657,39 @@ const GroupDetail = ({ route, navigation }) => {
   }, []);
 
   const canDelete = (m) => !!m && (m.user?.id === currentUser?.id || m.is_owner || isAdmin);
+  // Only your own, already-saved, text messages can be edited.
+  const canEdit = (m) => !!m && m.message_type === 'text'
+    && (m.user?.id === currentUser?.id || m.is_owner)
+    && !String(m.id).startsWith('temp_') && m._status !== 'failed';
+
+  const startEdit = useCallback((m) => {
+    setMenuMsg(null);
+    setReplyTo(null);
+    setEditingMsg(m);
+    setText(m.content || '');
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
+  const cancelEdit = useCallback(() => { setEditingMsg(null); setText(''); }, []);
+
+  const saveEdit = useCallback(async () => {
+    const m = editingMsg;
+    const content = text.trim();
+    if (!m) return;
+    if (!content || content === m.content) { cancelEdit(); return; }
+    setEditingMsg(null); setText('');
+    // Optimistic: show the new text with an "edited" stamp immediately.
+    const stamp = new Date().toISOString();
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, content, edited_at: stamp } : x)));
+    try {
+      const saved = await editGroupMessage(groupSlug, m.id, content);
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...saved } : x)));
+    } catch {
+      // Roll back to the original text on failure.
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, content: m.content, edited_at: m.edited_at || null } : x)));
+      Alert.alert(t('common.error'), t('group.detail.editFailed'));
+    }
+  }, [editingMsg, text, groupSlug, cancelEdit, t]);
 
   const confirmDelete = useCallback((m) => {
     setMenuMsg(null);
@@ -794,6 +831,18 @@ const GroupDetail = ({ route, navigation }) => {
         </View>
       )}
 
+      {/* Edit banner */}
+      {editingMsg && canChat && (
+        <View style={styles.replyBar}>
+          <View style={styles.replyAccent} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.replyBarName}>{t('group.detail.editingMessage')}</Text>
+            <Text style={styles.replyBarText} numberOfLines={1}>{editingMsg.content}</Text>
+          </View>
+          <TouchableOpacity onPress={cancelEdit} hitSlop={8}><Ionicons name="close" size={20} color={colors.textMuted} /></TouchableOpacity>
+        </View>
+      )}
+
       {typingUsers.length > 0 && (
         <View style={styles.typingBar}>
           <View style={styles.typingDots}>
@@ -822,7 +871,11 @@ const GroupDetail = ({ route, navigation }) => {
               <TouchableOpacity style={styles.iconBtn} onPress={() => setShowEmoji((s) => !s)}><Ionicons name={showEmoji ? 'close' : 'happy-outline'} size={24} color={colors.textSecondary} /></TouchableOpacity>
               <TouchableOpacity style={styles.iconBtn} onPress={onAttachPress}><Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} /></TouchableOpacity>
               <TextInput style={styles.input} placeholder={t('chat.messagePlaceholder')} placeholderTextColor={colors.placeholder} value={text} onChangeText={onChangeText} onFocus={() => setShowEmoji(false)} multiline maxLength={2000} />
-              {text.trim() ? (
+              {editingMsg ? (
+                <TouchableOpacity style={styles.sendBtn} onPress={saveEdit}>
+                  <Ionicons name="checkmark" size={20} color={colors.white} />
+                </TouchableOpacity>
+              ) : text.trim() ? (
                 <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
                   <Ionicons name="send" size={18} color={colors.white} />
                 </TouchableOpacity>
@@ -1016,6 +1069,12 @@ const GroupDetail = ({ route, navigation }) => {
               <Ionicons name="arrow-undo" size={20} color={colors.textPrimary} />
               <Text style={styles.menuItemText}>{t('group.detail.reply')}</Text>
             </TouchableOpacity>
+            {canEdit(menuMsg) && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => startEdit(menuMsg)}>
+                <Ionicons name="create-outline" size={20} color={colors.textPrimary} />
+                <Text style={styles.menuItemText}>{t('group.detail.edit')}</Text>
+              </TouchableOpacity>
+            )}
             {canDelete(menuMsg) && (
               <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
                 <Ionicons name="trash-outline" size={20} color={colors.error} />

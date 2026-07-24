@@ -547,6 +547,28 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         broadcast_group_deleted(slug, post_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=True, methods=['patch'], url_path='edit')
+    def edit_message(self, request, *args, **kwargs):
+        """Edit a text message you authored. Only the body changes; the edit is
+        stamped and fanned out to the group so everyone sees it update live."""
+        post = self.get_object()
+        if post.user_id != request.user.id:
+            return Response({'error': 'You can only edit your own messages'},
+                            status=status.HTTP_403_FORBIDDEN)
+        if post.message_type != 'text':
+            return Response({'error': 'Only text messages can be edited'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'error': 'Message cannot be empty'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        post.content = content
+        post.edited_at = timezone.now()
+        post.save(update_fields=['content', 'edited_at', 'updated_at'])
+        data = self.get_serializer(post).data
+        broadcast_group_message(post.group.slug, data)
+        return Response(data)
+
     @action(detail=True, methods=['post'], url_path='react', permission_classes=[IsAuthenticated])
     def react(self, request, *args, **kwargs):
         """Toggle the caller's emoji reaction on a post (one per user). Any group

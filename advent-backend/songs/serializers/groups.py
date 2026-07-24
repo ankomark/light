@@ -202,11 +202,11 @@ class GroupPostSerializer(serializers.ModelSerializer):
         model = GroupPost
         fields = [
             'id', 'content', 'message_type', 'attachment', 'attachment_blurhash',
-            'file_name', 'duration',
+            'file_name', 'duration', 'edited_at',
             'reply_to', 'reply_to_id', 'created_at', 'updated_at', 'group', 'user',
             'attachments', 'is_owner', 'reactions',
         ]
-        read_only_fields = ['group', 'user', 'created_at', 'updated_at', 'attachments', 'reply_to']
+        read_only_fields = ['group', 'user', 'created_at', 'updated_at', 'edited_at', 'attachments', 'reply_to']
         extra_kwargs = {'content': {'required': False, 'allow_blank': True}}
 
     def get_is_owner(self, obj):
