@@ -118,6 +118,50 @@ class GroupPrivacyScanTests(APITestCase):
         self.assertTrue(GroupJoinRequest.objects.filter(
             group=pub, user=self.outsider, status='pending').exists())
 
+    def test_join_request_notifications_carry_group_slug(self):
+        """The admin's join-request alert and the requester's approval alert both
+        carry the group slug so the client can deep-link the tap."""
+        from songs.models import Notification
+
+        pub = Group.objects.create(creator=self.creator, name='Open Forum', is_private=False)
+        GroupMember.objects.create(group=pub, user=self.creator, is_admin=True)
+
+        # Outsider requests to join → the admin gets a routable notification.
+        self.client.force_authenticate(self.outsider)
+        self.client.post(f'/api/groups/{pub.slug}/request-join/', {}, format='json')
+        admin_note = Notification.objects.get(
+            recipient=self.creator, notification_type='group_join_request')
+        self.assertEqual(admin_note.group_id, pub.id)
+
+        self.client.force_authenticate(self.creator)
+        body = self.client.get('/api/notifications/').json()
+        rows = body.get('results', body)
+        row = next(n for n in rows if n['notification_type'] == 'group_join_request')
+        self.assertEqual(row['group_slug'], pub.slug)
+
+        # Admin approves → the requester gets an approval notification for the group.
+        jr = GroupJoinRequest.objects.get(group=pub, user=self.outsider)
+        approve = self.client.post(f'/api/group-join-requests/{jr.id}/approve/', {}, format='json')
+        self.assertEqual(approve.status_code, 200, approve.content[:200])
+        self.assertTrue(GroupMember.objects.filter(group=pub, user=self.outsider).exists())
+        approved = Notification.objects.get(
+            recipient=self.outsider, notification_type='group_join_approved')
+        self.assertEqual(approved.group_id, pub.id)
+
+    def test_non_group_notification_has_null_group(self):
+        """A non-group notification serializes group_slug as null (no crash)."""
+        from songs.models import Notification
+
+        Notification.objects.create(
+            recipient=self.creator, sender=self.outsider,
+            message='hi', notification_type='follow',
+        )
+        self.client.force_authenticate(self.creator)
+        body = self.client.get('/api/notifications/').json()
+        rows = body.get('results', body)
+        row = next(n for n in rows if n['notification_type'] == 'follow')
+        self.assertIsNone(row['group_slug'])
+
 
 class GroupListScalingTests(APITestCase):
     """The group list folds its per-row fields (member count, membership, unread,

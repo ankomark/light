@@ -207,8 +207,10 @@ class GroupViewSet(viewsets.ModelViewSet):
                 sender=request.user,
                 message=msg,
                 notification_type='group_join_request',
+                group=group,
             )
-            notify_user(admin.user, 'group_join_request', msg)
+            notify_user(admin.user, 'group_join_request', msg,
+                        data={'groupSlug': group.slug, 'type': 'group_join_request'})
         
         serializer = GroupJoinRequestSerializer(join_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -593,6 +595,19 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         if created:
             group_system_message(join_request.group, f"{join_request.user.username} joined", join_request.user)
 
+        # Tell the requester they're in — tapping the alert opens the group chat.
+        group = join_request.group
+        msg = f"Your request to join {group.name} was approved"
+        Notification.objects.create(
+            recipient=join_request.user,
+            sender=request.user,
+            message=msg,
+            notification_type='group_join_approved',
+            group=group,
+        )
+        notify_user(join_request.user, 'group_join_approved', msg,
+                    data={'groupSlug': group.slug, 'type': 'group_join_approved'})
+
         return Response({"status": "Request approved"}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='reject')
@@ -607,7 +622,19 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         
         join_request.status = 'rejected'
         join_request.save()
-        
+
+        group = join_request.group
+        msg = f"Your request to join {group.name} was declined"
+        Notification.objects.create(
+            recipient=join_request.user,
+            sender=request.user,
+            message=msg,
+            notification_type='group_join_rejected',
+            group=group,
+        )
+        notify_user(join_request.user, 'group_join_rejected', msg,
+                    data={'groupSlug': group.slug, 'type': 'group_join_rejected'})
+
         return Response({"status": "Request rejected"}, status=status.HTTP_200_OK)
 
 

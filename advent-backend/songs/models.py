@@ -567,6 +567,9 @@ class Notification(models.Model):
     notification_type = models.CharField(max_length=50)  # e.g., 'like', 'comment', 'follow'
     post = models.ForeignKey(SocialPost, null=True, blank=True, on_delete=models.CASCADE)
     track = models.ForeignKey(Track, null=True, blank=True, on_delete=models.CASCADE)
+    # Set on group-related notifications (join request / approval / rejection) so
+    # the client can deep-link the tap to the right group screen.
+    group = models.ForeignKey('Group', null=True, blank=True, on_delete=models.CASCADE, related_name='+')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

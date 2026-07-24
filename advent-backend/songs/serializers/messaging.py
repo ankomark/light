@@ -25,12 +25,15 @@ class NotificationSerializer(serializers.ModelSerializer):
     track = NotificationTrackSerializer(read_only=True, required=False)
     related_comment = serializers.SerializerMethodField()
     related_comment_id = serializers.SerializerMethodField()
+    group_slug = serializers.CharField(source='group.slug', read_only=True, default=None)
+    group_name = serializers.CharField(source='group.name', read_only=True, default=None)
 
     class Meta:
         model = Notification
         fields = [
             'id', 'sender', 'message', 'read',
             'notification_type', 'post', 'track',
+            'group_slug', 'group_name',
             'created_at', 'related_comment', 'related_comment_id'
         ]
 

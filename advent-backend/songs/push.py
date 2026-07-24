@@ -8,6 +8,8 @@ NOTIFICATION_TITLES = {
     'comment': '\U0001f4ac New Comment',
     'follow': '\U0001f464 New Follower',
     'group_join_request': '\U0001f465 Join Request',
+    'group_join_approved': '✅ Request Approved',
+    'group_join_rejected': '\U0001f6ab Request Declined',
     'message': '\U0001f4ac New Message',
     'security': '\U0001f512 Security alert',
 }
@@ -21,6 +23,8 @@ NOTIFICATION_CATEGORIES = {
     'follow': 'follows',
     'message': 'messages',
     'group_join_request': 'groups',
+    'group_join_approved': 'groups',
+    'group_join_rejected': 'groups',
     'group_added': 'groups',
     'church_request': 'communities',
     'church_approved': 'communities',

@@ -21,6 +21,8 @@ const TYPE_ICON = {
   comment: { name: 'chatbubble', color: colors.primary },
   follow: { name: 'person-add', color: '#17BF63' },
   group_join_request: { name: 'people', color: colors.accent },
+  group_join_approved: { name: 'checkmark-circle', color: '#17BF63' },
+  group_join_rejected: { name: 'close-circle', color: colors.error },
 };
 
 // TikTok-style category filters across the top of the panel.
@@ -179,7 +181,16 @@ const NotificationsBell = ({ navigation }) => {
     setShowPanel(false);
     const type = item.notification_type;
 
-    if (item.post) {
+    if (item.group_slug) {
+      // Group notifications deep-link to the relevant group screen.
+      if (type === 'group_join_request') {
+        // Admin/creator → the group's pending join-requests page.
+        navigation.navigate('GroupJoinRequests', { groupSlug: item.group_slug });
+      } else {
+        // Approved/declined (or any other group alert) → the group itself.
+        navigation.navigate('GroupDetail', { groupSlug: item.group_slug });
+      }
+    } else if (item.post) {
       // Comment → open the post, auto-open comments, and scroll to the comment.
       navigation.navigate('PostDetail', {
         postId: item.post.id,

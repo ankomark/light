@@ -187,6 +187,14 @@ const App = () => {
       const data = response.notification.request.content.data;
       if (data?.postId) {
         navigate('PostDetail', { postId: data.postId });
+      } else if (data?.groupSlug) {
+        // Group taps deep-link like the in-app bell: a join request goes to the
+        // group's pending-requests page, everything else to the group itself.
+        if (data.type === 'group_join_request') {
+          navigate('GroupJoinRequests', { groupSlug: data.groupSlug });
+        } else {
+          navigate('GroupDetail', { groupSlug: data.groupSlug });
+        }
       }
     });
     return () => sub.remove();
