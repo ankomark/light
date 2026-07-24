@@ -7,6 +7,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 
 from .common import *  # noqa: F401,F403
+from ..consumers import broadcast_group_message, broadcast_group_deleted
 
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
 # never-opened group counts every message as unread (matches the old behaviour).
@@ -522,6 +523,11 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         post = self.perform_create(serializer)
         complete_serializer = self.get_serializer(post)
+        # Realtime fan-out to the group's socket room. Super-admin messages are
+        # invisible to regular members, so they are never broadcast (the admin's
+        # own optimistic bubble + fallback poll still show them their message).
+        if not request.user.is_super_admin:
+            broadcast_group_message(post.group.slug, complete_serializer.data)
         headers = self.get_success_headers(complete_serializer.data)
         return Response(complete_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
@@ -536,7 +542,9 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                 {"error": "You don't have permission to delete this post"},
                 status=status.HTTP_403_FORBIDDEN
             )
+        slug, post_id = instance.group.slug, instance.id
         self.perform_destroy(instance)
+        broadcast_group_deleted(slug, post_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post'], url_path='react', permission_classes=[IsAuthenticated])

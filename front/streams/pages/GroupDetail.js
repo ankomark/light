@@ -24,13 +24,16 @@ import {
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
 } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
+import { createGroupSocket } from '../services/groupSocket';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
-const POLL_MS = 4000;
+// Realtime arrives over the WebSocket; the poll is now just a safety net that
+// catches anything missed during a socket reconnect, so it can be slow.
+const POLL_MS = 12000;
 const { width: SCREEN_W } = Dimensions.get('window');
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const EMOJIS = ['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','🥰','😘','😋','😜','🤪','🤔','🤭','😎','🥳','😢','😭','😤','😡','🥺','😱','🙏','👍','👎','👏','🙌','🤝','💪','🫶','❤️','🧡','💛','💚','💙','💜','🔥','✨','🎉','💯','✅','🕊️','📖','🎵','☀️','⭐'];
@@ -217,9 +220,13 @@ const GroupDetail = ({ route, navigation }) => {
   const [recordSecs, setRecordSecs] = useState(0);
   const [playingId, setPlayingId] = useState(null);
   const [hasEarlier, setHasEarlier] = useState(false);
+  const [typingUsers, setTypingUsers] = useState([]); // usernames currently typing
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
+  const socketRef = useRef(null);        // realtime chat socket
+  const typingTimersRef = useRef({});    // per-user auto-expire timers
+  const myTypingRef = useRef({ active: false, idle: null }); // outbound typing throttle
   // Only members may read the chat (public groups included). Mirrored into a ref
   // so the poll/AppState callbacks can gate without re-subscribing.
   const canReadRef = useRef(initialGroup?.is_member || false);
@@ -297,10 +304,60 @@ const GroupDetail = ({ route, navigation }) => {
     }, [loadGroup, loadPosts, markRead])
   );
 
+  // ── Realtime socket ──
+  // A member connection streams new messages, deletions, and typing. Reads/sends
+  // still go through REST; this just makes them land instantly. My own messages
+  // are skipped here (the optimistic bubble already shows them).
+  const markUserTyping = useCallback((username, isTyping) => {
+    clearTimeout(typingTimersRef.current[username]);
+    if (isTyping) {
+      setTypingUsers((prev) => (prev.includes(username) ? prev : [...prev, username]));
+      typingTimersRef.current[username] = setTimeout(() => {
+        setTypingUsers((prev) => prev.filter((u) => u !== username));
+      }, 5000);
+    } else {
+      setTypingUsers((prev) => prev.filter((u) => u !== username));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isMember) return undefined;
+    const sock = createGroupSocket(groupSlug, {
+      onMessage: (msg) => {
+        if (msg?.user?.id === currentUser?.id) return; // already shown optimistically
+        setMessages((prev) => mergeMessages([msg], prev));
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+      },
+      onDeleted: (id) => setMessages((prev) => prev.filter((m) => String(m.id) !== String(id))),
+      onTyping: (evt) => {
+        if (evt.user_id === currentUser?.id || !evt.username) return;
+        markUserTyping(evt.username, evt.is_typing);
+      },
+    });
+    socketRef.current = sock;
+    return () => { sock.close(); socketRef.current = null; };
+  }, [groupSlug, isMember, currentUser?.id, markUserTyping]);
+
+  // Tell the room I'm typing (once), and stop after a short idle.
+  const notifyTyping = useCallback(() => {
+    const s = socketRef.current;
+    if (!s) return;
+    if (!myTypingRef.current.active) { myTypingRef.current.active = true; s.sendTyping(true); }
+    clearTimeout(myTypingRef.current.idle);
+    myTypingRef.current.idle = setTimeout(() => {
+      myTypingRef.current.active = false;
+      s.sendTyping(false);
+    }, 2500);
+  }, []);
+
+  const onChangeText = useCallback((val) => { setText(val); notifyTyping(); }, [notifyTyping]);
+
   useEffect(() => () => {
     clearInterval(recordTimerRef.current);
     recordingRef.current?.stopAndUnloadAsync?.().catch(() => {});
     soundRef.current?.unloadAsync?.().catch(() => {});
+    Object.values(typingTimersRef.current).forEach(clearTimeout);
+    clearTimeout(myTypingRef.current.idle);
   }, []);
 
   // ── Send (optimistic, WhatsApp-style states) ──
@@ -710,10 +767,25 @@ const GroupDetail = ({ route, navigation }) => {
         <View style={styles.replyBar}>
           <View style={styles.replyAccent} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.replyBarName}>Replying to {replyTo.user?.username}</Text>
+            <Text style={styles.replyBarName}>{t('group.detail.replyingTo', { name: replyTo.user?.username })}</Text>
             <Text style={styles.replyBarText} numberOfLines={1}>{replyLabel(replyTo, t)}</Text>
           </View>
           <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8}><Ionicons name="close" size={20} color={colors.textMuted} /></TouchableOpacity>
+        </View>
+      )}
+
+      {typingUsers.length > 0 && (
+        <View style={styles.typingBar}>
+          <View style={styles.typingDots}>
+            <View style={[styles.typingDot, styles.typingDot1]} />
+            <View style={[styles.typingDot, styles.typingDot2]} />
+            <View style={[styles.typingDot, styles.typingDot3]} />
+          </View>
+          <Text style={styles.typingText} numberOfLines={1}>
+            {typingUsers.length === 1
+              ? t('group.detail.typingOne', { name: typingUsers[0] })
+              : t('group.detail.typingMany')}
+          </Text>
         </View>
       )}
 
@@ -729,7 +801,7 @@ const GroupDetail = ({ route, navigation }) => {
             <>
               <TouchableOpacity style={styles.iconBtn} onPress={() => setShowEmoji((s) => !s)}><Ionicons name={showEmoji ? 'close' : 'happy-outline'} size={24} color={colors.textSecondary} /></TouchableOpacity>
               <TouchableOpacity style={styles.iconBtn} onPress={onAttachPress}><Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} /></TouchableOpacity>
-              <TextInput style={styles.input} placeholder={t('chat.messagePlaceholder')} placeholderTextColor={colors.placeholder} value={text} onChangeText={setText} onFocus={() => setShowEmoji(false)} multiline maxLength={2000} />
+              <TextInput style={styles.input} placeholder={t('chat.messagePlaceholder')} placeholderTextColor={colors.placeholder} value={text} onChangeText={onChangeText} onFocus={() => setShowEmoji(false)} multiline maxLength={2000} />
               {text.trim() ? (
                 <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
                   <Ionicons name="send" size={18} color={colors.white} />
@@ -1035,6 +1107,14 @@ const styles = StyleSheet.create({
   replyAccent: { width: 3, alignSelf: 'stretch', backgroundColor: colors.accent, borderRadius: 2 },
   replyBarName: { ...typography.caption, color: colors.accent, fontWeight: '700' },
   replyBarText: { ...typography.caption, color: colors.textSecondary },
+
+  typingBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2 },
+  typingDots: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
+  typingDot1: { opacity: 0.4 },
+  typingDot2: { opacity: 0.7 },
+  typingDot3: { opacity: 1 },
+  typingText: { ...typography.caption, color: colors.textSecondary, fontStyle: 'italic', flex: 1 },
 
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.xs },
   iconBtn: { width: 36, height: 40, alignItems: 'center', justifyContent: 'center' },

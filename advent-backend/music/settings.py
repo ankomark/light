@@ -98,12 +98,15 @@ CORS_ALLOWED_ORIGINS = [
     
 ]
 INSTALLED_APPS = [
+    # 'daphne' must lead so it takes over runserver with the ASGI/WebSocket server.
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'django_extensions',
     'songs',
     'rest_framework',
@@ -268,6 +271,24 @@ else:
 # Seconds to cache the feed's first page per user (0 disables). Kept short
 # because the payload carries per-user like/save state.
 FEED_CACHE_SECONDS = int(os.getenv('FEED_CACHE_SECONDS', '20'))
+
+
+# ── Channels / WebSockets ────────────────────────────────────────────────────
+# Realtime group chat. In production the channel layer is Redis (set REDIS_URL —
+# Railway provides one with its Redis plugin); locally / in tests it falls back
+# to an in-process layer so no Redis is needed to run or test.
+ASGI_APPLICATION = 'music.asgi.application'
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [REDIS_URL]},
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'},
+    }
 
 
 # Password validation

@@ -1,5 +1,8 @@
 ﻿asgiref==3.8.1
 certifi==2025.7.9
+channels==4.1.0
+channels-redis==4.2.0
+daphne==4.1.2
 charset-normalizer==3.4.2
 dj-database-url==2.1.0
 Django==5.2

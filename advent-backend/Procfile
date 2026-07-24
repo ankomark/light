@@ -1,1 +1,1 @@
-web: gunicorn --timeout 150 music.wsgi:application --workers 3
+web: daphne -b 0.0.0.0 -p $PORT music.asgi:application
