@@ -25,7 +25,6 @@ import {
   pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts, setGroupJoinQuestion,
   fetchGroupMessageContext, fetchGroupPostsBefore, fetchGroupPostsAfter,
 } from '../services/api';
-import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
 import { createGroupSocket } from '../services/groupSocket';
 import { useAuth } from '../context/useAuth';
@@ -35,6 +34,13 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+
+// react-native-blurhash is a native module: it isn't present in Expo Go, or in
+// any build made before it was added. Its import runs a TurboModule lookup that
+// throws if the native binary lacks it — so guard the require and treat blurhash
+// as an optional enhancement that only turns on once an EAS build includes it.
+let Blurhash = null;
+try { Blurhash = require('react-native-blurhash').Blurhash; } catch { Blurhash = null; }
 // Realtime arrives over the WebSocket; the poll is now just a safety net that
 // catches anything missed during a socket reconnect, so it can be slow.
 const POLL_MS = 12000;
@@ -582,7 +588,9 @@ const GroupDetail = ({ route, navigation }) => {
       // Encode a BlurHash so every viewer gets a colour-matched blur placeholder
       // while the real image downloads. Optional — a failure just skips it.
       let blurhash = '';
-      try { blurhash = await Blurhash.encode(p.uri, 4, 3); } catch { /* placeholder is optional */ }
+      if (Blurhash) {
+        try { blurhash = await Blurhash.encode(p.uri, 4, 3); } catch { /* placeholder is optional */ }
+      }
       sendMediaMessage({ localUri: p.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg', blurhash });
     } catch { Alert.alert(t('common.error'), t('chat.attachImageFailed')); }
   }, [sendMediaMessage, t]);
@@ -1523,7 +1531,8 @@ const GroupDetail = ({ route, navigation }) => {
       </Modal>
 
       {/* Join-question answer (shown to a requester when the group asks one) */}
-      <Modal visible={joinAnswer !== null} transparent animationType="slide" onRequestClose={() => setJoinAnswer(null)}>
+      <Modal visible={joinAnswer !== null} transparent animationType="slide" onRequestClose={() => setJoinAnswer(null)} statusBarTranslucent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setJoinAnswer(null)}>
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
@@ -1552,6 +1561,7 @@ const GroupDetail = ({ route, navigation }) => {
             </View>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       <ReportModal
@@ -1563,7 +1573,8 @@ const GroupDetail = ({ route, navigation }) => {
       />
 
       {/* Admin: set/clear the join question */}
-      <Modal visible={jqEditor !== null} transparent animationType="slide" onRequestClose={() => setJqEditor(null)}>
+      <Modal visible={jqEditor !== null} transparent animationType="slide" onRequestClose={() => setJqEditor(null)} statusBarTranslucent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setJqEditor(null)}>
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
@@ -1588,6 +1599,7 @@ const GroupDetail = ({ route, navigation }) => {
             </View>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </KeyboardAvoidingView>
     </View>
