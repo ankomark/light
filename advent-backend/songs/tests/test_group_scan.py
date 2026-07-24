@@ -148,6 +148,26 @@ class GroupPrivacyScanTests(APITestCase):
             recipient=self.outsider, notification_type='group_join_approved')
         self.assertEqual(approved.group_id, pub.id)
 
+    def test_base64_attachment_is_rejected(self):
+        """New messages must reference an uploaded R2 URL — inline base64 (which
+        would bloat the DB) is refused; a real https URL is accepted."""
+        member = User.objects.create_user('mediauser', 'mu@x.com', 'x')
+        g = Group.objects.create(creator=member, name='Media Room', is_private=False)
+        GroupMember.objects.create(group=g, user=member, is_admin=True)
+        self.client.force_authenticate(member)
+        url = f'/api/groups/{g.slug}/posts/'
+
+        data_uri = 'data:image/png;base64,' + ('A' * 5000)
+        bad = self.client.post(url, {'message_type': 'image', 'attachment': data_uri}, format='json')
+        self.assertEqual(bad.status_code, 400, bad.content[:200])
+
+        ok = self.client.post(
+            url,
+            {'message_type': 'image', 'attachment': 'https://cdn.example/r2/pic.jpg'},
+            format='json',
+        )
+        self.assertEqual(ok.status_code, 201, ok.content[:200])
+
     def test_non_group_notification_has_null_group(self):
         """A non-group notification serializes group_slug as null (no crash)."""
         from songs.models import Notification

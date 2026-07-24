@@ -8,10 +8,6 @@ from django.db.models.functions import Coalesce
 
 from .common import *  # noqa: F401,F403
 
-# Group chat attachments are an R2 https URL (current) or a legacy base64 data
-# URI (older clients). base64 of ~6 MB is ~8 MB of text — allow headroom.
-MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
-
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
 # never-opened group counts every message as unread (matches the old behaviour).
 EPOCH = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
@@ -478,18 +474,17 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         if not content and not attachment:
             raise ValidationError({'detail': 'Message cannot be empty'})
 
-        # Validate the inline attachment: a Cloudinary https URL (media is now
-        # uploaded there and only the URL is stored) or a legacy base64 data URI,
-        # which is size-capped so it can't bloat the DB.
+        # Attachments must be an R2 https URL. Media is uploaded straight to R2
+        # (presigned PUT) and only the URL is stored — inline base64 data URIs are
+        # no longer accepted, so a new message can never bloat the DB. Legacy rows
+        # that still hold a data URI keep rendering on read; this guards writes.
         if attachment:
-            if attachment.startswith('https://'):
-                if len(attachment) > 2000:
-                    raise ValidationError({'detail': 'Invalid attachment URL'})
-            elif attachment.startswith('data:'):
-                if len(attachment) > MAX_ATTACHMENT_CHARS:
-                    raise ValidationError({'detail': 'Attachment is too large (max ~6 MB).'})
-            else:
-                raise ValidationError({'detail': 'Invalid attachment'})
+            if not attachment.startswith('https://'):
+                raise ValidationError(
+                    {'detail': 'Attachments must be uploaded — inline data is not allowed.'}
+                )
+            if len(attachment) > 2000:
+                raise ValidationError({'detail': 'Invalid attachment URL'})
 
         post = serializer.save(user=self.request.user, group=group)
 
