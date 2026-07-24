@@ -75,6 +75,7 @@ const Choirs = ({ navigation }) => {
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [actionsOpenId, setActionsOpenId] = useState(null); // card whose edit/delete is revealed
   const [form, setForm] = useState(EMPTY);
   const [profileImage, setProfileImage] = useState('');
   const [coverImage, setCoverImage] = useState('');
@@ -244,12 +245,23 @@ const Choirs = ({ navigation }) => {
           )}
           {owner && (
             <View style={styles.ownerActions}>
-              <TouchableOpacity style={styles.ownerBtn} onPress={() => openEdit(item)} hitSlop={6}>
-                <MaterialIcons name="edit" size={18} color={colors.white} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.ownerBtn} onPress={() => onDelete(item)} hitSlop={6}>
-                <MaterialIcons name="delete-outline" size={19} color={colors.white} />
-              </TouchableOpacity>
+              {actionsOpenId === item.id ? (
+                <>
+                  <TouchableOpacity style={styles.ownerBtn} onPress={() => { setActionsOpenId(null); openEdit(item); }} hitSlop={6}>
+                    <MaterialIcons name="edit" size={18} color={colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.ownerBtn} onPress={() => { setActionsOpenId(null); onDelete(item); }} hitSlop={6}>
+                    <MaterialIcons name="delete-outline" size={19} color={colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.ownerBtn} onPress={() => setActionsOpenId(null)} hitSlop={6}>
+                    <MaterialIcons name="close" size={18} color={colors.white} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity style={styles.ownerBtn} onPress={() => setActionsOpenId(item.id)} hitSlop={6}>
+                  <MaterialIcons name="more-horiz" size={20} color={colors.white} />
+                </TouchableOpacity>
+              )}
             </View>
           )}
           <View style={[styles.statusPill, item.is_active ? styles.statusActive : styles.statusInactive]}>

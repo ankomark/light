@@ -617,8 +617,13 @@ const ChoirCommunity = ({ navigation, route }) => {
   const approve = async (r) => {
     try { await approveChoirRequest(choirId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); fetchChoirMembers(choirId).then(setMembers).catch(() => {}); } catch {}
   };
-  const reject = async (r) => {
-    try { await rejectChoirRequest(choirId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); } catch {}
+  const reject = (r) => {
+    Alert.alert(t('community.rejectTitle'), t('community.rejectConfirm', { name: r.user?.username }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.reject'), style: 'destructive', onPress: async () => {
+        try { await rejectChoirRequest(choirId, r.id); setRequests((p) => p.filter((x) => x.id !== r.id)); } catch {}
+      } },
+    ]);
   };
   const remove = (m) => {
     Alert.alert(t('community.removeTitle'), t('community.removeConfirm', { name: m.user?.username }), [
