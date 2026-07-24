@@ -1,6 +1,19 @@
 from .common import *  # noqa: F401,F403
 
 
+def pinned_preview(post):
+    """Compact pinned-message shape shared by the serializer and the pin actions."""
+    if not post:
+        return None
+    return {
+        'id': post.id,
+        'content': post.content,
+        'message_type': post.message_type,
+        'file_name': post.file_name,
+        'sender_username': post.user.username if post.user_id else None,
+    }
+
+
 class GroupSerializer(serializers.ModelSerializer):
     creator = SimpleUserSerializer(read_only=True)
     member_count = serializers.SerializerMethodField()
@@ -9,10 +22,14 @@ class GroupSerializer(serializers.ModelSerializer):
     has_pending_request = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
+    pinned_message = serializers.SerializerMethodField()
     cover_image = MediaReferenceImageField(required=False, allow_null=True)
     is_private = serializers.BooleanField(default=False)
     # Override the model field: the invite token is only ever revealed to admins.
     invite_code = serializers.SerializerMethodField()
+
+    def get_pinned_message(self, obj):
+        return pinned_preview(obj.pinned_post)
 
     class Meta:
         model = Group

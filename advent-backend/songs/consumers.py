@@ -40,6 +40,16 @@ def broadcast_group_deleted(slug, post_id):
     )
 
 
+def broadcast_group_pinned(slug, pinned):
+    """`pinned` is the pinned-message preview dict, or None when unpinned."""
+    layer = get_channel_layer()
+    if not layer:
+        return
+    async_to_sync(layer.group_send)(
+        group_channel(slug), {'type': 'chat_pinned', 'pinned': pinned},
+    )
+
+
 class GroupChatConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.user = self.scope.get('user')
@@ -95,6 +105,9 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
 
     async def chat_deleted(self, event):
         await self.send_json({'type': 'deleted', 'id': event['id']})
+
+    async def chat_pinned(self, event):
+        await self.send_json({'type': 'pinned', 'pinned': event['pinned']})
 
     async def typing(self, event):
         if event.get('sender_channel') == self.channel_name:

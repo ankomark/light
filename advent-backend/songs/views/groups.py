@@ -7,7 +7,8 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 
 from .common import *  # noqa: F401,F403
-from ..consumers import broadcast_group_message, broadcast_group_deleted
+from ..consumers import broadcast_group_message, broadcast_group_deleted, broadcast_group_pinned
+from ..serializers.groups import pinned_preview
 
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
 # never-opened group counts every message as unread (matches the old behaviour).
@@ -69,7 +70,9 @@ class GroupViewSet(viewsets.ModelViewSet):
                   ))
                   .order_by().values('group').annotate(c=Count('id')).values('c'))
 
-        return qs.select_related('creator', 'creator__profile').annotate(
+        return qs.select_related(
+            'creator', 'creator__profile', 'pinned_post', 'pinned_post__user',
+        ).annotate(
             anno_member_count=Coalesce(Subquery(member_count, output_field=IntegerField()), 0),
             anno_is_member=Exists(my_member),
             anno_is_admin=Exists(my_member.filter(is_admin=True)),
@@ -543,8 +546,11 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         slug, post_id = instance.group.slug, instance.id
-        self.perform_destroy(instance)
+        was_pinned = instance.group.pinned_post_id == instance.id
+        self.perform_destroy(instance)  # SET_NULL clears pinned_post automatically
         broadcast_group_deleted(slug, post_id)
+        if was_pinned:
+            broadcast_group_pinned(slug, None)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['patch'], url_path='edit')
@@ -568,6 +574,37 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         data = self.get_serializer(post).data
         broadcast_group_message(post.group.slug, data)
         return Response(data)
+
+    def _is_group_admin(self, group):
+        u = self.request.user
+        return u.is_super_admin or GroupMember.objects.filter(
+            group=group, user=u, is_admin=True).exists()
+
+    @action(detail=True, methods=['post'], url_path='pin')
+    def pin_message(self, request, *args, **kwargs):
+        """Admin pins this message to the top of the chat (one per group)."""
+        post = self.get_object()
+        if not self._is_group_admin(post.group):
+            return Response({'error': 'Only admins can pin messages'},
+                            status=status.HTTP_403_FORBIDDEN)
+        group = post.group
+        group.pinned_post = post
+        group.save(update_fields=['pinned_post'])
+        preview = pinned_preview(post)
+        broadcast_group_pinned(group.slug, preview)
+        return Response(preview)
+
+    @action(detail=True, methods=['post'], url_path='unpin')
+    def unpin_message(self, request, *args, **kwargs):
+        post = self.get_object()
+        if not self._is_group_admin(post.group):
+            return Response({'error': 'Only admins can unpin messages'},
+                            status=status.HTTP_403_FORBIDDEN)
+        group = post.group
+        group.pinned_post = None
+        group.save(update_fields=['pinned_post'])
+        broadcast_group_pinned(group.slug, None)
+        return Response({'status': 'unpinned'})
 
     @action(detail=True, methods=['post'], url_path='react', permission_classes=[IsAuthenticated])
     def react(self, request, *args, **kwargs):

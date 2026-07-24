@@ -208,6 +208,43 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_pin_and_unpin_message(self):
+        """An admin can pin a message (surfaced as group.pinned_message); a
+        non-admin can't; unpinning and deleting the pinned message both clear it."""
+        admin = User.objects.create_user('pinadmin', 'pa@x.com', 'x')
+        member = User.objects.create_user('pinmember', 'pm@x.com', 'x')
+        g = Group.objects.create(creator=admin, name='Pin Room', is_private=False)
+        GroupMember.objects.create(group=g, user=admin, is_admin=True)
+        GroupMember.objects.create(group=g, user=member)
+
+        self.client.force_authenticate(admin)
+        pid = self.client.post(
+            f'/api/groups/{g.slug}/posts/', {'content': 'read this', 'message_type': 'text'},
+            format='json',
+        ).json()['id']
+
+        # Member can't pin.
+        self.client.force_authenticate(member)
+        self.assertEqual(
+            self.client.post(f'/api/groups/{g.slug}/posts/{pid}/pin/', {}, format='json').status_code, 403)
+
+        # Admin pins → shows up on the group detail.
+        self.client.force_authenticate(admin)
+        self.assertEqual(
+            self.client.post(f'/api/groups/{g.slug}/posts/{pid}/pin/', {}, format='json').status_code, 200)
+        detail = self.client.get(f'/api/groups/{g.slug}/').json()
+        self.assertEqual(detail['pinned_message']['id'], pid)
+
+        # Unpin clears it.
+        self.assertEqual(
+            self.client.post(f'/api/groups/{g.slug}/posts/{pid}/unpin/', {}, format='json').status_code, 200)
+        self.assertIsNone(self.client.get(f'/api/groups/{g.slug}/').json()['pinned_message'])
+
+        # Re-pin, then delete the message → pin auto-clears.
+        self.client.post(f'/api/groups/{g.slug}/posts/{pid}/pin/', {}, format='json')
+        self.client.delete(f'/api/groups/{g.slug}/posts/{pid}/')
+        self.assertIsNone(self.client.get(f'/api/groups/{g.slug}/').json()['pinned_message'])
+
     def test_attachment_blurhash_round_trips(self):
         """The image placeholder hash is stored on send and returned on read."""
         member = User.objects.create_user('bhuser', 'bh@x.com', 'x')

@@ -1225,6 +1225,10 @@ class Group(models.Model):
     # link/code without exposing the group in public discovery. Null until an
     # admin generates one; rotating it invalidates old links.
     invite_code = models.UUIDField(null=True, blank=True, unique=True, db_index=True)
+    # The one message an admin has pinned to the top of the chat (Telegram-style).
+    pinned_post = models.ForeignKey(
+        'GroupPost', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
     # Soft moderation takedown — hidden from public group listings.
     is_removed = models.BooleanField(default=False)
     slug = models.SlugField(unique=True, max_length=100)

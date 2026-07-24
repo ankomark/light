@@ -1006,6 +1006,12 @@ export const sendGroupMessage = async (slug, payload) =>
 export const editGroupMessage = async (slug, id, content) =>
   apiRequest('patch', `/groups/${slug}/posts/${id}/edit/`, { content });
 
+export const pinGroupMessage = async (slug, id) =>
+  apiRequest('post', `/groups/${slug}/posts/${id}/pin/`);
+
+export const unpinGroupMessage = async (slug, id) =>
+  apiRequest('post', `/groups/${slug}/posts/${id}/unpin/`);
+
 export const markGroupRead = async (slug) =>
   apiRequest('post', `/groups/${slug}/mark-read/`);
 

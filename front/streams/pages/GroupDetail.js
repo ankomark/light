@@ -22,6 +22,7 @@ import { compressImage } from '../services/imageProcessing';
 import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
+  pinGroupMessage, unpinGroupMessage,
 } from '../services/api';
 import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
@@ -240,6 +241,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [playingId, setPlayingId] = useState(null);
   const [hasEarlier, setHasEarlier] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]); // usernames currently typing
+  const [pinnedMsg, setPinnedMsg] = useState(initialGroup?.pinned_message || null);
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
@@ -287,6 +289,7 @@ const GroupDetail = ({ route, navigation }) => {
       setIsMember(g.is_member);
       setIsAdmin(g.is_admin);
       setRequested(!!g.has_pending_request);
+      setPinnedMsg(g.pinned_message || null);
       canReadRef.current = !!g.is_member;
       if (!postsPromise && g.is_member) await loadPosts();
     } catch {
@@ -352,6 +355,7 @@ const GroupDetail = ({ route, navigation }) => {
         if (evt.user_id === currentUser?.id || !evt.username) return;
         markUserTyping(evt.username, evt.is_typing);
       },
+      onPinned: (evt) => setPinnedMsg(evt.pinned || null),
     });
     socketRef.current = sock;
     return () => { sock.close(); socketRef.current = null; };
@@ -672,6 +676,29 @@ const GroupDetail = ({ route, navigation }) => {
 
   const cancelEdit = useCallback(() => { setEditingMsg(null); setText(''); }, []);
 
+  const jumpToMessage = useCallback((id) => {
+    const idx = messages.findIndex((m) => String(m.id) === String(id));
+    if (idx >= 0) {
+      try { listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.35 }); } catch { /* best effort */ }
+    }
+  }, [messages]);
+
+  const pinMessage = useCallback(async (m) => {
+    setMenuMsg(null);
+    const prev = pinnedMsg;
+    try { setPinnedMsg(await pinGroupMessage(groupSlug, m.id)); }
+    catch { setPinnedMsg(prev); Alert.alert(t('common.error'), t('group.detail.pinFailed')); }
+  }, [groupSlug, pinnedMsg, t]);
+
+  const unpinMessage = useCallback(async () => {
+    setMenuMsg(null);
+    const prev = pinnedMsg;
+    if (!prev) return;
+    setPinnedMsg(null);
+    try { await unpinGroupMessage(groupSlug, prev.id); }
+    catch { setPinnedMsg(prev); Alert.alert(t('common.error'), t('group.detail.pinFailed')); }
+  }, [groupSlug, pinnedMsg, t]);
+
   const saveEdit = useCallback(async () => {
     const m = editingMsg;
     const content = text.trim();
@@ -778,6 +805,19 @@ const GroupDetail = ({ route, navigation }) => {
         </LinearGradient>
       </SafeAreaView>
 
+      {isMember && pinnedMsg && (
+        <TouchableOpacity style={styles.pinnedBar} activeOpacity={0.85} onPress={() => jumpToMessage(pinnedMsg.id)}>
+          <Ionicons name="pin" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pinnedTitle}>{t('group.detail.pinnedMessage')}</Text>
+            <Text style={styles.pinnedText} numberOfLines={1}>{replyLabel(pinnedMsg, t)}</Text>
+          </View>
+          {isAdmin && (
+            <TouchableOpacity onPress={unpinMessage} hitSlop={8}><Ionicons name="close" size={18} color={colors.textMuted} /></TouchableOpacity>
+          )}
+        </TouchableOpacity>
+      )}
+
       {isMember ? (
         <FlatList
           ref={listRef}
@@ -786,6 +826,9 @@ const GroupDetail = ({ route, navigation }) => {
           renderItem={renderMessage}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          onScrollToIndexFailed={({ averageItemLength, index }) => {
+            listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: true });
+          }}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           ListHeaderComponent={hasEarlier ? (
             <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
@@ -1075,6 +1118,19 @@ const GroupDetail = ({ route, navigation }) => {
                 <Text style={styles.menuItemText}>{t('group.detail.edit')}</Text>
               </TouchableOpacity>
             )}
+            {isAdmin && menuMsg && !String(menuMsg.id).startsWith('temp_') && (
+              pinnedMsg && String(pinnedMsg.id) === String(menuMsg.id) ? (
+                <TouchableOpacity style={styles.menuItem} onPress={unpinMessage}>
+                  <Ionicons name="remove-circle-outline" size={20} color={colors.textPrimary} />
+                  <Text style={styles.menuItemText}>{t('group.detail.unpin')}</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.menuItem} onPress={() => pinMessage(menuMsg)}>
+                  <Ionicons name="pin-outline" size={20} color={colors.textPrimary} />
+                  <Text style={styles.menuItemText}>{t('group.detail.pin')}</Text>
+                </TouchableOpacity>
+              )
+            )}
             {canDelete(menuMsg) && (
               <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
                 <Ionicons name="trash-outline" size={20} color={colors.error} />
@@ -1186,6 +1242,14 @@ const styles = StyleSheet.create({
   replyAccent: { width: 3, alignSelf: 'stretch', backgroundColor: colors.accent, borderRadius: 2 },
   replyBarName: { ...typography.caption, color: colors.accent, fontWeight: '700' },
   replyBarText: { ...typography.caption, color: colors.textSecondary },
+
+  pinnedBar: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    backgroundColor: colors.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  pinnedTitle: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  pinnedText: { ...typography.caption, color: colors.textSecondary },
 
   typingBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2 },
   typingDots: { flexDirection: 'row', alignItems: 'center', gap: 3 },
