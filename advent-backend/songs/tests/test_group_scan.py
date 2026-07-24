@@ -208,6 +208,30 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_report_group_message(self):
+        """A member can report a message; it lands as a Report the admin panel
+        can act on (content_type 'grouppost')."""
+        from songs.models import Report
+
+        author = User.objects.create_user('rpauthor', 'rp1@x.com', 'x')
+        reporter = User.objects.create_user('rpreporter', 'rp2@x.com', 'x')
+        g = Group.objects.create(creator=author, name='Report Room', is_private=False)
+        GroupMember.objects.create(group=g, user=author, is_admin=True)
+        GroupMember.objects.create(group=g, user=reporter)
+
+        self.client.force_authenticate(author)
+        pid = self.client.post(
+            f'/api/groups/{g.slug}/posts/', {'content': 'bad stuff', 'message_type': 'text'},
+            format='json').json()['id']
+
+        self.client.force_authenticate(reporter)
+        res = self.client.post(
+            '/api/reports/',
+            {'content_type': 'grouppost', 'object_id': pid, 'reason': 'spam'}, format='json')
+        self.assertEqual(res.status_code, 201, res.content[:200])
+        self.assertTrue(Report.objects.filter(
+            content_type='grouppost', object_id=pid, reporter=reporter).exists())
+
     def test_moderator_role(self):
         """An admin can appoint a moderator; the moderator can delete others'
         messages and pin, but can't manage membership. Non-admins can't appoint."""

@@ -28,7 +28,7 @@ const REASONS = [
  *     objectId={post.id}
  *   />
  */
-const ReportModal = ({ visible, onClose, contentType, objectId }) => {
+const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
   const { t } = useI18n();
   const [selectedReason, setSelectedReason] = useState('');
   const [description, setDescription] = useState('');
@@ -90,7 +90,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId }) => {
           </View>
         ) : (
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.title}>Report {contentType}</Text>
+            <Text style={styles.title}>{title || `Report ${contentType}`}</Text>
             <Text style={styles.subtitle}>{t('report.why')}</Text>
 
             {REASONS.map(r => (

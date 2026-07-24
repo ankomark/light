@@ -29,6 +29,7 @@ import { uploadMedia } from '../services/cloudinary';
 import { createGroupSocket } from '../services/groupSocket';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
+import ReportModal from '../components/ReportModal';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -281,6 +282,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [receipts, setReceipts] = useState(null); // { loading, count, readers } | null
   const [joinAnswer, setJoinAnswer] = useState(null); // string when the join-question modal is open
   const [jqEditor, setJqEditor] = useState(null);     // string when the admin join-question editor is open
+  const [reportMsg, setReportMsg] = useState(null);   // message being reported
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
@@ -1339,6 +1341,13 @@ const GroupDetail = ({ route, navigation }) => {
                 <Text style={styles.menuItemText}>{t('group.detail.messageInfo')}</Text>
               </TouchableOpacity>
             )}
+            {menuMsg && menuMsg.user?.id !== currentUser?.id && menuMsg.message_type !== 'system'
+              && !String(menuMsg.id).startsWith('temp_') && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => { const m = menuMsg; setMenuMsg(null); setReportMsg(m); }}>
+                <Ionicons name="flag-outline" size={20} color={colors.error} />
+                <Text style={[styles.menuItemText, { color: colors.error }]}>{t('group.detail.reportMessage')}</Text>
+              </TouchableOpacity>
+            )}
             {canDelete(menuMsg) && (
               <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
                 <Ionicons name="trash-outline" size={20} color={colors.error} />
@@ -1411,6 +1420,14 @@ const GroupDetail = ({ route, navigation }) => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ReportModal
+        visible={!!reportMsg}
+        onClose={() => setReportMsg(null)}
+        contentType="grouppost"
+        objectId={reportMsg?.id}
+        title={t('group.detail.reportMessageTitle')}
+      />
 
       {/* Admin: set/clear the join question */}
       <Modal visible={jqEditor !== null} transparent animationType="slide" onRequestClose={() => setJqEditor(null)}>
