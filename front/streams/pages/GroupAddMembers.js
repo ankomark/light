@@ -70,6 +70,18 @@ const GroupAddMembers = ({ route, navigation }) => {
     }
   }, [groupSlug, t]);
 
+  // Regenerating breaks every previously-shared link — confirm first.
+  const confirmRegenerate = useCallback(() => {
+    Alert.alert(
+      t('group.add.regenTitle'),
+      t('group.add.regenBody'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('group.add.regenConfirm'), style: 'destructive', onPress: () => fetchInvite(true) },
+      ],
+    );
+  }, [t, fetchInvite]);
+
   const inviteLink = invite?.code ? `streams://join/${invite.code}` : '';
 
   const shareInvite = useCallback(async () => {
@@ -142,7 +154,7 @@ const GroupAddMembers = ({ route, navigation }) => {
                   <Ionicons name="share-social" size={16} color="#0A1628" />
                   <Text style={styles.shareBtnText}>{t('group.add.shareInvite')}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.regenBtn} onPress={() => fetchInvite(true)} disabled={loadingInvite} activeOpacity={0.85}>
+                <TouchableOpacity style={styles.regenBtn} onPress={confirmRegenerate} disabled={loadingInvite} activeOpacity={0.85}>
                   <Ionicons name="refresh" size={16} color={colors.textSecondary} />
                   <Text style={styles.regenText}>{t('common.reset')}</Text>
                 </TouchableOpacity>

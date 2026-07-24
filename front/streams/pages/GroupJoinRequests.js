@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchGroupJoinRequests, approveJoinRequest, rejectJoinRequest } from '../services/api';
@@ -53,7 +53,7 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
     }
   };
 
-  const handleReject = async (requestId) => {
+  const doReject = async (requestId) => {
     setBusyId(requestId);
     try {
       await rejectJoinRequest(requestId);
@@ -63,6 +63,18 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
     } finally {
       setBusyId(null);
     }
+  };
+
+  // Declining locks the person out of re-requesting for a week, so confirm first.
+  const handleReject = (requestId) => {
+    Alert.alert(
+      t('groupReq.rejectTitle'),
+      t('groupReq.rejectBody'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('common.reject'), style: 'destructive', onPress: () => doReject(requestId) },
+      ],
+    );
   };
 
   return (
