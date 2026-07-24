@@ -580,6 +580,23 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         return u.is_super_admin or GroupMember.objects.filter(
             group=group, user=u, is_admin=True).exists()
 
+    @action(detail=True, methods=['get'], url_path='receipts')
+    def receipts(self, request, *args, **kwargs):
+        """Who has read this message — a member counts as having read it once their
+        last_read_at reaches the message's timestamp. Author + hidden super-admins
+        excluded. Members-only (get_object enforces the same gate as the list)."""
+        post = self.get_object()
+        readers = (
+            GroupMember.objects
+            .filter(group=post.group, last_read_at__gte=post.created_at)
+            .exclude(user_id=post.user_id)
+            .exclude(user_id__in=self._hidden_ids())
+            .select_related('user', 'user__profile')
+            .order_by('-last_read_at')
+        )
+        data = GroupMemberSerializer(readers, many=True, context=self.get_serializer_context()).data
+        return Response({'count': len(data), 'readers': data})
+
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request, *args, **kwargs):
         """Full-text-ish search over a group's text messages (members-only,

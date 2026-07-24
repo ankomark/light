@@ -208,6 +208,32 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_read_receipts(self):
+        """A member counts as a reader of a message once they mark the group read;
+        the author is never counted."""
+        author = User.objects.create_user('rcauthor', 'r1@x.com', 'x')
+        reader = User.objects.create_user('rcreader', 'r2@x.com', 'x')
+        g = Group.objects.create(creator=author, name='Receipt Room', is_private=False)
+        GroupMember.objects.create(group=g, user=author, is_admin=True)
+        GroupMember.objects.create(group=g, user=reader)
+
+        self.client.force_authenticate(author)
+        pid = self.client.post(
+            f'/api/groups/{g.slug}/posts/', {'content': 'seen?', 'message_type': 'text'}, format='json',
+        ).json()['id']
+
+        # Nobody has read it yet.
+        r0 = self.client.get(f'/api/groups/{g.slug}/posts/{pid}/receipts/').json()
+        self.assertEqual(r0['count'], 0)
+
+        # The reader opens the group (marks read) → now counts as a reader.
+        self.client.force_authenticate(reader)
+        self.client.post(f'/api/groups/{g.slug}/mark-read/')
+        self.client.force_authenticate(author)
+        r1 = self.client.get(f'/api/groups/{g.slug}/posts/{pid}/receipts/').json()
+        self.assertEqual(r1['count'], 1)
+        self.assertEqual(r1['readers'][0]['user']['username'], 'rcreader')
+
     def test_search_finds_text_messages(self):
         """Search returns matching text messages to a member and is members-only."""
         owner = User.objects.create_user('srchowner', 's1@x.com', 'x')

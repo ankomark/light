@@ -22,7 +22,7 @@ import { compressImage } from '../services/imageProcessing';
 import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
-  pinGroupMessage, unpinGroupMessage, searchGroupMessages,
+  pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts,
 } from '../services/api';
 import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
@@ -248,6 +248,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef(null);
+  const [receipts, setReceipts] = useState(null); // { loading, count, readers } | null
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
@@ -720,6 +721,17 @@ const GroupDetail = ({ route, navigation }) => {
     closeSearch();
     setTimeout(() => jumpToMessage(m.id), 120);
   }, [closeSearch, jumpToMessage]);
+
+  const showReceipts = useCallback(async (m) => {
+    setMenuMsg(null);
+    setReceipts({ loading: true, count: 0, readers: [] });
+    try {
+      const res = await fetchMessageReceipts(groupSlug, m.id);
+      setReceipts({ loading: false, count: res?.count ?? 0, readers: res?.readers ?? [] });
+    } catch {
+      setReceipts({ loading: false, count: 0, readers: [] });
+    }
+  }, [groupSlug]);
 
   const pinMessage = useCallback(async (m) => {
     setMenuMsg(null);
@@ -1236,11 +1248,49 @@ const GroupDetail = ({ route, navigation }) => {
                 </TouchableOpacity>
               )
             )}
+            {menuMsg && menuMsg.user?.id === currentUser?.id
+              && !String(menuMsg.id).startsWith('temp_') && menuMsg._status !== 'failed' && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => showReceipts(menuMsg)}>
+                <Ionicons name="checkmark-done" size={20} color={colors.textPrimary} />
+                <Text style={styles.menuItemText}>{t('group.detail.messageInfo')}</Text>
+              </TouchableOpacity>
+            )}
             {canDelete(menuMsg) && (
               <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
                 <Ionicons name="trash-outline" size={20} color={colors.error} />
                 <Text style={[styles.menuItemText, { color: colors.error }]}>{t('common.delete')}</Text>
               </TouchableOpacity>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Message info: who has seen this message */}
+      <Modal visible={!!receipts} transparent animationType="slide" onRequestClose={() => setReceipts(null)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setReceipts(null)}>
+          <Pressable style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t('group.detail.messageInfo')}</Text>
+            {receipts?.loading ? (
+              <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.lg }} />
+            ) : (
+              <>
+                <Text style={styles.receiptCount}>{t('group.detail.seenBy', { count: receipts?.count ?? 0 })}</Text>
+                <View style={styles.receiptList}>
+                  {(receipts?.readers ?? []).map((r) => (
+                    <View key={r.user?.id} style={styles.receiptRow}>
+                      <Image
+                        source={r.user?.profile?.picture ? { uri: r.user.profile.picture } : DEFAULT_AVATAR}
+                        placeholder={DEFAULT_AVATAR}
+                        contentFit="cover"
+                        transition={120}
+                        style={styles.receiptAvatar}
+                      />
+                      <Text style={styles.receiptName} numberOfLines={1}>{r.user?.username}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
             )}
           </Pressable>
         </Pressable>
@@ -1419,6 +1469,11 @@ const styles = StyleSheet.create({
   },
   sheetHandle: { alignSelf: 'center', width: 42, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.22)', marginBottom: spacing.md },
   sheetTitle: { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
+  receiptCount: { ...typography.caption, color: colors.accent, fontWeight: '700', marginTop: spacing.xs, marginBottom: spacing.sm },
+  receiptList: { gap: spacing.sm, maxHeight: 320 },
+  receiptRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  receiptAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: 'rgba(244,162,97,0.35)' },
+  receiptName: { ...typography.body, color: colors.textPrimary, flex: 1 },
   sheetSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.md },
   sheetOption: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,

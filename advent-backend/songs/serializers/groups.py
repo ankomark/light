@@ -162,12 +162,15 @@ class GroupMemberSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'is_admin', 'joined_at']
     
     def get_user(self, obj):
+        try:
+            profile = obj.user.profile
+        except Exception:
+            profile = None  # a user may not have a profile row yet
+        picture = media.resolve(profile.picture) if profile and profile.picture else None
         return {
             'id': obj.user.id,
             'username': obj.user.username,
-            'profile': {
-                'picture': media.resolve(obj.user.profile.picture) if obj.user.profile and obj.user.profile.picture else None
-            }
+            'profile': {'picture': picture},
         }
 
 
