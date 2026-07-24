@@ -60,9 +60,11 @@ const replyLabel = (m, t) => m.content || ({
  */
 const GroupMessageRow = ({
   item, isOwn, showName, playingId,
-  onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry,
+  onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry, onDoubleTap,
 }) => {
   const { t } = useI18n();
+  const lastTapRef = useRef(0);
+  const burst = useRef(new Animated.Value(0)).current; // double-tap ❤️ pop
   // Natural aspect ratio for image bubbles, learned on load (clamped so extreme
   // panoramas/columns stay sensible). Until known, a square placeholder shows.
   const [imgRatio, setImgRatio] = React.useState(null);
@@ -105,6 +107,25 @@ const GroupMessageRow = ({
   const myReaction = item.reactions?.mine || null;
   const hintOpacity = tx.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0, 1], extrapolate: 'clamp' });
 
+  const onTap = () => {
+    if (failed) { onRetry(item); return; }
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      lastTapRef.current = 0;
+      // Only animate a burst when adding the heart (not when toggling it off).
+      if (myReaction !== '❤️') {
+        burst.setValue(0);
+        Animated.sequence([
+          Animated.spring(burst, { toValue: 1, friction: 4, useNativeDriver: true }),
+          Animated.timing(burst, { toValue: 0, duration: 350, delay: 250, useNativeDriver: true }),
+        ]).start();
+      }
+      onDoubleTap?.(item);
+    } else {
+      lastTapRef.current = now;
+    }
+  };
+
   return (
     <View style={styles.swipeWrap}>
       <Animated.View style={[styles.replyHint, { opacity: hintOpacity, transform: [{ scale: hintOpacity }] }]}>
@@ -114,7 +135,7 @@ const GroupMessageRow = ({
       <Animated.View style={{ transform: [{ translateX: tx }] }} {...pan.panHandlers}>
         <Pressable
           onLongPress={() => onLongPress(item)} delayLongPress={250}
-          onPress={failed ? () => onRetry(item) : undefined}
+          onPress={onTap}
           style={[styles.msgRow, isOwn ? styles.msgRowOwn : styles.msgRowOther]}
         >
           {!isOwn && (
@@ -125,6 +146,13 @@ const GroupMessageRow = ({
             </View>
           )}
           <View style={styles.bubbleCol}>
+            <Animated.Text
+              pointerEvents="none"
+              style={[styles.burstHeart, {
+                opacity: burst,
+                transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1.6] }) }],
+              }]}
+            >❤️</Animated.Text>
             <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, type === 'image' && styles.bubbleMedia, sending && styles.bubbleSending]}>
               {showName && <Text style={styles.senderName}>{item.user?.username}</Text>}
 
@@ -831,6 +859,7 @@ const GroupDetail = ({ route, navigation }) => {
         playingId={playingId}
         onReply={startReply}
         onLongPress={openMsgMenu}
+        onDoubleTap={(m) => reactToPost(m, '❤️')}
         onOpenImage={setViewer}
         onOpenFile={openFile}
         onPlayAudio={playAudio}
@@ -1441,6 +1470,7 @@ const styles = StyleSheet.create({
   avatarPlaceholder: { width: 30, marginRight: spacing.xs },
   msgAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface },
   bubbleCol: { maxWidth: '78%', flexShrink: 1 },
+  burstHeart: { position: 'absolute', alignSelf: 'center', top: '30%', fontSize: 40, zIndex: 5 },
   bubble: { borderRadius: radius.lg, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs + 2, ...shadows.sm },
   bubbleMedia: { padding: 2, borderRadius: 8 }, // slim 2px frame, tidy corners
   bubbleSending: { opacity: 0.85 },             // dim while in flight
