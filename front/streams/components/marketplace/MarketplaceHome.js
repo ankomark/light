@@ -39,7 +39,8 @@ const MarketplaceHome = () => {
       try {
         const [categoriesData, productsData] = await Promise.all([
           fetchProductCategories(),
-          fetchProducts(1) // fetchProducts(page, extraParams); returns { results, ... }
+          // Featured strip shows 8 — fetch exactly 8 instead of the default 20.
+          fetchProducts(1, { page_size: 8 })
         ]);
         setCategories(
           Array.isArray(categoriesData) ? categoriesData : (categoriesData?.results || [])

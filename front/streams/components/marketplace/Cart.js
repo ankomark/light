@@ -13,7 +13,7 @@ import {
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
-import { fetchCart, removeFromCart, checkoutCart } from '../../services/api';
+import { fetchCart, removeFromCart, updateCartItem, checkoutCart } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -126,6 +126,29 @@ const Cart = () => {
     }
   };
 
+  // Change a line's quantity in place (the +/- steppers), so an over-stock line
+  // can be dialled down without deleting it. Optimistic, capped at stock, and
+  // reverts on a server rejection.
+  const handleSetQuantity = async (item, nextQty) => {
+    const stock = item.product?.quantity ?? 0;
+    if (nextQty < 1) return;                 // to remove, use the trash button
+    if (nextQty > stock) {
+      Alert.alert(t('common.error'), t('market.cart.onlyInStock', { n: stock }));
+      return;
+    }
+    const prev = cartItems;
+    const updated = cartItems.map((it) => (it.id === item.id ? { ...it, quantity: nextQty } : it));
+    setCartItems(updated);
+    setSubtotal(updated.reduce((s, it) => s + (it.product?.price || 0) * it.quantity, 0));
+    try {
+      await updateCartItem(item.id, nextQty);
+    } catch (error) {
+      setCartItems(prev);                    // revert
+      setSubtotal(prev.reduce((s, it) => s + (it.product?.price || 0) * it.quantity, 0));
+      Alert.alert(t('common.error'), error.response?.data?.error || t('market.cart.updateFailed'));
+    }
+  };
+
   // Handle checkout
   const handleCheckout = async () => {
     if (!currentUser) {
@@ -197,8 +220,32 @@ const Cart = () => {
                 <Text style={styles.price}>
                   {formatPrice(item.product?.price, item.product?.currency)}
                 </Text>
-                <Text style={styles.quantityText}>Qty: {item.quantity}</Text>
+                <View style={styles.qtyStepper}>
+                  <TouchableOpacity
+                    style={styles.qtyBtn}
+                    onPress={() => handleSetQuantity(item, item.quantity - 1)}
+                    disabled={item.quantity <= 1}
+                    hitSlop={6}
+                  >
+                    <Icon name="minus" size={12} color={item.quantity <= 1 ? '#ccc' : '#1D478B'} />
+                  </TouchableOpacity>
+                  <Text style={styles.qtyValue}>{item.quantity}</Text>
+                  <TouchableOpacity
+                    style={styles.qtyBtn}
+                    onPress={() => handleSetQuantity(item, item.quantity + 1)}
+                    disabled={item.quantity >= (item.product?.quantity ?? 0)}
+                    hitSlop={6}
+                  >
+                    <Icon name="plus" size={12} color={item.quantity >= (item.product?.quantity ?? 0) ? '#ccc' : '#1D478B'} />
+                  </TouchableOpacity>
+                </View>
               </View>
+
+              {item.quantity > (item.product?.quantity ?? 0) && (
+                <Text style={styles.stockWarn}>
+                  {t('market.cart.exceedsStock', { n: item.product?.quantity ?? 0 })}
+                </Text>
+              )}
 
               <Text style={styles.itemTotal}>
                 Total: {formatPrice((item.product?.price || 0) * item.quantity, item.product?.currency)}
@@ -341,6 +388,31 @@ const styles = StyleSheet.create({
   quantityText: {
     fontSize: 14,
     color: '#555',
+  },
+  qtyStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  qtyBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qtyValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginHorizontal: 12,
+    minWidth: 18,
+    textAlign: 'center',
+  },
+  stockWarn: {
+    fontSize: 12,
+    color: '#FF6347',
+    marginBottom: 4,
   },
   itemTotal: {
     fontSize: 16,

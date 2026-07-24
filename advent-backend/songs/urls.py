@@ -203,8 +203,8 @@ urlpatterns = [
          WishlistViewSet.as_view({'post': 'remove_product'}), 
          name='wishlist-remove-product'),
      # Add this to your urlpatterns
-     path('marketplace/cart/items/<int:pk>/', 
-          CartViewSet.as_view({'delete': 'destroy'}), 
+     path('marketplace/cart/items/<int:pk>/',
+          CartViewSet.as_view({'delete': 'destroy', 'patch': 'update_quantity'}),
           name='cart-item-delete'),
           
      path('live-events/featured/', 

@@ -278,20 +278,63 @@ class CartViewSet(viewsets.ModelViewSet):
             )
 
         cart, _ = Cart.objects.get_or_create(user=request.user)
-        cart_item, created = CartItem.objects.get_or_create(
-            cart=cart,
-            product=product,
-            defaults={'quantity': quantity}
-        )
+        cart_item = CartItem.objects.filter(cart=cart, product=product).first()
+        in_cart = cart_item.quantity if cart_item else 0
 
-        if not created:
-            cart_item.quantity += quantity
+        # Cap against stock at ADD time, so a buyer is told immediately instead
+        # of building a cart that only fails at checkout (and having to empty it).
+        if product.quantity <= 0:
+            return Response(
+                {"error": "This item is out of stock.", "available": 0, "in_cart": in_cart},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if in_cart + quantity > product.quantity:
+            detail = f"Only {product.quantity} in stock."
+            if in_cart:
+                detail = (f"Only {product.quantity} in stock and you already have "
+                          f"{in_cart} in your cart.")
+            return Response(
+                {"error": detail, "available": product.quantity, "in_cart": in_cart},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if cart_item:
+            cart_item.quantity = in_cart + quantity
             cart_item.save(update_fields=['quantity'])
+        else:
+            cart_item = CartItem.objects.create(cart=cart, product=product, quantity=quantity)
 
         return Response(
             {"status": "Item added to cart", "quantity": cart_item.quantity},
             status=status.HTTP_200_OK
         )
+
+    def update_quantity(self, request, pk=None):
+        """Set a cart line's quantity (the +/- steppers in the cart). Validated
+        against stock so a buyer can dial an over-stock line back down in place
+        rather than deleting it. Use DELETE to remove; this rejects quantity < 1."""
+        try:
+            cart_item = CartItem.objects.select_related('product').get(
+                id=pk, cart__user=request.user
+            )
+        except CartItem.DoesNotExist:
+            return Response({"error": "Item not found in cart"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            quantity = int(request.data.get('quantity'))
+        except (TypeError, ValueError):
+            return Response({"error": "Invalid quantity"}, status=status.HTTP_400_BAD_REQUEST)
+        if quantity < 1:
+            return Response({"error": "Quantity must be at least 1"}, status=status.HTTP_400_BAD_REQUEST)
+
+        available = cart_item.product.quantity
+        if quantity > available:
+            return Response(
+                {"error": f"Only {available} in stock.", "available": available},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        cart_item.quantity = quantity
+        cart_item.save(update_fields=['quantity'])
+        return Response(CartItemSerializer(cart_item, context={'request': request}).data)
     
     @action(detail=False, methods=['post'])
     def checkout(self, request):

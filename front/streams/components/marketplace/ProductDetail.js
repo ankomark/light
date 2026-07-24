@@ -103,7 +103,11 @@ const ProductDetail = () => {
       Alert.alert(t('market.success'), t('market.product.addedToCart'));
     } catch (error) {
       console.error('Error adding to cart:', error);
-      Alert.alert(t('common.error'), error.message || t('market.product.addToCartFailed'));
+      // Prefer the server's message (e.g. "Only 3 in stock…") over axios's generic.
+      Alert.alert(
+        t('common.error'),
+        error.response?.data?.error || error.message || t('market.product.addToCartFailed')
+      );
     }
   };
 

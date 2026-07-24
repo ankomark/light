@@ -83,28 +83,21 @@ class ProductSerializer(serializers.ModelSerializer):
             return obj.seller == request.user
         return False
 
-    # The three below read annotations set by ProductViewSet.get_queryset() —
-    # computing them per object would be an N+1 across a page of products. When
-    # ProductSerializer is nested somewhere unannotated (order/wishlist payloads)
-    # they degrade to a direct count/avg rather than silently reporting zero.
+    # Annotation-only: ProductViewSet.get_queryset() sets these for the product
+    # LIST and DETAIL (the only places the app shows a rating / wishlist heart).
+    # Nested uses of ProductSerializer — order line items, wishlist entries —
+    # don't render them, so we deliberately do NOT fall back to a per-object
+    # query: that fallback was a real N+1 (an order with N items, or a wishlist
+    # of N products, each fired 3 extra queries). Unannotated -> null/0/false.
     def get_average_rating(self, obj):
         avg = getattr(obj, 'avg_rating', None)
-        if avg is None:  # unannotated path — exclude removed reviews too
-            avg = obj.reviews.filter(is_removed=False).aggregate(v=Avg('rating'))['v']
         return round(float(avg), 1) if avg is not None else None
 
     def get_review_count(self, obj):
-        count = getattr(obj, 'num_reviews', None)
-        return count if count is not None else obj.reviews.filter(is_removed=False).count()
+        return getattr(obj, 'num_reviews', 0) or 0
 
     def get_is_wishlisted(self, obj):
-        annotated = getattr(obj, 'wishlisted_by_me', None)
-        if annotated is not None:
-            return bool(annotated)
-        request = self.context.get('request')
-        if not request or not request.user.is_authenticated:
-            return False
-        return obj.wishlisted_by.filter(user=request.user).exists()
+        return bool(getattr(obj, 'wishlisted_by_me', False))
 
     def validate_category(self, value):
         value = value.strip()

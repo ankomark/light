@@ -1298,6 +1298,11 @@ export const removeFromCart = async (itemId) => {
   }
 };
 
+// Set a cart line's quantity (the +/- steppers). Validated against stock server
+// side, so an over-stock line can be dialled down in place instead of deleted.
+export const updateCartItem = async (itemId, quantity) =>
+  apiRequest('patch', `/marketplace/cart/items/${itemId}/`, { quantity });
+
 export const checkoutCart = async () => {
   return apiRequest('post', '/marketplace/cart/checkout/');
 };
@@ -1869,6 +1874,7 @@ export default {
   fetchWishlist,
   fetchProductReviews,
   removeFromCart,
+  updateCartItem,
   processPayment,
   confirmOrderPayment,
   createProduct,

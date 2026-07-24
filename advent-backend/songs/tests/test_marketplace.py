@@ -631,3 +631,131 @@ class OrderRoleFilterTests(APITestCase):
         self.client.force_authenticate(self.user)
         ids = self._ids(self.client.get('/api/marketplace/orders/', {'role': 'seller'}))
         self.assertEqual(ids, {self.sold.id})
+
+
+class MarketplaceQueryScalingTests(APITestCase):
+    """Guard against the N+1 that nested ProductSerializer once caused: order and
+    wishlist payloads must NOT run a per-item query for rating/wishlist state."""
+
+    def setUp(self):
+        cache.clear()
+        self.buyer = User.objects.create_user('qsbuyer', 'qs@t.local', 'pw')
+        self.sellers = [User.objects.create_user(f'qss{i}', f'qss{i}@t.local', 'pw') for i in range(8)]
+        self.products = [
+            Product.objects.create(seller=self.sellers[i], title=f'P{i}', description='d',
+                                   price=Decimal('5'), quantity=9, slug=f'qs-{i}', currency='USD')
+            for i in range(8)
+        ]
+
+    def _order_with(self, n):
+        o = Order.objects.create(buyer=self.buyer, status='PENDING', total_amount=Decimal('5'))
+        for i in range(n):
+            OrderItem.objects.create(order=o, product=self.products[i], quantity=1,
+                                     price_at_purchase=Decimal('5'), seller=self.sellers[i])
+        return o
+
+    def _queries_for(self, url):
+        from django.test.utils import CaptureQueriesContext
+        from django.db import connection
+        self.client.force_authenticate(self.buyer)
+        with CaptureQueriesContext(connection) as ctx:
+            self.client.get(url)
+        return len(ctx.captured_queries)
+
+    def test_order_history_does_not_n_plus_one_on_items(self):
+        self._order_with(2)
+        few = self._queries_for('/api/marketplace/orders/?role=buyer')
+        # Bump the SECOND order from tiny to large; total items jumps by 6.
+        self._order_with(6)
+        many = self._queries_for('/api/marketplace/orders/?role=buyer')
+        # Adding 6 line items must not add ~3 queries each (the old N+1 = +18).
+        self.assertLess(many - few, 6, f'orders scaled with items: {few} -> {many}')
+
+    def test_wishlist_does_not_n_plus_one_on_products(self):
+        from songs.models import Wishlist
+        wl, _ = Wishlist.objects.get_or_create(user=self.buyer)
+        wl.products.add(self.products[0])
+        few = self._queries_for('/api/marketplace/wishlist/my_wishlist/')
+        for p in self.products[1:]:
+            wl.products.add(p)
+        many = self._queries_for('/api/marketplace/wishlist/my_wishlist/')
+        self.assertLess(many - few, 6, f'wishlist scaled with products: {few} -> {many}')
+
+
+class CartStockTests(APITestCase):
+    """Adds are capped at stock (told at add time, not just at checkout), and a
+    line's quantity can be changed in place instead of deleting the item."""
+
+    def setUp(self):
+        cache.clear()
+        self.seller = User.objects.create_user('cstseller', 'cst@t.local', 'pw')
+        self.buyer = User.objects.create_user('cstbuyer', 'cstb@t.local', 'pw')
+        self.product = Product.objects.create(
+            seller=self.seller, title='Limited', description='d',
+            price=Decimal('10'), quantity=3, slug='cst-limited', currency='USD',
+        )
+
+    def _add(self, qty):
+        return self.client.post('/api/marketplace/cart/add_item/',
+                                {'product_id': self.product.id, 'quantity': qty})
+
+    def test_add_beyond_stock_is_rejected_with_a_clear_message(self):
+        self.client.force_authenticate(self.buyer)
+        res = self._add(5)  # only 3 in stock
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('3', res.data['error'])
+        self.assertEqual(res.data['available'], 3)
+        self.assertFalse(CartItem.objects.filter(cart__user=self.buyer).exists())
+
+    def test_cumulative_add_cannot_exceed_stock(self):
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self._add(2).status_code, status.HTTP_200_OK)
+        # 2 already in cart; adding 2 more (=4) exceeds stock of 3.
+        res = self._add(2)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['in_cart'], 2)
+        item = CartItem.objects.get(cart__user=self.buyer, product=self.product)
+        self.assertEqual(item.quantity, 2)  # unchanged
+
+    def test_out_of_stock_add_is_rejected(self):
+        self.product.quantity = 0
+        self.product.save(update_fields=['quantity'])
+        self.client.force_authenticate(self.buyer)
+        res = self._add(1)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_update_quantity_in_place(self):
+        self.client.force_authenticate(self.buyer)
+        self._add(3)
+        item = CartItem.objects.get(cart__user=self.buyer, product=self.product)
+
+        # Dial down to 1 — the fix for "had to delete the cart".
+        res = self.client.patch(f'/api/marketplace/cart/items/{item.id}/', {'quantity': 1})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        item.refresh_from_db()
+        self.assertEqual(item.quantity, 1)
+
+    def test_update_quantity_cannot_exceed_stock(self):
+        self.client.force_authenticate(self.buyer)
+        self._add(2)
+        item = CartItem.objects.get(cart__user=self.buyer, product=self.product)
+        res = self.client.patch(f'/api/marketplace/cart/items/{item.id}/', {'quantity': 9})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        item.refresh_from_db()
+        self.assertEqual(item.quantity, 2)  # unchanged
+
+    def test_update_quantity_rejects_zero(self):
+        self.client.force_authenticate(self.buyer)
+        self._add(2)
+        item = CartItem.objects.get(cart__user=self.buyer, product=self.product)
+        res = self.client.patch(f'/api/marketplace/cart/items/{item.id}/', {'quantity': 0})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_update_another_users_cart_item(self):
+        other = User.objects.create_user('cstother', 'csto@t.local', 'pw')
+        self.client.force_authenticate(self.buyer)
+        self._add(1)
+        item = CartItem.objects.get(cart__user=self.buyer, product=self.product)
+        self.client.force_authenticate(other)
+        res = self.client.patch(f'/api/marketplace/cart/items/{item.id}/', {'quantity': 2})
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
