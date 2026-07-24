@@ -21,9 +21,9 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 import { useI18n } from '../context/I18nContext';
 
 const TABS = [
-  { key: 'public', label: 'Public', icon: 'earth' },
-  { key: 'private', label: 'Private', icon: 'lock-closed' },
-  { key: 'mine', label: 'My Groups', icon: 'people' },
+  { key: 'public', labelKey: 'group.list.tabPublic', icon: 'earth' },
+  { key: 'private', labelKey: 'group.list.tabPrivate', icon: 'lock-closed' },
+  { key: 'mine', labelKey: 'group.list.tabMine', icon: 'people' },
 ];
 
 const GroupList = ({ navigation }) => {
@@ -212,17 +212,17 @@ const GroupList = ({ navigation }) => {
       <View style={styles.container}>
         {/* Tabs */}
         <View style={styles.tabBar}>
-          {TABS.map(t => {
-            const active = activeTab === t.key;
+          {TABS.map((tab) => {
+            const active = activeTab === tab.key;
             return (
               <TouchableOpacity
-                key={t.key}
+                key={tab.key}
                 style={[styles.tab, active && styles.tabActive]}
-                onPress={() => setActiveTab(t.key)}
+                onPress={() => setActiveTab(tab.key)}
                 activeOpacity={0.85}
               >
-                <Ionicons name={t.icon} size={15} color={active ? '#0A1628' : colors.textSecondary} />
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+                <Ionicons name={tab.icon} size={15} color={active ? '#0A1628' : colors.textSecondary} />
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{t(tab.labelKey)}</Text>
               </TouchableOpacity>
             );
           })}

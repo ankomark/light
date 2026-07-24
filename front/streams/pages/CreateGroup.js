@@ -1,40 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ScrollView,
+} from 'react-native';
 import { Image } from 'expo-image';
-import { useAuth } from '../context/useAuth';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { createGroup, updateGroup, deleteGroup } from '../services/api';
 import * as ImagePicker from 'expo-image-picker';
-import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { useI18n } from '../context/I18nContext';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import RotatingBackground from '../components/RotatingBackground';
+import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
+
+const NAVY = '#0A1628';
 
 const GroupForm = ({ navigation, route }) => {
   const { t } = useI18n();
   const { group: existingGroup } = route.params || {};
   const isEditMode = !!existingGroup;
-  
+
   const [name, setName] = useState(existingGroup?.name || '');
   const [description, setDescription] = useState(existingGroup?.description || '');
   const [isPrivate, setIsPrivate] = useState(existingGroup?.is_private ?? true);
   const [coverImage, setCoverImage] = useState(existingGroup?.cover_image || null);
   const [isLoading, setIsLoading] = useState(false);
-  const { currentUser } = useAuth();
-
-  useEffect(() => {
-    if (isEditMode) {
-      navigation.setOptions({
-        title: 'Edit Group',
-        headerRight: () => (
-          <TouchableOpacity 
-            onPress={handleDelete}
-            style={styles.deleteButton}
-          >
-            <Ionicons name="trash-outline" size={24} color="#ef4444" />
-          </TouchableOpacity>
-        ),
-      });
-    }
-  }, [isEditMode]);
 
   const pickImage = async () => {
     try {
@@ -73,17 +63,17 @@ const GroupForm = ({ navigation, route }) => {
 
     try {
       setIsLoading(true);
-      
+
       const formData = new FormData();
       formData.append('name', name.trim());
       formData.append('description', description || '');
       formData.append('is_private', String(isPrivate));
-      
+
       if (coverImage && typeof coverImage === 'string' && coverImage.startsWith('file://')) {
         formData.append('cover_image', {
           uri: coverImage,
           name: `cover_${Date.now()}.jpg`,
-          type: 'image/jpeg'
+          type: 'image/jpeg',
         });
       }
 
@@ -97,7 +87,6 @@ const GroupForm = ({ navigation, route }) => {
         // Drop this form from the stack and open the new group's chat directly.
         navigation.replace('GroupDetail', { groupSlug: response.slug, group: response });
       }
-
     } catch (error) {
       console.error('Error:', error);
       // Error shapes vary: apiRequest throws an Error with .response.data;
@@ -113,14 +102,14 @@ const GroupForm = ({ navigation, route }) => {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     Alert.alert(
-      'Delete Group',
+      t('group.create.deleteTitle'),
       t('group.create.deleteConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -134,331 +123,209 @@ const GroupForm = ({ navigation, route }) => {
             } finally {
               setIsLoading(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
+  const canSubmit = !!name.trim() && !isLoading;
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>
-          {isEditMode ? 'Edit Group' : 'Create New Group'}
-        </Text>
-      </View>
-
-      <View style={styles.formContainer}>
-        <TouchableOpacity 
-          style={styles.coverImageContainer} 
-          onPress={pickImage}
-          activeOpacity={0.8}
-        >
-          {coverImage ? (
-            <>
-              <Image
-                source={{ uri: coverImage }}
-                style={styles.coverImage}
-                contentFit="cover"
-                transition={150}
-              />
-              <View style={styles.coverImageOverlay}>
-                <MaterialIcons name="edit" size={24} color="white" />
-              </View>
-            </>
-          ) : (
-            <View style={styles.coverImagePlaceholder}>
-              <MaterialIcons name="add-a-photo" size={32} color="#6b7280" />
-              <Text style={styles.coverImageText}>{t('group.create.addCover')}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('group.create.name')}</Text>
-          <TextInput
-            style={styles.input}
-            value={name}
-            onChangeText={setName}
-            placeholder={t('group.create.namePlaceholder')}
-            placeholderTextColor="#9ca3af"
-            autoCapitalize="words"
-            autoFocus={!isEditMode}
-          />
-        </View>
-        
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('group.create.description')}</Text>
-          <TextInput
-            style={[styles.input, styles.multilineInput]}
-            value={description}
-            onChangeText={setDescription}
-            placeholder={t('group.create.descriptionPlaceholder')}
-            placeholderTextColor="#9ca3af"
-            multiline
-            numberOfLines={4}
-          />
-        </View>
-        
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('group.create.privacy')}</Text>
-          <View style={styles.privacyContainer}>
-            <TouchableOpacity
-              style={[styles.privacyOption, isPrivate && styles.selectedOption]}
-              onPress={() => setIsPrivate(true)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.radioCircle}>
-                {isPrivate && <View style={styles.radioInnerCircle} />}
-              </View>
-              <Text style={isPrivate ? styles.selectedText : styles.optionText}>{t('group.create.private')}</Text>
+    <View style={styles.root}>
+      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.86)" />
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
+            <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {isEditMode ? t('group.create.editTitle') : t('group.create.createTitle')}
+          </Text>
+          {isEditMode ? (
+            <TouchableOpacity onPress={handleDelete} style={styles.iconBtn} hitSlop={10}>
+              <Ionicons name="trash-outline" size={22} color={colors.error} />
             </TouchableOpacity>
-            
+          ) : (
+            <View style={styles.iconBtn} />
+          )}
+        </View>
+
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.flex}
+        >
+          <ScrollView
+            style={styles.flex}
+            contentContainerStyle={styles.formContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <TouchableOpacity
-              style={[styles.privacyOption, !isPrivate && styles.selectedOption]}
-              onPress={() => setIsPrivate(false)}
-              activeOpacity={0.7}
+              style={styles.coverImageContainer}
+              onPress={pickImage}
+              activeOpacity={0.85}
             >
-              <View style={styles.radioCircle}>
-                {!isPrivate && <View style={styles.radioInnerCircle} />}
+              {coverImage ? (
+                <>
+                  <Image source={{ uri: coverImage }} style={styles.coverImage} contentFit="cover" transition={150} />
+                  <View style={styles.coverImageOverlay}>
+                    <MaterialIcons name="edit" size={22} color="#fff" />
+                  </View>
+                </>
+              ) : (
+                <View style={styles.coverImagePlaceholder}>
+                  <MaterialIcons name="add-a-photo" size={30} color={colors.textMuted} />
+                  <Text style={styles.coverImageText}>{t('group.create.addCover')}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>{t('group.create.name')}</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder={t('group.create.namePlaceholder')}
+                placeholderTextColor={colors.placeholder}
+                autoCapitalize="words"
+                autoFocus={!isEditMode}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>{t('group.create.description')}</Text>
+              <TextInput
+                style={[styles.input, styles.multilineInput]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder={t('group.create.descriptionPlaceholder')}
+                placeholderTextColor={colors.placeholder}
+                multiline
+                numberOfLines={4}
+              />
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.label}>{t('group.create.privacy')}</Text>
+              <View style={styles.privacyContainer}>
+                <TouchableOpacity
+                  style={[styles.privacyOption, isPrivate && styles.selectedOption]}
+                  onPress={() => setIsPrivate(true)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="lock-closed" size={16} color={isPrivate ? colors.accent : colors.textSecondary} />
+                  <Text style={isPrivate ? styles.selectedText : styles.optionText}>{t('group.create.private')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.privacyOption, !isPrivate && styles.selectedOption]}
+                  onPress={() => setIsPrivate(false)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="earth" size={16} color={!isPrivate ? colors.accent : colors.textSecondary} />
+                  <Text style={!isPrivate ? styles.selectedText : styles.optionText}>{t('group.create.public')}</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={!isPrivate ? styles.selectedText : styles.optionText}>{t('group.create.public')}</Text>
+              <Text style={styles.privacyHint}>
+                {isPrivate ? t('group.create.privateHint') : t('group.create.publicHint')}
+              </Text>
+            </View>
+          </ScrollView>
+
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={[styles.button, styles.cancelButton]}
+              onPress={() => navigation.goBack()}
+              disabled={isLoading}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, styles.submitButton, !canSubmit && styles.disabledButton]}
+              onPress={handleSubmit}
+              disabled={!canSubmit}
+              activeOpacity={0.85}
+            >
+              {isLoading ? (
+                <ActivityIndicator color={NAVY} size="small" />
+              ) : (
+                <Text style={styles.submitButtonText}>
+                  {isEditMode ? t('group.create.saveChanges') : t('group.create.createBtn')}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
-          <Text style={styles.privacyHint}>
-            {isPrivate 
-              ? t('group.create.privateHint') 
-              : t('group.create.publicHint')}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.footer}>
-        <TouchableOpacity 
-          style={[styles.button, styles.cancelButton]}
-          onPress={() => navigation.goBack()}
-          disabled={isLoading}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={[
-            styles.button, 
-            styles.submitButton, 
-            (!name.trim() || isLoading) && styles.disabledButton
-          ]}
-          onPress={handleSubmit}
-          disabled={!name.trim() || isLoading}
-          activeOpacity={0.8}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.submitButtonText}>
-              {isEditMode ? 'Save Changes' : 'Create Group'}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
-  },
+  root: { flex: 1, backgroundColor: NAVY },
+  safe: { flex: 1, backgroundColor: 'transparent' },
+  flex: { flex: 1 },
+
   header: {
-    paddingVertical: 20,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.12)',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#111827',
-    textAlign: 'center',
-    marginTop:15,
-  },
-  deleteButton: {
-    marginRight: 15,
-    padding: 5,
-  },
-  formContainer: {
-    flex: 1,
-    padding: 20,
-  },
+  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { ...typography.h3, color: colors.textPrimary, fontWeight: '800', flex: 1, textAlign: 'center' },
+
+  formContainer: { padding: spacing.md, paddingBottom: spacing.xl },
+
   coverImageContainer: {
-    height: 150,
-    marginBottom: 24,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    position: 'relative',
+    height: 160, marginBottom: spacing.lg, borderRadius: radius.lg, overflow: 'hidden',
+    backgroundColor: 'rgba(16,46,80,0.55)', justifyContent: 'center', alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
   },
-  coverImage: {
-    width: '100%',
-    height: '100%',
-  },
+  coverImage: { width: '100%', height: '100%' },
   coverImageOverlay: {
-    position: 'absolute',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
+    position: 'absolute', top: spacing.sm, right: spacing.sm,
+    width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center', alignItems: 'center',
   },
-  coverImagePlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  coverImageText: {
-    marginTop: 8,
-    color: '#6b7280',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    marginBottom: 8,
-    fontWeight: '500',
-    color: '#374151',
-  },
+  coverImagePlaceholder: { justifyContent: 'center', alignItems: 'center', gap: spacing.xs },
+  coverImageText: { ...typography.caption, color: colors.textMuted, fontWeight: '600' },
+
+  inputGroup: { marginBottom: spacing.md },
+  label: { ...typography.label, color: colors.textSecondary, fontWeight: '700', marginBottom: spacing.xs },
   input: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#ffffff',
-    color: '#111827',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)', borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2, fontSize: 15,
+    backgroundColor: 'rgba(13,35,64,0.85)', color: colors.textPrimary,
   },
-  multilineInput: {
-    height: 120,
-    textAlignVertical: 'top',
-  },
-  section: {
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 12,
-  },
-  privacyContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
+  multilineInput: { minHeight: 110, textAlignVertical: 'top', paddingTop: spacing.sm + 2 },
+
+  section: { marginTop: spacing.xs, marginBottom: spacing.md },
+  privacyContainer: { flexDirection: 'row', gap: spacing.sm },
   privacyOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginRight: 12,
-    backgroundColor: '#ffffff',
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: spacing.sm + 2, borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(13,35,64,0.7)',
   },
-  selectedOption: {
-    borderColor: '#3b82f6',
-    backgroundColor: '#eff6ff',
-  },
-  radioCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#d1d5db',
-    marginRight: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  radioInnerCircle: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#3b82f6',
-  },
-  optionText: {
-    color: '#4b5563',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  selectedText: {
-    color: '#3b82f6',
-    fontWeight: '500',
-    fontSize: 14,
-  },
-  privacyHint: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginTop: 4,
-  },
+  selectedOption: { borderColor: colors.accent, backgroundColor: 'rgba(244,162,97,0.14)' },
+  optionText: { ...typography.button, color: colors.textSecondary, fontWeight: '700', fontSize: 14 },
+  selectedText: { ...typography.button, color: colors.accent, fontWeight: '800', fontSize: 14 },
+  privacyHint: { ...typography.caption, color: colors.textMuted, marginTop: spacing.sm },
+
   footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#ffffff',
+    flexDirection: 'row', gap: spacing.sm, padding: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)',
   },
-  button: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  cancelButton: {
-    backgroundColor: '#f3f4f6',
-  },
-  cancelButtonText: {
-    color: '#4b5563',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  submitButton: {
-    backgroundColor: '#3b82f6',
-  },
-  disabledButton: {
-    backgroundColor: '#93c5fd',
-  },
-  submitButtonText: {
-    color: '#ffffff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
+  button: { flex: 1, paddingVertical: spacing.sm + 4, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
+  cancelButton: { backgroundColor: 'rgba(18,30,46,0.9)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)' },
+  cancelButtonText: { ...typography.button, color: colors.textSecondary, fontWeight: '700' },
+  submitButton: { backgroundColor: colors.accent, ...shadows.sm },
+  disabledButton: { opacity: 0.55 },
+  submitButtonText: { ...typography.button, color: NAVY, fontWeight: '800' },
 });
 
 export default GroupForm;
