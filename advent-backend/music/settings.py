@@ -157,6 +157,11 @@ REST_FRAMEWORK = {
         # Live broadcasting abuse guards.
         'go_live': '20/hour',
         'cohost_request': '30/hour',
+        # Group chat abuse guards: message spam, reaction spam, and mass
+        # join-request spam. Generous enough for fast human chatting.
+        'group_post': '90/min',
+        'group_react': '60/min',
+        'group_join': '20/hour',
     },
 }
 ROOT_URLCONF = 'music.urls'

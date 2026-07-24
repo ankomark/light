@@ -107,6 +107,12 @@ class GroupViewSet(viewsets.ModelViewSet):
             self.permission_classes = [IsAuthenticated, IsGroupCreator]
         return super().get_permissions()
 
+    def get_throttles(self):
+        # Cap mass join-request spam (the global ScopedRateThrottle reads this).
+        if self.action in ('request_join', 'join_by_code'):
+            self.throttle_scope = 'group_join'
+        return super().get_throttles()
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
@@ -408,6 +414,16 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
     pagination_class = StandardPagination
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_throttles(self):
+        # Rate-limit writes only (the global ScopedRateThrottle reads this attr);
+        # reads keep the default user/anon throttles. Sending is capped tighter
+        # than reacting since a spam message is more disruptive than a spam tap.
+        if self.action == 'create':
+            self.throttle_scope = 'group_post'
+        elif self.action == 'react':
+            self.throttle_scope = 'group_react'
+        return super().get_throttles()
 
     def _hidden_ids(self):
         """Super-admin user ids to hide from this viewer (empty when the viewer
