@@ -74,13 +74,10 @@ const GroupAddMembers = ({ route, navigation }) => {
 
   const shareInvite = useCallback(async () => {
     if (!invite?.code) return;
-    const name = group?.name || invite.group_name || 'our group';
-    const message =
-      `Join "${name}" on Adventist Life.\n\n` +
-      `Open the app → Groups → "Join with code" and enter this code:\n${invite.code}\n\n` +
-      `Or tap: ${inviteLink}`;
+    const name = group?.name || invite.group_name || t('group.add.fallbackName');
+    const message = t('group.add.shareMessage', { name, code: invite.code, link: inviteLink });
     try { await Share.share({ message }); } catch { /* user cancelled */ }
-  }, [invite, group, inviteLink]);
+  }, [invite, group, inviteLink, t]);
 
   const renderUser = ({ item }) => {
     const added = addedIds.includes(item.id);
@@ -106,7 +103,7 @@ const GroupAddMembers = ({ route, navigation }) => {
             ) : (
               <>
                 <Ionicons name="person-add" size={15} color="#0A1628" />
-                <Text style={styles.addBtnText}>Add</Text>
+                <Text style={styles.addBtnText}>{t('group.add.addBtn')}</Text>
               </>
             )}
           </TouchableOpacity>

@@ -3,26 +3,32 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
 
-function timeAgo(dateStr) {
+function timeAgo(dateStr, t) {
   if (!dateStr) return '';
   const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
-  if (diff < 60) return 'now';
+  if (diff < 60) return t('group.preview.now');
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
   return new Date(dateStr).toLocaleDateString();
 }
 
-const previewText = (lm) => {
-  if (!lm) return 'No messages yet';
+const previewText = (lm, t) => {
+  if (!lm) return t('group.preview.noMessages');
   if (lm.message_type === 'system') return lm.content;
   const body = lm.content
-    || ({ image: '📷 Photo', file: `📎 ${lm.file_name || 'File'}`, audio: '🎤 Voice note' }[lm.message_type] || 'Message');
+    || ({
+      image: t('group.preview.photo'),
+      file: `📎 ${lm.file_name || t('group.preview.message')}`,
+      audio: t('group.preview.voiceNote'),
+    }[lm.message_type] || t('group.preview.message'));
   return lm.sender_username ? `${lm.sender_username}: ${body}` : body;
 };
 
 const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
+  const { t } = useI18n();
   const unread = group.unread_count || 0;
   const lm = group.last_message;
 
@@ -44,11 +50,11 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
       <View style={styles.body}>
         <View style={styles.topRow}>
           <Text style={[styles.name, unread > 0 && styles.bold]} numberOfLines={1}>{group.name}</Text>
-          <Text style={styles.time}>{timeAgo(lm?.created_at || group.updated_at)}</Text>
+          <Text style={styles.time}>{timeAgo(lm?.created_at || group.updated_at, t)}</Text>
         </View>
         <View style={styles.bottomRow}>
           <Text style={[styles.preview, unread > 0 && styles.previewBold]} numberOfLines={1}>
-            {previewText(lm)}
+            {previewText(lm, t)}
           </Text>
           {unread > 0 ? (
             <View style={styles.badge}><Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text></View>

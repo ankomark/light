@@ -43,7 +43,9 @@ const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const fmtDuration = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.round((s || 0) % 60)).padStart(2, '0')}`;
-const replyLabel = (m) => m.content || ({ image: '📷 Photo', file: '📎 File', audio: '🎤 Voice note' }[m.message_type] || 'Message');
+const replyLabel = (m, t) => m.content || ({
+  image: t('group.preview.photo'), file: t('group.preview.file'), audio: t('group.preview.voiceNote'),
+}[m.message_type] || t('group.preview.message'));
 
 /**
  * One chat row: swipe-right-to-reply (PanResponder, no GestureHandlerRootView),
@@ -119,8 +121,8 @@ const GroupMessageRow = ({
 
               {item.reply_to && (
                 <View style={styles.replyQuote}>
-                  <Text style={styles.replyQuoteName}>{item.reply_to.sender_username || 'Reply'}</Text>
-                  <Text style={styles.replyQuoteText} numberOfLines={1}>{replyLabel(item.reply_to)}</Text>
+                  <Text style={styles.replyQuoteName}>{item.reply_to.sender_username || t('group.preview.reply')}</Text>
+                  <Text style={styles.replyQuoteText} numberOfLines={1}>{replyLabel(item.reply_to, t)}</Text>
                 </View>
               )}
 
@@ -579,8 +581,8 @@ const GroupDetail = ({ route, navigation }) => {
     setMenuMsg(null);
     if (!canDelete(m)) return;
     Alert.alert(t('group.detail.deleteMessageTitle'), t('group.detail.deleteMessageBody'), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: async () => {
         try { await deleteGroupPost(groupSlug, m.id); setMessages((prev) => prev.filter((x) => x.id !== m.id)); }
         catch { Alert.alert(t('common.error'), t('group.detail.deleteMessageFailed')); }
       } },
@@ -653,7 +655,7 @@ const GroupDetail = ({ route, navigation }) => {
             )}
             <View style={{ flex: 1 }}>
               <Text style={styles.headerName} numberOfLines={1}>{group?.name ?? 'Group'}</Text>
-              <Text style={styles.headerSub} numberOfLines={1}>{group?.member_count ?? 0} members{group?.is_private ? ' · Private' : ''}</Text>
+              <Text style={styles.headerSub} numberOfLines={1}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity onPress={openMenu} style={styles.backBtn}>
@@ -709,7 +711,7 @@ const GroupDetail = ({ route, navigation }) => {
           <View style={styles.replyAccent} />
           <View style={{ flex: 1 }}>
             <Text style={styles.replyBarName}>Replying to {replyTo.user?.username}</Text>
-            <Text style={styles.replyBarText} numberOfLines={1}>{replyLabel(replyTo)}</Text>
+            <Text style={styles.replyBarText} numberOfLines={1}>{replyLabel(replyTo, t)}</Text>
           </View>
           <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8}><Ionicons name="close" size={20} color={colors.textMuted} /></TouchableOpacity>
         </View>
@@ -720,7 +722,7 @@ const GroupDetail = ({ route, navigation }) => {
           {isRecording ? (
             <>
               <TouchableOpacity style={styles.iconBtn} onPress={() => stopRecording(true)}><Ionicons name="trash-outline" size={24} color={colors.error} /></TouchableOpacity>
-              <View style={styles.recordingInfo}><View style={styles.recDot} /><Text style={styles.recText}>Recording… {fmtDuration(recordSecs)}</Text></View>
+              <View style={styles.recordingInfo}><View style={styles.recDot} /><Text style={styles.recText}>{t('group.detail.recording', { time: fmtDuration(recordSecs) })}</Text></View>
               <TouchableOpacity style={styles.sendBtn} onPress={() => stopRecording(false)}><Ionicons name="send" size={18} color={colors.white} /></TouchableOpacity>
             </>
           ) : (
@@ -809,7 +811,7 @@ const GroupDetail = ({ route, navigation }) => {
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle} numberOfLines={1}>{group?.name || 'Group'}</Text>
-            <Text style={styles.sheetSubtitle}>{group?.member_count ?? 0} members{group?.is_private ? ' · Private' : ''}</Text>
+            <Text style={styles.sheetSubtitle}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
 
             {isMember && (
               <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={goMembers}>

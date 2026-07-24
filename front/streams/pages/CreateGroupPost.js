@@ -443,7 +443,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
               />
               <View style={styles.userText}>
                 <Text style={styles.username}>
-                  {currentUser?.username || 'User'}
+                  {currentUser?.username || t('group.post.userFallback')}
                 </Text>
                 <Text style={styles.postingTo}>{t('group.post.create')}</Text>
               </View>

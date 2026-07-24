@@ -50,7 +50,7 @@ const GroupList = ({ navigation }) => {
     } catch (error) {
       console.error('Failed to load groups:', error);
       Alert.alert(
-        'Error',
+        t('common.error'),
         error.detail || error.message || t('group.list.loadFailed')
       );
       throw error;
@@ -109,12 +109,12 @@ const GroupList = ({ navigation }) => {
 
   const handleDeleteGroup = useCallback(async (group) => {
     Alert.alert(
-      'Delete Group',
-      `Are you sure you want to delete "${group.name}"? This action cannot be undone.`,
+      t('group.create.deleteTitle'),
+      t('group.list.deleteConfirm', { name: group.name }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -123,7 +123,7 @@ const GroupList = ({ navigation }) => {
             } catch (error) {
               console.error('Failed to delete group:', error);
               Alert.alert(
-                'Error',
+                t('common.error'),
                 error.detail || error.message || t('group.list.deleteFailed')
               );
             }
@@ -185,7 +185,7 @@ const GroupList = ({ navigation }) => {
 
   const emptyCopy = {
     public: { title: t('group.list.noPublic'), sub: t('group.list.noPublicSub') },
-    private: { title: 'No private groups', sub: t('group.list.privateNote') },
+    private: { title: t('group.list.noPrivate'), sub: t('group.list.privateNote') },
     mine: { title: t('group.list.notInAny'), sub: t('group.list.notInAnySub') },
   }[activeTab];
 

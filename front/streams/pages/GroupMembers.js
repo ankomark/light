@@ -28,9 +28,9 @@ const GroupMemberItem = ({ member, isCreator, canManage, isSelf, onPress }) => {
     />
     <View style={styles.memberInfo}>
       <Text style={styles.memberName} numberOfLines={1}>
-        {member.user?.username || 'Unknown User'}{isSelf ? ' (You)' : ''}
+        {member.user?.username || t('group.members.unknownUser')}{isSelf ? t('group.members.youSuffix') : ''}
       </Text>
-      <Text style={styles.memberSub}>{isCreator ? 'Group owner' : member.is_admin ? 'Group admin' : 'Member'}</Text>
+      <Text style={styles.memberSub}>{isCreator ? t('group.members.roleOwner') : member.is_admin ? t('group.members.roleAdmin') : t('group.members.roleMember')}</Text>
     </View>
     {isCreator ? (
       <View style={[styles.badge, styles.ownerBadge]}>
@@ -121,8 +121,8 @@ const GroupMembers = (props) => {
               <Text style={styles.title}>{t('group.members.title')}</Text>
               {!loading && !error && (
                 <Text style={styles.subtitle}>
-                  {members.length} {members.length === 1 ? 'person' : 'people'}
-                  {isAdmin ? '  ·  Tap a member to manage' : ''}
+                  {members.length} {members.length === 1 ? t('group.members.person') : t('group.members.people')}
+                  {isAdmin ? t('group.members.tapToManage') : ''}
                 </Text>
               )}
             </View>
@@ -184,8 +184,8 @@ const GroupMembers = (props) => {
                   style={styles.sheetAvatar}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.sheetTitle} numberOfLines={1}>{am?.user?.username || 'Member'}</Text>
-                  <Text style={styles.sheetSubtitle}>{amIsCreator ? 'Group owner' : am?.is_admin ? 'Group admin' : 'Member'}</Text>
+                  <Text style={styles.sheetTitle} numberOfLines={1}>{am?.user?.username || t('group.members.roleMember')}</Text>
+                  <Text style={styles.sheetSubtitle}>{amIsCreator ? t('group.members.roleOwner') : am?.is_admin ? t('group.members.roleAdmin') : t('group.members.roleMember')}</Text>
                 </View>
               </View>
 
@@ -235,7 +235,7 @@ const GroupMembers = (props) => {
           <Pressable style={styles.confirmBackdrop} onPress={() => setConfirmRemove(null)}>
             <Pressable style={styles.confirmCard}>
               <View style={styles.confirmIcon}><Ionicons name="person-remove-outline" size={26} color={colors.error} /></View>
-              <Text style={styles.confirmTitle} numberOfLines={2}>Remove {confirmRemove?.user?.username}?</Text>
+              <Text style={styles.confirmTitle} numberOfLines={2}>{t('group.members.removeTitle', { name: confirmRemove?.user?.username })}</Text>
               <Text style={styles.confirmText}>{t('group.members.removeBody')}</Text>
               <View style={styles.confirmActions}>
                 <TouchableOpacity style={[styles.confirmBtn, styles.confirmCancelBtn]} activeOpacity={0.85} onPress={() => setConfirmRemove(null)}>
