@@ -89,13 +89,13 @@ class ProductSerializer(serializers.ModelSerializer):
     # they degrade to a direct count/avg rather than silently reporting zero.
     def get_average_rating(self, obj):
         avg = getattr(obj, 'avg_rating', None)
-        if avg is None:
-            avg = obj.reviews.aggregate(v=Avg('rating'))['v']
+        if avg is None:  # unannotated path — exclude removed reviews too
+            avg = obj.reviews.filter(is_removed=False).aggregate(v=Avg('rating'))['v']
         return round(float(avg), 1) if avg is not None else None
 
     def get_review_count(self, obj):
         count = getattr(obj, 'num_reviews', None)
-        return count if count is not None else obj.reviews.count()
+        return count if count is not None else obj.reviews.filter(is_removed=False).count()
 
     def get_is_wishlisted(self, obj):
         annotated = getattr(obj, 'wishlisted_by_me', None)

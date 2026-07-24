@@ -437,7 +437,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         # super admin authored (an empty exclude set is a no-op for super admins).
         return (
             GroupPost.objects
-            .filter(group=group)
+            .filter(group=group, is_removed=False)  # hide moderator takedowns
             .exclude(user_id__in=self._hidden_ids())
             .select_related('user__profile', 'reply_to__user')
             .prefetch_related('attachments', 'reactions')

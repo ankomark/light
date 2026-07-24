@@ -23,7 +23,13 @@ const FILTERS = [
 ];
 
 // Targets we can soft-remove (users are handled via suspend/ban on the Users tab).
-const REMOVABLE = new Set(['post', 'comment', 'track']);
+// Every content type the backend can soft-remove from a report. Must stay in
+// step with _CONTENT_MODELS on the server.
+const REMOVABLE = new Set([
+  'post', 'comment', 'track', 'trackcomment', 'group', 'story',
+  'publication', 'product', 'productreview', 'grouppost',
+  'choirmessage', 'churchmessage', 'church', 'choir', 'videostudio', 'mediastation',
+]);
 
 const TargetPreview = ({ target }) => {
   const { t } = useI18n();

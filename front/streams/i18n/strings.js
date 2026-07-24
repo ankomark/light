@@ -511,6 +511,9 @@ export const STRINGS = {
     'artists.changeImage': 'Change Profile Image',
     'studios.saveFailed': 'Could not save the studio. Please try again.',
 
+    'common.report': 'Report',
+    'market.product.report': 'Report this product',
+    'pubDetail.report': 'Report this publication',
     'common.close': 'Close',
     'common.next': 'Next',
     'common.previous': 'Previous',
@@ -1730,6 +1733,9 @@ export const STRINGS = {
     'artists.changeImage': 'Badilisha Picha ya Wasifu',
     'studios.saveFailed': 'Imeshindwa kuhifadhi studio. Tafadhali jaribu tena.',
 
+    'common.report': 'Ripoti',
+    'market.product.report': 'Ripoti bidhaa hii',
+    'pubDetail.report': 'Ripoti chapisho hili',
     'common.close': 'Funga',
     'common.next': 'Ifuatayo',
     'common.previous': 'Iliyotangulia',

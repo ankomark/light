@@ -666,7 +666,14 @@ class ReportViewSet(viewsets.ViewSet):
         reason = request.data.get('reason', '')
         description = request.data.get('description', '')
 
-        valid_types = {'post', 'user', 'track', 'comment', 'group'}
+        # Every moderatable content type (mirrors _CONTENT_MODELS) plus 'user'.
+        # Admins can act on all of these from the reports screen.
+        valid_types = {
+            'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
+            'publication', 'product', 'productreview', 'grouppost',
+            'choirmessage', 'churchmessage', 'church', 'choir',
+            'videostudio', 'mediastation',
+        }
         if content_type not in valid_types:
             return Response({'error': f'content_type must be one of {list(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)
         if not object_id:
@@ -792,6 +799,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = (
             Publication.objects
+            .filter(is_removed=False)  # hide moderator takedowns (author included)
             .select_related('author', 'author__profile')
             .annotate(
                 chapter_count_anno=Count('chapters', distinct=True),

@@ -19,6 +19,16 @@ const TYPES = [
   { key: 'trackcomment', label: 'Track comments' },
   { key: 'group', label: 'Groups' },
   { key: 'story', label: 'Stories' },
+  { key: 'publication', label: 'Publications' },
+  { key: 'product', label: 'Products' },
+  { key: 'productreview', label: 'Product reviews' },
+  { key: 'grouppost', label: 'Group messages' },
+  { key: 'choirmessage', label: 'Choir messages' },
+  { key: 'churchmessage', label: 'Church messages' },
+  { key: 'church', label: 'Churches' },
+  { key: 'choir', label: 'Choirs' },
+  { key: 'videostudio', label: 'Studios' },
+  { key: 'mediastation', label: 'Media stations' },
 ];
 
 const AdminContent = () => {

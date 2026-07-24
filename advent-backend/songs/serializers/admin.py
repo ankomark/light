@@ -45,6 +45,22 @@ def _format_group(g):
     return {'type': 'group', 'id': g.id, 'name': getattr(g, 'name', '')}
 
 
+def _format_publication(p):
+    return {
+        'type': 'publication', 'id': p.id, 'title': (p.title or '')[:140],
+        'author': SimpleUserSerializer(p.author).data,
+        'is_removed': p.is_removed,
+    }
+
+
+def _format_product(p):
+    return {
+        'type': 'product', 'id': p.id, 'title': (p.title or '')[:140],
+        'author': SimpleUserSerializer(p.seller).data,
+        'is_removed': p.is_removed,
+    }
+
+
 # content_type -> (queryset builder, formatter). select_related pulls the
 # author (+ its profile for the avatar) so a page of targets is a query per
 # TYPE, not per report.
@@ -54,6 +70,8 @@ _TARGET_FETCHERS = {
     'track':   (lambda ids: Track.objects.filter(id__in=ids).select_related('artist__profile'),      _format_track),
     'user':    (lambda ids: User.objects.filter(id__in=ids).select_related('profile'),               _format_user),
     'group':   (lambda ids: Group.objects.filter(id__in=ids),                                        _format_group),
+    'publication': (lambda ids: Publication.objects.filter(id__in=ids).select_related('author__profile'), _format_publication),
+    'product': (lambda ids: Product.objects.filter(id__in=ids).select_related('seller__profile'),    _format_product),
 }
 
 
@@ -262,3 +280,91 @@ class AdminContentStorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Story
         fields = ['id', 'caption', 'content_type', 'is_removed', 'created_at', 'author']
+
+
+# ── Content-management serializers for the extended moderation set ────────────
+# (publications, marketplace, community chat, directory listings). Each exposes
+# author + a preview field + is_removed, matching the shape the admin panel
+# renders (caption|content|title|name).
+from ..models import Publication  # not in the common star import
+
+
+class AdminContentPublicationSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = Publication
+        fields = ['id', 'title', 'summary', 'status', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentProductSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='seller', read_only=True)
+
+    class Meta:
+        model = Product
+        fields = ['id', 'title', 'price', 'currency', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentProductReviewSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='reviewer', read_only=True)
+    content = serializers.CharField(source='comment', read_only=True)
+
+    class Meta:
+        model = ProductReview
+        fields = ['id', 'content', 'rating', 'product', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentGroupPostSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='user', read_only=True)
+
+    class Meta:
+        model = GroupPost
+        fields = ['id', 'content', 'message_type', 'group', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentChoirMessageSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='sender', read_only=True)
+
+    class Meta:
+        model = ChoirMessage
+        fields = ['id', 'content', 'choir', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentChurchMessageSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='sender', read_only=True)
+
+    class Meta:
+        model = ChurchMessage
+        fields = ['id', 'content', 'church', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentChurchSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = Church
+        fields = ['id', 'name', 'country', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentChoirSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = Choir
+        fields = ['id', 'name', 'location', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentVideostudioSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = Videostudio
+        fields = ['id', 'name', 'location', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentMediaStationSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = MediaStation
+        fields = ['id', 'name', 'type', 'is_removed', 'created_at', 'author']

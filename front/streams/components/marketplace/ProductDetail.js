@@ -24,6 +24,7 @@ import {
   addProductReview,
 } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+import ReportModal from '../ReportModal';
 import { useI18n } from '../../context/I18nContext';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
@@ -42,6 +43,7 @@ const ProductDetail = () => {
   const [myRating, setMyRating] = useState(0);
   const [myComment, setMyComment] = useState('');
   const [postingReview, setPostingReview] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
   const { currentUser } = useAuth();
   const { t } = useI18n();
 
@@ -438,6 +440,23 @@ const ProductDetail = () => {
         <Icon name="share-alt" size={20} color="#1D478B" />
         <Text style={styles.shareButtonText}>{t('market.product.share')}</Text>
       </TouchableOpacity>
+
+      {!product.is_owner && (
+        <TouchableOpacity
+          style={styles.shareButton}
+          onPress={() => setReportVisible(true)}
+        >
+          <Icon name="flag-o" size={18} color="#B00020" />
+          <Text style={[styles.shareButtonText, { color: '#B00020' }]}>{t('market.product.report')}</Text>
+        </TouchableOpacity>
+      )}
+
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        contentType="product"
+        objectId={product.id}
+      />
 
       {/* Reviews */}
       <View style={styles.reviewsContainer}>

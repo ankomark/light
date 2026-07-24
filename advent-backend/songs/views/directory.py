@@ -28,7 +28,7 @@ class MediaStationViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        qs = MediaStation.objects.all()
+        qs = MediaStation.objects.filter(is_removed=False)
         station_type = self.request.query_params.get('type')
         if station_type in ('TV', 'Radio', 'Podcast'):
             qs = qs.filter(type=station_type)
@@ -103,7 +103,7 @@ class AdminNoteViewSet(viewsets.ModelViewSet):
 
 class ChurchViewSet(viewsets.ModelViewSet):
     # select_related avoids an N+1 on created_by during listing.
-    queryset = Church.objects.select_related('created_by', 'created_by__profile').order_by('-created_at')
+    queryset = Church.objects.filter(is_removed=False).select_related('created_by', 'created_by__profile').order_by('-created_at')
     serializer_class = ChurchSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
@@ -396,6 +396,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
         # (or reaction) a super admin authored.
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         qs = (church.messages
+              .filter(is_removed=False)  # hide moderator takedowns
               .exclude(sender_id__in=hidden)
               .select_related('sender__profile', 'reply_to__sender')
               .prefetch_related('reactions')
@@ -446,7 +447,7 @@ from rest_framework.exceptions import PermissionDenied
 
 class VideoStudioViewSet(viewsets.ModelViewSet):
     # select_related avoids an N+1 on created_by (+ its profile) during listing.
-    queryset = Videostudio.objects.select_related('created_by', 'created_by__profile').order_by('-created_at')
+    queryset = Videostudio.objects.filter(is_removed=False).select_related('created_by', 'created_by__profile').order_by('-created_at')
     serializer_class = VideoStudioSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
@@ -518,7 +519,7 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
 
 class ChoirViewSet(viewsets.ModelViewSet):
     # select_related avoids an N+1 on created_by (+ its profile) during listing.
-    queryset = Choir.objects.select_related('created_by', 'created_by__profile').order_by('-created_at')
+    queryset = Choir.objects.filter(is_removed=False).select_related('created_by', 'created_by__profile').order_by('-created_at')
     serializer_class = ChoirSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
@@ -880,6 +881,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
         # (or reaction) a super admin authored.
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         qs = (choir.messages
+              .filter(is_removed=False)  # hide moderator takedowns
               .exclude(sender_id__in=hidden)
               .select_related('sender__profile', 'reply_to__sender')
               .prefetch_related('reactions')

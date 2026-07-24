@@ -16,6 +16,16 @@ from ..serializers import (
     AdminContentTrackCommentSerializer,
     AdminContentGroupSerializer,
     AdminContentStorySerializer,
+    AdminContentPublicationSerializer,
+    AdminContentProductSerializer,
+    AdminContentProductReviewSerializer,
+    AdminContentGroupPostSerializer,
+    AdminContentChoirMessageSerializer,
+    AdminContentChurchMessageSerializer,
+    AdminContentChurchSerializer,
+    AdminContentChoirSerializer,
+    AdminContentVideostudioSerializer,
+    AdminContentMediaStationSerializer,
 )
 
 # Strikes at/after which a warning auto-escalates to a temporary suspension.
@@ -51,6 +61,18 @@ _CONTENT_MODELS = {
     'trackcomment': Comment,      # comments on tracks
     'group': Group,
     'story': Story,
+    # Extended moderation set — every remaining user-generated content type now
+    # carries is_removed and is takedown/restore-able here (and via reports).
+    'publication': Publication,   # long-form articles
+    'product': Product,           # marketplace listings
+    'productreview': ProductReview,
+    'grouppost': GroupPost,       # group chat messages
+    'choirmessage': ChoirMessage,
+    'churchmessage': ChurchMessage,
+    'church': Church,             # directory listings
+    'choir': Choir,
+    'videostudio': Videostudio,
+    'mediastation': MediaStation,
 }
 
 
@@ -512,6 +534,16 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         'trackcomment': ('user',   AdminContentTrackCommentSerializer,['content__icontains', 'user__username__icontains']),
         'group':        ('creator', AdminContentGroupSerializer,      ['name__icontains', 'description__icontains']),
         'story':        ('user',   AdminContentStorySerializer,       ['caption__icontains', 'user__username__icontains']),
+        'publication':  ('author',  AdminContentPublicationSerializer, ['title__icontains', 'summary__icontains', 'author__username__icontains']),
+        'product':      ('seller',  AdminContentProductSerializer,     ['title__icontains', 'seller__username__icontains']),
+        'productreview': ('reviewer', AdminContentProductReviewSerializer, ['comment__icontains', 'reviewer__username__icontains']),
+        'grouppost':    ('user',   AdminContentGroupPostSerializer,   ['content__icontains', 'user__username__icontains']),
+        'choirmessage': ('sender', AdminContentChoirMessageSerializer, ['content__icontains', 'sender__username__icontains']),
+        'churchmessage': ('sender', AdminContentChurchMessageSerializer, ['content__icontains', 'sender__username__icontains']),
+        'church':       ('created_by', AdminContentChurchSerializer,  ['name__icontains', 'country__icontains']),
+        'choir':        ('created_by', AdminContentChoirSerializer,   ['name__icontains', 'location__icontains']),
+        'videostudio':  ('created_by', AdminContentVideostudioSerializer, ['name__icontains', 'location__icontains']),
+        'mediastation': ('created_by', AdminContentMediaStationSerializer, ['name__icontains']),
     }
 
     def list(self, request):

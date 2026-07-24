@@ -636,6 +636,9 @@ class DeviceToken(models.Model):
 
 
 class Church(models.Model):
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     name = models.CharField(max_length=200)
     country = models.CharField(max_length=100)
     county = models.CharField(max_length=100, blank=True, null=True)
@@ -870,6 +873,9 @@ class WatchEvent(models.Model):
 
 
 class MediaStation(models.Model):
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     STATION_TYPES = [('TV', 'TV'), ('Radio', 'Radio'), ('Podcast', 'Podcast')]
 
     name = models.CharField(max_length=200)
@@ -896,6 +902,9 @@ class MediaStation(models.Model):
 
 
 class Videostudio(models.Model):
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     SERVICE_TYPES = (
         ('music_video', 'Music Video Production'),
         ('live_event', 'Live Event Coverage'),
@@ -969,6 +978,9 @@ class Videostudio(models.Model):
         ordering = ['-created_at']
 
 class Choir(models.Model):
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     GENRE_CHOICES = (
         ('gospel', 'Gospel'),
         ('contemporary', 'Contemporary Christian'),
@@ -1044,6 +1056,9 @@ class ChoirJoinRequest(models.Model):
 class ChoirMessage(models.Model):
     """A message in a choir community chat (text / image / file / voice note /
     system notice). Attachments ride as base64 data URIs, matching GroupPost."""
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     MESSAGE_TYPES = [
         ('text', 'Text'),
         ('image', 'Image'),
@@ -1126,6 +1141,9 @@ class ChurchJoinRequest(models.Model):
 class ChurchMessage(models.Model):
     """A message in a church community chat (text / image / file / voice note /
     system notice). Attachments ride as base64 data URIs, matching ChoirMessage."""
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     MESSAGE_TYPES = [
         ('text', 'Text'),
         ('image', 'Image'),
@@ -1235,6 +1253,9 @@ class GroupJoinRequest(models.Model):
 
 class GroupPost(models.Model):
     """A message in a group chat (text / image / file / voice / system notice)."""
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     MESSAGE_TYPES = [
         ('text', 'Text'),
         ('image', 'Image'),
@@ -1321,6 +1342,9 @@ class ProductCategory(models.Model):
 
 # Product Model
 class Product(models.Model):
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     CONDITION_CHOICES = [
         ('NEW', 'New'),
         ('USED', 'Used'),
@@ -1521,6 +1545,9 @@ class OrderItem(models.Model):
 
 # Product Review Model
 class ProductReview(models.Model):
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
     reviewer = models.ForeignKey('User', on_delete=models.CASCADE, related_name='product_reviews')
     rating = models.PositiveIntegerField(choices=[(i, str(i)) for i in range(1, 6)])
@@ -1683,6 +1710,9 @@ class LiveEvent(models.Model):
 class Publication(models.Model):
     """A long-form article / book that a user publishes. Content lives in
     ordered Chapters (markdown). Drafts are visible only to the author."""
+    # Soft-removed by a moderator (remove_content). Excluded from public
+    # queries; the row and its author survive so it can be restored.
+    is_removed = models.BooleanField(default=False, db_index=True)
     STATUS_CHOICES = [('draft', 'Draft'), ('published', 'Published')]
     CATEGORY_CHOICES = [
         ('devotional', 'Devotional'),

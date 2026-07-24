@@ -9,11 +9,13 @@ import {
   fetchPublication, deletePublication, togglePublicationLike, togglePublicationBookmark,
 } from '../services/api';
 import FollowButton from '../components/FollowButton';
+import ReportModal from '../components/ReportModal';
 import { categoryLabel } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
 const PublicationDetail = ({ route, navigation }) => {
+  const [reportVisible, setReportVisible] = useState(false);
   const { t } = useI18n();
   const { id } = route.params;
   const [pub, setPub] = useState(null);
@@ -173,6 +175,12 @@ const PublicationDetail = ({ route, navigation }) => {
             />
             <Text style={styles.actionText}>{bookmarked ? 'Saved' : 'Save'}</Text>
           </TouchableOpacity>
+          {!pub.is_owner && (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => setReportVisible(true)} activeOpacity={0.8}>
+              <Ionicons name="flag-outline" size={19} color={colors.error} />
+              <Text style={[styles.actionText, { color: colors.error }]}>{t('common.report')}</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {pub.summary ? <Text style={styles.summary}>{pub.summary}</Text> : null}
@@ -212,6 +220,13 @@ const PublicationDetail = ({ route, navigation }) => {
         )}
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
+
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        contentType="publication"
+        objectId={pub.id}
+      />
     </SafeAreaView>
   );
 };

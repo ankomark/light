@@ -122,13 +122,15 @@ class ProductViewSet(viewsets.ModelViewSet):
         # handful of queries instead of one-per-product-per-relation (N+1).
         queryset = (
             super().get_queryset()
+            .filter(is_removed=False)  # hide moderator takedowns
             .select_related('seller', 'seller__profile', 'category')
             .prefetch_related('images')
             # Rating + wishlist state as annotations, so a page of products costs
             # a couple of joins instead of 3 extra queries per product.
             .annotate(
-                avg_rating=Avg('reviews__rating'),
-                num_reviews=Count('reviews', distinct=True),
+                # A removed review must not count toward the score or the count.
+                avg_rating=Avg('reviews__rating', filter=Q(reviews__is_removed=False)),
+                num_reviews=Count('reviews', filter=Q(reviews__is_removed=False), distinct=True),
             )
         )
         user = self.request.user
@@ -533,7 +535,11 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         slug = self._product_slug()
-        queryset = ProductReview.objects.select_related('reviewer', 'reviewer__profile')
+        queryset = (
+            ProductReview.objects
+            .filter(is_removed=False)  # hide moderator takedowns
+            .select_related('reviewer', 'reviewer__profile')
+        )
         if slug:
             return queryset.filter(product__slug=slug)
         return queryset.none()  # never leak the whole review table
