@@ -60,6 +60,9 @@ const GroupMessageRow = ({
   onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry,
 }) => {
   const { t } = useI18n();
+  // Natural aspect ratio for image bubbles, learned on load (clamped so extreme
+  // panoramas/columns stay sensible). Until known, a square placeholder shows.
+  const [imgRatio, setImgRatio] = React.useState(null);
   const tx = useRef(new Animated.Value(0)).current;
   const armed = useRef(false);
   const pan = useRef(
@@ -131,13 +134,22 @@ const GroupMessageRow = ({
 
               {type === 'image' && item.attachment ? (
                 <Pressable onPress={() => (sending ? null : onOpenImage(item.attachment))}>
-                  <Image source={{ uri: item.attachment }} style={styles.imageMsg} contentFit="cover" transition={150} />
+                  <Image
+                    source={{ uri: item.attachment }}
+                    style={[styles.imageMsg, imgRatio ? { aspectRatio: imgRatio, height: undefined } : null]}
+                    contentFit="cover"
+                    transition={200}
+                    onLoad={(e) => {
+                      const s = e?.source;
+                      if (s?.width && s?.height) setImgRatio(Math.max(0.62, Math.min(1.9, s.width / s.height)));
+                    }}
+                  />
                   {sending && <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>}
                 </Pressable>
               ) : type === 'file' ? (
                 <Pressable style={styles.fileRow} onPress={() => onOpenFile(item)} disabled={sending}>
                   <View style={styles.fileIcon}><Ionicons name="document-text" size={22} color={colors.primary} /></View>
-                  <Text style={[styles.fileName, isOwn ? styles.txtOwn : styles.txtOther]} numberOfLines={1}>{item.file_name || 'File'}</Text>
+                  <Text style={[styles.fileName, isOwn ? styles.txtOwn : styles.txtOther]} numberOfLines={1}>{item.file_name || t('group.preview.message')}</Text>
                   <Ionicons name="download-outline" size={18} color={isOwn ? 'rgba(255,255,255,0.8)' : colors.textMuted} />
                 </Pressable>
               ) : type === 'audio' ? (
