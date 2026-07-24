@@ -79,6 +79,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             anno_member_count=Coalesce(Subquery(member_count, output_field=IntegerField()), 0),
             anno_is_member=Exists(my_member),
             anno_is_admin=Exists(my_member.filter(is_admin=True)),
+            anno_is_moderator=Exists(my_member.filter(is_moderator=True)),
             anno_has_pending=Exists(pending),
             anno_unread=Coalesce(Subquery(unread, output_field=IntegerField()), 0),
             anno_last_id=Subquery(last.values('id')[:1]),
@@ -278,6 +279,30 @@ class GroupViewSet(viewsets.ModelViewSet):
             group_system_message(group, f"{target.user.username} {verb}", request.user)
         return Response(GroupMemberSerializer(target, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='set-moderator')
+    def set_moderator(self, request, slug=None):
+        """Promote a member to moderator or dismiss them. Admins only. Moderators
+        can moderate content but not manage membership or settings."""
+        group = self.get_object()
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
+            raise PermissionDenied("Only admins can change roles")
+
+        user_id = request.data.get('user_id')
+        make_mod = bool(request.data.get('is_moderator', True))
+        if not user_id:
+            return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        target = GroupMember.objects.filter(group=group, user_id=user_id).select_related('user').first()
+        if not target:
+            return Response({"error": "That person is not a member"}, status=status.HTTP_404_NOT_FOUND)
+
+        if target.is_moderator != make_mod:
+            target.is_moderator = make_mod
+            target.save(update_fields=['is_moderator'])
+            verb = "is now a moderator" if make_mod else "is no longer a moderator"
+            group_system_message(group, f"{target.user.username} {verb}", request.user)
+        return Response(GroupMemberSerializer(target, context={'request': request}).data)
+
     @action(detail=True, methods=['post'], url_path='posting-policy')
     def set_posting_policy(self, request, slug=None):
         """Toggle the WhatsApp-style 'Only admins can send messages' lock. Admins only."""
@@ -446,6 +471,14 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             self.throttle_scope = 'group_react'
         return super().get_throttles()
 
+    def get_permissions(self):
+        # Moderation actions (delete/pin/unpin) do their own author-or-moderator
+        # check, so drop IsOwnerOrReadOnly — otherwise a mod/admin couldn't act on
+        # someone else's message. Editing stays owner-only.
+        if self.action in ('destroy', 'pin_message', 'unpin_message'):
+            self.permission_classes = [IsAuthenticated]
+        return super().get_permissions()
+
     def _hidden_ids(self):
         """Super-admin user ids to hide from this viewer (empty when the viewer
         is themselves a super admin — they see everyone)."""
@@ -557,11 +590,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.user != request.user and not request.user.is_super_admin and not GroupMember.objects.filter(
-            group=instance.group,
-            user=request.user,
-            is_admin=True
-        ).exists():
+        # The author, or any moderator/admin, may delete a message.
+        if instance.user_id != request.user.id and not self._is_group_mod(instance.group):
             return Response(
                 {"error": "You don't have permission to delete this post"},
                 status=status.HTTP_403_FORBIDDEN
@@ -600,6 +630,12 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         u = self.request.user
         return u.is_super_admin or GroupMember.objects.filter(
             group=group, user=u, is_admin=True).exists()
+
+    def _is_group_mod(self, group):
+        """Admins AND moderators can moderate content (delete any message, pin)."""
+        u = self.request.user
+        return u.is_super_admin or GroupMember.objects.filter(
+            group=group, user=u).filter(Q(is_admin=True) | Q(is_moderator=True)).exists()
 
     @action(detail=True, methods=['get'], url_path='receipts')
     def receipts(self, request, *args, **kwargs):
@@ -645,7 +681,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     def pin_message(self, request, *args, **kwargs):
         """Admin pins this message to the top of the chat (one per group)."""
         post = self.get_object()
-        if not self._is_group_admin(post.group):
+        if not self._is_group_mod(post.group):
             return Response({'error': 'Only admins can pin messages'},
                             status=status.HTTP_403_FORBIDDEN)
         group = post.group
@@ -658,7 +694,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='unpin')
     def unpin_message(self, request, *args, **kwargs):
         post = self.get_object()
-        if not self._is_group_admin(post.group):
+        if not self._is_group_mod(post.group):
             return Response({'error': 'Only admins can unpin messages'},
                             status=status.HTTP_403_FORBIDDEN)
         group = post.group

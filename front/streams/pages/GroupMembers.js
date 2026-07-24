@@ -3,7 +3,7 @@ import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOp
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fetchGroupMembers, removeGroupMember, setGroupAdmin } from '../services/api';
+import { fetchGroupMembers, removeGroupMember, setGroupAdmin, setGroupModerator } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -30,7 +30,7 @@ const GroupMemberItem = ({ member, isCreator, canManage, isSelf, onPress }) => {
       <Text style={styles.memberName} numberOfLines={1}>
         {member.user?.username || t('group.members.unknownUser')}{isSelf ? t('group.members.youSuffix') : ''}
       </Text>
-      <Text style={styles.memberSub}>{isCreator ? t('group.members.roleOwner') : member.is_admin ? t('group.members.roleAdmin') : t('group.members.roleMember')}</Text>
+      <Text style={styles.memberSub}>{isCreator ? t('group.members.roleOwner') : member.is_admin ? t('group.members.roleAdmin') : member.is_moderator ? t('group.members.roleModerator') : t('group.members.roleMember')}</Text>
     </View>
     {isCreator ? (
       <View style={[styles.badge, styles.ownerBadge]}>
@@ -41,6 +41,11 @@ const GroupMemberItem = ({ member, isCreator, canManage, isSelf, onPress }) => {
       <View style={styles.badge}>
         <Ionicons name="shield-checkmark" size={12} color={colors.accent} />
         <Text style={styles.badgeText}>{t('common.admin')}</Text>
+      </View>
+    ) : member.is_moderator ? (
+      <View style={styles.badge}>
+        <Ionicons name="ribbon" size={12} color={colors.accent} />
+        <Text style={styles.badgeText}>{t('common.moderator')}</Text>
       </View>
     ) : null}
     {canManage && !isSelf && (
@@ -87,6 +92,19 @@ const GroupMembers = (props) => {
     setBusy(true);
     try {
       await setGroupAdmin(groupSlug, member.user.id, makeAdmin);
+      await load();
+    } catch (e) {
+      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.members.updateFailed'));
+    } finally {
+      setBusy(false);
+    }
+  }, [groupSlug, load, t]);
+
+  const changeModerator = useCallback(async (member, makeMod) => {
+    setActionMember(null);
+    setBusy(true);
+    try {
+      await setGroupModerator(groupSlug, member.user.id, makeMod);
       await load();
     } catch (e) {
       Alert.alert(t('common.error'), e?.response?.data?.error || t('group.members.updateFailed'));
@@ -185,7 +203,7 @@ const GroupMembers = (props) => {
                 />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.sheetTitle} numberOfLines={1}>{am?.user?.username || t('group.members.roleMember')}</Text>
-                  <Text style={styles.sheetSubtitle}>{amIsCreator ? t('group.members.roleOwner') : am?.is_admin ? t('group.members.roleAdmin') : t('group.members.roleMember')}</Text>
+                  <Text style={styles.sheetSubtitle}>{amIsCreator ? t('group.members.roleOwner') : am?.is_admin ? t('group.members.roleAdmin') : am?.is_moderator ? t('group.members.roleModerator') : t('group.members.roleMember')}</Text>
                 </View>
               </View>
 
@@ -205,6 +223,26 @@ const GroupMembers = (props) => {
                   <View style={styles.sheetOptionText}>
                     <Text style={styles.sheetOptionLabel}>{t('group.members.dismissAdmin')}</Text>
                     <Text style={styles.sheetOptionHint}>{t('group.members.revokeAdmin')}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+
+              {!am?.is_admin && !am?.is_moderator && (
+                <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => changeModerator(am, true)}>
+                  <View style={[styles.sheetIcon, styles.sheetIconPhoto]}><Ionicons name="ribbon" size={22} color={colors.accent} /></View>
+                  <View style={styles.sheetOptionText}>
+                    <Text style={styles.sheetOptionLabel}>{t('group.members.makeModerator')}</Text>
+                    <Text style={styles.sheetOptionHint}>{t('group.members.canModerate')}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+
+              {am?.is_moderator && !am?.is_admin && (
+                <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={() => changeModerator(am, false)}>
+                  <View style={[styles.sheetIcon, styles.sheetIconFile]}><Ionicons name="remove-circle-outline" size={22} color={colors.primary} /></View>
+                  <View style={styles.sheetOptionText}>
+                    <Text style={styles.sheetOptionLabel}>{t('group.members.dismissModerator')}</Text>
+                    <Text style={styles.sheetOptionHint}>{t('group.members.revokeModerator')}</Text>
                   </View>
                 </TouchableOpacity>
               )}

@@ -250,6 +250,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [group, setGroup] = useState(initialGroup || null);
   const [isMember, setIsMember] = useState(initialGroup?.is_member || false);
   const [isAdmin, setIsAdmin] = useState(initialGroup?.is_admin || false);
+  const [isModerator, setIsModerator] = useState(initialGroup?.is_moderator || false);
   const [requested, setRequested] = useState(initialGroup?.has_pending_request || false);
   const [messages, setMessages] = useState([]);
   // When we arrive from the list we already have the group object, so we can
@@ -326,6 +327,7 @@ const GroupDetail = ({ route, navigation }) => {
       setGroup(g);
       setIsMember(g.is_member);
       setIsAdmin(g.is_admin);
+      setIsModerator(g.is_moderator);
       setRequested(!!g.has_pending_request);
       setPinnedMsg(g.pinned_message || null);
       canReadRef.current = !!g.is_member;
@@ -728,7 +730,8 @@ const GroupDetail = ({ route, navigation }) => {
     setMenuMsg(m);
   }, []);
 
-  const canDelete = (m) => !!m && (m.user?.id === currentUser?.id || m.is_owner || isAdmin);
+  const canModerate = isAdmin || isModerator;
+  const canDelete = (m) => !!m && (m.user?.id === currentUser?.id || m.is_owner || canModerate);
   // Only your own, already-saved, text messages can be edited.
   const canEdit = (m) => !!m && m.message_type === 'text'
     && (m.user?.id === currentUser?.id || m.is_owner)
@@ -980,7 +983,7 @@ const GroupDetail = ({ route, navigation }) => {
             <Text style={styles.pinnedTitle}>{t('group.detail.pinnedMessage')}</Text>
             <Text style={styles.pinnedText} numberOfLines={1}>{replyLabel(pinnedMsg, t)}</Text>
           </View>
-          {isAdmin && (
+          {canModerate && (
             <TouchableOpacity onPress={unpinMessage} hitSlop={8}><Ionicons name="close" size={18} color={colors.textMuted} /></TouchableOpacity>
           )}
         </TouchableOpacity>
@@ -1316,7 +1319,7 @@ const GroupDetail = ({ route, navigation }) => {
                 <Text style={styles.menuItemText}>{t('group.detail.edit')}</Text>
               </TouchableOpacity>
             )}
-            {isAdmin && menuMsg && !String(menuMsg.id).startsWith('temp_') && (
+            {canModerate && menuMsg && !String(menuMsg.id).startsWith('temp_') && (
               pinnedMsg && String(pinnedMsg.id) === String(menuMsg.id) ? (
                 <TouchableOpacity style={styles.menuItem} onPress={unpinMessage}>
                   <Ionicons name="remove-circle-outline" size={20} color={colors.textPrimary} />

@@ -208,6 +208,43 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_moderator_role(self):
+        """An admin can appoint a moderator; the moderator can delete others'
+        messages and pin, but can't manage membership. Non-admins can't appoint."""
+        admin = User.objects.create_user('modadmin', 'ma1@x.com', 'x')
+        mod = User.objects.create_user('themod', 'ma2@x.com', 'x')
+        member = User.objects.create_user('plainmember', 'ma3@x.com', 'x')
+        g = Group.objects.create(creator=admin, name='Mod Room', is_private=False)
+        GroupMember.objects.create(group=g, user=admin, is_admin=True)
+        GroupMember.objects.create(group=g, user=mod)
+        GroupMember.objects.create(group=g, user=member)
+
+        # A plain member can't appoint moderators.
+        self.client.force_authenticate(member)
+        self.assertEqual(self.client.post(
+            f'/api/groups/{g.slug}/set-moderator/', {'user_id': mod.id}, format='json').status_code, 403)
+
+        # Admin appoints the moderator.
+        self.client.force_authenticate(admin)
+        res = self.client.post(f'/api/groups/{g.slug}/set-moderator/', {'user_id': mod.id}, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()['is_moderator'])
+        self.assertTrue(self.client.get(f'/api/groups/{g.slug}/').json()['is_moderator'])  # admin is a mod too
+
+        # A member posts; the moderator can delete it.
+        self.client.force_authenticate(member)
+        pid = self.client.post(
+            f'/api/groups/{g.slug}/posts/', {'content': 'oops', 'message_type': 'text'}, format='json').json()['id']
+        self.client.force_authenticate(mod)
+        self.assertEqual(self.client.delete(f'/api/groups/{g.slug}/posts/{pid}/').status_code, 204)
+
+        # The moderator can pin, but can NOT appoint admins (membership management).
+        pid2 = self.client.post(
+            f'/api/groups/{g.slug}/posts/', {'content': 'pin me', 'message_type': 'text'}, format='json').json()['id']
+        self.assertEqual(self.client.post(f'/api/groups/{g.slug}/posts/{pid2}/pin/', {}, format='json').status_code, 200)
+        self.assertEqual(self.client.post(
+            f'/api/groups/{g.slug}/set-admin/', {'user_id': member.id}, format='json').status_code, 403)
+
     def test_join_question_admin_only(self):
         """An admin can set the join prompt; it shows on the group; a member can't."""
         admin = User.objects.create_user('jqadmin', 'jq1@x.com', 'x')

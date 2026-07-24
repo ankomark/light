@@ -1254,6 +1254,9 @@ class GroupMember(models.Model):
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='members')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_memberships')
     is_admin = models.BooleanField(default=False)
+    # Moderators can moderate content (delete any message, pin) but not manage
+    # membership or group settings — a middle tier between member and admin.
+    is_moderator = models.BooleanField(default=False)
     joined_at = models.DateTimeField(auto_now_add=True)
     last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
 

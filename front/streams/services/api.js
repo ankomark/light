@@ -1113,6 +1113,9 @@ export const removeGroupMember = async (slug, userId) =>
 export const setGroupAdmin = async (slug, userId, isAdmin) =>
   apiRequest('post', `/groups/${slug}/set-admin/`, { user_id: userId, is_admin: isAdmin });
 
+export const setGroupModerator = async (slug, userId, isModerator) =>
+  apiRequest('post', `/groups/${slug}/set-moderator/`, { user_id: userId, is_moderator: isModerator });
+
 export const setGroupPostingPolicy = async (slug, onlyAdmins) =>
   apiRequest('post', `/groups/${slug}/posting-policy/`, { only_admins_can_post: onlyAdmins });
 

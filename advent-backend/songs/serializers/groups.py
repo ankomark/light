@@ -19,6 +19,7 @@ class GroupSerializer(serializers.ModelSerializer):
     member_count = serializers.SerializerMethodField()
     is_member = serializers.SerializerMethodField()
     is_admin = serializers.SerializerMethodField()
+    is_moderator = serializers.SerializerMethodField()
     has_pending_request = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
@@ -96,6 +97,15 @@ class GroupSerializer(serializers.ModelSerializer):
         m = self._membership(obj)
         return bool(m and m.is_admin)
 
+    def get_is_moderator(self, obj):
+        if self._is_super():
+            return True
+        anno_mod = getattr(obj, 'anno_is_moderator', None)
+        if anno_mod is not None:
+            return bool(anno_mod or getattr(obj, 'anno_is_admin', False))
+        m = self._membership(obj)
+        return bool(m and (m.is_moderator or m.is_admin))
+
     def get_has_pending_request(self, obj):
         v = getattr(obj, 'anno_has_pending', None)
         if v is not None:
@@ -159,7 +169,7 @@ class GroupMemberSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = GroupMember
-        fields = ['id', 'user', 'is_admin', 'joined_at']
+        fields = ['id', 'user', 'is_admin', 'is_moderator', 'joined_at']
     
     def get_user(self, obj):
         try:
