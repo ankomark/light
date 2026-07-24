@@ -23,6 +23,7 @@ import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
 } from '../services/api';
+import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
 import { createGroupSocket } from '../services/groupSocket';
 import { useAuth } from '../context/useAuth';
@@ -139,6 +140,8 @@ const GroupMessageRow = ({
                     style={[styles.imageMsg, imgRatio ? { aspectRatio: imgRatio, height: undefined } : null]}
                     contentFit="cover"
                     transition={200}
+                    placeholder={item.attachment_blurhash ? { blurhash: item.attachment_blurhash } : undefined}
+                    placeholderContentFit="cover"
                     onLoad={(e) => {
                       const s = e?.source;
                       if (s?.width && s?.height) setImgRatio(Math.max(0.62, Math.min(1.9, s.width / s.height)));
@@ -412,12 +415,12 @@ const GroupDetail = ({ route, navigation }) => {
   // Media send: show the local file instantly, upload it to R2 in the
   // background, then persist the message with just the URL (mirrors DMs).
   const sendMedia = useCallback(async (media, replyDisplay) => {
-    const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType } = media;
+    const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType, blurhash = '' } = media;
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const optimistic = {
       id: tempId,
       user: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
-      content: '', message_type, attachment: localUri, file_name, duration,
+      content: '', message_type, attachment: localUri, attachment_blurhash: blurhash, file_name, duration,
       reply_to: replyDisplay
         ? { id: replyDisplay.id, content: replyDisplay.content, message_type: replyDisplay.message_type, sender_username: replyDisplay.user?.username || replyDisplay.sender_username }
         : null,
@@ -430,7 +433,8 @@ const GroupDetail = ({ route, navigation }) => {
     try {
       const uploaded = await uploadMedia({ uri: localUri, name: file_name || `chat_${Date.now()}`, mimeType }, uploadType);
       const saved = await sendGroupMessage(groupSlug, {
-        message_type, attachment: uploaded.url, file_name, duration, reply_to_id: replyDisplay?.id,
+        message_type, attachment: uploaded.url, attachment_blurhash: blurhash,
+        file_name, duration, reply_to_id: replyDisplay?.id,
       });
       // Swap the optimistic row for the saved one, and drop any copy a concurrent
       // poll may have already merged in, so the message can't briefly appear twice.
@@ -468,7 +472,11 @@ const GroupDetail = ({ route, navigation }) => {
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (res.canceled || !res.assets?.length) return;
       const p = await compressImage(res.assets[0].uri, { width: 1080, quality: 0.6 });
-      sendMediaMessage({ localUri: p.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg' });
+      // Encode a BlurHash so every viewer gets a colour-matched blur placeholder
+      // while the real image downloads. Optional — a failure just skips it.
+      let blurhash = '';
+      try { blurhash = await Blurhash.encode(p.uri, 4, 3); } catch { /* placeholder is optional */ }
+      sendMediaMessage({ localUri: p.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg', blurhash });
     } catch { Alert.alert(t('common.error'), t('chat.attachImageFailed')); }
   }, [sendMediaMessage, t]);
 

@@ -1294,6 +1294,10 @@ class GroupPost(models.Model):
     # Attachment stored as a base64 data URI (image/file/audio).
     attachment = models.TextField(blank=True, default='')
     file_name = models.CharField(max_length=255, blank=True, default='')
+    # BlurHash of an image attachment — a ~30-char string the client encodes on
+    # send and every viewer decodes into a colour-matched blur placeholder while
+    # the real image downloads.
+    attachment_blurhash = models.CharField(max_length=60, blank=True, default='')
     duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
     reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
     created_at = models.DateTimeField(auto_now_add=True)

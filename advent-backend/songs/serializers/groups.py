@@ -201,7 +201,8 @@ class GroupPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = GroupPost
         fields = [
-            'id', 'content', 'message_type', 'attachment', 'file_name', 'duration',
+            'id', 'content', 'message_type', 'attachment', 'attachment_blurhash',
+            'file_name', 'duration',
             'reply_to', 'reply_to_id', 'created_at', 'updated_at', 'group', 'user',
             'attachments', 'is_owner', 'reactions',
         ]

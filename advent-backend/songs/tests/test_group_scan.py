@@ -168,6 +168,24 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(ok.status_code, 201, ok.content[:200])
 
+    def test_attachment_blurhash_round_trips(self):
+        """The image placeholder hash is stored on send and returned on read."""
+        member = User.objects.create_user('bhuser', 'bh@x.com', 'x')
+        g = Group.objects.create(creator=member, name='Blur Room', is_private=False)
+        GroupMember.objects.create(group=g, user=member, is_admin=True)
+        self.client.force_authenticate(member)
+        res = self.client.post(
+            f'/api/groups/{g.slug}/posts/',
+            {
+                'message_type': 'image',
+                'attachment': 'https://cdn.example/r2/pic.jpg',
+                'attachment_blurhash': 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, 201, res.content[:200])
+        self.assertEqual(res.json()['attachment_blurhash'], 'LEHV6nWB2yk8pyo0adR*.7kCMdnj')
+
     def test_non_group_notification_has_null_group(self):
         """A non-group notification serializes group_slug as null (no crash)."""
         from songs.models import Notification
