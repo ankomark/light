@@ -218,6 +218,9 @@ const GroupDetail = ({ route, navigation }) => {
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
+  // Only members may read the chat (public groups included). Mirrored into a ref
+  // so the poll/AppState callbacks can gate without re-subscribing.
+  const canReadRef = useRef(initialGroup?.is_member || false);
   const appState = useRef(AppState.currentState);
   const pageRef = useRef(1);
   const recordingRef = useRef(null);
@@ -244,10 +247,11 @@ const GroupDetail = ({ route, navigation }) => {
   }, [groupSlug]);
 
   const loadGroup = useCallback(async () => {
-    // If the list already told us the user can read this group, start fetching
-    // messages right now — in parallel with the group-details request — so the
-    // chat fills in without waiting for two sequential round-trips.
-    const canReadNow = initialGroup?.is_member || (initialGroup && !initialGroup.is_private);
+    // Only members can read messages (public groups too). If the list already
+    // told us the user is a member, start fetching messages right now — in
+    // parallel with the group-details request — so the chat fills in without
+    // waiting for two sequential round-trips.
+    const canReadNow = !!initialGroup?.is_member;
     const postsPromise = canReadNow ? loadPosts() : null;
     try {
       const g = await fetchGroupDetails(groupSlug);
@@ -255,7 +259,8 @@ const GroupDetail = ({ route, navigation }) => {
       setIsMember(g.is_member);
       setIsAdmin(g.is_admin);
       setRequested(!!g.has_pending_request);
-      if (!postsPromise && (g.is_member || !g.is_private)) await loadPosts();
+      canReadRef.current = !!g.is_member;
+      if (!postsPromise && g.is_member) await loadPosts();
     } catch {
       Alert.alert(t('common.error'), t('group.detail.loadFailed'));
     } finally {
@@ -281,9 +286,9 @@ const GroupDetail = ({ route, navigation }) => {
     useCallback(() => {
       loadGroup();
       markRead();
-      pollRef.current = setInterval(() => { loadPosts(true); }, POLL_MS);
+      pollRef.current = setInterval(() => { if (canReadRef.current) loadPosts(true); }, POLL_MS);
       const sub = AppState.addEventListener('change', (n) => {
-        if (n === 'active' && appState.current !== 'active') { loadPosts(true); markRead(); }
+        if (n === 'active' && appState.current !== 'active' && canReadRef.current) { loadPosts(true); markRead(); }
         appState.current = n;
       });
       return () => { clearInterval(pollRef.current); sub.remove(); markRead(); };
@@ -657,23 +662,36 @@ const GroupDetail = ({ route, navigation }) => {
         </LinearGradient>
       </SafeAreaView>
 
-      <FlatList
-        ref={listRef}
-        data={messages}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderMessage}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-        ListHeaderComponent={hasEarlier ? (
-          <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
-        ) : null}
-        ListEmptyComponent={firstLoad ? (
-          <View style={styles.emptyContainer}><ActivityIndicator color={colors.accent} /></View>
-        ) : (
-          <View style={styles.emptyContainer}><Text style={styles.emptyText}>No messages yet. Say hello 👋</Text></View>
-        )}
-      />
+      {isMember ? (
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderMessage}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          ListHeaderComponent={hasEarlier ? (
+            <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
+          ) : null}
+          ListEmptyComponent={firstLoad ? (
+            <View style={styles.emptyContainer}><ActivityIndicator color={colors.accent} /></View>
+          ) : (
+            <View style={styles.emptyContainer}><Text style={styles.emptyText}>{t('group.detail.noMessages')}</Text></View>
+          )}
+        />
+      ) : (
+        <View style={styles.lockedPreview}>
+          <View style={styles.lockedIconWrap}>
+            <Ionicons name="lock-closed" size={34} color={colors.textSecondary} />
+          </View>
+          <Text style={styles.lockedTitle}>{t('group.detail.membersOnlyTitle')}</Text>
+          <Text style={styles.lockedBody}>{t('group.detail.membersOnlyBody')}</Text>
+          {group?.description ? (
+            <Text style={styles.lockedDesc} numberOfLines={4}>{group.description}</Text>
+          ) : null}
+        </View>
+      )}
 
       {showEmoji && canChat && (
         <View style={styles.emojiPanel}>
@@ -996,6 +1014,15 @@ const styles = StyleSheet.create({
 
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   emptyText: { ...typography.body, color: colors.textMuted },
+
+  lockedPreview: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.xl, gap: spacing.sm },
+  lockedIconWrap: {
+    width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm,
+  },
+  lockedTitle: { ...typography.h3, color: colors.textPrimary, textAlign: 'center' },
+  lockedBody: { ...typography.body, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
+  lockedDesc: { ...typography.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm, fontStyle: 'italic' },
 
   emojiPanel: { height: 220, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   emojiGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: spacing.sm },

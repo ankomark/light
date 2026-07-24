@@ -107,6 +107,10 @@ class GroupSerializer(serializers.ModelSerializer):
         return qs.count()
 
     def get_last_message(self, obj):
+        # Chat content is members-only — public groups included. A non-member sees
+        # the group in discovery but no message preview until they're approved.
+        if not self.get_is_member(obj):
+            return None
         if hasattr(obj, 'anno_last_id'):
             if obj.anno_last_id is None:
                 return None

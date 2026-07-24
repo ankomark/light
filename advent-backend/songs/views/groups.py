@@ -425,11 +425,10 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         group_slug = self.kwargs.get('group_slug')
         group = get_object_or_404(Group, slug=group_slug)
-        # Private group messages are members-only. Public group messages stay
-        # readable so people can preview a group before joining (mirrors how the
-        # group itself is visible). Without this, any authenticated user could
-        # read a private group's chat by hitting this endpoint directly.
-        if (group.is_private and not self.request.user.is_super_admin
+        # Group chats are members-only — for public groups too. A non-member must
+        # be approved (request-join → admin approval, or an invite) before they can
+        # read any messages; the public group is discoverable, its chat is not.
+        if (not self.request.user.is_super_admin
                 and not GroupMember.objects.filter(group=group, user=self.request.user).exists()):
             raise PermissionDenied("You are not a member of this group")
         # Newest first (paginated); the chat reverses for chronological display.

@@ -76,14 +76,47 @@ class GroupPrivacyScanTests(APITestCase):
         r2 = self.client.get(f'/api/groups/{self.group.slug}/posts/')
         self.assertIn('ghost note', [p['content'] for p in r2.json()['results']])
 
-    def test_outsider_can_read_public_group_posts(self):
-        """Public group messages stay readable so people can preview before joining."""
+    def test_outsider_cannot_read_public_group_posts(self):
+        """Even a PUBLIC group's chat is members-only: a non-member must be
+        approved before they can read any messages."""
         pub = Group.objects.create(creator=self.creator, name='Open Forum', is_private=False)
         GroupMember.objects.create(group=pub, user=self.creator, is_admin=True)
         GroupPost.objects.create(group=pub, user=self.creator, content='welcome all')
         self.client.force_authenticate(self.outsider)
         r = self.client.get(f'/api/groups/{pub.slug}/posts/')
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 403, f'public posts must be members-only, got {r.status_code}')
+
+    def test_public_group_last_message_hidden_from_outsider(self):
+        """The group list shows a public group in discovery, but a non-member gets
+        no last-message preview — no chat content leaks before approval."""
+        pub = Group.objects.create(creator=self.creator, name='Open Forum', is_private=False)
+        GroupMember.objects.create(group=pub, user=self.creator, is_admin=True)
+        GroupPost.objects.create(group=pub, user=self.creator, content='welcome all')
+
+        self.client.force_authenticate(self.outsider)
+        body = self.client.get('/api/groups/').json()
+        row = next(g for g in body['results'] if g['slug'] == pub.slug)
+        self.assertTrue(row['is_member'] is False)
+        self.assertIsNone(row['last_message'], 'chat preview leaked to a non-member')
+
+        # The member does see the preview.
+        self.client.force_authenticate(self.creator)
+        body2 = self.client.get('/api/groups/').json()
+        row2 = next(g for g in body2['results'] if g['slug'] == pub.slug)
+        self.assertIsNotNone(row2['last_message'])
+        self.assertEqual(row2['last_message']['content'], 'welcome all')
+
+    def test_public_group_join_requires_approval(self):
+        """Requesting to join a public group creates a PENDING request, not an
+        instant membership — an admin still has to approve."""
+        pub = Group.objects.create(creator=self.creator, name='Open Forum', is_private=False)
+        GroupMember.objects.create(group=pub, user=self.creator, is_admin=True)
+        self.client.force_authenticate(self.outsider)
+        r = self.client.post(f'/api/groups/{pub.slug}/request-join/', {}, format='json')
+        self.assertEqual(r.status_code, 201, r.content[:200])
+        self.assertFalse(GroupMember.objects.filter(group=pub, user=self.outsider).exists())
+        self.assertTrue(GroupJoinRequest.objects.filter(
+            group=pub, user=self.outsider, status='pending').exists())
 
 
 class GroupListScalingTests(APITestCase):
