@@ -580,6 +580,19 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         return u.is_super_admin or GroupMember.objects.filter(
             group=group, user=u, is_admin=True).exists()
 
+    @action(detail=False, methods=['get'], url_path='search')
+    def search(self, request, *args, **kwargs):
+        """Full-text-ish search over a group's text messages (members-only,
+        newest first). Needs at least 2 chars."""
+        q = (request.query_params.get('q') or '').strip()
+        if len(q) < 2:
+            return Response({'results': []})
+        qs = self.get_queryset().filter(message_type='text', content__icontains=q)
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(qs, many=True).data)
+
     @action(detail=False, methods=['get'], url_path='media')
     def media(self, request, *args, **kwargs):
         """Every image / file / voice note shared in the group, newest first

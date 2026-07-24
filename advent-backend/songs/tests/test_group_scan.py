@@ -208,6 +208,30 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_search_finds_text_messages(self):
+        """Search returns matching text messages to a member and is members-only."""
+        owner = User.objects.create_user('srchowner', 's1@x.com', 'x')
+        outsider = User.objects.create_user('srchout', 's2@x.com', 'x')
+        g = Group.objects.create(creator=owner, name='Search Room', is_private=False)
+        GroupMember.objects.create(group=g, user=owner, is_admin=True)
+
+        self.client.force_authenticate(owner)
+        url = f'/api/groups/{g.slug}/posts/'
+        self.client.post(url, {'content': 'meet at the chapel tomorrow', 'message_type': 'text'}, format='json')
+        self.client.post(url, {'content': 'bring your bibles', 'message_type': 'text'}, format='json')
+
+        res = self.client.get(f'/api/groups/{g.slug}/posts/search/?q=chapel')
+        rows = res.json().get('results', res.json())
+        self.assertEqual(len(rows), 1)
+        self.assertIn('chapel', rows[0]['content'])
+
+        # Too-short query returns nothing.
+        self.assertEqual(len(self.client.get(f'/api/groups/{g.slug}/posts/search/?q=c').json()['results']), 0)
+
+        # Members-only.
+        self.client.force_authenticate(outsider)
+        self.assertEqual(self.client.get(f'/api/groups/{g.slug}/posts/search/?q=chapel').status_code, 403)
+
     def test_media_endpoint_returns_only_media(self):
         """The gallery endpoint returns image/file/audio messages (not text) to a
         member, and is members-only."""

@@ -22,7 +22,7 @@ import { compressImage } from '../services/imageProcessing';
 import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
-  pinGroupMessage, unpinGroupMessage,
+  pinGroupMessage, unpinGroupMessage, searchGroupMessages,
 } from '../services/api';
 import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
@@ -47,6 +47,7 @@ const SWIPE_TRIGGER = 56; // px of right-swipe to fire a reply
 const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtDate = (d) => new Date(d).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' + fmtTime(d);
 const fmtDuration = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.round((s || 0) % 60)).padStart(2, '0')}`;
 const replyLabel = (m, t) => m.content || ({
   image: t('group.preview.photo'), file: t('group.preview.file'), audio: t('group.preview.voiceNote'),
@@ -242,6 +243,11 @@ const GroupDetail = ({ route, navigation }) => {
   const [hasEarlier, setHasEarlier] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]); // usernames currently typing
   const [pinnedMsg, setPinnedMsg] = useState(initialGroup?.pinned_message || null);
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const searchTimerRef = useRef(null);
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
@@ -381,6 +387,7 @@ const GroupDetail = ({ route, navigation }) => {
     soundRef.current?.unloadAsync?.().catch(() => {});
     Object.values(typingTimersRef.current).forEach(clearTimeout);
     clearTimeout(myTypingRef.current.idle);
+    clearTimeout(searchTimerRef.current);
   }, []);
 
   // ── Send (optimistic, WhatsApp-style states) ──
@@ -688,6 +695,32 @@ const GroupDetail = ({ route, navigation }) => {
     }
   }, [messages]);
 
+  const openSearch = useCallback(() => { setMenuSheet(false); setSearchMode(true); }, []);
+  const closeSearch = useCallback(() => {
+    setSearchMode(false); setSearchQuery(''); setSearchResults([]);
+    clearTimeout(searchTimerRef.current);
+  }, []);
+
+  const onSearchChange = useCallback((val) => {
+    setSearchQuery(val);
+    clearTimeout(searchTimerRef.current);
+    const q = val.trim();
+    if (q.length < 2) { setSearchResults([]); setSearching(false); return; }
+    setSearching(true);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await searchGroupMessages(groupSlug, q);
+        setSearchResults(res?.results ?? (Array.isArray(res) ? res : []));
+      } catch { setSearchResults([]); }
+      finally { setSearching(false); }
+    }, 350);
+  }, [groupSlug]);
+
+  const onTapResult = useCallback((m) => {
+    closeSearch();
+    setTimeout(() => jumpToMessage(m.id), 120);
+  }, [closeSearch, jumpToMessage]);
+
   const pinMessage = useCallback(async (m) => {
     setMenuMsg(null);
     const prev = pinnedMsg;
@@ -804,11 +837,65 @@ const GroupDetail = ({ route, navigation }) => {
               <Text style={styles.headerSub} numberOfLines={1}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
             </View>
           </TouchableOpacity>
+          {isMember && (
+            <TouchableOpacity onPress={openSearch} style={styles.backBtn}>
+              <Ionicons name="search" size={21} color={colors.textPrimary} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={openMenu} style={styles.backBtn}>
             <Ionicons name="ellipsis-vertical" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
         </LinearGradient>
       </SafeAreaView>
+
+      {/* In-chat search overlay */}
+      {searchMode && (
+        <View style={styles.searchOverlay}>
+          <SafeAreaView edges={['top']} style={styles.headerSafe}>
+            <View style={styles.searchHeader}>
+              <TouchableOpacity onPress={closeSearch} style={styles.backBtn}>
+                <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.searchInput}
+                placeholder={t('group.detail.searchPlaceholder')}
+                placeholderTextColor={colors.placeholder}
+                value={searchQuery}
+                onChangeText={onSearchChange}
+                autoFocus
+                returnKeyType="search"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => onSearchChange('')} style={styles.backBtn}>
+                  <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </SafeAreaView>
+          {searching ? (
+            <View style={styles.centered}><ActivityIndicator color={colors.accent} /></View>
+          ) : (
+            <FlatList
+              data={searchResults}
+              keyExtractor={(item) => String(item.id)}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.searchResult} activeOpacity={0.8} onPress={() => onTapResult(item)}>
+                  <Text style={styles.searchResultName}>{item.user?.username}</Text>
+                  <Text style={styles.searchResultText} numberOfLines={2}>{item.content}</Text>
+                  <Text style={styles.searchResultTime}>{fmtDate(item.created_at)}</Text>
+                </TouchableOpacity>
+              )}
+              contentContainerStyle={styles.searchList}
+              ListEmptyComponent={
+                searchQuery.trim().length >= 2 ? (
+                  <Text style={styles.searchEmpty}>{t('group.detail.searchNone')}</Text>
+                ) : null
+              }
+            />
+          )}
+        </View>
+      )}
 
       {isMember && pinnedMsg && (
         <TouchableOpacity style={styles.pinnedBar} activeOpacity={0.85} onPress={() => jumpToMessage(pinnedMsg.id)}>
@@ -1268,6 +1355,23 @@ const styles = StyleSheet.create({
   },
   pinnedTitle: { ...typography.caption, color: colors.accent, fontWeight: '700' },
   pinnedText: { ...typography.caption, color: colors.textSecondary },
+
+  searchOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#0A1628', zIndex: 20 },
+  searchHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.12)',
+  },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 16, paddingVertical: spacing.xs },
+  searchList: { padding: spacing.md, gap: spacing.sm, flexGrow: 1 },
+  searchResult: {
+    backgroundColor: 'rgba(16,46,80,0.55)', borderRadius: radius.md, padding: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
+  },
+  searchResultName: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  searchResultText: { ...typography.body, color: colors.textPrimary, marginTop: 2 },
+  searchResultTime: { ...typography.caption, color: colors.textMuted, marginTop: 4 },
+  searchEmpty: { ...typography.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl },
 
   typingBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2 },
   typingDots: { flexDirection: 'row', alignItems: 'center', gap: 3 },
