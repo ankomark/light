@@ -285,6 +285,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [reportMsg, setReportMsg] = useState(null);   // message being reported
 
   const listRef = useRef(null);
+  const atBottomRef = useRef(true);      // is the chat scrolled to the newest message?
   const pollRef = useRef(null);
   const socketRef = useRef(null);        // realtime chat socket
   const typingTimersRef = useRef({});    // per-user auto-expire timers
@@ -390,8 +391,15 @@ const GroupDetail = ({ route, navigation }) => {
       onMessage: (msg) => {
         if (msg?.user?.id === currentUser?.id) return; // already shown optimistically
         setMessages((prev) => mergeMessages([msg], prev));
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+        // Only jump to the newest if they were already at the bottom — don't yank
+        // someone out of scrolled-up history.
+        if (atBottomRef.current) setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
       },
+      // An edit updates the message in place — never scroll, and never inject a
+      // message that isn't already loaded (an edit of off-screen history).
+      onEdited: (msg) => setMessages((prev) => (
+        prev.some((m) => String(m.id) === String(msg.id)) ? mergeMessages([msg], prev) : prev
+      )),
       onDeleted: (id) => setMessages((prev) => prev.filter((m) => String(m.id) !== String(id))),
       onTyping: (evt) => {
         if (evt.user_id === currentUser?.id || !evt.username) return;
@@ -1007,7 +1015,12 @@ const GroupDetail = ({ route, navigation }) => {
           onScrollToIndexFailed={({ averageItemLength, index }) => {
             listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: true });
           }}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            atBottomRef.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+          }}
+          scrollEventThrottle={100}
+          onContentSizeChange={() => { if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false }); }}
           ListHeaderComponent={hasEarlier ? (
             <TouchableOpacity style={styles.earlierBtn} onPress={loadEarlier}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
           ) : null}

@@ -7,7 +7,9 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 
 from .common import *  # noqa: F401,F403
-from ..consumers import broadcast_group_message, broadcast_group_deleted, broadcast_group_pinned
+from ..consumers import (
+    broadcast_group_message, broadcast_group_deleted, broadcast_group_pinned, broadcast_group_edited,
+)
 from ..serializers.groups import pinned_preview, GroupAuditLogSerializer
 
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
@@ -655,7 +657,10 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         post.edited_at = timezone.now()
         post.save(update_fields=['content', 'edited_at', 'updated_at'])
         data = self.get_serializer(post).data
-        broadcast_group_message(post.group.slug, data)
+        # Update in place for everyone (no scroll). Skip super-admin-authored
+        # messages, which are invisible to regular members (mirrors create()).
+        if not request.user.is_super_admin:
+            broadcast_group_edited(post.group.slug, data)
         return Response(data)
 
     def _is_group_admin(self, group):
