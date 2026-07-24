@@ -22,7 +22,7 @@ import { compressImage } from '../services/imageProcessing';
 import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
-  pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts,
+  pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts, setGroupJoinQuestion,
 } from '../services/api';
 import { Blurhash } from 'react-native-blurhash';
 import { uploadMedia } from '../services/cloudinary';
@@ -250,6 +250,8 @@ const GroupDetail = ({ route, navigation }) => {
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef(null);
   const [receipts, setReceipts] = useState(null); // { loading, count, readers } | null
+  const [joinAnswer, setJoinAnswer] = useState(null); // string when the join-question modal is open
+  const [jqEditor, setJqEditor] = useState(null);     // string when the admin join-question editor is open
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
@@ -657,9 +659,9 @@ const GroupDetail = ({ route, navigation }) => {
     }
   }, [group, groupSlug, t]);
 
-  const join = async () => {
+  const submitJoin = async (answer) => {
     try {
-      await requestJoinGroup(groupSlug, '');
+      await requestJoinGroup(groupSlug, answer || '');
       setRequested(true);
       Alert.alert(t('group.detail.requestSentTitle'), t('group.detail.requestSentBody'));
     } catch (e) {
@@ -669,6 +671,21 @@ const GroupDetail = ({ route, navigation }) => {
       Alert.alert(t('common.notice'), msg);
     }
   };
+
+  const join = () => {
+    // If the group asks a question, collect the answer first; else request straight away.
+    if (group?.join_question) setJoinAnswer('');
+    else submitJoin('');
+  };
+
+  const saveJoinQuestion = useCallback(async () => {
+    const q = (jqEditor || '').trim();
+    setJqEditor(null);
+    try {
+      const updated = await setGroupJoinQuestion(groupSlug, q);
+      setGroup((g) => ({ ...(g || {}), join_question: updated?.join_question ?? q }));
+    } catch { Alert.alert(t('common.error'), t('group.detail.saveFailed')); }
+  }, [jqEditor, groupSlug, t]);
 
   // ── Message actions: react / reply / delete ──
   const startReply = useCallback((m) => {
@@ -1176,6 +1193,23 @@ const GroupDetail = ({ route, navigation }) => {
             )}
 
             {isAdmin && (
+              <TouchableOpacity
+                style={styles.sheetOption}
+                activeOpacity={0.85}
+                onPress={() => { setMenuSheet(false); setJqEditor(group?.join_question || ''); }}
+              >
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name="help-circle" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.joinQuestion')}</Text>
+                  <Text style={styles.sheetOptionHint} numberOfLines={1}>{group?.join_question || t('group.detail.joinQuestionHint')}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+
+            {isAdmin && (
               <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={togglePostingPolicy}>
                 <View style={[styles.sheetIcon, styles.sheetIconFile]}>
                   <Ionicons name={adminsOnly ? 'lock-closed' : 'lock-open'} size={22} color={colors.primary} />
@@ -1310,6 +1344,66 @@ const GroupDetail = ({ route, navigation }) => {
                 </View>
               </>
             )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Join-question answer (shown to a requester when the group asks one) */}
+      <Modal visible={joinAnswer !== null} transparent animationType="slide" onRequestClose={() => setJoinAnswer(null)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setJoinAnswer(null)}>
+          <Pressable style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{group?.join_question}</Text>
+            <TextInput
+              style={styles.promptInput}
+              placeholder={t('group.detail.answerPlaceholder')}
+              placeholderTextColor={colors.placeholder}
+              value={joinAnswer || ''}
+              onChangeText={setJoinAnswer}
+              multiline
+              maxLength={500}
+              autoFocus
+            />
+            <View style={styles.promptActions}>
+              <TouchableOpacity style={[styles.promptBtn, styles.promptCancel]} onPress={() => setJoinAnswer(null)}>
+                <Text style={styles.promptCancelText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.promptBtn, styles.promptSave, !joinAnswer?.trim() && styles.promptDisabled]}
+                disabled={!joinAnswer?.trim()}
+                onPress={() => { const a = joinAnswer; setJoinAnswer(null); submitJoin(a); }}
+              >
+                <Text style={styles.promptSaveText}>{t('group.detail.requestToJoin')}</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Admin: set/clear the join question */}
+      <Modal visible={jqEditor !== null} transparent animationType="slide" onRequestClose={() => setJqEditor(null)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setJqEditor(null)}>
+          <Pressable style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t('group.detail.joinQuestion')}</Text>
+            <Text style={styles.sheetSubtitle}>{t('group.detail.joinQuestionEditorHint')}</Text>
+            <TextInput
+              style={styles.promptInput}
+              placeholder={t('group.detail.joinQuestionPlaceholder')}
+              placeholderTextColor={colors.placeholder}
+              value={jqEditor || ''}
+              onChangeText={setJqEditor}
+              maxLength={200}
+              autoFocus
+            />
+            <View style={styles.promptActions}>
+              <TouchableOpacity style={[styles.promptBtn, styles.promptCancel]} onPress={() => setJqEditor(null)}>
+                <Text style={styles.promptCancelText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.promptBtn, styles.promptSave]} onPress={saveJoinQuestion}>
+                <Text style={styles.promptSaveText}>{t('common.save')}</Text>
+              </TouchableOpacity>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1495,6 +1589,19 @@ const styles = StyleSheet.create({
   receiptRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   receiptAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: 'rgba(244,162,97,0.35)' },
   receiptName: { ...typography.body, color: colors.textPrimary, flex: 1 },
+
+  promptInput: {
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.16)', borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2, marginTop: spacing.sm,
+    color: colors.textPrimary, backgroundColor: 'rgba(13,35,64,0.85)', fontSize: 15, minHeight: 48,
+  },
+  promptActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  promptBtn: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.md, alignItems: 'center' },
+  promptCancel: { backgroundColor: 'rgba(18,30,46,0.9)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)' },
+  promptCancelText: { ...typography.button, color: colors.textSecondary, fontWeight: '700' },
+  promptSave: { backgroundColor: colors.accent },
+  promptSaveText: { ...typography.button, color: '#0A1628', fontWeight: '800' },
+  promptDisabled: { opacity: 0.5 },
   sheetSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.md },
   sheetOption: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,

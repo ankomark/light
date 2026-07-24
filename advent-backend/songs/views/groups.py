@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db.models import (
     OuterRef, Subquery, Exists, Count, Value, IntegerField, DateTimeField,
@@ -13,6 +13,9 @@ from ..serializers.groups import pinned_preview
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
 # never-opened group counts every message as unread (matches the old behaviour).
 EPOCH = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
+
+# How long after a rejection before someone may request to join again.
+REJOIN_COOLDOWN_DAYS = 7
 
 
 def group_system_message(group, text, actor):
@@ -180,29 +183,37 @@ class GroupViewSet(viewsets.ModelViewSet):
                 {"error": "You are already a member of this group"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        existing_request = GroupJoinRequest.objects.filter(
-            group=group, 
-            user=request.user,
-            status='pending'
-        ).first()
-        
-        if existing_request:
-            return Response(
-                {"error": "You already have a pending request to join this group"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Allow empty requests
+
         message = request.data.get('message', '')
-        
-        # Create join request directly
-        join_request = GroupJoinRequest.objects.create(
-            group=group,
-            user=request.user,
-            message=message,
-            status='pending'
-        )
+        # One row per (group, user) — reopen the existing one instead of inserting
+        # a duplicate (which would hit the unique constraint).
+        existing = GroupJoinRequest.objects.filter(group=group, user=request.user).first()
+        if existing:
+            if existing.status == 'pending':
+                return Response(
+                    {"error": "You already have a pending request to join this group"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if existing.status == 'rejected':
+                # Cooldown after a rejection before they can ask again.
+                cooldown_end = existing.updated_at + timedelta(days=REJOIN_COOLDOWN_DAYS)
+                if timezone.now() < cooldown_end:
+                    return Response(
+                        {"error": f"Your request was declined. You can request again after "
+                                  f"{cooldown_end.date().isoformat()}."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            existing.status = 'pending'
+            existing.message = message
+            existing.save(update_fields=['status', 'message', 'updated_at'])
+            join_request = existing
+        else:
+            join_request = GroupJoinRequest.objects.create(
+                group=group,
+                user=request.user,
+                message=message,
+                status='pending'
+            )
         
         # Notify group admins
         admins = GroupMember.objects.filter(group=group, is_admin=True)
@@ -280,6 +291,16 @@ class GroupViewSet(viewsets.ModelViewSet):
             group.save(update_fields=['only_admins_can_post'])
             msg = "Only admins can send messages now" if only_admins else "Everyone can send messages now"
             group_system_message(group, msg, request.user)
+        return Response(GroupSerializer(group, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='join-question')
+    def set_join_question(self, request, slug=None):
+        """Set (or clear) the prompt shown to people requesting to join. Admins only."""
+        group = self.get_object()
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
+            raise PermissionDenied("Only admins can change this setting")
+        group.join_question = (request.data.get('join_question') or '').strip()[:200]
+        group.save(update_fields=['join_question'])
         return Response(GroupSerializer(group, context={'request': request}).data)
 
     @action(detail=True, methods=['get'], url_path='search-users')

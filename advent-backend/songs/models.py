@@ -1229,6 +1229,9 @@ class Group(models.Model):
     pinned_post = models.ForeignKey(
         'GroupPost', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
     )
+    # Optional prompt shown to someone requesting to join (their answer becomes the
+    # join request's message). Blank = no question.
+    join_question = models.CharField(max_length=200, blank=True, default='')
     # Soft moderation takedown — hidden from public group listings.
     is_removed = models.BooleanField(default=False)
     slug = models.SlugField(unique=True, max_length=100)
@@ -1272,6 +1275,7 @@ class GroupJoinRequest(models.Model):
     message = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)  # last status change (drives re-request cooldown)
 
     class Meta:
         unique_together = ('group', 'user')

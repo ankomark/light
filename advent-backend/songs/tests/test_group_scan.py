@@ -208,6 +208,55 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_join_question_admin_only(self):
+        """An admin can set the join prompt; it shows on the group; a member can't."""
+        admin = User.objects.create_user('jqadmin', 'jq1@x.com', 'x')
+        member = User.objects.create_user('jqmember', 'jq2@x.com', 'x')
+        g = Group.objects.create(creator=admin, name='JQ Room', is_private=False)
+        GroupMember.objects.create(group=g, user=admin, is_admin=True)
+        GroupMember.objects.create(group=g, user=member)
+
+        self.client.force_authenticate(member)
+        self.assertEqual(
+            self.client.post(f'/api/groups/{g.slug}/join-question/', {'join_question': 'x'}, format='json').status_code, 403)
+
+        self.client.force_authenticate(admin)
+        res = self.client.post(f'/api/groups/{g.slug}/join-question/', {'join_question': 'Why join?'}, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.client.get(f'/api/groups/{g.slug}/').json()['join_question'], 'Why join?')
+
+    def test_rejoin_cooldown_after_rejection(self):
+        """After a rejection, re-requesting is blocked until the cooldown passes,
+        then it reopens the same request (no unique-constraint crash)."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from songs.models import GroupJoinRequest
+
+        admin = User.objects.create_user('cdadmin', 'cd1@x.com', 'x')
+        applicant = User.objects.create_user('cdapp', 'cd2@x.com', 'x')
+        g = Group.objects.create(creator=admin, name='CD Room', is_private=False)
+        GroupMember.objects.create(group=g, user=admin, is_admin=True)
+
+        self.client.force_authenticate(applicant)
+        jr_id = self.client.post(f'/api/groups/{g.slug}/request-join/', {}, format='json').json()['id']
+
+        self.client.force_authenticate(admin)
+        self.client.post(f'/api/group-join-requests/{jr_id}/reject/', {}, format='json')
+
+        # Immediate re-request is blocked by the cooldown.
+        self.client.force_authenticate(applicant)
+        blocked = self.client.post(f'/api/groups/{g.slug}/request-join/', {}, format='json')
+        self.assertEqual(blocked.status_code, 400)
+
+        # Backdate the rejection past the cooldown → re-request reopens it.
+        GroupJoinRequest.objects.filter(id=jr_id).update(
+            updated_at=timezone.now() - timedelta(days=8))
+        ok = self.client.post(f'/api/groups/{g.slug}/request-join/', {'message': 'take two'}, format='json')
+        self.assertEqual(ok.status_code, 201, ok.content[:200])
+        jr = GroupJoinRequest.objects.get(id=jr_id)
+        self.assertEqual(jr.status, 'pending')
+        self.assertEqual(jr.message, 'take two')
+
     def test_read_receipts(self):
         """A member counts as a reader of a message once they mark the group read;
         the author is never counted."""
