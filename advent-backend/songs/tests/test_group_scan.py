@@ -208,6 +208,29 @@ class GroupPrivacyScanTests(APITestCase):
         )
         self.assertEqual(bad.status_code, 400)
 
+    def test_media_endpoint_returns_only_media(self):
+        """The gallery endpoint returns image/file/audio messages (not text) to a
+        member, and is members-only."""
+        owner = User.objects.create_user('galowner', 'g@x.com', 'x')
+        outsider = User.objects.create_user('galout', 'go@x.com', 'x')
+        g = Group.objects.create(creator=owner, name='Gallery', is_private=False)
+        GroupMember.objects.create(group=g, user=owner, is_admin=True)
+
+        self.client.force_authenticate(owner)
+        url = f'/api/groups/{g.slug}/posts/'
+        self.client.post(url, {'content': 'just text', 'message_type': 'text'}, format='json')
+        self.client.post(url, {'message_type': 'image', 'attachment': 'https://cdn.example/a.jpg'}, format='json')
+        self.client.post(url, {'message_type': 'file', 'attachment': 'https://cdn.example/a.pdf', 'file_name': 'a.pdf'}, format='json')
+
+        res = self.client.get(f'/api/groups/{g.slug}/posts/media/')
+        self.assertEqual(res.status_code, 200)
+        rows = res.json().get('results', res.json())
+        types = {r['message_type'] for r in rows}
+        self.assertEqual(types, {'image', 'file'})
+
+        self.client.force_authenticate(outsider)
+        self.assertEqual(self.client.get(f'/api/groups/{g.slug}/posts/media/').status_code, 403)
+
     def test_pin_and_unpin_message(self):
         """An admin can pin a message (surfaced as group.pinned_message); a
         non-admin can't; unpinning and deleting the pinned message both clear it."""

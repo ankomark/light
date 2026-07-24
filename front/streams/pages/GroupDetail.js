@@ -605,6 +605,11 @@ const GroupDetail = ({ route, navigation }) => {
     navigation.navigate('GroupJoinRequests', { groupSlug, group });
   }, [navigation, groupSlug, group]);
 
+  const goMedia = useCallback(() => {
+    setMenuSheet(false);
+    navigation.navigate('GroupMedia', { groupSlug, group });
+  }, [navigation, groupSlug, group]);
+
   const goAddMembers = useCallback(() => {
     setMenuSheet(false);
     navigation.navigate('GroupAddMembers', { groupSlug, group });
@@ -1009,6 +1014,19 @@ const GroupDetail = ({ route, navigation }) => {
                 <View style={styles.sheetOptionText}>
                   <Text style={styles.sheetOptionLabel}>{t('group.detail.viewMembers')}</Text>
                   <Text style={styles.sheetOptionHint}>{t('group.detail.seeEveryone')}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+
+            {isMember && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={goMedia}>
+                <View style={[styles.sheetIcon, styles.sheetIconPhoto]}>
+                  <Ionicons name="images" size={22} color={colors.accent} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.sharedMedia')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.sharedMediaHint')}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>

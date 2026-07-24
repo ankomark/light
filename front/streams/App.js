@@ -49,6 +49,7 @@ import GroupDetail from './pages/GroupDetail';
 import CreateGroup from './pages/CreateGroup';
 import GroupMembers from './pages/GroupMembers';
 import GroupJoinRequests from './pages/GroupJoinRequests';
+import GroupMedia from './pages/GroupMedia';
 import GroupAddMembers from './pages/GroupAddMembers';
 import MarketplaceHome from './components/marketplace/MarketplaceHome';
 import ProductList from './components/marketplace/ProductList';
@@ -274,6 +275,7 @@ const App = () => {
                 <Stack.Screen name="CreateGroup" component={CreateGroup} />
                 <Stack.Screen name="GroupMembers" component={GroupMembers} options={{ title: 'Group Members' }}/>
                 <Stack.Screen name="GroupJoinRequests" component={GroupJoinRequests} options={{ title: 'Join Requests' }}/>
+                <Stack.Screen name="GroupMedia" component={GroupMedia} options={{ headerShown: false }}/>
                 <Stack.Screen name="GroupAddMembers" component={GroupAddMembers} options={{ headerShown: false }}/>
                 <Stack.Screen name="MarketplaceHome" component={MarketplaceHomeWrapper} />
                 <Stack.Screen name="ProductList" component={ProductListWrapper} />

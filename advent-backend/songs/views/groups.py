@@ -580,6 +580,16 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         return u.is_super_admin or GroupMember.objects.filter(
             group=group, user=u, is_admin=True).exists()
 
+    @action(detail=False, methods=['get'], url_path='media')
+    def media(self, request, *args, **kwargs):
+        """Every image / file / voice note shared in the group, newest first
+        (members-only — reuses the same membership gate as the message list)."""
+        qs = self.get_queryset().filter(message_type__in=['image', 'file', 'audio'])
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(qs, many=True).data)
+
     @action(detail=True, methods=['post'], url_path='pin')
     def pin_message(self, request, *args, **kwargs):
         """Admin pins this message to the top of the chat (one per group)."""
