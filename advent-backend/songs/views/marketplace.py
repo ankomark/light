@@ -352,9 +352,10 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
     def get_queryset(self):
         # Prefetch the item → product graph (and buyer) so order lists/details
         # don't re-query the seller/images/category for every line item.
-        return (
+        user = self.request.user
+        queryset = (
             Order.objects
-            .filter(Q(buyer=self.request.user) | Q(items__seller=self.request.user))
+            .filter(Q(buyer=user) | Q(items__seller=user))
             .distinct()
             .select_related('buyer', 'buyer__profile')
             .prefetch_related(
@@ -364,6 +365,18 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                 'items__product__category',
             )
         )
+        # ?role=buyer -> only orders I placed (My Orders); ?role=seller -> only
+        # orders containing something I sell (Seller Dashboard). Without it, a
+        # user who both buys and sells would see purchases and sales mixed into
+        # both screens. Detail actions ignore role (the base filter already
+        # scopes to buyer-or-seller).
+        if self.action == 'list':
+            role = self.request.query_params.get('role')
+            if role == 'buyer':
+                queryset = queryset.filter(buyer=user)
+            elif role == 'seller':
+                queryset = queryset.filter(items__seller=user).distinct()
+        return queryset
 
     @action(detail=True, methods=['post'], url_path='set-shipping')
     def set_shipping(self, request, pk=None):
@@ -448,10 +461,18 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
 
         is_seller = order.items.filter(seller=request.user).exists()
         is_buyer = order.buyer == request.user
+        # An order can span several sellers but has ONE shared status field, so
+        # who may cancel it is deliberately narrow: only the buyer (owns the whole
+        # order) or a sole seller (owns every line). Otherwise one seller could
+        # cancel the order and hand back another seller's already-committed stock.
+        is_sole_seller = is_seller and not order.items.exclude(seller=request.user).exists()
+        cancelling = new_status in ('CANCELLED', 'REFUNDED')
 
-        # Buyers may only cancel a not-yet-shipped order; sellers drive fulfilment.
         if is_buyer and not is_seller:
-            if new_status != 'CANCELLED':
+            # Buyers may only cancel, and only before any seller has confirmed
+            # payment — in direct-pay a confirmed line means money already changed
+            # hands off-platform, which the app can't unwind.
+            if not cancelling:
                 return Response(
                     {"error": "Buyers can only cancel an order"},
                     status=status.HTTP_403_FORBIDDEN
@@ -461,7 +482,23 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                     {"error": "This order can no longer be cancelled"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        elif not is_seller:
+            if order.items.filter(payment_confirmed_at__isnull=False).exists():
+                return Response(
+                    {"error": "A seller has already confirmed payment on this order. "
+                              "Contact them to resolve it."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif is_seller:
+            # Sellers drive fulfilment (PROCESSING/SHIPPED/DELIVERED) freely, but
+            # may only cancel/refund an order they solely own — a partial cancel
+            # of a multi-seller order isn't representable in the shared status.
+            if cancelling and not is_sole_seller:
+                return Response(
+                    {"error": "This order has items from other sellers, so you can't cancel "
+                              "the whole order. Contact the buyer to resolve your part."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        else:
             return Response(
                 {"error": "You don't have permission to update this order"},
                 status=status.HTTP_403_FORBIDDEN
@@ -469,9 +506,10 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
 
         with transaction.atomic():
             order = Order.objects.select_for_update().get(pk=order.pk)
-            # Cancelling/refunding after a seller confirmed payment must hand the
-            # inventory back, or the stock those lines took is lost for good.
-            if new_status in ('CANCELLED', 'REFUNDED'):
+            # Cancelling/refunding hands committed inventory back. Only the buyer
+            # or a sole seller reaches this, so every released line belongs to the
+            # actor — a seller can never release another seller's stock.
+            if cancelling:
                 for item in order.items.select_related('product').all():
                     item.release_stock()
             order.status = new_status

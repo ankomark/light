@@ -1302,8 +1302,11 @@ export const checkoutCart = async () => {
   return apiRequest('post', '/marketplace/cart/checkout/');
 };
 
+// params go in the 4th arg (axios config) — the 3rd is the request body, which
+// a GET ignores. Pass { role: 'buyer' } for purchases, { role: 'seller' } for
+// sales; omitting role returns both.
 export const fetchOrders = async (params = {}) => {
-  return apiRequest('get', '/marketplace/orders/', { params });
+  return apiRequest('get', '/marketplace/orders/', null, { params });
 };
 
 export const fetchOrderById = async (id) => {

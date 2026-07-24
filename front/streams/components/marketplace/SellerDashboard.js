@@ -94,7 +94,7 @@ const SellerDashboard = () => {
 
         const [productsData, ordersData] = await Promise.all([
           fetchProducts(1, { seller: currentUser.id }),
-          fetchOrders({ seller_id: currentUser.id })
+          fetchOrders({ role: 'seller' })
         ]);
 
         setProducts(productsData?.results || []);

@@ -47,7 +47,8 @@ const OrderHistory = () => {
   const loadOrders = async () => {
     try {
       setRefreshing(true);
-      const ordersData = await fetchOrders();
+      // "My Orders" = things I bought. Sales live in the Seller Dashboard.
+      const ordersData = await fetchOrders({ role: 'buyer' });
       // Orders list is unpaginated today; tolerate a paginated envelope too.
       setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
     } catch (error) {

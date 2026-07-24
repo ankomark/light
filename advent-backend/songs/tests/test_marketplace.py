@@ -340,6 +340,11 @@ class DirectPayConfirmationTests(APITestCase):
         self.assertEqual(self.prod_a.quantity, 1)  # never goes negative
 
     def test_cancelling_after_confirmation_returns_stock(self):
+        # Sole-seller order (drop seller B's line) — a seller may only cancel an
+        # order they solely own; multi-seller cancel is covered in
+        # MultiSellerCancelTests.
+        self.item_b.delete()
+
         self._confirm(self.seller_a)
         self.prod_a.refresh_from_db()
         self.assertEqual(self.prod_a.quantity, 3)
@@ -495,3 +500,119 @@ class WishlistTests(APITestCase):
     def test_is_wishlisted_is_false_for_anonymous_callers(self):
         res = self.client.get(f'/api/marketplace/products/{self.product.slug}/')
         self.assertFalse(res.data['is_wishlisted'])
+
+
+class MultiSellerCancelTests(APITestCase):
+    """A shared order status must not let one seller act on another seller's
+    lines — the concrete hole being: seller B cancelling releases seller A's
+    already-committed stock."""
+
+    def setUp(self):
+        cache.clear()
+        self.seller_a = User.objects.create_user('msca', 'msca@t.local', 'pw')
+        self.seller_b = User.objects.create_user('mscb', 'mscb@t.local', 'pw')
+        self.buyer = User.objects.create_user('mscbuyer', 'mscbuyer@t.local', 'pw')
+        self.pa = Product.objects.create(seller=self.seller_a, title='A', description='d',
+                                         price=Decimal('10'), quantity=5, slug='msc-a')
+        self.pb = Product.objects.create(seller=self.seller_b, title='B', description='d',
+                                         price=Decimal('20'), quantity=5, slug='msc-b')
+        self.order = Order.objects.create(buyer=self.buyer, status='PENDING', total_amount=Decimal('30'))
+        self.ia = OrderItem.objects.create(order=self.order, product=self.pa, quantity=2,
+                                           price_at_purchase=Decimal('10'), seller=self.seller_a)
+        self.ib = OrderItem.objects.create(order=self.order, product=self.pb, quantity=1,
+                                           price_at_purchase=Decimal('20'), seller=self.seller_b)
+
+    def _status(self, user, s):
+        self.client.force_authenticate(user)
+        return self.client.post(f'/api/marketplace/orders/{self.order.id}/update_status/', {'status': s})
+
+    def test_a_seller_cannot_cancel_a_multi_seller_order(self):
+        # Seller A confirms — their stock is committed (5 -> 3).
+        self.client.force_authenticate(self.seller_a)
+        self.client.post(f'/api/marketplace/orders/{self.order.id}/confirm-payment/')
+        self.pa.refresh_from_db()
+        self.assertEqual(self.pa.quantity, 3)
+
+        res = self._status(self.seller_b, 'CANCELLED')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.order.refresh_from_db()
+        self.pa.refresh_from_db()
+        self.assertEqual(self.order.status, 'PENDING')   # not cancelled
+        self.assertEqual(self.pa.quantity, 3)            # A's sale intact
+
+    def test_seller_can_still_advance_fulfilment_on_a_multi_seller_order(self):
+        res = self._status(self.seller_b, 'SHIPPED')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+    def test_sole_seller_can_cancel_and_reclaim_their_own_stock(self):
+        # Single-seller order: seller B removed, A is the only seller.
+        self.ib.delete()
+        self.client.force_authenticate(self.seller_a)
+        self.client.post(f'/api/marketplace/orders/{self.order.id}/confirm-payment/')
+        self.pa.refresh_from_db()
+        self.assertEqual(self.pa.quantity, 3)
+
+        res = self._status(self.seller_a, 'CANCELLED')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.pa.refresh_from_db()
+        self.assertEqual(self.pa.quantity, 5)            # handed back
+
+    def test_buyer_cannot_cancel_once_a_seller_has_confirmed_payment(self):
+        # Direct-pay: a confirmed line means money already moved off-platform.
+        self.client.force_authenticate(self.seller_a)
+        self.client.post(f'/api/marketplace/orders/{self.order.id}/confirm-payment/')
+
+        res = self._status(self.buyer, 'CANCELLED')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'PENDING')
+
+    def test_buyer_can_cancel_a_fully_unconfirmed_order(self):
+        res = self._status(self.buyer, 'CANCELLED')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'CANCELLED')
+
+
+class OrderRoleFilterTests(APITestCase):
+    """?role=buyer / ?role=seller keep purchases and sales from bleeding into
+    each other's screens for a user who does both."""
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user('roleuser', 'role@t.local', 'pw')
+        self.other = User.objects.create_user('roleother', 'roleother@t.local', 'pw')
+
+        # An order the user BOUGHT (someone else sells).
+        p_other = Product.objects.create(seller=self.other, title='O', description='d',
+                                         price=Decimal('5'), quantity=9, slug='role-o')
+        self.bought = Order.objects.create(buyer=self.user, status='PENDING', total_amount=Decimal('5'))
+        OrderItem.objects.create(order=self.bought, product=p_other, quantity=1,
+                                 price_at_purchase=Decimal('5'), seller=self.other)
+
+        # An order the user SOLD (someone else buys).
+        p_mine = Product.objects.create(seller=self.user, title='M', description='d',
+                                        price=Decimal('7'), quantity=9, slug='role-m')
+        self.sold = Order.objects.create(buyer=self.other, status='PENDING', total_amount=Decimal('7'))
+        OrderItem.objects.create(order=self.sold, product=p_mine, quantity=1,
+                                 price_at_purchase=Decimal('7'), seller=self.user)
+
+    def _ids(self, res):
+        rows = res.data['results'] if isinstance(res.data, dict) and 'results' in res.data else res.data
+        return {o['id'] for o in rows}
+
+    def test_no_role_returns_both(self):
+        self.client.force_authenticate(self.user)
+        ids = self._ids(self.client.get('/api/marketplace/orders/'))
+        self.assertEqual(ids, {self.bought.id, self.sold.id})
+
+    def test_role_buyer_is_purchases_only(self):
+        self.client.force_authenticate(self.user)
+        ids = self._ids(self.client.get('/api/marketplace/orders/', {'role': 'buyer'}))
+        self.assertEqual(ids, {self.bought.id})
+
+    def test_role_seller_is_sales_only(self):
+        self.client.force_authenticate(self.user)
+        ids = self._ids(self.client.get('/api/marketplace/orders/', {'role': 'seller'}))
+        self.assertEqual(ids, {self.sold.id})
