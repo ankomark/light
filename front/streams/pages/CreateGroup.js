@@ -55,12 +55,27 @@ const GroupForm = ({ navigation, route }) => {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!name.trim()) {
       Alert.alert(t('group.create.nameRequiredTitle'), t('group.create.nameRequired'));
       return;
     }
+    // Turning a private group public exposes it to discovery — confirm first.
+    if (isEditMode && existingGroup?.is_private && !isPrivate) {
+      Alert.alert(
+        t('group.create.goPublicTitle'),
+        t('group.create.goPublicBody'),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('group.create.goPublicConfirm'), style: 'destructive', onPress: doSubmit },
+        ],
+      );
+      return;
+    }
+    doSubmit();
+  };
 
+  const doSubmit = async () => {
     try {
       setIsLoading(true);
 
