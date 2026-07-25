@@ -21,7 +21,9 @@
           "voip"
         ],
         "NSMicrophoneUsageDescription": "Allow microphone access to broadcast live audio and record video with sound.",
-        "NSCameraUsageDescription": "Allow camera access to broadcast live video and take photos and videos for your posts."
+        "NSCameraUsageDescription": "Allow camera access to broadcast live video and take photos and videos for your posts.",
+        "NSPhotoLibraryUsageDescription": "Allow access to your photos so you can pick images and videos for your posts.",
+        "NSPhotoLibraryAddUsageDescription": "Allow saving photos and videos you download or capture to your library."
       }
     },
     "android": {

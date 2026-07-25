@@ -12,11 +12,12 @@
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Image, Platform, Alert,
+  View, Text, StyleSheet, TouchableOpacity, Animated, Image, Alert, PanResponder,
 } from 'react-native';
 // eslint-disable-next-line import/no-unresolved -- installed via `npx expo install expo-camera` (native module; needs a dev/EAS build)
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import * as Haptics from 'expo-haptics';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,9 +48,89 @@ const CameraCapture = ({ navigation, route }) => {
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
 
+  // Phase 2: zoom, grid, tap-to-focus, last-photo thumbnail.
+  const [zoom, setZoom] = useState(0);           // CameraView zoom 0..1
+  const [gridOn, setGridOn] = useState(false);
+  const [focusPt, setFocusPt] = useState(null);   // { x, y } for the focus square
+  const [lastPhoto, setLastPhoto] = useState(null);
+  const zoomRef = useRef(0);        // mirrors `zoom` for the (stable) PanResponder closure
+  const zoomBaseRef = useRef(0);    // zoom captured at the start of the current pinch
+  const pinchStartRef = useRef(null);
+  const lastTapRef = useRef(0);
+  const focusAnim = useRef(new Animated.Value(0)).current;
+
   const timerRef = useRef(null);
   const recDot = useRef(new Animated.Value(1)).current;
   const shutter = useRef(new Animated.Value(1)).current;
+
+  const flipFacing = useCallback(() => setFacing((f) => (f === 'back' ? 'front' : 'back')), []);
+
+  // Load the most recent photo for the gallery-shortcut thumbnail — but only if
+  // library access is ALREADY granted. We never prompt just for a thumbnail; the
+  // gallery button itself prompts (via the picker) when tapped.
+  useEffect(() => {
+    (async () => {
+      try {
+        const perm = await MediaLibrary.getPermissionsAsync();
+        if (!perm.granted) return;
+        const res = await MediaLibrary.getAssetsAsync({ first: 1, sortBy: 'creationTime', mediaType: 'photo' });
+        if (res.assets?.[0]?.uri) setLastPhoto(res.assets[0].uri);
+      } catch { /* thumbnail is optional */ }
+    })();
+  }, []);
+
+  const dist = (touches) => {
+    const [a, b] = touches;
+    return Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
+  };
+
+  const showFocus = (x, y) => {
+    setFocusPt({ x, y });
+    focusAnim.setValue(0);
+    Animated.sequence([
+      Animated.spring(focusAnim, { toValue: 1, useNativeDriver: true, friction: 5 }),
+      Animated.timing(focusAnim, { toValue: 0, duration: 400, delay: 500, useNativeDriver: true }),
+    ]).start(() => setFocusPt(null));
+  };
+
+  // One overlay handles pinch-to-zoom, tap-to-focus and double-tap-to-flip.
+  const gestures = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (e) => e.nativeEvent.touches.length === 2,
+      onPanResponderGrant: (e) => {
+        if (e.nativeEvent.touches.length === 2) {
+          pinchStartRef.current = dist(e.nativeEvent.touches);
+          zoomBaseRef.current = zoomRef.current; // fixed baseline for this pinch
+        }
+      },
+      onPanResponderMove: (e) => {
+        const touches = e.nativeEvent.touches;
+        if (touches.length !== 2) return;
+        if (!pinchStartRef.current) { // second finger landed after grant
+          pinchStartRef.current = dist(touches);
+          zoomBaseRef.current = zoomRef.current;
+          return;
+        }
+        const delta = (dist(touches) - pinchStartRef.current) / 400; // sensitivity
+        setZoom(Math.max(0, Math.min(1, zoomBaseRef.current + delta)));
+      },
+      onPanResponderRelease: (e, g) => {
+        const wasPinch = !!pinchStartRef.current;
+        pinchStartRef.current = null; // the zoom baseline is kept in sync by an effect
+        // A near-stationary single-finger release = a tap (ignore pinch releases).
+        if (!wasPinch && Math.abs(g.dx) < 8 && Math.abs(g.dy) < 8 && e.nativeEvent.changedTouches.length <= 1) {
+          const now = Date.now();
+          if (now - lastTapRef.current < 280) { lastTapRef.current = 0; flipFacing(); }
+          else { lastTapRef.current = now; showFocus(e.nativeEvent.locationX, e.nativeEvent.locationY); }
+        }
+      },
+      onPanResponderTerminationRequest: () => true,
+    })
+  ).current;
+
+  // Keep the ref mirror of `zoom` current for the stable PanResponder closure.
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
 
   // Ask for camera access on mount.
   useEffect(() => { if (camPerm && !camPerm.granted) requestCam(); }, [camPerm, requestCam]);
@@ -196,8 +277,41 @@ const CameraCapture = ({ navigation, route }) => {
         flash={flash}
         enableTorch={mode === 'video' && recording && flash === 'on'}
         mode={mode}
+        zoom={zoom}
         onCameraReady={() => setReady(true)}
       />
+
+      {/* Gesture layer: pinch-zoom, tap-to-focus, double-tap flip */}
+      <View style={styles.gestureLayer} {...gestures.panHandlers} pointerEvents="box-only" />
+
+      {/* Rule-of-thirds grid */}
+      {gridOn && (
+        <View style={styles.gridLayer} pointerEvents="none">
+          <View style={[styles.gridLine, styles.gridV, { left: '33.33%' }]} />
+          <View style={[styles.gridLine, styles.gridV, { left: '66.66%' }]} />
+          <View style={[styles.gridLine, styles.gridH, { top: '33.33%' }]} />
+          <View style={[styles.gridLine, styles.gridH, { top: '66.66%' }]} />
+        </View>
+      )}
+
+      {/* Tap-to-focus square */}
+      {focusPt && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.focusBox, {
+            left: focusPt.x - 40, top: focusPt.y - 40,
+            opacity: focusAnim,
+            transform: [{ scale: focusAnim.interpolate({ inputRange: [0, 1], outputRange: [1.4, 1] }) }],
+          }]}
+        />
+      )}
+
+      {/* Zoom readout */}
+      {zoom > 0.001 && (
+        <View style={styles.zoomPill} pointerEvents="none">
+          <Text style={styles.zoomText}>{`${(1 + zoom * 9).toFixed(1)}x`}</Text>
+        </View>
+      )}
 
       {/* Top controls */}
       <SafeAreaView edges={['top']} style={[styles.topBar, { paddingTop: insets.top || spacing.sm }]}>
@@ -212,9 +326,14 @@ const CameraCapture = ({ navigation, route }) => {
           </View>
         ) : <View />}
 
-        <TouchableOpacity style={styles.iconBtn} onPress={() => setFlash((f) => FLASH_CYCLE[f])} hitSlop={10}>
-          <Ionicons name={FLASH_ICON[flash]} size={24} color="#fff" />
-        </TouchableOpacity>
+        <View style={styles.topRight}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setGridOn((g) => !g)} hitSlop={10} disabled={recording}>
+            <MaterialCommunityIcons name="grid" size={22} color={gridOn ? colors.accent : '#fff'} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setFlash((f) => FLASH_CYCLE[f])} hitSlop={10}>
+            <Ionicons name={FLASH_ICON[flash]} size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
 
       {/* Bottom controls */}
@@ -232,7 +351,11 @@ const CameraCapture = ({ navigation, route }) => {
 
         <View style={styles.shutterRow}>
           <TouchableOpacity style={styles.sideBtn} onPress={openGallery} disabled={recording} activeOpacity={0.8}>
-            <Ionicons name="images-outline" size={26} color={recording ? 'rgba(255,255,255,0.3)' : '#fff'} />
+            {lastPhoto ? (
+              <Image source={{ uri: lastPhoto }} style={styles.galleryThumb} />
+            ) : (
+              <Ionicons name="images-outline" size={26} color={recording ? 'rgba(255,255,255,0.3)' : '#fff'} />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity onPress={onShutter} activeOpacity={0.85} disabled={busy || !ready}>
@@ -245,7 +368,7 @@ const CameraCapture = ({ navigation, route }) => {
             </Animated.View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.sideBtn} onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))} disabled={recording} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.sideBtn} onPress={flipFacing} disabled={recording} activeOpacity={0.8}>
             <Ionicons name="camera-reverse-outline" size={28} color={recording ? 'rgba(255,255,255,0.3)' : '#fff'} />
           </TouchableOpacity>
         </View>
@@ -270,6 +393,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)' },
+  topRight: { flexDirection: 'row', gap: spacing.sm },
+
+  gestureLayer: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
+  gridLayer: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
+  gridLine: { position: 'absolute', backgroundColor: 'rgba(255,255,255,0.35)' },
+  gridV: { top: 0, bottom: 0, width: StyleSheet.hairlineWidth },
+  gridH: { left: 0, right: 0, height: StyleSheet.hairlineWidth },
+  focusBox: {
+    position: 'absolute', width: 80, height: 80, borderRadius: 8,
+    borderWidth: 1.5, borderColor: colors.accent, zIndex: 2,
+  },
+  zoomPill: {
+    position: 'absolute', alignSelf: 'center', top: '50%', zIndex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.full,
+  },
+  zoomText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  galleryThumb: { width: 40, height: 40, borderRadius: 8, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)' },
   recPill: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full },
   recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF3B30' },
   recTime: { color: '#fff', fontVariant: ['tabular-nums'], fontWeight: '700', fontSize: 14 },
