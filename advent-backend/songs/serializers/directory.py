@@ -196,7 +196,7 @@ class ChoirMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChoirMessage
         fields = [
-            'id', 'sender', 'content', 'message_type', 'attachment',
+            'id', 'sender', 'content', 'message_type', 'attachment', 'attachment_blurhash',
             'file_name', 'duration', 'reply_to', 'reactions', 'created_at',
         ]
         read_only_fields = ['id', 'sender', 'created_at']
@@ -259,7 +259,7 @@ class ChurchMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChurchMessage
         fields = [
-            'id', 'sender', 'content', 'message_type', 'attachment',
+            'id', 'sender', 'content', 'message_type', 'attachment', 'attachment_blurhash',
             'file_name', 'duration', 'reply_to', 'reactions', 'created_at',
         ]
         read_only_fields = ['id', 'sender', 'created_at']

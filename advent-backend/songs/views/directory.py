@@ -2,23 +2,19 @@ from .common import *  # noqa: F401,F403
 import base64
 from django.http import HttpResponse
 
-# Community chat attachments are a Cloudinary https URL (current) or a legacy
-# base64 data URI (older clients). base64 of ~6 MB is ~8 MB of text — headroom.
-MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
-
-
 def chat_attachment_error(attachment):
-    """Validate a chat attachment string. Returns (message, status) on a problem,
-    or None when it's a valid https URL / size-bounded data URI / empty."""
+    """Validate a chat attachment string. Attachments must be an uploaded R2
+    https URL — inline base64 data URIs are no longer accepted (they bloat the
+    DB). Returns (message, status) on a problem, or None when valid / empty.
+    Legacy rows that still hold base64 keep rendering on read; this guards writes."""
     if not attachment:
         return None
-    if attachment.startswith('https://'):
-        return ('Invalid attachment URL', status.HTTP_400_BAD_REQUEST) if len(attachment) > 2000 else None
-    if attachment.startswith('data:'):
-        if len(attachment) > MAX_ATTACHMENT_CHARS:
-            return ('Attachment is too large (max ~6 MB).', status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
-        return None
-    return ('Invalid attachment', status.HTTP_400_BAD_REQUEST)
+    if not attachment.startswith('https://'):
+        return ('Attachments must be uploaded — inline data is not allowed.',
+                status.HTTP_400_BAD_REQUEST)
+    if len(attachment) > 2000:
+        return ('Invalid attachment URL', status.HTTP_400_BAD_REQUEST)
+    return None
 
 
 class MediaStationViewSet(viewsets.ModelViewSet):
@@ -385,6 +381,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
             msg = ChurchMessage.objects.create(
                 church=church, sender=request.user, content=content[:5000],
                 message_type=mtype, attachment=attachment,
+                attachment_blurhash=(request.data.get('attachment_blurhash') or '')[:60],
                 file_name=(request.data.get('file_name') or '')[:255],
                 duration=request.data.get('duration') or None, reply_to=reply_to,
             )
@@ -875,6 +872,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
             msg = ChoirMessage.objects.create(
                 choir=choir, sender=request.user, content=content[:5000],
                 message_type=mtype, attachment=attachment,
+                attachment_blurhash=(request.data.get('attachment_blurhash') or '')[:60],
                 file_name=(request.data.get('file_name') or '')[:255],
                 duration=request.data.get('duration') or None, reply_to=reply_to,
             )

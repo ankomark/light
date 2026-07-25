@@ -52,6 +52,26 @@ class ChoirCommunityTests(APITestCase):
         self.assertEqual(post.status_code, 201)
         self.assertEqual(post.json()['sender']['username'], 'fan')
 
+    def test_base64_rejected_and_blurhash_round_trips(self):
+        """Image messages must reference an uploaded R2 URL (inline base64 is
+        refused), and the BlurHash placeholder persists and comes back."""
+        cid = self._make_choir()
+        self.client.force_authenticate(self.creator)
+        url = f'/api/choirs/{cid}/messages/'
+
+        bad = self.client.post(
+            url, {'message_type': 'image', 'attachment': 'data:image/png;base64,' + 'A' * 4000},
+            format='json')
+        self.assertEqual(bad.status_code, 400, bad.content[:200])
+
+        ok = self.client.post(
+            url,
+            {'message_type': 'image', 'attachment': 'https://cdn.example/r2/pic.jpg',
+             'attachment_blurhash': 'LEHV6nWB2yk8pyo0adR*.7kCMdnj'},
+            format='json')
+        self.assertEqual(ok.status_code, 201, ok.content[:200])
+        self.assertEqual(ok.json()['attachment_blurhash'], 'LEHV6nWB2yk8pyo0adR*.7kCMdnj')
+
     def test_non_member_cannot_post(self):
         cid = self._make_choir()
         self.client.force_authenticate(self.outsider)

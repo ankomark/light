@@ -1094,7 +1094,8 @@ class ChoirMessage(models.Model):
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_messages')
     content = models.TextField(blank=True, default='')
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
-    attachment = models.TextField(blank=True, default='')  # base64 data URI
+    attachment = models.TextField(blank=True, default='')  # R2 URL (legacy rows may hold base64)
+    attachment_blurhash = models.CharField(max_length=60, blank=True, default='')
     file_name = models.CharField(max_length=255, blank=True, default='')
     duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
     reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
@@ -1179,7 +1180,8 @@ class ChurchMessage(models.Model):
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_messages')
     content = models.TextField(blank=True, default='')
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
-    attachment = models.TextField(blank=True, default='')  # base64 data URI
+    attachment = models.TextField(blank=True, default='')  # R2 URL (legacy rows may hold base64)
+    attachment_blurhash = models.CharField(max_length=60, blank=True, default='')
     file_name = models.CharField(max_length=255, blank=True, default='')
     duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
     reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
