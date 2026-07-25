@@ -583,8 +583,8 @@ const ChurchCommunity = ({ navigation, route }) => {
     setMenuMsg(null);
     if (!canModerate(m)) return;
     Alert.alert(t('group.detail.deleteMessageTitle'), t('group.detail.deleteMessageBody'), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: async () => {
         try { await deleteChurchMessage(churchId, m.id); setMessages((p) => p.filter((x) => x.id !== m.id)); } catch {}
       } },
     ]);
@@ -635,8 +635,8 @@ const ChurchCommunity = ({ navigation, route }) => {
   };
   const remove = (m) => {
     Alert.alert(t('community.removeTitle'), t('community.removeConfirm', { name: m.user?.username }), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.remove'), style: 'destructive', onPress: async () => {
         try { await removeChurchMember(churchId, m.user.id); setMembers((p) => p.filter((x) => x.id !== m.id)); } catch {}
       } },
     ]);
@@ -687,8 +687,8 @@ const ChurchCommunity = ({ navigation, route }) => {
   };
   const onLeave = () => {
     Alert.alert(t('community.leaveTitle'), t('community.leaveConfirm', { name: church.name || t('community.thisChurch') }), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Leave', style: 'destructive', onPress: async () => {
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.leave'), style: 'destructive', onPress: async () => {
         try { await leaveChurch(churchId); navigation.goBack(); } catch (e) { Alert.alert(t('community.church'), e?.response?.data?.error || t('community.leaveFailed')); }
       } },
     ]);

@@ -197,9 +197,9 @@ const Choirs = ({ navigation }) => {
 
   const onDelete = (c) => {
     Alert.alert(t('choirs.deleteTitle'), t('common.deleteConfirm', { name: c.name }), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive',
+        text: t('common.delete'), style: 'destructive',
         onPress: async () => {
           const prev = choirs;
           setChoirs((cur) => cur.filter((x) => x.id !== c.id));

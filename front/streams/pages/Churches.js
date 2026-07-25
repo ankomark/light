@@ -237,15 +237,15 @@ const Churches = ({ navigation }) => {
 
   const handleDeleteChurch = async (id) => {
     Alert.alert(
-      'Confirm Delete',
+      t('churches.deleteTitle'),
       t('churches.deleteConfirm'),
       [
         {
-          text: 'Cancel',
+          text: t('common.cancel'),
           style: 'cancel',
         },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           onPress: async () => {
             try {
               await deleteChurch(id);
