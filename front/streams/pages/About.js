@@ -27,8 +27,8 @@ const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 const TAGLINE_KEY = 'about.tagline';
 const SUPPORT_EMAIL = 'ankomark76@gmail.com';
 const WEBSITE_URL = '';        // set when available
-const PRIVACY_URL = '';        // set when available
-const TERMS_URL = '';          // set when available
+// Privacy / Terms / Guidelines now open in-app screens (see LegalPage) instead
+// of external URLs.
 const LOGO = require('../assets/logo.png');
 
 const FEATURES = [
@@ -157,13 +157,19 @@ const About = () => {
             <ActionRow
               icon="shield-checkmark-outline"
               label={t('about.privacy')}
-              onPress={() => openLink(PRIVACY_URL, t('about.privacySoon'), t)}
+              onPress={() => navigation.navigate('LegalPage', { docKey: 'privacy' })}
             />
             <Divider />
             <ActionRow
               icon="document-text-outline"
               label={t('about.terms')}
-              onPress={() => openLink(TERMS_URL, t('about.termsSoon'), t)}
+              onPress={() => navigation.navigate('LegalPage', { docKey: 'terms' })}
+            />
+            <Divider />
+            <ActionRow
+              icon="people-outline"
+              label={t('about.guidelines')}
+              onPress={() => navigation.navigate('LegalPage', { docKey: 'guidelines' })}
             />
           </View>
 

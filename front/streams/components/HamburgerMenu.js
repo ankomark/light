@@ -65,6 +65,15 @@ const SECTIONS = [
       { label: 'User Guide', route: 'UserGuide', set: 'mci', icon: 'compass-outline' },
     ],
   },
+  {
+    title: 'Legal & Privacy',
+    items: [
+      { label: 'Privacy Centre', route: 'PrivacyCentre', set: 'mci', icon: 'shield-account-outline' },
+      { label: 'Privacy Policy', route: 'LegalPage', params: { docKey: 'privacy' }, set: 'mci', icon: 'shield-check-outline' },
+      { label: 'Terms of Service', route: 'LegalPage', params: { docKey: 'terms' }, set: 'mci', icon: 'file-document-outline' },
+      { label: 'Guidelines', route: 'LegalPage', params: { docKey: 'guidelines' }, set: 'mci', icon: 'account-group-outline' },
+    ],
+  },
 ];
 
 // Admin destinations, each gated by the capability it needs (dashboard is shown
@@ -123,9 +132,9 @@ function HamburgerMenu() {
 
   const close = () => setMenuVisible(false);
 
-  const go = (route) => {
+  const go = (route, params) => {
     setMenuVisible(false);
-    navigation.navigate(route);
+    navigation.navigate(route, params);
   };
 
   const handleLogout = async () => {
@@ -212,8 +221,8 @@ function HamburgerMenu() {
                     const active = activeRoute === item.route;
                     return (
                       <Pressable
-                        key={item.route}
-                        onPress={() => go(item.route)}
+                        key={item.label}
+                        onPress={() => go(item.route, item.params)}
                         android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
                         accessibilityRole="button"
                         accessibilityLabel={item.label}

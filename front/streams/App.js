@@ -37,6 +37,8 @@ import PublicationEditor from './pages/PublicationEditor';
 import Churches from './pages/Churches';
 import About from './pages/About';
 import UserGuide from './pages/UserGuide';
+import LegalPage from './pages/LegalPage';
+import PrivacyCentre from './pages/PrivacyCentre';
 import Settings from './pages/Settings';
 import Help from './pages/Help';
 import BlockedUsers from './pages/BlockedUsers';
@@ -265,6 +267,8 @@ const App = () => {
                 <Stack.Screen name="Churches" component={ChurchesWrapper} />
                 <Stack.Screen name="About" component={About} />
                 <Stack.Screen name="UserGuide" component={UserGuide} />
+                <Stack.Screen name="PrivacyCentre" component={PrivacyCentre} />
+                <Stack.Screen name="LegalPage" component={LegalPage} />
                 <Stack.Screen name="Settings" component={Settings} options={{ headerShown: false }} />
                 <Stack.Screen name="Help" component={Help} options={{ headerShown: false }} />
                 <Stack.Screen name="BlockedUsers" component={BlockedUsers} options={{ headerShown: false }} />
