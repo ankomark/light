@@ -104,13 +104,19 @@ function AdminLogin() {
 
 function NotAuthorized() {
   const { logout, currentUser } = useAuth();
+  const debug = currentUser
+    ? `is_staff=${JSON.stringify(currentUser.is_staff)} · admin_role=${JSON.stringify(currentUser.admin_role)} · is_super_admin=${JSON.stringify(currentUser.is_super_admin)} · capabilities=${JSON.stringify(currentUser.capabilities)}`
+    : 'currentUser is null — your profile could not be loaded (check the Network tab for /profiles/me/).';
   return (
     <View style={styles.centered}>
       <View style={styles.loginCard}>
         <Text style={styles.loginTitle}>Not authorized</Text>
         <Text style={styles.muted}>
-          {`Signed in as @${currentUser?.username || ''}, but this account isn't an admin.`}
+          {currentUser
+            ? `Signed in as @${currentUser.username || ''}, but this account isn't recognised as an admin.`
+            : 'Signed in, but your admin profile could not be loaded.'}
         </Text>
+        <Text style={styles.debug}>{debug}</Text>
         <TouchableOpacity style={styles.primaryBtn} onPress={logout} activeOpacity={0.85}>
           <Text style={styles.primaryBtnText}>Sign out</Text>
         </TouchableOpacity>
@@ -204,6 +210,7 @@ const styles = StyleSheet.create({
   brand: { color: colors.accent, fontWeight: '800', letterSpacing: 1, fontSize: 12 },
   loginTitle: { color: '#fff', fontSize: 24, fontWeight: '800', marginBottom: 6 },
   muted: { color: 'rgba(255,255,255,0.7)', lineHeight: 20 },
+  debug: { color: 'rgba(255,255,255,0.45)', fontSize: 11, fontFamily: 'monospace', marginTop: 4 },
   input: {
     backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
     color: '#fff', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
