@@ -1486,6 +1486,21 @@ export const STRINGS = {
     'privacyCentre.guidelinesSub': 'What belongs here — and what does not.',
     'privacyCentre.terms': 'Terms of Service',
     'privacyCentre.termsSub': 'The rules for using the app.',
+
+    // ── Camera ──────────────────────────────────────────────────────────────
+    'camera.open': 'Take photo or video',
+    'camera.photo': 'PHOTO',
+    'camera.video': 'VIDEO',
+    'camera.retake': 'Retake',
+    'camera.use': 'Use photo',
+    'camera.enable': 'Enable camera',
+    'camera.permTitle': 'Camera access needed',
+    'camera.permBody': 'Allow camera access to take photos and videos for your posts.',
+    'camera.micTitle': 'Microphone needed',
+    'camera.micBody': 'Allow microphone access to record video with sound.',
+    'camera.errorTitle': 'Camera',
+    'camera.photoFailed': 'Could not take the photo. Please try again.',
+    'camera.videoFailed': 'Could not record the video. Please try again.',
   },
   sw: {
     'common.cancel': 'Ghairi',
@@ -2961,5 +2976,20 @@ export const STRINGS = {
     'privacyCentre.guidelinesSub': 'Kinachokaribishwa — na kisichokaribishwa.',
     'privacyCentre.terms': 'Masharti ya Huduma',
     'privacyCentre.termsSub': 'Kanuni za kutumia programu.',
+
+    // ── Kamera ──────────────────────────────────────────────────────────────
+    'camera.open': 'Piga picha au video',
+    'camera.photo': 'PICHA',
+    'camera.video': 'VIDEO',
+    'camera.retake': 'Piga tena',
+    'camera.use': 'Tumia picha',
+    'camera.enable': 'Washa kamera',
+    'camera.permTitle': 'Ruhusa ya kamera inahitajika',
+    'camera.permBody': 'Ruhusu ufikiaji wa kamera kupiga picha na video kwa machapisho yako.',
+    'camera.micTitle': 'Kipaza sauti kinahitajika',
+    'camera.micBody': 'Ruhusu ufikiaji wa kipaza sauti kurekodi video yenye sauti.',
+    'camera.errorTitle': 'Kamera',
+    'camera.photoFailed': 'Imeshindwa kupiga picha. Tafadhali jaribu tena.',
+    'camera.videoFailed': 'Imeshindwa kurekodi video. Tafadhali jaribu tena.',
   },
 };

@@ -20,6 +20,7 @@ import RotatingBackground from './components/RotatingBackground';
 import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold } from '@expo-google-fonts/cinzel';
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import CreatePost from './components/CreatePost';
+import CameraCapture from './components/CameraCapture';
 import Music from './components/Music';
 import EditTrackScreen from './components/EditTrackScreen';
 import PostDetail from './components/PostDetail'
@@ -253,6 +254,7 @@ const App = () => {
                 <Stack.Screen name="Playlists" component={PlaylistsWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="PlaylistDetail" component={PlaylistDetailWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: true }} />
+                <Stack.Screen name="CameraCapture" component={CameraCapture} options={{ headerShown: false, presentation: 'fullScreenModal' }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>
                 <Stack.Screen name="HymnDetail" component={HymnDetail}  options={({ route }) => ({ headerShown: false, title: route.params?.hymn?.title || 'Hymn Details' })}/>

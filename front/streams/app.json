@@ -20,8 +20,8 @@
           "audio",
           "voip"
         ],
-        "NSMicrophoneUsageDescription": "Allow microphone access so you can broadcast live audio.",
-        "NSCameraUsageDescription": "Allow camera access for live video broadcasts."
+        "NSMicrophoneUsageDescription": "Allow microphone access to broadcast live audio and record video with sound.",
+        "NSCameraUsageDescription": "Allow camera access to broadcast live video and take photos and videos for your posts."
       }
     },
     "android": {
@@ -85,6 +85,14 @@
       "expo-secure-store",
       "expo-video",
       "expo-audio",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take photos and videos for your posts.",
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone to record video with sound.",
+          "recordAudioAndroid": true
+        }
+      ],
       "react-native-compressor"
     ],
     "experiments": {

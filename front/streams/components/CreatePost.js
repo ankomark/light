@@ -289,6 +289,50 @@ const CreatePost = ({ navigation }) => {
   const compressImage = (uri, width) =>
     compressImageFile(uri, { maxWidth: 1080, sourceWidth: width, quality: 0.8 });
 
+  // A shot captured in the in-app camera comes back as an ImagePicker-shaped
+  // asset and flows into the same paths as a gallery pick (video → trimmer,
+  // photo → crop/compress). Camera videos have unknown dimensions, which the
+  // resolution check treats as allowed.
+  const handleCapturedAsset = async (asset) => {
+    if (!asset?.uri) return;
+    if (asset.type === 'video') {
+      setContentType('video');
+      const shortSide = asset.width && asset.height ? Math.min(asset.width, asset.height) : 0;
+      if (shortSide > MAX_VIDEO_SHORT_SIDE) {
+        Alert.alert(t('create.post.resolutionTitle'), t('create.post.resolutionBody'));
+        return;
+      }
+      setMedia(asset);
+      const durSec = (asset.duration || 0) / 1000;
+      setVideoTrim({ start: 0, end: Math.min(30, durSec || 30) });
+      setShowVideoTrimmer(true);
+      return;
+    }
+    // Photo.
+    setContentType('image');
+    if (images.length >= MAX_IMAGES) {
+      Alert.alert(t('create.post.limitTitle'), t('create.post.limitBody', { max: MAX_IMAGES }));
+      return;
+    }
+    setPreparingMedia(true);
+    try {
+      let src = { uri: asset.uri, width: asset.width, height: asset.height };
+      try {
+        const out = await compressImage(asset.uri, asset.width);
+        src = { uri: out.uri, width: out.width || asset.width, height: out.height || asset.height };
+      } catch { /* keep original on compress failure */ }
+      if (images.length === 0) {
+        originalAssetRef.current = src;
+        setCropTarget(src);
+        setShowCropper(true);
+      } else {
+        setImages((prev) => [...prev, src].slice(0, MAX_IMAGES));
+      }
+    } finally { setPreparingMedia(false); }
+  };
+
+  const openCamera = () => navigation.navigate('CameraCapture', { onCapture: handleCapturedAsset });
+
   // Cropper confirmed: compress the cropped output → single-image post.
   // (Crop is only offered for single-image posts, so this replaces the carousel.)
   // The cropper already outputs a compressed JPEG capped at 1080px (and the
@@ -619,10 +663,16 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
-            <Feather name="upload" size={32} color="#666" />
-            <Text style={styles.uploadText}>{t('create.post.selectVideo')}</Text>
-          </TouchableOpacity>
+          <View>
+            <TouchableOpacity style={styles.cameraButton} onPress={openCamera} activeOpacity={0.85}>
+              <Feather name="camera" size={20} color="#fff" />
+              <Text style={styles.cameraButtonText}>{t('camera.open')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
+              <Feather name="upload" size={32} color="#666" />
+              <Text style={styles.uploadText}>{t('create.post.selectVideo')}</Text>
+            </TouchableOpacity>
+          </View>
         )
       ) : images.length > 0 ? (
         <View style={styles.mediaPreviewContainer}>
@@ -675,10 +725,16 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
           </View>
         </View>
       ) : (
-        <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
-          <Feather name="upload" size={32} color="#666" />
-          <Text style={styles.uploadText}>Select Images (up to {MAX_IMAGES})</Text>
-        </TouchableOpacity>
+        <View>
+          <TouchableOpacity style={styles.cameraButton} onPress={openCamera} activeOpacity={0.85}>
+            <Feather name="camera" size={20} color="#fff" />
+            <Text style={styles.cameraButtonText}>{t('camera.open')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
+            <Feather name="upload" size={32} color="#666" />
+            <Text style={styles.uploadText}>Select Images (up to {MAX_IMAGES})</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Caption Input */}
@@ -996,6 +1052,21 @@ const styles = StyleSheet.create({
   },
   activeTypeText: {
     color: '#fff',
+  },
+  cameraButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#1DA1F2',
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginBottom: 12,
+  },
+  cameraButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   uploadButton: {
     height: 200,
