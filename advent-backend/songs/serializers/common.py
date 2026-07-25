@@ -121,6 +121,9 @@ class DetailedUserSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    # Declared explicitly so the default (case-sensitive) UniqueValidator is
+    # replaced by our case-insensitive check below with a friendly message.
+    username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True)
     profile_picture = serializers.SerializerMethodField() 
     profile = ProfileSerializer(read_only=True)
@@ -156,6 +159,23 @@ class UserSerializer(serializers.ModelSerializer):
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
+    def validate_username(self, value):
+        # Usernames must be unique case-insensitively — "Otieno" reserves
+        # "otieno" too. The entered casing is preserved for display.
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError("Username is required.")
+        if len(value) < 3:
+            raise serializers.ValidationError("Username must be at least 3 characters.")
+        if ' ' in value:
+            raise serializers.ValidationError("Username cannot contain spaces.")
+        qs = User.objects.filter(username__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("This username is already taken. Please pick a unique name.")
         return value
 
     def get_profile_picture(self, obj):
