@@ -771,7 +771,7 @@ export const STRINGS = {
     'dir.invalidTitle': 'Invalid',
     'dir.invalidNumber': 'Enter a valid number.',
 
-    'choirs.title': 'Choirs',
+    'choirs.title': 'Choir Community',
     'choirs.subtitle': 'Discover Adventist choirs',
     'choirs.add': 'Add Choir',
     'choirs.none': 'No choirs found',
@@ -792,7 +792,7 @@ export const STRINGS = {
     'choirs.invalidDate': 'Founded date must be in YYYY-MM-DD format.',
     'choirs.missingInfo': 'Choir name and location are required.',
 
-    'churches.title': 'Seventh-day Adventist Churches',
+    'churches.title': 'Church Community',
     'churches.add': 'Add Your Church',
     'churches.added': 'Added this church',
     'churches.none': 'No churches found',
@@ -2192,7 +2192,7 @@ export const STRINGS = {
     'dir.invalidTitle': 'Si sahihi',
     'dir.invalidNumber': 'Weka nambari sahihi.',
 
-    'choirs.title': 'Kwaya',
+    'choirs.title': 'Jumuiya ya Kwaya',
     'choirs.subtitle': 'Gundua kwaya za Waadventista',
     'choirs.add': 'Ongeza Kwaya',
     'choirs.none': 'Hakuna kwaya zilizopatikana',
@@ -2213,7 +2213,7 @@ export const STRINGS = {
     'choirs.invalidDate': 'Tarehe ya kuanzishwa lazima iwe katika muundo wa YYYY-MM-DD.',
     'choirs.missingInfo': 'Jina la kwaya na mahali vinahitajika.',
 
-    'churches.title': 'Makanisa ya Waadventista wa Sabato',
+    'churches.title': 'Jumuiya ya Kanisa',
     'churches.add': 'Ongeza Kanisa Lako',
     'churches.added': 'Umeongeza kanisa hili',
     'churches.none': 'Hakuna makanisa yaliyopatikana',

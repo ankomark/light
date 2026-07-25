@@ -40,8 +40,8 @@ const SECTIONS = [
     title: 'Community',
     items: [
       { label: 'Messages', route: 'Inbox', set: 'ion', icon: 'chatbubbles-outline' },
-      { label: 'Choirs', route: 'Choirs', set: 'mci', icon: 'account-music-outline' },
-      { label: 'Churches', route: 'Churches', set: 'mci', icon: 'church' },
+      { label: 'Choir Community', route: 'Choirs', set: 'mci', icon: 'account-music-outline' },
+      { label: 'Church Community', route: 'Churches', set: 'mci', icon: 'church' },
       { label: 'Groups', route: 'Groups', set: 'mci', icon: 'account-group-outline' },
       { label: 'Notice Board', route: 'NoticeBoard', set: 'mci', icon: 'bulletin-board' },
     ],
