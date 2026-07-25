@@ -29,6 +29,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import ReportModal from '../components/ReportModal';
+import { createCommunitySocket } from '../services/groupSocket';
 import { uploadMedia } from '../services/cloudinary';
 import {
   fetchChurchCommunity, fetchChurchMessages, sendChurchMessage, deleteChurchMessage,
@@ -288,6 +289,25 @@ const ChurchCommunity = ({ navigation, route }) => {
   const replyToRef = useRef(null);
   useEffect(() => { replyToRef.current = replyTo; }, [replyTo]);
 
+  // Realtime
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [onlineIds, setOnlineIds] = useState([]);
+  const socketRef = useRef(null);
+  const typingTimersRef = useRef({});
+  const myTypingRef = useRef({ active: false, idle: null });
+
+  const markUserTyping = useCallback((username, isTyping) => {
+    clearTimeout(typingTimersRef.current[username]);
+    if (isTyping) {
+      setTypingUsers((prev) => (prev.includes(username) ? prev : [...prev, username]));
+      typingTimersRef.current[username] = setTimeout(() => {
+        setTypingUsers((prev) => prev.filter((u) => u !== username));
+      }, 5000);
+    } else {
+      setTypingUsers((prev) => prev.filter((u) => u !== username));
+    }
+  }, []);
+
   // Attachment tray slide/fade animation (mounted only while visible/exiting).
   const [trayMounted, setTrayMounted] = useState(false);
   const trayAnim = useRef(new Animated.Value(0)).current;
@@ -336,7 +356,44 @@ const ChurchCommunity = ({ navigation, route }) => {
 
   useEffect(() => { loadCommunity(); }, [loadCommunity]);
 
-  // ── poll for new messages (no websockets) ─────────────────────────────────
+  // ── realtime socket (new messages / deletes / typing / presence) ──────────
+  useEffect(() => {
+    if (!isMember) return undefined;
+    const sock = createCommunitySocket('church', churchId, {
+      onMessage: (msg) => {
+        if (!msg?.id || seenIdsRef.current.has(msg.id)) return; // dedupe (incl. my own)
+        seenIdsRef.current.add(msg.id);
+        setMessages((prev) => [msg, ...prev]);
+      },
+      onDeleted: (id) => setMessages((prev) => prev.filter((m) => String(m.id) !== String(id))),
+      onTyping: (evt) => {
+        if (evt.user_id === currentUser?.id || !evt.username) return;
+        markUserTyping(evt.username, evt.is_typing);
+      },
+      onPresence: (evt) => {
+        if (!evt.user_id) return;
+        setOnlineIds((prev) => (evt.event === 'online'
+          ? (prev.includes(evt.user_id) ? prev : [...prev, evt.user_id])
+          : prev.filter((id) => id !== evt.user_id)));
+      },
+      onStatus: (s) => { if (s === 'closed') setOnlineIds([]); },
+    });
+    socketRef.current = sock;
+    return () => { sock.close(); socketRef.current = null; };
+  }, [isMember, churchId, currentUser?.id, markUserTyping]);
+
+  const notifyTyping = useCallback(() => {
+    const s = socketRef.current;
+    if (!s) return;
+    if (!myTypingRef.current.active) { myTypingRef.current.active = true; s.sendTyping(true); }
+    clearTimeout(myTypingRef.current.idle);
+    myTypingRef.current.idle = setTimeout(() => {
+      myTypingRef.current.active = false;
+      s.sendTyping(false);
+    }, 2500);
+  }, []);
+
+  // ── fallback poll (safety net; realtime carries the load) ─────────────────
   useEffect(() => {
     if (!isMember) return undefined;
     pollRef.current = setInterval(async () => {
@@ -349,9 +406,14 @@ const ChurchCommunity = ({ navigation, route }) => {
           setMessages((prev) => [...fresh, ...prev]);
         }
       } catch {}
-    }, 5000);
+    }, 15000);
     return () => clearInterval(pollRef.current);
   }, [isMember, churchId]);
+
+  useEffect(() => () => {
+    Object.values(typingTimersRef.current).forEach(clearTimeout);
+    clearTimeout(myTypingRef.current.idle);
+  }, []);
 
   useEffect(() => () => { soundRef.current?.unloadAsync?.().catch(() => {}); }, []);
 
@@ -775,10 +837,22 @@ const ChurchCommunity = ({ navigation, route }) => {
           defaultSource={DEFAULT_AVATAR} style={styles.headerAvatar} />
         <View style={{ flex: 1 }}>
           <Text style={styles.headerName} numberOfLines={1}>{church.name || 'Church'}</Text>
-          <Text style={styles.headerSub}>
-            <Ionicons name="people" size={12} color={colors.textSecondary} /> {community?.members_count ?? 0} in community
-            {community?.role ? `  ·  ${ROLE_BADGE[community.role]}` : ''}
-          </Text>
+          {typingUsers.length > 0 ? (
+            <Text style={[styles.headerSub, { color: colors.accent }]} numberOfLines={1}>
+              {typingUsers.length === 1
+                ? t('group.detail.typingOne', { name: typingUsers[0] })
+                : t('group.detail.typingMany')}
+            </Text>
+          ) : onlineIds.filter((id) => id !== currentUser?.id).length > 0 ? (
+            <Text style={[styles.headerSub, { color: '#25D366' }]} numberOfLines={1}>
+              ● {t('group.detail.onlineCount', { count: onlineIds.filter((id) => id !== currentUser?.id).length })}
+            </Text>
+          ) : (
+            <Text style={styles.headerSub}>
+              <Ionicons name="people" size={12} color={colors.textSecondary} /> {community?.members_count ?? 0} in community
+              {community?.role ? `  ·  ${ROLE_BADGE[community.role]}` : ''}
+            </Text>
+          )}
         </View>
         {isMember && (
           <TouchableOpacity onPress={openManage} hitSlop={10} style={styles.headerBtn}>
@@ -886,7 +960,7 @@ const ChurchCommunity = ({ navigation, route }) => {
               <TextInput
                 style={styles.input}
                 value={draft}
-                onChangeText={setDraft}
+                onChangeText={(v) => { setDraft(v); notifyTyping(); }}
                 placeholder={t('chat.messagePlaceholder')}
                 placeholderTextColor={colors.placeholder}
                 multiline

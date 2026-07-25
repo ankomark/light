@@ -7,18 +7,16 @@
 // headers).
 import { API_BASE, getAccessToken } from './api';
 
-function wsUrl(slug, token) {
-  // http→ws, https→wss
-  const base = API_BASE.replace(/^http(s?):\/\//i, (_m, s) => `ws${s}://`);
-  return `${base}/ws/groups/${encodeURIComponent(slug)}/?token=${encodeURIComponent(token)}`;
-}
+// http(s)://host → ws(s)://host
+const wsBase = () => API_BASE.replace(/^http(s?):\/\//i, (_m, s) => `ws${s}://`);
 
 /**
- * Open a managed socket for one group. Returns { sendTyping, close }.
- * Handlers: onMessage(msg), onDeleted(id), onTyping(evt), onPresence(evt),
- * onStatus('open'|'closed').
+ * Open a managed realtime socket for a given ws path (e.g. `ws/groups/<slug>/`).
+ * Returns { sendTyping, close }. Handlers: onMessage(msg), onDeleted(id),
+ * onEdited(msg), onPinned(evt), onTyping(evt), onPresence(evt),
+ * onStatus('open'|'closed'). Auto-reconnects with backoff; auth via ?token=.
  */
-export function createGroupSocket(slug, handlers = {}) {
+function createSocket(path, handlers = {}) {
   let ws = null;
   let closedByUs = false;
   let retry = 0;
@@ -37,7 +35,7 @@ export function createGroupSocket(slug, handlers = {}) {
     const token = await getAccessToken();
     if (!token) { scheduleReconnect(); return; }
     try {
-      ws = new WebSocket(wsUrl(slug, token));
+      ws = new WebSocket(`${wsBase()}/${path}?token=${encodeURIComponent(token)}`);
     } catch {
       scheduleReconnect();
       return;
@@ -48,7 +46,9 @@ export function createGroupSocket(slug, handlers = {}) {
       try { data = JSON.parse(e.data); } catch { return; }
       switch (data.type) {
         case 'message': handlers.onMessage?.(data.message); break;
+        case 'edited': handlers.onEdited?.(data.message); break;
         case 'deleted': handlers.onDeleted?.(data.id); break;
+        case 'pinned': handlers.onPinned?.(data); break;
         case 'typing': handlers.onTyping?.(data); break;
         case 'presence': handlers.onPresence?.(data); break;
         default: break;
@@ -76,4 +76,13 @@ export function createGroupSocket(slug, handlers = {}) {
 
   connect();
   return { sendTyping, close };
+}
+
+export function createGroupSocket(slug, handlers = {}) {
+  return createSocket(`ws/groups/${encodeURIComponent(slug)}/`, handlers);
+}
+
+// Choir / church community chat. kind = 'choir' | 'church'.
+export function createCommunitySocket(kind, communityId, handlers = {}) {
+  return createSocket(`ws/community/${kind}/${encodeURIComponent(communityId)}/`, handlers);
 }
