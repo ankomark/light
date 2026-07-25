@@ -888,6 +888,11 @@ export const searchChoirMessages = (id, q) =>
   apiRequest('get', `/choirs/${id}/search/`, null, { params: { q } });
 export const fetchChoirContext = (id, messageId) =>
   apiRequest('get', `/choirs/${id}/context/`, null, { params: { message_id: messageId } });
+// Phase 4: moderator role + audit log.
+export const setChoirModerator = (id, userId, isModerator) =>
+  apiRequest('post', `/choirs/${id}/set-moderator/`, { user_id: userId, is_moderator: isModerator });
+export const fetchChoirAuditLog = (id) =>
+  apiRequest('get', `/choirs/${id}/audit-log/`);
 
 // ── Church community (membership / requests / chat) — mirrors the choir API ───
 export const fetchChurchCommunity = (id) =>
@@ -938,6 +943,11 @@ export const searchChurchMessages = (id, q) =>
   apiRequest('get', `/churches/${id}/search/`, null, { params: { q } });
 export const fetchChurchContext = (id, messageId) =>
   apiRequest('get', `/churches/${id}/context/`, null, { params: { message_id: messageId } });
+// Phase 4: moderator role + audit log.
+export const setChurchModerator = (id, userId, isModerator) =>
+  apiRequest('post', `/churches/${id}/set-moderator/`, { user_id: userId, is_moderator: isModerator });
+export const fetchChurchAuditLog = (id) =>
+  apiRequest('get', `/churches/${id}/audit-log/`);
 
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);

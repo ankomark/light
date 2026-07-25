@@ -38,6 +38,7 @@ import {
   searchChurchUsers, addChurchMember, setChurchMemberRole, setChurchPostingPolicy,
   editChurchMessage, pinChurchMessage, unpinChurchMessage, markChurchRead,
   fetchChurchReceipts, searchChurchMessages, fetchChurchContext,
+  setChurchModerator, fetchChurchAuditLog,
 } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -294,6 +295,10 @@ const ChurchCommunity = ({ navigation, route }) => {
   const [searchBusy, setSearchBusy] = useState(false);
   const [inContext, setInContext] = useState(false);
   const listRef = useRef(null);
+  // Phase 4: moderator role + audit log.
+  const [showAudit, setShowAudit] = useState(false);
+  const [auditRows, setAuditRows] = useState([]);
+  const [auditBusy, setAuditBusy] = useState(false);
   const [playingId, setPlayingId] = useState(null); // id of the voice note currently playing
   const [messagesLoading, setMessagesLoading] = useState(true); // first page of chat still loading
 
@@ -339,6 +344,7 @@ const ChurchCommunity = ({ navigation, route }) => {
 
   const isMember = !!community?.is_member;
   const isAdmin = !!community?.is_admin;
+  const isMod = !!community?.is_moderator;
   const onlyAdmins = !!community?.only_admins_can_post;
   const creatorId = community?.created_by_id;
   const canPost = isAdmin || !onlyAdmins; // members can't post when the chat is admin-locked
@@ -713,7 +719,7 @@ const ChurchCommunity = ({ navigation, route }) => {
   };
 
   const canModerate = (m) =>
-    m?.sender?.id === currentUser?.id || m?.sender?.username === currentUser?.username || isAdmin;
+    m?.sender?.id === currentUser?.id || m?.sender?.username === currentUser?.username || isAdmin || isMod;
 
   const confirmDelete = (m) => {
     setMenuMsg(null);
@@ -871,6 +877,25 @@ const ChurchCommunity = ({ navigation, route }) => {
       setMembers((p) => p.map((x) => (x.id === m.id ? { ...x, role: m.role } : x)));
       Alert.alert(t('community.church'), t('community.roleFailed'));
     });
+  };
+
+  // Promote/dismiss a moderator (optimistic).
+  const toggleModerator = (m) => {
+    const next = !m.is_moderator;
+    setMembers((p) => p.map((x) => (x.id === m.id ? { ...x, is_moderator: next } : x)));
+    setChurchModerator(churchId, m.user.id, next).catch(() => {
+      setMembers((p) => p.map((x) => (x.id === m.id ? { ...x, is_moderator: m.is_moderator } : x)));
+      Alert.alert(t('community.church'), t('community.moderatorFailed'));
+    });
+  };
+
+  const openAudit = async () => {
+    setShowAudit(true);
+    setAuditBusy(true);
+    try {
+      const res = await fetchChurchAuditLog(churchId);
+      setAuditRows(res?.results ?? (Array.isArray(res) ? res : []));
+    } catch { setAuditRows([]); } finally { setAuditBusy(false); }
   };
 
   // WhatsApp-style "Only admins can send messages" lock (admin only).
@@ -1169,6 +1194,10 @@ const ChurchCommunity = ({ navigation, route }) => {
                       <Ionicons name="person-add" size={18} color="#0A1628" />
                       <Text style={styles.addBtnText}>{t('community.addMembers')}</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity style={styles.auditBtn} onPress={openAudit} activeOpacity={0.85}>
+                      <Ionicons name="time-outline" size={18} color={colors.accent} />
+                      <Text style={styles.auditBtnText}>{t('community.auditLog')}</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
                 {isAdmin && requests.length > 0 && (
@@ -1194,7 +1223,10 @@ const ChurchCommunity = ({ navigation, route }) => {
                   <Image source={m.user?.profile_picture ? { uri: m.user.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.memberAvatar} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.memberName} numberOfLines={1}>@{m.user?.username}</Text>
-                    <Text style={styles.memberRole}>{isCreator ? 'Creator' : (ROLE_BADGE[m.role] || m.role)}</Text>
+                    <Text style={styles.memberRole}>
+                      {isCreator ? 'Creator' : (ROLE_BADGE[m.role] || m.role)}
+                      {m.is_moderator && !isCreator ? `  ·  ${t('community.moderator')}` : ''}
+                    </Text>
                   </View>
                   {isAdmin && !isCreator && (
                     <>
@@ -1206,6 +1238,16 @@ const ChurchCommunity = ({ navigation, route }) => {
                           {m.role === 'admin' ? 'Dismiss' : 'Make admin'}
                         </Text>
                       </TouchableOpacity>
+                      {m.role !== 'admin' && (
+                        <TouchableOpacity
+                          style={[styles.smallBtn, m.is_moderator ? styles.rejectBtn : styles.modBtn]}
+                          onPress={() => toggleModerator(m)}
+                        >
+                          <Text style={m.is_moderator ? styles.rejectText : styles.modBtnText}>
+                            {m.is_moderator ? t('community.dismissModerator') : t('community.makeModerator')}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                       <TouchableOpacity style={[styles.smallBtn, styles.rejectBtn]} onPress={() => remove(m)}>
                         <Text style={styles.rejectText}>{t('common.remove')}</Text>
                       </TouchableOpacity>
@@ -1302,7 +1344,7 @@ const ChurchCommunity = ({ navigation, route }) => {
                 <Text style={styles.menuItemText}>{t('community.readBy')}</Text>
               </TouchableOpacity>
             )}
-            {isAdmin && menuMsg && menuMsg.message_type !== 'system' && !String(menuMsg.id).startsWith('temp-') && (
+            {(isAdmin || isMod) && menuMsg && menuMsg.message_type !== 'system' && !String(menuMsg.id).startsWith('temp-') && (
               <TouchableOpacity style={styles.menuItem} onPress={() => (pinned?.id === menuMsg.id ? (setMenuMsg(null), unpin()) : pin(menuMsg))}>
                 <Ionicons name={pinned?.id === menuMsg.id ? 'pin-outline' : 'pin'} size={20} color={colors.textPrimary} />
                 <Text style={styles.menuItemText}>{pinned?.id === menuMsg.id ? t('community.unpin') : t('community.pin')}</Text>
@@ -1376,6 +1418,38 @@ const ChurchCommunity = ({ navigation, route }) => {
             }
             contentContainerStyle={{ paddingBottom: spacing.xl }}
           />
+        </SafeAreaView>
+      </Modal>
+
+      {/* Activity log (admins & moderators) */}
+      <Modal visible={showAudit} animationType="slide" onRequestClose={() => setShowAudit(false)} statusBarTranslucent>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.modalBar}>
+            <TouchableOpacity onPress={() => setShowAudit(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.textPrimary} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>{t('community.auditLog')}</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          {auditBusy ? (
+            <View style={styles.bodyLoading}><ActivityIndicator color={colors.accent} /></View>
+          ) : (
+            <FlatList
+              data={auditRows}
+              keyExtractor={(a) => String(a.id)}
+              renderItem={({ item: a }) => (
+                <View style={styles.auditRow}>
+                  <Ionicons name="ellipse" size={8} color={colors.accent} style={{ marginTop: 6 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.auditDetail}>{a.detail || a.action}</Text>
+                    <Text style={styles.auditMeta}>
+                      @{a.actor?.username || '—'} · {new Date(a.created_at).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+              )}
+              ListEmptyComponent={<Text style={styles.addHint}>{t('community.auditLogEmpty')}</Text>}
+              contentContainerStyle={{ paddingBottom: spacing.xl }}
+            />
+          )}
         </SafeAreaView>
       </Modal>
 
@@ -1485,6 +1559,21 @@ const styles = StyleSheet.create({
     padding: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.3)',
   },
   receiptsTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
+  auditBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    marginTop: spacing.sm, paddingVertical: spacing.sm, borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.5)',
+  },
+  auditBtnText: { ...typography.button, color: colors.accent },
+  modBtn: { backgroundColor: 'rgba(244,162,97,0.14)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.4)' },
+  modBtnText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  auditRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  auditDetail: { ...typography.body, color: colors.textPrimary },
+  auditMeta: { ...typography.caption, color: colors.textMuted, marginTop: 1 },
 
   // Locked
   locked: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
