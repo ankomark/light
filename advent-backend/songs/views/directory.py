@@ -31,6 +31,44 @@ def log_community_action(kind, community, actor, action, detail=''):
     )
 
 
+# How many messages a single community chat page returns (cursor pagination).
+COMMUNITY_CURSOR_LIMIT = 30
+
+
+def community_cursor_page(base_qs, before, after):
+    """Cursor slice for a community chat, mirroring the group message list.
+
+    - no cursor → newest page (newest-first)
+    - ?before=<id> → the page immediately older than that message (newest-first)
+    - ?after=<id> → the page immediately newer (oldest-first, for forward paging)
+
+    `base_qs` must be unordered/newest-agnostic (this applies its own order_by).
+    Returns (rows, has_more). An unknown anchor yields ([], False)."""
+    limit = COMMUNITY_CURSOR_LIMIT
+    if after:
+        anchor = base_qs.filter(pk=after).first()
+        if not anchor:
+            return [], False
+        # (created_at, id) tie-break keeps paging deterministic when several
+        # messages share a timestamp (e.g. a burst of sends).
+        rows = list(base_qs.filter(
+            Q(created_at__gt=anchor.created_at)
+            | Q(created_at=anchor.created_at, id__gt=anchor.id)
+        ).order_by('created_at', 'id')[:limit + 1])  # oldest-first
+    elif before:
+        anchor = base_qs.filter(pk=before).first()
+        if not anchor:
+            return [], False
+        rows = list(base_qs.filter(
+            Q(created_at__lt=anchor.created_at)
+            | Q(created_at=anchor.created_at, id__lt=anchor.id)
+        ).order_by('-created_at', '-id')[:limit + 1])  # newest-first
+    else:
+        rows = list(base_qs.order_by('-created_at', '-id')[:limit + 1])  # newest page
+    has_more = len(rows) > limit
+    return rows[:limit], has_more
+
+
 class MediaStationViewSet(viewsets.ModelViewSet):
     queryset = MediaStation.objects.all()
     serializer_class = MediaStationSerializer
@@ -458,20 +496,20 @@ class ChurchViewSet(viewsets.ModelViewSet):
                 broadcast_community_message('church', church.id, data)
             return Response(data, status=status.HTTP_201_CREATED)
 
-        # GET — newest first, paginated; the client reverses for display.
-        # Super admins operate invisibly — regular members never see a message
-        # (or reaction) a super admin authored.
+        # GET — cursor-paginated. Default = newest page; ?before/?after page in
+        # either direction from an anchor message. Super admins operate invisibly,
+        # so regular members never see a message (or reaction) a super admin authored.
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
-        qs = (church.messages
-              .filter(is_removed=False)  # hide moderator takedowns
-              .exclude(sender_id__in=hidden)
-              .select_related('sender__profile', 'reply_to__sender')
-              .prefetch_related('reactions')
-              .order_by('-created_at'))
-        page = self.paginate_queryset(qs)
-        data = ChurchMessageSerializer(page if page is not None else qs, many=True,
+        base_qs = (church.messages
+                   .filter(is_removed=False)  # hide moderator takedowns
+                   .exclude(sender_id__in=hidden)
+                   .select_related('sender__profile', 'reply_to__sender')
+                   .prefetch_related('reactions'))
+        rows, has_more = community_cursor_page(
+            base_qs, request.query_params.get('before'), request.query_params.get('after'))
+        data = ChurchMessageSerializer(rows, many=True,
                                        context={'request': request, 'hide_super_ids': hidden}).data
-        return self.get_paginated_response(data) if page is not None else Response(data)
+        return Response({'results': data, 'has_more': has_more})
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
     def delete_message(self, request, pk=None, message_id=None):
@@ -1182,20 +1220,20 @@ class ChoirViewSet(viewsets.ModelViewSet):
                 broadcast_community_message('choir', choir.id, data)
             return Response(data, status=status.HTTP_201_CREATED)
 
-        # GET — newest first, paginated; the client reverses for display.
-        # Super admins operate invisibly — regular members never see a message
-        # (or reaction) a super admin authored.
+        # GET — cursor-paginated. Default = newest page; ?before/?after page in
+        # either direction from an anchor message. Super admins operate invisibly,
+        # so regular members never see a message (or reaction) a super admin authored.
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
-        qs = (choir.messages
-              .filter(is_removed=False)  # hide moderator takedowns
-              .exclude(sender_id__in=hidden)
-              .select_related('sender__profile', 'reply_to__sender')
-              .prefetch_related('reactions')
-              .order_by('-created_at'))
-        page = self.paginate_queryset(qs)
-        data = ChoirMessageSerializer(page if page is not None else qs, many=True,
+        base_qs = (choir.messages
+                   .filter(is_removed=False)  # hide moderator takedowns
+                   .exclude(sender_id__in=hidden)
+                   .select_related('sender__profile', 'reply_to__sender')
+                   .prefetch_related('reactions'))
+        rows, has_more = community_cursor_page(
+            base_qs, request.query_params.get('before'), request.query_params.get('after'))
+        data = ChoirMessageSerializer(rows, many=True,
                                       context={'request': request, 'hide_super_ids': hidden}).data
-        return self.get_paginated_response(data) if page is not None else Response(data)
+        return Response({'results': data, 'has_more': has_more})
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
     def delete_message(self, request, pk=None, message_id=None):

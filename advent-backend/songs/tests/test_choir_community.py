@@ -428,3 +428,39 @@ class ChoirMediaUnreadTests(APITestCase):
         # A non-member never carries an unread count.
         self.client.force_authenticate(self.outsider)
         self.assertEqual(self._row(self.client.get('/api/choirs/'), self.choir.id)['unread_count'], 0)
+
+
+class ChoirCursorPaginationTests(APITestCase):
+    """The chat message list is cursor-paginated (?before=<id>)."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user('cadm', 'a@x.com', 'x')
+        self.choir = Choir.objects.create(name='Zion', location='Nairobi', created_by=self.admin)
+        ChoirMembership.objects.create(choir=self.choir, user=self.admin, role='admin')
+        # 45 messages > one 30-message page.
+        for i in range(45):
+            ChoirMessage.objects.create(choir=self.choir, sender=self.admin, content=f'm{i}')
+
+    def test_newest_page_then_before_cursor(self):
+        self.client.force_authenticate(self.admin)
+        # Default = newest 30, newest-first, with more available.
+        first = self.client.get(f'/api/choirs/{self.choir.id}/messages/').json()
+        self.assertEqual(len(first['results']), 30)
+        self.assertTrue(first['has_more'])
+        newest = first['results'][0]['content']
+        self.assertEqual(newest, 'm44')  # newest-first
+        # Page older from the oldest loaded message → the remaining 15, no more.
+        oldest_id = first['results'][-1]['id']
+        second = self.client.get(f'/api/choirs/{self.choir.id}/messages/',
+                                 {'before': oldest_id}).json()
+        self.assertEqual(len(second['results']), 15)
+        self.assertFalse(second['has_more'])
+        # No overlap between the two pages.
+        self.assertTrue({m['id'] for m in first['results']}
+                        .isdisjoint({m['id'] for m in second['results']}))
+
+    def test_unknown_cursor_is_empty(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.get(f'/api/choirs/{self.choir.id}/messages/', {'before': 999999}).json()
+        self.assertEqual(res['results'], [])
+        self.assertFalse(res['has_more'])

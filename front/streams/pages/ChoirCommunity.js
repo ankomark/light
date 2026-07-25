@@ -259,7 +259,6 @@ const ChoirCommunity = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [recording, setRecording] = useState(false);
-  const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -289,7 +288,10 @@ const ChoirCommunity = ({ navigation, route }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [inContext, setInContext] = useState(false);  // viewing a search hit's window (not the live tail)
+  const inContextRef = useRef(false);
+  useEffect(() => { inContextRef.current = inContext; }, [inContext]);
   const listRef = useRef(null);
+  const messagesRef = useRef([]);
   // Phase 4: moderator role + audit log.
   const [showAudit, setShowAudit] = useState(false);
   const [auditRows, setAuditRows] = useState([]);
@@ -306,6 +308,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   const seenIdsRef = useRef(new Set());
   const replyToRef = useRef(null);
   useEffect(() => { replyToRef.current = replyTo; }, [replyTo]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   // Realtime
   const [typingUsers, setTypingUsers] = useState([]);
@@ -353,7 +356,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   // request 403s for non-members, which we swallow.
   const loadCommunity = useCallback(async () => {
     const snapP = fetchChoirCommunity(choirId);
-    const msgsP = fetchChoirMessages(choirId, 1).catch(() => null);
+    const msgsP = fetchChoirMessages(choirId).catch(() => null);
     try {
       const snap = await snapP;
       setCommunity(snap);
@@ -364,8 +367,7 @@ const ChoirCommunity = ({ navigation, route }) => {
         const list = res?.results ?? (Array.isArray(res) ? res : []);
         seenIdsRef.current = new Set(list.map((m) => m.id));
         setMessages(list); // newest-first from the API → matches inverted list
-        setHasMore(!!res?.next);
-        setPage(1);
+        setHasMore(!!res?.has_more);
         markChoirRead(choirId).catch(() => {}); // stamp last_read for receipts/unread
       }
     } catch (e) {
@@ -424,8 +426,9 @@ const ChoirCommunity = ({ navigation, route }) => {
   useEffect(() => {
     if (!isMember) return undefined;
     pollRef.current = setInterval(async () => {
+      if (inContextRef.current) return; // don't fight a search-context view
       try {
-        const res = await fetchChoirMessages(choirId, 1);
+        const res = await fetchChoirMessages(choirId);
         const list = res?.results ?? [];
         const fresh = list.filter((m) => !seenIdsRef.current.has(m.id));
         if (fresh.length) {
@@ -446,17 +449,19 @@ const ChoirCommunity = ({ navigation, route }) => {
 
   const loadOlder = useCallback(async () => {
     if (loadingMore || !hasMore) return;
+    // Cursor: page from the oldest message currently loaded (tail of the
+    // inverted, newest-first list).
+    const oldest = messagesRef.current[messagesRef.current.length - 1];
+    if (!oldest || String(oldest.id).startsWith('temp-')) return;
     setLoadingMore(true);
     try {
-      const next = page + 1;
-      const res = await fetchChoirMessages(choirId, next);
+      const res = await fetchChoirMessages(choirId, { before: oldest.id });
       const list = res?.results ?? [];
       list.forEach((m) => seenIdsRef.current.add(m.id));
       setMessages((prev) => [...prev, ...list]); // older append to the (inverted) tail
-      setHasMore(!!res?.next);
-      setPage(next);
+      setHasMore(!!res?.has_more);
     } catch {} finally { setLoadingMore(false); }
-  }, [choirId, page, hasMore, loadingMore]);
+  }, [choirId, hasMore, loadingMore]);
 
   // ── sending (optimistic, WhatsApp-style) ──────────────────────────────────
   // Show the message instantly with a 'sending' status, then swap in the saved
@@ -818,12 +823,11 @@ const ChoirCommunity = ({ navigation, route }) => {
   const backToLive = useCallback(async () => {
     setInContext(false);
     try {
-      const res = await fetchChoirMessages(choirId, 1);
+      const res = await fetchChoirMessages(choirId);
       const list = res?.results ?? [];
       seenIdsRef.current = new Set(list.map((m) => m.id));
       setMessages(list);
-      setHasMore(!!res?.next);
-      setPage(1);
+      setHasMore(!!res?.has_more);
       listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
     } catch {}
   }, [choirId]);

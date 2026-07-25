@@ -865,8 +865,10 @@ export const setChoirPostingPolicy = (id, onlyAdmins) =>
 export const leaveChoir = (id) =>
   apiRequest('post', `/choirs/${id}/leave/`);
 // Smaller page → a lighter first payload (messages can carry base64 media).
-export const fetchChoirMessages = (id, page = 1, pageSize = 15) =>
-  apiRequest('get', `/choirs/${id}/messages/`, null, { params: { page, page_size: pageSize } });
+// Cursor-paginated: no params = newest page; { before: id } / { after: id } page
+// older / newer from an anchor. Returns { results, has_more }.
+export const fetchChoirMessages = (id, params = {}) =>
+  apiRequest('get', `/choirs/${id}/messages/`, null, { params });
 export const sendChoirMessage = (id, payload) =>
   apiRequest('post', `/choirs/${id}/messages/`, payload);
 export const deleteChoirMessage = (id, messageId) =>
@@ -922,8 +924,10 @@ export const setChurchPostingPolicy = (id, onlyAdmins) =>
   apiRequest('post', `/churches/${id}/posting-policy/`, { only_admins_can_post: onlyAdmins });
 export const leaveChurch = (id) =>
   apiRequest('post', `/churches/${id}/leave/`);
-export const fetchChurchMessages = (id, page = 1, pageSize = 15) =>
-  apiRequest('get', `/churches/${id}/messages/`, null, { params: { page, page_size: pageSize } });
+// Cursor-paginated: no params = newest page; { before: id } / { after: id } page
+// older / newer from an anchor. Returns { results, has_more }.
+export const fetchChurchMessages = (id, params = {}) =>
+  apiRequest('get', `/churches/${id}/messages/`, null, { params });
 export const sendChurchMessage = (id, payload) =>
   apiRequest('post', `/churches/${id}/messages/`, payload);
 export const deleteChurchMessage = (id, messageId) =>
