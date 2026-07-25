@@ -131,14 +131,17 @@ function NotAuthorized() {
       const m = await check('/profiles/me/');
       // The exact path login uses (axios + global interceptors) — this is what
       // actually fails while the raw fetch above succeeds.
-      let ax;
-      try {
-        const r = await axios.get(`${API_URL}/profiles/me/`);
-        ax = `axios /profiles/me/ → ${r.status}`;
-      } catch (e) {
-        ax = `axios /profiles/me/ → ERROR ${e?.response?.status ?? ''} ${e?.message ?? ''}`.trim();
-      }
-      setDiag(`token: ${token ? 'present' : 'MISSING'}\n${s}\n${m}\n${ax}`);
+      const axCheck = async (path) => {
+        try {
+          const r = await axios.get(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+          return `axios ${path} → ${r.status}`;
+        } catch (e) {
+          return `axios ${path} → ERROR ${e?.response?.status ?? ''} ${e?.message ?? ''}`.trim();
+        }
+      };
+      const axStatus = await axCheck('/auth/status/');
+      const axMe = await axCheck('/profiles/me/');
+      setDiag(`token: ${token ? 'present' : 'MISSING'}\n${s}\n${m}\n${axStatus}\n${axMe}`);
     } catch (e) {
       setDiag(`error: ${e.message}`);
     } finally {
