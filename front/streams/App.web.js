@@ -22,8 +22,9 @@ import { PreferencesProvider } from './context/PreferencesContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { I18nProvider } from './context/I18nContext';
 import { WallpaperProvider } from './context/WallpaperContext';
+import axios from 'axios';
 import { isAdmin } from './utils/roles';
-import { API_BASE, getAccessToken } from './services/api';
+import { API_BASE, API_URL, getAccessToken } from './services/api';
 import { colors } from './constants/theme';
 
 import AdminDashboard from './components/admin/AdminDashboard';
@@ -128,7 +129,16 @@ function NotAuthorized() {
       };
       const s = await check('/auth/status/');
       const m = await check('/profiles/me/');
-      setDiag(`token: ${token ? 'present' : 'MISSING'}\n${s}\n${m}`);
+      // The exact path login uses (axios + global interceptors) — this is what
+      // actually fails while the raw fetch above succeeds.
+      let ax;
+      try {
+        const r = await axios.get(`${API_URL}/profiles/me/`);
+        ax = `axios /profiles/me/ → ${r.status}`;
+      } catch (e) {
+        ax = `axios /profiles/me/ → ERROR ${e?.response?.status ?? ''} ${e?.message ?? ''}`.trim();
+      }
+      setDiag(`token: ${token ? 'present' : 'MISSING'}\n${s}\n${m}\n${ax}`);
     } catch (e) {
       setDiag(`error: ${e.message}`);
     } finally {
