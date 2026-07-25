@@ -62,6 +62,7 @@ const SECTIONS = [
       { label: 'Settings', route: 'Settings', set: 'ion', icon: 'settings-outline' },
       { label: 'Help', route: 'Help', set: 'ion', icon: 'help-circle-outline' },
       { label: 'About', route: 'About', set: 'mci', icon: 'information-outline' },
+      { label: 'User Guide', route: 'UserGuide', set: 'mci', icon: 'compass-outline' },
     ],
   },
 ];
