@@ -184,6 +184,13 @@ const CameraCapture = ({ navigation, route }) => {
     try { cameraRef.current.stopRecording(); } catch { /* noop */ }
   }, []);
 
+  // Belt-and-suspenders 30s cap: recordAsync({maxDuration}) already auto-stops,
+  // but native maxDuration is unreliable on some Android devices, so force-stop
+  // from JS too. Guarantees the clip never exceeds the limit (no trimming needed).
+  useEffect(() => {
+    if (recording && elapsed >= MAX_VIDEO_SEC) stopRecording();
+  }, [recording, elapsed, stopRecording]);
+
   const startRecording = useCallback(async () => {
     if (!cameraRef.current || recording || busy) return;
     // Video needs the mic.
