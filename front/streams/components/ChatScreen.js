@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator, AppState, Modal,
+  ActivityIndicator, AppState, Modal,
   ScrollView, Alert, Pressable, Dimensions,
 } from 'react-native';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -55,6 +56,7 @@ const ChatScreen = ({ route, navigation }) => {
   const { conversationId, otherUser } = route.params;
   const { currentUser } = useAuth();
   const { t } = useI18n();
+  const kbHeight = useKeyboardHeight(); // float the composer above the keyboard (edge-to-edge safe)
 
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -496,10 +498,7 @@ const ChatScreen = ({ route, navigation }) => {
   return (
     <View style={styles.root}>
     <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.7)" />
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={[styles.container, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
       <SafeAreaView edges={['top']} style={styles.headerSafe}>
         <LinearGradient colors={['rgba(16,46,80,0.95)', 'rgba(10,22,40,0.80)']} style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -655,7 +654,7 @@ const ChatScreen = ({ route, navigation }) => {
           </Pressable>
         </Pressable>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
     </View>
   );
 };

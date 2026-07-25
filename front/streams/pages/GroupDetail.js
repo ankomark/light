@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator, AppState, Modal,
   ScrollView, Alert, Pressable, Dimensions, Animated, PanResponder,
 } from 'react-native';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -254,6 +255,7 @@ const GroupDetail = ({ route, navigation }) => {
   const { t } = useI18n();
   const { groupSlug, group: initialGroup } = route.params;
   const { currentUser } = useAuth();
+  const kbHeight = useKeyboardHeight(); // float the composer above the keyboard (edge-to-edge safe)
 
   const [group, setGroup] = useState(initialGroup || null);
   const [isMember, setIsMember] = useState(initialGroup?.is_member || false);
@@ -1002,7 +1004,7 @@ const GroupDetail = ({ route, navigation }) => {
   return (
     <View style={styles.root}>
     <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.68)" />
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <View style={[styles.container, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
       <SafeAreaView edges={['top']} style={styles.headerSafe}>
         <LinearGradient colors={['rgba(16,46,80,0.95)', 'rgba(10,22,40,0.80)']} style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -1601,7 +1603,7 @@ const GroupDetail = ({ route, navigation }) => {
         </Pressable>
         </KeyboardAvoidingView>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
     </View>
   );
 };
