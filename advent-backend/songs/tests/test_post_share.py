@@ -37,16 +37,25 @@ class PostSharePageTests(TestCase):
         self.assertIn('play.google.com/store', html)
         self.assertIn('apps.apple.com', html)
 
-    def test_video_post_falls_back_to_brand_image(self):
+    def test_video_post_uses_its_poster_frame(self):
         post = SocialPost.objects.create(
             user=self.user, caption='Sermon clip',
             content_type='video', media_file='https://cdn.example/clip.mp4',
+            thumbnail='https://cdn.example/poster.jpg',  # client-captured poster
         )
         html = self._get(post).content.decode()
-        # No own thumbnail → branded fallback keeps the card from being blank.
-        self.assertIn('og:image" content="https://cdn.example/brand.png"', html)
+        # The real poster frame is the preview image, not the brand fallback.
+        self.assertIn('og:image" content="https://cdn.example/poster.jpg"', html)
         self.assertIn('og:video', html)  # video tag still present
         self.assertIn(f'streams://post/{post.id}', html)
+
+    def test_video_without_poster_falls_back_to_brand(self):
+        post = SocialPost.objects.create(
+            user=self.user, caption='Clip', content_type='video',
+            media_file='https://cdn.example/clip.mp4',  # no thumbnail captured
+        )
+        html = self._get(post).content.decode()
+        self.assertIn('og:image" content="https://cdn.example/brand.png"', html)
 
     @override_settings(APP_STORE_URL='')  # iOS not published yet
     def test_only_configured_stores_appear(self):

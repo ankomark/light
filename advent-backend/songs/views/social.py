@@ -928,10 +928,14 @@ from django.utils.html import escape as _esc
 
 
 def _share_image(post):
-    """og:image for the link-preview card. Image posts use their stored URL.
-    Videos have no server-side poster yet (R2 stores bytes verbatim), so they
-    fall back to a branded image (SHARE_FALLBACK_IMAGE) when one is configured —
-    keeping the preview card from rendering blank."""
+    """og:image for the link-preview card. Prefers the post's own still — the
+    video poster frame the client captures at upload (post.thumbnail), or the
+    image itself for photo posts — then falls back to a branded image
+    (SHARE_FALLBACK_IMAGE) so the card is never blank. Mirrors the serializer's
+    get_thumbnail_url resolution."""
+    poster = media.resolve(post.thumbnail) if post.thumbnail else ''
+    if poster:
+        return poster
     if post.content_type == 'image':
         img = media.resolve(post.media_file) or ''
         if img:
