@@ -38,7 +38,7 @@ import {
   searchChurchUsers, addChurchMember, setChurchMemberRole, setChurchPostingPolicy,
   editChurchMessage, pinChurchMessage, unpinChurchMessage, markChurchRead,
   fetchChurchReceipts, searchChurchMessages, fetchChurchContext,
-  setChurchModerator, fetchChurchAuditLog,
+  setChurchModerator, fetchChurchAuditLog, fetchChurchMedia,
 } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -299,6 +299,10 @@ const ChurchCommunity = ({ navigation, route }) => {
   const [showAudit, setShowAudit] = useState(false);
   const [auditRows, setAuditRows] = useState([]);
   const [auditBusy, setAuditBusy] = useState(false);
+  // Shared-media gallery.
+  const [showMedia, setShowMedia] = useState(false);
+  const [mediaItems, setMediaItems] = useState([]);
+  const [mediaBusy, setMediaBusy] = useState(false);
   const [playingId, setPlayingId] = useState(null); // id of the voice note currently playing
   const [messagesLoading, setMessagesLoading] = useState(true); // first page of chat still loading
 
@@ -898,6 +902,16 @@ const ChurchCommunity = ({ navigation, route }) => {
     } catch { setAuditRows([]); } finally { setAuditBusy(false); }
   };
 
+  const openMedia = async () => {
+    setShowManage(false);
+    setShowMedia(true);
+    setMediaBusy(true);
+    try {
+      const res = await fetchChurchMedia(churchId);
+      setMediaItems(res?.results ?? (Array.isArray(res) ? res : []));
+    } catch { setMediaItems([]); } finally { setMediaBusy(false); }
+  };
+
   // WhatsApp-style "Only admins can send messages" lock (admin only).
   const togglePosting = async (value) => {
     setPolicyBusy(true);
@@ -1174,6 +1188,11 @@ const ChurchCommunity = ({ navigation, route }) => {
             keyExtractor={(m) => String(m.id)}
             ListHeaderComponent={
               <View>
+                <TouchableOpacity style={styles.mediaEntry} onPress={openMedia} activeOpacity={0.85}>
+                  <Ionicons name="images-outline" size={20} color={colors.accent} />
+                  <Text style={styles.mediaEntryText}>{t('community.media')}</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
                 {isAdmin && (
                   <View style={styles.section}>
                     <Text style={styles.sectionLabel}>{t('community.adminControls')}</Text>
@@ -1453,6 +1472,56 @@ const ChurchCommunity = ({ navigation, route }) => {
         </SafeAreaView>
       </Modal>
 
+      {/* Shared-media gallery */}
+      <Modal visible={showMedia} animationType="slide" onRequestClose={() => setShowMedia(false)} statusBarTranslucent>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.modalBar}>
+            <TouchableOpacity onPress={() => setShowMedia(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.textPrimary} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>{t('community.media')}</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          {mediaBusy ? (
+            <View style={styles.bodyLoading}><ActivityIndicator color={colors.accent} /></View>
+          ) : (
+            <FlatList
+              data={mediaItems}
+              keyExtractor={(m) => String(m.id)}
+              numColumns={3}
+              renderItem={({ item: m }) => (
+                <TouchableOpacity
+                  style={styles.mediaTile}
+                  activeOpacity={0.85}
+                  onPress={() => (m.message_type === 'image' ? setViewerUri(m.attachment)
+                    : m.message_type === 'audio' ? playAudio(m) : openFile(m))}
+                >
+                  {m.message_type === 'image' ? (
+                    <Image
+                      source={{ uri: cldThumb(m.attachment) }}
+                      style={styles.mediaThumb}
+                      contentFit="cover"
+                      transition={150}
+                      placeholder={m.attachment_blurhash ? { blurhash: m.attachment_blurhash } : undefined}
+                    />
+                  ) : (
+                    <View style={[styles.mediaThumb, styles.mediaNonImage]}>
+                      <Ionicons
+                        name={m.message_type === 'audio' ? 'musical-notes' : 'document-text'}
+                        size={26} color={colors.accent}
+                      />
+                      <Text style={styles.mediaFileName} numberOfLines={1}>
+                        {m.message_type === 'audio' ? fmtDuration(m.duration) : (m.file_name || 'file')}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={<Text style={styles.addHint}>{t('community.mediaEmpty')}</Text>}
+              contentContainerStyle={{ padding: 2, paddingBottom: spacing.xl }}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
+
       {/* Read-by receipts */}
       <Modal visible={!!receiptsMsg} transparent animationType="fade" onRequestClose={() => setReceiptsMsg(null)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setReceiptsMsg(null)}>
@@ -1574,6 +1643,20 @@ const styles = StyleSheet.create({
   },
   auditDetail: { ...typography.body, color: colors.textPrimary },
   auditMeta: { ...typography.caption, color: colors.textMuted, marginTop: 1 },
+  mediaEntry: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginHorizontal: spacing.md, marginTop: spacing.md, padding: spacing.md,
+    backgroundColor: 'rgba(16,46,80,0.55)', borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.3)',
+  },
+  mediaEntryText: { ...typography.button, color: colors.textPrimary, flex: 1 },
+  mediaTile: { flex: 1 / 3, aspectRatio: 1, padding: 2 },
+  mediaThumb: { flex: 1, borderRadius: radius.sm, backgroundColor: colors.surface },
+  mediaNonImage: {
+    alignItems: 'center', justifyContent: 'center', gap: 4,
+    backgroundColor: 'rgba(16,46,80,0.7)', paddingHorizontal: 4,
+  },
+  mediaFileName: { ...typography.caption, fontSize: 10, color: colors.textSecondary, textAlign: 'center' },
 
   // Locked
   locked: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },

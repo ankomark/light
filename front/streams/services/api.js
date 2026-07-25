@@ -893,6 +893,8 @@ export const setChoirModerator = (id, userId, isModerator) =>
   apiRequest('post', `/choirs/${id}/set-moderator/`, { user_id: userId, is_moderator: isModerator });
 export const fetchChoirAuditLog = (id) =>
   apiRequest('get', `/choirs/${id}/audit-log/`);
+export const fetchChoirMedia = (id, page = 1) =>
+  apiRequest('get', `/choirs/${id}/media/`, null, { params: { page } });
 
 // ── Church community (membership / requests / chat) — mirrors the choir API ───
 export const fetchChurchCommunity = (id) =>
@@ -948,6 +950,8 @@ export const setChurchModerator = (id, userId, isModerator) =>
   apiRequest('post', `/churches/${id}/set-moderator/`, { user_id: userId, is_moderator: isModerator });
 export const fetchChurchAuditLog = (id) =>
   apiRequest('get', `/churches/${id}/audit-log/`);
+export const fetchChurchMedia = (id, page = 1) =>
+  apiRequest('get', `/churches/${id}/media/`, null, { params: { page } });
 
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);

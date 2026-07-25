@@ -319,7 +319,12 @@ const Choirs = ({ navigation }) => {
         >
           <Ionicons name="chatbubbles" size={18} color="#0A1628" />
           <Text style={styles.communityText}>{t('dir.openCommunity')}</Text>
-          <Ionicons name="chevron-forward" size={16} color="#0A1628" style={{ marginLeft: 'auto' }} />
+          {item.unread_count > 0 && (
+            <View style={[styles.unreadBadge, { marginLeft: 'auto' }]}>
+              <Text style={styles.unreadBadgeText}>{item.unread_count > 99 ? '99+' : item.unread_count}</Text>
+            </View>
+          )}
+          <Ionicons name="chevron-forward" size={16} color="#0A1628" style={item.unread_count > 0 ? { marginLeft: spacing.xs } : { marginLeft: 'auto' }} />
         </TouchableOpacity>
 
         {/* Owner controls */}
@@ -631,6 +636,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.md, ...shadows.sm,
   },
   communityText: { ...typography.label, color: '#0A1628', fontWeight: '800' },
+  unreadBadge: {
+    minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6,
+    backgroundColor: '#0A1628', alignItems: 'center', justifyContent: 'center',
+  },
+  unreadBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 
   ownerControls: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

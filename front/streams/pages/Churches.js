@@ -400,7 +400,12 @@ const Churches = ({ navigation }) => {
         >
           <MaterialIcons name="forum" size={16} color="#0A1628" />
           <Text style={styles.communityBtnText}>{t('dir.openCommunity')}</Text>
-          <MaterialIcons name="chevron-right" size={18} color="#0A1628" style={{ marginLeft: 'auto' }} />
+          {item.unread_count > 0 && (
+            <View style={[styles.unreadBadge, { marginLeft: 'auto' }]}>
+              <Text style={styles.unreadBadgeText}>{item.unread_count > 99 ? '99+' : item.unread_count}</Text>
+            </View>
+          )}
+          <MaterialIcons name="chevron-right" size={18} color="#0A1628" style={item.unread_count > 0 ? { marginLeft: 6 } : { marginLeft: 'auto' }} />
         </TouchableOpacity>
       </View>
     );
@@ -889,6 +894,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   communityBtnText: { color: '#0A1628', fontWeight: '800', fontSize: 13 },
+  unreadBadge: {
+    minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6,
+    backgroundColor: '#0A1628', alignItems: 'center', justifyContent: 'center',
+  },
+  unreadBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',

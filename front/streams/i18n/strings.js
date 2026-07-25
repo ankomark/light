@@ -1055,6 +1055,8 @@ export const STRINGS = {
     'community.moderatorFailed': 'Could not change moderator status.',
     'community.auditLog': 'Activity log',
     'community.auditLogEmpty': 'No activity yet.',
+    'community.media': 'Shared media',
+    'community.mediaEmpty': 'No media shared yet.',
 
     'group.list.new': 'New Group',
     'group.list.tabPublic': 'Public',
@@ -2474,6 +2476,8 @@ export const STRINGS = {
     'community.moderatorFailed': 'Imeshindwa kubadili hadhi ya msimamizi.',
     'community.auditLog': 'Kumbukumbu za shughuli',
     'community.auditLogEmpty': 'Bado hakuna shughuli.',
+    'community.media': 'Media zilizoshirikiwa',
+    'community.mediaEmpty': 'Bado hakuna media iliyoshirikiwa.',
 
     'group.list.new': 'Kikundi Kipya',
     'group.list.tabPublic': 'Ya Wazi',
