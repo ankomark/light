@@ -873,6 +873,21 @@ export const deleteChoirMessage = (id, messageId) =>
   apiRequest('post', `/choirs/${id}/messages/${messageId}/delete/`);
 export const reactToChoirMessage = (id, messageId, emoji) =>
   apiRequest('post', `/choirs/${id}/messages/${messageId}/react/`, { emoji });
+// Phase 3: edit / pin / receipts / search / context.
+export const editChoirMessage = (id, messageId, content) =>
+  apiRequest('patch', `/choirs/${id}/messages/${messageId}/edit/`, { content });
+export const pinChoirMessage = (id, messageId) =>
+  apiRequest('post', `/choirs/${id}/messages/${messageId}/pin/`);
+export const unpinChoirMessage = (id) =>
+  apiRequest('post', `/choirs/${id}/unpin/`);
+export const markChoirRead = (id) =>
+  apiRequest('post', `/choirs/${id}/mark-read/`);
+export const fetchChoirReceipts = (id, messageId) =>
+  apiRequest('get', `/choirs/${id}/messages/${messageId}/receipts/`);
+export const searchChoirMessages = (id, q) =>
+  apiRequest('get', `/choirs/${id}/search/`, null, { params: { q } });
+export const fetchChoirContext = (id, messageId) =>
+  apiRequest('get', `/choirs/${id}/context/`, null, { params: { message_id: messageId } });
 
 // ── Church community (membership / requests / chat) — mirrors the choir API ───
 export const fetchChurchCommunity = (id) =>
@@ -908,6 +923,21 @@ export const deleteChurchMessage = (id, messageId) =>
   apiRequest('post', `/churches/${id}/messages/${messageId}/delete/`);
 export const reactToChurchMessage = (id, messageId, emoji) =>
   apiRequest('post', `/churches/${id}/messages/${messageId}/react/`, { emoji });
+// Phase 3: edit / pin / receipts / search / context.
+export const editChurchMessage = (id, messageId, content) =>
+  apiRequest('patch', `/churches/${id}/messages/${messageId}/edit/`, { content });
+export const pinChurchMessage = (id, messageId) =>
+  apiRequest('post', `/churches/${id}/messages/${messageId}/pin/`);
+export const unpinChurchMessage = (id) =>
+  apiRequest('post', `/churches/${id}/unpin/`);
+export const markChurchRead = (id) =>
+  apiRequest('post', `/churches/${id}/mark-read/`);
+export const fetchChurchReceipts = (id, messageId) =>
+  apiRequest('get', `/churches/${id}/messages/${messageId}/receipts/`);
+export const searchChurchMessages = (id, q) =>
+  apiRequest('get', `/churches/${id}/search/`, null, { params: { q } });
+export const fetchChurchContext = (id, messageId) =>
+  apiRequest('get', `/churches/${id}/context/`, null, { params: { message_id: messageId } });
 
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);

@@ -36,6 +36,8 @@ import {
   requestJoinChoir, fetchChoirMembers, fetchChoirJoinRequests, approveChoirRequest,
   rejectChoirRequest, removeChoirMember, leaveChoir, reactToChoirMessage,
   searchChoirUsers, addChoirMember, setChoirMemberRole, setChoirPostingPolicy,
+  editChoirMessage, pinChoirMessage, unpinChoirMessage, markChoirRead,
+  fetchChoirReceipts, searchChoirMessages, fetchChoirContext,
 } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -204,6 +206,9 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
               )}
               {!!item.content && <Text style={[styles.msgText, mine && styles.textMine]}>{item.content}</Text>}
               <View style={styles.metaRow}>
+                {item.edited_at && (
+                  <Text style={[styles.editedTag, mine && styles.timeMine]}>{t('community.edited')} · </Text>
+                )}
                 <Text style={[styles.msgTime, mine && styles.timeMine]}>
                   {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </Text>
@@ -273,6 +278,18 @@ const ChoirCommunity = ({ navigation, route }) => {
   const [playingId, setPlayingId] = useState(null); // id of the voice note currently playing
   const [messagesLoading, setMessagesLoading] = useState(true); // first page of chat still loading
 
+  // Phase 3: edit, pin, receipts, in-chat search + context jump.
+  const [editing, setEditing] = useState(null);       // message being edited (repurposes the input bar)
+  const [pinned, setPinned] = useState(null);         // pinned-message preview banner
+  const [receiptsMsg, setReceiptsMsg] = useState(null); // message whose "read by" list is open
+  const [receipts, setReceipts] = useState(null);     // { count, readers } | null (loading)
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [inContext, setInContext] = useState(false);  // viewing a search hit's window (not the live tail)
+  const listRef = useRef(null);
+
   const recordingRef = useRef(null);
   const soundRef = useRef(null);
   const loadedIdRef = useRef(null); // id of the voice note currently loaded into soundRef
@@ -330,6 +347,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     try {
       const snap = await snapP;
       setCommunity(snap);
+      setPinned(snap.pinned_message || null);
       setLoading(false); // show the shell (chat or locked hero) immediately
       if (snap.is_member) {
         const res = await msgsP;
@@ -338,6 +356,7 @@ const ChoirCommunity = ({ navigation, route }) => {
         setMessages(list); // newest-first from the API → matches inverted list
         setHasMore(!!res?.next);
         setPage(1);
+        markChoirRead(choirId).catch(() => {}); // stamp last_read for receipts/unread
       }
     } catch (e) {
       setLoading(false); // snapshot failed — still drop the spinner
@@ -356,7 +375,13 @@ const ChoirCommunity = ({ navigation, route }) => {
         if (!msg?.id || seenIdsRef.current.has(msg.id)) return; // dedupe (incl. my own)
         seenIdsRef.current.add(msg.id);
         setMessages((prev) => [msg, ...prev]);
+        markChoirRead(choirId).catch(() => {}); // I'm here reading it → keep receipts fresh
       },
+      onEdited: (msg) => {
+        if (!msg?.id) return;
+        setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, ...msg, _status: undefined } : m)));
+      },
+      onPinned: (evt) => setPinned(evt?.pinned || null),
       onDeleted: (id) => setMessages((prev) => prev.filter((m) => String(m.id) !== String(id))),
       onTyping: (evt) => {
         if (evt.user_id === currentUser?.id || !evt.username) return;
@@ -704,6 +729,95 @@ const ChoirCommunity = ({ navigation, route }) => {
     } catch {}
   };
 
+  // ── Phase 3: edit / pin / receipts / in-chat search ───────────────────────
+  const startEdit = (m) => {
+    setMenuMsg(null);
+    setReplyTo(null);
+    setEditing(m);
+    setDraft(m.content || '');
+  };
+
+  const submitEdit = async () => {
+    const body = draft.trim();
+    const m = editing;
+    if (!m || !body) return;
+    setDraft('');
+    setEditing(null);
+    // Optimistic — swap the body in immediately; the socket 'edited' confirms it.
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, content: body, edited_at: new Date().toISOString() } : x)));
+    try {
+      const updated = await editChoirMessage(choirId, m.id, body);
+      setMessages((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
+    } catch (e) {
+      Alert.alert(t('community.choir'), e?.response?.data?.error || t('community.editFailed'));
+    }
+  };
+
+  const pin = async (m) => {
+    setMenuMsg(null);
+    const preview = { id: m.id, content: m.content, message_type: m.message_type, file_name: m.file_name, sender_username: m.sender?.username };
+    setPinned(preview); // optimistic
+    try { await pinChoirMessage(choirId, m.id); } catch { setPinned(null); Alert.alert(t('community.choir'), t('community.pinFailed')); }
+  };
+
+  const unpin = () => {
+    Alert.alert(t('community.unpinTitle'), t('community.unpinConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('community.unpin'), onPress: async () => {
+        const prev = pinned;
+        setPinned(null);
+        try { await unpinChoirMessage(choirId); } catch { setPinned(prev); }
+      } },
+    ]);
+  };
+
+  const openReceipts = async (m) => {
+    setMenuMsg(null);
+    setReceiptsMsg(m);
+    setReceipts(null);
+    try { setReceipts(await fetchChoirReceipts(choirId, m.id)); }
+    catch { setReceipts({ count: 0, readers: [] }); }
+  };
+
+  // Jump the chat to a message that may be far up the history: load a window
+  // around it and switch the list into "context mode" (a FAB returns to live).
+  const jumpToMessage = async (messageId) => {
+    setShowSearch(false);
+    try {
+      const res = await fetchChoirContext(choirId, messageId);
+      const list = (res?.results || []).slice().reverse(); // ascending → newest-first for inverted list
+      if (!list.length) return;
+      list.forEach((m) => seenIdsRef.current.add(m.id));
+      setMessages(list);
+      setHasMore(!!res?.has_earlier);
+      setInContext(true);
+    } catch { Alert.alert(t('community.choir'), t('community.jumpFailed')); }
+  };
+
+  const runMessageSearch = useCallback(async (text) => {
+    setSearchQuery(text);
+    if (text.trim().length < 2) { setSearchResults([]); return; }
+    setSearchBusy(true);
+    try {
+      const res = await searchChoirMessages(choirId, text.trim());
+      setSearchResults(res?.results || []);
+    } catch { setSearchResults([]); } finally { setSearchBusy(false); }
+  }, [choirId]);
+
+  // Leave context mode: reload the live tail and scroll to the newest message.
+  const backToLive = useCallback(async () => {
+    setInContext(false);
+    try {
+      const res = await fetchChoirMessages(choirId, 1);
+      const list = res?.results ?? [];
+      seenIdsRef.current = new Set(list.map((m) => m.id));
+      setMessages(list);
+      setHasMore(!!res?.next);
+      setPage(1);
+      listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+    } catch {}
+  }, [choirId]);
+
   // ── membership actions ──────────────────────────────────────────────────--
   const onRequestJoin = async () => {
     try {
@@ -847,6 +961,11 @@ const ChoirCommunity = ({ navigation, route }) => {
           )}
         </View>
         {isMember && (
+          <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); setShowSearch(true); }} hitSlop={10} style={styles.headerBtn}>
+            <Ionicons name="search" size={22} color={colors.accent} />
+          </TouchableOpacity>
+        )}
+        {isMember && (
           <TouchableOpacity onPress={openManage} hitSlop={10} style={styles.headerBtn}>
             <Ionicons name={isAdmin ? 'shield-checkmark' : 'people-circle-outline'} size={24} color={colors.accent} />
             {isAdmin && community?.has_requests ? <View style={styles.dot} /> : null}
@@ -875,7 +994,28 @@ const ChoirCommunity = ({ navigation, route }) => {
         </View>
       ) : (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.top + 8}>
+          {/* Pinned-message banner */}
+          {pinned && (
+            <TouchableOpacity activeOpacity={0.85} style={styles.pinBanner}
+              onPress={() => jumpToMessage(pinned.id)}
+              onLongPress={isAdmin ? unpin : undefined}>
+              <Ionicons name="pin" size={16} color={colors.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pinLabel} numberOfLines={1}>
+                  {t('community.pinnedMessage')}{pinned.sender_username ? ` · ${pinned.sender_username}` : ''}
+                </Text>
+                <Text style={styles.pinText} numberOfLines={1}>{previewOf(pinned)}</Text>
+              </View>
+              {isAdmin && (
+                <TouchableOpacity onPress={unpin} hitSlop={8}>
+                  <Ionicons name="close" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </TouchableOpacity>
+          )}
+
           <FlatList
+            ref={listRef}
             data={messages}
             keyExtractor={(m) => String(m.id)}
             renderItem={renderMessage}
@@ -894,6 +1034,14 @@ const ChoirCommunity = ({ navigation, route }) => {
                 : <View style={styles.emptyChat}><Text style={styles.emptyChatText}>Say hello 👋</Text></View>
             }
           />
+
+          {/* Jump back to the live tail after viewing a search hit's context */}
+          {inContext && (
+            <TouchableOpacity style={styles.jumpFab} onPress={backToLive} activeOpacity={0.9}>
+              <Ionicons name="arrow-down" size={18} color="#0A1628" />
+              <Text style={styles.jumpFabText}>{t('community.jumpToLatest')}</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Icon-only attachment tray (animated in/out) */}
           {!recording && trayMounted && (
@@ -917,7 +1065,7 @@ const ChoirCommunity = ({ navigation, route }) => {
           )}
 
           {/* Reply compose bar */}
-          {replyTo && !recording && (
+          {replyTo && !recording && !editing && (
             <View style={styles.replyBar}>
               <View style={styles.replyBarAccent} />
               <View style={{ flex: 1 }}>
@@ -927,6 +1075,20 @@ const ChoirCommunity = ({ navigation, route }) => {
                 <Text style={styles.replyBarText} numberOfLines={1}>{previewOf(replyTo)}</Text>
               </View>
               <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8}>
+                <Ionicons name="close-circle" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Editing bar */}
+          {editing && !recording && (
+            <View style={styles.replyBar}>
+              <View style={[styles.replyBarAccent, { backgroundColor: colors.accent }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.replyBarName} numberOfLines={1}>{t('community.editingMessage')}</Text>
+                <Text style={styles.replyBarText} numberOfLines={1}>{editing.content}</Text>
+              </View>
+              <TouchableOpacity onPress={() => { setEditing(null); setDraft(''); }} hitSlop={8}>
                 <Ionicons name="close-circle" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
@@ -958,8 +1120,8 @@ const ChoirCommunity = ({ navigation, route }) => {
                 multiline
               />
               {draft.trim() ? (
-                <TouchableOpacity onPress={sendText} style={styles.sendBtn}>
-                  <Ionicons name="send" size={18} color="#0A1628" />
+                <TouchableOpacity onPress={editing ? submitEdit : sendText} style={styles.sendBtn}>
+                  <Ionicons name={editing ? 'checkmark' : 'send'} size={18} color="#0A1628" />
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity onLongPress={startRecording} onPress={() => Alert.alert(t('community.voiceNoteTitle'), t('community.voiceNoteHint'))} style={styles.micBtn}>
@@ -1123,6 +1285,26 @@ const ChoirCommunity = ({ navigation, route }) => {
               <Ionicons name="arrow-undo" size={20} color={colors.textPrimary} />
               <Text style={styles.menuItemText}>{t('community.reply')}</Text>
             </TouchableOpacity>
+            {menuMsg && menuMsg.message_type === 'text' && canModerate(menuMsg)
+              && (menuMsg.sender?.id === currentUser?.id || menuMsg.sender?.username === currentUser?.username) && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => startEdit(menuMsg)}>
+                <Ionicons name="create-outline" size={20} color={colors.textPrimary} />
+                <Text style={styles.menuItemText}>{t('community.editMessage')}</Text>
+              </TouchableOpacity>
+            )}
+            {menuMsg && (menuMsg.sender?.id === currentUser?.id || menuMsg.sender?.username === currentUser?.username)
+              && menuMsg.message_type !== 'system' && !String(menuMsg.id).startsWith('temp-') && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => openReceipts(menuMsg)}>
+                <Ionicons name="checkmark-done-outline" size={20} color={colors.textPrimary} />
+                <Text style={styles.menuItemText}>{t('community.readBy')}</Text>
+              </TouchableOpacity>
+            )}
+            {isAdmin && menuMsg && menuMsg.message_type !== 'system' && !String(menuMsg.id).startsWith('temp-') && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => (pinned?.id === menuMsg.id ? (setMenuMsg(null), unpin()) : pin(menuMsg))}>
+                <Ionicons name={pinned?.id === menuMsg.id ? 'pin-outline' : 'pin'} size={20} color={colors.textPrimary} />
+                <Text style={styles.menuItemText}>{pinned?.id === menuMsg.id ? t('community.unpin') : t('community.pin')}</Text>
+              </TouchableOpacity>
+            )}
             {menuMsg && menuMsg.message_type !== 'system'
               && menuMsg.sender?.id !== currentUser?.id
               && menuMsg.sender?.username !== currentUser?.username && (
@@ -1148,6 +1330,79 @@ const ChoirCommunity = ({ navigation, route }) => {
         objectId={reportMsg?.id}
         title={t('group.detail.reportMessageTitle')}
       />
+
+      {/* In-chat search: type ≥2 chars, tap a hit to jump to its context */}
+      <Modal visible={showSearch} animationType="slide" onRequestClose={() => setShowSearch(false)} statusBarTranslucent>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.modalBar}>
+            <TouchableOpacity onPress={() => setShowSearch(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.textPrimary} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>{t('community.searchMessages')}</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={18} color={colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={runMessageSearch}
+              placeholder={t('community.searchMessagesPlaceholder')}
+              placeholderTextColor={colors.placeholder}
+              autoFocus
+              autoCorrect={false}
+            />
+            {searchBusy && <ActivityIndicator size="small" color={colors.accent} />}
+          </View>
+          <FlatList
+            data={searchResults}
+            keyExtractor={(m) => String(m.id)}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item: m }) => (
+              <TouchableOpacity style={styles.searchResult} onPress={() => jumpToMessage(m.id)} activeOpacity={0.8}>
+                <Image source={m.sender?.profile_picture ? { uri: m.sender.profile_picture } : DEFAULT_AVATAR} placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.memberAvatar} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.searchResultName} numberOfLines={1}>@{m.sender?.username}</Text>
+                  <Text style={styles.searchResultText} numberOfLines={2}>{m.content}</Text>
+                </View>
+                <Text style={styles.searchResultTime}>{new Date(m.created_at).toLocaleDateString()}</Text>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.addHint}>
+                {searchQuery.trim().length < 2 ? t('community.typeTwoLetters') : t('community.noMatchingMessages')}
+              </Text>
+            }
+            contentContainerStyle={{ paddingBottom: spacing.xl }}
+          />
+        </SafeAreaView>
+      </Modal>
+
+      {/* Read-by receipts */}
+      <Modal visible={!!receiptsMsg} transparent animationType="fade" onRequestClose={() => setReceiptsMsg(null)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setReceiptsMsg(null)}>
+          <Pressable style={styles.receiptsCard}>
+            <Text style={styles.receiptsTitle}>
+              {receipts ? t('community.readByCount', { count: receipts.count }) : t('community.loading')}
+            </Text>
+            {receipts === null ? (
+              <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} />
+            ) : receipts.readers.length === 0 ? (
+              <Text style={styles.addHint}>{t('community.noReadsYet')}</Text>
+            ) : (
+              <FlatList
+                data={receipts.readers}
+                keyExtractor={(r) => String(r.id)}
+                style={{ maxHeight: 320 }}
+                renderItem={({ item: r }) => (
+                  <View style={styles.memberRow}>
+                    <Image source={r.user?.profile_picture ? { uri: r.user.profile_picture } : DEFAULT_AVATAR} placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.memberAvatar} />
+                    <Text style={[styles.memberName, { flex: 1 }]} numberOfLines={1}>@{r.user?.username}</Text>
+                  </View>
+                )}
+              />
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Full-screen image viewer */}
       <Modal visible={!!viewerUri} transparent animationType="fade" onRequestClose={() => setViewerUri(null)}>
@@ -1196,6 +1451,37 @@ const styles = StyleSheet.create({
   headerSub: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
   headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   dot: { position: 'absolute', top: 8, right: 8, width: 9, height: 9, borderRadius: 5, backgroundColor: colors.error },
+
+  // Phase 3: edited tag, pin banner, jump FAB, search results, receipts
+  editedTag: { ...typography.caption, fontSize: 10, color: 'rgba(255,255,255,0.55)' },
+  pinBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    backgroundColor: 'rgba(16,46,80,0.92)',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(244,162,97,0.4)',
+  },
+  pinLabel: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  pinText: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
+  jumpFab: {
+    position: 'absolute', right: spacing.md, bottom: 84, flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: colors.accent, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: radius.full, ...shadows.md,
+  },
+  jumpFabText: { ...typography.caption, color: '#0A1628', fontWeight: '700' },
+  searchResult: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  searchResultName: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  searchResultText: { ...typography.body, color: colors.textPrimary, marginTop: 1 },
+  searchResultTime: { ...typography.caption, fontSize: 10, color: colors.textMuted },
+  receiptsCard: {
+    alignSelf: 'center', marginTop: 'auto', marginBottom: 'auto',
+    width: '82%', backgroundColor: 'rgba(16,46,80,0.98)', borderRadius: radius.lg,
+    padding: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.3)',
+  },
+  receiptsTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
 
   // Locked
   locked: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
