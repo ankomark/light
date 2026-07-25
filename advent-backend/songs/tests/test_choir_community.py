@@ -2,13 +2,16 @@
 
     python manage.py test songs.tests.test_choir_community --settings=music.settings_test
 """
+from django.core.cache import cache
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework.throttling import SimpleRateThrottle
 from unittest import mock
 
 from songs.models import (
     User, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction,
+    CommunityAuditLog,
 )
 
 
@@ -295,3 +298,86 @@ class ChoirChatPhase3Tests(APITestCase):
         self.client.force_authenticate(self.outsider)
         self.assertEqual(
             self.client.get(f'/api/choirs/{self.choir.id}/search/', {'q': 'banana'}).status_code, 403)
+
+
+class ChoirModerationPhase4Tests(APITestCase):
+    """Moderator role, per-community audit log, and chat rate limiting."""
+
+    def setUp(self):
+        cache.clear()  # throttle counters live in the cache; reset between tests
+        self.admin = User.objects.create_user('padm', 'a@x.com', 'x')
+        self.mod = User.objects.create_user('pmod', 'm@x.com', 'x')
+        self.member = User.objects.create_user('pmem', 'p@x.com', 'x')
+        self.choir = Choir.objects.create(name='Zion', location='Nairobi', created_by=self.admin)
+        ChoirMembership.objects.create(choir=self.choir, user=self.admin, role='admin')
+        self.mod_m = ChoirMembership.objects.create(choir=self.choir, user=self.mod, role='friend')
+        ChoirMembership.objects.create(choir=self.choir, user=self.member, role='friend')
+
+    def _post(self, user, content):
+        self.client.force_authenticate(user)
+        r = self.client.post(f'/api/choirs/{self.choir.id}/messages/', {'content': content}, format='json')
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()['id']
+
+    def test_set_moderator_is_admin_only_and_grants_powers(self):
+        # A plain member can't promote anyone.
+        self.client.force_authenticate(self.member)
+        self.assertEqual(
+            self.client.post(f'/api/choirs/{self.choir.id}/set-moderator/',
+                             {'user_id': self.mod.id}, format='json').status_code, 403)
+        # Admin promotes the moderator; it shows on the membership + snapshot.
+        self.client.force_authenticate(self.admin)
+        r = self.client.post(f'/api/choirs/{self.choir.id}/set-moderator/',
+                             {'user_id': self.mod.id}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()['is_moderator'])
+        self.mod_m.refresh_from_db()
+        self.assertTrue(self.mod_m.is_moderator)
+        self.client.force_authenticate(self.mod)
+        snap = self.client.get(f'/api/choirs/{self.choir.id}/community/').json()
+        self.assertTrue(snap['is_moderator'])
+
+    def test_moderator_can_delete_others_and_pin(self):
+        self.mod_m.is_moderator = True
+        self.mod_m.save(update_fields=['is_moderator'])
+        victim_msg = self._post(self.member, 'delete me')
+        # Plain member cannot delete someone else's message.
+        self.client.force_authenticate(self.member)
+        other = self._post(self.admin, 'admin note')
+        self.client.force_authenticate(self.member)
+        self.assertEqual(
+            self.client.post(f'/api/choirs/{self.choir.id}/messages/{other}/delete/').status_code, 403)
+        # Moderator can delete another member's message and pin one.
+        self.client.force_authenticate(self.mod)
+        self.assertEqual(
+            self.client.post(f'/api/choirs/{self.choir.id}/messages/{victim_msg}/delete/').status_code, 200)
+        self.assertEqual(
+            self.client.post(f'/api/choirs/{self.choir.id}/messages/{other}/pin/').status_code, 200)
+
+    def test_audit_log_records_and_is_gated(self):
+        # An admin action gets logged.
+        self.client.force_authenticate(self.admin)
+        self.client.post(f'/api/choirs/{self.choir.id}/set-moderator/',
+                         {'user_id': self.mod.id}, format='json')
+        self.assertTrue(CommunityAuditLog.objects.filter(
+            kind='choir', community_id=self.choir.id, action='grant_moderator').exists())
+        # Admin + moderator can read the log; a plain member cannot.
+        log = self.client.get(f'/api/choirs/{self.choir.id}/audit-log/')
+        self.assertEqual(log.status_code, 200)
+        rows = log.json().get('results', log.json())
+        self.assertTrue(any(r['action'] == 'grant_moderator' for r in rows))
+        self.mod_m.is_moderator = True
+        self.mod_m.save(update_fields=['is_moderator'])
+        self.client.force_authenticate(self.mod)
+        self.assertEqual(self.client.get(f'/api/choirs/{self.choir.id}/audit-log/').status_code, 200)
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.get(f'/api/choirs/{self.choir.id}/audit-log/').status_code, 403)
+
+    def test_message_rate_limit(self):
+        cache.clear()
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'community_post': '2/min'}):
+            self.client.force_authenticate(self.member)
+            url = f'/api/choirs/{self.choir.id}/messages/'
+            self.assertEqual(self.client.post(url, {'content': '1'}, format='json').status_code, 201)
+            self.assertEqual(self.client.post(url, {'content': '2'}, format='json').status_code, 201)
+            self.assertEqual(self.client.post(url, {'content': '3'}, format='json').status_code, 429)

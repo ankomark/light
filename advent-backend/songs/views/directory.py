@@ -6,7 +6,7 @@ from ..consumers import (
     broadcast_community_message, broadcast_community_deleted,
     broadcast_community_edited, broadcast_community_pinned,
 )
-from ..serializers.directory import community_pinned_preview
+from ..serializers.directory import community_pinned_preview, CommunityAuditLogSerializer
 
 def chat_attachment_error(attachment):
     """Validate a chat attachment string. Attachments must be an uploaded R2
@@ -21,6 +21,14 @@ def chat_attachment_error(attachment):
     if len(attachment) > 2000:
         return ('Invalid attachment URL', status.HTTP_400_BAD_REQUEST)
     return None
+
+
+def log_community_action(kind, community, actor, action, detail=''):
+    """Record an admin/moderator action in a choir/church community's audit trail."""
+    CommunityAuditLog.objects.create(
+        kind=kind, community_id=community.id, actor=actor,
+        action=action, detail=(detail or '')[:300],
+    )
 
 
 class MediaStationViewSet(viewsets.ModelViewSet):
@@ -178,6 +186,23 @@ class ChurchViewSet(viewsets.ModelViewSet):
         m = self._membership(church, user)
         return bool(m and m.role == 'admin')
 
+    def _is_mod(self, church, user):
+        """Admins AND moderators can moderate content (delete any message, pin)."""
+        if self._is_admin(church, user):
+            return True
+        m = self._membership(church, user)
+        return bool(m and m.is_moderator)
+
+    def get_throttles(self):
+        # Community chat abuse guards (the global ScopedRateThrottle reads this).
+        if self.action == 'messages' and self.request.method == 'POST':
+            self.throttle_scope = 'community_post'
+        elif self.action == 'react_message':
+            self.throttle_scope = 'community_react'
+        elif self.action == 'request_join':
+            self.throttle_scope = 'community_join'
+        return super().get_throttles()
+
     # ── Community: membership state ──────────────────────────────────────────
     @action(detail=True, methods=['get'], url_path='community')
     def community(self, request, pk=None):
@@ -191,6 +216,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
             'church_id': church.id,
             'name': church.name,
             'is_admin': is_admin,
+            'is_moderator': bool(m and m.is_moderator),
             'role': m.role if m else None,
             # A super admin is reported as a member so the chat unlocks for them.
             'is_member': bool(m) or is_admin,
@@ -251,6 +277,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
         req.status = 'approved'
         req.save(update_fields=['status'])
         ChurchMembership.objects.get_or_create(church=church, user=req.user, defaults={'role': 'friend'})
+        log_community_action('church', church, request.user, 'approve_join', f'Approved {req.user.username}')
         try:
             notify_user(req.user, 'church_approved', f"You're now in the {church.name} community",
                         {'type': 'church_approved', 'church_id': church.id})
@@ -266,6 +293,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
         req = get_object_or_404(ChurchJoinRequest, pk=request.data.get('request_id'), church=church)
         req.status = 'rejected'
         req.save(update_fields=['status'])
+        log_community_action('church', church, request.user, 'reject_join', f'Declined {req.user.username}')
         return Response(ChurchJoinRequestSerializer(req).data)
 
     # ── Community: moderation ────────────────────────────────────────────────
@@ -278,8 +306,12 @@ class ChurchViewSet(viewsets.ModelViewSet):
         target_id = request.data.get('user_id')
         if str(target_id) == str(church.created_by_id):
             return Response({'error': "The creator can't be removed."}, status=status.HTTP_400_BAD_REQUEST)
+        removed_user = User.objects.filter(id=target_id).first()
         deleted, _ = church.memberships.filter(user_id=target_id).delete()
         church.join_requests.filter(user_id=target_id).delete()  # let them re-request later
+        if deleted:
+            log_community_action('church', church, request.user, 'remove_member',
+                                 f'Removed {removed_user.username if removed_user else target_id}')
         return Response({'status': 'removed', 'removed': deleted})
 
     @action(detail=True, methods=['get'], url_path='search-users')
@@ -337,6 +369,9 @@ class ChurchViewSet(viewsets.ModelViewSet):
         if target.role != role:
             target.role = role
             target.save(update_fields=['role'])
+            log_community_action('church', church, request.user,
+                                 'grant_admin' if role == 'admin' else 'revoke_admin',
+                                 f'{target.user.username} → {role}')
         return Response(ChurchMembershipSerializer(target).data)
 
     @action(detail=True, methods=['post'], url_path='posting-policy')
@@ -349,6 +384,8 @@ class ChurchViewSet(viewsets.ModelViewSet):
         if church.only_admins_can_post != only_admins:
             church.only_admins_can_post = only_admins
             church.save(update_fields=['only_admins_can_post'])
+            log_community_action('church', church, request.user, 'posting_policy',
+                                 'Only admins can send messages now' if only_admins else 'Everyone can send messages now')
         return Response({'only_admins_can_post': church.only_admins_can_post})
 
     @action(detail=True, methods=['post'])
@@ -418,11 +455,15 @@ class ChurchViewSet(viewsets.ModelViewSet):
         """Sender can delete their own message; admin can delete any."""
         church = self.get_object()
         msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
-        if msg.sender_id != request.user.id and not self._is_admin(church, request.user):
+        own = msg.sender_id == request.user.id
+        if not own and not self._is_mod(church, request.user):
             return Response({'error': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
         mid = msg.id
+        author = msg.sender.username
         msg.delete()
         broadcast_community_deleted('church', church.id, mid)
+        if not own:  # a moderator/admin removing someone else's message → log it
+            log_community_action('church', church, request.user, 'delete_message', f'Deleted a message from {author}')
         return Response({'status': 'deleted'})
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/react')
@@ -550,26 +591,62 @@ class ChurchViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/pin')
     def pin_message(self, request, pk=None, message_id=None):
-        """Admin pins one message as a banner atop the chat."""
+        """Admin/moderator pins one message as a banner atop the chat."""
         church = self.get_object()
-        if not self._is_admin(church, request.user):
+        if not self._is_mod(church, request.user):
             return Response({'error': 'Only admins can pin messages.'}, status=status.HTTP_403_FORBIDDEN)
         msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
         church.pinned_message = msg
         church.save(update_fields=['pinned_message'])
         preview = community_pinned_preview(msg)
         broadcast_community_pinned('church', church.id, preview)
+        log_community_action('church', church, request.user, 'pin', 'Pinned a message')
         return Response(preview)
 
     @action(detail=True, methods=['post'], url_path='unpin')
     def unpin_message(self, request, pk=None):
         church = self.get_object()
-        if not self._is_admin(church, request.user):
+        if not self._is_mod(church, request.user):
             return Response({'error': 'Only admins can unpin messages.'}, status=status.HTTP_403_FORBIDDEN)
         church.pinned_message = None
         church.save(update_fields=['pinned_message'])
         broadcast_community_pinned('church', church.id, None)
+        log_community_action('church', church, request.user, 'unpin', 'Unpinned the message')
         return Response({'status': 'unpinned'})
+
+    @action(detail=True, methods=['post'], url_path='set-moderator')
+    def set_moderator(self, request, pk=None):
+        """Promote a member to moderator or dismiss them. Admins only."""
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Only admins can change roles.'}, status=status.HTTP_403_FORBIDDEN)
+        user_id = request.data.get('user_id')
+        make_mod = bool(request.data.get('is_moderator', True))
+        target = church.memberships.filter(user_id=user_id).select_related('user').first()
+        if not target:
+            return Response({'error': 'That person is not a member.'}, status=status.HTTP_404_NOT_FOUND)
+        if target.is_moderator != make_mod:
+            target.is_moderator = make_mod
+            target.save(update_fields=['is_moderator'])
+            verb = 'is now a moderator' if make_mod else 'is no longer a moderator'
+            log_community_action('church', church, request.user,
+                                 'grant_moderator' if make_mod else 'revoke_moderator',
+                                 f'{target.user.username} {verb}')
+        return Response(ChurchMembershipSerializer(target).data)
+
+    @action(detail=True, methods=['get'], url_path='audit-log')
+    def audit_log(self, request, pk=None):
+        """The community's moderation trail. Visible to admins and moderators only."""
+        church = self.get_object()
+        if not self._is_mod(church, request.user):
+            return Response({'error': 'Only admins and moderators can view the log.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = (CommunityAuditLog.objects
+              .filter(kind='church', community_id=church.id)
+              .select_related('actor__profile'))
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(CommunityAuditLogSerializer(page, many=True).data)
+        return Response(CommunityAuditLogSerializer(qs, many=True).data)
 
 
 
@@ -722,6 +799,23 @@ class ChoirViewSet(viewsets.ModelViewSet):
         m = self._membership(choir, user)
         return bool(m and m.role == 'admin')
 
+    def _is_mod(self, choir, user):
+        """Admins AND moderators can moderate content (delete any message, pin)."""
+        if self._is_admin(choir, user):
+            return True
+        m = self._membership(choir, user)
+        return bool(m and m.is_moderator)
+
+    def get_throttles(self):
+        # Community chat abuse guards (the global ScopedRateThrottle reads this).
+        if self.action == 'messages' and self.request.method == 'POST':
+            self.throttle_scope = 'community_post'
+        elif self.action == 'react_message':
+            self.throttle_scope = 'community_react'
+        elif self.action == 'request_join':
+            self.throttle_scope = 'community_join'
+        return super().get_throttles()
+
     def _sync_count(self, choir):
         choir.members_count = choir.memberships.count()
         choir.save(update_fields=['members_count'])
@@ -812,6 +906,9 @@ class ChoirViewSet(viewsets.ModelViewSet):
         if target.role != role:
             target.role = role
             target.save(update_fields=['role'])
+            log_community_action('choir', choir, request.user,
+                                 'grant_admin' if role == 'admin' else 'revoke_admin',
+                                 f'{target.user.username} → {role}')
         return Response(ChoirMembershipSerializer(target).data)
 
     @action(detail=True, methods=['post'], url_path='posting-policy')
@@ -824,6 +921,8 @@ class ChoirViewSet(viewsets.ModelViewSet):
         if choir.only_admins_can_post != only_admins:
             choir.only_admins_can_post = only_admins
             choir.save(update_fields=['only_admins_can_post'])
+            log_community_action('choir', choir, request.user, 'posting_policy',
+                                 'Only admins can send messages now' if only_admins else 'Everyone can send messages now')
         return Response({'only_admins_can_post': choir.only_admins_can_post})
 
     @action(detail=True, methods=['post'])
@@ -877,6 +976,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
             'choir_id': choir.id,
             'name': choir.name,
             'is_admin': is_admin,
+            'is_moderator': bool(m and m.is_moderator),
             'role': m.role if m else None,
             # A super admin is reported as a member so the chat unlocks for them.
             'is_member': bool(m) or is_admin,
@@ -938,6 +1038,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
         req.save(update_fields=['status'])
         ChoirMembership.objects.get_or_create(choir=choir, user=req.user, defaults={'role': 'friend'})
         self._sync_count(choir)
+        log_community_action('choir', choir, request.user, 'approve_join', f'Approved {req.user.username}')
         try:
             notify_user(req.user, 'choir_approved', f"You're now a friend of {choir.name}",
                         {'type': 'choir_approved', 'choir_id': choir.id})
@@ -953,6 +1054,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
         req = get_object_or_404(ChoirJoinRequest, pk=request.data.get('request_id'), choir=choir)
         req.status = 'rejected'
         req.save(update_fields=['status'])
+        log_community_action('choir', choir, request.user, 'reject_join', f'Declined {req.user.username}')
         return Response(ChoirJoinRequestSerializer(req).data)
 
     # ── Community: moderation ────────────────────────────────────────────────
@@ -965,9 +1067,13 @@ class ChoirViewSet(viewsets.ModelViewSet):
         target_id = request.data.get('user_id')
         if str(target_id) == str(choir.created_by_id):
             return Response({'error': "The creator can't be removed."}, status=status.HTTP_400_BAD_REQUEST)
+        removed_user = User.objects.filter(id=target_id).first()
         deleted, _ = choir.memberships.filter(user_id=target_id).delete()
         choir.join_requests.filter(user_id=target_id).delete()  # let them re-request later
         self._sync_count(choir)
+        if deleted:
+            log_community_action('choir', choir, request.user, 'remove_member',
+                                 f'Removed {removed_user.username if removed_user else target_id}')
         return Response({'status': 'removed', 'removed': deleted})
 
     @action(detail=True, methods=['post'])
@@ -1034,14 +1140,18 @@ class ChoirViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/delete')
     def delete_message(self, request, pk=None, message_id=None):
-        """Sender can delete their own message; admin can delete any."""
+        """Sender can delete their own message; admin/moderator can delete any."""
         choir = self.get_object()
         msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
-        if msg.sender_id != request.user.id and not self._is_admin(choir, request.user):
+        own = msg.sender_id == request.user.id
+        if not own and not self._is_mod(choir, request.user):
             return Response({'error': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
         mid = msg.id
+        author = msg.sender.username
         msg.delete()
         broadcast_community_deleted('choir', choir.id, mid)
+        if not own:  # a moderator/admin removing someone else's message → log it
+            log_community_action('choir', choir, request.user, 'delete_message', f'Deleted a message from {author}')
         return Response({'status': 'deleted'})
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/react')
@@ -1169,26 +1279,62 @@ class ChoirViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/pin')
     def pin_message(self, request, pk=None, message_id=None):
-        """Admin pins one message as a banner atop the chat."""
+        """Admin/moderator pins one message as a banner atop the chat."""
         choir = self.get_object()
-        if not self._is_admin(choir, request.user):
+        if not self._is_mod(choir, request.user):
             return Response({'error': 'Only admins can pin messages.'}, status=status.HTTP_403_FORBIDDEN)
         msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
         choir.pinned_message = msg
         choir.save(update_fields=['pinned_message'])
         preview = community_pinned_preview(msg)
         broadcast_community_pinned('choir', choir.id, preview)
+        log_community_action('choir', choir, request.user, 'pin', 'Pinned a message')
         return Response(preview)
 
     @action(detail=True, methods=['post'], url_path='unpin')
     def unpin_message(self, request, pk=None):
         choir = self.get_object()
-        if not self._is_admin(choir, request.user):
+        if not self._is_mod(choir, request.user):
             return Response({'error': 'Only admins can unpin messages.'}, status=status.HTTP_403_FORBIDDEN)
         choir.pinned_message = None
         choir.save(update_fields=['pinned_message'])
         broadcast_community_pinned('choir', choir.id, None)
+        log_community_action('choir', choir, request.user, 'unpin', 'Unpinned the message')
         return Response({'status': 'unpinned'})
+
+    @action(detail=True, methods=['post'], url_path='set-moderator')
+    def set_moderator(self, request, pk=None):
+        """Promote a member to moderator or dismiss them. Admins only."""
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Only admins can change roles.'}, status=status.HTTP_403_FORBIDDEN)
+        user_id = request.data.get('user_id')
+        make_mod = bool(request.data.get('is_moderator', True))
+        target = choir.memberships.filter(user_id=user_id).select_related('user').first()
+        if not target:
+            return Response({'error': 'That person is not a member.'}, status=status.HTTP_404_NOT_FOUND)
+        if target.is_moderator != make_mod:
+            target.is_moderator = make_mod
+            target.save(update_fields=['is_moderator'])
+            verb = 'is now a moderator' if make_mod else 'is no longer a moderator'
+            log_community_action('choir', choir, request.user,
+                                 'grant_moderator' if make_mod else 'revoke_moderator',
+                                 f'{target.user.username} {verb}')
+        return Response(ChoirMembershipSerializer(target).data)
+
+    @action(detail=True, methods=['get'], url_path='audit-log')
+    def audit_log(self, request, pk=None):
+        """The community's moderation trail. Visible to admins and moderators only."""
+        choir = self.get_object()
+        if not self._is_mod(choir, request.user):
+            return Response({'error': 'Only admins and moderators can view the log.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = (CommunityAuditLog.objects
+              .filter(kind='choir', community_id=choir.id)
+              .select_related('actor__profile'))
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(CommunityAuditLogSerializer(page, many=True).data)
+        return Response(CommunityAuditLogSerializer(qs, many=True).data)
 
 
 class LiveEventViewSet(viewsets.ModelViewSet):

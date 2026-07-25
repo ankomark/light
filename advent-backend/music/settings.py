@@ -165,6 +165,10 @@ REST_FRAMEWORK = {
         'group_post': '90/min',
         'group_react': '60/min',
         'group_join': '20/hour',
+        # Choir/church community chat abuse guards (mirror the group rates).
+        'community_post': '90/min',
+        'community_react': '60/min',
+        'community_join': '20/hour',
     },
 }
 ROOT_URLCONF = 'music.urls'

@@ -1,6 +1,14 @@
 from .common import *  # noqa: F401,F403
 
 
+class CommunityAuditLogSerializer(serializers.ModelSerializer):
+    actor = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = CommunityAuditLog
+        fields = ['id', 'actor', 'action', 'detail', 'created_at']
+
+
 def community_pinned_preview(msg):
     """Compact pinned-message shape for a choir/church community, shared by the
     serializer and the pin actions. Mirrors groups.pinned_preview but the sender
@@ -200,7 +208,7 @@ class ChoirMembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChoirMembership
-        fields = ['id', 'user', 'role', 'joined_at']
+        fields = ['id', 'user', 'role', 'is_moderator', 'joined_at']
         read_only_fields = fields
 
 
@@ -263,7 +271,7 @@ class ChurchMembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChurchMembership
-        fields = ['id', 'user', 'role', 'joined_at']
+        fields = ['id', 'user', 'role', 'is_moderator', 'joined_at']
         read_only_fields = fields
 
 

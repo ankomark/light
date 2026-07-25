@@ -1057,6 +1057,9 @@ class ChoirMembership(models.Model):
     choir = models.ForeignKey(Choir, on_delete=models.CASCADE, related_name='memberships')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_memberships')
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='friend')
+    # A moderator can moderate content (delete any message, pin) but can't manage
+    # membership or settings — that stays with the admin/creator.
+    is_moderator = models.BooleanField(default=False)
     joined_at = models.DateTimeField(auto_now_add=True)
     last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
 
@@ -1144,6 +1147,9 @@ class ChurchMembership(models.Model):
     church = models.ForeignKey(Church, on_delete=models.CASCADE, related_name='memberships')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_memberships')
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='friend')
+    # A moderator can moderate content (delete any message, pin) but can't manage
+    # membership or settings — that stays with the admin/creator.
+    is_moderator = models.BooleanField(default=False)
     joined_at = models.DateTimeField(auto_now_add=True)
     last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
 
@@ -1315,6 +1321,27 @@ class GroupAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.group_id}:{self.action} by {self.actor_id}"
+
+
+class CommunityAuditLog(models.Model):
+    """Admin/moderator accountability trail for a choir or church community —
+    who did what (delete a message, pin, change roles, remove a member, approve a
+    join, etc.). Keyed by (kind, community_id) so one table serves both. Visible
+    only to that community's admins/moderators."""
+    KIND_CHOICES = (('choir', 'Choir'), ('church', 'Church'))
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, db_index=True)
+    community_id = models.PositiveIntegerField(db_index=True)
+    actor = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    action = models.CharField(max_length=40)      # machine key, e.g. 'delete_message'
+    detail = models.CharField(max_length=300, blank=True, default='')  # human summary
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['kind', 'community_id', '-created_at'])]
+
+    def __str__(self):
+        return f"{self.kind}:{self.community_id}:{self.action} by {self.actor_id}"
 
 
 class GroupPost(models.Model):
