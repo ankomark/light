@@ -381,3 +381,50 @@ class ChoirModerationPhase4Tests(APITestCase):
             self.assertEqual(self.client.post(url, {'content': '1'}, format='json').status_code, 201)
             self.assertEqual(self.client.post(url, {'content': '2'}, format='json').status_code, 201)
             self.assertEqual(self.client.post(url, {'content': '3'}, format='json').status_code, 429)
+
+
+class ChoirMediaUnreadTests(APITestCase):
+    """Media gallery endpoint and unread-count badge on the list."""
+
+    def setUp(self):
+        cache.clear()
+        self.admin = User.objects.create_user('madm', 'a@x.com', 'x')
+        self.member = User.objects.create_user('mmem', 'm@x.com', 'x')
+        self.outsider = User.objects.create_user('mout', 'o@x.com', 'x')
+        self.choir = Choir.objects.create(name='Zion', location='Nairobi', created_by=self.admin)
+        ChoirMembership.objects.create(choir=self.choir, user=self.admin, role='admin')
+        ChoirMembership.objects.create(choir=self.choir, user=self.member, role='friend')
+
+    def _row(self, listing, cid):
+        data = listing.json()
+        rows = data.get('results', data)
+        return next(c for c in rows if c['id'] == cid)
+
+    def test_media_endpoint_returns_only_attachments(self):
+        ChoirMessage.objects.create(choir=self.choir, sender=self.member, content='just text')
+        ChoirMessage.objects.create(choir=self.choir, sender=self.member, message_type='image',
+                                    attachment='https://cdn.example/a.jpg')
+        ChoirMessage.objects.create(choir=self.choir, sender=self.member, message_type='audio',
+                                    attachment='https://cdn.example/a.m4a', duration=3)
+        self.client.force_authenticate(self.member)
+        r = self.client.get(f'/api/choirs/{self.choir.id}/media/')
+        self.assertEqual(r.status_code, 200)
+        rows = r.json().get('results', r.json())
+        types = {m['message_type'] for m in rows}
+        self.assertEqual(types, {'image', 'audio'})  # the text message is excluded
+        # Outsiders can't browse the media.
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(self.client.get(f'/api/choirs/{self.choir.id}/media/').status_code, 403)
+
+    def test_unread_count_on_list(self):
+        # Admin sends two messages the member hasn't read.
+        ChoirMessage.objects.create(choir=self.choir, sender=self.admin, content='hi 1')
+        ChoirMessage.objects.create(choir=self.choir, sender=self.admin, content='hi 2')
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self._row(self.client.get('/api/choirs/'), self.choir.id)['unread_count'], 2)
+        # After marking read, the badge clears.
+        self.client.post(f'/api/choirs/{self.choir.id}/mark-read/')
+        self.assertEqual(self._row(self.client.get('/api/choirs/'), self.choir.id)['unread_count'], 0)
+        # A non-member never carries an unread count.
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(self._row(self.client.get('/api/choirs/'), self.choir.id)['unread_count'], 0)

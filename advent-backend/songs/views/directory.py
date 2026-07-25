@@ -203,6 +203,29 @@ class ChurchViewSet(viewsets.ModelViewSet):
             self.throttle_scope = 'community_join'
         return super().get_throttles()
 
+    def _unread_by_id(self):
+        """Map {church_id: unread_count} for the caller's memberships — drives the
+        unread badge on list rows. Bounded by how many communities they're in."""
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return {}
+        hidden = set() if user.is_super_admin else super_admin_user_ids()
+        out = {}
+        for cid, last_read in ChurchMembership.objects.filter(user=user).values_list('church_id', 'last_read_at'):
+            qs = (ChurchMessage.objects.filter(church_id=cid, is_removed=False)
+                  .exclude(sender_id=user.id).exclude(message_type='system')
+                  .exclude(sender_id__in=hidden))
+            if last_read:
+                qs = qs.filter(created_at__gt=last_read)
+            out[cid] = qs.count()
+        return out
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        if self.action in ('list', 'my_churches'):
+            ctx['unread_by_id'] = self._unread_by_id()
+        return ctx
+
     # ── Community: membership state ──────────────────────────────────────────
     @action(detail=True, methods=['get'], url_path='community')
     def community(self, request, pk=None):
@@ -648,6 +671,23 @@ class ChurchViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(CommunityAuditLogSerializer(page, many=True).data)
         return Response(CommunityAuditLogSerializer(qs, many=True).data)
 
+    @action(detail=True, methods=['get'])
+    def media(self, request, pk=None):
+        """Every image / file / voice note shared in the church, newest first
+        (members-only — reuses the same membership gate as the message list)."""
+        church = self.get_object()
+        if not self._membership(church, request.user) and not self._is_admin(church, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        qs = (self._message_qs(church, request)
+              .filter(message_type__in=['image', 'file', 'audio'])
+              .order_by('-created_at'))
+        page = self.paginate_queryset(qs)
+        ctx = {'request': request, 'hide_super_ids': hidden}
+        if page is not None:
+            return self.get_paginated_response(ChurchMessageSerializer(page, many=True, context=ctx).data)
+        return Response(ChurchMessageSerializer(qs, many=True, context=ctx).data)
+
 
 
 from rest_framework.exceptions import PermissionDenied
@@ -747,7 +787,26 @@ class ChoirViewSet(viewsets.ModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
+        if self.action in ('list', 'my_choirs'):
+            context['unread_by_id'] = self._unread_by_id()
         return context
+
+    def _unread_by_id(self):
+        """Map {choir_id: unread_count} for the caller's memberships — drives the
+        unread badge on list rows. Bounded by how many communities they're in."""
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return {}
+        hidden = set() if user.is_super_admin else super_admin_user_ids()
+        out = {}
+        for cid, last_read in ChoirMembership.objects.filter(user=user).values_list('choir_id', 'last_read_at'):
+            qs = (ChoirMessage.objects.filter(choir_id=cid, is_removed=False)
+                  .exclude(sender_id=user.id).exclude(message_type='system')
+                  .exclude(sender_id__in=hidden))
+            if last_read:
+                qs = qs.filter(created_at__gt=last_read)
+            out[cid] = qs.count()
+        return out
 
     def perform_create(self, serializer):
         choir = serializer.save(created_by=self.request.user)
@@ -1335,6 +1394,23 @@ class ChoirViewSet(viewsets.ModelViewSet):
         if page is not None:
             return self.get_paginated_response(CommunityAuditLogSerializer(page, many=True).data)
         return Response(CommunityAuditLogSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=['get'])
+    def media(self, request, pk=None):
+        """Every image / file / voice note shared in the choir, newest first
+        (members-only — reuses the same membership gate as the message list)."""
+        choir = self.get_object()
+        if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        qs = (self._message_qs(choir, request)
+              .filter(message_type__in=['image', 'file', 'audio'])
+              .order_by('-created_at'))
+        page = self.paginate_queryset(qs)
+        ctx = {'request': request, 'hide_super_ids': hidden}
+        if page is not None:
+            return self.get_paginated_response(ChoirMessageSerializer(page, many=True, context=ctx).data)
+        return Response(ChoirMessageSerializer(qs, many=True, context=ctx).data)
 
 
 class LiveEventViewSet(viewsets.ModelViewSet):

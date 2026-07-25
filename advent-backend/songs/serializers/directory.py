@@ -95,6 +95,9 @@ class ChurchSerializer(serializers.ModelSerializer):
     created_by_picture = serializers.SerializerMethodField()
     # Expose the pin as a compact preview, not a bare PK.
     pinned_message = serializers.SerializerMethodField()
+    # Unread chat messages for the caller — populated from a context map the list
+    # view precomputes (0 when the caller isn't a member or the map is absent).
+    unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Church
@@ -103,6 +106,9 @@ class ChurchSerializer(serializers.ModelSerializer):
 
     def get_pinned_message(self, obj):
         return community_pinned_preview(obj.pinned_message)
+
+    def get_unread_count(self, obj):
+        return (self.context.get('unread_by_id') or {}).get(obj.id, 0)
 
     def get_created_by_picture(self, obj):
         # Null-safe: a creator may not have a profile or a picture set.
@@ -185,6 +191,9 @@ class ChoirListSerializer(serializers.ModelSerializer):
     is_owner = serializers.SerializerMethodField()
     profile_image = serializers.SerializerMethodField()
     cover_image = serializers.SerializerMethodField()
+    # Unread chat messages for the caller — populated from a context map the list
+    # view precomputes (0 when the caller isn't a member or the map is absent).
+    unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Choir
@@ -200,6 +209,9 @@ class ChoirListSerializer(serializers.ModelSerializer):
 
     def get_cover_image(self, obj):
         return media.resolve(obj.cover_image) or ''
+
+    def get_unread_count(self, obj):
+        return (self.context.get('unread_by_id') or {}).get(obj.id, 0)
 
 
 # ── Choir community (membership / requests / chat) ────────────────────────────
