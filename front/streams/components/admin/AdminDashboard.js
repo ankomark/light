@@ -44,6 +44,7 @@ const AdminDashboard = ({ navigation }) => {
   const { currentUser } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
   // Responsive stat grid: 2 cards per row on a phone, more on tablets / landscape.
   const { tileSize: cardW } = useGridColumns({
     target: 150, min: 2, max: 4, horizontalPadding: spacing.md * 2, gap: spacing.sm,
@@ -53,8 +54,12 @@ const AdminDashboard = ({ navigation }) => {
     try {
       const res = await fetchAdminDashboard();
       setData(res);
-    } catch {
-      // gated server-side; if it fails the wrapper will have redirected
+      setErr(null);
+    } catch (e) {
+      // Surface the reason instead of silently showing zeros. A 403 means the
+      // account isn't a platform admin (super_admin / moderator / has capabilities).
+      const status = e?.response?.status;
+      setErr(status ? `Couldn't load dashboard data (HTTP ${status}).` : (e?.message || 'Failed to load dashboard data.'));
     } finally {
       setLoading(false);
     }
@@ -89,6 +94,10 @@ const AdminDashboard = ({ navigation }) => {
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.accent} />}
     >
       <Text style={styles.title}>{tr('adminDash.title')}</Text>
+
+      {err ? (
+        <View style={styles.errBanner}><Text style={styles.errText}>{err}</Text></View>
+      ) : null}
 
       <View style={styles.grid}>
         <StatCard width={cardW} icon="people" label="Users" value={t.users} tint="#1DA1F2" />
@@ -212,6 +221,11 @@ const styles = StyleSheet.create({
   recentDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.error },
   recentText: { flex: 1, ...typography.caption, color: colors.textPrimary },
   recentStatus: { ...typography.caption, color: colors.textMuted, textTransform: 'capitalize' },
+  errBanner: {
+    backgroundColor: 'rgba(224,36,94,0.15)', borderWidth: 1, borderColor: 'rgba(224,36,94,0.5)',
+    borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.md,
+  },
+  errText: { ...typography.caption, color: '#FF6B6B' },
 });
 
 export default AdminDashboard;
