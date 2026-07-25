@@ -15,7 +15,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Image, Alert, PanResponder,
   Pressable, useWindowDimensions,
 } from 'react-native';
-// eslint-disable-next-line import/no-unresolved -- installed via `npx expo install expo-camera` (native module; needs a dev/EAS build)
+// expo-camera is a native module — the live preview needs a dev/EAS build (not Expo Go).
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
