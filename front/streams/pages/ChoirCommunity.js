@@ -28,6 +28,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
+import ReportModal from '../components/ReportModal';
 import { uploadMedia } from '../services/cloudinary';
 import {
   fetchChoirCommunity, fetchChoirMessages, sendChoirMessage, deleteChoirMessage,
@@ -39,6 +40,12 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+
+// react-native-blurhash is a native module (absent in Expo Go / pre-rebuild
+// binaries); its import throws a TurboModule lookup. Guard it so encoding is an
+// optional enhancement and never crashes the screen.
+let Blurhash = null;
+try { Blurhash = require('react-native-blurhash').Blurhash; } catch { Blurhash = null; }
 const MAX_ATTACH_BYTES = 8 * 1024 * 1024; // 8MB cap on a single attachment
 
 const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
@@ -64,10 +71,13 @@ const previewOf = (m) =>
  * GestureHandlerRootView; it only claims clearly-horizontal right-swipes, so the
  * inverted FlatList keeps its vertical scroll.
  */
-const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry }) => {
+const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry, onDoubleTap }) => {
   const { t } = useI18n();
   const tx = useRef(new Animated.Value(0)).current;
   const armed = useRef(false); // crossed the trigger threshold this gesture
+  const lastTapRef = useRef(0);
+  const burst = useRef(new Animated.Value(0)).current; // double-tap ❤️ pop
+  const [imgRatio, setImgRatio] = useState(null);      // natural aspect ratio, learned on load
 
   const pan = useRef(
     PanResponder.create({
@@ -107,6 +117,24 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
   const myReaction = item.reactions?.mine || null;
   const hintOpacity = tx.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0, 1], extrapolate: 'clamp' });
 
+  const onTap = () => {
+    if (failed) { onRetry(item); return; }
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      lastTapRef.current = 0;
+      if (myReaction !== '❤️') {
+        burst.setValue(0);
+        Animated.sequence([
+          Animated.spring(burst, { toValue: 1, friction: 4, useNativeDriver: true }),
+          Animated.timing(burst, { toValue: 0, duration: 350, delay: 250, useNativeDriver: true }),
+        ]).start();
+      }
+      onDoubleTap?.(item);
+    } else {
+      lastTapRef.current = now;
+    }
+  };
+
   return (
     <View style={styles.swipeWrap}>
       <Animated.View style={[styles.replyHint, { opacity: hintOpacity, transform: [{ scale: hintOpacity }] }]}>
@@ -116,7 +144,7 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
       <Animated.View style={{ transform: [{ translateX: tx }] }} {...pan.panHandlers}>
         <Pressable
           onLongPress={() => onLongPress(item)} delayLongPress={280}
-          onPress={failed ? () => onRetry(item) : undefined}
+          onPress={onTap}
           style={[styles.msgRow, mine && styles.msgRowMine]}
         >
           {!mine && (
@@ -124,6 +152,13 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
               placeholder={DEFAULT_AVATAR} contentFit="cover" transition={120} style={styles.msgAvatar} />
           )}
           <View style={styles.bubbleCol}>
+            <Animated.Text
+              pointerEvents="none"
+              style={[styles.burstHeart, {
+                opacity: burst,
+                transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1.6] }) }],
+              }]}
+            >❤️</Animated.Text>
             <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther, isImg && styles.bubbleImage, sending && styles.bubbleSending]}>
               {!mine && <Text style={styles.msgSender}>{item.sender?.username || 'member'}</Text>}
               {item.reply_to && (
@@ -134,7 +169,18 @@ const MessageRow = ({ item, currentUser, isAdmin, playingId, onReply, onLongPres
               )}
               {item.message_type === 'image' && !!item.attachment && (
                 <TouchableOpacity activeOpacity={0.9} onPress={() => (sending ? null : onOpenImage(item.attachment))}>
-                  <Image source={{ uri: item.attachment }} style={styles.msgImage} contentFit="cover" transition={150} />
+                  <Image
+                    source={{ uri: item.attachment }}
+                    style={[styles.msgImage, imgRatio ? { aspectRatio: imgRatio, height: undefined } : null]}
+                    contentFit="cover"
+                    transition={200}
+                    placeholder={item.attachment_blurhash ? { blurhash: item.attachment_blurhash } : undefined}
+                    placeholderContentFit="cover"
+                    onLoad={(e) => {
+                      const s = e?.source;
+                      if (s?.width && s?.height) setImgRatio(Math.max(0.62, Math.min(1.9, s.width / s.height)));
+                    }}
+                  />
                   {sending ? (
                     <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>
                   ) : (
@@ -222,6 +268,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   const [viewerUri, setViewerUri] = useState(null); // full-screen image viewer
   const [replyTo, setReplyTo] = useState(null);     // message being replied to
   const [menuMsg, setMenuMsg] = useState(null);     // message for the long-press action menu
+  const [reportMsg, setReportMsg] = useState(null); // message being reported
   const [playingId, setPlayingId] = useState(null); // id of the voice note currently playing
   const [messagesLoading, setMessagesLoading] = useState(true); // first page of chat still loading
 
@@ -373,7 +420,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   // Media send: show the local file instantly, upload to R2 in the background,
   // then persist the message with just the URL (mirrors DMs).
   const sendMedia = useCallback(async (media) => {
-    const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType } = media;
+    const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType, blurhash = '' } = media;
     const reply = replyToRef.current;
     if (reply) setReplyTo(null);
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -383,7 +430,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     const tempMsg = {
       id: tempId,
       sender: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
-      content: '', message_type, attachment: localUri, file_name, duration,
+      content: '', message_type, attachment: localUri, attachment_blurhash: blurhash, file_name, duration,
       reply_to: replyDisplay, created_at: new Date().toISOString(),
       reactions: { summary: [], mine: null },
       _status: 'sending', _retryMedia: media,
@@ -392,7 +439,7 @@ const ChoirCommunity = ({ navigation, route }) => {
     try {
       const uploaded = await uploadMedia({ uri: localUri, name: file_name || `chat_${Date.now()}`, mimeType }, uploadType);
       const body = {
-        message_type, attachment: uploaded.url, file_name, duration,
+        message_type, attachment: uploaded.url, attachment_blurhash: blurhash, file_name, duration,
         ...(reply ? { reply_to: reply.id } : {}),
       };
       const msg = await sendChoirMessage(choirId, body);
@@ -435,7 +482,10 @@ const ChoirCommunity = ({ navigation, route }) => {
     });
     if (res.canceled || !res.assets?.length) return;
     const out = await compressImage(res.assets[0].uri, { width: 1280, quality: 0.6 });
-    sendMedia({ localUri: out.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg' });
+    // Encode a BlurHash placeholder (optional — no-op without the native module).
+    let blurhash = '';
+    if (Blurhash) { try { blurhash = await Blurhash.encode(out.uri, 4, 3); } catch { /* optional */ } }
+    sendMedia({ localUri: out.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg', blurhash });
   };
 
   const attachDocument = async (audioOnly = false) => {
@@ -699,6 +749,7 @@ const ChoirCommunity = ({ navigation, route }) => {
       onOpenFile={openFile}
       onPlayAudio={playAudio}
       onToggleReaction={react}
+      onDoubleTap={(m) => react(m, '❤️')}
       onRetry={retrySend}
     />
   );
@@ -998,6 +1049,14 @@ const ChoirCommunity = ({ navigation, route }) => {
               <Ionicons name="arrow-undo" size={20} color={colors.textPrimary} />
               <Text style={styles.menuItemText}>{t('community.reply')}</Text>
             </TouchableOpacity>
+            {menuMsg && menuMsg.message_type !== 'system'
+              && menuMsg.sender?.id !== currentUser?.id
+              && menuMsg.sender?.username !== currentUser?.username && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => { const m = menuMsg; setMenuMsg(null); setReportMsg(m); }}>
+                <Ionicons name="flag-outline" size={20} color={colors.error} />
+                <Text style={[styles.menuItemText, { color: colors.error }]}>{t('group.detail.reportMessage')}</Text>
+              </TouchableOpacity>
+            )}
             {canModerate(menuMsg) && (
               <TouchableOpacity style={styles.menuItem} onPress={() => confirmDelete(menuMsg)}>
                 <Ionicons name="trash-outline" size={20} color={colors.error} />
@@ -1007,6 +1066,14 @@ const ChoirCommunity = ({ navigation, route }) => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ReportModal
+        visible={!!reportMsg}
+        onClose={() => setReportMsg(null)}
+        contentType="choirmessage"
+        objectId={reportMsg?.id}
+        title={t('group.detail.reportMessageTitle')}
+      />
 
       {/* Full-screen image viewer */}
       <Modal visible={!!viewerUri} transparent animationType="fade" onRequestClose={() => setViewerUri(null)}>
@@ -1106,6 +1173,7 @@ const styles = StyleSheet.create({
   // Swipe-to-reply + reactions
   swipeWrap: { justifyContent: 'center' },
   bubbleCol: { flexShrink: 1 },
+  burstHeart: { position: 'absolute', alignSelf: 'center', top: '30%', fontSize: 40, zIndex: 5 },
   replyHint: {
     position: 'absolute', left: 12, alignSelf: 'center',
     width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
