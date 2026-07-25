@@ -266,6 +266,15 @@ export const fetchTracks = async (page = 1, search = '') => {
   return apiRequest('get', '/tracks/', null, { params });
 };
 
+// A capped random sample to seed a "shuffle whole library" queue in one request
+// (lean payload; the player still streams one track at a time). Returns an array.
+export const fetchShuffledTracks = async (limit = 200, search = '') => {
+  const params = { limit };
+  if (search) params.search = search;
+  const data = await apiRequest('get', '/tracks/shuffle/', null, { params });
+  return data?.results ?? (Array.isArray(data) ? data : []);
+};
+
 // Playlist endpoints (all scoped to the authenticated user on the backend).
 export const fetchPlaylists = async () => {
   const data = await apiRequest('get', '/playlists/');

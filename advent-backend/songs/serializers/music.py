@@ -51,6 +51,19 @@ class TrackSerializer(serializers.ModelSerializer):
 
 
 
+class TrackQueueSerializer(serializers.ModelSerializer):
+    """Lean payload for building a playback queue (e.g. shuffle). Only the fields
+    the player needs — no per-row like counts / annotations / ownership — so a
+    capped random sample of many tracks stays one small request."""
+    artist = SimpleUserSerializer(read_only=True)
+    audio_file = MediaReferenceField()
+    cover_image = MediaReferenceField(required=False)
+
+    class Meta:
+        model = Track
+        fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image', 'lyrics', 'slug']
+
+
 class PlaylistSerializer(serializers.ModelSerializer):
     # Slim owner ref (the full UserSerializer drags in the whole social-posts
     # payload, which is wasteful for a playlist).

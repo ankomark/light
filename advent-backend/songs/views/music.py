@@ -187,6 +187,35 @@ class TrackViewSet(viewsets.ModelViewSet):
             counter += 1
         serializer.save(artist=self.request.user, slug=slug)
 
+    # A capped random sample is enough to seed a "shuffle my library" session and
+    # keeps the payload bounded no matter how big the library grows.
+    SHUFFLE_DEFAULT = 200
+    SHUFFLE_MAX = 500
+
+    @action(detail=False, methods=['get'], url_path='shuffle')
+    def shuffle(self, request):
+        """Return a random sample of tracks (lean payload) to seed a shuffled
+        queue in one request. `?limit=` (default 200, capped at 500). Optional
+        `?search=` narrows the pool the same way the list does."""
+        try:
+            limit = int(request.query_params.get('limit', self.SHUFFLE_DEFAULT))
+        except (TypeError, ValueError):
+            limit = self.SHUFFLE_DEFAULT
+        limit = max(1, min(limit, self.SHUFFLE_MAX))
+
+        qs = Track.objects.filter(is_removed=False).select_related('artist__profile')
+        search = request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(
+                Q(title__icontains=search)
+                | Q(album__icontains=search)
+                | Q(artist__username__icontains=search)
+            )
+        # order_by('?') = DB-side random; the LIMIT keeps it to `limit` rows.
+        tracks = qs.order_by('?')[:limit]
+        data = TrackQueueSerializer(tracks, many=True, context={'request': request}).data
+        return Response({'results': data, 'count': len(data)})
+
     @action(detail=False, methods=['post'], url_path='upload')
     def upload_track(self, request):
         serializer = self.get_serializer(data=request.data)

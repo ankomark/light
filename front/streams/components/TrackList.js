@@ -10,7 +10,7 @@ import {
   RefreshControl 
 } from "react-native";
 import { useFocusEffect , useNavigation } from '@react-navigation/native';
-import { fetchTracks } from "../services/api";
+import { fetchTracks, fetchShuffledTracks } from "../services/api";
 import TrackItem from "./TrackItem";
 import SearchBar from "./SearchBar";
 import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -28,6 +28,7 @@ const TrackList = () => {
   const [page, setPage] = useState(1);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [shuffling, setShuffling] = useState(false);
   const navigation = useNavigation();
   const { playQueue } = usePlayer();
 
@@ -50,6 +51,24 @@ const TrackList = () => {
     })),
     [tracks]
   );
+
+  // Shuffle spans the whole library, not just the tracks scrolled into view:
+  // one request pulls a capped random sample from the server, then the player
+  // shuffles + plays it (streaming one track at a time). Falls back to the
+  // loaded tracks if the request fails.
+  const shuffleAll = useCallback(async () => {
+    if (shuffling) return;
+    setShuffling(true);
+    try {
+      const sample = await fetchShuffledTracks(200, searchRef.current);
+      if (sample.length) playQueue(sample, 0, { shuffle: true });
+      else if (tracks.length) playQueue(buildQueue(), 0, { shuffle: true });
+    } catch {
+      if (tracks.length) playQueue(buildQueue(), 0, { shuffle: true });
+    } finally {
+      setShuffling(false);
+    }
+  }, [shuffling, playQueue, buildQueue, tracks.length]);
 
   const loadTracks = useCallback(async (search = searchRef.current) => {
     try {
@@ -149,10 +168,15 @@ const TrackList = () => {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.queueBtn, styles.shuffleBtn]}
-              onPress={() => playQueue(buildQueue(), 0, { shuffle: true })}
+              onPress={shuffleAll}
+              disabled={shuffling}
               activeOpacity={0.85}
             >
-              <Ionicons name="shuffle" size={16} color={colors.primary} />
+              {shuffling ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons name="shuffle" size={16} color={colors.primary} />
+              )}
               <Text style={styles.shuffleBtnText}>{t('music.shuffle')}</Text>
             </TouchableOpacity>
           </>

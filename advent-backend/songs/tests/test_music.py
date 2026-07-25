@@ -246,3 +246,42 @@ class QueryCountTests(APITestCase):
             f'Playlist list query count grew with rows ({small} -> {large}); N+1 reintroduced.'
         )
         self.assertLessEqual(small, 6)
+
+
+class TrackShuffleTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.alice = User.objects.create_user(username='alice', email='alice@test.co', password='pw12345!')
+        for i in range(50):
+            make_track(self.alice, title=f'Song {i}', album='Lib')
+
+    def test_shuffle_caps_limit_and_is_lean(self):
+        self.client.force_authenticate(self.alice)
+        res = self.client.get('/api/tracks/shuffle/?limit=10')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        results = res.data['results']
+        self.assertEqual(len(results), 10)          # honours the cap
+        self.assertEqual(res.data['count'], 10)
+        # Lean payload: queue fields only, no like/owner extras.
+        row = results[0]
+        self.assertIn('audio_file', row)
+        self.assertIn('lyrics', row)
+        self.assertNotIn('likes_count', row)
+        self.assertNotIn('is_liked', row)
+
+    def test_shuffle_limit_is_bounded_and_randomises(self):
+        self.client.force_authenticate(self.alice)
+        # Over-large limit is clamped to the pool (50 tracks < SHUFFLE_MAX).
+        res = self.client.get('/api/tracks/shuffle/?limit=9999')
+        self.assertEqual(len(res.data['results']), 50)
+        # Two draws of a subset should (almost always) differ in order.
+        a = [t['id'] for t in self.client.get('/api/tracks/shuffle/?limit=40').data['results']]
+        b = [t['id'] for t in self.client.get('/api/tracks/shuffle/?limit=40').data['results']]
+        self.assertNotEqual(a, b)
+
+    def test_shuffle_respects_search(self):
+        make_track(self.alice, title='Unique Anthem', album='Special')
+        self.client.force_authenticate(self.alice)
+        res = self.client.get('/api/tracks/shuffle/?search=anthem')
+        titles = [t['title'] for t in res.data['results']]
+        self.assertEqual(titles, ['Unique Anthem'])

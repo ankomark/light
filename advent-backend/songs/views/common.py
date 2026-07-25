@@ -33,6 +33,7 @@ from ..serializers import (
     UserSerializer,
     FollowRequestSerializer,
     TrackSerializer,
+    TrackQueueSerializer,
     PlaylistSerializer,
     PlaylistListSerializer,
     ProfileSerializer,
