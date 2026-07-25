@@ -95,8 +95,22 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.1.126",  # Adjust for your network
     "http://192.168.1.126:19006",  # Add port
     "http://10.0.2.2:19006"        # For Android emulator
-    
+
 ]
+
+# In development, allow the Expo web dev server (localhost:8081 by default) and
+# any local-network origin on any port, so the web build (admin console) works
+# without hardcoding each machine's IP/port. Production still uses the explicit
+# CORS_ALLOWED_ORIGINS list above — add your deployed web-admin origin there.
+if DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^http://localhost:\d+$",
+        r"^http://127\.0\.0\.1:\d+$",
+        r"^http://192\.168\.\d+\.\d+:\d+$",
+        r"^http://10\.\d+\.\d+\.\d+:\d+$",
+        r"^http://172\.(1[6-9]|2\d|3[01])\.\d+\.\d+:\d+$",
+    ]
+
 INSTALLED_APPS = [
     # 'daphne' must lead so it takes over runserver with the ASGI/WebSocket server.
     'daphne',

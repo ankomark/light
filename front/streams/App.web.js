@@ -23,6 +23,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { I18nProvider } from './context/I18nContext';
 import { WallpaperProvider } from './context/WallpaperContext';
 import { isAdmin } from './utils/roles';
+import { API_BASE } from './services/api';
 import { colors } from './constants/theme';
 
 import AdminDashboard from './components/admin/AdminDashboard';
@@ -54,7 +55,14 @@ function AdminLogin() {
       await login(username.trim(), password);
       // On success the auth state updates and the console renders itself.
     } catch (e) {
-      setError(e?.response?.data?.detail || 'Login failed. Check your credentials.');
+      if (e?.response) {
+        // Server answered → a real auth/validation error.
+        setError(e.response.data?.detail || 'Login failed. Check your username and password.');
+      } else {
+        // No response = couldn't reach the API (wrong host or CORS not allowing
+        // this web origin). Surfaces the base URL to make it obvious.
+        setError(`Can't reach the server at ${API_BASE}. Is the backend running and CORS allowing this origin?`);
+      }
     } finally {
       setBusy(false);
     }
