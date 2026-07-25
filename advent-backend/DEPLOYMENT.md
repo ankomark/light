@@ -36,10 +36,22 @@ Pin Python to **3.12** (Django 5.2 does not support 3.14).
 
 1. **Set the env vars above** in Railway (at minimum `DJANGO_SECRET_KEY`, `DATABASE_URL`, Cloudinary, Stripe).
 2. **Run migrations** on every deploy: `python manage.py migrate`.
-   - Pending migrations include `0021` (Order.payment_status), `0022` (indexes + drops two unused columns), `0023` (pg_trgm search indexes — see below), and the `token_blacklist` tables.
+   - `migrate` applies **all** pending migrations; you don't list them by hand. The
+     entries below are just call-outs for the notable ones so you know what a deploy
+     changes.
+   - Earlier call-outs: `0021` (Order.payment_status), `0022` (indexes + drops two
+     unused columns), `0023` (pg_trgm search indexes — see below), and the
+     `token_blacklist` tables.
+   - **Choir/church community chat** (all **additive and safe** — nullable columns +
+     one new table, no data backfill, no locks that matter, zero-downtime):
+     - `0090` — `attachment_blurhash` on `ChoirMessage` + `ChurchMessage` (image placeholders).
+     - `0091` — `edited_at` on both message models, and a `pinned_message` FK on `Choir` + `Church` (pinned-banner).
+     - `0092` — `is_moderator` on `ChoirMembership` + `ChurchMembership`, and the new `CommunityAuditLog` table (moderation trail).
+   - After deploy, confirm nothing is pending: `python manage.py migrate --check`
+     (exits non-zero if a migration is unapplied) or `python manage.py showmigrations songs`.
    - Run `migrate` against the **direct** Postgres connection (port 5432), not the pooler.
 3. **Collect static** if serving admin assets: `python manage.py collectstatic --noinput` (Whitenoise serves them).
-4. Start: `gunicorn music.wsgi` (see `Procfile`).
+4. Start: **daphne** (ASGI) per the `Procfile` — `daphne -b 0.0.0.0 -p $PORT music.asgi:application`. Realtime chat (groups + choir/church communities) rides WebSockets through this process, so it needs Redis; see **`REALTIME_DEPLOY.md`** for the Redis (`REDIS_URL`) setup. Without Redis the app still serves HTTP and WebSockets connect, but realtime only fans out within a single process.
 
 ## Stripe webhook (required for checkout to complete)
 
