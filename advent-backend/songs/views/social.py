@@ -928,12 +928,15 @@ from django.utils.html import escape as _esc
 
 
 def _share_image(post):
-    """og:image for the link-preview card. Images use the stored URL directly.
-    Videos have no server-side thumbnail yet (R2 stores bytes verbatim) —
-    they'll get a poster once client-side thumbnails land."""
+    """og:image for the link-preview card. Image posts use their stored URL.
+    Videos have no server-side poster yet (R2 stores bytes verbatim), so they
+    fall back to a branded image (SHARE_FALLBACK_IMAGE) when one is configured —
+    keeping the preview card from rendering blank."""
     if post.content_type == 'image':
-        return media.resolve(post.media_file) or ''
-    return ''
+        img = media.resolve(post.media_file) or ''
+        if img:
+            return img
+    return getattr(settings, 'SHARE_FALLBACK_IMAGE', '') or ''
 
 
 _SHARE_PAGE = """<!doctype html>
@@ -971,7 +974,14 @@ _SHARE_PAGE = """<!doctype html>
   .caption { color:#A9BCD0; font-size:14px; line-height:1.45; margin:0 0 18px; white-space:pre-wrap; }
   .btn { display:block; text-align:center; text-decoration:none; background:#1DA1F2;
     color:#fff; font-weight:700; padding:14px; border-radius:14px; }
-  .brand { text-align:center; color:#6C757D; font-size:12px; margin-top:14px; letter-spacing:1px; }
+  .stores { margin-top:18px; text-align:center; }
+  .stores .get { color:#A9BCD0; font-size:13px; margin:0 0 10px; }
+  .store-row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .store { flex:1 1 0; min-width:130px; display:flex; align-items:center; justify-content:center;
+    gap:8px; text-decoration:none; background:#0D2340; border:1px solid #1E3A5F;
+    color:#E0E1DD; font-weight:600; font-size:14px; padding:12px; border-radius:12px; }
+  .store svg { width:18px; height:18px; fill:#E0E1DD; }
+  .brand { text-align:center; color:#6C757D; font-size:12px; margin-top:18px; letter-spacing:1px; }
 </style>
 </head>
 <body>
@@ -979,14 +989,20 @@ _SHARE_PAGE = """<!doctype html>
     <div class="media">__IMG_BLOCK____PLAY_BLOCK__</div>
     <div class="body">
       <p class="user">__USER__</p>__CAPTION_BLOCK__
-      <a class="btn" href="__DEEP__">Open in Adventist Life</a>
+      <a class="btn" href="__DEEP__">Open in Adventist Life</a>__STORE_BLOCK__
       <p class="brand">ADVENTIST LIFE</p>
     </div>
   </div>
   <script>
-    // Hand off to the app immediately; if it isn't installed, this page (with
-    // its thumbnail + button) stays as the fallback.
-    (function(){ try { window.location.href = "__DEEP__"; } catch (e) {} })();
+    // If the app is installed, hand off to it (opens this exact post). Only try
+    // on mobile — desktop browsers would just error on the custom scheme — and
+    // leave this page (thumbnail, caption, and the store buttons) as the fallback
+    // for anyone who doesn't have the app yet.
+    (function(){
+      var ua = navigator.userAgent || '';
+      if (!/Android|iPhone|iPad|iPod/i.test(ua)) return;
+      try { window.location.href = "__DEEP__"; } catch (e) {}
+    })();
   </script>
 </body>
 </html>"""
@@ -1028,6 +1044,29 @@ def post_share_page(request, post_id):
     )
     caption_block = f'\n      <p class="caption">{_esc(caption)}</p>' if caption else ''
 
+    # "Don't have the app? Get it here" — shown to anyone whose device didn't
+    # hand off to the app. Only the configured stores appear.
+    store_links = ''
+    play_url = getattr(settings, 'APP_PLAY_STORE_URL', '')
+    ios_url = getattr(settings, 'APP_STORE_URL', '')
+    if play_url:
+        store_links += (
+            f'<a class="store" href="{_esc(play_url)}">'
+            '<svg viewBox="0 0 24 24"><path d="M3 3.5v17l9.5-8.5L3 3.5zm11.2 7.1l2.6-2.3 3.7 2.1c.9.5.9 1.7 0 2.2l-3.7 2.1-2.6-2.3 0-1.9zM5 2.9l9.1 5.1-2.1 1.9L5 2.9zm0 18.2l7-6.9 2.1 1.9L5 21.1z"/></svg>'
+            'Google Play</a>'
+        )
+    if ios_url:
+        store_links += (
+            f'<a class="store" href="{_esc(ios_url)}">'
+            '<svg viewBox="0 0 24 24"><path d="M16.4 12.9c0-2 1.6-3 1.7-3-.9-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7-1.3 0-2.6.8-3.3 2-1.4 2.4-.4 6 1 8 .7 1 1.4 2.1 2.5 2 1-.1 1.4-.6 2.6-.6 1.2 0 1.6.6 2.6.6 1.1 0 1.8-1 2.5-2 .8-1.1 1.1-2.2 1.1-2.3-.1 0-2.2-.8-2.2-3.2zM14.6 6.5c.5-.7.9-1.6.8-2.5-.8 0-1.8.5-2.4 1.2-.5.6-1 1.5-.8 2.4.9.1 1.8-.4 2.4-1.1z"/></svg>'
+            'App Store</a>'
+        )
+    store_block = (
+        '\n      <div class="stores"><p class="get">Don\'t have the app? Get it here:</p>'
+        f'<div class="store-row">{store_links}</div></div>'
+        if store_links else ''
+    )
+
     html = (
         _SHARE_PAGE
         .replace('__OGTYPE__', 'video.other' if is_video else 'article')
@@ -1035,6 +1074,7 @@ def post_share_page(request, post_id):
         .replace('__IMG_BLOCK__', img_block)
         .replace('__PLAY_BLOCK__', play_block)
         .replace('__CAPTION_BLOCK__', caption_block)
+        .replace('__STORE_BLOCK__', store_block)
         .replace('__USER__', _esc(username))
         .replace('__TITLE__', _esc(title))
         .replace('__DESC__', _esc(description[:200]))

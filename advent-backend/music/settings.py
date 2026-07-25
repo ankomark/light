@@ -191,6 +191,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'music.wsgi.application'
 
+# ── Shared-link landing page (/post/<id>) ────────────────────────────────────
+# Store links shown to visitors who open a shared post but don't have the app.
+# Override via env when/if the listings change.
+APP_PLAY_STORE_URL = os.environ.get(
+    'APP_PLAY_STORE_URL',
+    'https://play.google.com/store/apps/details?id=com.ankom.streams',
+)
+APP_STORE_URL = os.environ.get('APP_STORE_URL', '')  # set once the iOS app is live
+# Optional branded fallback image for the link-preview card when a post has no
+# image of its own (e.g. video posts, until client-side posters land).
+SHARE_FALLBACK_IMAGE = os.environ.get('SHARE_FALLBACK_IMAGE', '')
+
 AUTH_USER_MODEL = 'songs.User'
 
 # ── LiveKit (live broadcasting) ───────────────────────────────────────────────

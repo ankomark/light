@@ -1,0 +1,59 @@
+"""Public shared-post landing page (/post/<id>/): rich preview + deep link + stores.
+
+    python manage.py test songs.tests.test_post_share --settings=music.settings_test
+"""
+from django.test import TestCase, override_settings
+
+from songs.models import User, SocialPost
+
+
+@override_settings(
+    APP_PLAY_STORE_URL='https://play.google.com/store/apps/details?id=com.ankom.streams',
+    APP_STORE_URL='https://apps.apple.com/app/id0000000000',
+    SHARE_FALLBACK_IMAGE='https://cdn.example/brand.png',
+)
+class PostSharePageTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('sharer', 's@x.com', 'x')
+
+    def _get(self, post):
+        return self.client.get(f'/post/{post.id}/')
+
+    def test_image_post_has_preview_deeplink_and_stores(self):
+        post = SocialPost.objects.create(
+            user=self.user, caption='Praise the Lord!',
+            content_type='image', media_file='https://cdn.example/pic.jpg',
+        )
+        html = self._get(post).content.decode()
+        # Rich preview (thumbnail + title + caption).
+        self.assertIn('og:image" content="https://cdn.example/pic.jpg"', html)
+        self.assertIn('sharer on Adventist Life', html)              # og:title
+        self.assertIn('Praise the Lord!', html)                      # caption in card + desc
+        self.assertIn('twitter:card" content="summary_large_image"', html)
+        # Deep link back to the exact post.
+        self.assertIn(f'streams://post/{post.id}', html)
+        # Download guidance for people without the app.
+        self.assertIn("Don't have the app", html)
+        self.assertIn('play.google.com/store', html)
+        self.assertIn('apps.apple.com', html)
+
+    def test_video_post_falls_back_to_brand_image(self):
+        post = SocialPost.objects.create(
+            user=self.user, caption='Sermon clip',
+            content_type='video', media_file='https://cdn.example/clip.mp4',
+        )
+        html = self._get(post).content.decode()
+        # No own thumbnail → branded fallback keeps the card from being blank.
+        self.assertIn('og:image" content="https://cdn.example/brand.png"', html)
+        self.assertIn('og:video', html)  # video tag still present
+        self.assertIn(f'streams://post/{post.id}', html)
+
+    @override_settings(APP_STORE_URL='')  # iOS not published yet
+    def test_only_configured_stores_appear(self):
+        post = SocialPost.objects.create(
+            user=self.user, caption='', content_type='image',
+            media_file='https://cdn.example/pic.jpg',
+        )
+        html = self._get(post).content.decode()
+        self.assertIn('play.google.com/store', html)   # Android shown
+        self.assertNotIn('apps.apple.com', html)        # App Store hidden
