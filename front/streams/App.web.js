@@ -23,7 +23,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { I18nProvider } from './context/I18nContext';
 import { WallpaperProvider } from './context/WallpaperContext';
 import { isAdmin } from './utils/roles';
-import { API_BASE } from './services/api';
+import { API_BASE, getAccessToken } from './services/api';
 import { colors } from './constants/theme';
 
 import AdminDashboard from './components/admin/AdminDashboard';
@@ -104,9 +104,42 @@ function AdminLogin() {
 
 function NotAuthorized() {
   const { logout, currentUser } = useAuth();
+  const [diag, setDiag] = useState('');
+  const [running, setRunning] = useState(false);
+
+  const runDiag = async () => {
+    setRunning(true);
+    setDiag('Running…');
+    try {
+      const token = await getAccessToken();
+      const check = async (path) => {
+        try {
+          const r = await fetch(`${API_BASE}/api${path}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          let extra = '';
+          if (path.includes('status')) {
+            try { const j = await r.json(); extra = ` has_profile=${JSON.stringify(j.has_profile)}`; } catch {}
+          }
+          return `${path} → ${r.status}${extra}`;
+        } catch (e) {
+          return `${path} → FAILED (${e.message})`; // e.g. CORS / network
+        }
+      };
+      const s = await check('/auth/status/');
+      const m = await check('/profiles/me/');
+      setDiag(`token: ${token ? 'present' : 'MISSING'}\n${s}\n${m}`);
+    } catch (e) {
+      setDiag(`error: ${e.message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const debug = currentUser
     ? `is_staff=${JSON.stringify(currentUser.is_staff)} · admin_role=${JSON.stringify(currentUser.admin_role)} · is_super_admin=${JSON.stringify(currentUser.is_super_admin)} · capabilities=${JSON.stringify(currentUser.capabilities)}`
-    : 'currentUser is null — your profile could not be loaded (check the Network tab for /profiles/me/).';
+    : 'currentUser is null — your profile could not be loaded.';
+
   return (
     <View style={styles.centered}>
       <View style={styles.loginCard}>
@@ -117,6 +150,10 @@ function NotAuthorized() {
             : 'Signed in, but your admin profile could not be loaded.'}
         </Text>
         <Text style={styles.debug}>{debug}</Text>
+        {diag ? <Text style={styles.debug}>{diag}</Text> : null}
+        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: '#0D2340' }]} onPress={runDiag} disabled={running} activeOpacity={0.85}>
+          <Text style={[styles.primaryBtnText, { color: '#fff' }]}>{running ? 'Checking…' : 'Run diagnostics'}</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.primaryBtn} onPress={logout} activeOpacity={0.85}>
           <Text style={styles.primaryBtnText}>Sign out</Text>
         </TouchableOpacity>
