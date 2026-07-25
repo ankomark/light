@@ -10,8 +10,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert,
-  ActivityIndicator, KeyboardAvoidingView, Platform, Modal, Pressable, Animated, PanResponder, Switch,
+  ActivityIndicator, Modal, Pressable, Animated, PanResponder, Switch,
 } from 'react-native';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -252,6 +253,7 @@ const ChoirCommunity = ({ navigation, route }) => {
   const choir = route.params?.choir || {};
   const choirId = route.params?.choirId || choir.id;
   const insets = useSafeAreaInsets();
+  const kbHeight = useKeyboardHeight(); // lift the composer above the keyboard (edge-to-edge safe)
   const { currentUser } = useAuth();
 
   const [community, setCommunity] = useState(null);
@@ -1036,7 +1038,7 @@ const ChoirCommunity = ({ navigation, route }) => {
           )}
         </View>
       ) : (
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.top + 8}>
+        <View style={[styles.flex, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
           {/* Pinned-message banner */}
           {pinned && (
             <TouchableOpacity activeOpacity={0.85} style={styles.pinBanner}
@@ -1138,7 +1140,7 @@ const ChoirCommunity = ({ navigation, route }) => {
           )}
 
           {!canPost ? (
-            <View style={[styles.lockedBar, { paddingBottom: insets.bottom || spacing.sm }]}>
+            <View style={[styles.lockedBar, { paddingBottom: kbHeight > 0 ? spacing.sm : (insets.bottom || spacing.sm) }]}>
               <Ionicons name="lock-closed" size={15} color={colors.textMuted} />
               <Text style={styles.lockedBarText}>{t('community.onlyAdminsSend')}</Text>
             </View>
@@ -1150,7 +1152,7 @@ const ChoirCommunity = ({ navigation, route }) => {
               <TouchableOpacity onPress={() => stopRecording(false)} style={styles.recSend}><Ionicons name="send" size={18} color="#0A1628" /></TouchableOpacity>
             </View>
           ) : (
-            <View style={[styles.inputBar, { paddingBottom: insets.bottom || spacing.sm }]}>
+            <View style={[styles.inputBar, { paddingBottom: kbHeight > 0 ? spacing.sm : (insets.bottom || spacing.sm) }]}>
               <TouchableOpacity onPress={() => setShowAttach((s) => !s)} hitSlop={8} style={styles.iconBtn}>
                 <Ionicons name={showAttach ? 'close-circle' : 'add-circle'} size={28} color={colors.accent} />
               </TouchableOpacity>
@@ -1173,7 +1175,7 @@ const ChoirCommunity = ({ navigation, route }) => {
               )}
             </View>
           )}
-        </KeyboardAvoidingView>
+        </View>
       )}
 
       {/* Manage modal */}
