@@ -1,9 +1,30 @@
 from .common import *  # noqa: F401,F403
 import base64
-from django.http import HttpResponse, Http404
+import os
+from django.http import HttpResponse, Http404, HttpResponseNotFound
 from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F
 from django.conf import settings
 from django.core.cache import cache
+
+# Branded fallback image for share cards (a post with no still of its own).
+# Bundled in the repo and served by share_brand_image, so shared links get a
+# non-blank preview with zero extra hosting/config.
+_BRAND_OG_PATH = os.path.join(os.path.dirname(__file__), '..', 'assets', 'share-og.png')
+_brand_og_bytes = None
+
+
+def share_brand_image(request):
+    """Serve the bundled branded OG image (used as the share-card fallback)."""
+    global _brand_og_bytes
+    if _brand_og_bytes is None:
+        try:
+            with open(_BRAND_OG_PATH, 'rb') as f:
+                _brand_og_bytes = f.read()
+        except OSError:
+            return HttpResponseNotFound('not found')
+    resp = HttpResponse(_brand_og_bytes, content_type='image/png')
+    resp['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 def feed_post_queryset(user):
@@ -927,12 +948,11 @@ from django.shortcuts import get_object_or_404
 from django.utils.html import escape as _esc
 
 
-def _share_image(post):
+def _share_image(post, fallback=''):
     """og:image for the link-preview card. Prefers the post's own still — the
     video poster frame the client captures at upload (post.thumbnail), or the
-    image itself for photo posts — then falls back to a branded image
-    (SHARE_FALLBACK_IMAGE) so the card is never blank. Mirrors the serializer's
-    get_thumbnail_url resolution."""
+    image itself for photo posts — then falls back to a branded image so the card
+    is never blank. Mirrors the serializer's get_thumbnail_url resolution."""
     poster = media.resolve(post.thumbnail) if post.thumbnail else ''
     if poster:
         return poster
@@ -940,7 +960,7 @@ def _share_image(post):
         img = media.resolve(post.media_file) or ''
         if img:
             return img
-    return getattr(settings, 'SHARE_FALLBACK_IMAGE', '') or ''
+    return fallback or ''
 
 
 _SHARE_PAGE = """<!doctype html>
@@ -1027,7 +1047,10 @@ def post_share_page(request, post_id):
     caption = (post.caption or '').strip()
     title = f"{username} on Adventist Life"
     description = caption or f"See {username}'s post on Adventist Life."
-    image = _share_image(post)
+    # Branded fallback: an env override if set, else the bundled image we serve
+    # ourselves (absolute URL so crawlers can fetch it).
+    fallback = getattr(settings, 'SHARE_FALLBACK_IMAGE', '') or request.build_absolute_uri('/share-og.png')
+    image = _share_image(post, fallback)
     deep_link = f"streams://post/{post.id}"
     is_video = post.content_type == 'video'
 

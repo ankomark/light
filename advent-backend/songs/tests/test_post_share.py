@@ -57,6 +57,22 @@ class PostSharePageTests(TestCase):
         html = self._get(post).content.decode()
         self.assertIn('og:image" content="https://cdn.example/brand.png"', html)
 
+    @override_settings(SHARE_FALLBACK_IMAGE='')  # no env override configured
+    def test_default_fallback_is_self_hosted_brand_image(self):
+        post = SocialPost.objects.create(
+            user=self.user, caption='Clip', content_type='video',
+            media_file='https://cdn.example/clip.mp4',
+        )
+        html = self._get(post).content.decode()
+        # With no env override, the card points at the image we serve ourselves.
+        self.assertIn('/share-og.png', html)
+
+    def test_brand_image_endpoint_serves_png(self):
+        res = self.client.get('/share-og.png')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'image/png')
+        self.assertEqual(res.content[:8], b'\x89PNG\r\n\x1a\n')  # PNG magic bytes
+
     @override_settings(APP_STORE_URL='')  # iOS not published yet
     def test_only_configured_stores_appear(self):
         post = SocialPost.objects.create(
