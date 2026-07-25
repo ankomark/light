@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
 import { fetchComments, postComment, getAccessToken, API_URL } from '../services/api';
@@ -40,6 +41,7 @@ const CommentSkeleton = () => (
 
 const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
     const { t } = useI18n();
+    const kbHeight = useKeyboardHeight(); // float the comment box above the keyboard (edge-to-edge safe)
     const flatListRef = useRef(null);
     const [highlightedComment, setHighlightedComment] = useState(null);
     const [comments, setComments] = useState([]);
@@ -178,7 +180,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                     <RotatingBackground intervalMs={60000} scrimColor="transparent" />
                     <ScreenVignette tintRgb="6,16,34" zIndex={1} />
 
-                    <SafeAreaView edges={['top']} style={styles.content}>
+                    <SafeAreaView edges={['top']} style={[styles.content, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
                         <View style={styles.headerRow}>
                             <Text style={styles.headerTitle}>{t('comments.title')}</Text>
                             <TouchableOpacity

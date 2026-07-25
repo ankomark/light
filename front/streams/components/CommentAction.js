@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { useAuth } from '../context/useAuth';
 import { commentOnPost, fetchSocialPostComments, getAccessToken, API_URL } from '../services/api';
 import RotatingBackground from './RotatingBackground';
@@ -39,6 +40,7 @@ const CommentSkeleton = () => (
 
 const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, currentUserAvatar, triggerVariant = 'icon' }) => {
   const { t } = useI18n();
+  const kbHeight = useKeyboardHeight(); // float the comment box above the keyboard (edge-to-edge safe)
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(autoOpen || false);
   const [newComment, setNewComment] = useState('');
@@ -226,7 +228,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
           <RotatingBackground intervalMs={60000} blurIntensity={5} tint="default" scrimColor="transparent" />
           <ScreenVignette tintRgb="6,16,34" zIndex={1} />
 
-          <SafeAreaView edges={['top']} style={styles.content}>
+          <SafeAreaView edges={['top']} style={[styles.content, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
             <View style={styles.headerRow}>
               <Text style={styles.headerTitle}>{t('comments.title')}</Text>
               <TouchableOpacity
