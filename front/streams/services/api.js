@@ -12,6 +12,11 @@ const PROD_API_BASE = 'https://web-production-f266.up.railway.app';
 const resolveApiBase = () => {
   if (process.env.EXPO_PUBLIC_API_BASE) return process.env.EXPO_PUBLIC_API_BASE;
   if (__DEV__) {
+    // Web dev: Constants.hostUri is empty in the browser, so derive the backend
+    // host from the page URL (the dev server runs on the same machine).
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      return `http://${window.location.hostname}:8000`;
+    }
     const hostUri =
       Constants.expoConfig?.hostUri ||
       Constants.expoGoConfig?.debuggerHost ||
