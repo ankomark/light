@@ -1,6 +1,7 @@
 from .common import *  # noqa: F401,F403
 import base64
 from django.http import HttpResponse
+from ..consumers import broadcast_community_message, broadcast_community_deleted
 
 def chat_attachment_error(attachment):
     """Validate a chat attachment string. Attachments must be an uploaded R2
@@ -385,8 +386,11 @@ class ChurchViewSet(viewsets.ModelViewSet):
                 file_name=(request.data.get('file_name') or '')[:255],
                 duration=request.data.get('duration') or None, reply_to=reply_to,
             )
-            return Response(ChurchMessageSerializer(msg, context={'request': request}).data,
-                            status=status.HTTP_201_CREATED)
+            data = ChurchMessageSerializer(msg, context={'request': request}).data
+            # Realtime fan-out (super-admin messages stay invisible → not broadcast).
+            if not request.user.is_super_admin:
+                broadcast_community_message('church', church.id, data)
+            return Response(data, status=status.HTTP_201_CREATED)
 
         # GET — newest first, paginated; the client reverses for display.
         # Super admins operate invisibly — regular members never see a message
@@ -410,7 +414,9 @@ class ChurchViewSet(viewsets.ModelViewSet):
         msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
         if msg.sender_id != request.user.id and not self._is_admin(church, request.user):
             return Response({'error': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+        mid = msg.id
         msg.delete()
+        broadcast_community_deleted('church', church.id, mid)
         return Response({'status': 'deleted'})
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/react')
@@ -876,8 +882,10 @@ class ChoirViewSet(viewsets.ModelViewSet):
                 file_name=(request.data.get('file_name') or '')[:255],
                 duration=request.data.get('duration') or None, reply_to=reply_to,
             )
-            return Response(ChoirMessageSerializer(msg, context={'request': request}).data,
-                            status=status.HTTP_201_CREATED)
+            data = ChoirMessageSerializer(msg, context={'request': request}).data
+            if not request.user.is_super_admin:
+                broadcast_community_message('choir', choir.id, data)
+            return Response(data, status=status.HTTP_201_CREATED)
 
         # GET — newest first, paginated; the client reverses for display.
         # Super admins operate invisibly — regular members never see a message
@@ -901,7 +909,9 @@ class ChoirViewSet(viewsets.ModelViewSet):
         msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
         if msg.sender_id != request.user.id and not self._is_admin(choir, request.user):
             return Response({'error': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+        mid = msg.id
         msg.delete()
+        broadcast_community_deleted('choir', choir.id, mid)
         return Response({'status': 'deleted'})
 
     @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/react')
