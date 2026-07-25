@@ -8,15 +8,14 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  ScrollView,
   Modal,
   RefreshControl,
-  KeyboardAvoidingView,
   Platform
 } from 'react-native';
 import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchChurches, fetchChurchesByUrl, createChurch, updateChurch, deleteChurch } from '../services/api';
 import { useAuth } from '../context/useAuth';
@@ -283,7 +282,7 @@ const Churches = ({ navigation }) => {
     if (actionsOpenId !== church.id) {
       return (
         <TouchableOpacity onPress={() => setActionsOpenId(church.id)} hitSlop={10} style={styles.moreBtn}>
-          <MaterialIcons name="more-horiz" size={20} color="#0b3d52" />
+          <MaterialIcons name="more-horiz" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       );
     }
@@ -291,13 +290,13 @@ const Churches = ({ navigation }) => {
     return (
       <View style={styles.churchActions}>
         <TouchableOpacity onPress={() => { setActionsOpenId(null); handleEditChurch(church); }}>
-          <MaterialIcons name="edit" size={20} color="#006064" />
+          <MaterialIcons name="edit" size={20} color={colors.accent} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => { setActionsOpenId(null); handleDeleteChurch(church.id); }}>
-          <MaterialIcons name="delete" size={20} color="#e53935" />
+          <MaterialIcons name="delete" size={20} color={colors.error} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setActionsOpenId(null)} hitSlop={10}>
-          <MaterialIcons name="close" size={18} color="#90a4ae" />
+          <MaterialIcons name="close" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
     );
@@ -339,25 +338,25 @@ const Churches = ({ navigation }) => {
           />
         ) : (
           <View style={[styles.churchImage, styles.churchImagePlaceholder]}>
-            <MaterialIcons name="church" size={30} color="#9fb3c8" />
+            <MaterialIcons name="church" size={30} color={colors.textMuted} />
           </View>
         )}
 
         <View style={styles.nameRow}>
-          <MaterialIcons name="church" size={16} color="#006064" />
+          <MaterialIcons name="church" size={16} color={colors.accent} />
           <Text style={styles.churchName} numberOfLines={1}>{item.name}</Text>
         </View>
 
         <View style={styles.churchDetails}>
           {locationText ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="location-on" size={14} color="#00838f" />
+              <MaterialIcons name="location-on" size={14} color={colors.accent} />
               <Text style={styles.detailText}>{locationText}</Text>
             </View>
           ) : null}
 
           <View style={styles.detailRow}>
-            <MaterialIcons name="people" size={14} color="#00838f" />
+            <MaterialIcons name="people" size={14} color={colors.accent} />
             <Text style={styles.detailText}>
               {Number(item.members || 0).toLocaleString()} members
             </Text>
@@ -365,14 +364,14 @@ const Churches = ({ navigation }) => {
 
           {item.pastor ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="account-circle" size={14} color="#00838f" />
+              <MaterialIcons name="account-circle" size={14} color={colors.accent} />
               <Text style={styles.detailText}>Pastor {item.pastor}</Text>
             </View>
           ) : null}
 
           {item.contact ? (
             <View style={styles.detailRow}>
-              <MaterialIcons name="phone" size={14} color="#00838f" />
+              <MaterialIcons name="phone" size={14} color={colors.accent} />
               <Text style={styles.detailText}>{item.contact}</Text>
             </View>
           ) : null}
@@ -381,13 +380,13 @@ const Churches = ({ navigation }) => {
         <View style={styles.metaContainer}>
           {item.conference ? (
             <View style={styles.chip}>
-              <MaterialIcons name="account-balance" size={13} color="#006064" />
+              <MaterialIcons name="account-balance" size={13} color={colors.accent} />
               <Text style={styles.chipText}>{item.conference}</Text>
             </View>
           ) : null}
           {item.country ? (
             <View style={styles.chip}>
-              <MaterialIcons name="public" size={13} color="#006064" />
+              <MaterialIcons name="public" size={13} color={colors.accent} />
               <Text style={styles.chipText}>{item.country}</Text>
             </View>
           ) : null}
@@ -429,16 +428,19 @@ const Churches = ({ navigation }) => {
             <TouchableOpacity onPress={closeForm} style={styles.topIconBtn} hitSlop={10}>
               <MaterialIcons name="close" size={24} color={colors.textPrimary} />
             </TouchableOpacity>
-            <Text style={styles.topTitle}>{editingChurch ? 'Edit Church' : 'New Church'}</Text>
+            <Text style={styles.topTitle}>{editingChurch ? t('churches.editTitle') : t('churches.newTitle')}</Text>
             <View style={styles.topIconBtn} />
           </View>
 
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <ScrollView
+          <KeyboardAwareScrollView
+              style={{ flex: 1 }}
               contentContainerStyle={styles.formContent}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
               showsVerticalScrollIndicator={false}
+              enableOnAndroid
+              enableResetScrollToCoords={false}
+              extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
             >
               <TouchableOpacity style={styles.coverPicker} onPress={pickImage} activeOpacity={0.85}>
                 {image ? (
@@ -446,31 +448,30 @@ const Churches = ({ navigation }) => {
                 ) : (
                   <View style={styles.coverPlaceholder}>
                     <MaterialIcons name="add-a-photo" size={26} color={colors.accent} />
-                    <Text style={styles.coverHint}>{editingChurch ? t('churches.changeImage') : 'Add church image'}</Text>
+                    <Text style={styles.coverHint}>{editingChurch ? t('churches.changeImage') : t('churches.addImage')}</Text>
                   </View>
                 )}
               </TouchableOpacity>
 
-              <Field label="Church name *" value={newChurch.name} onChangeText={(t) => setNewChurch({ ...newChurch, name: t })} placeholder={t('churches.namePlaceholder')} />
-              <Field label="Country *" value={newChurch.country} onChangeText={(t) => setNewChurch({ ...newChurch, country: t })} placeholder={t('churches.countryPlaceholder')} />
-              <Field label="County / State" value={newChurch.county} onChangeText={(t) => setNewChurch({ ...newChurch, county: t })} placeholder={t('churches.optional')} />
-              <Field label="Conference *" value={newChurch.conference} onChangeText={(t) => setNewChurch({ ...newChurch, conference: t })} placeholder={t('churches.conferencePlaceholder')} />
-              <Field label="District" value={newChurch.district} onChangeText={(t) => setNewChurch({ ...newChurch, district: t })} placeholder={t('churches.optional')} />
-              <Field label="Physical location" value={newChurch.location} onChangeText={(t) => setNewChurch({ ...newChurch, location: t })} placeholder={t('churches.townPlaceholder')} />
-              <Field label="Number of members" value={newChurch.members} onChangeText={(t) => setNewChurch({ ...newChurch, members: t })} placeholder={t('churches.membersPlaceholder')} keyboardType="numeric" />
-              <Field label="Pastor's name" value={newChurch.pastor} onChangeText={(t) => setNewChurch({ ...newChurch, pastor: t })} placeholder={t('churches.optional')} />
-              <Field label="Contact phone" value={newChurch.contact} onChangeText={(t) => setNewChurch({ ...newChurch, contact: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
+              <Field label={t('churches.nameLabel')} value={newChurch.name} onChangeText={(v) => setNewChurch({ ...newChurch, name: v })} placeholder={t('churches.namePlaceholder')} />
+              <Field label={t('churches.countryLabel')} value={newChurch.country} onChangeText={(v) => setNewChurch({ ...newChurch, country: v })} placeholder={t('churches.countryPlaceholder')} />
+              <Field label={t('churches.countyLabel')} value={newChurch.county} onChangeText={(v) => setNewChurch({ ...newChurch, county: v })} placeholder={t('churches.optional')} />
+              <Field label={t('churches.conferenceLabel')} value={newChurch.conference} onChangeText={(v) => setNewChurch({ ...newChurch, conference: v })} placeholder={t('churches.conferencePlaceholder')} />
+              <Field label={t('churches.districtLabel')} value={newChurch.district} onChangeText={(v) => setNewChurch({ ...newChurch, district: v })} placeholder={t('churches.optional')} />
+              <Field label={t('churches.locationLabel')} value={newChurch.location} onChangeText={(v) => setNewChurch({ ...newChurch, location: v })} placeholder={t('churches.townPlaceholder')} />
+              <Field label={t('churches.membersLabel')} value={newChurch.members} onChangeText={(v) => setNewChurch({ ...newChurch, members: v })} placeholder={t('churches.membersPlaceholder')} keyboardType="numeric" />
+              <Field label={t('churches.pastorLabel')} value={newChurch.pastor} onChangeText={(v) => setNewChurch({ ...newChurch, pastor: v })} placeholder={t('churches.optional')} />
+              <Field label={t('churches.contactLabel')} value={newChurch.contact} onChangeText={(v) => setNewChurch({ ...newChurch, contact: v })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
 
               <View style={{ height: spacing.xl }} />
-            </ScrollView>
-          </KeyboardAvoidingView>
+            </KeyboardAwareScrollView>
 
           <View style={styles.saveBar}>
             <TouchableOpacity style={[styles.saveBtn, styles.cancelBtn]} onPress={closeForm}>
               <Text style={styles.cancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={handleAddChurch}>
-              <Text style={styles.submitText}>{editingChurch ? 'Save Changes' : 'Add Church'}</Text>
+              <Text style={styles.submitText}>{editingChurch ? t('churches.saveChanges') : t('churches.addChurch')}</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -481,7 +482,7 @@ const Churches = ({ navigation }) => {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#006064" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -500,16 +501,17 @@ const Churches = ({ navigation }) => {
       {/* Search and Filter Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
-          <MaterialIcons name="search" size={18} color="#555" style={styles.searchIcon} />
+          <MaterialIcons name="search" size={18} color={colors.textMuted} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder={t('churches.searchPlaceholder')}
+            placeholderTextColor={colors.placeholder}
             value={searchTerm}
             onChangeText={setSearchTerm}
           />
           {searchTerm ? (
             <TouchableOpacity onPress={() => setSearchTerm('')}>
-              <MaterialIcons name="close" size={20} color="#555" />
+              <MaterialIcons name="close" size={20} color={colors.textMuted} />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -517,7 +519,7 @@ const Churches = ({ navigation }) => {
           style={styles.filterButton}
           onPress={() => setShowFilters(!showFilters)}
         >
-          <MaterialIcons name="filter-list" size={20} color="#006064" />
+          <MaterialIcons name="filter-list" size={20} color={colors.accent} />
         </TouchableOpacity>
       </View>
       
@@ -620,7 +622,7 @@ const Churches = ({ navigation }) => {
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <MaterialIcons name="church" size={56} color="#3d567a" />
+            <MaterialIcons name="church" size={56} color={colors.textMuted} />
             <Text style={styles.emptyText}>{t('churches.none')}</Text>
             <Text style={styles.emptySubtext}>
               {searchTerm || filterValues.country || filterValues.conference
@@ -660,16 +662,16 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
     marginTop: 2,
     textAlign: 'center',
     letterSpacing: 0.3,
-    color: '#FFA726',
+    color: colors.accent,
   },
   subtitle: {
     fontSize: 11,
     textAlign: 'center',
-    color: '#cdd9e5',
+    color: colors.textSecondary,
     marginTop: 1,
     marginBottom: 8,
   },
@@ -682,10 +684,12 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(16,46,80,0.7)',
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   searchIcon: {
     marginRight: 6,
@@ -694,35 +698,40 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     paddingVertical: 2,
+    color: colors.textPrimary,
   },
   filterButton: {
     marginLeft: 8,
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: 'white',
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(16,46,80,0.7)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   filtersPanel: {
-    backgroundColor: 'white',
-    borderRadius: 8,
+    backgroundColor: 'rgba(16,46,80,0.85)',
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
     padding: 16,
     marginBottom: 16,
   },
   filterTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#006064',
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
     marginBottom: 12,
   },
   filterGroup: {
     marginBottom: 16,
   },
   filterLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#555',
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   filterOptions: {
@@ -732,22 +741,24 @@ const styles = StyleSheet.create({
   filterOption: {
     paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#b2ebf2',
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
     marginRight: 8,
     marginBottom: 8,
-    backgroundColor: 'white',
+    backgroundColor: 'rgba(13,35,64,0.7)',
   },
   filterOptionSelected: {
-    backgroundColor: '#006064',
-    borderColor: '#006064',
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   filterOptionText: {
-    color: '#555',
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
   filterOptionTextSelected: {
-    color: 'white',
+    color: '#0A1628',
+    fontWeight: '700',
   },
   clearFiltersButton: {
     alignSelf: 'flex-end',
@@ -779,15 +790,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   churchCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    padding: 10,
+    backgroundColor: 'rgba(16,46,80,0.55)',
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+    padding: 12,
     marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 4,
+    ...shadows.md,
   },
   churchHeader: {
     flexDirection: 'row',
@@ -804,18 +813,18 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     marginRight: 8,
-    backgroundColor: '#eee',
+    backgroundColor: colors.surface,
     borderWidth: 1.5,
-    borderColor: '#e0f2f4',
+    borderColor: 'rgba(244,162,97,0.35)',
   },
   username: {
     fontWeight: '700',
     fontSize: 13,
-    color: '#0b3d52',
+    color: colors.textPrimary,
   },
   byline: {
     fontSize: 10.5,
-    color: '#90a4ae',
+    color: colors.textMuted,
     marginTop: 0,
   },
   nameRow: {
@@ -828,7 +837,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '700',
-    color: '#006064',
+    color: colors.textPrimary,
   },
   churchActions: {
     flexDirection: 'row',
@@ -843,7 +852,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   churchImagePlaceholder: {
-    backgroundColor: '#eef3f6',
+    backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -855,7 +864,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   detailText: {
-    color: '#455a64',
+    color: colors.textSecondary,
     marginLeft: 6,
     fontSize: 12.5,
     flex: 1,
@@ -866,8 +875,8 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 8,
     paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#eef2f4',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.10)',
   },
   communityBtn: {
     flexDirection: 'row',
@@ -884,35 +893,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#e0f7fa',
+    backgroundColor: 'rgba(244,162,97,0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(244,162,97,0.4)',
     paddingVertical: 5,
     paddingHorizontal: 10,
-    borderRadius: 20,
+    borderRadius: radius.full,
   },
   chipText: {
-    color: '#006064',
+    color: colors.accent,
     fontSize: 12.5,
     fontWeight: '600',
   },
   addButton: {
-    backgroundColor: '#006064',
+    backgroundColor: colors.accent,
     paddingVertical: 9,
-    paddingHorizontal: 16,
-    borderRadius: 22,
+    paddingHorizontal: 18,
+    borderRadius: radius.full,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'center',
     marginTop: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
+    ...shadows.sm,
   },
   buttonText: {
-    color: 'white',
-    fontWeight: '600',
+    color: '#0A1628',
+    fontWeight: '800',
     fontSize: 13,
     marginLeft: 6,
   },
