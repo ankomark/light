@@ -1,5 +1,5 @@
 import axios from 'axios';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from './secureStorage'; // web-safe shim (expo-secure-store stubs web)
 import Constants from 'expo-constants';
 import { extractYoutubeId } from '../utils/youtubeUtils';
 

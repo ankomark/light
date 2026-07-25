@@ -7,7 +7,7 @@
 // so all existing `useAuth()` callers share one source of truth unchanged.
 
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../services/secureStorage'; // web-safe shim (expo-secure-store stubs web)
 import axios from 'axios';
 import { API_URL, storeTokens, clearTokens } from '../services/api';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';

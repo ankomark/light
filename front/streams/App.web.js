@@ -59,9 +59,12 @@ function AdminLogin() {
         // Server answered → a real auth/validation error.
         setError(e.response.data?.detail || 'Login failed. Check your username and password.');
       } else {
-        // No response = couldn't reach the API (wrong host or CORS not allowing
-        // this web origin). Surfaces the base URL to make it obvious.
-        setError(`Can't reach the server at ${API_BASE}. Is the backend running and CORS allowing this origin?`);
+        // No HTTP response: either the API was unreachable (wrong host / CORS) or
+        // a client-side step (e.g. token storage) failed. Show the real message.
+        const msg = e?.message && e.message !== 'Network Error'
+          ? e.message
+          : `Can't reach the server at ${API_BASE}. Is the backend running and CORS allowing this origin?`;
+        setError(msg);
       }
     } finally {
       setBusy(false);
