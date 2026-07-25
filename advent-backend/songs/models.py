@@ -653,6 +653,10 @@ class Church(models.Model):
     contact = models.CharField(max_length=100, blank=True, null=True)
     # WhatsApp-style "Only admins can send messages" lock for the church community chat.
     only_admins_can_post = models.BooleanField(default=False)
+    # One admin-pinned message shown as a banner atop the chat (SET_NULL so
+    # deleting the message just clears the pin).
+    pinned_message = models.ForeignKey('ChurchMessage', null=True, blank=True,
+                                       on_delete=models.SET_NULL, related_name='+')
     # image = models.ImageField(upload_to='churches/', blank=True, null=True)
     # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
     image = models.CharField(max_length=500, blank=True, null=True)
@@ -1029,6 +1033,10 @@ class Choir(models.Model):
     is_active = models.BooleanField(default=True)
     # WhatsApp-style "Only admins can send messages" lock for the choir community chat.
     only_admins_can_post = models.BooleanField(default=False)
+    # One admin-pinned message shown as a banner atop the chat (SET_NULL so
+    # deleting the message just clears the pin).
+    pinned_message = models.ForeignKey('ChoirMessage', null=True, blank=True,
+                                       on_delete=models.SET_NULL, related_name='+')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choirs')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1100,6 +1108,7 @@ class ChoirMessage(models.Model):
     duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
     reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
     created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)  # set when the author edits the body
 
     class Meta:
         ordering = ['created_at']
@@ -1186,6 +1195,7 @@ class ChurchMessage(models.Model):
     duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
     reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
     created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)  # set when the author edits the body
 
     class Meta:
         ordering = ['created_at']

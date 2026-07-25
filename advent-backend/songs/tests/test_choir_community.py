@@ -208,3 +208,90 @@ class ChoirCommunityTests(APITestCase):
         row = next(c for c in (lst.json().get('results') or lst.json()) if c['id'] == cid)
         self.assertEqual(row['cover_image'], '')
         self.assertEqual(row['profile_image'], '')
+
+
+class ChoirChatPhase3Tests(APITestCase):
+    """Edit, pin, receipts, and in-chat search/context for the choir chat."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user('adm', 'a@x.com', 'x')
+        self.member = User.objects.create_user('mem', 'm@x.com', 'x')
+        self.outsider = User.objects.create_user('out', 'o@x.com', 'x')
+        self.choir = Choir.objects.create(name='Zion', location='Nairobi', created_by=self.admin)
+        ChoirMembership.objects.create(choir=self.choir, user=self.admin, role='admin')
+        ChoirMembership.objects.create(choir=self.choir, user=self.member, role='friend')
+
+    def _post(self, user, content):
+        self.client.force_authenticate(user)
+        r = self.client.post(f'/api/choirs/{self.choir.id}/messages/', {'content': content}, format='json')
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()['id']
+
+    def test_author_edits_own_message_only(self):
+        mid = self._post(self.member, 'helo')
+        # Author edits.
+        self.client.force_authenticate(self.member)
+        r = self.client.patch(f'/api/choirs/{self.choir.id}/messages/{mid}/edit/',
+                              {'content': 'hello'}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['content'], 'hello')
+        self.assertIsNotNone(r.json()['edited_at'])
+        # Someone else cannot.
+        self.client.force_authenticate(self.admin)
+        r2 = self.client.patch(f'/api/choirs/{self.choir.id}/messages/{mid}/edit/',
+                               {'content': 'nope'}, format='json')
+        self.assertEqual(r2.status_code, 403)
+
+    def test_admin_pins_and_unpins(self):
+        mid = self._post(self.member, 'pin me')
+        # Member cannot pin.
+        self.client.force_authenticate(self.member)
+        self.assertEqual(
+            self.client.post(f'/api/choirs/{self.choir.id}/messages/{mid}/pin/').status_code, 403)
+        # Admin pins; it surfaces on the community snapshot.
+        self.client.force_authenticate(self.admin)
+        r = self.client.post(f'/api/choirs/{self.choir.id}/messages/{mid}/pin/')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['id'], mid)
+        snap = self.client.get(f'/api/choirs/{self.choir.id}/community/').json()
+        self.assertEqual(snap['pinned_message']['id'], mid)
+        # Unpin clears it.
+        self.client.post(f'/api/choirs/{self.choir.id}/unpin/')
+        snap2 = self.client.get(f'/api/choirs/{self.choir.id}/community/').json()
+        self.assertIsNone(snap2['pinned_message'])
+
+    def test_receipts_count_readers_after_mark_read(self):
+        mid = self._post(self.admin, 'roll call')
+        # Before anyone reads, no receipts.
+        self.client.force_authenticate(self.admin)
+        r0 = self.client.get(f'/api/choirs/{self.choir.id}/messages/{mid}/receipts/')
+        self.assertEqual(r0.json()['count'], 0)
+        # Member marks the chat read → shows up as a reader (author excluded).
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.post(f'/api/choirs/{self.choir.id}/mark-read/').status_code, 200)
+        self.client.force_authenticate(self.admin)
+        r1 = self.client.get(f'/api/choirs/{self.choir.id}/messages/{mid}/receipts/')
+        self.assertEqual(r1.json()['count'], 1)
+        self.assertEqual(r1.json()['readers'][0]['user']['username'], 'mem')
+
+    def test_search_and_context(self):
+        self._post(self.member, 'first apple message')
+        target = self._post(self.member, 'the banana in the middle')
+        self._post(self.member, 'last cherry note')
+        self.client.force_authenticate(self.member)
+        # Search finds the banana message.
+        s = self.client.get(f'/api/choirs/{self.choir.id}/search/', {'q': 'banana'})
+        self.assertEqual(s.status_code, 200)
+        ids = [m['id'] for m in s.json()['results']]
+        self.assertIn(target, ids)
+        # Context returns a window around it.
+        c = self.client.get(f'/api/choirs/{self.choir.id}/context/', {'message_id': target})
+        self.assertEqual(c.status_code, 200)
+        win_ids = [m['id'] for m in c.json()['results']]
+        self.assertIn(target, win_ids)
+        self.assertFalse(c.json()['has_earlier'])
+        self.assertFalse(c.json()['has_newer'])
+        # Outsider is locked out of search.
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(
+            self.client.get(f'/api/choirs/{self.choir.id}/search/', {'q': 'banana'}).status_code, 403)

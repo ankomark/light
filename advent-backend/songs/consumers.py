@@ -173,6 +173,27 @@ def broadcast_community_deleted(kind, community_id, message_id):
     )
 
 
+def broadcast_community_edited(kind, community_id, message_data):
+    layer = get_channel_layer()
+    if not layer:
+        return
+    async_to_sync(layer.group_send)(
+        community_channel(kind, community_id),
+        {'type': 'chat_edited', 'message': message_data},
+    )
+
+
+def broadcast_community_pinned(kind, community_id, pinned):
+    """`pinned` is the pin preview dict, or None to clear it."""
+    layer = get_channel_layer()
+    if not layer:
+        return
+    async_to_sync(layer.group_send)(
+        community_channel(kind, community_id),
+        {'type': 'chat_pinned', 'pinned': pinned},
+    )
+
+
 class CommunityChatConsumer(AsyncJsonWebsocketConsumer):
     """Realtime fan-out for a choir or church community chat. Same shape as
     GroupChatConsumer, keyed by (kind, id). Reads/writes stay on the REST API."""
@@ -237,6 +258,12 @@ class CommunityChatConsumer(AsyncJsonWebsocketConsumer):
 
     async def chat_deleted(self, event):
         await self.send_json({'type': 'deleted', 'id': event['id']})
+
+    async def chat_edited(self, event):
+        await self.send_json({'type': 'edited', 'message': event['message']})
+
+    async def chat_pinned(self, event):
+        await self.send_json({'type': 'pinned', 'pinned': event['pinned']})
 
     async def typing(self, event):
         if event.get('sender_channel') == self.channel_name:

@@ -1,6 +1,21 @@
 from .common import *  # noqa: F401,F403
 
 
+def community_pinned_preview(msg):
+    """Compact pinned-message shape for a choir/church community, shared by the
+    serializer and the pin actions. Mirrors groups.pinned_preview but the sender
+    field is `sender` (not `user`)."""
+    if not msg:
+        return None
+    return {
+        'id': msg.id,
+        'content': msg.content,
+        'message_type': msg.message_type,
+        'file_name': msg.file_name,
+        'sender_username': msg.sender.username if msg.sender_id else None,
+    }
+
+
 class MediaStationSerializer(serializers.ModelSerializer):
     is_owner = serializers.SerializerMethodField()
     created_by_username = serializers.CharField(
@@ -70,11 +85,16 @@ class ChurchSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
     created_by_picture = serializers.SerializerMethodField()
+    # Expose the pin as a compact preview, not a bare PK.
+    pinned_message = serializers.SerializerMethodField()
 
     class Meta:
         model = Church
         fields = '__all__'
         read_only_fields = ('created_by', 'created_at', 'updated_at', 'id')
+
+    def get_pinned_message(self, obj):
+        return community_pinned_preview(obj.pinned_message)
 
     def get_created_by_picture(self, obj):
         # Null-safe: a creator may not have a profile or a picture set.
@@ -134,11 +154,16 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
 class ChoirSerializer(serializers.ModelSerializer):
     created_by = SimpleUserSerializer(read_only=True)
     is_owner = serializers.SerializerMethodField()
+    # Expose the pin as a compact preview, not a bare PK.
+    pinned_message = serializers.SerializerMethodField()
 
     class Meta:
         model = Choir
         fields = '__all__'
         read_only_fields = ('created_by', 'members_count')
+
+    def get_pinned_message(self, obj):
+        return community_pinned_preview(obj.pinned_message)
 
     def get_is_owner(self, obj):
         request = self.context.get('request')
@@ -197,7 +222,7 @@ class ChoirMessageSerializer(serializers.ModelSerializer):
         model = ChoirMessage
         fields = [
             'id', 'sender', 'content', 'message_type', 'attachment', 'attachment_blurhash',
-            'file_name', 'duration', 'reply_to', 'reactions', 'created_at',
+            'file_name', 'duration', 'reply_to', 'reactions', 'created_at', 'edited_at',
         ]
         read_only_fields = ['id', 'sender', 'created_at']
 
@@ -260,7 +285,7 @@ class ChurchMessageSerializer(serializers.ModelSerializer):
         model = ChurchMessage
         fields = [
             'id', 'sender', 'content', 'message_type', 'attachment', 'attachment_blurhash',
-            'file_name', 'duration', 'reply_to', 'reactions', 'created_at',
+            'file_name', 'duration', 'reply_to', 'reactions', 'created_at', 'edited_at',
         ]
         read_only_fields = ['id', 'sender', 'created_at']
 

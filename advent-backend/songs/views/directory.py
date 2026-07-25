@@ -1,7 +1,12 @@
 from .common import *  # noqa: F401,F403
 import base64
 from django.http import HttpResponse
-from ..consumers import broadcast_community_message, broadcast_community_deleted
+from django.utils import timezone
+from ..consumers import (
+    broadcast_community_message, broadcast_community_deleted,
+    broadcast_community_edited, broadcast_community_pinned,
+)
+from ..serializers.directory import community_pinned_preview
 
 def chat_attachment_error(attachment):
     """Validate a chat attachment string. Attachments must be an uploaded R2
@@ -195,6 +200,7 @@ class ChurchViewSet(viewsets.ModelViewSet):
             'created_by_id': church.created_by_id,
             # Live community size (separate from the congregation `members` field).
             'members_count': church.memberships.count(),
+            'pinned_message': community_pinned_preview(church.pinned_message),
         })
 
     @action(detail=True, methods=['get'])
@@ -440,7 +446,130 @@ class ChurchViewSet(viewsets.ModelViewSet):
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         return Response(ChurchMessageSerializer(msg, context={'request': request, 'hide_super_ids': hidden}).data)
 
+    def _message_qs(self, church, request):
+        """The same membership-gated, super-admin-hidden message queryset the chat
+        list uses — reused by search / context / media."""
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        return (church.messages
+                .filter(is_removed=False)
+                .exclude(sender_id__in=hidden)
+                .select_related('sender__profile', 'reply_to__sender')
+                .prefetch_related('reactions'))
 
+    @action(detail=True, methods=['patch'], url_path='messages/(?P<message_id>[^/.]+)/edit')
+    def edit_message(self, request, pk=None, message_id=None):
+        """Edit a text message you authored; the edit is stamped and fanned out."""
+        church = self.get_object()
+        msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
+        if msg.sender_id != request.user.id:
+            return Response({'error': 'You can only edit your own messages.'}, status=status.HTTP_403_FORBIDDEN)
+        if msg.message_type != 'text':
+            return Response({'error': 'Only text messages can be edited.'}, status=status.HTTP_400_BAD_REQUEST)
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'error': 'Message cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        msg.content = content[:5000]
+        msg.edited_at = timezone.now()
+        msg.save(update_fields=['content', 'edited_at'])
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        data = ChurchMessageSerializer(msg, context={'request': request, 'hide_super_ids': hidden}).data
+        if not request.user.is_super_admin:
+            broadcast_community_edited('church', church.id, data)
+        return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='mark-read')
+    def mark_read(self, request, pk=None):
+        """Stamp the caller's last_read_at to now (drives unread counts + receipts)."""
+        church = self.get_object()
+        m = self._membership(church, request.user)
+        if m:
+            m.last_read_at = timezone.now()
+            m.save(update_fields=['last_read_at'])
+        return Response({'status': 'ok'})
+
+    @action(detail=True, methods=['get'], url_path='messages/(?P<message_id>[^/.]+)/receipts')
+    def receipts(self, request, pk=None, message_id=None):
+        """Who has read this message — a member counts once their last_read_at
+        reaches the message's timestamp. Author + hidden super-admins excluded."""
+        church = self.get_object()
+        if not self._membership(church, request.user) and not self._is_admin(church, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        readers = (church.memberships
+                   .filter(last_read_at__gte=msg.created_at)
+                   .exclude(user_id=msg.sender_id)
+                   .exclude(user_id__in=hidden)
+                   .select_related('user__profile')
+                   .order_by('-last_read_at'))
+        data = ChurchMembershipSerializer(readers, many=True).data
+        return Response({'count': len(data), 'readers': data})
+
+    @action(detail=True, methods=['get'])
+    def search(self, request, pk=None):
+        """Search a church's text messages (members-only, newest first, min 2 chars)."""
+        church = self.get_object()
+        if not self._membership(church, request.user) and not self._is_admin(church, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        q = (request.query_params.get('q') or '').strip()
+        if len(q) < 2:
+            return Response({'results': []})
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        qs = (self._message_qs(church, request)
+              .filter(message_type='text', content__icontains=q)
+              .order_by('-created_at')[:50])
+        data = ChurchMessageSerializer(qs, many=True,
+                                       context={'request': request, 'hide_super_ids': hidden}).data
+        return Response({'results': data})
+
+    @action(detail=True, methods=['get'])
+    def context(self, request, pk=None):
+        """A window of messages around a given one (for jumping to a search hit).
+        Members-only. Returns the window plus flags for older/newer beyond it."""
+        church = self.get_object()
+        if not self._membership(church, request.user) and not self._is_admin(church, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        message_id = request.query_params.get('message_id')
+        radius = 20
+        base = self._message_qs(church, request)
+        target = base.filter(pk=message_id).first() if message_id else None
+        if not target:
+            return Response({'results': [], 'has_earlier': False, 'has_newer': False})
+        older = list(base.filter(created_at__lte=target.created_at).order_by('-created_at')[:radius + 1])
+        newer = list(base.filter(created_at__gt=target.created_at).order_by('created_at')[:radius])
+        window = older[::-1] + newer
+        has_earlier = base.filter(created_at__lt=target.created_at).count() > radius
+        has_newer = base.filter(created_at__gt=target.created_at).count() > radius
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        return Response({
+            'results': ChurchMessageSerializer(window, many=True,
+                                               context={'request': request, 'hide_super_ids': hidden}).data,
+            'has_earlier': has_earlier,
+            'has_newer': has_newer,
+        })
+
+    @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/pin')
+    def pin_message(self, request, pk=None, message_id=None):
+        """Admin pins one message as a banner atop the chat."""
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Only admins can pin messages.'}, status=status.HTTP_403_FORBIDDEN)
+        msg = get_object_or_404(ChurchMessage, pk=message_id, church=church)
+        church.pinned_message = msg
+        church.save(update_fields=['pinned_message'])
+        preview = community_pinned_preview(msg)
+        broadcast_community_pinned('church', church.id, preview)
+        return Response(preview)
+
+    @action(detail=True, methods=['post'], url_path='unpin')
+    def unpin_message(self, request, pk=None):
+        church = self.get_object()
+        if not self._is_admin(church, request.user):
+            return Response({'error': 'Only admins can unpin messages.'}, status=status.HTTP_403_FORBIDDEN)
+        church.pinned_message = None
+        church.save(update_fields=['pinned_message'])
+        broadcast_community_pinned('church', church.id, None)
+        return Response({'status': 'unpinned'})
 
 
 
@@ -757,6 +886,7 @@ class ChoirViewSet(viewsets.ModelViewSet):
             'only_admins_can_post': choir.only_admins_can_post,
             'created_by_id': choir.created_by_id,
             'members_count': choir.memberships.count(),
+            'pinned_message': community_pinned_preview(choir.pinned_message),
         })
 
     @action(detail=True, methods=['get'])
@@ -934,6 +1064,131 @@ class ChoirViewSet(viewsets.ModelViewSet):
             ChoirMessageReaction.objects.create(message=msg, user=request.user, emoji=emoji)
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         return Response(ChoirMessageSerializer(msg, context={'request': request, 'hide_super_ids': hidden}).data)
+
+    def _message_qs(self, choir, request):
+        """The same membership-gated, super-admin-hidden message queryset the chat
+        list uses — reused by search / context."""
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        return (choir.messages
+                .filter(is_removed=False)
+                .exclude(sender_id__in=hidden)
+                .select_related('sender__profile', 'reply_to__sender')
+                .prefetch_related('reactions'))
+
+    @action(detail=True, methods=['patch'], url_path='messages/(?P<message_id>[^/.]+)/edit')
+    def edit_message(self, request, pk=None, message_id=None):
+        """Edit a text message you authored; the edit is stamped and fanned out."""
+        choir = self.get_object()
+        msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
+        if msg.sender_id != request.user.id:
+            return Response({'error': 'You can only edit your own messages.'}, status=status.HTTP_403_FORBIDDEN)
+        if msg.message_type != 'text':
+            return Response({'error': 'Only text messages can be edited.'}, status=status.HTTP_400_BAD_REQUEST)
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'error': 'Message cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        msg.content = content[:5000]
+        msg.edited_at = timezone.now()
+        msg.save(update_fields=['content', 'edited_at'])
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        data = ChoirMessageSerializer(msg, context={'request': request, 'hide_super_ids': hidden}).data
+        if not request.user.is_super_admin:
+            broadcast_community_edited('choir', choir.id, data)
+        return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='mark-read')
+    def mark_read(self, request, pk=None):
+        """Stamp the caller's last_read_at to now (drives unread counts + receipts)."""
+        choir = self.get_object()
+        m = self._membership(choir, request.user)
+        if m:
+            m.last_read_at = timezone.now()
+            m.save(update_fields=['last_read_at'])
+        return Response({'status': 'ok'})
+
+    @action(detail=True, methods=['get'], url_path='messages/(?P<message_id>[^/.]+)/receipts')
+    def receipts(self, request, pk=None, message_id=None):
+        """Who has read this message — a member counts once their last_read_at
+        reaches the message's timestamp. Author + hidden super-admins excluded."""
+        choir = self.get_object()
+        if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        readers = (choir.memberships
+                   .filter(last_read_at__gte=msg.created_at)
+                   .exclude(user_id=msg.sender_id)
+                   .exclude(user_id__in=hidden)
+                   .select_related('user__profile')
+                   .order_by('-last_read_at'))
+        data = ChoirMembershipSerializer(readers, many=True).data
+        return Response({'count': len(data), 'readers': data})
+
+    @action(detail=True, methods=['get'])
+    def search(self, request, pk=None):
+        """Search a choir's text messages (members-only, newest first, min 2 chars)."""
+        choir = self.get_object()
+        if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        q = (request.query_params.get('q') or '').strip()
+        if len(q) < 2:
+            return Response({'results': []})
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        qs = (self._message_qs(choir, request)
+              .filter(message_type='text', content__icontains=q)
+              .order_by('-created_at')[:50])
+        data = ChoirMessageSerializer(qs, many=True,
+                                      context={'request': request, 'hide_super_ids': hidden}).data
+        return Response({'results': data})
+
+    @action(detail=True, methods=['get'])
+    def context(self, request, pk=None):
+        """A window of messages around a given one (for jumping to a search hit).
+        Members-only. Returns the window plus flags for older/newer beyond it."""
+        choir = self.get_object()
+        if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
+            return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
+        message_id = request.query_params.get('message_id')
+        radius = 20
+        base = self._message_qs(choir, request)
+        target = base.filter(pk=message_id).first() if message_id else None
+        if not target:
+            return Response({'results': [], 'has_earlier': False, 'has_newer': False})
+        older = list(base.filter(created_at__lte=target.created_at).order_by('-created_at')[:radius + 1])
+        newer = list(base.filter(created_at__gt=target.created_at).order_by('created_at')[:radius])
+        window = older[::-1] + newer
+        has_earlier = base.filter(created_at__lt=target.created_at).count() > radius
+        has_newer = base.filter(created_at__gt=target.created_at).count() > radius
+        hidden = set() if request.user.is_super_admin else super_admin_user_ids()
+        return Response({
+            'results': ChoirMessageSerializer(window, many=True,
+                                              context={'request': request, 'hide_super_ids': hidden}).data,
+            'has_earlier': has_earlier,
+            'has_newer': has_newer,
+        })
+
+    @action(detail=True, methods=['post'], url_path='messages/(?P<message_id>[^/.]+)/pin')
+    def pin_message(self, request, pk=None, message_id=None):
+        """Admin pins one message as a banner atop the chat."""
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Only admins can pin messages.'}, status=status.HTTP_403_FORBIDDEN)
+        msg = get_object_or_404(ChoirMessage, pk=message_id, choir=choir)
+        choir.pinned_message = msg
+        choir.save(update_fields=['pinned_message'])
+        preview = community_pinned_preview(msg)
+        broadcast_community_pinned('choir', choir.id, preview)
+        return Response(preview)
+
+    @action(detail=True, methods=['post'], url_path='unpin')
+    def unpin_message(self, request, pk=None):
+        choir = self.get_object()
+        if not self._is_admin(choir, request.user):
+            return Response({'error': 'Only admins can unpin messages.'}, status=status.HTTP_403_FORBIDDEN)
+        choir.pinned_message = None
+        choir.save(update_fields=['pinned_message'])
+        broadcast_community_pinned('choir', choir.id, None)
+        return Response({'status': 'unpinned'})
 
 
 class LiveEventViewSet(viewsets.ModelViewSet):
