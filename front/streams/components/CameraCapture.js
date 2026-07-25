@@ -13,6 +13,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Image, Alert, PanResponder,
+  Pressable, useWindowDimensions,
 } from 'react-native';
 // eslint-disable-next-line import/no-unresolved -- installed via `npx expo install expo-camera` (native module; needs a dev/EAS build)
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
@@ -53,6 +54,12 @@ const CameraCapture = ({ navigation, route }) => {
   const [gridOn, setGridOn] = useState(false);
   const [focusPt, setFocusPt] = useState(null);   // { x, y } for the focus square
   const [lastPhoto, setLastPhoto] = useState(null);
+  // Phase 3: self-timer + aspect framing guide.
+  const [timer, setTimer] = useState(0);          // 0 | 3 | 10 seconds
+  const [counting, setCounting] = useState(0);     // live countdown value (0 = idle)
+  const [aspect, setAspect] = useState('full');    // 'full' | '1:1' | '4:5'
+  const countRef = useRef(null);
+  const { width: winW, height: winH } = useWindowDimensions();
   const zoomRef = useRef(0);        // mirrors `zoom` for the (stable) PanResponder closure
   const zoomBaseRef = useRef(0);    // zoom captured at the start of the current pinch
   const pinchStartRef = useRef(null);
@@ -204,10 +211,40 @@ const CameraCapture = ({ navigation, route }) => {
     }
   }, [recording, busy, micPerm, requestMic, onCapture, navigation, t]);
 
+  const runCountdown = useCallback((onDone) => {
+    let n = timer;
+    setCounting(n);
+    tap();
+    countRef.current = setInterval(() => {
+      n -= 1;
+      if (n <= 0) {
+        clearInterval(countRef.current); countRef.current = null;
+        setCounting(0); onDone();
+      } else {
+        setCounting(n);
+        Haptics.selectionAsync().catch(() => {});
+      }
+    }, 1000);
+  }, [timer]);
+
+  const cancelCountdown = useCallback(() => {
+    clearInterval(countRef.current); countRef.current = null;
+    setCounting(0);
+  }, []);
+
+  useEffect(() => () => clearInterval(countRef.current), []);
+
   const onShutter = () => {
-    if (mode === 'picture') takePhoto();
-    else if (recording) stopRecording();
-    else startRecording();
+    if (counting) { cancelCountdown(); return; }
+    if (mode === 'picture') {
+      if (timer > 0) runCountdown(takePhoto); else takePhoto();
+    } else if (recording) {
+      stopRecording();
+    } else if (timer > 0) {
+      runCountdown(startRecording);
+    } else {
+      startRecording();
+    }
   };
 
   const openGallery = async () => {
@@ -227,6 +264,11 @@ const CameraCapture = ({ navigation, route }) => {
       navigation.goBack();
     }
   };
+
+  // Aspect framing guide: darken the area outside the chosen ratio (capture is
+  // still full-frame; this just helps compose for a later crop).
+  const aspectRatio = aspect === '1:1' ? 1 : aspect === '4:5' ? 4 / 5 : null; // w/h
+  const maskH = aspectRatio ? Math.max(0, (winH - Math.min(winH, winW / aspectRatio)) / 2) : 0;
 
   // ── Permission gate ───────────────────────────────────────────────────────
   if (!camPerm) return <View style={styles.root} />;  // still resolving
@@ -294,6 +336,21 @@ const CameraCapture = ({ navigation, route }) => {
         </View>
       )}
 
+      {/* Aspect framing mask */}
+      {maskH > 0 && (
+        <View style={styles.gridLayer} pointerEvents="none">
+          <View style={[styles.aspectMask, { top: 0, height: maskH }]} />
+          <View style={[styles.aspectMask, { bottom: 0, height: maskH }]} />
+        </View>
+      )}
+
+      {/* Self-timer countdown (tap anywhere to cancel) */}
+      {counting > 0 && (
+        <Pressable style={styles.countLayer} onPress={cancelCountdown}>
+          <Text style={styles.countNum}>{counting}</Text>
+        </Pressable>
+      )}
+
       {/* Tap-to-focus square */}
       {focusPt && (
         <Animated.View
@@ -327,6 +384,24 @@ const CameraCapture = ({ navigation, route }) => {
         ) : <View />}
 
         <View style={styles.topRight}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => setAspect((a) => (a === 'full' ? '1:1' : a === '1:1' ? '4:5' : 'full'))}
+            hitSlop={10} disabled={recording || !!counting}
+          >
+            <MaterialCommunityIcons
+              name={aspect === '1:1' ? 'crop-square' : aspect === '4:5' ? 'crop-portrait' : 'crop-free'}
+              size={22} color={aspect === 'full' ? '#fff' : colors.accent}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => setTimer((s) => (s === 0 ? 3 : s === 3 ? 10 : 0))}
+            hitSlop={10} disabled={recording || !!counting}
+          >
+            <MaterialCommunityIcons name={timer ? 'timer-outline' : 'timer-off-outline'} size={22} color={timer ? colors.accent : '#fff'} />
+            {timer > 0 && <Text style={styles.timerBadge}>{timer}</Text>}
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={() => setGridOn((g) => !g)} hitSlop={10} disabled={recording}>
             <MaterialCommunityIcons name="grid" size={22} color={gridOn ? colors.accent : '#fff'} />
           </TouchableOpacity>
@@ -410,6 +485,15 @@ const styles = StyleSheet.create({
   },
   zoomText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   galleryThumb: { width: 40, height: 40, borderRadius: 8, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)' },
+  timerBadge: {
+    position: 'absolute', top: 4, right: 4, color: colors.accent, fontSize: 10, fontWeight: '800',
+  },
+  aspectMask: { position: 'absolute', left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)' },
+  countLayer: {
+    ...StyleSheet.absoluteFillObject, zIndex: 3,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  countNum: { color: '#fff', fontSize: 96, fontWeight: '800', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 12 },
   recPill: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full },
   recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF3B30' },
   recTime: { color: '#fff', fontVariant: ['tabular-nums'], fontWeight: '700', fontSize: 14 },
