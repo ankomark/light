@@ -69,6 +69,25 @@ def community_cursor_page(base_qs, before, after):
     return rows[:limit], has_more
 
 
+def community_context_window(base_qs, target, radius=20):
+    """A window of messages around `target` for jumping to a search hit, tie-broken
+    on (created_at, id) so messages sharing a timestamp are bucketed deterministically
+    (same ordering as community_cursor_page). Returns (window_ascending, has_earlier,
+    has_newer)."""
+    before_q = (Q(created_at__lt=target.created_at)
+                | Q(created_at=target.created_at, id__lt=target.id))
+    after_q = (Q(created_at__gt=target.created_at)
+               | Q(created_at=target.created_at, id__gt=target.id))
+    # target + up to `radius` older (newest-first), reversed to ascending, then newer.
+    older = list(base_qs.filter(before_q | Q(pk=target.pk))
+                 .order_by('-created_at', '-id')[:radius + 1])
+    newer = list(base_qs.filter(after_q).order_by('created_at', 'id')[:radius])
+    window = older[::-1] + newer
+    has_earlier = base_qs.filter(before_q).count() > radius
+    has_newer = base_qs.filter(after_q).count() > radius
+    return window, has_earlier, has_newer
+
+
 class MediaStationViewSet(viewsets.ModelViewSet):
     queryset = MediaStation.objects.all()
     serializer_class = MediaStationSerializer
@@ -632,16 +651,11 @@ class ChurchViewSet(viewsets.ModelViewSet):
         if not self._membership(church, request.user) and not self._is_admin(church, request.user):
             return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
         message_id = request.query_params.get('message_id')
-        radius = 20
         base = self._message_qs(church, request)
         target = base.filter(pk=message_id).first() if message_id else None
         if not target:
             return Response({'results': [], 'has_earlier': False, 'has_newer': False})
-        older = list(base.filter(created_at__lte=target.created_at).order_by('-created_at')[:radius + 1])
-        newer = list(base.filter(created_at__gt=target.created_at).order_by('created_at')[:radius])
-        window = older[::-1] + newer
-        has_earlier = base.filter(created_at__lt=target.created_at).count() > radius
-        has_newer = base.filter(created_at__gt=target.created_at).count() > radius
+        window, has_earlier, has_newer = community_context_window(base, target)
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         return Response({
             'results': ChurchMessageSerializer(window, many=True,
@@ -1356,16 +1370,11 @@ class ChoirViewSet(viewsets.ModelViewSet):
         if not self._membership(choir, request.user) and not self._is_admin(choir, request.user):
             return Response({'error': 'Members only.'}, status=status.HTTP_403_FORBIDDEN)
         message_id = request.query_params.get('message_id')
-        radius = 20
         base = self._message_qs(choir, request)
         target = base.filter(pk=message_id).first() if message_id else None
         if not target:
             return Response({'results': [], 'has_earlier': False, 'has_newer': False})
-        older = list(base.filter(created_at__lte=target.created_at).order_by('-created_at')[:radius + 1])
-        newer = list(base.filter(created_at__gt=target.created_at).order_by('created_at')[:radius])
-        window = older[::-1] + newer
-        has_earlier = base.filter(created_at__lt=target.created_at).count() > radius
-        has_newer = base.filter(created_at__gt=target.created_at).count() > radius
+        window, has_earlier, has_newer = community_context_window(base, target)
         hidden = set() if request.user.is_super_admin else super_admin_user_ids()
         return Response({
             'results': ChoirMessageSerializer(window, many=True,

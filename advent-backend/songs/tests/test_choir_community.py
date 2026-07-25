@@ -464,3 +464,20 @@ class ChoirCursorPaginationTests(APITestCase):
         res = self.client.get(f'/api/choirs/{self.choir.id}/messages/', {'before': 999999}).json()
         self.assertEqual(res['results'], [])
         self.assertFalse(res['has_more'])
+
+    def test_context_window_is_deterministic_with_ties(self):
+        # The 45 setup messages were created in a burst → many share a timestamp,
+        # so this exercises the (created_at, id) tie-break in the context window.
+        self.client.force_authenticate(self.admin)
+        ids = [m.id for m in ChoirMessage.objects.filter(choir=self.choir).order_by('id')]
+        target = ids[len(ids) // 2]  # a message in the middle
+        res = self.client.get(f'/api/choirs/{self.choir.id}/context/', {'message_id': target}).json()
+        win = res['results']
+        win_ids = [m['id'] for m in win]
+        # Target present exactly once, no duplicates, and the window is a clean
+        # ascending (created_at, id) slice with the anchor inside it.
+        self.assertIn(target, win_ids)
+        self.assertEqual(len(win_ids), len(set(win_ids)))
+        self.assertEqual(win_ids, sorted(win_ids))  # ids are monotonic with created_at here
+        self.assertTrue(res['has_earlier'])
+        self.assertTrue(res['has_newer'])
