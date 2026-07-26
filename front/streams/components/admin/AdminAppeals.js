@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminAppeals, fetchAdminByUrl, approveAppeal, rejectAppeal } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { confirmAction, notify } from '../../utils/adminConfirm';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -65,17 +66,19 @@ const AdminAppeals = () => {
       await fn();
       setAppeals((prev) => prev.filter((a) => a.id !== id));
     } catch {
-      Alert.alert(t('common.error'), t('admin.actionFailedShort'));
+      notify(t('common.error'), t('admin.actionFailedShort'));
     } finally {
       setBusyId(null);
     }
   };
 
-  const confirmApprove = (item) =>
-    Alert.alert(t('appeal.approveTitle'), t('appeal.approveConfirm', { name: item.user?.username }), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Approve', onPress: () => act(item.id, () => approveAppeal(item.id)) },
-    ]);
+  const confirmApprove = async (item) => {
+    if (await confirmAction({
+      title: t('appeal.approveTitle'),
+      message: t('appeal.approveConfirm', { name: item.user?.username }),
+      confirmLabel: 'Approve',
+    })) act(item.id, () => approveAppeal(item.id));
+  };
 
   const renderItem = ({ item }) => {
     const busy = busyId === item.id;

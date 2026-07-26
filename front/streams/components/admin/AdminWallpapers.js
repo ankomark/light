@@ -6,7 +6,6 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   Switch,
   RefreshControl,
 } from 'react-native';
@@ -26,6 +25,7 @@ import { compressImage } from '../../services/imageProcessing';
 import { useWallpapers } from '../../context/WallpaperContext';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { confirmAction, notify } from '../../utils/adminConfirm';
 
 // Wallpapers are full-screen backdrops, so a generous cap — but still
 // downscaled before upload, since R2 stores bytes verbatim (no ingest
@@ -55,7 +55,7 @@ const AdminWallpapers = () => {
       const data = await fetchAllWallpapers();
       setAllItems(Array.isArray(data) ? data : (data?.results || []));
     } catch {
-      Alert.alert(t('common.error'), t('wallpaper.loadFailed'));
+      notify(t('common.error'), t('wallpaper.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -86,7 +86,7 @@ const AdminWallpapers = () => {
   const handleAdd = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(t('chat.permissionRequired'), t('wallpaper.permissionPhotos'));
+      notify(t('chat.permissionRequired'), t('wallpaper.permissionPhotos'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -118,7 +118,7 @@ const AdminWallpapers = () => {
       await refreshLiveWallpapers();   // apply it app-wide immediately
     } catch (error) {
       console.error('Wallpaper upload failed:', error);
-      Alert.alert(t('common.uploadFailedTitle'), error.message || t('wallpaper.uploadFailed'));
+      notify(t('common.uploadFailedTitle'), error.message || t('wallpaper.uploadFailed'));
     } finally {
       setUploading(false);
       setProgress(0);
@@ -134,38 +134,32 @@ const AdminWallpapers = () => {
       await refreshLiveWallpapers();
     } catch {
       setItems(previous);
-      Alert.alert(t('common.error'), t('wallpaper.updateFailed'));
+      notify(t('common.error'), t('wallpaper.updateFailed'));
     } finally {
       setBusyId(null);
     }
   };
 
-  const handleDelete = (item) => {
-    Alert.alert(
-      t('wallpaper.deleteTitle'),
-      t('wallpaper.deleteBody'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: async () => {
-            setBusyId(item.id);
-            const previous = items;
-            setItems((cur) => cur.filter((w) => w.id !== item.id));
-            try {
-              await deleteWallpaper(item.id);
-              await refreshLiveWallpapers();
-            } catch {
-              setItems(previous);
-              Alert.alert(t('common.error'), t('wallpaper.deleteFailed'));
-            } finally {
-              setBusyId(null);
-            }
-          },
-        },
-      ]
-    );
+  const handleDelete = async (item) => {
+    if (!(await confirmAction({
+      title: t('wallpaper.deleteTitle'),
+      message: t('wallpaper.deleteBody'),
+      confirmLabel: t('common.delete'),
+      cancelLabel: t('common.cancel'),
+      destructive: true,
+    }))) return;
+    setBusyId(item.id);
+    const previous = items;
+    setItems((cur) => cur.filter((w) => w.id !== item.id));
+    try {
+      await deleteWallpaper(item.id);
+      await refreshLiveWallpapers();
+    } catch {
+      setItems(previous);
+      notify(t('common.error'), t('wallpaper.deleteFailed'));
+    } finally {
+      setBusyId(null);
+    }
   };
 
   // Swap with the neighbour and persist both positions in one call.
@@ -180,7 +174,7 @@ const AdminWallpapers = () => {
       await refreshLiveWallpapers();
     } catch {
       load();  // fall back to server truth
-      Alert.alert(t('common.error'), t('wallpaper.reorderFailed'));
+      notify(t('common.error'), t('wallpaper.reorderFailed'));
     }
   };
 

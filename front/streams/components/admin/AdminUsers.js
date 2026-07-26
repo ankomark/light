@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
-  ActivityIndicator, Modal, Alert,
+  ActivityIndicator, Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +14,7 @@ import {
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { notify } from '../../utils/adminConfirm';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -85,7 +86,7 @@ const AdminUsers = () => {
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
       setSelected(updated);
     } catch (e) {
-      Alert.alert(t('common.error'), e?.response?.data?.error || t('admin.actionFailedShort'));
+      notify(t('common.error'), e?.response?.data?.error || t('admin.actionFailedShort'));
     } finally {
       setBusy(false);
     }

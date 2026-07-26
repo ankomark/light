@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, Alert, Modal, TextInput, Pressable,
+  ActivityIndicator, Modal, TextInput, Pressable,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +12,7 @@ import {
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { confirmAction, notify } from '../../utils/adminConfirm';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -111,7 +112,7 @@ const AdminReports = () => {
       await fn();
       setReports((prev) => prev.filter((r) => r.id !== id));
     } catch {
-      Alert.alert(t('common.error'), t('admin.actionFailed'));
+      notify(t('common.error'), t('admin.actionFailed'));
     } finally {
       setBusyId(null);
     }
@@ -124,21 +125,19 @@ const AdminReports = () => {
       const updated = await fn();
       setReports((prev) => prev.map((r) => (r.id === id ? updated : r)));
     } catch {
-      Alert.alert(t('common.error'), t('admin.actionFailed'));
+      notify(t('common.error'), t('admin.actionFailed'));
     } finally {
       setBusyId(null);
     }
   };
 
-  const confirmRemove = (item) => {
-    Alert.alert(
-      'Remove content',
-      `This hides the reported ${item.content_type} from everyone. You can restore it later from the Content tab.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => act(item.id, () => removeReportTarget(item.id)) },
-      ],
-    );
+  const confirmRemove = async (item) => {
+    if (await confirmAction({
+      title: 'Remove content',
+      message: `This hides the reported ${item.content_type} from everyone. You can restore it later from the Content tab.`,
+      confirmLabel: 'Remove',
+      destructive: true,
+    })) act(item.id, () => removeReportTarget(item.id));
   };
 
   const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
@@ -156,7 +155,7 @@ const AdminReports = () => {
       setReports((prev) => prev.filter((r) => !ids.includes(r.id)));
       exitSelect();
     } catch {
-      Alert.alert(t('common.error'), t('admin.bulkFailed'));
+      notify(t('common.error'), t('admin.bulkFailed'));
     } finally {
       setBulkBusy(false);
     }

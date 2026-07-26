@@ -1,12 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Alert,
+  View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchMyAppeal, submitAppeal } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { notify } from '../../utils/adminConfirm';
 
 const STATUS_META = {
   pending: { color: colors.warning, label: 'Under review', icon: 'hourglass-outline' },
@@ -37,7 +38,7 @@ const AppealScreen = ({ navigation }) => {
   const submit = async () => {
     const msg = message.trim();
     if (msg.length < 10) {
-      Alert.alert(t('appeal.title'), t('appeal.tooShort'));
+      notify(t('appeal.title'), t('appeal.tooShort'));
       return;
     }
     setSubmitting(true);
@@ -46,7 +47,7 @@ const AppealScreen = ({ navigation }) => {
       setAppeal(created);
       setMessage('');
     } catch (e) {
-      Alert.alert(t('appeal.title'), e?.response?.data?.error || t('appeal.submitFailed'));
+      notify(t('appeal.title'), e?.response?.data?.error || t('appeal.submitFailed'));
     } finally {
       setSubmitting(false);
     }

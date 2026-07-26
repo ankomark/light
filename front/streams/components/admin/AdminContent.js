@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
-  Alert, ScrollView, TextInput, Pressable,
+  ScrollView, TextInput, Pressable,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminContent, fetchAdminByUrl, removeContent, restoreContent, bulkContent } from '../../services/api';
+import { confirmAction, notify } from '../../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 
@@ -107,17 +108,20 @@ const AdminContent = () => {
       setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, is_removed: action === 'remove' } : it)));
       exitSelect();
     } catch {
-      Alert.alert(t('common.error'), t('admin.bulkFailed'));
+      notify(t('common.error'), t('admin.bulkFailed'));
     } finally {
       setBulkBusy(false);
     }
   };
 
-  const confirmBulkRemove = () =>
-    Alert.alert(t('admin.removeContentTitle'), t('admin.removeBulkConfirm', { count: selected.size, type }), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => runBulk('remove') },
-    ]);
+  const confirmBulkRemove = async () => {
+    if (await confirmAction({
+      title: t('admin.removeContentTitle'),
+      message: t('admin.removeBulkConfirm', { count: selected.size, type }),
+      confirmLabel: 'Remove',
+      destructive: true,
+    })) runBulk('remove');
+  };
 
   const toggle = async (item) => {
     const willRemove = !item.is_removed;
@@ -127,16 +131,18 @@ const AdminContent = () => {
         await (willRemove ? removeContent(type, item.id) : restoreContent(type, item.id));
         setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, is_removed: willRemove } : it)));
       } catch {
-        Alert.alert(t('common.error'), t('admin.actionFailedShort'));
+        notify(t('common.error'), t('admin.actionFailedShort'));
       } finally {
         setBusyId(null);
       }
     };
     if (willRemove) {
-      Alert.alert(t('admin.removeContentTitle'), t('admin.removeOneConfirm', { type }), [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: doIt },
-      ]);
+      if (await confirmAction({
+        title: t('admin.removeContentTitle'),
+        message: t('admin.removeOneConfirm', { type }),
+        confirmLabel: 'Remove',
+        destructive: true,
+      })) doIt();
     } else {
       doIt();
     }

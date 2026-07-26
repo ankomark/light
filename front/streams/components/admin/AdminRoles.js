@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
-  Modal, TextInput, Alert, ScrollView,
+  Modal, TextInput, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,6 +10,7 @@ import {
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { confirmAction, notify } from '../../utils/adminConfirm';
 
 const AdminRoles = () => {
   const { t } = useI18n();
@@ -50,7 +51,7 @@ const AdminRoles = () => {
 
   const save = async () => {
     const payload = { name: name.trim(), capabilities: [...selectedCaps] };
-    if (!payload.name) { Alert.alert(t('admin.roleTitle'), t('admin.roleNameRequired')); return; }
+    if (!payload.name) { notify(t('admin.roleTitle'), t('admin.roleNameRequired')); return; }
     setSaving(true);
     try {
       if (editing.id) await updateRole(editing.id, payload);
@@ -58,17 +59,20 @@ const AdminRoles = () => {
       close();
       load();
     } catch (e) {
-      Alert.alert(t('admin.roleTitle'), e?.response?.data?.name?.[0] || e?.response?.data?.error || t('admin.roleSaveFailed'));
+      notify(t('admin.roleTitle'), e?.response?.data?.name?.[0] || e?.response?.data?.error || t('admin.roleSaveFailed'));
     } finally {
       setSaving(false);
     }
   };
 
-  const confirmDelete = (role) =>
-    Alert.alert(t('admin.deleteRoleTitle'), t('admin.deleteRoleConfirm', { name: role.name }), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => { await deleteRole(role.id); load(); } },
-    ]);
+  const confirmDelete = async (role) => {
+    if (await confirmAction({
+      title: t('admin.deleteRoleTitle'),
+      message: t('admin.deleteRoleConfirm', { name: role.name }),
+      confirmLabel: 'Delete',
+      destructive: true,
+    })) { await deleteRole(role.id); load(); }
+  };
 
   const renderItem = ({ item }) => (
     <View style={styles.card}>
