@@ -180,6 +180,13 @@ function Root() {
     return <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>;
   }
   if (!isAuthenticated) return <AdminLogin />;
+  // On a fresh login, useAuth flips isAuthenticated true and *then* fetches the
+  // profile, so currentUser is briefly null. Wait for it — don't misread that
+  // transient null as "not an admin" and bounce a real admin out. A genuine
+  // non-admin has a populated currentUser (isAdmin just returns false).
+  if (!currentUser) {
+    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>;
+  }
   if (!isAdmin(currentUser)) return <NotAuthorized />;
   return <AdminConsole />;
 }
