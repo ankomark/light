@@ -45,9 +45,12 @@ export default function ConfirmHost() {
           <Text style={styles.title}>{cfg.title}</Text>
           {cfg.message ? <Text style={styles.message}>{cfg.message}</Text> : null}
           <View style={styles.actions}>
-            <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={() => finish(false)} activeOpacity={0.85}>
-              <Text style={styles.btnCancelText}>{cfg.cancelLabel || 'Cancel'}</Text>
-            </TouchableOpacity>
+            {/* A notice is informational — a single dismiss button, no Cancel. */}
+            {cfg.variant !== 'notice' && (
+              <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={() => finish(false)} activeOpacity={0.85}>
+                <Text style={styles.btnCancelText}>{cfg.cancelLabel || 'Cancel'}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.btn, cfg.destructive ? styles.btnDanger : styles.btnConfirm]}
               onPress={() => finish(true)}

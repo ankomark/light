@@ -57,9 +57,14 @@ export const confirmAction = ({
   });
 };
 
-/** Single-button notice (e.g. an error toast). Web: window.alert; native: Alert.alert. */
+/**
+ * Single-button notice (e.g. an error toast). Web: the styled modal in
+ * 'notice' mode (falling back to window.alert if the host isn't mounted);
+ * native: Alert.alert. Fire-and-forget — returns nothing.
+ */
 export const notify = (title, message = '') => {
   if (Platform.OS === 'web') {
+    if (_webHost) { _webHost({ title, message, variant: 'notice', confirmLabel: 'OK' }); return; }
     if (typeof window !== 'undefined' && typeof window.alert === 'function') {
       window.alert(joinText(title, message));
     }
