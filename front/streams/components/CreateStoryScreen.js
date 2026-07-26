@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, Image, TouchableOpacity, StyleSheet, TextInput,
-  ActivityIndicator, Alert, Dimensions,
+  ActivityIndicator, Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,8 +12,6 @@ import { processVideo } from '../services/videoProcessing';
 import { createStory } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
-
-const { width } = Dimensions.get('window');
 
 // Stories cap video at 30s (WhatsApp-style). expo-image-picker reports asset
 // duration in milliseconds; allow a small tolerance so a ~30s clip isn't
@@ -173,7 +171,7 @@ const styles = StyleSheet.create({
   postBtnText: { ...typography.label, color: colors.white, fontWeight: '700' },
   preview: {
     width: '100%',
-    height: width * (16 / 9),
+    aspectRatio: 9 / 16,  // portrait story preview; reflows with width (no snapshot)
     maxHeight: 420,
     backgroundColor: colors.surface,
   },

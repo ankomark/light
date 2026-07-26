@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, AppState, Modal,
-  ScrollView, Alert, Pressable, Dimensions,
+  ScrollView, Alert, Pressable, useWindowDimensions,
 } from 'react-native';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
@@ -28,7 +28,6 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const POLL_MS = 3000;
-const { width: SCREEN_W } = Dimensions.get('window');
 const MAX_FILE_BYTES = 6 * 1024 * 1024; // 6 MB cap for document attachments
 
 const EMOJIS = ['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','🥰','😘','😋','😜','🤪','🤔','🤭','🫡','😎','🥳','😏','😴','😢','😭','😤','😡','🥺','😱','🤯','🙏','👍','👎','👏','🙌','🤝','💪','🫶','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🔥','✨','🎉','🎊','💯','✅','🕊️','📖','🎵','🎶','☀️','🌙','⭐','🙏🏽'];
@@ -56,6 +55,8 @@ const ChatScreen = ({ route, navigation }) => {
   const { conversationId, otherUser } = route.params;
   const { currentUser } = useAuth();
   const { t } = useI18n();
+  const { width: winW } = useWindowDimensions();
+  const imgSide = winW * 0.6;  // chat image bubble, 60% of the live window width
   const kbHeight = useKeyboardHeight(); // float the composer above the keyboard (edge-to-edge safe)
 
   const [messages, setMessages] = useState([]);
@@ -455,7 +456,7 @@ const ChatScreen = ({ route, navigation }) => {
         <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, type === 'image' && styles.bubbleMedia]}>
           {type === 'image' && item.attachment ? (
             <Pressable onPress={() => setViewer(item.attachment)}>
-              <Image source={{ uri: cldThumb(item.attachment) }} style={styles.imageMsg} contentFit="cover" transition={150} />
+              <Image source={{ uri: cldThumb(item.attachment) }} style={[styles.imageMsg, { width: imgSide, height: imgSide }]} contentFit="cover" transition={150} />
             </Pressable>
           ) : type === 'file' ? (
             <Pressable style={styles.fileRow} onPress={() => openFile(item)}>
@@ -493,7 +494,7 @@ const ChatScreen = ({ route, navigation }) => {
         </View>
       </View>
     );
-  }, [currentUser?.id, messages, openFile]);
+  }, [currentUser?.id, messages, openFile, imgSide]);
 
   return (
     <View style={styles.root}>
@@ -687,7 +688,7 @@ const styles = StyleSheet.create({
   bubbleTimeOwn: { color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
   bubbleTimeOther: { color: colors.textMuted },
 
-  imageMsg: { width: SCREEN_W * 0.6, height: SCREEN_W * 0.6, borderRadius: radius.md, backgroundColor: colors.surface },
+  imageMsg: { borderRadius: radius.md, backgroundColor: colors.surface },  // width/height inline (reactive)
   fileRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 2, paddingRight: spacing.xs, minWidth: 180 },
   fileIcon: { width: 38, height: 38, borderRadius: radius.sm, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   fileName: { flex: 1, fontSize: 14, fontWeight: '600' },

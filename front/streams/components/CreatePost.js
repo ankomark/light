@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Image, TextInput, StyleSheet,
-  ScrollView, Alert, Modal, Dimensions, ActivityIndicator
+  ScrollView, Alert, Modal, useWindowDimensions, ActivityIndicator
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AudioTrimmer from './AudioTrimmer';
@@ -31,8 +31,6 @@ const clampAspect = (w, h) => {
   return Math.min(1.91, Math.max(0.8, r));
 };
 
-const PREVIEW_W = Dimensions.get('window').width - 40; // contentContainer padding 20 each side
-
 // Accept 1080p and below only; reject 2K/4K. Measured on the shorter edge — a
 // 1080p clip (portrait or landscape) has a 1080px short side, while 1440p/4K
 // have 1440/2160. The tolerance covers encoders that pad 1080 up to 1088.
@@ -40,6 +38,10 @@ const MAX_VIDEO_SHORT_SIDE = 1130;
 
 const CreatePost = ({ navigation }) => {
   const { t } = useI18n();
+  // Reactive carousel-slide width (window minus the 20px content padding each
+  // side) — reflows on rotation / web resize; was a module-scope snapshot.
+  const { width: winW } = useWindowDimensions();
+  const previewW = winW - 40;
   const [contentType, setContentType] = useState('image');
   const [media, setMedia] = useState(null);          // single video
   const [images, setImages] = useState([]);          // 1–4 image carousel: [{uri,width,height}]
@@ -682,11 +684,11 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
               pagingEnabled
               showsHorizontalScrollIndicator={false}
               onMomentumScrollEnd={(e) =>
-                setPreviewIndex(Math.round(e.nativeEvent.contentOffset.x / PREVIEW_W))
+                setPreviewIndex(Math.round(e.nativeEvent.contentOffset.x / previewW))
               }
             >
               {images.map((img, i) => (
-                <View key={`${img.uri}_${i}`} style={{ width: PREVIEW_W, height: '100%' }}>
+                <View key={`${img.uri}_${i}`} style={{ width: previewW, height: '100%' }}>
                   <Image source={{ uri: img.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                   <TouchableOpacity style={styles.removeImageBtn} onPress={() => removeImage(i)}>
                     <Feather name="x" size={16} color="#fff" />

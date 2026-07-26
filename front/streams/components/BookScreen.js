@@ -9,18 +9,18 @@ import {
   Animated,
   TextInput,
   SafeAreaView,
-  Dimensions, // Import Dimensions
+  useWindowDimensions,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import axios from 'axios';
 import { useI18n } from '../context/I18nContext';
 
-// Get the screen width
-const screenWidth = Dimensions.get('window').width;
-
 // SearchBar Component
 const SearchBar = ({ onSearch }) => {
   const { t } = useI18n();
+  // Live window width — the expanded bar reflows on rotation / web resize
+  // (was a module-scope Dimensions.get snapshot).
+  const { width: screenWidth } = useWindowDimensions();
   const [isExpanded, setIsExpanded] = useState(false);
   const [query, setQuery] = useState('');
   const widthAnim = useRef(new Animated.Value(40)).current;

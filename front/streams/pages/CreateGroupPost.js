@@ -9,7 +9,7 @@ import {
   Image,
   ScrollView,
   SafeAreaView,
-  Dimensions,
+  useWindowDimensions,
   Keyboard,
   Animated,
   ActivityIndicator,
@@ -28,11 +28,12 @@ import { processVideo } from '../services/videoProcessing';
 import { MaterialIcons, FontAwesome, Ionicons, Feather, AntDesign } from '@expo/vector-icons';
 import { useI18n } from '../context/I18nContext';
 
-const { height } = Dimensions.get('window');
-
 const CreateGroupPost = ({ onSubmit, onCancel }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
+  // Live window height drives the modal's off-screen slide distance — reflows
+  // on rotation / web resize; was a module-scope Dimensions.get snapshot.
+  const { height: winH } = useWindowDimensions();
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -43,7 +44,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
   const inputRef = useRef(null);
   const scrollViewRef = useRef(null);
   const buttonScaleAnim = useRef(new Animated.Value(1)).current;
-  const modalSlideAnim = useRef(new Animated.Value(height)).current;
+  const modalSlideAnim = useRef(new Animated.Value(winH)).current;
   const recordingTimerRef = useRef(null);
 
   // Animation for recording indicator
@@ -133,7 +134,7 @@ const CreateGroupPost = ({ onSubmit, onCancel }) => {
 
   const closeModal = () => {
     Animated.timing(modalSlideAnim, {
-      toValue: height,
+      toValue: winH,
       duration: 300,
       useNativeDriver: true,
     }).start(onCancel);

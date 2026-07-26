@@ -1,12 +1,11 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, PanResponder, Dimensions, TouchableOpacity,
+  View, Text, StyleSheet, PanResponder, useWindowDimensions, TouchableOpacity,
 } from 'react-native';
 import AppVideo from './AppVideo';
 import { Feather } from '@expo/vector-icons';
 import { colors, radius } from '../constants/theme';
 
-const TRACK_W = Dimensions.get('window').width - 40;
 const HANDLE_W = 18;
 const MAX_CLIP = 30; // seconds
 
@@ -28,6 +27,14 @@ export default function VideoTrimmer({ uri, durationSec = 0, aspectRatio = 1, on
   const [end, setEnd] = useState(Math.min(MAX_CLIP, durationSec || MAX_CLIP));
   const [playing, setPlaying] = useState(false);
 
+  // Reactive timeline width (window minus 20px gutters each side) — reflows on
+  // rotation / web resize. trackWRef feeds the once-created PanResponders their
+  // live value without re-creating them (was a module-scope snapshot).
+  const { width: winW } = useWindowDimensions();
+  const trackW = winW - 40;
+  const trackWRef = useRef(trackW);
+  trackWRef.current = trackW;
+
   const live = useRef({ duration, start, end });
   live.current = { duration, start, end };
 
@@ -37,7 +44,7 @@ export default function VideoTrimmer({ uri, durationSec = 0, aspectRatio = 1, on
   const report = (s, e) => { setStart(s); setEnd(e); };
 
   const dragRef = useRef({ start: 0, end: 0 });
-  const secToX = (s) => (duration > 0 ? (s / duration) * TRACK_W : 0);
+  const secToX = (s) => (duration > 0 ? (s / duration) * trackW : 0);
 
   const makeResponder = (mode) =>
     PanResponder.create({
@@ -50,7 +57,7 @@ export default function VideoTrimmer({ uri, durationSec = 0, aspectRatio = 1, on
       onPanResponderMove: (_e, g) => {
         const { duration: D } = live.current;
         if (D <= 0) return;
-        const delta = (g.dx / TRACK_W) * D;
+        const delta = (g.dx / trackWRef.current) * D;
         let { start: s, end: e } = dragRef.current;
         if (mode === 'start') {
           s = clamp(s + delta, 0, e - 1);
@@ -124,9 +131,9 @@ export default function VideoTrimmer({ uri, durationSec = 0, aspectRatio = 1, on
         <Text style={styles.timeText}>{fmt(end)}</Text>
       </View>
 
-      <View style={styles.track}>
+      <View style={[styles.track, { width: trackW }]}>
         <View style={[styles.dim, { left: 0, width: startX }]} pointerEvents="none" />
-        <View style={[styles.dim, { left: endX, width: Math.max(0, TRACK_W - endX) }]} pointerEvents="none" />
+        <View style={[styles.dim, { left: endX, width: Math.max(0, trackW - endX) }]} pointerEvents="none" />
         <View style={[styles.selection, { left: startX, width: Math.max(0, endX - startX) }]} pointerEvents="none" />
         <View
           style={[styles.regionTouch, { left: startX + HANDLE_W, width: Math.max(0, endX - startX - HANDLE_W * 2) }]}
@@ -169,7 +176,7 @@ const styles = StyleSheet.create({
   durPillText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   track: {
     height: 56,
-    width: TRACK_W,
+    // width applied inline via useWindowDimensions() so it reflows on resize
     borderRadius: 10,
     backgroundColor: '#0d2236',
     overflow: 'hidden',

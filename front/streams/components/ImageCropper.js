@@ -1,15 +1,13 @@
 import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   View, Text, Modal, StyleSheet, TouchableOpacity, Animated, PanResponder,
-  Dimensions, ActivityIndicator,
+  useWindowDimensions, ActivityIndicator,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Feather } from '@expo/vector-icons';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useI18n } from '../context/I18nContext';
 
-const SCREEN_W = Dimensions.get('window').width;
-const FRAME_W = SCREEN_W - 32;
 const MAX_ZOOM = 3;
 
 // Instagram crop presets (width:height ratio).
@@ -31,6 +29,10 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  */
 export default function ImageCropper({ visible, uri, imageWidth, imageHeight, onCancel, onCropped }) {
   const { t } = useI18n();
+  // Crop frame width from the live window (was a module-scope Dimensions.get
+  // snapshot) so it's correct for the current window size, not the one at import.
+  const { width: screenW } = useWindowDimensions();
+  const FRAME_W = screenW - 32;
   const [aspectKey, setAspectKey] = useState('4:5');
   const [zoom, setZoom] = useState(1);
   const [working, setWorking] = useState(false);
@@ -48,7 +50,7 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
   // Base scale so the image covers the frame; total = base * zoom.
   const baseScale = useMemo(
     () => Math.max(FRAME_W / iw, frameH / ih),
-    [iw, ih, frameH]
+    [iw, ih, frameH, FRAME_W]
   );
   const totalScale = baseScale * zoom;
   const dispW = iw * totalScale;
