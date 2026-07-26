@@ -69,12 +69,17 @@ ALLOWED_HOSTS = [
 if DEBUG:
     ALLOWED_HOSTS = ['*']
 
-CORS_ALLOW_HEADERS =[
-    'access-control-allow-origin',
-    'content-type',
-    'Authorization', 
-    'Content-Type',
-]
+# Start from django-cors-headers' safe defaults (accept, authorization,
+# content-type, origin, user-agent, x-csrftoken, x-requested-with, …) and add
+# the app-specific headers the web build sends. apiRequest() tags every call
+# with X-Request-ID, so the browser's CORS preflight must allow it — otherwise
+# the whole apiRequest path (dashboard, admin lists, etc.) is blocked on web
+# with a bare "Network Error" while plain axios calls (profile/status) succeed.
+from corsheaders.defaults import default_headers  # noqa: E402
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    'x-request-id',
+)
 CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS =[
