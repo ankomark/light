@@ -36,6 +36,7 @@ import AdminAppeals from './components/admin/AdminAppeals';
 import AdminRoles from './components/admin/AdminRoles';
 import AdminWallpapers from './components/admin/AdminWallpapers';
 import AppealScreen from './components/admin/AppealScreen';
+import ConfirmHost from './components/admin/ConfirmHost';
 
 const Stack = createNativeStackNavigator();
 
@@ -199,7 +200,7 @@ export default function App() {
           <ThemeProvider>
             <I18nProvider>
               <WallpaperProvider>
-                <View style={styles.page}><Root /></View>
+                <View style={styles.page}><Root /><ConfirmHost /></View>
               </WallpaperProvider>
             </I18nProvider>
           </ThemeProvider>

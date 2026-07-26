@@ -2,15 +2,24 @@
 //
 // react-native-web's Alert.alert is a no-op (`static alert() {}`) — on web it
 // shows nothing AND never fires the button callbacks, so every destructive
-// admin action gated behind an Alert confirmation (remove content, delete role,
-// approve appeal, delete wallpaper, …) silently did nothing in the browser.
-// These helpers use the DOM's window.confirm/alert on web and fall back to the
-// native Alert (with buttons) on iOS/Android, so the same call site works on
-// both. On native the behaviour is unchanged.
+// admin action gated behind an Alert confirmation silently did nothing in the
+// browser. These helpers keep a single imperative API — `await confirmAction()`
+// — that works on both platforms:
+//
+//   • Web:    renders a styled in-app modal (see components/admin/ConfirmHost),
+//             which registers itself here on mount. If no host is mounted we
+//             fall back to the DOM's window.confirm so a call never hangs.
+//   • Native: uses the OS Alert with buttons (unchanged phone behaviour).
 
 import { Platform, Alert } from 'react-native';
 
 const joinText = (title, message) => (message ? `${title}\n\n${message}` : title);
+
+// ── Web modal bridge ─────────────────────────────────────────────────────────
+// <ConfirmHost/> registers a function here that shows the modal and returns a
+// Promise<boolean>. confirmAction() calls it; the modal's buttons resolve it.
+let _webHost = null;
+export const registerConfirmHost = (fn) => { _webHost = fn; };
 
 /**
  * Ask the user to confirm an action. Returns a Promise<boolean> that resolves
@@ -28,10 +37,12 @@ export const confirmAction = ({
   destructive = false,
 }) => {
   if (Platform.OS === 'web') {
-    if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
-      return Promise.resolve(false);
+    if (_webHost) return _webHost({ title, message, confirmLabel, cancelLabel, destructive });
+    // Host not mounted yet — never leave the caller hanging.
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      return Promise.resolve(window.confirm(joinText(title, message)));
     }
-    return Promise.resolve(window.confirm(joinText(title, message)));
+    return Promise.resolve(false);
   }
   return new Promise((resolve) => {
     Alert.alert(
