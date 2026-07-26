@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput,
-  ActivityIndicator, ScrollView, Dimensions,
+  ActivityIndicator, ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,7 +12,6 @@ import { CATEGORIES, categoryLabel } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const { width } = Dimensions.get('window');
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const TABS = [

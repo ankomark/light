@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, AppState, Modal,
-  ScrollView, Alert, Pressable, Dimensions, Animated, PanResponder,
+  ScrollView, Alert, Pressable, useWindowDimensions, Animated, PanResponder,
 } from 'react-native';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
@@ -45,7 +45,6 @@ try { Blurhash = require('react-native-blurhash').Blurhash; } catch { Blurhash =
 // Realtime arrives over the WebSocket; the poll is now just a safety net that
 // catches anything missed during a socket reconnect, so it can be slow.
 const POLL_MS = 12000;
-const { width: SCREEN_W } = Dimensions.get('window');
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const EMOJIS = ['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','🥰','😘','😋','😜','🤪','🤔','🤭','😎','🥳','😢','😭','😤','😡','🥺','😱','🙏','👍','👎','👏','🙌','🤝','💪','🫶','❤️','🧡','💛','💚','💙','💜','🔥','✨','🎉','💯','✅','🕊️','📖','🎵','☀️','⭐'];
 const REACTIONS = ['❤️', '👍', '🙏', '🎵', '😂', '🔥']; // quick-react row
@@ -72,6 +71,8 @@ const GroupMessageRow = ({
   onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry, onDoubleTap, highlighted,
 }) => {
   const { t } = useI18n();
+  const { width: winW } = useWindowDimensions();
+  const imgSide = winW * 0.6;  // chat image bubble, 60% of the live window width
   const lastTapRef = useRef(0);
   const burst = useRef(new Animated.Value(0)).current; // double-tap ❤️ pop
   // Natural aspect ratio for image bubbles, learned on load (clamped so extreme
@@ -176,7 +177,7 @@ const GroupMessageRow = ({
                 <Pressable onPress={() => (sending ? null : onOpenImage(item.attachment))}>
                   <Image
                     source={{ uri: item.attachment }}
-                    style={[styles.imageMsg, imgRatio ? { aspectRatio: imgRatio, height: undefined } : null]}
+                    style={[styles.imageMsg, { width: imgSide, height: imgSide }, imgRatio ? { aspectRatio: imgRatio, height: undefined } : null]}
                     contentFit="cover"
                     transition={200}
                     placeholder={item.attachment_blurhash ? { blurhash: item.attachment_blurhash } : undefined}
@@ -1678,7 +1679,7 @@ const styles = StyleSheet.create({
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   menuItemText: { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
 
-  imageMsg: { width: SCREEN_W * 0.6, height: SCREEN_W * 0.6, borderRadius: 5, backgroundColor: colors.surface },
+  imageMsg: { borderRadius: 5, backgroundColor: colors.surface },  // width/height inline (reactive)
   uploadOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)' },
   fileRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 2, paddingRight: spacing.xs, minWidth: 180 },
   fileIcon: { width: 38, height: 38, borderRadius: radius.sm, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },

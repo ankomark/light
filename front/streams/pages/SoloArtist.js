@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Modal,
-  Dimensions,
   Image,
   Linking
 } from 'react-native';
@@ -26,8 +25,6 @@ import {
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
-
-const { height } = Dimensions.get('window');
 
 // Values are the stored genre codes; the labels are resolved at render.
 const GENRE_CHOICES = {
@@ -979,7 +976,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    height: height * 0.8,
+    height: '80%',  // % of the full-screen overlay — reflows on resize/rotation
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

@@ -7,7 +7,7 @@ import {
   Image,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
@@ -21,8 +21,6 @@ import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const getOptimizedUrl = (url, type = 'image') => {
@@ -56,6 +54,10 @@ const processPost = (post) => ({
 const PostDetail = ({ route, navigation }) => {
   const { t } = useI18n();
   const { postId, commentId, shouldOpenComments } = route.params;
+  // Reactive media width — capped + centered on wide screens; reflows on
+  // rotation / web resize (was a module-scope Dimensions.get snapshot).
+  const { width: winW } = useWindowDimensions();
+  const mediaFrameW = Math.min(winW - spacing.md * 2, 600);
   const [commentsVisible, setCommentsVisible] = useState(false);
   const flatListRef = useRef(null);
   const [post, setPost] = useState(null);
@@ -252,7 +254,7 @@ const PostDetail = ({ route, navigation }) => {
         </View>
 
         {/* Media */}
-        <View style={[styles.mediaFrame, { aspectRatio }]}>
+        <View style={[styles.mediaFrame, { aspectRatio, width: mediaFrameW }]}>
           {mediaError ? (
             <View style={styles.errorMediaContainer}>
               <Feather name="image" size={44} color={colors.textMuted} />
@@ -429,7 +431,7 @@ const styles = StyleSheet.create({
 
   mediaFrame: {
     // Cap + center on wide screens (tablets) so the media doesn't stretch huge.
-    width: Math.min(SCREEN_WIDTH - spacing.md * 2, 600),
+    // width applied inline via useWindowDimensions() so it reflows on resize.
     marginTop: spacing.xs,
     borderRadius: radius.lg,
     overflow: 'hidden',

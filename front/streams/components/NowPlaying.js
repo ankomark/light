@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, Image, StyleSheet, TouchableOpacity, ScrollView,
-  Dimensions, ActivityIndicator, Platform, StatusBar,
+  useWindowDimensions, ActivityIndicator, Platform, StatusBar,
 } from 'react-native';
 import SeekBar from './SeekBar';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -11,8 +11,6 @@ import { usePlayer } from '../context/PlayerContext';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const { width } = Dimensions.get('window');
-const ART = Math.min(width - spacing.lg * 2, 340);
 const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 8 : 54;
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
@@ -33,6 +31,11 @@ const upscaleCover = (url) => {
 const NowPlaying = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
+  // Reactive artwork size — reflows on rotation / web resize (was a module-scope
+  // Dimensions.get snapshot captured once at import).
+  const { width: winW } = useWindowDimensions();
+  const artSize = Math.min(winW - spacing.lg * 2, 340);
+  const artDim = { width: artSize, height: artSize };
   const {
     currentTrack,
     isPlaying,
@@ -139,11 +142,11 @@ const NowPlaying = () => {
         ) : cover ? (
           <Image
             source={{ uri: cover }}
-            style={styles.art}
+            style={[styles.art, artDim]}
             onError={() => setCoverFailed(true)}
           />
         ) : (
-          <View style={[styles.art, styles.artPlaceholder]}>
+          <View style={[styles.art, styles.artPlaceholder, artDim]}>
             <Ionicons name="musical-notes" size={72} color={colors.textMuted} />
           </View>
         )}
@@ -229,8 +232,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   art: {
-    width: ART,
-    height: ART,
     borderRadius: radius.xl,
     backgroundColor: colors.surface,
     ...shadows.lg,

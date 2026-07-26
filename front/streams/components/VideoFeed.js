@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, FlatList, Dimensions, StyleSheet, ActivityIndicator,
+  View, Text, FlatList, useWindowDimensions, StyleSheet, ActivityIndicator,
   TouchableOpacity, Image, StatusBar, Animated,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -21,12 +21,12 @@ import { LikeButton, SaveButton, ShareButton } from './SocialActions';
 import CommentAction from './CommentAction';
 import { colors, typography } from '../constants/theme';
 
-const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 // ── A single full-screen video page ─────────────────────────────────────────
 const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute, currentUser, navigation, bottomOffset = 120 }) => {
   const videoRef = useRef(null);
+  const { width: screenW } = useWindowDimensions();
   const { preferences } = usePreferences();
   const { t } = useI18n();
   // One resolver drives both autoplay and buffering, so "Data saver" and the
@@ -126,7 +126,7 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
   }, [isActive, handleDoubleTapLike]);
 
   return (
-    <View style={{ height, width: SCREEN_W, backgroundColor: '#000' }}>
+    <View style={{ height, width: screenW, backgroundColor: '#000' }}>
       {uri && !errored ? (
         <AppVideo
           ref={videoRef}
@@ -255,6 +255,9 @@ const VideoFeed = () => {
   const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
   const player = usePlayer();
+  // Initial page height from the live window (onLayout below is the source of
+  // truth and corrects it on resize/rotation).
+  const { height: winH } = useWindowDimensions();
 
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -263,7 +266,7 @@ const VideoFeed = () => {
   const [muted, setMuted] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [screenFocused, setScreenFocused] = useState(true);
-  const [containerH, setContainerH] = useState(SCREEN_H);
+  const [containerH, setContainerH] = useState(winH);
   const [tab, setTab] = useState('foryou'); // 'foryou' (all) | 'following'
 
   const activeIdRef = useRef(null);

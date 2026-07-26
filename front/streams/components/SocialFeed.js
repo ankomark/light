@@ -8,7 +8,7 @@ import {
   Alert,
   TouchableOpacity,
   Pressable,
-  Dimensions,
+  useWindowDimensions,
   Platform,
   AppState,
   Animated,
@@ -55,7 +55,13 @@ const FEED_REASON = {
 // as a centered column instead of stretching edge-to-edge; on phones it's just
 // the window width minus the 12px side margins, so their layout is unchanged.
 const MAX_FEED_W = 600;
-const CARD_W = Math.min(Dimensions.get('window').width - 24, MAX_FEED_W);
+// Reactive feed-card width: full width minus gutters on phones, capped at
+// MAX_FEED_W (centered column) on tablets/web. A hook — not a module-scope
+// Dimensions.get snapshot — so it reflows on rotation / web resize.
+const useCardWidth = () => {
+  const { width } = useWindowDimensions();
+  return Math.min(width - 24, MAX_FEED_W);
+};
 
 // Compact relative time, e.g. "now", "5m", "3h", "2d", "4w", or a date.
 const timeAgo = (dateStr) => {
@@ -152,6 +158,7 @@ const processPost = (post, existingFollowStates = {}) => {
 // ratio so the card height is steady as you swipe; dots + a counter show progress.
 const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPressSlide }) {
   const [index, setIndex] = useState(0);
+  const cardW = useCardWidth();
   return (
     <View style={[styles.mediaContainer, { aspectRatio }]}>
       <FlatList
@@ -161,12 +168,12 @@ const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPre
         showsHorizontalScrollIndicator={false}
         style={{ width: '100%', height: '100%' }}
         keyExtractor={(_, i) => `slide_${i}`}
-        getItemLayout={(_, i) => ({ length: CARD_W, offset: CARD_W * i, index: i })}
+        getItemLayout={(_, i) => ({ length: cardW, offset: cardW * i, index: i })}
         onMomentumScrollEnd={(e) =>
-          setIndex(Math.round(e.nativeEvent.contentOffset.x / CARD_W))
+          setIndex(Math.round(e.nativeEvent.contentOffset.x / cardW))
         }
         renderItem={({ item: url }) => (
-          <Pressable onPress={onPressSlide} disabled={!onPressSlide} style={{ width: CARD_W, height: '100%' }}>
+          <Pressable onPress={onPressSlide} disabled={!onPressSlide} style={{ width: cardW, height: '100%' }}>
             <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={150} />
           </Pressable>
         )}
@@ -518,6 +525,7 @@ const PostMedia = React.memo(function PostMedia({
 
 const SocialFeed = ({ showBackground = true }) => {
   const { t } = useI18n();
+  const cardW = useCardWidth();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1070,7 +1078,7 @@ const SocialFeed = ({ showBackground = true }) => {
   ), [currentUser?.profile_picture, handleSaveChange, handleLikeChange]);
 
   const renderItem = useCallback(({ item }) => (
-    <View style={styles.postContainer}>
+    <View style={[styles.postContainer, { width: cardW }]}>
       {renderPostHeader({ item })}
       <PostMedia
         item={item}
@@ -1084,7 +1092,7 @@ const SocialFeed = ({ showBackground = true }) => {
       />
       {renderPostFooter({ item })}
     </View>
-  ), [renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
+  ), [cardW, renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
       currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback, handleDoubleTapLike]);
 
   const renderEmptyComponent = useCallback(() => {
@@ -1371,7 +1379,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 18,
     marginVertical: 8,
-    width: CARD_W,        // window-24 on phones, capped at MAX_FEED_W on tablets
+    // width applied inline via useCardWidth() so it reflows on resize/rotation
     alignSelf: 'center',  // centered column on wide screens
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,

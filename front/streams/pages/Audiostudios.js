@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Modal,
-  Dimensions,
   Image
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -18,8 +17,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { fetchAudiostudios, createAudiostudio, updateAudiostudio, deleteAudiostudio } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
-
-const { height } = Dimensions.get('window');
 
 const Audiostudios = () => {
   const { t } = useI18n();
@@ -591,7 +588,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    height: height * 0.7,
+    height: '70%',  // % of the full-screen overlay — reflows on resize/rotation
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

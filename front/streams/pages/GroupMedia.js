@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator,
-  Modal, Pressable, Dimensions, Linking,
+  Modal, Pressable, useWindowDimensions, Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,13 +11,15 @@ import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const { width: SCREEN_W } = Dimensions.get('window');
 const COLS = 3;
 const GAP = 3;
-const TILE = Math.floor((SCREEN_W - GAP * (COLS - 1)) / COLS);
 
 const GroupMedia = (props) => {
   const { t } = useI18n();
+  // Reactive media-grid tile — reflows on rotation / web resize (was a
+  // module-scope Dimensions.get snapshot).
+  const { width: winW } = useWindowDimensions();
+  const tile = Math.floor((winW - GAP * (COLS - 1)) / COLS);
   const groupSlug = props.groupSlug ?? props.route?.params?.groupSlug;
   const onClose = props.onClose ?? (() => props.navigation?.goBack());
 
@@ -52,7 +54,7 @@ const GroupMedia = (props) => {
   };
 
   const renderTile = ({ item }) => (
-    <TouchableOpacity style={styles.tile} activeOpacity={0.85} onPress={() => openItem(item)}>
+    <TouchableOpacity style={[styles.tile, { width: tile, height: tile }]} activeOpacity={0.85} onPress={() => openItem(item)}>
       {item.message_type === 'image' ? (
         <Image
           source={{ uri: item.attachment }}
@@ -138,7 +140,7 @@ const styles = StyleSheet.create({
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   grid: { gap: GAP, paddingBottom: spacing.xl, flexGrow: 1 },
-  tile: { width: TILE, height: TILE, borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(16,46,80,0.55)' },
+  tile: { borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(16,46,80,0.55)' },  // width/height inline (reactive)
   tileImage: { width: '100%', height: '100%' },
   tileDoc: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.xs, padding: spacing.xs },
   tileDocName: { ...typography.caption, color: colors.textSecondary, fontSize: 10, textAlign: 'center' },

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, Image, TouchableOpacity, StyleSheet, Dimensions,
+  View, Text, Image, TouchableOpacity, StyleSheet, useWindowDimensions,
   StatusBar, Animated, Easing, PanResponder, ActivityIndicator,
 } from 'react-native';
 import AppVideo from './AppVideo';
@@ -10,7 +10,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { viewStory } from '../services/api';
 import { colors, spacing } from '../constants/theme';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const IMAGE_DURATION = 5000;   // ms an image story is shown
 const VIDEO_MAX_MS = 30000;    // hard 30s cap for video stories
 const LONG_PRESS_MS = 200;     // hold-to-pause threshold
@@ -23,6 +22,12 @@ const StoryViewer = ({ route, navigation }) => {
   const { group } = route.params;
   const insets = useSafeAreaInsets();
   const stories = group.stories ?? [];
+  // Reactive full-screen size — reflows on rotation / web resize (was a
+  // module-scope Dimensions.get snapshot). screenWRef feeds the once-created
+  // PanResponder its live value without re-creating it.
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const screenWRef = useRef(screenW);
+  useEffect(() => { screenWRef.current = screenW; }, [screenW]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -128,9 +133,9 @@ const StoryViewer = ({ route, navigation }) => {
 
   const dismiss = useCallback(() => {
     Animated.timing(translateY, {
-      toValue: SCREEN_H, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true,
+      toValue: screenH, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true,
     }).start(() => navigation.goBack());
-  }, [translateY, navigation]);
+  }, [translateY, navigation, screenH]);
 
   // The PanResponder is created once, so it must reach pause/resume through refs
   // to avoid capturing a stale `isVideo` from the first story in the group.
@@ -184,7 +189,7 @@ const StoryViewer = ({ route, navigation }) => {
           return;
         }
         // A plain tap: left edge goes back, the rest advances.
-        if (e.nativeEvent.locationX < SCREEN_W * PREV_ZONE) goPrevRef.current();
+        if (e.nativeEvent.locationX < screenWRef.current * PREV_ZONE) goPrevRef.current();
         else goNextRef.current();
       },
       onPanResponderTerminate: () => {
@@ -204,7 +209,7 @@ const StoryViewer = ({ route, navigation }) => {
   }
 
   const dragOpacity = translateY.interpolate({
-    inputRange: [0, SCREEN_H], outputRange: [1, 0.3], extrapolate: 'clamp',
+    inputRange: [0, screenH], outputRange: [1, 0.3], extrapolate: 'clamp',
   });
 
   return (
@@ -215,7 +220,7 @@ const StoryViewer = ({ route, navigation }) => {
       {isVideo ? (
         <AppVideo
           source={{ uri: currentStory.media_url }}
-          style={styles.media}
+          style={[styles.media, { width: screenW, height: screenH }]}
           resizeMode="cover"
           shouldPlay={!paused && !mediaLoading}
           isLooping={false}
@@ -225,7 +230,7 @@ const StoryViewer = ({ route, navigation }) => {
       ) : (
         <Image
           source={{ uri: currentStory.media_url }}
-          style={styles.media}
+          style={[styles.media, { width: screenW, height: screenH }]}
           resizeMode="cover"
           onLoad={handleMediaReady}
         />
@@ -299,7 +304,7 @@ function timeAgo(dateStr) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  media: { width: SCREEN_W, height: SCREEN_H, position: 'absolute' },
+  media: { position: 'absolute' },  // width/height applied inline (reactive)
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
