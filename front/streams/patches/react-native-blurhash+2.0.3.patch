@@ -1,0 +1,15 @@
+diff --git a/node_modules/react-native-blurhash/android/src/main/java/com/mrousavy/blurhash/BlurhashViewManager.kt b/node_modules/react-native-blurhash/android/src/main/java/com/mrousavy/blurhash/BlurhashViewManager.kt
+index 0000000..1111111 100644
+--- a/node_modules/react-native-blurhash/android/src/main/java/com/mrousavy/blurhash/BlurhashViewManager.kt
++++ b/node_modules/react-native-blurhash/android/src/main/java/com/mrousavy/blurhash/BlurhashViewManager.kt
+@@ -108,8 +108,8 @@ class BlurhashViewManager :
+     return image
+   }
+
+-  override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any>? {
+-    return MapBuilder.builder<String, Any>()
++  override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any?>? {
++    return MapBuilder.builder<String, Any?>()
+         .put(LoadErrorEvent.EVENT_NAME, MapBuilder.of("registrationName", "onLoadError"))
+         .put(LoadStartEvent.EVENT_NAME, MapBuilder.of("registrationName", "onLoadStart"))
+         .put(LoadEndEvent.EVENT_NAME, MapBuilder.of("registrationName", "onLoadEnd"))
