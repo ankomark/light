@@ -74,11 +74,14 @@ const About = () => {
     }
   };
 
-  const handleEmail = () =>
+  const emailWith = (subject) =>
     openLink(
-      `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} feedback`)}`,
+      `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} — ${subject}`)}`,
       t('about.emailUnavailable'), t
     );
+  const handleEmail = () => emailWith('Feedback');
+  const handleDonate = () => emailWith('Support & Donation');
+  const handlePartner = () => emailWith('Collaboration & Partnership');
 
   return (
     <View style={styles.root}>
@@ -124,6 +127,19 @@ const About = () => {
             </Text>
           </View>
 
+          {/* ── Vision ─────────────────────────────────────────── */}
+          <View style={styles.card}>
+            <View style={styles.visionIcon}>
+              <MaterialCommunityIcons name="white-balance-sunny" size={22} color={colors.white} />
+            </View>
+            <Text style={styles.sectionTitle}>Built for the glory of God</Text>
+            <Text style={styles.paragraph}>
+              {APP_NAME} was created to honour the great Kingdom of God — a digital home where
+              believers everywhere can worship, learn and grow together. Everything we build is
+              offered as a small act of service to that greater purpose.
+            </Text>
+          </View>
+
           {/* ── Feature grid ───────────────────────────────────── */}
           <Text style={[styles.sectionTitle, styles.gridTitle]}>{t('about.whatsInside')}</Text>
           <View style={styles.grid}>
@@ -136,6 +152,55 @@ const About = () => {
                 <Text style={styles.featureDesc}>{t(f.descKey)}</Text>
               </View>
             ))}
+          </View>
+
+          {/* ── Founder ────────────────────────────────────────── */}
+          <Text style={[styles.sectionTitle, styles.gridTitle]}>The Founder</Text>
+          <View style={styles.card}>
+            <View style={styles.founderHead}>
+              <View style={styles.founderAvatar}>
+                <MaterialCommunityIcons name="account-tie" size={30} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.founderName}>Eng. Anko Mark</Text>
+                <Text style={styles.founderRole}>Founder · Full-stack Software Engineer</Text>
+              </View>
+            </View>
+            <Text style={[styles.paragraph, { marginTop: spacing.sm }]}>
+              {APP_NAME} was founded by Eng. Anko Mark, a full-stack software engineer with years
+              of experience. Development began in 2023, and Version 1 was released in 2026 — the
+              fruit of a long labour of love and faith.
+            </Text>
+          </View>
+
+          {/* ── Support / donations ────────────────────────────── */}
+          <Text style={[styles.sectionTitle, styles.gridTitle]}>Support the mission</Text>
+          <View style={styles.card}>
+            <Text style={styles.paragraph}>
+              Keeping {APP_NAME} online — its servers, storage and live streaming — carries real,
+              ongoing costs. If the app has blessed you, we prayerfully invite you to help keep it
+              running. Every gift, however small, is deeply appreciated and goes toward serving the
+              community for the glory of God.
+            </Text>
+            <TouchableOpacity style={styles.ctaBtn} onPress={handleDonate} activeOpacity={0.85}>
+              <Ionicons name="heart" size={18} color={colors.white} />
+              <Text style={styles.ctaBtnText}>Support with a donation</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Partner & serve ────────────────────────────────── */}
+          <Text style={[styles.sectionTitle, styles.gridTitle]}>Partner &amp; serve with us</Text>
+          <View style={styles.card}>
+            <Text style={styles.paragraph}>
+              We warmly welcome partners — developers, sponsors and volunteers — who would like to
+              help make {APP_NAME} even better and take it premium. We are also forming a board of
+              management with members from across borders. If you feel called to collaborate or
+              serve, please reach out through the contact email below.
+            </Text>
+            <TouchableOpacity style={styles.ctaBtnOutline} onPress={handlePartner} activeOpacity={0.85}>
+              <Ionicons name="people" size={18} color={colors.primary} />
+              <Text style={styles.ctaBtnOutlineText}>Get involved</Text>
+            </TouchableOpacity>
           </View>
 
           {/* ── Get in touch ───────────────────────────────────── */}
@@ -274,6 +339,36 @@ const makeStyles = (colors) => StyleSheet.create({
   sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
   gridTitle: { marginTop: spacing.xs },
   paragraph: { ...typography.body, color: colors.textSecondary },
+
+  // Vision
+  visionIcon: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm, ...shadows.sm,
+  },
+
+  // Founder
+  founderHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  founderAvatar: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: colors.inputBg,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.border,
+  },
+  founderName: { ...typography.h3, color: colors.textPrimary },
+  founderRole: { ...typography.caption, color: colors.primary, fontWeight: '700', marginTop: 2 },
+
+  // Call-to-action buttons
+  ctaBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.primary, borderRadius: radius.full, paddingVertical: spacing.sm + 2,
+    marginTop: spacing.md, ...shadows.sm,
+  },
+  ctaBtnText: { color: colors.white, fontWeight: '800', fontSize: 15 },
+  ctaBtnOutline: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.primary,
+    borderRadius: radius.full, paddingVertical: spacing.sm + 2, marginTop: spacing.md,
+  },
+  ctaBtnOutlineText: { color: colors.primary, fontWeight: '800', fontSize: 15 },
 
   grid: {
     flexDirection: 'row',
