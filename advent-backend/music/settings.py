@@ -69,6 +69,24 @@ ALLOWED_HOSTS = [
 if DEBUG:
     ALLOWED_HOSTS = ['*']
 
+# ── Production HTTPS hardening ────────────────────────────────────────────────
+# Gated to the real deploy only (Railway auto-sets RAILWAY_ENVIRONMENT) so local
+# dev — even running with DEBUG off against the shared DB — never redirects to
+# HTTPS or drops insecure cookies. Railway terminates TLS at the edge and
+# forwards the original scheme in X-Forwarded-Proto, so we trust that, then
+# force HTTPS + HSTS and mark cookies secure. SSL redirect is env-overridable in
+# case a platform health check ever hits plain HTTP (set DJANGO_SSL_REDIRECT=False).
+if os.getenv('RAILWAY_ENVIRONMENT'):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = os.getenv('DJANGO_SSL_REDIRECT', 'True') == 'True'
+    SECURE_HSTS_SECONDS = 31536000            # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = False               # enable + submit once on a custom domain
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+
 # Start from django-cors-headers' safe defaults (accept, authorization,
 # content-type, origin, user-agent, x-csrftoken, x-requested-with, …) and add
 # the app-specific headers the web build sends. apiRequest() tags every call
