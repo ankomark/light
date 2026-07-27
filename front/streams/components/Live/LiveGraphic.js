@@ -180,7 +180,10 @@ export default function LiveGraphic({ graphic, insets, bottomOffset = 160, kbHei
 const CARD = 'rgba(6,13,26,0.72)';
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute' },
+  // Above the top scrim (zIndex 2) so a top-anchored banner is grabbable to
+  // drag; still below the dock (zIndex 4). The wrap is box-none, so only the
+  // graphic itself captures touches — the header controls stay tappable.
+  wrap: { position: 'absolute', zIndex: 3 },
   dragHint: {
     position: 'absolute', top: -18, left: 8, backgroundColor: 'rgba(6,13,26,0.7)',
     paddingHorizontal: 7, paddingVertical: 1, borderRadius: 6,
