@@ -25,7 +25,7 @@ const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 // Resolved at render — module scope can't call t().
 const TAGLINE_KEY = 'about.tagline';
-const SUPPORT_EMAIL = 'ankomark76@gmail.com';
+const SUPPORT_EMAIL = 'adventistlight145@gmail.com';
 const WEBSITE_URL = '';        // set when available
 // Privacy / Terms / Guidelines now open in-app screens (see LegalPage) instead
 // of external URLs.

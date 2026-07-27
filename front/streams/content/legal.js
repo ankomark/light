@@ -15,7 +15,7 @@ export const LEGAL = {
   entity: 'Adventist Life',            // legal entity / operator name
   jurisdiction: '[your country/state]', // governing law + courts
   effectiveDate: '[effective date]',    // e.g. "1 August 2026"
-  contactEmail: 'ankomark76@gmail.com',
+  contactEmail: 'adventistlight145@gmail.com',
 };
 
 const P = (updated, intro, sections) => ({ updated, intro, sections });
