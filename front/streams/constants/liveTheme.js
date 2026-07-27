@@ -37,6 +37,7 @@ export const live = {
 
   // Gradients (arrays for expo-linear-gradient `colors`)
   gradCta: ['#F4D9A0', '#C9A25E'],
+  gradEnd: ['#F0555A', '#C42B30'],   // refined crimson for the End-live action
   gradHero: ['rgba(6,13,26,0.35)', 'transparent', 'rgba(6,13,26,0.92)'],
   gradTile: ['transparent', 'rgba(6,13,26,0.90)'],
   gradScrimTop: ['rgba(6,13,26,0.90)', 'rgba(6,13,26,0.30)', 'transparent'],
@@ -49,6 +50,13 @@ export const live = {
 // or gradient, so this degrades cleanly.
 export const goldGlow = Platform.select({
   ios: { shadowColor: '#E8C583', shadowOpacity: 0.55, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  android: { elevation: 6 },
+  default: {},
+});
+
+// Soft red glow for the End-live action (iOS tinted shadow; Android elevation).
+export const redGlow = Platform.select({
+  ios: { shadowColor: '#E5484A', shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
   android: { elevation: 6 },
   default: {},
 });

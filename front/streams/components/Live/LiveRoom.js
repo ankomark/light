@@ -27,7 +27,7 @@ import {
   fetchCohostToken, moderateBroadcast, followUser, reactBroadcast, setBroadcastOverlay,
 } from '../../services/api';
 import { typography, spacing, radius, shadows } from '../../constants/theme';
-import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
+import { live, goldGlow, redGlow, fmtCount } from '../../constants/liveTheme';
 import { LiveBadge, ViewPill, GoldRing } from './LivePrimitives';
 import LiveChat from './LiveChat';
 import FloatingReactions from './FloatingReactions';
@@ -691,8 +691,11 @@ const RoomInner = ({
             <MaterialCommunityIcons name="subtitles-outline" size={22} color={graphic ? live.gold : '#fff'} />
           </TouchableOpacity>
           {isHost ? (
-            <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={endLive}>
-              <Ionicons name="stop" size={20} color="#fff" /><Text style={styles.ctrlText}>End</Text>
+            <TouchableOpacity style={styles.endWrap} onPress={endLive} activeOpacity={0.88}>
+              <LinearGradient colors={live.gradEnd} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.endBtn}>
+                <View style={styles.endDot}><Ionicons name="stop" size={11} color="#fff" /></View>
+                <Text style={styles.endText}>End live</Text>
+              </LinearGradient>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
@@ -1019,6 +1022,19 @@ const styles = StyleSheet.create({
   ctrlMuted: { opacity: 0.6 },
   ctrlOn: { borderColor: live.gold },
   ctrlEnd: { backgroundColor: live.live, borderColor: live.live, flex: 1 },
+
+  // Professional End-live button: crimson gradient pill, red glow, filled stop.
+  endWrap: { flex: 1, borderRadius: radius.full, ...redGlow },
+  endBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 52, borderRadius: radius.full, paddingHorizontal: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.28)',
+  },
+  endDot: {
+    width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  endText: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
   ctrlText: { ...typography.label, color: '#fff', fontWeight: '700' },
 
   // ── Portrait full-bleed (TikTok-style) ──────────────────────────────────────
