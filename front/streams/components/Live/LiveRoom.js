@@ -31,6 +31,8 @@ import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
 import { LiveBadge, ViewPill, GoldRing } from './LivePrimitives';
 import LiveChat from './LiveChat';
 import FloatingReactions from './FloatingReactions';
+import LiveGraphic from './LiveGraphic';
+import GraphicComposer from './GraphicComposer';
 import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 import { useI18n } from '../../context/I18nContext';
 
@@ -226,6 +228,11 @@ const RoomInner = ({
   const [likeCount, setLikeCount] = useState(broadcast.like_count || 0);
   const pendingLikesRef = useRef(0); // this viewer's own ❤️ awaiting a server flush
 
+  // On-screen graphic (lower third / banner / name tag / ticker). One at a time.
+  const [graphic, setGraphic] = useState(null);
+  const graphicRef = useRef(null);        // current, so the host can re-send to late joiners
+  const [graphicOpen, setGraphicOpen] = useState(false);
+
   const toggleFollow = useCallback(async () => {
     if (!hostUser.id || followBusy) return;
     setFollowBusy(true);
@@ -379,10 +386,43 @@ const RoomInner = ({
       if (!msg) return;
       if (msg.t === 'chat') pushMessage({ id: msg.id, name: msg.name, text: msg.text, host: !!msg.host });
       else if (msg.t === 'react') { reactionsRef.current?.add(msg.emoji || '❤️'); setLikeCount((c) => c + 1); }
+      else if (msg.t === 'graphic') {
+        const g = msg.visible ? { style: msg.style, title: msg.title, sub: msg.sub } : null;
+        graphicRef.current = g;
+        setGraphic(g);
+      }
     };
     room.on(RoomEvent.DataReceived, onData);
     return () => { room.off(RoomEvent.DataReceived, onData); };
   }, [room, pushMessage]);
+
+  // Host/co-host: publish (or clear) the on-screen graphic to everyone.
+  const publishGraphic = useCallback((g) => {
+    const payload = g
+      ? { v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub }
+      : { v: 1, t: 'graphic', visible: false };
+    graphicRef.current = g || null;
+    setGraphic(g || null);
+    try { room?.localParticipant?.publishData(encodeData(payload), { reliable: true }); } catch {}
+  }, [room]);
+
+  // Re-send the current graphic when someone new joins (data messages don't
+  // reach late joiners), so viewers who arrive mid-stream still see it.
+  useEffect(() => {
+    if (!room || !canPublish) return undefined;
+    const onJoin = () => {
+      const g = graphicRef.current;
+      if (!g) return;
+      try {
+        room.localParticipant.publishData(
+          encodeData({ v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub }),
+          { reliable: true },
+        );
+      } catch {}
+    };
+    room.on(RoomEvent.ParticipantConnected, onJoin);
+    return () => { room.off(RoomEvent.ParticipantConnected, onJoin); };
+  }, [room, canPublish]);
 
   const sendChat = useCallback((text) => {
     const m = { v: 1, t: 'chat', id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: myName, text, host: isHost };
@@ -638,6 +678,9 @@ const RoomInner = ({
               <MaterialCommunityIcons name="camera-flip-outline" size={22} color="#fff" />
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={[styles.ctrlBtn, graphic && styles.ctrlOn]} onPress={() => setGraphicOpen(true)}>
+            <MaterialCommunityIcons name="subtitles-outline" size={22} color={graphic ? live.gold : '#fff'} />
+          </TouchableOpacity>
           {isHost ? (
             <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={endLive}>
               <Ionicons name="stop" size={20} color="#fff" /><Text style={styles.ctrlText}>End</Text>
@@ -675,6 +718,7 @@ const RoomInner = ({
           {hostRowNode}
           {reconnectNode}
           {stageNode}
+          <LiveGraphic graphic={graphic} insets={insets} />
         </View>
         <View style={[styles.sidePanel, { marginBottom: kbHeight }]}>
           {inboxNode}
@@ -684,6 +728,15 @@ const RoomInner = ({
           </View>
           {controlsNode}
         </View>
+        {canPublish && (
+          <GraphicComposer
+            visible={graphicOpen}
+            current={graphic}
+            onShow={publishGraphic}
+            onClear={() => publishGraphic(null)}
+            onClose={() => setGraphicOpen(false)}
+          />
+        )}
       </View>
     );
   }
@@ -707,6 +760,7 @@ const RoomInner = ({
 
       {reconnecting && <View style={styles.reconnectFloat} pointerEvents="none">{reconnectNode}</View>}
 
+      <LiveGraphic graphic={graphic} insets={insets} />
       <FloatingReactions ref={reactionsRef} />
 
       {/* Bottom dock: a frosted blue glass holding the inbox, chat and controls.
@@ -721,6 +775,16 @@ const RoomInner = ({
           </View>
         </BlurView>
       </View>
+
+      {canPublish && (
+        <GraphicComposer
+          visible={graphicOpen}
+          current={graphic}
+          onShow={publishGraphic}
+          onClear={() => publishGraphic(null)}
+          onClose={() => setGraphicOpen(false)}
+        />
+      )}
     </View>
   );
 };
@@ -927,6 +991,7 @@ const styles = StyleSheet.create({
   },
   ctrlGrow: { flex: 1 },
   ctrlMuted: { opacity: 0.6 },
+  ctrlOn: { borderColor: live.gold },
   ctrlEnd: { backgroundColor: live.live, borderColor: live.live, flex: 1 },
   ctrlText: { ...typography.label, color: '#fff', fontWeight: '700' },
 
