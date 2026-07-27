@@ -26,7 +26,9 @@ import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
   fetchCohostToken, moderateBroadcast,
 } from '../../services/api';
-import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { typography, spacing, radius, shadows } from '../../constants/theme';
+import { live, goldGlow } from '../../constants/liveTheme';
+import { LiveBadge, ViewPill } from './LivePrimitives';
 import LiveChat from './LiveChat';
 import FloatingReactions from './FloatingReactions';
 import { useI18n } from '../../context/I18nContext';
@@ -136,7 +138,7 @@ const LiveRoom = ({ navigation, route }) => {
   if (inExpoGo) {
     return (
       <View style={styles.guard}>
-        <MaterialCommunityIcons name="broadcast-off" size={56} color={colors.textSecondary} />
+        <MaterialCommunityIcons name="broadcast-off" size={56} color={live.inkDim} />
         <Text style={styles.guardTitle}>{t('live.needsFullApp')}</Text>
         <Text style={styles.guardText}>{t('live.expoGoNote')}</Text>
         <TouchableOpacity style={styles.guardBtn} onPress={() => navigation.goBack()}>
@@ -326,7 +328,7 @@ const RoomInner = ({
     const onData = (payload) => {
       const msg = decodeData(payload);
       if (!msg) return;
-      if (msg.t === 'chat') pushMessage({ id: msg.id, name: msg.name, text: msg.text });
+      if (msg.t === 'chat') pushMessage({ id: msg.id, name: msg.name, text: msg.text, host: !!msg.host });
       else if (msg.t === 'react') reactionsRef.current?.add(msg.emoji || '❤️');
     };
     room.on(RoomEvent.DataReceived, onData);
@@ -334,11 +336,11 @@ const RoomInner = ({
   }, [room, pushMessage]);
 
   const sendChat = useCallback((text) => {
-    const m = { v: 1, t: 'chat', id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: myName, text };
-    pushMessage({ id: m.id, name: m.name, text: m.text });
+    const m = { v: 1, t: 'chat', id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: myName, text, host: isHost };
+    pushMessage({ id: m.id, name: m.name, text: m.text, host: m.host });
     setDraft('');
     try { room?.localParticipant?.publishData(encodeData(m), { reliable: true }); } catch {}
-  }, [room, myName, pushMessage]);
+  }, [room, myName, pushMessage, isHost]);
 
   const sendReaction = useCallback(() => {
     reactionsRef.current?.add('❤️');
@@ -478,12 +480,11 @@ const RoomInner = ({
   // ── Shared pieces (composed differently for portrait vs landscape) ───────────
   const headerNode = (
     <View style={styles.header}>
-      <View style={styles.liveDot} />
-      <Text style={styles.liveLabel}>LIVE</Text>
+      <LiveBadge />
       <Text style={styles.elapsed}>{elapsed}</Text>
-      <Text style={styles.viewers}><Ionicons name="eye" size={13} color={colors.textSecondary} /> {watching}</Text>
+      <View style={{ marginLeft: 'auto' }}><ViewPill count={watching} /></View>
       <TouchableOpacity style={styles.closeBtn} onPress={isHost ? endLive : leave} hitSlop={10}>
-        <Ionicons name="close" size={24} color={colors.textPrimary} />
+        <Ionicons name="close" size={20} color={live.ink} />
       </TouchableOpacity>
     </View>
   );
@@ -497,7 +498,7 @@ const RoomInner = ({
 
   const stageNode = connecting ? (
     <View style={[styles.connecting, !landscape && styles.centerFill]}>
-      <ActivityIndicator color={colors.accent} />
+      <ActivityIndicator color={live.gold} />
       <Text style={styles.connectingText}>{t('live.connecting')}</Text>
     </View>
   ) : isVideo ? (
@@ -519,7 +520,7 @@ const RoomInner = ({
             <MaterialCommunityIcons
               name={p.isMicrophoneEnabled ? 'microphone' : 'microphone-off'}
               size={22}
-              color={p.isMicrophoneEnabled ? colors.accent : colors.textMuted}
+              color={p.isMicrophoneEnabled ? live.gold : live.inkMute}
             />
           </View>
           <Text style={styles.speakerName} numberOfLines={1}>{p.name || p.identity}</Text>
@@ -536,7 +537,7 @@ const RoomInner = ({
   const controlsNode = (
     <View style={[styles.controls, landscape && styles.controlsLandscape]}>
       <TouchableOpacity style={styles.ctrlBtn} onPress={sendReaction}>
-        <Ionicons name="heart" size={22} color={colors.error} />
+        <Ionicons name="heart" size={22} color={live.live} />
       </TouchableOpacity>
       {canPublish ? (
         <>
@@ -613,7 +614,7 @@ const RoomInner = ({
 
       {/* Top scrim keeps the header + title legible over bright video. */}
       <LinearGradient
-        colors={['rgba(6,16,32,0.92)', 'rgba(6,16,32,0.35)', 'transparent']}
+        colors={live.gradScrimTop}
         style={[styles.topScrim, { paddingTop: insets.top + spacing.sm }]}
         pointerEvents="box-none"
       >
@@ -705,7 +706,7 @@ const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick 
         <VideoTrack trackRef={trackRef} style={styles.video} objectFit="cover" />
       ) : (
         <View style={styles.videoOff}>
-          <MaterialCommunityIcons name="account" size={big ? 64 : 30} color={colors.textSecondary} />
+          <MaterialCommunityIcons name="account" size={big ? 64 : 30} color={live.inkDim} />
         </View>
       )}
       <View style={styles.videoNameTag}>
@@ -724,7 +725,7 @@ const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick 
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0A1628' },
+  root: { flex: 1, backgroundColor: live.bg },
   inner: { flex: 1, paddingHorizontal: spacing.md },
   // Landscape: video on the left, a chat/controls side panel on the right.
   innerLandscape: { flexDirection: 'row' },
@@ -735,18 +736,18 @@ const styles = StyleSheet.create({
   bottomRowLandscape: { flex: 1 },
   controlsLandscape: { flexWrap: 'wrap', justifyContent: 'center' },
 
-  guard: { flex: 1, backgroundColor: '#0A1628', alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
-  guardTitle: { ...typography.h2, color: colors.textPrimary, textAlign: 'center' },
-  guardText: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
-  guardBtn: { backgroundColor: colors.accent, borderRadius: radius.full, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm + 2, marginTop: spacing.sm },
-  guardBtnText: { ...typography.button, color: '#0A1628', fontWeight: '800' },
+  guard: { flex: 1, backgroundColor: live.bg, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
+  guardTitle: { ...typography.h2, color: live.ink, textAlign: 'center' },
+  guardText: { ...typography.body, color: live.inkDim, textAlign: 'center' },
+  guardBtn: { backgroundColor: live.gold, borderRadius: radius.full, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm + 2, marginTop: spacing.sm },
+  guardBtnText: { ...typography.button, color: live.onGold, fontWeight: '800' },
 
-  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  liveDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.error },
-  liveLabel: { ...typography.caption, color: colors.error, fontWeight: '900', letterSpacing: 1 },
-  elapsed: { ...typography.caption, color: colors.textSecondary, marginLeft: spacing.sm, fontVariant: ['tabular-nums'] },
-  viewers: { ...typography.caption, color: colors.textSecondary, marginLeft: spacing.sm },
-  closeBtn: { marginLeft: 'auto', width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  elapsed: { ...typography.caption, color: live.inkDim, fontVariant: ['tabular-nums'], fontWeight: '600' },
+  closeBtn: {
+    width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(6,13,26,0.45)', borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
+  },
 
   reconnect: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, alignSelf: 'center',
@@ -755,10 +756,10 @@ const styles = StyleSheet.create({
   },
   reconnectText: { ...typography.caption, color: '#fff', fontWeight: '700' },
 
-  title: { ...typography.h2, color: colors.textPrimary, marginTop: spacing.md },
-  kind: { ...typography.caption, color: colors.accent, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
+  title: { ...typography.h2, color: live.ink, marginTop: spacing.md },
+  kind: { ...typography.caption, color: live.gold, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
   sectionLabel: {
-    ...typography.label, color: colors.accent, fontWeight: '700', textTransform: 'uppercase',
+    ...typography.label, color: live.gold, fontWeight: '700', textTransform: 'uppercase',
     letterSpacing: 0.8, marginTop: spacing.lg, marginBottom: spacing.sm,
   },
 
@@ -772,9 +773,9 @@ const styles = StyleSheet.create({
     width: 110, aspectRatio: 3 / 4, borderRadius: radius.md, overflow: 'hidden',
     backgroundColor: '#000', borderWidth: 2, borderColor: 'rgba(255,255,255,0.10)',
   },
-  tileSpeaking: { borderColor: colors.accent },
+  tileSpeaking: { borderColor: live.gold, ...goldGlow },
   video: { flex: 1, backgroundColor: '#000' },
-  videoOff: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  videoOff: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: live.navy },
   videoNameTag: {
     position: 'absolute', left: 6, bottom: 6, flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 8, paddingVertical: 2,
@@ -788,15 +789,15 @@ const styles = StyleSheet.create({
 
   speakerWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   connecting: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
-  connectingText: { ...typography.body, color: colors.textSecondary },
+  connectingText: { ...typography.body, color: live.inkDim },
   speaker: { alignItems: 'center', width: 80, gap: 4 },
   speakerAvatar: {
     width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(16,28,46,0.9)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)',
   },
-  speakerActive: { borderColor: colors.accent },
-  speakerName: { ...typography.caption, color: colors.textPrimary, fontWeight: '600' },
-  removeText: { ...typography.caption, color: colors.error, fontSize: 10 },
+  speakerActive: { borderColor: live.gold, ...goldGlow },
+  speakerName: { ...typography.caption, color: live.ink, fontWeight: '600' },
+  removeText: { ...typography.caption, color: live.live, fontSize: 10 },
 
   inbox: {
     backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.lg,
@@ -804,12 +805,12 @@ const styles = StyleSheet.create({
     padding: spacing.sm, marginTop: spacing.md,
   },
   reqRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
-  reqName: { flex: 1, ...typography.label, color: colors.textPrimary },
+  reqName: { flex: 1, ...typography.label, color: live.ink },
   reqBtn: { paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs, borderRadius: radius.md },
-  reqApprove: { backgroundColor: colors.accent },
-  reqApproveText: { ...typography.caption, color: '#0A1628', fontWeight: '800' },
+  reqApprove: { backgroundColor: live.gold },
+  reqApproveText: { ...typography.caption, color: live.onGold, fontWeight: '800' },
   reqReject: { backgroundColor: 'rgba(255,255,255,0.08)' },
-  reqRejectText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  reqRejectText: { ...typography.caption, color: live.inkDim, fontWeight: '700' },
 
   bottomRow: { minHeight: 80, justifyContent: 'flex-end' },
   chat: { },
@@ -823,7 +824,7 @@ const styles = StyleSheet.create({
   },
   ctrlGrow: { flex: 1 },
   ctrlMuted: { opacity: 0.6 },
-  ctrlEnd: { backgroundColor: colors.error, borderColor: colors.error, flex: 1 },
+  ctrlEnd: { backgroundColor: live.live, borderColor: live.live, flex: 1 },
   ctrlText: { ...typography.label, color: '#fff', fontWeight: '700' },
 
   // ── Portrait full-bleed (TikTok-style) ──────────────────────────────────────
@@ -841,16 +842,16 @@ const styles = StyleSheet.create({
     ...typography.h3, color: '#fff', fontWeight: '800', marginTop: spacing.xs,
     textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
-  kindOverlay: { ...typography.caption, color: colors.accent, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
+  kindOverlay: { ...typography.caption, color: live.gold, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
   reconnectFloat: { position: 'absolute', top: 110, left: 0, right: 0, alignItems: 'center', zIndex: 3 },
 
   dockWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 4 },
   dock: {
     borderTopLeftRadius: radius.xl + 6, borderTopRightRadius: radius.xl + 6, overflow: 'hidden',
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(160,200,255,0.28)',
+    borderTopWidth: 1, borderColor: live.hair,
   },
-  // The blue cast over the blur — frosted "blue glass".
-  dockTint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,46,80,0.46)' },
+  // The blue cast over the blur — frosted "blue glass" with a faint gold sheen at the top edge.
+  dockTint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(14,42,74,0.5)' },
   dockInner: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
   chatFull: { width: '100%' },
 });

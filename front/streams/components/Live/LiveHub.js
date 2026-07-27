@@ -11,62 +11,11 @@ import { useAuth } from '../../context/useAuth';
 import { isSuperAdmin } from '../../utils/roles';
 import { spacing, radius, typography } from '../../constants/theme';
 import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
+import { LiveBadge, GoldRing, ViewPill } from './LivePrimitives';
 import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 const KIND_LABEL = { meet: 'Meet', tv: 'Go-Live' };
-
-// ── A breathing red LIVE dot (ring pulses outward and fades) ──────────────────
-const PulseDot = ({ size = 7 }) => {
-  const a = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(a, { toValue: 1, duration: 1700, useNativeDriver: true }),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [a]);
-  const scale = a.interpolate({ inputRange: [0, 1], outputRange: [1, 2.8] });
-  const opacity = a.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
-  return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <Animated.View style={[
-        styles.dotRing,
-        { width: size, height: size, borderRadius: size / 2, transform: [{ scale }], opacity },
-      ]} />
-      <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: live.live }} />
-    </View>
-  );
-};
-
-const LiveBadge = ({ small }) => (
-  <View style={[styles.liveBadge, small && styles.liveBadgeSm]}>
-    <PulseDot size={small ? 6 : 7} />
-    <Text style={[styles.liveText, small && { fontSize: 8, letterSpacing: 1 }]}>LIVE</Text>
-  </View>
-);
-
-// Champagne ring around the host avatar.
-const GoldRing = ({ uri, size }) => (
-  <LinearGradient
-    colors={[live.goldBright, live.goldDeep]}
-    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-    style={{ width: size + 4, height: size + 4, borderRadius: (size + 4) / 2, padding: 2, ...goldGlow, shadowRadius: 10, elevation: 6 }}
-  >
-    <Image
-      source={uri ? { uri } : DEFAULT_AVATAR}
-      defaultSource={DEFAULT_AVATAR}
-      style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: live.bg, backgroundColor: live.navy }}
-    />
-  </LinearGradient>
-);
-
-const ViewPill = ({ count }) => (
-  <View style={styles.viewPill}>
-    <Ionicons name="eye" size={12} color={live.ink} />
-    <Text style={styles.viewPillText}>{fmtCount(count)}</Text>
-  </View>
-);
 
 const EndBtn = ({ ending, onPress }) =>
   ending ? (
@@ -282,23 +231,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs, marginBottom: spacing.sm, fontSize: 11,
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
-
-  // LIVE badge
-  dotRing: { position: 'absolute', backgroundColor: live.live },
-  liveBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 4,
-    borderRadius: radius.full, backgroundColor: 'rgba(6,13,26,0.5)',
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(229,72,74,0.5)',
-  },
-  liveBadgeSm: { paddingHorizontal: 6, paddingVertical: 2, gap: 4 },
-  liveText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 1.4 },
-
-  viewPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4,
-    borderRadius: radius.full, backgroundColor: 'rgba(6,13,26,0.5)',
-    borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
-  },
-  viewPillText: { color: live.ink, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
 
   // Hero
   hero: {
