@@ -1533,6 +1533,9 @@ export const fetchBroadcastToken = (id) =>
   apiRequest('get', `/live/broadcasts/${id}/token/`);
 export const endBroadcast = (id) =>
   apiRequest('post', `/live/broadcasts/${id}/end/`);
+// Flush a batch of ❤️ reactions to the persisted like tally.
+export const reactBroadcast = (id, count = 1) =>
+  apiRequest('post', `/live/broadcasts/${id}/react/`, { count });
 // Host or super admin: delete a broadcast record (tears down a live room first).
 export const deleteBroadcast = (id) =>
   apiRequest('delete', `/live/broadcasts/${id}/`);

@@ -1,5 +1,6 @@
 from .common import *  # noqa: F401,F403
 import uuid
+from django.db.models import F
 from django.utils import timezone
 from ..models import LiveBroadcast, CoHostRequest
 from ..serializers import LiveBroadcastSerializer, CoHostRequestSerializer
@@ -128,6 +129,21 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             room=b.room_name, can_publish=False,  # viewers are subscribe-only
         )
         return Response(_broadcast_payload(b, token, request))
+
+    # ── Likes (❤️ reactions) ─────────────────────────────────────────────────────
+    @action(detail=True, methods=['post'])
+    def react(self, request, pk=None):
+        """Batch-increment the broadcast's like tally. Clients flush the number
+        of ❤️ reactions they produced since the last call, so the persisted total
+        survives rejoins. Clamped so one call can't inflate the count."""
+        try:
+            n = int(request.data.get('count') or 1)
+        except (TypeError, ValueError):
+            n = 1
+        n = max(1, min(n, 100))
+        LiveBroadcast.objects.filter(pk=pk, status='live').update(like_count=F('like_count') + n)
+        b = get_object_or_404(LiveBroadcast, pk=pk)
+        return Response({'like_count': b.like_count})
 
     # ── End (host or super admin) ───────────────────────────────────────────────
     @action(detail=True, methods=['post'])

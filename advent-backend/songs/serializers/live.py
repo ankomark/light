@@ -1,5 +1,5 @@
 from .common import *  # noqa: F401,F403  (serializers, SimpleUserSerializer)
-from ..models import LiveBroadcast, CoHostRequest
+from ..models import LiveBroadcast, CoHostRequest, FollowRequest
 
 
 class LiveBroadcastSerializer(serializers.ModelSerializer):
@@ -9,13 +9,16 @@ class LiveBroadcastSerializer(serializers.ModelSerializer):
     # Follow / Following button in the live room. False for the host themselves
     # and when there's no authenticated request in context.
     is_following = serializers.SerializerMethodField()
+    # 'following' | 'requested' | 'none' — lets the button show a pending request
+    # (private host) rather than snapping back to Follow.
+    follow_status = serializers.SerializerMethodField()
 
     class Meta:
         model = LiveBroadcast
         fields = [
             'id', 'host', 'kind', 'title', 'status', 'viewer_count',
             'peak_viewer_count', 'duration_seconds', 'started_at', 'ended_at',
-            'is_following',
+            'like_count', 'is_following', 'follow_status',
         ]
         read_only_fields = fields
 
@@ -24,6 +27,16 @@ class LiveBroadcastSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated or request.user.id == obj.host_id:
             return False
         return obj.host.followers.filter(id=request.user.id).exists()
+
+    def get_follow_status(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or request.user.id == obj.host_id:
+            return 'none'
+        if obj.host.followers.filter(id=request.user.id).exists():
+            return 'following'
+        if FollowRequest.objects.filter(requester=request.user, target=obj.host, status='pending').exists():
+            return 'requested'
+        return 'none'
 
 
 class CoHostRequestSerializer(serializers.ModelSerializer):

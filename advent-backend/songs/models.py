@@ -1900,6 +1900,10 @@ class LiveBroadcast(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='live')
     viewer_count = models.PositiveIntegerField(default=0)
     peak_viewer_count = models.PositiveIntegerField(default=0)
+    # Running total of ❤️ reactions the room received — persisted so the count
+    # survives rejoins and reflects the whole session, not just what one viewer
+    # saw. Incremented in batches via the `react` endpoint.
+    like_count = models.PositiveIntegerField(default=0)
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
 

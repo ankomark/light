@@ -24,7 +24,7 @@ import {
 import { Track, RoomEvent, ConnectionState } from 'livekit-client';
 import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
-  fetchCohostToken, moderateBroadcast, followUser,
+  fetchCohostToken, moderateBroadcast, followUser, reactBroadcast,
 } from '../../services/api';
 import { typography, spacing, radius, shadows } from '../../constants/theme';
 import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
@@ -212,24 +212,45 @@ const RoomInner = ({
   // ❤️ reactions the room has sent (driven off the data channel).
   const hostUser = broadcast.host || {};
   const showFollow = !isHost && !!hostUser.id;
-  const [following, setFollowing] = useState(!!broadcast.is_following);
+  const [followState, setFollowState] = useState(
+    broadcast.follow_status || (broadcast.is_following ? 'following' : 'none'),
+  ); // 'none' | 'following' | 'requested'
   const [followBusy, setFollowBusy] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
+  // Seed from the persisted total so the count reflects the whole session, then
+  // keep it live off the data channel.
+  const [likeCount, setLikeCount] = useState(broadcast.like_count || 0);
+  const pendingLikesRef = useRef(0); // this viewer's own ❤️ awaiting a server flush
 
   const toggleFollow = useCallback(async () => {
     if (!hostUser.id || followBusy) return;
     setFollowBusy(true);
-    const next = !following;
-    setFollowing(next); // optimistic
+    const prev = followState;
+    setFollowState(prev === 'none' ? 'following' : 'none'); // optimistic
     try {
       const res = await followUser(hostUser.id);
-      if (res && typeof res.is_following === 'boolean') setFollowing(res.is_following);
+      if (res?.follow_status) setFollowState(res.follow_status);
+      else if (typeof res?.is_following === 'boolean') setFollowState(res.is_following ? 'following' : 'none');
     } catch {
-      setFollowing(!next); // revert on failure
+      setFollowState(prev); // revert on failure
     } finally {
       setFollowBusy(false);
     }
-  }, [hostUser.id, following, followBusy]);
+  }, [hostUser.id, followState, followBusy]);
+
+  // Persist likes in batches so rejoins/other viewers see the real total. Only
+  // this viewer's own reactions are flushed (others' arrive via the data
+  // channel and are flushed by their senders), so the tally isn't multiplied.
+  const flushLikes = useCallback(() => {
+    const n = pendingLikesRef.current;
+    if (n <= 0) return;
+    pendingLikesRef.current = 0;
+    reactBroadcast(broadcast.id, n).catch(() => { pendingLikesRef.current += n; });
+  }, [broadcast.id]);
+
+  useEffect(() => {
+    const iv = setInterval(flushLikes, 5000);
+    return () => { clearInterval(iv); flushLikes(); };
+  }, [flushLikes]);
 
   const [connState, setConnState] = useState(room?.state);
   const [messages, setMessages] = useState([]);
@@ -368,6 +389,7 @@ const RoomInner = ({
   const sendReaction = useCallback(() => {
     reactionsRef.current?.add('❤️');
     setLikeCount((c) => c + 1);
+    pendingLikesRef.current += 1;
     try { room?.localParticipant?.publishData(encodeData({ v: 1, t: 'react', emoji: '❤️' }), { reliable: false }); } catch {}
   }, [room]);
 
@@ -529,10 +551,12 @@ const RoomInner = ({
           onPress={toggleFollow}
           disabled={followBusy}
           activeOpacity={0.85}
-          style={[styles.followBtn, following && styles.followingBtn]}
+          style={[styles.followBtn, followState !== 'none' && styles.followingBtn]}
         >
-          {following ? (
+          {followState === 'following' ? (
             <Text style={styles.followingText}>Following</Text>
+          ) : followState === 'requested' ? (
+            <Text style={styles.followingText}>Requested</Text>
           ) : (
             <>
               <Ionicons name="add" size={14} color={live.onGold} />
