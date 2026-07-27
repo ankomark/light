@@ -693,8 +693,8 @@ const RoomInner = ({
           {isHost ? (
             <TouchableOpacity style={styles.endWrap} onPress={endLive} activeOpacity={0.88}>
               <LinearGradient colors={live.gradEnd} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.endBtn}>
-                <View style={styles.endDot}><Ionicons name="stop" size={11} color="#fff" /></View>
-                <Text style={styles.endText}>End live</Text>
+                <Ionicons name="stop" size={16} color="#fff" />
+                <Text style={styles.endText} numberOfLines={1}>End</Text>
               </LinearGradient>
             </TouchableOpacity>
           ) : (
@@ -1011,7 +1011,7 @@ const styles = StyleSheet.create({
   bottomRow: { minHeight: 80, justifyContent: 'flex-end' },
   chat: { },
 
-  controls: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  controls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   ctrlBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     minWidth: 52, height: 52, paddingHorizontal: spacing.sm,
@@ -1023,16 +1023,12 @@ const styles = StyleSheet.create({
   ctrlOn: { borderColor: live.gold },
   ctrlEnd: { backgroundColor: live.live, borderColor: live.live, flex: 1 },
 
-  // Professional End-live button: crimson gradient pill, red glow, filled stop.
-  endWrap: { flex: 1, borderRadius: radius.full, ...redGlow },
+  // Professional End-live button: crimson gradient pill, red glow.
+  endWrap: { flex: 1, minWidth: 92, borderRadius: radius.full, ...redGlow },
   endBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    height: 52, borderRadius: radius.full, paddingHorizontal: spacing.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    height: 52, borderRadius: radius.full, paddingHorizontal: spacing.sm,
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.28)',
-  },
-  endDot: {
-    width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   endText: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
   ctrlText: { ...typography.label, color: '#fff', fontWeight: '700' },
