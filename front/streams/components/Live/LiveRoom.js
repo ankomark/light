@@ -21,7 +21,7 @@ import {
   LiveKitRoom, AudioSession, useParticipants, useLocalParticipant, useRoomContext,
   useTracks, VideoTrack,
 } from '@livekit/react-native';
-import { Track, RoomEvent, ConnectionState } from 'livekit-client';
+import { Track, RoomEvent, ConnectionState, setLogLevel } from 'livekit-client';
 import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
   fetchCohostToken, moderateBroadcast, followUser, reactBroadcast, setBroadcastOverlay,
@@ -35,6 +35,9 @@ import LiveGraphic from './LiveGraphic';
 import GraphicComposer from './GraphicComposer';
 import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 import { useI18n } from '../../context/I18nContext';
+
+// Quiet LiveKit's very chatty info/debug logging; keep genuine warnings/errors.
+setLogLevel('warn');
 
 // ── data-channel codec (manual UTF-8, no TextEncoder/escape dependency) ───────
 const encodeData = (obj) => {
