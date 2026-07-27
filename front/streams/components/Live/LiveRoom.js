@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
-  KeyboardAvoidingView, Platform, useWindowDimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +31,7 @@ import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
 import { LiveBadge, ViewPill, GoldRing } from './LivePrimitives';
 import LiveChat from './LiveChat';
 import FloatingReactions from './FloatingReactions';
+import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 import { useI18n } from '../../context/I18nContext';
 
 // ── data-channel codec (manual UTF-8, no TextEncoder/escape dependency) ───────
@@ -196,6 +197,10 @@ const RoomInner = ({
   const insets = useSafeAreaInsets();
   const { width: winW, height: winH } = useWindowDimensions();
   const landscape = winW > winH;
+  // Lift the chat dock above the keyboard. KeyboardAvoidingView doesn't work
+  // under edgeToEdgeEnabled (Android stops resizing), so read the keyboard
+  // height directly — the project-wide pattern for chat composers.
+  const kbHeight = useKeyboardHeight();
   const room = useRoomContext();
   const participants = useParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -671,18 +676,14 @@ const RoomInner = ({
           {reconnectNode}
           {stageNode}
         </View>
-        <KeyboardAvoidingView
-          style={styles.sidePanel}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={insets.bottom + 8}
-        >
+        <View style={[styles.sidePanel, { marginBottom: kbHeight }]}>
           {inboxNode}
           <View style={[styles.bottomRow, styles.bottomRowLandscape]}>
             <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat} />
             <FloatingReactions ref={reactionsRef} />
           </View>
           {controlsNode}
-        </KeyboardAvoidingView>
+        </View>
       </View>
     );
   }
@@ -708,21 +709,18 @@ const RoomInner = ({
 
       <FloatingReactions ref={reactionsRef} />
 
-      {/* Bottom dock: a frosted blue glass holding the inbox, chat and controls. */}
-      <KeyboardAvoidingView
-        style={styles.dockWrap}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
-      >
+      {/* Bottom dock: a frosted blue glass holding the inbox, chat and controls.
+          Floats above the keyboard by shifting `bottom` (edge-to-edge safe). */}
+      <View style={[styles.dockWrap, { bottom: kbHeight }]}>
         <BlurView intensity={32} tint="dark" style={styles.dock}>
           <View style={styles.dockTint} pointerEvents="none" />
-          <View style={[styles.dockInner, { paddingBottom: insets.bottom + spacing.sm }]}>
+          <View style={[styles.dockInner, { paddingBottom: kbHeight > 0 ? spacing.sm : insets.bottom + spacing.sm }]}>
             {inboxNode}
             <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chatFull} />
             {controlsNode}
           </View>
         </BlurView>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 };
