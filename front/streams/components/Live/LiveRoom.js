@@ -582,15 +582,25 @@ const RoomInner = ({
     <View style={styles.header}>
       <LiveBadge />
       <Text style={styles.elapsed}>{elapsed}</Text>
+      {isHost && (
+        <TouchableOpacity style={styles.endPillWrap} onPress={endLive} activeOpacity={0.85} hitSlop={6}>
+          <LinearGradient colors={live.gradEnd} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.endPill}>
+            <Ionicons name="stop" size={11} color="#fff" />
+            <Text style={styles.endPillText}>End</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
       <View style={styles.headerRight}>
         <View style={styles.heartPill}>
           <Ionicons name="heart" size={12} color={live.live} />
           <Text style={styles.heartPillText}>{fmtCount(likeCount)}</Text>
         </View>
         <ViewPill count={watching} />
-        <TouchableOpacity style={styles.closeBtn} onPress={isHost ? endLive : leave} hitSlop={10}>
-          <Ionicons name="close" size={20} color={live.ink} />
-        </TouchableOpacity>
+        {!isHost && (
+          <TouchableOpacity style={styles.closeBtn} onPress={leave} hitSlop={10}>
+            <Ionicons name="close" size={20} color={live.ink} />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -690,14 +700,7 @@ const RoomInner = ({
           <TouchableOpacity style={[styles.ctrlBtn, graphic && styles.ctrlOn]} onPress={() => setGraphicOpen(true)}>
             <MaterialCommunityIcons name="subtitles-outline" size={22} color={graphic ? live.gold : '#fff'} />
           </TouchableOpacity>
-          {isHost ? (
-            <TouchableOpacity style={styles.endWrap} onPress={endLive} activeOpacity={0.88}>
-              <LinearGradient colors={live.gradEnd} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.endBtn}>
-                <Ionicons name="stop" size={16} color="#fff" />
-                <Text style={styles.endText} numberOfLines={1}>End</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ) : (
+          {!isHost && (
             <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
               <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>{t('live.leave')}</Text>
             </TouchableOpacity>
@@ -1023,14 +1026,14 @@ const styles = StyleSheet.create({
   ctrlOn: { borderColor: live.gold },
   ctrlEnd: { backgroundColor: live.live, borderColor: live.live, flex: 1 },
 
-  // Professional End-live button: crimson gradient pill, red glow.
-  endWrap: { flex: 1, minWidth: 92, borderRadius: radius.full, ...redGlow },
-  endBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    height: 52, borderRadius: radius.full, paddingHorizontal: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.28)',
+  // End-live: a compact crimson pill in the header, next to the live timer — up
+  // and away from the frequently-tapped controls so it can't be hit by accident.
+  endPillWrap: { borderRadius: radius.full, ...redGlow, shadowRadius: 8, elevation: 4 },
+  endPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 26,
+    borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.28)',
   },
-  endText: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
+  endPillText: { color: '#fff', fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
   ctrlText: { ...typography.label, color: '#fff', fontWeight: '700' },
 
   // ── Portrait full-bleed (TikTok-style) ──────────────────────────────────────
