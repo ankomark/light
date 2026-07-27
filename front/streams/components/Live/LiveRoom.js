@@ -728,6 +728,7 @@ const RoomInner = ({
             graphic={graphic}
             insets={insets}
             bottomOffset={insets.bottom + spacing.lg}
+            kbHeight={kbHeight}
             editable={canPublish}
             onReposition={(pos) => publishGraphic({ ...graphicRef.current, ...pos })}
           />
@@ -775,7 +776,8 @@ const RoomInner = ({
       <LiveGraphic
         graphic={graphic}
         insets={insets}
-        bottomOffset={(dockH || 150) + kbHeight + spacing.sm}
+        bottomOffset={(dockH || 150) + spacing.sm}
+        kbHeight={kbHeight}
         editable={canPublish}
         onReposition={(pos) => publishGraphic({ ...graphicRef.current, ...pos })}
       />

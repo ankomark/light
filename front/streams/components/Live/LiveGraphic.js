@@ -50,7 +50,7 @@ function Ticker({ text }) {
   );
 }
 
-export default function LiveGraphic({ graphic, insets, bottomOffset = 160, editable = false, onReposition }) {
+export default function LiveGraphic({ graphic, insets, bottomOffset = 160, kbHeight = 0, editable = false, onReposition }) {
   const { width: W, height: H } = useWindowDimensions();
   const reduced = useReducedMotion();
   const anim = useRef(new Animated.Value(0)).current;
@@ -121,11 +121,15 @@ export default function LiveGraphic({ graphic, insets, bottomOffset = 160, edita
     layoutRef.current = { x, y, w: width, h: height };
   };
 
-  const enter = reduced ? null : {
-    opacity: anim,
-    transform: [{ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [s === 'banner' ? 0 : -40, 0] }) },
-      { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [s === 'banner' ? -20 : 0, 0] }) }],
-  };
+  // Enter animation + a uniform lift by the keyboard height (project-wide
+  // pattern) so the graphic rides above the keyboard like the chat dock does.
+  const tf = [];
+  if (!reduced) {
+    tf.push({ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [s === 'banner' ? 0 : -40, 0] }) });
+    tf.push({ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [s === 'banner' ? -20 : 0, 0] }) });
+  }
+  if (kbHeight) tf.push({ translateY: -kbHeight });
+  const enter = { opacity: reduced ? 1 : anim, transform: tf };
 
   let inner;
   if (s === 'banner') {

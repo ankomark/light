@@ -10,6 +10,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { live } from '../../constants/liveTheme';
+import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 
 const STYLES = [
   { key: 'lower3', label: 'Lower third', icon: 'format-text', sub: true },
@@ -19,6 +20,7 @@ const STYLES = [
 ];
 
 export default function GraphicComposer({ visible, current, onShow, onClear, onClose }) {
+  const kbHeight = useKeyboardHeight();
   const [styleKey, setStyleKey] = useState('lower3');
   const [title, setTitle] = useState('');
   const [sub, setSub] = useState('');
@@ -42,7 +44,7 @@ export default function GraphicComposer({ visible, current, onShow, onClear, onC
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={styles.sheet}>
+        <TouchableOpacity activeOpacity={1} style={[styles.sheet, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
           <View style={styles.handle} />
           <Text style={styles.title}>On-screen text</Text>
 
