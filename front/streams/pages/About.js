@@ -29,7 +29,7 @@ const SUPPORT_EMAIL = 'adventistlight145@gmail.com';
 const WEBSITE_URL = '';        // set when available
 // Privacy / Terms / Guidelines now open in-app screens (see LegalPage) instead
 // of external URLs.
-const LOGO = require('../assets/logo.png');
+const LOGO = require('../assets/logo-mark.png');
 
 const FEATURES = [
   { icon: 'book-music-outline', labelKey: 'about.feature.hymnals', descKey: 'about.feature.hymnalsDesc' },

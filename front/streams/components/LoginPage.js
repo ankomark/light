@@ -51,7 +51,7 @@ const LoginPage = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+        <Image source={require('../assets/logo-mark.png')} style={styles.logo} resizeMode="contain" />
 
         <Text style={styles.title}>{t('auth.welcomeBack')}</Text>
         <Text style={styles.subtitle}>{t('auth.loginSubtitle')}</Text>
@@ -134,8 +134,8 @@ const makeStyles = (colors) => StyleSheet.create({
     backgroundColor: colors.bg,
   },
   logo: {
-    width: 120,
-    height: 60,
+    width: 96,
+    height: 96,
     alignSelf: 'center',
     marginBottom: spacing.md,
   },

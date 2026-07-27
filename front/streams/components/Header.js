@@ -95,7 +95,7 @@ const Header = ({ transparentBg = false }) => {
             style={styles.logoRing}
           >
             <View style={styles.logoDisc}>
-              <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+              <Image source={require('../assets/logo-mark.png')} style={styles.logo} resizeMode="contain" />
             </View>
           </LinearGradient>
 
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  logo: { width: 36, height: 24 },
+  logo: { width: 32, height: 30 },
   // Fills the space between the logo and the icons and centers within it, so the
   // gap to the logo (left) equals the gap to the video icon (right).
   title: {
