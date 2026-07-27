@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 34,
     borderRadius: 26,
-    padding: 3.5,
+    padding: 1.75,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -235,7 +235,7 @@ const styles = StyleSheet.create({
   logoDisc: {
     width: '100%',
     height: '100%',
-    borderRadius: 23.5,
+    borderRadius: 24.5,
     backgroundColor: '#FBF7EE',
     alignItems: 'center',
     justifyContent: 'center',
