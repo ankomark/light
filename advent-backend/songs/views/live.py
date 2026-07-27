@@ -159,10 +159,17 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         if request.data.get('clear') or not title:
             b.overlay = None
         else:
+            def _frac(v):
+                try:
+                    return round(min(1.0, max(0.0, float(v))), 4)
+                except (TypeError, ValueError):
+                    return None
             b.overlay = {
                 'style': request.data.get('style') or 'lower3',
                 'title': title[:120],
                 'sub': (request.data.get('sub') or '').strip()[:80],
+                'x': _frac(request.data.get('x')),
+                'y': _frac(request.data.get('y')),
             }
         b.save(update_fields=['overlay'])
         return Response({'overlay': b.overlay})

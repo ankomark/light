@@ -1,17 +1,21 @@
 /**
  * On-screen broadcast graphics (lower third / banner / name tag / ticker),
- * TikTok-style. Purely presentational: the host authors one via GraphicComposer,
- * it rides the LiveKit data channel, and every client renders the current one
- * here as an overlay above the video. pointerEvents:none so it never blocks the
- * controls. Honors reduce-motion.
+ * TikTok-style. The current graphic rides the LiveKit data channel and every
+ * client renders it here. Publishers (host/co-host) can DRAG it to reposition;
+ * the position is stored normalised (0..1 of screen) so it maps across devices,
+ * synced to everyone and persisted. Viewers see it non-interactive.
  *
- * graphic shape: { style: 'lower3'|'banner'|'nametag'|'ticker', title, sub }
+ * graphic shape: { style, title, sub, x, y }  (x/y normalised top-left, or null)
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native';
+import {
+  View, Text, StyleSheet, Animated, Easing, PanResponder, useWindowDimensions,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { live } from '../../constants/liveTheme';
 import useReducedMotion from '../../utils/useReducedMotion';
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 
 function Ticker({ text }) {
   const reduced = useReducedMotion();
@@ -23,10 +27,8 @@ function Ticker({ text }) {
     x.setValue(width);
     const loop = Animated.loop(
       Animated.timing(x, {
-        toValue: -textW,
-        duration: Math.max(6000, (textW + width) * 14),
-        easing: Easing.linear,
-        useNativeDriver: true,
+        toValue: -textW, duration: Math.max(6000, (textW + width) * 14),
+        easing: Easing.linear, useNativeDriver: true,
       }),
     );
     loop.start();
@@ -48,66 +50,124 @@ function Ticker({ text }) {
   );
 }
 
-export default function LiveGraphic({ graphic, insets, bottomOffset = 160 }) {
+export default function LiveGraphic({ graphic, insets, bottomOffset = 160, editable = false, onReposition }) {
+  const { width: W, height: H } = useWindowDimensions();
   const reduced = useReducedMotion();
   const anim = useRef(new Animated.Value(0)).current;
-  const key = graphic ? `${graphic.style}|${graphic.title}|${graphic.sub || ''}` : '';
 
+  const layoutRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const [drag, setDrag] = useState(null);          // {left, top} px while/after dragging
+  const dragRef = useRef(null); dragRef.current = drag;
+  const startRef = useRef({ left: 0, top: 0 });
+  const editableRef = useRef(editable); editableRef.current = editable;
+  const cbRef = useRef({}); cbRef.current = { W, H, onReposition };
+
+  const key = graphic ? `${graphic.style}|${graphic.title}|${graphic.sub || ''}` : '';
   useEffect(() => {
+    setDrag(null); // a fresh graphic (or an externally-synced move) resets the local drag override
     if (!graphic) return;
     if (reduced) { anim.setValue(1); return; }
     anim.setValue(0);
     Animated.spring(anim, { toValue: 1, friction: 8, tension: 60, useNativeDriver: true }).start();
-  }, [key, graphic, reduced, anim]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => editableRef.current,
+    onMoveShouldSetPanResponder: (_e, g) => editableRef.current && (Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2),
+    onPanResponderGrant: () => {
+      const d = dragRef.current;
+      startRef.current = { left: d ? d.left : layoutRef.current.x, top: d ? d.top : layoutRef.current.y };
+    },
+    onPanResponderMove: (_e, g) => setDrag({ left: startRef.current.left + g.dx, top: startRef.current.top + g.dy }),
+    onPanResponderRelease: (_e, g) => {
+      const { W: w0, H: h0, onReposition: cb } = cbRef.current;
+      const { w, h } = layoutRef.current;
+      const left = clamp(startRef.current.left + g.dx, 0, Math.max(0, w0 - w));
+      const top = clamp(startRef.current.top + g.dy, 0, Math.max(0, h0 - h));
+      setDrag({ left, top });
+      // A pure tap (no real movement) shouldn't re-broadcast.
+      if (Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3) {
+        cb?.({ x: +(left / w0).toFixed(4), y: +(top / h0).toFixed(4) });
+      }
+    },
+  })).current;
 
   if (!graphic || !graphic.title) return null;
   const { style: s, title, sub } = graphic;
+  const cardW = Math.min(W - 32, 520);
 
-  const slideIn = {
-    opacity: anim,
-    transform: [{ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [-40, 0] }) }],
-  };
-  const dropIn = {
-    opacity: anim,
-    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
-  };
-
-  if (s === 'banner') {
-    return (
-      <Animated.View style={[styles.bannerWrap, { top: (insets?.top || 0) + 78 }, dropIn]} pointerEvents="none">
-        <LinearGradient colors={live.gradCta} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.banner}>
-          <Text style={styles.bannerText} numberOfLines={1}>{title}</Text>
-          {sub ? <Text style={styles.bannerSub} numberOfLines={1}>{sub}</Text> : null}
-        </LinearGradient>
-      </Animated.View>
-    );
+  // Resolve position: live drag > explicit x/y > per-preset default.
+  let posStyle;
+  if (drag) {
+    posStyle = { left: drag.left, top: drag.top };
+  } else if (graphic.x != null && graphic.y != null) {
+    posStyle = {
+      left: clamp(graphic.x * W, 0, Math.max(0, W - (layoutRef.current.w || 0))),
+      top: clamp(graphic.y * H, 0, Math.max(0, H - (layoutRef.current.h || 0))),
+    };
+  } else if (s === 'banner') {
+    posStyle = { top: (insets?.top || 0) + 78, left: (W - cardW) / 2 };
+  } else if (s === 'nametag') {
+    posStyle = { left: 16, bottom: bottomOffset };
+  } else if (s === 'ticker') {
+    posStyle = { left: 0, bottom: bottomOffset };
+  } else {
+    posStyle = { left: 16, bottom: bottomOffset };
   }
 
-  if (s === 'nametag') {
-    return (
-      <Animated.View style={[styles.nametag, { bottom: bottomOffset }, slideIn]} pointerEvents="none">
+  const onLayout = (e) => {
+    const { x, y, width, height } = e.nativeEvent.layout;
+    layoutRef.current = { x, y, w: width, h: height };
+  };
+
+  const enter = reduced ? null : {
+    opacity: anim,
+    transform: [{ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [s === 'banner' ? 0 : -40, 0] }) },
+      { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [s === 'banner' ? -20 : 0, 0] }) }],
+  };
+
+  let inner;
+  if (s === 'banner') {
+    inner = (
+      <LinearGradient colors={live.gradCta} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.banner}>
+        <Text style={styles.bannerText} numberOfLines={1}>{title}</Text>
+        {sub ? <Text style={styles.bannerSub} numberOfLines={1}>{sub}</Text> : null}
+      </LinearGradient>
+    );
+  } else if (s === 'nametag') {
+    inner = (
+      <View style={styles.nametag}>
         <View style={styles.nametagBar} />
         <Text style={styles.nametagText} numberOfLines={1}>{title}</Text>
         {sub ? <Text style={styles.nametagSub} numberOfLines={1}> · {sub}</Text> : null}
-      </Animated.View>
+      </View>
+    );
+  } else if (s === 'ticker') {
+    inner = <Ticker text={title} />;
+  } else {
+    inner = (
+      <View style={styles.lower3}>
+        <View style={styles.lower3Bar} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.lower3Title} numberOfLines={2}>{title}</Text>
+          {sub ? <Text style={styles.lower3Sub} numberOfLines={1}>{sub}</Text> : null}
+        </View>
+      </View>
     );
   }
 
-  if (s === 'ticker') {
-    return (
-      <Animated.View style={[styles.tickerOuter, { bottom: bottomOffset }, dropIn]} pointerEvents="none">
-        <Ticker text={title} />
-      </Animated.View>
-    );
-  }
+  const width = s === 'ticker' ? W : (s === 'nametag' ? undefined : cardW);
 
-  // default: lower third
   return (
-    <Animated.View style={[styles.lower3, { bottom: bottomOffset }, slideIn]} pointerEvents="none">
-      <View style={styles.lower3Bar} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.lower3Title} numberOfLines={2}>{title}</Text>
-        {sub ? <Text style={styles.lower3Sub} numberOfLines={1}>{sub}</Text> : null}
+    <Animated.View
+      onLayout={onLayout}
+      pointerEvents={editable ? 'box-none' : 'none'}
+      style={[styles.wrap, posStyle, width != null && { width }, enter]}
+    >
+      <View {...(editable ? pan.panHandlers : {})} pointerEvents={editable ? 'auto' : 'none'}>
+        {editable && <View style={styles.dragHint}><Text style={styles.dragHintText}>drag to move</Text></View>}
+        {inner}
       </View>
     </Animated.View>
   );
@@ -116,9 +176,15 @@ export default function LiveGraphic({ graphic, insets, bottomOffset = 160 }) {
 const CARD = 'rgba(6,13,26,0.72)';
 
 const styles = StyleSheet.create({
-  // Lower third — bottom-left band with a gold accent bar
+  wrap: { position: 'absolute' },
+  dragHint: {
+    position: 'absolute', top: -18, left: 8, backgroundColor: 'rgba(6,13,26,0.7)',
+    paddingHorizontal: 7, paddingVertical: 1, borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair, zIndex: 5,
+  },
+  dragHintText: { color: live.gold, fontSize: 9, fontWeight: '700', letterSpacing: 0.4 },
+
   lower3: {
-    position: 'absolute', left: 16, right: 40,
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: CARD, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,
     borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
@@ -127,18 +193,12 @@ const styles = StyleSheet.create({
   lower3Title: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.2 },
   lower3Sub: { color: live.gold, fontSize: 12.5, fontWeight: '600', marginTop: 2 },
 
-  // Banner — full-width gold strip near the top
-  bannerWrap: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
-  banner: {
-    width: '100%', borderRadius: 999, paddingVertical: 9, paddingHorizontal: 18, alignItems: 'center',
-  },
+  banner: { width: '100%', borderRadius: 999, paddingVertical: 9, paddingHorizontal: 18, alignItems: 'center' },
   bannerText: { color: live.onGold, fontSize: 14.5, fontWeight: '800', letterSpacing: 0.3 },
   bannerSub: { color: 'rgba(42,28,5,0.8)', fontSize: 11.5, fontWeight: '600', marginTop: 1 },
 
-  // Name tag — compact pill bottom-left
   nametag: {
-    position: 'absolute', left: 16, maxWidth: '75%',
-    flexDirection: 'row', alignItems: 'center',
+    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center',
     backgroundColor: CARD, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12,
     borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
   },
@@ -146,11 +206,8 @@ const styles = StyleSheet.create({
   nametagText: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
   nametagSub: { color: live.gold, fontSize: 12, fontWeight: '600' },
 
-  // Ticker — scrolling strip near the bottom
-  tickerOuter: { position: 'absolute', left: 0, right: 0 },
   tickerWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(6,13,26,0.82)',
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(6,13,26,0.82)',
     borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
     paddingVertical: 7,
   },

@@ -1539,7 +1539,9 @@ export const reactBroadcast = (id, count = 1) =>
 // Persist the on-screen graphic (or clear it). Pass null to clear.
 export const setBroadcastOverlay = (id, graphic) =>
   apiRequest('post', `/live/broadcasts/${id}/overlay/`,
-    graphic ? { style: graphic.style, title: graphic.title, sub: graphic.sub } : { clear: true });
+    graphic
+      ? { style: graphic.style, title: graphic.title, sub: graphic.sub, x: graphic.x ?? null, y: graphic.y ?? null }
+      : { clear: true });
 // Host or super admin: delete a broadcast record (tears down a live room first).
 export const deleteBroadcast = (id) =>
   apiRequest('delete', `/live/broadcasts/${id}/`);

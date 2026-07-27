@@ -389,7 +389,9 @@ const RoomInner = ({
       if (msg.t === 'chat') pushMessage({ id: msg.id, name: msg.name, text: msg.text, host: !!msg.host });
       else if (msg.t === 'react') { reactionsRef.current?.add(msg.emoji || '❤️'); setLikeCount((c) => c + 1); }
       else if (msg.t === 'graphic') {
-        const g = msg.visible ? { style: msg.style, title: msg.title, sub: msg.sub } : null;
+        const g = msg.visible
+          ? { style: msg.style, title: msg.title, sub: msg.sub, x: msg.x ?? null, y: msg.y ?? null }
+          : null;
         graphicRef.current = g;
         setGraphic(g);
       }
@@ -401,7 +403,7 @@ const RoomInner = ({
   // Host/co-host: publish (or clear) the on-screen graphic to everyone.
   const publishGraphic = useCallback((g) => {
     const payload = g
-      ? { v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub }
+      ? { v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub, x: g.x ?? null, y: g.y ?? null }
       : { v: 1, t: 'graphic', visible: false };
     graphicRef.current = g || null;
     setGraphic(g || null);
@@ -419,7 +421,7 @@ const RoomInner = ({
       if (!g) return;
       try {
         room.localParticipant.publishData(
-          encodeData({ v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub }),
+          encodeData({ v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub, x: g.x ?? null, y: g.y ?? null }),
           { reliable: true },
         );
       } catch {}
@@ -722,7 +724,13 @@ const RoomInner = ({
           {hostRowNode}
           {reconnectNode}
           {stageNode}
-          <LiveGraphic graphic={graphic} insets={insets} bottomOffset={insets.bottom + spacing.lg} />
+          <LiveGraphic
+            graphic={graphic}
+            insets={insets}
+            bottomOffset={insets.bottom + spacing.lg}
+            editable={canPublish}
+            onReposition={(pos) => publishGraphic({ ...graphicRef.current, ...pos })}
+          />
         </View>
         <View style={[styles.sidePanel, { marginBottom: kbHeight }]}>
           {inboxNode}
@@ -764,7 +772,13 @@ const RoomInner = ({
 
       {reconnecting && <View style={styles.reconnectFloat} pointerEvents="none">{reconnectNode}</View>}
 
-      <LiveGraphic graphic={graphic} insets={insets} bottomOffset={(dockH || 150) + kbHeight + spacing.sm} />
+      <LiveGraphic
+        graphic={graphic}
+        insets={insets}
+        bottomOffset={(dockH || 150) + kbHeight + spacing.sm}
+        editable={canPublish}
+        onReposition={(pos) => publishGraphic({ ...graphicRef.current, ...pos })}
+      />
       <FloatingReactions ref={reactionsRef} />
 
       {/* Bottom dock: a frosted blue glass holding the inbox, chat and controls.
