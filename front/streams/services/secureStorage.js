@@ -7,12 +7,18 @@ import * as SecureStore from 'expo-secure-store';
  * expo-secure-store ships an empty stub on web (its ExpoSecureStore.web.js is
  * `export default {}`), so its methods throw in the browser — which broke web
  * login (the token was obtained but couldn't be stored). On web we fall back to
- * localStorage; native keeps using the Keychain/Keystore-backed SecureStore.
+ * sessionStorage; native keeps using the Keychain/Keystore-backed SecureStore.
+ *
+ * sessionStorage (not localStorage): the web build is the admin console, so we
+ * don't want a long-lived admin JWT sitting on disk. sessionStorage is scoped to
+ * the tab and cleared when it closes — a stolen/shared machine can't reuse the
+ * token, and there's no persisted token after the session ends. (It's still
+ * same-origin readable, so pair this with a CSP header on the host to blunt XSS.)
  *
  * Same method names as SecureStore, so call sites only swap the import.
  */
 const isWeb = Platform.OS === 'web';
-const ls = () => (typeof window !== 'undefined' ? window.localStorage : null);
+const ls = () => (typeof window !== 'undefined' ? window.sessionStorage : null);
 
 export const setItemAsync = (key, value, options) => {
   if (isWeb) { ls()?.setItem(key, value); return Promise.resolve(); }
