@@ -156,21 +156,28 @@ const About = () => {
 
           {/* ── Founder ────────────────────────────────────────── */}
           <Text style={[styles.sectionTitle, styles.gridTitle]}>The Founder</Text>
-          <View style={styles.card}>
+          <View style={styles.founderCard}>
             <View style={styles.founderHead}>
-              <View style={styles.founderAvatar}>
-                <MaterialCommunityIcons name="account-tie" size={30} color={colors.primary} />
-              </View>
+              <LinearGradient
+                colors={[colors.primary, colors.accent]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={styles.founderRing}
+              >
+                <View style={styles.founderMono}>
+                  <Text style={styles.founderInitials}>ENG.</Text>
+                </View>
+              </LinearGradient>
               <View style={{ flex: 1 }}>
-                <Text style={styles.founderName}>Eng. Anko Mark</Text>
-                <Text style={styles.founderRole}>Founder · Full-stack Software Engineer</Text>
+                <Text style={styles.founderName}>Eng.Dir Anko Mark</Text>
+                <Text style={styles.founderRole}>FOUNDER · LEAD ENGINEER</Text>
               </View>
             </View>
-            <Text style={[styles.paragraph, { marginTop: spacing.sm }]}>
-              {APP_NAME} was founded by Eng. Anko Mark, a full-stack software engineer with years
-              of experience. Development began in 2023, and Version 1 was released in 2026 — the
-              fruit of a long labour of love and faith.
-            </Text>
+            <Text style={styles.founderQuote}>“Built for the glory of the kingdom of God.”</Text>
+            <View style={styles.founderChips}>
+              {['Full-stack', 'Since 2023', 'v1 · 2026'].map((c) => (
+                <View key={c} style={styles.founderChip}><Text style={styles.founderChipText}>{c}</Text></View>
+              ))}
+            </View>
           </View>
 
           {/* ── Support / donations ────────────────────────────── */}
@@ -346,15 +353,36 @@ const makeStyles = (colors) => StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm, ...shadows.sm,
   },
 
-  // Founder
-  founderHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  founderAvatar: {
-    width: 56, height: 56, borderRadius: 28, backgroundColor: colors.inputBg,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: colors.border,
+  // Founder — a compact, premium profile card
+  founderCard: {
+    backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.md,
+    borderWidth: 1, borderColor: colors.border, marginBottom: spacing.md, ...shadows.sm,
   },
+  founderHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  founderRing: {
+    width: 54, height: 54, borderRadius: 27, padding: 2.5,
+    alignItems: 'center', justifyContent: 'center', ...shadows.sm,
+  },
+  founderMono: {
+    width: '100%', height: '100%', borderRadius: 25,
+    backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center',
+  },
+  founderInitials: { fontSize: 19, fontWeight: '800', color: colors.textPrimary, letterSpacing: 0.5 },
   founderName: { ...typography.h3, color: colors.textPrimary },
-  founderRole: { ...typography.caption, color: colors.primary, fontWeight: '700', marginTop: 2 },
+  founderRole: {
+    ...typography.caption, color: colors.accent, fontWeight: '800',
+    letterSpacing: 1, marginTop: 3, fontSize: 11,
+  },
+  founderQuote: {
+    ...typography.body, color: colors.textPrimary, fontStyle: 'italic',
+    marginTop: spacing.md, lineHeight: 22,
+  },
+  founderChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.md },
+  founderChip: {
+    paddingHorizontal: 11, paddingVertical: 5, borderRadius: radius.full,
+    backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border,
+  },
+  founderChipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', fontSize: 11 },
 
   // Call-to-action buttons
   ctaBtn: {
