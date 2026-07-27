@@ -1,23 +1,81 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Image, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  RefreshControl, Image, Animated, Alert,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchBroadcasts, fetchBroadcastToken, endBroadcast } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import { isSuperAdmin } from '../../utils/roles';
-import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { spacing, radius, typography } from '../../constants/theme';
+import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
 import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
+const KIND_LABEL = { meet: 'Meet', tv: 'Go-Live' };
 
-const KINDS = [
-  { key: 'meet', label: 'Meet', icon: 'account-group' },
-  { key: 'tv', label: 'Go-Live', icon: 'television-classic' },
-];
+// ── A breathing red LIVE dot (ring pulses outward and fades) ──────────────────
+const PulseDot = ({ size = 7 }) => {
+  const a = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(a, { toValue: 1, duration: 1700, useNativeDriver: true }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [a]);
+  const scale = a.interpolate({ inputRange: [0, 1], outputRange: [1, 2.8] });
+  const opacity = a.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View style={[
+        styles.dotRing,
+        { width: size, height: size, borderRadius: size / 2, transform: [{ scale }], opacity },
+      ]} />
+      <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: live.live }} />
+    </View>
+  );
+};
 
-const KIND_ICON = { meet: 'account-group', tv: 'television-classic' };
+const LiveBadge = ({ small }) => (
+  <View style={[styles.liveBadge, small && styles.liveBadgeSm]}>
+    <PulseDot size={small ? 6 : 7} />
+    <Text style={[styles.liveText, small && { fontSize: 8, letterSpacing: 1 }]}>LIVE</Text>
+  </View>
+);
+
+// Champagne ring around the host avatar.
+const GoldRing = ({ uri, size }) => (
+  <LinearGradient
+    colors={[live.goldBright, live.goldDeep]}
+    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+    style={{ width: size + 4, height: size + 4, borderRadius: (size + 4) / 2, padding: 2, ...goldGlow, shadowRadius: 10, elevation: 6 }}
+  >
+    <Image
+      source={uri ? { uri } : DEFAULT_AVATAR}
+      defaultSource={DEFAULT_AVATAR}
+      style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: live.bg, backgroundColor: live.navy }}
+    />
+  </LinearGradient>
+);
+
+const ViewPill = ({ count }) => (
+  <View style={styles.viewPill}>
+    <Ionicons name="eye" size={12} color={live.ink} />
+    <Text style={styles.viewPillText}>{fmtCount(count)}</Text>
+  </View>
+);
+
+const EndBtn = ({ ending, onPress }) =>
+  ending ? (
+    <ActivityIndicator color={live.live} />
+  ) : (
+    <TouchableOpacity onPress={onPress} hitSlop={10} style={styles.endBtn}>
+      <Ionicons name="stop-circle" size={24} color={live.live} />
+    </TouchableOpacity>
+  );
 
 const LiveHub = ({ navigation }) => {
   const { t } = useI18n();
@@ -81,37 +139,68 @@ const LiveHub = ({ navigation }) => {
     );
   };
 
-  const renderItem = ({ item }) => {
+  const hero = items[0];
+  const rest = items.slice(1);
+
+  const HeroCard = ({ item }) => {
     const host = item.host || {};
+    const busy = opening === item.id;
     return (
-      <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={() => openViewer(item)} disabled={opening === item.id}>
-        <View style={styles.thumb}>
-          <Image source={host.profile_picture ? { uri: host.profile_picture } : DEFAULT_AVATAR} defaultSource={DEFAULT_AVATAR} style={styles.thumbImg} />
-          <View style={styles.liveTag}><Text style={styles.liveTagText}>LIVE</Text></View>
-          <View style={styles.kindTag}>
-            <MaterialCommunityIcons name={KIND_ICON[item.kind] || 'account-group'} size={12} color="#fff" />
+      <TouchableOpacity style={styles.hero} activeOpacity={0.92} onPress={() => openViewer(item)} disabled={busy}>
+        <Image
+          source={host.profile_picture ? { uri: host.profile_picture } : DEFAULT_AVATAR}
+          defaultSource={DEFAULT_AVATAR}
+          style={StyleSheet.absoluteFill}
+          blurRadius={18}
+          resizeMode="cover"
+        />
+        <LinearGradient colors={live.gradHero} style={StyleSheet.absoluteFill} />
+        <View style={styles.heroTop}>
+          <LiveBadge />
+          <ViewPill count={item.viewer_count} />
+        </View>
+        <View style={styles.heroBottom}>
+          <GoldRing uri={host.profile_picture} size={40} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.heroName} numberOfLines={1}>{item.title}</Text>
+            <Text style={styles.heroHost} numberOfLines={1}>@{host.username || 'host'} · {KIND_LABEL[item.kind] || 'Live'}</Text>
+          </View>
+          {busy ? (
+            <ActivityIndicator color={live.gold} />
+          ) : isSuper ? (
+            <EndBtn ending={endingId === item.id} onPress={() => endLive(item)} />
+          ) : null}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const MiniCard = ({ item }) => {
+    const host = item.host || {};
+    const busy = opening === item.id;
+    return (
+      <TouchableOpacity style={styles.mini} activeOpacity={0.92} onPress={() => openViewer(item)} disabled={busy}>
+        <Image
+          source={host.profile_picture ? { uri: host.profile_picture } : DEFAULT_AVATAR}
+          defaultSource={DEFAULT_AVATAR}
+          style={StyleSheet.absoluteFill}
+          blurRadius={14}
+          resizeMode="cover"
+        />
+        <LinearGradient colors={live.gradTile} style={StyleSheet.absoluteFill} />
+        <View style={styles.miniBadge}><LiveBadge small /></View>
+        {isSuper && (
+          <View style={styles.miniEnd}><EndBtn ending={endingId === item.id} onPress={() => endLive(item)} /></View>
+        )}
+        <View style={styles.miniFoot}>
+          <GoldRing uri={host.profile_picture} size={22} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.miniName} numberOfLines={1}>{item.title}</Text>
+            <Text style={styles.miniView} numberOfLines={1}>{fmtCount(item.viewer_count)} watching</Text>
           </View>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.cardHost} numberOfLines={1}>@{host.username || 'host'}</Text>
-          <View style={styles.viewerRow}>
-            <Ionicons name="eye" size={13} color={colors.textMuted} />
-            <Text style={styles.viewerText}>{item.viewer_count || 0}</Text>
-          </View>
-        </View>
-        {opening === item.id ? (
-          <ActivityIndicator color={colors.accent} />
-        ) : isSuper ? (
-          endingId === item.id ? (
-            <ActivityIndicator color={colors.error} />
-          ) : (
-            <TouchableOpacity onPress={() => endLive(item)} hitSlop={10} style={styles.endBtn}>
-              <Ionicons name="stop-circle" size={24} color={colors.error} />
-            </TouchableOpacity>
-          )
-        ) : (
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        {busy && (
+          <View style={styles.busyOverlay}><ActivityIndicator color={live.gold} /></View>
         )}
       </TouchableOpacity>
     );
@@ -121,87 +210,148 @@ const LiveHub = ({ navigation }) => {
     <View style={styles.container}>
       <Text style={styles.title}>{t('live.title')}</Text>
 
-      {/* Go Live CTA */}
-      <View style={styles.goLiveRow}>
-        {KINDS.map((k) => (
-          <TouchableOpacity key={k.key} style={styles.goLiveBtn} activeOpacity={0.85}
-            onPress={() => navigation.navigate('GoLive', { kind: k.key })}>
-            <MaterialCommunityIcons name={k.icon} size={22} color={colors.accent} />
-            <Text style={styles.goLiveLabel}>{k.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={live.gold} />}
+      >
+        <Text style={styles.sectionTitle}>{t('live.now')}</Text>
 
-      <Text style={styles.sectionTitle}>{t('live.now')}</Text>
-      {loading ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderItem}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          onRefresh={load}
-          refreshing={loading}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <MaterialCommunityIcons name="broadcast-off" size={48} color={colors.textSecondary} />
-              <Text style={styles.emptyText}>{t('live.noOneLive')}</Text>
-              <Text style={styles.emptySub}>{t('live.startYourOwn')}</Text>
-            </View>
-          }
-        />
-      )}
+        {loading && items.length === 0 ? (
+          <LiveSkeleton />
+        ) : items.length === 0 ? (
+          <View style={styles.empty}>
+            <MaterialCommunityIcons name="broadcast-off" size={48} color={live.inkMute} />
+            <Text style={styles.emptyText}>{t('live.noOneLive')}</Text>
+            <Text style={styles.emptySub}>{t('live.startYourOwn')}</Text>
+          </View>
+        ) : (
+          <>
+            <HeroCard item={hero} />
+            {rest.length > 0 && (
+              <View style={styles.grid}>
+                {rest.map((it) => <MiniCard key={String(it.id)} item={it} />)}
+              </View>
+            )}
+          </>
+        )}
+      </ScrollView>
+
+      {/* One premium Go Live CTA — broadcast type is chosen in the next step. */}
+      <TouchableOpacity activeOpacity={0.9} style={styles.ctaWrap} onPress={() => navigation.navigate('GoLive')}>
+        <LinearGradient colors={live.gradCta} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cta}>
+          <MaterialCommunityIcons name="broadcast" size={20} color={live.onGold} />
+          <Text style={styles.ctaText}>{t('live.goLive')}</Text>
+        </LinearGradient>
+      </TouchableOpacity>
     </View>
+  );
+};
+
+// Lightweight loading placeholder that gently breathes.
+const LiveSkeleton = () => {
+  const a = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(a, { toValue: 0.8, duration: 700, useNativeDriver: true }),
+      Animated.timing(a, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [a]);
+  return (
+    <Animated.View style={{ opacity: a }}>
+      <View style={styles.skHero} />
+      <View style={styles.grid}>
+        <View style={styles.skMini} />
+        <View style={styles.skMini} />
+      </View>
+    </Animated.View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scroll: { paddingHorizontal: spacing.md, paddingBottom: 96 },
   title: {
-    ...typography.h1, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+    ...typography.h1, color: live.ink, paddingHorizontal: spacing.md, paddingTop: spacing.sm,
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
-  goLiveRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
-  goLiveBtn: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: spacing.md,
-    backgroundColor: 'rgba(16,28,46,0.82)', borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.4)',
-  },
-  goLiveLabel: { ...typography.caption, color: colors.textPrimary, fontWeight: '700' },
   sectionTitle: {
-    ...typography.label, color: colors.accent, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8,
-    paddingHorizontal: spacing.md, marginTop: spacing.xs, marginBottom: spacing.sm,
+    ...typography.label, color: live.gold, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.2,
+    marginTop: spacing.xs, marginBottom: spacing.sm, fontSize: 11,
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
-  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl },
-  card: {
+
+  // LIVE badge
+  dotRing: { position: 'absolute', backgroundColor: live.live },
+  liveBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 4,
+    borderRadius: radius.full, backgroundColor: 'rgba(6,13,26,0.5)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(229,72,74,0.5)',
+  },
+  liveBadgeSm: { paddingHorizontal: 6, paddingVertical: 2, gap: 4 },
+  liveText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 1.4 },
+
+  viewPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4,
+    borderRadius: radius.full, backgroundColor: 'rgba(6,13,26,0.5)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
+  },
+  viewPillText: { color: live.ink, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
+
+  // Hero
+  hero: {
+    height: 210, borderRadius: radius.xl, overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
+    backgroundColor: live.navy, ...goldGlow, shadowOpacity: 0.32,
+  },
+  heroTop: {
+    position: 'absolute', top: 10, left: 10, right: 10,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+  },
+  heroBottom: {
+    position: 'absolute', left: 12, right: 12, bottom: 12,
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    backgroundColor: 'rgba(16,28,46,0.82)', borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
-    padding: spacing.sm + 2, marginBottom: spacing.sm, ...shadows.sm,
   },
-  thumb: { width: 56, height: 56, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.surface },
-  thumbImg: { width: '100%', height: '100%' },
-  liveTag: {
-    position: 'absolute', top: 4, left: 4, backgroundColor: colors.error,
-    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
+  heroName: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  heroHost: { color: live.gold, fontSize: 12, marginTop: 1 },
+
+  // Grid of remaining broadcasts
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: spacing.sm },
+  mini: {
+    width: '48.5%', height: 118, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair, backgroundColor: live.navy,
   },
-  liveTagText: { color: '#fff', fontSize: 8, fontWeight: '900', letterSpacing: 0.5 },
-  kindTag: {
-    position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 9, width: 18, height: 18, alignItems: 'center', justifyContent: 'center',
+  miniBadge: { position: 'absolute', top: 8, left: 8 },
+  miniEnd: { position: 'absolute', top: 4, right: 4 },
+  miniFoot: {
+    position: 'absolute', left: 8, right: 8, bottom: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
   },
-  cardTitle: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
-  cardHost: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
-  viewerRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
-  viewerText: { ...typography.caption, color: colors.textMuted },
+  miniName: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  miniView: { color: live.inkDim, fontSize: 9.5, marginTop: 1 },
+  busyOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(6,13,26,0.35)' },
+
   endBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+
+  // Go Live CTA
+  ctaWrap: {
+    position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg,
+    borderRadius: radius.full, ...goldGlow,
+  },
+  cta: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
+    height: 52, borderRadius: radius.full,
+  },
+  ctaText: { color: live.onGold, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+
+  // Empty + skeleton
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.xs },
-  emptyText: { ...typography.body, color: colors.textSecondary },
-  emptySub: { ...typography.caption, color: colors.textMuted },
+  emptyText: { ...typography.body, color: live.inkDim },
+  emptySub: { ...typography.caption, color: live.inkMute },
+  skHero: { height: 210, borderRadius: radius.xl, backgroundColor: 'rgba(16,46,80,0.5)', borderWidth: StyleSheet.hairlineWidth, borderColor: live.hairSoft },
+  skMini: { width: '48.5%', height: 118, borderRadius: radius.lg, backgroundColor: 'rgba(16,46,80,0.5)', borderWidth: StyleSheet.hairlineWidth, borderColor: live.hairSoft, marginBottom: spacing.sm },
 });
 
 export default LiveHub;

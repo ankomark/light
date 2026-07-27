@@ -540,8 +540,8 @@ const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);
 const AdminLogsWrapper = adminWrap(AdminLogs);
 const LiveHubWrapper = ({ navigation }) => (
-  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.6)" />
+  <View style={{ flex: 1, backgroundColor: '#060D1A' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(6,13,26,0.72)" />
     <Header navigation={navigation} transparentBg />
     <LiveHub navigation={navigation} />
   </View>
