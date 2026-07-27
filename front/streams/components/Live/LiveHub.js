@@ -12,6 +12,7 @@ import { isSuperAdmin } from '../../utils/roles';
 import { spacing, radius, typography } from '../../constants/theme';
 import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
 import { LiveBadge, GoldRing, ViewPill } from './LivePrimitives';
+import useReducedMotion from '../../utils/useReducedMotion';
 import { useI18n } from '../../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
@@ -197,17 +198,19 @@ const LiveHub = ({ navigation }) => {
   );
 };
 
-// Lightweight loading placeholder that gently breathes.
+// Lightweight loading placeholder that gently breathes (static if reduce-motion).
 const LiveSkeleton = () => {
-  const a = useRef(new Animated.Value(0.4)).current;
+  const reduced = useReducedMotion();
+  const a = useRef(new Animated.Value(reduced ? 0.6 : 0.4)).current;
   useEffect(() => {
+    if (reduced) return undefined;
     const loop = Animated.loop(Animated.sequence([
       Animated.timing(a, { toValue: 0.8, duration: 700, useNativeDriver: true }),
       Animated.timing(a, { toValue: 0.4, duration: 700, useNativeDriver: true }),
     ]));
     loop.start();
     return () => loop.stop();
-  }, [a]);
+  }, [a, reduced]);
   return (
     <Animated.View style={{ opacity: a }}>
       <View style={styles.skHero} />

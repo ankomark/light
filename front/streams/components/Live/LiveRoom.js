@@ -824,8 +824,8 @@ const styles = StyleSheet.create({
   guardBtnText: { ...typography.button, color: live.onGold, fontWeight: '800' },
 
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  elapsed: { ...typography.caption, color: live.inkDim, fontVariant: ['tabular-nums'], fontWeight: '600' },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginLeft: 'auto' },
+  elapsed: { ...typography.caption, color: live.inkDim, fontVariant: ['tabular-nums'], fontWeight: '600', flexShrink: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginLeft: 'auto', flexShrink: 0 },
   heartPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4,
     borderRadius: radius.full, backgroundColor: 'rgba(6,13,26,0.5)',

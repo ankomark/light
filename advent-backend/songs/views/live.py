@@ -3,7 +3,7 @@ import uuid
 from django.db.models import F
 from django.utils import timezone
 from ..models import LiveBroadcast, CoHostRequest
-from ..serializers import LiveBroadcastSerializer, CoHostRequestSerializer
+from ..serializers import LiveBroadcastSerializer, LiveBroadcastListSerializer, CoHostRequestSerializer
 from .. import livekit_service as lk
 
 
@@ -54,7 +54,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     def list(self, request):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
-        data = LiveBroadcastSerializer(
+        data = LiveBroadcastListSerializer(
             page if page is not None else qs, many=True, context={'request': request},
         ).data
         return self.get_paginated_response(data) if page is not None else Response(data)

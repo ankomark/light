@@ -8,27 +8,33 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { radius } from '../../constants/theme';
 import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
+import useReducedMotion from '../../utils/useReducedMotion';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
-// A breathing red LIVE dot (a ring pulses outward and fades).
+// A breathing red LIVE dot (a ring pulses outward and fades). Honors the OS
+// "reduce motion" setting — falls back to a static dot.
 export const PulseDot = ({ size = 7 }) => {
+  const reduced = useReducedMotion();
   const a = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    if (reduced) return undefined;
     const loop = Animated.loop(
       Animated.timing(a, { toValue: 1, duration: 1700, useNativeDriver: true }),
     );
     loop.start();
     return () => loop.stop();
-  }, [a]);
+  }, [a, reduced]);
   const scale = a.interpolate({ inputRange: [0, 1], outputRange: [1, 2.8] });
   const opacity = a.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <Animated.View style={[
-        styles.dotRing,
-        { width: size, height: size, borderRadius: size / 2, transform: [{ scale }], opacity },
-      ]} />
+      {!reduced && (
+        <Animated.View style={[
+          styles.dotRing,
+          { width: size, height: size, borderRadius: size / 2, transform: [{ scale }], opacity },
+        ]} />
+      )}
       <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: live.live }} />
     </View>
   );

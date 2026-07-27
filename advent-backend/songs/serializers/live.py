@@ -39,6 +39,18 @@ class LiveBroadcastSerializer(serializers.ModelSerializer):
         return 'none'
 
 
+class LiveBroadcastListSerializer(LiveBroadcastSerializer):
+    """Hub/discovery rows. Drops the per-viewer follow fields (is_following /
+    follow_status) — the hub doesn't render a follow button, so computing them
+    per row would be a needless query per broadcast."""
+    class Meta(LiveBroadcastSerializer.Meta):
+        fields = [
+            f for f in LiveBroadcastSerializer.Meta.fields
+            if f not in ('is_following', 'follow_status')
+        ]
+        read_only_fields = fields
+
+
 class CoHostRequestSerializer(serializers.ModelSerializer):
     user = SimpleUserSerializer(read_only=True)
 

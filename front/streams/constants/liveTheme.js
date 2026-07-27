@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 /**
  * Live feature design tokens — "champagne gold on deep navy".
  *
@@ -40,14 +42,16 @@ export const live = {
   gradScrimTop: ['rgba(6,13,26,0.90)', 'rgba(6,13,26,0.30)', 'transparent'],
 };
 
-// Soft gold glow for live / active elements (iOS shadow + Android elevation).
-export const goldGlow = {
-  shadowColor: '#E8C583',
-  shadowOpacity: 0.55,
-  shadowRadius: 18,
-  shadowOffset: { width: 0, height: 8 },
-  elevation: 10,
-};
+// Soft gold glow for live / active elements. shadowColor is honored on iOS; on
+// Android the platform ignores shadow tint (elevation shadows are neutral), so
+// we use a modest elevation for depth and let the gold borders/gradients carry
+// the colour. Elements that need the gold identity already have a gold hairline
+// or gradient, so this degrades cleanly.
+export const goldGlow = Platform.select({
+  ios: { shadowColor: '#E8C583', shadowOpacity: 0.55, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  android: { elevation: 6 },
+  default: {},
+});
 
 // Compact viewer-count formatter: 1284 -> "1.3k".
 export const fmtCount = (n) => {
