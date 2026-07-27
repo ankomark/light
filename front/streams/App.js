@@ -17,7 +17,7 @@ import CreateProfile from './components/CreateProfile';
 import Header from './components/Header'; // Move the import to the top
 import SocialFeed from './components/SocialFeed';
 import RotatingBackground from './components/RotatingBackground';
-import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold } from '@expo-google-fonts/cinzel';
+import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold } from '@expo-google-fonts/cinzel';
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import CreatePost from './components/CreatePost';
 import CameraCapture from './components/CameraCapture';
@@ -186,7 +186,7 @@ const AuthInitializer = ({ children }) => {
 
 const App = () => {
   // Load the Cinzel display font used for the app's brand title.
-  const [fontsLoaded] = useFonts({ Cinzel_600SemiBold, Cinzel_700Bold, Lora_400Regular, Lora_700Bold });
+  const [fontsLoaded] = useFonts({ Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold, Lora_400Regular, Lora_700Bold });
 
   // App is portrait by default; only the Live room opts into rotation (it
   // unlocks on mount and relocks portrait on leave). Guarded so it no-ops until

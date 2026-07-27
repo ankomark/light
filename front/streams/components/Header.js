@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     color: colors.accent,
     textAlign: 'center',
-    fontFamily: 'Cinzel_700Bold',
+    fontFamily: 'Cinzel_800ExtraBold',
     fontSize: 24,
     // Wider tracking gives Cinzel its engraved, monument-like premium feel.
     letterSpacing: 2.5,
