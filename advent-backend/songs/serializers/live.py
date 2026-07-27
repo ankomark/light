@@ -5,14 +5,25 @@ from ..models import LiveBroadcast, CoHostRequest
 class LiveBroadcastSerializer(serializers.ModelSerializer):
     host = SimpleUserSerializer(read_only=True)
     duration_seconds = serializers.IntegerField(read_only=True)
+    # Whether the requesting viewer already follows the host — drives the
+    # Follow / Following button in the live room. False for the host themselves
+    # and when there's no authenticated request in context.
+    is_following = serializers.SerializerMethodField()
 
     class Meta:
         model = LiveBroadcast
         fields = [
             'id', 'host', 'kind', 'title', 'status', 'viewer_count',
             'peak_viewer_count', 'duration_seconds', 'started_at', 'ended_at',
+            'is_following',
         ]
         read_only_fields = fields
+
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or request.user.id == obj.host_id:
+            return False
+        return obj.host.followers.filter(id=request.user.id).exists()
 
 
 class CoHostRequestSerializer(serializers.ModelSerializer):

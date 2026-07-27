@@ -19,12 +19,13 @@ def _identity(user):
     return f"u{user.id}"
 
 
-def _broadcast_payload(broadcast, token):
-    """What the client needs to join: the LiveKit URL, a role token, and the row."""
+def _broadcast_payload(broadcast, token, request=None):
+    """What the client needs to join: the LiveKit URL, a role token, and the row.
+    `request` is passed so the serializer can resolve is_following for the viewer."""
     return {
         'url': settings.LIVEKIT_URL,
         'token': token,
-        'broadcast': LiveBroadcastSerializer(broadcast).data,
+        'broadcast': LiveBroadcastSerializer(broadcast, context={'request': request}).data,
     }
 
 
@@ -52,12 +53,14 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     def list(self, request):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
-        data = LiveBroadcastSerializer(page if page is not None else qs, many=True).data
+        data = LiveBroadcastSerializer(
+            page if page is not None else qs, many=True, context={'request': request},
+        ).data
         return self.get_paginated_response(data) if page is not None else Response(data)
 
     def retrieve(self, request, pk=None):
         b = get_object_or_404(LiveBroadcast, pk=pk)
-        return Response(LiveBroadcastSerializer(b).data)
+        return Response(LiveBroadcastSerializer(b, context={'request': request}).data)
 
     # ── Go live (host) ─────────────────────────────────────────────────────────
     def create(self, request):
@@ -100,7 +103,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             room=room_name, can_publish=True,
         )
         self._notify_followers(request.user, broadcast)
-        return Response(_broadcast_payload(broadcast, token), status=status.HTTP_201_CREATED)
+        return Response(_broadcast_payload(broadcast, token, request), status=status.HTTP_201_CREATED)
 
     def _notify_followers(self, host, broadcast):
         msg = f"{host.username} is live on air: {broadcast.title}"
@@ -124,7 +127,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=False,  # viewers are subscribe-only
         )
-        return Response(_broadcast_payload(b, token))
+        return Response(_broadcast_payload(b, token, request))
 
     # ── End (host or super admin) ───────────────────────────────────────────────
     @action(detail=True, methods=['post'])
@@ -226,7 +229,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=True,
         )
-        return Response(_broadcast_payload(b, token))
+        return Response(_broadcast_payload(b, token, request))
 
     # ── Moderation (host): remove a participant ─────────────────────────────────
     @action(detail=True, methods=['post'])

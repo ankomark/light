@@ -24,11 +24,11 @@ import {
 import { Track, RoomEvent, ConnectionState } from 'livekit-client';
 import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
-  fetchCohostToken, moderateBroadcast,
+  fetchCohostToken, moderateBroadcast, followUser,
 } from '../../services/api';
 import { typography, spacing, radius, shadows } from '../../constants/theme';
-import { live, goldGlow } from '../../constants/liveTheme';
-import { LiveBadge, ViewPill } from './LivePrimitives';
+import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
+import { LiveBadge, ViewPill, GoldRing } from './LivePrimitives';
 import LiveChat from './LiveChat';
 import FloatingReactions from './FloatingReactions';
 import { useI18n } from '../../context/I18nContext';
@@ -208,6 +208,29 @@ const RoomInner = ({
   const [requests, setRequests] = useState([]);     // host: pending co-host requests
   const [requested, setRequested] = useState(false); // viewer: asked to join
 
+  // Host + viewer engagement: follow the broadcaster, and a running tally of the
+  // ❤️ reactions the room has sent (driven off the data channel).
+  const hostUser = broadcast.host || {};
+  const showFollow = !isHost && !!hostUser.id;
+  const [following, setFollowing] = useState(!!broadcast.is_following);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+
+  const toggleFollow = useCallback(async () => {
+    if (!hostUser.id || followBusy) return;
+    setFollowBusy(true);
+    const next = !following;
+    setFollowing(next); // optimistic
+    try {
+      const res = await followUser(hostUser.id);
+      if (res && typeof res.is_following === 'boolean') setFollowing(res.is_following);
+    } catch {
+      setFollowing(!next); // revert on failure
+    } finally {
+      setFollowBusy(false);
+    }
+  }, [hostUser.id, following, followBusy]);
+
   const [connState, setConnState] = useState(room?.state);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
@@ -329,7 +352,7 @@ const RoomInner = ({
       const msg = decodeData(payload);
       if (!msg) return;
       if (msg.t === 'chat') pushMessage({ id: msg.id, name: msg.name, text: msg.text, host: !!msg.host });
-      else if (msg.t === 'react') reactionsRef.current?.add(msg.emoji || '❤️');
+      else if (msg.t === 'react') { reactionsRef.current?.add(msg.emoji || '❤️'); setLikeCount((c) => c + 1); }
     };
     room.on(RoomEvent.DataReceived, onData);
     return () => { room.off(RoomEvent.DataReceived, onData); };
@@ -344,6 +367,7 @@ const RoomInner = ({
 
   const sendReaction = useCallback(() => {
     reactionsRef.current?.add('❤️');
+    setLikeCount((c) => c + 1);
     try { room?.localParticipant?.publishData(encodeData({ v: 1, t: 'react', emoji: '❤️' }), { reliable: false }); } catch {}
   }, [room]);
 
@@ -482,10 +506,41 @@ const RoomInner = ({
     <View style={styles.header}>
       <LiveBadge />
       <Text style={styles.elapsed}>{elapsed}</Text>
-      <View style={{ marginLeft: 'auto' }}><ViewPill count={watching} /></View>
-      <TouchableOpacity style={styles.closeBtn} onPress={isHost ? endLive : leave} hitSlop={10}>
-        <Ionicons name="close" size={20} color={live.ink} />
-      </TouchableOpacity>
+      <View style={styles.headerRight}>
+        <View style={styles.heartPill}>
+          <Ionicons name="heart" size={12} color={live.live} />
+          <Text style={styles.heartPillText}>{fmtCount(likeCount)}</Text>
+        </View>
+        <ViewPill count={watching} />
+        <TouchableOpacity style={styles.closeBtn} onPress={isHost ? endLive : leave} hitSlop={10}>
+          <Ionicons name="close" size={20} color={live.ink} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // Host chip + Follow — shown to viewers/co-hosts at the top of the room.
+  const hostRowNode = (
+    <View style={styles.hostRow}>
+      <GoldRing uri={hostUser.profile_picture} size={26} />
+      <Text style={styles.hostRowName} numberOfLines={1}>@{hostUser.username || 'host'}</Text>
+      {showFollow && (
+        <TouchableOpacity
+          onPress={toggleFollow}
+          disabled={followBusy}
+          activeOpacity={0.85}
+          style={[styles.followBtn, following && styles.followingBtn]}
+        >
+          {following ? (
+            <Text style={styles.followingText}>Following</Text>
+          ) : (
+            <>
+              <Ionicons name="add" size={14} color={live.onGold} />
+              <Text style={styles.followText}>Follow</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -588,6 +643,7 @@ const RoomInner = ({
       <View style={[styles.inner, styles.innerLandscape, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.sm }]}>
         <View style={styles.mainCol}>
           {headerNode}
+          {hostRowNode}
           {reconnectNode}
           {stageNode}
         </View>
@@ -621,6 +677,7 @@ const RoomInner = ({
         {headerNode}
         <Text style={styles.titleOverlay} numberOfLines={2}>{broadcast.title}</Text>
         <Text style={styles.kindOverlay}>{KIND_LABEL[broadcast.kind] || (broadcast.kind || 'meet').toUpperCase()}</Text>
+        {hostRowNode}
       </LinearGradient>
 
       {reconnecting && <View style={styles.reconnectFloat} pointerEvents="none">{reconnectNode}</View>}
@@ -744,10 +801,31 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   elapsed: { ...typography.caption, color: live.inkDim, fontVariant: ['tabular-nums'], fontWeight: '600' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginLeft: 'auto' },
+  heartPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4,
+    borderRadius: radius.full, backgroundColor: 'rgba(6,13,26,0.5)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(229,72,74,0.45)',
+  },
+  heartPillText: { color: live.ink, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
   closeBtn: {
     width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(6,13,26,0.45)', borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
   },
+
+  // Host chip + Follow
+  hostRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  hostRowName: { flex: 1, color: '#fff', fontSize: 13, fontWeight: '700' },
+  followBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: spacing.md, paddingVertical: 6,
+    borderRadius: radius.full, backgroundColor: live.gold, ...goldGlow, shadowRadius: 10, elevation: 5,
+  },
+  followText: { color: live.onGold, fontSize: 12.5, fontWeight: '800' },
+  followingBtn: {
+    backgroundColor: 'rgba(6,13,26,0.5)', borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
+    shadowOpacity: 0, elevation: 0,
+  },
+  followingText: { color: live.gold, fontSize: 12.5, fontWeight: '700' },
 
   reconnect: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, alignSelf: 'center',
