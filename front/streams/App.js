@@ -24,7 +24,15 @@ import CameraCapture from './components/CameraCapture';
 import Music from './components/Music';
 import EditTrackScreen from './components/EditTrackScreen';
 import PostDetail from './components/PostDetail'
-import { View, ActivityIndicator} from 'react-native';
+import { View, ActivityIndicator, LogBox } from 'react-native';
+
+// Known, benign library warning: on camera flip, LiveKit's restartTrack calls
+// setMediaStreamTrack, and @livekit/react-native-webrtc's event-target-shim
+// re-adds an 'ended' listener it treats as a duplicate. The flip works; this
+// just silences the noise.
+LogBox.ignoreLogs([
+  "An event listener wasn't added because it has been added already",
+]);
 import BibleReader from './components/BibleReader';
 import HymnList from './components/HymnList';
 import HymnDetail from './components/HymnDetail';
