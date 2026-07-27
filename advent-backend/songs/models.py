@@ -1904,6 +1904,10 @@ class LiveBroadcast(models.Model):
     # survives rejoins and reflects the whole session, not just what one viewer
     # saw. Incremented in batches via the `react` endpoint.
     like_count = models.PositiveIntegerField(default=0)
+    # Current on-screen graphic (lower third / banner / name tag / ticker), or
+    # null. Persisted so it survives a host reconnect and reaches late joiners in
+    # the join payload. Shape: {"style": str, "title": str, "sub": str}.
+    overlay = models.JSONField(null=True, blank=True, default=None)
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
 

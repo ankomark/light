@@ -145,6 +145,28 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         b = get_object_or_404(LiveBroadcast, pk=pk)
         return Response({'like_count': b.like_count})
 
+    # ── On-screen graphic (lower third / banner / name tag / ticker) ─────────────
+    @action(detail=True, methods=['post'])
+    def overlay(self, request, pk=None):
+        """Set or clear the persisted on-screen graphic. Host or an approved
+        co-host only. Persisted so it survives a reconnect and reaches late
+        joiners in the join payload; the live push still rides the data channel."""
+        b = get_object_or_404(LiveBroadcast, pk=pk)
+        is_cohost = b.cohost_requests.filter(user=request.user, status='approved').exists()
+        if b.host_id != request.user.id and not is_cohost and not request.user.is_super_admin:
+            return Response({'error': 'Only the host or a co-host can set on-screen text.'}, status=status.HTTP_403_FORBIDDEN)
+        title = (request.data.get('title') or '').strip()
+        if request.data.get('clear') or not title:
+            b.overlay = None
+        else:
+            b.overlay = {
+                'style': request.data.get('style') or 'lower3',
+                'title': title[:120],
+                'sub': (request.data.get('sub') or '').strip()[:80],
+            }
+        b.save(update_fields=['overlay'])
+        return Response({'overlay': b.overlay})
+
     # ── End (host or super admin) ───────────────────────────────────────────────
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):

@@ -48,7 +48,7 @@ function Ticker({ text }) {
   );
 }
 
-export default function LiveGraphic({ graphic, insets }) {
+export default function LiveGraphic({ graphic, insets, bottomOffset = 160 }) {
   const reduced = useReducedMotion();
   const anim = useRef(new Animated.Value(0)).current;
   const key = graphic ? `${graphic.style}|${graphic.title}|${graphic.sub || ''}` : '';
@@ -85,7 +85,7 @@ export default function LiveGraphic({ graphic, insets }) {
 
   if (s === 'nametag') {
     return (
-      <Animated.View style={[styles.nametag, slideIn]} pointerEvents="none">
+      <Animated.View style={[styles.nametag, { bottom: bottomOffset }, slideIn]} pointerEvents="none">
         <View style={styles.nametagBar} />
         <Text style={styles.nametagText} numberOfLines={1}>{title}</Text>
         {sub ? <Text style={styles.nametagSub} numberOfLines={1}> · {sub}</Text> : null}
@@ -95,7 +95,7 @@ export default function LiveGraphic({ graphic, insets }) {
 
   if (s === 'ticker') {
     return (
-      <Animated.View style={[styles.tickerOuter, dropIn]} pointerEvents="none">
+      <Animated.View style={[styles.tickerOuter, { bottom: bottomOffset }, dropIn]} pointerEvents="none">
         <Ticker text={title} />
       </Animated.View>
     );
@@ -103,7 +103,7 @@ export default function LiveGraphic({ graphic, insets }) {
 
   // default: lower third
   return (
-    <Animated.View style={[styles.lower3, slideIn]} pointerEvents="none">
+    <Animated.View style={[styles.lower3, { bottom: bottomOffset }, slideIn]} pointerEvents="none">
       <View style={styles.lower3Bar} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={styles.lower3Title} numberOfLines={2}>{title}</Text>
@@ -118,7 +118,7 @@ const CARD = 'rgba(6,13,26,0.72)';
 const styles = StyleSheet.create({
   // Lower third — bottom-left band with a gold accent bar
   lower3: {
-    position: 'absolute', left: 16, right: 40, bottom: '32%',
+    position: 'absolute', left: 16, right: 40,
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: CARD, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,
     borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
 
   // Name tag — compact pill bottom-left
   nametag: {
-    position: 'absolute', left: 16, bottom: '32%', maxWidth: '75%',
+    position: 'absolute', left: 16, maxWidth: '75%',
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: CARD, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12,
     borderWidth: StyleSheet.hairlineWidth, borderColor: live.hair,
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
   nametagSub: { color: live.gold, fontSize: 12, fontWeight: '600' },
 
   // Ticker — scrolling strip near the bottom
-  tickerOuter: { position: 'absolute', left: 0, right: 0, bottom: '26%' },
+  tickerOuter: { position: 'absolute', left: 0, right: 0 },
   tickerWrap: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(6,13,26,0.82)',

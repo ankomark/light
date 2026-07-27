@@ -18,7 +18,7 @@ class LiveBroadcastSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'host', 'kind', 'title', 'status', 'viewer_count',
             'peak_viewer_count', 'duration_seconds', 'started_at', 'ended_at',
-            'like_count', 'is_following', 'follow_status',
+            'like_count', 'overlay', 'is_following', 'follow_status',
         ]
         read_only_fields = fields
 
@@ -46,7 +46,7 @@ class LiveBroadcastListSerializer(LiveBroadcastSerializer):
     class Meta(LiveBroadcastSerializer.Meta):
         fields = [
             f for f in LiveBroadcastSerializer.Meta.fields
-            if f not in ('is_following', 'follow_status')
+            if f not in ('is_following', 'follow_status', 'overlay')
         ]
         read_only_fields = fields
 

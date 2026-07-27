@@ -24,7 +24,7 @@ import {
 import { Track, RoomEvent, ConnectionState } from 'livekit-client';
 import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
-  fetchCohostToken, moderateBroadcast, followUser, reactBroadcast,
+  fetchCohostToken, moderateBroadcast, followUser, reactBroadcast, setBroadcastOverlay,
 } from '../../services/api';
 import { typography, spacing, radius, shadows } from '../../constants/theme';
 import { live, goldGlow, fmtCount } from '../../constants/liveTheme';
@@ -229,9 +229,11 @@ const RoomInner = ({
   const pendingLikesRef = useRef(0); // this viewer's own ❤️ awaiting a server flush
 
   // On-screen graphic (lower third / banner / name tag / ticker). One at a time.
-  const [graphic, setGraphic] = useState(null);
-  const graphicRef = useRef(null);        // current, so the host can re-send to late joiners
+  // Seeded from the persisted overlay so late joiners / reconnects keep it.
+  const [graphic, setGraphic] = useState(broadcast.overlay || null);
+  const graphicRef = useRef(broadcast.overlay || null); // current, to re-send to late joiners
   const [graphicOpen, setGraphicOpen] = useState(false);
+  const [dockH, setDockH] = useState(0); // measured dock height, to anchor the overlay above it
 
   const toggleFollow = useCallback(async () => {
     if (!hostUser.id || followBusy) return;
@@ -404,7 +406,9 @@ const RoomInner = ({
     graphicRef.current = g || null;
     setGraphic(g || null);
     try { room?.localParticipant?.publishData(encodeData(payload), { reliable: true }); } catch {}
-  }, [room]);
+    // Persist so it survives reconnects and reaches late joiners in the payload.
+    setBroadcastOverlay(broadcast.id, g || null).catch(() => {});
+  }, [room, broadcast.id]);
 
   // Re-send the current graphic when someone new joins (data messages don't
   // reach late joiners), so viewers who arrive mid-stream still see it.
@@ -718,7 +722,7 @@ const RoomInner = ({
           {hostRowNode}
           {reconnectNode}
           {stageNode}
-          <LiveGraphic graphic={graphic} insets={insets} />
+          <LiveGraphic graphic={graphic} insets={insets} bottomOffset={insets.bottom + spacing.lg} />
         </View>
         <View style={[styles.sidePanel, { marginBottom: kbHeight }]}>
           {inboxNode}
@@ -760,12 +764,15 @@ const RoomInner = ({
 
       {reconnecting && <View style={styles.reconnectFloat} pointerEvents="none">{reconnectNode}</View>}
 
-      <LiveGraphic graphic={graphic} insets={insets} />
+      <LiveGraphic graphic={graphic} insets={insets} bottomOffset={(dockH || 150) + kbHeight + spacing.sm} />
       <FloatingReactions ref={reactionsRef} />
 
       {/* Bottom dock: a frosted blue glass holding the inbox, chat and controls.
           Floats above the keyboard by shifting `bottom` (edge-to-edge safe). */}
-      <View style={[styles.dockWrap, { bottom: kbHeight }]}>
+      <View
+        style={[styles.dockWrap, { bottom: kbHeight }]}
+        onLayout={(e) => setDockH(e.nativeEvent.layout.height)}
+      >
         <BlurView intensity={32} tint="dark" style={styles.dock}>
           <View style={styles.dockTint} pointerEvents="none" />
           <View style={[styles.dockInner, { paddingBottom: kbHeight > 0 ? spacing.sm : insets.bottom + spacing.sm }]}>
