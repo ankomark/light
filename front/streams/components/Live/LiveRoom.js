@@ -873,7 +873,10 @@ const styles = StyleSheet.create({
     width: 110, aspectRatio: 3 / 4, borderRadius: radius.md, overflow: 'hidden',
     backgroundColor: '#000', borderWidth: 2, borderColor: 'rgba(255,255,255,0.10)',
   },
-  tileSpeaking: { borderColor: live.gold, ...goldGlow },
+  // Gold ring only — no goldGlow here: its Android elevation would raise the
+  // full-bleed spotlight above the title overlay, making the title vanish while
+  // someone talks. The border alone is the "who's speaking" cue.
+  tileSpeaking: { borderColor: live.gold },
   video: { flex: 1, backgroundColor: '#000' },
   videoOff: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: live.navy },
   videoNameTag: {
@@ -895,7 +898,7 @@ const styles = StyleSheet.create({
     width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(16,28,46,0.9)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)',
   },
-  speakerActive: { borderColor: live.gold, ...goldGlow },
+  speakerActive: { borderColor: live.gold },
   speakerName: { ...typography.caption, color: live.ink, fontWeight: '600' },
   removeText: { ...typography.caption, color: live.live, fontSize: 10 },
 
