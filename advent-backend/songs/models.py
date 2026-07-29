@@ -65,6 +65,14 @@ class User(AbstractUser):
     # Escalating moderation warnings (warn -> temp suspend -> ban).
     strikes = models.PositiveIntegerField(default=0)
 
+    # Lifetime likes across everything this user has published — social posts,
+    # tracks and publications — shown as a stat on the profile (TikTok-style).
+    # Denormalised because the alternative is three aggregate queries on every
+    # profile read, and UserSerializer is nested inside list payloads. Kept in
+    # sync by signals on Like / PostLike / PublicationLike; `recount_total_likes`
+    # rebuilds it from scratch if it ever drifts.
+    total_likes = models.PositiveIntegerField(default=0)
+
     # Self-service "deactivate" — a reversible hide the user controls themselves
     # (distinct from the moderation is_suspended and the is_active ban). The
     # account can still authenticate; logging back in auto-reactivates it.

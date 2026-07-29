@@ -4,6 +4,7 @@ from django.db.models import F
 from django.utils import timezone
 from ..models import LiveBroadcast, CoHostRequest
 from ..serializers import LiveBroadcastSerializer, LiveBroadcastListSerializer, CoHostRequestSerializer
+from ..signals import credit_user_likes
 from .. import livekit_service as lk
 
 
@@ -141,8 +142,13 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         except (TypeError, ValueError):
             n = 1
         n = max(1, min(n, 100))
-        LiveBroadcast.objects.filter(pk=pk, status='live').update(like_count=F('like_count') + n)
+        applied = LiveBroadcast.objects.filter(pk=pk, status='live').update(like_count=F('like_count') + n)
         b = get_object_or_404(LiveBroadcast, pk=pk)
+        # Credit the host's lifetime like total only when the tally actually
+        # moved — reactions sent to an already-ended room are a no-op above and
+        # must not inflate the profile stat either.
+        if applied:
+            credit_user_likes(b.host_id, n)
         return Response({'like_count': b.like_count})
 
     # ── On-screen graphic (lower third / banner / name tag / ticker) ─────────────

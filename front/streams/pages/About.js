@@ -79,9 +79,9 @@ const About = () => {
       `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} — ${subject}`)}`,
       t('about.emailUnavailable'), t
     );
-  const handleEmail = () => emailWith('Feedback');
-  const handleDonate = () => emailWith('Support & Donation');
-  const handlePartner = () => emailWith('Collaboration & Partnership');
+  const handleEmail = () => emailWith(t('about.subject.feedback'));
+  const handleDonate = () => emailWith(t('about.subject.donation'));
+  const handlePartner = () => emailWith(t('about.subject.partnership'));
 
   return (
     <View style={styles.root}>

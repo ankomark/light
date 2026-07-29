@@ -61,14 +61,17 @@ class ProfileSerializer(serializers.ModelSerializer):
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     posts_count = serializers.SerializerMethodField()
+    # Lifetime likes on this user's posts, tracks and publications. A stored
+    # counter (see User.total_likes), so it costs no extra query here.
+    total_likes = serializers.ReadOnlyField(source='user.total_likes')
 
     class Meta:
         model = Profile
         fields = ['bio', 'user_id','username', 'email', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
                   'birth_date', 'location', 'is_public', 'picture','picture_url',
-                  'followers_count', 'following_count', 'posts_count']
+                  'followers_count', 'following_count', 'posts_count', 'total_likes']
         read_only_fields = ['user_id', 'username', 'email', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
-                            'picture_url', 'followers_count', 'following_count', 'posts_count']
+                            'picture_url', 'followers_count', 'following_count', 'posts_count', 'total_likes']
         extra_kwargs = {
             'picture': {'write_only': True}  # Only needed for uploads
         }
@@ -141,11 +144,13 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'password',
             'profile', 'social_posts', 'followers_count',
             'following_count', 'is_following', 'is_private', 'can_view',
-            'follow_status', 'profile_picture'
+            'follow_status', 'profile_picture', 'total_likes'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
-            'email': {'required': True}
+            'email': {'required': True},
+            # Stored counter maintained by signals — never client-writable.
+            'total_likes': {'read_only': True},
         }
 
     def validate_email(self, value):

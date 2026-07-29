@@ -11,7 +11,8 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { fetchSocialPosts, cursorFromUrl, followUser, likePost } from '../services/api';
+import { fetchSocialPosts, cursorFromUrl, followUser, likePost, markPostsViewed } from '../services/api';
+import formatCount from '../utils/formatCount';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { usePreferences } from '../context/PreferencesContext';
@@ -22,6 +23,9 @@ import CommentAction from './CommentAction';
 import { colors, typography } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+
+// How long buffered view reports wait for more company before being sent.
+const VIEW_FLUSH_MS = 4000;
 
 // ── A single full-screen video page ─────────────────────────────────────────
 const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute, currentUser, navigation, bottomOffset = 120 }) => {
@@ -229,6 +233,10 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
           </TouchableOpacity>
         </View>
         {item.caption ? <Text style={styles.caption} numberOfLines={2}>{item.caption}</Text> : null}
+        <View style={styles.viewsRow}>
+          <Ionicons name="play" size={12} color="rgba(255,255,255,0.85)" />
+          <Text style={styles.viewsText}>{formatCount(item.view_count || 0)}</Text>
+        </View>
         {songTitle ? (
           <View style={styles.songRow}>
             <Ionicons name="musical-notes" size={13} color="#fff" />
@@ -273,6 +281,13 @@ const VideoFeed = () => {
   const nextCursorRef = useRef(null);
   const loadingMoreRef = useRef(false);
   const tabRef = useRef('foryou');
+
+  // View counting: a clip taking the screen is the view. Buffered and sent in
+  // batches so a fast swipe-through doesn't fire a request per video, and
+  // guarded per session so swiping back up doesn't re-report.
+  const viewBufferRef = useRef([]);
+  const seenPostsRef = useRef(new Set());
+  const flushTimerRef = useRef(null);
 
   const FOOTER_H = 54 + insets.bottom;
   const feedFor = (t) => (t === 'following' ? 'following' : null);
@@ -338,12 +353,45 @@ const VideoFeed = () => {
     return () => setScreenFocused(false);
   }, [player]));
 
+  // Send whatever views have piled up (best-effort — a dropped report just
+  // means an uncounted view, never a broken feed).
+  const flushViews = useCallback(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    const ids = viewBufferRef.current;
+    if (!ids.length) return;
+    viewBufferRef.current = [];
+    markPostsViewed(ids).catch(() => {});
+  }, []);
+
+  const queueView = useCallback((id) => {
+    if (!id || seenPostsRef.current.has(id)) return;
+    seenPostsRef.current.add(id);
+    viewBufferRef.current.push(id);
+    // Coalesce a burst of swipes into one request.
+    if (!flushTimerRef.current) {
+      flushTimerRef.current = setTimeout(flushViews, VIEW_FLUSH_MS);
+    }
+  }, [flushViews]);
+
+  // Ref-held so the (deliberately stable) viewability handler can reach the
+  // latest version without being re-created and tripping FlatList's warning.
+  const queueViewRef = useRef(queueView);
+  useEffect(() => { queueViewRef.current = queueView; }, [queueView]);
+
+  // Leaving the screen must not strand buffered views (the cleanup runs on both
+  // blur and unmount).
+  useFocusEffect(useCallback(() => () => flushViews(), [flushViews]));
+
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     const first = viewableItems.find((v) => v.isViewable);
     const id = first ? first.item.id : null;
     if (id && id !== activeIdRef.current) {
       activeIdRef.current = id;
       setActiveId(id);
+      queueViewRef.current(id);
     }
   }).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
@@ -497,6 +545,8 @@ const styles = StyleSheet.create({
   authorAvatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)' },
   authorName: { color: '#fff', fontWeight: '800', fontSize: 15, textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   caption: { color: '#fff', fontSize: 14, lineHeight: 19, textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  viewsRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
+  viewsText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   songRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   songText: { color: '#fff', fontSize: 13, flexShrink: 1, textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
 });

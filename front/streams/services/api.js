@@ -1662,6 +1662,11 @@ export const updateNotificationPreferences = (fields) =>
 export const markPostViewed = (postId) =>
   apiRequest('post', `/social-posts/${postId}/viewed/`);
 
+// Batched view reporting — one request per scroll session instead of one per
+// post. Best-effort: callers ignore failures. ids: [postId, ...].
+export const markPostsViewed = (postIds) =>
+  apiRequest('post', '/social-posts/mark_viewed/', { post_ids: postIds });
+
 export const fetchPostInsights = (postId) =>
   apiRequest('get', `/social-posts/${postId}/insights/`);
 

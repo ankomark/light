@@ -28,7 +28,7 @@ import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS, resolveVideoQuality } from '../utils/preferences';
 import { useI18n } from '../context/I18nContext';
 import SearchBaar from '../components/SearchBaar';
-import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, fetchLatestPostId, likePost } from '../services/api';
+import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, markPostsViewed, fetchLatestPostId, likePost } from '../services/api';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
@@ -38,6 +38,7 @@ import StoriesBar from './StoriesBar';
 import AudioVisualizer from './AudioVisualizer';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
+import formatCount from '../utils/formatCount';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -590,6 +591,12 @@ const SocialFeed = ({ showBackground = true }) => {
   const viewStartRef = useRef({});          // postId -> ms timestamp entered view
   const watchBufferRef = useRef([]);        // [{ post_id, dwell_ms }] pending upload
 
+  // View counting, batched on the same flush as dwell. `seen` is the session
+  // guard: a post scrolled past twice only reports once, so we don't spend
+  // requests on views the server's per-viewer cooldown would drop anyway.
+  const viewBufferRef = useRef([]);         // [postId] pending upload
+  const seenPostsRef = useRef(new Set());
+
   // Send buffered dwell events (best-effort). closeOpen finalizes posts still in
   // view — used when leaving the screen / backgrounding.
   const flushWatch = useCallback((closeOpen = false) => {
@@ -600,6 +607,11 @@ const SocialFeed = ({ showBackground = true }) => {
         if (dwell >= 500) watchBufferRef.current.push({ post_id: Number(id), dwell_ms: dwell });
       });
       viewStartRef.current = {};
+    }
+    const views = viewBufferRef.current;
+    if (views.length) {
+      viewBufferRef.current = [];
+      markPostsViewed(views).catch(() => {});
     }
     const events = watchBufferRef.current;
     if (!events.length) return;
@@ -858,6 +870,12 @@ const SocialFeed = ({ showBackground = true }) => {
       if (entry.isViewable) {
         // Start the dwell timer for this post.
         viewStartRef.current[post.id] = Date.now();
+        // Becoming viewable (80% on screen for 100ms, per viewabilityConfig)
+        // is the view. Once per post per session; the buffer flushes with dwell.
+        if (!seenPostsRef.current.has(post.id)) {
+          seenPostsRef.current.add(post.id);
+          viewBufferRef.current.push(post.id);
+        }
         if (
           post.content_type === 'image' &&
           post.song_audio_url &&
@@ -1070,12 +1088,18 @@ const SocialFeed = ({ showBackground = true }) => {
         />
       </View>
       <View style={styles.postInfo}>
+        <View style={styles.viewsRow}>
+          <MaterialIcons name="play-arrow" size={14} color={colors.textMuted} />
+          <Text style={styles.viewsText}>
+            {t('post.viewsCount', { count: formatCount(item.view_count || 0) })}
+          </Text>
+        </View>
         {item.caption ? (
           <Text style={styles.caption} numberOfLines={3}>{item.caption}</Text>
         ) : null}
       </View>
     </View>
-  ), [currentUser?.profile_picture, handleSaveChange, handleLikeChange]);
+  ), [currentUser?.profile_picture, handleSaveChange, handleLikeChange, t]);
 
   const renderItem = useCallback(({ item }) => (
     <View style={[styles.postContainer, { width: cardW }]}>
@@ -1632,6 +1656,19 @@ const styles = StyleSheet.create({
 
   postInfo: {
     marginTop: 10,
+  },
+
+  viewsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginBottom: 4,
+  },
+
+  viewsText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
   },
 
   caption: {

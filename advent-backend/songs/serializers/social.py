@@ -49,9 +49,9 @@ class SocialPostSerializer(serializers.ModelSerializer):
             'video_start_time', 'video_end_time',
             'caption', 'tags', 'location', 'duration', 'width', 'height',
             'created_at', 'updated_at', 'likes_count', 'comments_count',
-            'is_liked', 'is_saved', 'can_edit','optimized_url'
+            'view_count', 'is_liked', 'is_saved', 'can_edit','optimized_url'
         ]
-        read_only_fields = ['user', 'created_at', 'updated_at']
+        read_only_fields = ['user', 'created_at', 'updated_at', 'view_count']
         extra_kwargs = {
             'media_file': {'write_only': True},
             'gallery': {'write_only': True},
@@ -270,7 +270,10 @@ class ProfilePostThumbSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SocialPost
-        fields = ['id', 'content_type', 'media_url', 'optimized_url', 'thumbnail_url', 'width', 'height']
+        # view_count is a plain column, so the grid's play-count badge costs no
+        # extra query on top of the thumbnail payload.
+        fields = ['id', 'content_type', 'media_url', 'optimized_url', 'thumbnail_url',
+                  'width', 'height', 'view_count']
 
     def get_media_url(self, obj):
         return _thumb_helper.get_media_url(obj)

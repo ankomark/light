@@ -12,6 +12,7 @@ import { useI18n } from '../context/I18nContext';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import useGridColumns from '../utils/useGridColumns';
+import formatCount from '../utils/formatCount';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const AVATAR_SIZE = 96;
@@ -32,7 +33,7 @@ const getPostThumb = (post) => {
 
 const StatBox = ({ value, label }) => (
   <View style={styles.statBox}>
-    <Text style={styles.statValue}>{value ?? 0}</Text>
+    <Text style={styles.statValue}>{formatCount(value ?? 0)}</Text>
     <Text style={styles.statLabel}>{label}</Text>
   </View>
 );
@@ -261,6 +262,10 @@ const UserProfileScreen = () => {
           <StatBox value={followersCount} label={t('profile.followers')} />
           <View style={styles.statDivider} />
           <StatBox value={user?.following_count ?? 0} label={t('profile.following')} />
+          <View style={styles.statDivider} />
+          {/* Lifetime likes across this user's posts, tracks and publications —
+              the running total the backend keeps on User.total_likes. */}
+          <StatBox value={user?.total_likes ?? 0} label={t('profile.likes')} />
         </View>
 
         {(profile.bio || profile.location) ? (
@@ -309,6 +314,11 @@ const UserProfileScreen = () => {
             <Ionicons name="play" size={12} color={colors.white} />
           </View>
         )}
+        {/* Play count, bottom-left over the thumbnail — the TikTok grid badge. */}
+        <View style={styles.viewsBadge}>
+          <Ionicons name="play" size={11} color={colors.white} />
+          <Text style={styles.viewsBadgeText}>{formatCount(item.view_count || 0)}</Text>
+        </View>
       </TouchableOpacity>
     );
   }, [navigation, cols, tileSize]);
@@ -490,6 +500,15 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 6, right: 6,
     backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.full,
     width: 22, height: 22, alignItems: 'center', justifyContent: 'center',
+  },
+  viewsBadge: {
+    position: 'absolute', bottom: 5, left: 5,
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+  },
+  viewsBadgeText: {
+    color: colors.white, fontSize: 11, fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
   postsEmpty: {
     backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.lg,

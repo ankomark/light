@@ -8,6 +8,7 @@ import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { fetchProfile, fetchUserPosts } from '../services/api';
 import useGridColumns from '../utils/useGridColumns';
+import formatCount from '../utils/formatCount';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -31,7 +32,7 @@ const getPostThumb = (post) => {
 const StatBox = ({ value, label, onPress }) => {
   const content = (
     <>
-      <Text style={styles.statValue}>{value ?? '—'}</Text>
+      <Text style={styles.statValue}>{value == null ? '—' : formatCount(value)}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </>
   );
@@ -135,7 +136,7 @@ const Profile = () => {
         <View style={styles.statsRow}>
           <StatBox
             value={profile.followers_count ?? 0}
-            label="Followers"
+            label={t('profile.followers')}
             onPress={() => navigation.navigate('FollowList', {
               userId: profile.user_id,
               type: 'followers',
@@ -145,7 +146,7 @@ const Profile = () => {
           <View style={styles.statDivider} />
           <StatBox
             value={profile.following_count ?? 0}
-            label="Following"
+            label={t('profile.following')}
             onPress={() => navigation.navigate('FollowList', {
               userId: profile.user_id,
               type: 'following',
@@ -153,7 +154,11 @@ const Profile = () => {
             })}
           />
           <View style={styles.statDivider} />
-          <StatBox value={profile.posts_count ?? posts.length} label="Posts" />
+          <StatBox value={profile.posts_count ?? posts.length} label={t('profile.posts')} />
+          <View style={styles.statDivider} />
+          {/* Lifetime likes across this user's posts, tracks and publications —
+              the running total the backend keeps on User.total_likes. */}
+          <StatBox value={profile.total_likes ?? 0} label={t('profile.likes')} />
         </View>
 
         {/* Quick link to saved music & posts */}
@@ -220,6 +225,11 @@ const Profile = () => {
             <Ionicons name="play" size={12} color={colors.white} />
           </View>
         )}
+        {/* Play count, bottom-left over the thumbnail — the TikTok grid badge. */}
+        <View style={styles.viewsBadge}>
+          <Ionicons name="play" size={11} color={colors.white} />
+          <Text style={styles.viewsBadgeText}>{formatCount(item.view_count || 0)}</Text>
+        </View>
       </TouchableOpacity>
     );
   }, [navigation, tileSize]);
@@ -449,6 +459,24 @@ const styles = StyleSheet.create({
     height: 22,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  viewsBadge: {
+    position: 'absolute',
+    bottom: 5,
+    left: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+
+  viewsBadgeText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   postsEmpty: {
     backgroundColor: 'rgba(16,28,46,0.85)',

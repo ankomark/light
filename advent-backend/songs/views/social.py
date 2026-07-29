@@ -27,6 +27,51 @@ def share_brand_image(request):
     return resp
 
 
+# ── Post view counting ───────────────────────────────────────────────────────
+# How many post ids one batched report may carry.
+VIEW_BATCH_CAP = 200
+# A given viewer only moves a post's counter once per this window. Scrolling a
+# post past twice in a session is one view, and a client replaying the endpoint
+# in a loop can't inflate a number that's shown publicly. Repeat views still
+# count once the window lapses, as they do on other feeds.
+VIEW_COOLDOWN_SECONDS = 30 * 60
+
+
+def _count_views(user, post_ids):
+    """Increment view_count for `post_ids` on behalf of `user`.
+
+    Returns how many posts were actually counted. A viewer's own posts are
+    skipped so authors can't run up their own numbers by rewatching, moderator
+    takedowns are skipped because a post hidden from every public surface should
+    not keep accruing views, and the per-viewer cooldown above filters replays.
+    Whatever survives all three is applied as a single bulk UPDATE.
+    """
+    clean = set()
+    for pid in post_ids:
+        try:
+            clean.add(int(pid))
+        except (TypeError, ValueError):
+            continue
+    if not clean:
+        return 0
+
+    # cache.add is atomic and only succeeds when the key is absent, so two
+    # concurrent reports of the same view can't both get through.
+    fresh = {
+        pid for pid in clean
+        if cache.add(f'postview:{user.id}:{pid}', 1, VIEW_COOLDOWN_SECONDS)
+    }
+    if not fresh:
+        return 0
+
+    updated = (
+        SocialPost.objects.filter(id__in=fresh, is_removed=False)
+        .exclude(user=user)
+        .update(view_count=F('view_count') + 1)
+    )
+    return updated
+
+
 def feed_post_queryset(user):
     """SocialPost queryset with all per-post data the serializer needs resolved
     in the main query (author + profile + song via select_related; follower
@@ -165,9 +210,23 @@ class SocialPostViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def viewed(self, request, pk=None):
-        """Increment view count — idempotent, fire-and-forget."""
-        SocialPost.objects.filter(pk=pk).update(view_count=models.F('view_count') + 1)
-        return Response({'status': 'ok'})
+        """Count one view of this post. Fire-and-forget; prefer the batched
+        `mark_viewed` below when reporting a scroll session."""
+        counted = _count_views(request.user, [pk])
+        return Response({'status': 'ok', 'counted': counted})
+
+    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def mark_viewed(self, request):
+        """Ingest a batch of viewed post ids: {"post_ids": [1, 2, 3]}.
+
+        Batched the same way dwell events are, so a fast scroll costs one
+        request rather than one per post.
+        """
+        ids = request.data.get('post_ids') or []
+        if not isinstance(ids, list):
+            return Response({'error': 'post_ids must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        counted = _count_views(request.user, ids[:VIEW_BATCH_CAP])
+        return Response({'counted': counted}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def insights(self, request, pk=None):

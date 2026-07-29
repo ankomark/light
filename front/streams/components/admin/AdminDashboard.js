@@ -59,11 +59,13 @@ const AdminDashboard = ({ navigation }) => {
       // Surface the reason instead of silently showing zeros. A 403 means the
       // account isn't a platform admin (super_admin / moderator / has capabilities).
       const status = e?.response?.status;
-      setErr(status ? `Couldn't load dashboard data (HTTP ${status}).` : (e?.message || 'Failed to load dashboard data.'));
+      setErr(status
+        ? tr('admin.dashboardLoadFailedStatus', { status })
+        : (e?.message || tr('admin.dashboardLoadFailed')));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tr]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
