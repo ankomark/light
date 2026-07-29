@@ -34,6 +34,11 @@ VIEW_BATCH_CAP = 200
 # post past twice in a session is one view, and a client replaying the endpoint
 # in a loop can't inflate a number that's shown publicly. Repeat views still
 # count once the window lapses, as they do on other feeds.
+#
+# The dedupe is only as wide as the cache is shared: with REDIS_URL set every
+# worker consults the same keys, but on the LocMemCache fallback the window is
+# per-process, so a repeat view landing on another worker counts again. Keep
+# REDIS_URL configured in production.
 VIEW_COOLDOWN_SECONDS = 30 * 60
 
 
@@ -388,19 +393,22 @@ class SocialPostViewSet(viewsets.ModelViewSet):
     def like(self, request, pk=None):
         post = self.get_object()
         user = request.user
-        
-        # Check if like exists
-        like_exists = PostLike.objects.filter(post=post, user=user).exists()
-        
-        if like_exists:
+
+        # One like per (post, user), enforced by the unique_together on PostLike.
+        # get_or_create rather than exists()-then-create: a double-tap sends two
+        # requests that can both read "not liked" before either commits, and the
+        # loser of that race used to hit the constraint and 500. get_or_create
+        # absorbs it and reports the row that won, so the second tap reads as the
+        # toggle-off it looks like to the user.
+        like, created = PostLike.objects.get_or_create(post=post, user=user)
+
+        if not created:
             # Unlike the post
-            PostLike.objects.filter(post=post, user=user).delete()
+            like.delete()
             liked = False
         else:
-            # Like the post
-            PostLike.objects.create(post=post, user=user)
             liked = True
-            
+
             # Create notification only when liking (not unliking)
             if user != post.user:  # Don't notify self
                 msg = f"{user.username} liked your post"

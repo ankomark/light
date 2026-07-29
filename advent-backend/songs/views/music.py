@@ -232,11 +232,14 @@ class TrackViewSet(viewsets.ModelViewSet):
     def like(self, request, pk=None):
         track = self.get_object()
         user = request.user
-        # Check if the user has already liked the track
-        if Like.objects.filter(user=user, track=track).exists():
-          return Response({"error": "You have already liked this track."}, status=400)
+        # One like per (track, user), enforced by the unique_together on Like.
+        # get_or_create rather than exists()-then-create so a double-tap whose
+        # two requests overlap loses the duplicate instead of hitting the
+        # constraint and 500-ing.
+        _like, created = Like.objects.get_or_create(user=user, track=track)
+        if not created:
+            return Response({"error": "You have already liked this track."}, status=400)
 
-        Like.objects.create(user=user, track=track)
     # Return the updated like count
         likes_count = Like.objects.filter(track=track).count()
         return Response({"status": "Track liked", "likes_count": likes_count})
@@ -248,16 +251,17 @@ class TrackViewSet(viewsets.ModelViewSet):
         track = self.get_object()
         user = request.user
 
-        existing_like = Like.objects.filter(user=user, track=track).first()
-        if existing_like:
-            existing_like.delete()
+        # See `like` above: get_or_create keeps overlapping double-taps off the
+        # unique constraint, and the loser reads as the toggle-off it looks like.
+        like, created = Like.objects.get_or_create(user=user, track=track)
+        if not created:
+            like.delete()
             likes_count = track.likes.count()
             return Response({
                 "status": "Track unliked",
                 "likes_count": likes_count,
                 "is_liked": False
             })
-        Like.objects.create(user=user, track=track)
         likes_count = track.likes.count()
         msg = f"{user.username} liked your track {track.title}"
         Notification.objects.create(

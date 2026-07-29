@@ -8,21 +8,29 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
     const [likes, setLikes] = useState(initialLikes);
     const [isLiked, setIsLiked] = useState(initialIsLiked);
     // const [isLiked, setIsLiked] = useState(false);
+    const [busy, setBusy] = useState(false);
     useEffect(() => {
         setLikes(initialLikes);
         setIsLiked(initialIsLiked);
       }, [initialLikes, initialIsLiked]);
 
     const handleLikeClick = async () => {
+        // One request in flight at a time, as on the feed and publication
+        // buttons: a double-tap would otherwise send two toggles that race, and
+        // whichever response landed last would decide the state on screen.
+        if (busy) return;
+        setBusy(true);
         try {
             const response = await toggleTrackLike(trackId);
-            
+
             if (response && typeof response.likes_count === 'number') {
               setLikes(response.likes_count);
               setIsLiked(response.is_liked);
             }
           } catch (error) {
             Alert.alert(t('common.error'), error.message || t('social.likeStatusFailed'));
+          } finally {
+            setBusy(false);
           }
         };
 
@@ -31,6 +39,7 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
         <TouchableOpacity
         style={styles.likeButton}
         onPress={handleLikeClick}
+        disabled={busy}
         testID="like-button"
     >
         <Text style={[styles.likeText, isLiked && styles.liked]}>
