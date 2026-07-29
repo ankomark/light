@@ -26,7 +26,7 @@ viewer-hour ≈ 675 MB, so **~2.16 TB/month of egress**.
 Egress is the whole story: **$0.10/GB vs Hetzner's €1/TB (~$0.001/GB) — ~100×.**
 Self-hosting is not a close call at this budget.
 
-Trade-off accepted: we own TURN, upgrades, scaling and monitoring. See §8.
+Trade-off accepted: we own TURN, upgrades, scaling and monitoring. See §9.
 
 ---
 
@@ -80,7 +80,8 @@ identical specs, and avoids ARM wheel issues with `psycopg2-binary`.
 
 ### Deliberate savings
 
-- **No Hetzner Backups** (~20% surcharge, VM-level). Use `pg_dump` → R2 (§7.6).
+- **No Hetzner Backups** (~20% surcharge, VM-level). Use a nightly `pg_dump` →
+  R2 instead — R2 egress is free and a dump of this DB costs pennies (§9, risk 1).
 - **No staging box** initially — snapshot before risky changes, roll back.
 - **No volumes** — all media already lives in R2.
 - **No managed DB/Redis** — Hetzner doesn't offer them; that's the trade.
@@ -144,6 +145,8 @@ switch on `REDIS_URL` (`:308`, `:334`).
 - `advent-backend/Dockerfile`
 - `advent-backend/backup.sh` — `pg_dump` → R2
 - `livekit.yaml` — live box config
+- `.github/workflows/deploy.yml` — build/test/restart on push (§7)
+- `.github/workflows/migrate.yml` — gated migrations (§7)
 - `HETZNER_DEPLOY.md` — runbook (supersedes the Railway parts of
   `DEPLOYMENT.md` / `REALTIME_DEPLOY.md`, which stay as history)
 
@@ -235,7 +238,7 @@ view-count dedupe becomes per-process (documented at `songs/views/social.py:33`)
 18. **Run `python manage.py recount_total_likes`** — still outstanding from
     commit `a816b56` (stored counters predate the "exclude removed content"
     rule), and post-restore is the natural moment.
-19. Set up the backup cron (§7.6) **and test a restore** before cutover.
+19. Set up the nightly `pg_dump` → R2 cron **and test a restore** before cutover.
 
 ### Phase 5 — Cutover
 20. Smoke test against Box A directly (hosts-file override): login, feed, post,
@@ -248,15 +251,138 @@ view-count dedupe becomes per-process (documented at `songs/views/social.py:33`)
 23. Confirm Sentry is receiving events; watch error rate for an hour.
 24. **Keep Railway running ~48h** as rollback. Then tear down and cancel.
 
-### Phase 6 — Harden (first week after)
-25. Uptime monitoring with alerts (external, not on these boxes).
-26. Verify the nightly backup ran, and restore one into a throwaway container.
-27. Take a snapshot of the known-good state of both boxes.
-28. Document anything that surprised us in `HETZNER_DEPLOY.md`.
+### Phase 6 — CI/CD (same week as cutover, not "later")
+25. Create a deploy-only SSH keypair; add the public key to Box A, the private
+    key as `HETZNER_SSH_KEY`. Set the three repo secrets (§7).
+26. Add `.github/workflows/deploy.yml`. Test it with a no-op commit and confirm
+    the test job gates the deploy job.
+27. Add `.github/workflows/migrate.yml`; set a required reviewer on the
+    `production` environment so migrations can't fire unattended.
+
+### Phase 7 — Harden (first week after)
+28. Uptime monitoring with alerts (external, not on these boxes).
+29. Verify the nightly backup ran, and restore one into a throwaway container.
+30. Take a snapshot of the known-good state of both boxes.
+31. Document anything that surprised us in `HETZNER_DEPLOY.md`.
 
 ---
 
-## 7. Scaling triggers
+## 7. CI/CD — replacing Railway's push-to-deploy
+
+Railway watches the repo and builds on push. **Hetzner is raw infrastructure — a
+VPS has no idea GitHub exists.** After the migration `git push` deploys nothing
+until we build this. Losing push-to-deploy is a real cost of the move, alongside
+backups.
+
+### Options considered
+
+| Approach | Effort | Cost | Notes |
+|---|---|---|---|
+| **GitHub Actions → SSH** | ~30 lines YAML | free | **Chosen.** No extra services, no daemon on the box, full control. |
+| Kamal | small | free | Purpose-built for Docker-on-VPS; proper zero-downtime. Revisit if deploys get painful. |
+| Watchtower + GHCR | small | free | Actions builds an image, box auto-pulls. Clean split, but unattended pulls to prod are loose. |
+| Coolify (self-hosted PaaS) | medium | free | Closest to the Railway feel — web UI, git integration, TLS. Wants ~1 GB+ RAM, which is a lot on a CX23. Fallback if we miss the dashboard. |
+
+### The split: automatic vs gated
+
+**Do not auto-run migrations.** This matters concretely here: migration
+`0095_user_total_likes` backfills every user in batches, so it's a slow
+migration, not an instant one. An unattended `migrate` can hold locks mid-request
+and there is no managed database to roll back to anymore.
+
+| Automatic on push to `main` | Manual / approval-gated |
+|---|---|
+| run tests | `migrate` |
+| build image | (always after a fresh `pg_dump`) |
+| `collectstatic` | |
+| restart `web` | |
+
+### `.github/workflows/deploy.yml`
+
+```yaml
+name: Deploy backend
+on:
+  push:
+    branches: [main]
+    paths: ['advent-backend/**']      # frontend-only commits shouldn't redeploy
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -r advent-backend/requirements.txt
+      - run: python manage.py test songs --settings=music.settings_test
+        working-directory: advent-backend
+
+  deploy:
+    needs: test                        # never deploy a red build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/adventlife
+            git pull --ff-only
+            docker compose build web
+            docker compose run --rm web python manage.py collectstatic --noinput
+            docker compose up -d --no-deps web
+            docker image prune -f
+```
+
+The test gate is cheap insurance — the suite is 438 tests in ~23 s.
+
+### `.github/workflows/migrate.yml` (manual only)
+
+```yaml
+name: Migrate (manual)
+on: workflow_dispatch
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production            # add a required reviewer in repo settings
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/adventlife
+            ./backup.sh                # dump to R2 BEFORE touching the schema
+            docker compose run --rm web python manage.py migrate
+```
+
+### Repo secrets to set
+
+| Secret | Value |
+|---|---|
+| `HETZNER_HOST` | Box A public IP or `api.yourdomain.com` |
+| `HETZNER_USER` | the non-root sudo user from Phase 1 |
+| `HETZNER_SSH_KEY` | a **deploy-only** private key, not your personal one |
+
+### Notes
+
+- Restarting Daphne **drops live WebSocket connections** — group chat reconnects
+  on every deploy. Acceptable at this scale (the client already reconnects).
+  Zero-downtime later means two `web` containers with Caddy switching between
+  them, which is when Kamal starts earning its keep.
+- The Expo frontend is unaffected — it releases through EAS on its own cadence,
+  which is also why the `paths:` filter above matters.
+- Deploys are only as safe as the rollback: `git pull --ff-only` means reverting
+  is `git revert` + push, and a Hetzner snapshot covers the worst case.
+
+---
+
+## 8. Scaling triggers
 
 Vertical first — Hetzner rescales in place with minutes of downtime.
 
@@ -273,7 +399,7 @@ this workload, since all media is on R2.
 
 ---
 
-## 8. What we take on, and the real risks
+## 9. What we take on, and the real risks
 
 The €15/mo isn't the cost of this move — the ops time is. Ranked by how much
 damage each can do:
@@ -290,12 +416,15 @@ damage each can do:
 5. **Postgres connection exhaustion.** Daphne + workers each hold connections;
    PgBouncer in transaction mode plus `DB_USE_PGBOUNCER=True` is the fix, and
    the code already supports it.
-6. **Ongoing:** OS patching, Postgres major upgrades, TLS (Caddy automates it),
+6. **No push-to-deploy out of the box.** Railway built on push; Hetzner doesn't.
+   Until §7 is in place every deploy is manual SSH, which invites drift and
+   skipped steps. Build the pipeline in the same week as the cutover, not "later".
+7. **Ongoing:** OS patching, Postgres major upgrades, TLS (Caddy automates it),
    LiveKit upgrades, monitoring, incident response. Sentry is already wired in.
 
 ---
 
-## 9. Open decisions
+## 10. Open decisions
 
 - [ ] Domain name — needed before Phase 0 can start.
 - [ ] App box: CX33 (€8.49, recommended) or CX23 (€5.49, floor)?
@@ -304,6 +433,8 @@ damage each can do:
 - [ ] Confirm current Hetzner prices at order time — two increases in 2026 already.
 - [ ] Does the web admin dashboard get its own subdomain? Affects change #4.
 - [ ] Keep Railway as a fallback beyond 48h, or cancel immediately?
+- [ ] CI/CD: GitHub Actions + SSH (recommended), or Coolify for a Railway-like
+      dashboard? Affects the app-box sizing — Coolify wants ~1 GB+ RAM.
 
 ---
 
