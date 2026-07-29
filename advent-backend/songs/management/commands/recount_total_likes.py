@@ -8,7 +8,7 @@ path that bypasses the ORM and leaves the totals drifting.
     python manage.py recount_total_likes --user alice
 """
 from django.core.management.base import BaseCommand
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 
 from songs.models import LiveBroadcast, User
 
@@ -21,11 +21,22 @@ def recount(users=None):
     """
     qs = User.objects.all() if users is None else users
     # distinct=True on each Count so the three joins can share one query without
-    # multiplying each other's rows.
+    # multiplying each other's rows. Moderator takedowns are excluded to match
+    # the incremental rule (see signals.sync_removal_likes) — if this disagreed,
+    # every run would "repair" the counters to a different number.
     qs = qs.annotate(
-        post_likes=Count('social_posts__likes', distinct=True),
-        track_likes=Count('tracks__likes', distinct=True),
-        pub_likes=Count('publications__likes', distinct=True),
+        post_likes=Count(
+            'social_posts__likes', distinct=True,
+            filter=Q(social_posts__is_removed=False),
+        ),
+        track_likes=Count(
+            'tracks__likes', distinct=True,
+            filter=Q(tracks__is_removed=False),
+        ),
+        pub_likes=Count(
+            'publications__likes', distinct=True,
+            filter=Q(publications__is_removed=False),
+        ),
     )
 
     # Live hearts are a stored tally rather than one row per like, so they need a

@@ -5,8 +5,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from songs.models import (
-    User, Publication, Product, ProductReview, Group, GroupPost,
+    User, Profile, Publication, Product, ProductReview, Group, GroupPost,
     Choir, ChoirMessage, Church, ChurchMessage, Videostudio, MediaStation,
+    SocialPost,
 )
 
 
@@ -127,6 +128,77 @@ class ContentModerationTests(APITestCase):
         res = self.client.get(f'/api/marketplace/products/{self.product.slug}/')
         self.assertEqual(res.data['review_count'], 1)
         self.assertEqual(res.data['average_rating'], 5.0)
+
+
+class ProfileGridTakedownTests(APITestCase):
+    """The profile post grid used to be the one public surface a takedown stayed
+    visible on — the feed hid it, the grid did not. It hides it now, for the
+    author too, and the header count agrees with what the grid renders."""
+
+    def setUp(self):
+        cache.clear()
+        self.admin = User.objects.create_user('pgadmin', 'pgadmin@t.local', 'pw')
+        self.admin.admin_role = 'super_admin'
+        self.admin.save(update_fields=['admin_role'])
+        self.author = User.objects.create_user('pgauthor', 'pgauthor@t.local', 'pw')
+        Profile.objects.create(user=self.author)
+        self.viewer = User.objects.create_user('pgviewer', 'pgviewer@t.local', 'pw')
+
+        self.kept = SocialPost.objects.create(user=self.author, content_type='image')
+        self.taken = SocialPost.objects.create(user=self.author, content_type='image')
+
+    def _grid_ids(self):
+        res = self.client.get(f'/api/users/{self.author.id}/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return {p['id'] for p in res.data['social_posts']}
+
+    def _endpoint_ids(self):
+        res = self.client.get(f'/api/users/{self.author.id}/social_posts/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return {p['id'] for p in _rows(res)}
+
+    def _take_down(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.post('/api/admin/content/remove/', {'type': 'post', 'id': self.taken.id})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+    def test_serializer_grid_hides_a_takedown(self):
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self._grid_ids(), {self.kept.id, self.taken.id})
+
+        self._take_down()
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self._grid_ids(), {self.kept.id})
+
+    def test_social_posts_endpoint_hides_a_takedown(self):
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self._endpoint_ids(), {self.kept.id, self.taken.id})
+
+        self._take_down()
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self._endpoint_ids(), {self.kept.id})
+
+    def test_the_author_does_not_see_their_own_takedown_either(self):
+        self._take_down()
+        self.client.force_authenticate(self.author)
+        self.assertEqual(self._grid_ids(), {self.kept.id})
+        self.assertEqual(self._endpoint_ids(), {self.kept.id})
+
+    def test_posts_count_matches_the_grid(self):
+        self._take_down()
+        self.client.force_authenticate(self.author)
+        res = self.client.get('/api/profiles/me/')
+        # A count of 2 over a one-item grid is the mismatch this guards.
+        self.assertEqual(res.data['posts_count'], 1)
+        self.assertEqual(len(self._grid_ids()), 1)
+
+    def test_a_restore_brings_the_post_back_to_the_grid(self):
+        self._take_down()
+        self.client.post('/api/admin/content/restore/', {'type': 'post', 'id': self.taken.id})
+
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self._grid_ids(), {self.kept.id, self.taken.id})
+        self.assertEqual(self._endpoint_ids(), {self.kept.id, self.taken.id})
 
 
 class ReportModerationTests(APITestCase):

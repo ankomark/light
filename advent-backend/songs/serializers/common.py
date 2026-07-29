@@ -87,7 +87,10 @@ class ProfileSerializer(serializers.ModelSerializer):
         return obj.user.followed_by.count()
 
     def get_posts_count(self, obj):
-        return obj.user.social_posts.count()
+        # Matches the grid below, which hides takedowns — otherwise the header
+        # would advertise a post the profile refuses to show. The admin
+        # serializer keeps its own unfiltered count on purpose.
+        return obj.user.social_posts.filter(is_removed=False).count()
 
     def create(self, validated_data):
         """Handles profile creation with request context"""
@@ -207,7 +210,10 @@ class UserSerializer(serializers.ModelSerializer):
         if not can_view_profile(viewer, obj):
             return []
 
-        posts = obj.social_posts.order_by('-created_at')
+        # is_removed hides a moderator takedown from every public surface — the
+        # author included, as on the feed. Without this the grid was the one
+        # place a removed post stayed visible.
+        posts = obj.social_posts.filter(is_removed=False).order_by('-created_at')
 
         if self.context.get('request'):
             content_type = self.context['request'].GET.get('content_type')

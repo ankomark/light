@@ -208,7 +208,9 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
     def social_posts(self, request, pk=None):
         """Get user's posts with optimized author pictures"""
         user = self.get_object()
-        posts = SocialPost.objects.filter(user=user).select_related('user__profile')
+        # Moderator takedowns stay hidden here too (see the feed and the grid on
+        # UserSerializer) — this endpoint feeds the same profile grid.
+        posts = SocialPost.objects.filter(user=user, is_removed=False).select_related('user__profile')
         
         page = self.paginate_queryset(posts)
         if page is not None:

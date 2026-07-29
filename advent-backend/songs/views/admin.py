@@ -3,6 +3,7 @@ from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES
+from ..signals import sync_removal_likes
 from ..serializers.admin import build_report_targets
 from ..serializers import (
     AdminUserSerializer,
@@ -115,6 +116,9 @@ def _soft_remove(content_type, object_id, removed=True):
     obj = Model.objects.filter(id=object_id).first()
     if not obj:
         return False
+    # Before the flip: a takedown's likes stop counting toward the author's
+    # profile total, and a restore hands them back.
+    sync_removal_likes(Model, [obj.pk], removed)
     obj.is_removed = removed
     obj.save(update_fields=['is_removed'])
     return True
@@ -605,6 +609,9 @@ class AdminContentViewSet(viewsets.GenericViewSet):
             return Response({'error': 'ids (a non-empty list) is required'}, status=status.HTTP_400_BAD_REQUEST)
         if op not in ('remove', 'restore'):
             return Response({'error': "action must be 'remove' or 'restore'"}, status=status.HTTP_400_BAD_REQUEST)
+        # .update() fires no signals, so the profile-total adjustment is explicit
+        # here as well — and must precede the flip (it selects on the old state).
+        sync_removal_likes(Model, ids, op == 'remove')
         count = Model.objects.filter(id__in=ids).update(is_removed=(op == 'remove'))
         log_admin_action(request.user, f'bulk_{op}_{ctype}', ctype, None, reason=f'{count} items')
         return Response({'updated': count})
