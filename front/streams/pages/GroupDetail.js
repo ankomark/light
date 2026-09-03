@@ -252,6 +252,27 @@ const mergeMessages = (a, b) => {
   return Array.from(map.values()).sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
 };
 
+/** The category-specific fields a community carries (conference, genre, ...).
+ *  Driven by the category's field_schema, so a user-created kind renders its
+ *  own fields with no code here. */
+const CommunityDetails = ({ group, styles }) => {
+  const schema = group?.category_detail?.field_schema || [];
+  const rows = schema
+    .map((f) => ({ label: f.label, value: group?.details?.[f.key] }))
+    .filter((r) => r.value !== undefined && r.value !== null && String(r.value).trim() !== '');
+  if (!rows.length) return null;
+  return (
+    <View style={styles.detailBlock}>
+      {rows.map((r) => (
+        <View style={styles.detailRow} key={r.label}>
+          <Text style={styles.detailLabel}>{r.label}</Text>
+          <Text style={styles.detailValue} numberOfLines={2}>{String(r.value)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+};
+
 const GroupDetail = ({ route, navigation }) => {
   const { t } = useI18n();
   const { groupSlug, group: initialGroup } = route.params;
@@ -1133,6 +1154,24 @@ const GroupDetail = ({ route, navigation }) => {
           ) : null}
           ListEmptyComponent={firstLoad ? (
             <View style={styles.emptyContainer}><ActivityIndicator color={colors.accent} /></View>
+          ) : group?.kind === 'community' ? (
+            <View style={styles.emptyContainer}>
+              <View style={styles.welcomeIcon}>
+                <Ionicons
+                  name={group?.category_detail?.icon || 'people'}
+                  size={26}
+                  color={colors.accent}
+                />
+              </View>
+              <Text style={styles.welcomeTitle}>
+                {t('community.detail.welcomeTitle', { name: group?.name || '' })}
+              </Text>
+              <Text style={styles.emptyText}>
+                {t(group?.is_private
+                  ? 'community.detail.welcomeBodyPrivate'
+                  : 'community.detail.welcomeBodyPublic')}
+              </Text>
+            </View>
           ) : (
             <View style={styles.emptyContainer}><Text style={styles.emptyText}>{t('group.detail.noMessages')}</Text></View>
           )}
@@ -1142,11 +1181,22 @@ const GroupDetail = ({ route, navigation }) => {
           <View style={styles.lockedIconWrap}>
             <Ionicons name="lock-closed" size={34} color={colors.textSecondary} />
           </View>
-          <Text style={styles.lockedTitle}>{t('group.detail.membersOnlyTitle')}</Text>
-          <Text style={styles.lockedBody}>{t('group.detail.membersOnlyBody')}</Text>
+          <Text style={styles.lockedTitle}>
+            {group?.kind === 'community' && !group?.is_private
+              ? t('community.detail.welcomeTitle', { name: group?.name || '' })
+              : t('group.detail.membersOnlyTitle')}
+          </Text>
+          <Text style={styles.lockedBody}>
+            {group?.kind === 'community'
+              ? t(group?.is_private
+                ? 'community.detail.joinBodyPrivate'
+                : 'community.detail.joinBodyPublic')
+              : t('group.detail.membersOnlyBody')}
+          </Text>
           {group?.description ? (
             <Text style={styles.lockedDesc} numberOfLines={4}>{group.description}</Text>
           ) : null}
+          <CommunityDetails group={group} styles={styles} />
         </View>
       )}
 
@@ -1304,6 +1354,13 @@ const GroupDetail = ({ route, navigation }) => {
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle} numberOfLines={1}>{group?.name || 'Group'}</Text>
             <Text style={styles.sheetSubtitle}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
+            {!!group?.category_detail && (
+              <View style={styles.categoryBadge}>
+                <Ionicons name={group.category_detail.icon || 'people'} size={12} color={colors.accent} />
+                <Text style={styles.categoryBadgeText}>{group.category_detail.name}</Text>
+              </View>
+            )}
+            <CommunityDetails group={group} styles={styles} />
 
             {isMember && (
               <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} onPress={goMembers}>
@@ -1689,8 +1746,13 @@ const styles = StyleSheet.create({
   audioBarFill: { width: '100%', height: '100%', opacity: 0.8 },
   audioDuration: { fontSize: 12, fontWeight: '600', minWidth: 34, textAlign: 'right' },
 
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyText: { ...typography.body, color: colors.textMuted },
+  emptyContainer: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    paddingTop: 80, paddingHorizontal: spacing.xl,
+  },
+  // Capped so the welcome copy stays a readable column on a tablet or in
+  // landscape instead of running the full width of the screen.
+  emptyText: { ...typography.body, color: colors.textMuted, textAlign: 'center', maxWidth: 340 },
 
   jumpFab: {
     position: 'absolute', right: spacing.md, bottom: 76, zIndex: 30,
@@ -1806,6 +1868,25 @@ const styles = StyleSheet.create({
   promptSave: { backgroundColor: colors.accent },
   promptSaveText: { ...typography.button, color: '#0A1628', fontWeight: '800' },
   promptDisabled: { opacity: 0.5 },
+  welcomeIcon: {
+    width: 52, height: 52, borderRadius: 26, marginBottom: 10,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(244,162,97,0.12)',
+  },
+  welcomeTitle: {
+    fontSize: 16, fontWeight: '800', color: colors.textPrimary,
+    marginBottom: 4, textAlign: 'center', maxWidth: 340,
+  },
+  categoryBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'center',
+    marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999,
+    backgroundColor: 'rgba(244,162,97,0.14)',
+  },
+  categoryBadgeText: { fontSize: 11, fontWeight: '800', color: colors.accent },
+  detailBlock: { marginTop: 10, gap: 4, alignSelf: 'stretch' },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  detailLabel: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
+  detailValue: { fontSize: 12, fontWeight: '600', color: colors.textSecondary, flexShrink: 1, textAlign: 'right' },
   sheetSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.md },
   sheetOption: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,

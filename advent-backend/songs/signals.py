@@ -14,8 +14,9 @@ from django.dispatch import receiver
 
 from .models import (
     Like, LiveBroadcast, PostLike, PostComment, PublicationLike,
-    Publication, SocialPost, Track, User,
+    Publication, PuzzleProgress, QuizAttempt, QuizSession, SocialPost, Track, User,
 )
+from .streaks import record_play
 
 
 def _bump(post_id, field, delta):
@@ -165,3 +166,35 @@ def comment_created(sender, instance, created, **kwargs):
 @receiver(post_delete, sender=PostComment)
 def comment_deleted(sender, instance, **kwargs):
     _bump(instance.post_id, 'comments_count', -1)
+
+
+# ── the streak ───────────────────────────────────────────────────────────────
+# One record of showing up, whatever was played. Written from the models rather
+# than from each view so that no write path — present or future — can quietly
+# under-count someone's streak by forgetting to call it. `record_play` is a
+# get_or_create on (user, day), so firing on every save costs one row a day.
+
+
+@receiver(post_save, sender=QuizAttempt)
+def quiz_attempt_played(sender, instance, raw=False, **kwargs):
+    if raw or not instance.quiz_id:
+        return
+    # The day the quiz was *for*, not the moment it was saved: a quiz taken at
+    # ten past midnight belongs to the day it asked about.
+    record_play(instance.user_id, instance.quiz.date)
+
+
+@receiver(post_save, sender=QuizSession)
+def quiz_session_played(sender, instance, raw=False, **kwargs):
+    if raw:
+        return
+    record_play(instance.user_id)
+
+
+@receiver(post_save, sender=PuzzleProgress)
+def puzzle_played(sender, instance, raw=False, **kwargs):
+    """Today, not when the level was started — someone can come back to an old
+    level a week later, and that week later is when they played."""
+    if raw:
+        return
+    record_play(instance.user_id)

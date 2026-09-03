@@ -21,10 +21,6 @@ from ..serializers import (
     AdminContentProductSerializer,
     AdminContentProductReviewSerializer,
     AdminContentGroupPostSerializer,
-    AdminContentChoirMessageSerializer,
-    AdminContentChurchMessageSerializer,
-    AdminContentChurchSerializer,
-    AdminContentChoirSerializer,
     AdminContentVideostudioSerializer,
     AdminContentMediaStationSerializer,
 )
@@ -68,10 +64,6 @@ _CONTENT_MODELS = {
     'product': Product,           # marketplace listings
     'productreview': ProductReview,
     'grouppost': GroupPost,       # group chat messages
-    'choirmessage': ChoirMessage,
-    'churchmessage': ChurchMessage,
-    'church': Church,             # directory listings
-    'choir': Choir,
     'videostudio': Videostudio,
     'mediastation': MediaStation,
 }
@@ -542,10 +534,6 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         'product':      ('seller',  AdminContentProductSerializer,     ['title__icontains', 'seller__username__icontains']),
         'productreview': ('reviewer', AdminContentProductReviewSerializer, ['comment__icontains', 'reviewer__username__icontains']),
         'grouppost':    ('user',   AdminContentGroupPostSerializer,   ['content__icontains', 'user__username__icontains']),
-        'choirmessage': ('sender', AdminContentChoirMessageSerializer, ['content__icontains', 'sender__username__icontains']),
-        'churchmessage': ('sender', AdminContentChurchMessageSerializer, ['content__icontains', 'sender__username__icontains']),
-        'church':       ('created_by', AdminContentChurchSerializer,  ['name__icontains', 'country__icontains']),
-        'choir':        ('created_by', AdminContentChoirSerializer,   ['name__icontains', 'location__icontains']),
         'videostudio':  ('created_by', AdminContentVideostudioSerializer, ['name__icontains', 'location__icontains']),
         'mediastation': ('created_by', AdminContentMediaStationSerializer, ['name__icontains']),
     }

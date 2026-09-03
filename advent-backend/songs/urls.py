@@ -37,13 +37,17 @@ from .views import (
     CreatePaymentIntentView,
     StoryViewSet,
     ReportViewSet,
-    ChurchViewSet,
     NoticeViewSet,
     AdminNoteViewSet,
     MediaStationViewSet,
     VideoStudioViewSet,
-    ChoirViewSet,
     GroupViewSet,
+    CommunityCategoryViewSet,
+    CommunityViewSet,
+    DailyQuizViewSet,
+    QuizSessionViewSet,
+    PuzzleThemeViewSet,
+    WordPuzzleViewSet,
     GroupJoinRequestViewSet,
     FollowRequestViewSet,
     WallpaperViewSet,
@@ -86,14 +90,24 @@ router.register(r'post-likes', PostLikeViewSet)
 router.register(r'post-comments', PostCommentViewSet)
 router.register(r'post-saves', PostSaveViewSet)
 router.register(r'notifications', NotificationViewSet, basename='notifications')
-router.register(r'churches', ChurchViewSet, basename='churches')
 router.register(r'notices', NoticeViewSet, basename='notices')
 router.register(r'admin-notes', AdminNoteViewSet, basename='admin-notes')
 router.register(r'media-stations', MediaStationViewSet, basename='media-stations')
 router.register(r'publications', PublicationViewSet, basename='publications')
 router.register(r'video-studios', VideoStudioViewSet, basename='video-studios')
-router.register(r'choirs', ChoirViewSet, basename='choirs')
+# Groups and communities are separate features on one shared engine, so they
+# get separate list endpoints. Detail and action routes on either path resolve
+# any row — the chat/members/moderation endpoints are common to both.
 router.register(r'groups', GroupViewSet, basename='groups')
+router.register(r'communities', CommunityViewSet, basename='communities')
+router.register(r'community-categories', CommunityCategoryViewSet, basename='community-categories')
+# Daily Bible quiz: /api/quiz/today/, /submit/, /leaderboard/, /my-history/
+router.register(r'quiz', DailyQuizViewSet, basename='quiz')
+# Practice modes (Speed Quiz, Streak) — personal runs, answered one at a time.
+router.register(r'quiz-sessions', QuizSessionViewSet, basename='quiz-sessions')
+# Word puzzle: themes, levels, and the coin wallet that hints spend from.
+router.register(r'puzzle-themes', PuzzleThemeViewSet, basename='puzzle-themes')
+router.register(r'puzzles', WordPuzzleViewSet, basename='puzzles')
 router.register(r'group-join-requests', GroupJoinRequestViewSet, basename='group-join-requests')
 router.register(r'group-posts', GroupPostViewSet, basename='group-posts')
 router.register(r'marketplace/categories', ProductCategoryViewSet, basename='product-categories')
@@ -158,12 +172,7 @@ urlpatterns = [
     path('tracks/upload/', TrackViewSet.as_view({'post': 'upload_track'}), name='track-upload'),
     path('tracks/favorites/', TrackViewSet.as_view({'get': 'get_favorites'}), name='track-favorites'),
     path('notifications/unread_count/', NotificationViewSet.as_view({'get': 'unread_count'}), name='notification-unread-count'),
-    path('churches/my_churches/', ChurchViewSet.as_view({'get': 'my_churches'}), name='church-my-churches'),
     path('video-studios/my-studios/', VideoStudioViewSet.as_view({'get': 'my_videostudios'}), name='video-my-studios'),
-    path('choirs/my-choirs/', ChoirViewSet.as_view({'get': 'my_choirs'}), name='choir-my-choirs'),
-    path('choirs/<int:pk>/add-member/', ChoirViewSet.as_view({'post': 'add_member'}), name='choir-add-member'),
-    path('choirs/<int:pk>/toggle-active/', ChoirViewSet.as_view({'post': 'toggle_active'}), name='choir-toggle-active'),
-    path('choirs/<int:pk>/update-members/', ChoirViewSet.as_view({'post': 'update_members'}), name='choir-update-members'),
     
     
     # New group-related routes

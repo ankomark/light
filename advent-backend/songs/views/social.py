@@ -759,7 +759,6 @@ class ReportViewSet(viewsets.ViewSet):
         valid_types = {
             'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
             'publication', 'product', 'productreview', 'grouppost',
-            'choirmessage', 'churchmessage', 'church', 'choir',
             'videostudio', 'mediastation',
         }
         if content_type not in valid_types:

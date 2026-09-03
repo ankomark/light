@@ -17,6 +17,7 @@ export const PREF_KEYS = {
   pushEnabled: 'pushEnabled',
   themeMode: 'themeMode',       // 'system' | 'light' | 'dark'
   language: 'language',         // 'system' | 'en' | 'sw' | ...
+  quizSound: 'quizSound',       // quiz effect sounds + haptics
 };
 
 export const DEFAULT_PREFERENCES = {
@@ -29,6 +30,9 @@ export const DEFAULT_PREFERENCES = {
   // user explicitly opts into light/system.
   [PREF_KEYS.themeMode]: 'dark',
   [PREF_KEYS.language]: 'system',
+  // Sound on by default — a game that starts silent feels broken, and it
+  // is one tap to turn off from the quiz header.
+  [PREF_KEYS.quizSound]: true,
 };
 
 const serialize = (value) => JSON.stringify(value);

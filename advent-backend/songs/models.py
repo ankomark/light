@@ -646,39 +646,6 @@ class DeviceToken(models.Model):
         return f"{self.user.username} - {self.platform} - {self.token[:30]}..."
 
 
-class Church(models.Model):
-    # Soft-removed by a moderator (remove_content). Excluded from public
-    # queries; the row and its author survive so it can be restored.
-    is_removed = models.BooleanField(default=False, db_index=True)
-    name = models.CharField(max_length=200)
-    country = models.CharField(max_length=100)
-    county = models.CharField(max_length=100, blank=True, null=True)
-    conference = models.CharField(max_length=200)
-    district = models.CharField(max_length=200, blank=True, null=True)
-    location = models.CharField(max_length=300)
-    members = models.PositiveIntegerField(default=0)
-    pastor = models.CharField(max_length=200, blank=True, null=True)
-    contact = models.CharField(max_length=100, blank=True, null=True)
-    # WhatsApp-style "Only admins can send messages" lock for the church community chat.
-    only_admins_can_post = models.BooleanField(default=False)
-    # One admin-pinned message shown as a banner atop the chat (SET_NULL so
-    # deleting the message just clears the pin).
-    pinned_message = models.ForeignKey('ChurchMessage', null=True, blank=True,
-                                       on_delete=models.SET_NULL, related_name='+')
-    # image = models.ImageField(upload_to='churches/', blank=True, null=True)
-    # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
-    image = models.CharField(max_length=500, blank=True, null=True)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='churches')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.name
-
-    class Meta:
-        ordering = ['-created_at']
-
-
 class Notice(models.Model):
     """Notice board posts. Read by everyone; only staff/admins may post
     (admin-role gating to be expanded later — currently uses User.is_staff)."""
@@ -758,6 +725,7 @@ class NotificationPreference(models.Model):
     groups = models.BooleanField(default=True)
     communities = models.BooleanField(default=True)
     live = models.BooleanField(default=True)
+    quiz = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -1013,230 +981,78 @@ class Videostudio(models.Model):
         verbose_name_plural = "Video Studios"
         ordering = ['-created_at']
 
-class Choir(models.Model):
-    # Soft-removed by a moderator (remove_content). Excluded from public
-    # queries; the row and its author survive so it can be restored.
-    is_removed = models.BooleanField(default=False, db_index=True)
-    GENRE_CHOICES = (
-        ('gospel', 'Gospel'),
-        ('contemporary', 'Contemporary Christian'),
-        ('traditional', 'Traditional Hymns'),
-        ('mixed', 'Mixed Repertoire'),
+class CommunityCategory(models.Model):
+    """A kind of community — Church, Choir, News, Youth, and whatever people
+    invent next. Communities used to be hardcoded as separate Choir/Church
+    models, which meant shipping a migration to allow a new kind; a category is
+    a row, so anyone can start one.
+
+    `field_schema` describes the extra fields a community of this kind carries
+    (a church has a conference and a pastor, a choir has a genre). It drives
+    both the create form and the directory filters, so a user-created category
+    gets the same treatment as a built-in one without any code change."""
+    # Field descriptor keys: key, label, type (text|email|tel|url|date),
+    # filterable (offered as a directory filter), searchable (included in ?search=).
+    name = models.CharField(max_length=60, unique=True)
+    slug = models.SlugField(max_length=60, unique=True)
+    description = models.CharField(max_length=200, blank=True, default='')
+    # Ionicons glyph name, so the picker and cards can show a per-kind icon.
+    icon = models.CharField(max_length=40, blank=True, default='people')
+    # Built-ins ship with the app and are protected from deletion; user-created
+    # categories belong to their author.
+    is_builtin = models.BooleanField(default=False)
+    field_schema = models.JSONField(default=list, blank=True)
+    created_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='community_categories',
     )
-    
-    name = models.CharField(max_length=200)
-    description = models.TextField(blank=True, null=True)
-    church = models.ForeignKey(Church, on_delete=models.SET_NULL, null=True, blank=True, related_name='choirs')
-    location = models.CharField(max_length=300)
-    contact_phone = models.CharField(max_length=20, blank=True, null=True)
-    contact_email = models.EmailField(blank=True, null=True)
-    genre = models.CharField(max_length=50, choices=GENRE_CHOICES, default='gospel')
-    members_count = models.PositiveIntegerField(default=0)
-    # Images stored as base64 data URIs (or blank to use a default).
-    # Media references: absolute URLs (R2).
-    profile_image = models.CharField(max_length=500, blank=True, default='')
-    cover_image = models.CharField(max_length=500, blank=True, default='')
-    founded_date = models.DateField(blank=True, null=True)
-    youtube_link = models.URLField(blank=True, null=True)
-    is_active = models.BooleanField(default=True)
-    # WhatsApp-style "Only admins can send messages" lock for the choir community chat.
-    only_admins_can_post = models.BooleanField(default=False)
-    # One admin-pinned message shown as a banner atop the chat (SET_NULL so
-    # deleting the message just clears the pin).
-    pinned_message = models.ForeignKey('ChoirMessage', null=True, blank=True,
-                                       on_delete=models.SET_NULL, related_name='+')
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choirs')
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_builtin', 'name']
+        verbose_name_plural = 'Community categories'
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(self.name) or 'category'
+            slug, n = base, 1
+            while CommunityCategory.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug, n = f"{base}-{n}", n + 1
+            self.slug = slug
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
 
-    class Meta:
-        verbose_name_plural = "Choirs"
-        ordering = ['-created_at']
-
-
-class ChoirMembership(models.Model):
-    """A person's place in a choir community. The creator is 'admin'; people who
-    request and are approved become 'friend'; the admin may add core 'member's.
-    All roles can read and post in the choir chat — role only governs moderation."""
-    ROLE_CHOICES = (('admin', 'Admin'), ('member', 'Member'), ('friend', 'Friend'))
-    choir = models.ForeignKey(Choir, on_delete=models.CASCADE, related_name='memberships')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_memberships')
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='friend')
-    # A moderator can moderate content (delete any message, pin) but can't manage
-    # membership or settings — that stays with the admin/creator.
-    is_moderator = models.BooleanField(default=False)
-    joined_at = models.DateTimeField(auto_now_add=True)
-    last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
-
-    class Meta:
-        unique_together = ('choir', 'user')
-        indexes = [models.Index(fields=['choir', 'role'])]
-
-    def __str__(self):
-        return f"{self.user.username} in {self.choir.name} ({self.role})"
-
-
-class ChoirJoinRequest(models.Model):
-    """A request to become a friend of a choir (community access)."""
-    STATUS_CHOICES = (('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'))
-    choir = models.ForeignKey(Choir, on_delete=models.CASCADE, related_name='join_requests')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_join_requests')
-    message = models.TextField(blank=True, default='')
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('choir', 'user')
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"{self.user.username} -> {self.choir.name} ({self.status})"
-
-
-class ChoirMessage(models.Model):
-    """A message in a choir community chat (text / image / file / voice note /
-    system notice). Attachments ride as base64 data URIs, matching GroupPost."""
-    # Soft-removed by a moderator (remove_content). Excluded from public
-    # queries; the row and its author survive so it can be restored.
-    is_removed = models.BooleanField(default=False, db_index=True)
-    MESSAGE_TYPES = [
-        ('text', 'Text'),
-        ('image', 'Image'),
-        ('file', 'File'),
-        ('audio', 'Voice note'),
-        ('system', 'System'),
-    ]
-    choir = models.ForeignKey(Choir, on_delete=models.CASCADE, related_name='messages')
-    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_messages')
-    content = models.TextField(blank=True, default='')
-    message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
-    attachment = models.TextField(blank=True, default='')  # R2 URL (legacy rows may hold base64)
-    attachment_blurhash = models.CharField(max_length=60, blank=True, default='')
-    file_name = models.CharField(max_length=255, blank=True, default='')
-    duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
-    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
-    created_at = models.DateTimeField(auto_now_add=True)
-    edited_at = models.DateTimeField(null=True, blank=True)  # set when the author edits the body
-
-    class Meta:
-        ordering = ['created_at']
-        indexes = [models.Index(fields=['choir', 'created_at'])]
-
-    def __str__(self):
-        return f"{self.sender.username} in {self.choir.name}"
-
-
-class ChoirMessageReaction(models.Model):
-    """A single emoji reaction by one user on a choir message. WhatsApp-style:
-    at most one reaction per user per message — re-reacting with a different
-    emoji replaces it, re-reacting with the same emoji clears it."""
-    message = models.ForeignKey(ChoirMessage, on_delete=models.CASCADE, related_name='reactions')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='choir_reactions')
-    emoji = models.CharField(max_length=16)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('message', 'user')
-        indexes = [models.Index(fields=['message'])]
-
-    def __str__(self):
-        return f"{self.user.username} {self.emoji} on msg {self.message_id}"
-
-
-# ── Church community (mirrors the choir community: membership / requests / chat) ─
-class ChurchMembership(models.Model):
-    """A person's place in a church community. The creator is 'admin'; people who
-    request and are approved become 'friend'; the admin may add core 'member's.
-    All roles can read and post in the church chat — role only governs moderation."""
-    ROLE_CHOICES = (('admin', 'Admin'), ('member', 'Member'), ('friend', 'Friend'))
-    church = models.ForeignKey(Church, on_delete=models.CASCADE, related_name='memberships')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_memberships')
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='friend')
-    # A moderator can moderate content (delete any message, pin) but can't manage
-    # membership or settings — that stays with the admin/creator.
-    is_moderator = models.BooleanField(default=False)
-    joined_at = models.DateTimeField(auto_now_add=True)
-    last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
-
-    class Meta:
-        unique_together = ('church', 'user')
-        indexes = [models.Index(fields=['church', 'role'])]
-
-    def __str__(self):
-        return f"{self.user.username} in {self.church.name} ({self.role})"
-
-
-class ChurchJoinRequest(models.Model):
-    """A request to join a church community."""
-    STATUS_CHOICES = (('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'))
-    church = models.ForeignKey(Church, on_delete=models.CASCADE, related_name='join_requests')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_join_requests')
-    message = models.TextField(blank=True, default='')
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('church', 'user')
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"{self.user.username} -> {self.church.name} ({self.status})"
-
-
-class ChurchMessage(models.Model):
-    """A message in a church community chat (text / image / file / voice note /
-    system notice). Attachments ride as base64 data URIs, matching ChoirMessage."""
-    # Soft-removed by a moderator (remove_content). Excluded from public
-    # queries; the row and its author survive so it can be restored.
-    is_removed = models.BooleanField(default=False, db_index=True)
-    MESSAGE_TYPES = [
-        ('text', 'Text'),
-        ('image', 'Image'),
-        ('file', 'File'),
-        ('audio', 'Voice note'),
-        ('system', 'System'),
-    ]
-    church = models.ForeignKey(Church, on_delete=models.CASCADE, related_name='messages')
-    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_messages')
-    content = models.TextField(blank=True, default='')
-    message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
-    attachment = models.TextField(blank=True, default='')  # R2 URL (legacy rows may hold base64)
-    attachment_blurhash = models.CharField(max_length=60, blank=True, default='')
-    file_name = models.CharField(max_length=255, blank=True, default='')
-    duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
-    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
-    created_at = models.DateTimeField(auto_now_add=True)
-    edited_at = models.DateTimeField(null=True, blank=True)  # set when the author edits the body
-
-    class Meta:
-        ordering = ['created_at']
-        indexes = [models.Index(fields=['church', 'created_at'])]
-
-    def __str__(self):
-        return f"{self.sender.username} in {self.church.name}"
-
-
-class ChurchMessageReaction(models.Model):
-    """A single emoji reaction by one user on a church message (one per user;
-    re-reacting with a different emoji replaces it, the same emoji clears it)."""
-    message = models.ForeignKey(ChurchMessage, on_delete=models.CASCADE, related_name='reactions')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='church_reactions')
-    emoji = models.CharField(max_length=16)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('message', 'user')
-        indexes = [models.Index(fields=['message'])]
-
-    def __str__(self):
-        return f"{self.user.username} {self.emoji} on msg {self.message_id}"
-
 
 class Group(models.Model):
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_groups')
+    # Groups and communities share this engine (membership, chat, moderation)
+    # but are separate features to a user: a group is a private circle you make
+    # with people you know; a community is a public place — a church, a choir,
+    # a news circle — that anyone can start and browse by category. Only
+    # communities carry a category.
+    KIND_GROUP = 'group'
+    KIND_COMMUNITY = 'community'
+    KIND_CHOICES = ((KIND_GROUP, 'Group'), (KIND_COMMUNITY, 'Community'))
+    kind = models.CharField(
+        max_length=12, choices=KIND_CHOICES, default=KIND_GROUP, db_index=True,
+    )
+    # What kind of community this is. Null means uncategorised — kept nullable
+    # so deleting a category never cascades away the communities using it.
+    category = models.ForeignKey(
+        CommunityCategory, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='communities',
+    )
+    # Values for the category's `field_schema` (conference/pastor for a church,
+    # genre/youtube for a choir). JSON rather than columns so a category someone
+    # invents carries its own fields without a schema migration.
+    details = models.JSONField(default=dict, blank=True)
+    # Optional containment between communities — a choir belongs to a church.
+    # Replaces the old Choir.church FK.
+    parent = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='children',
+    )
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1329,27 +1145,6 @@ class GroupAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.group_id}:{self.action} by {self.actor_id}"
-
-
-class CommunityAuditLog(models.Model):
-    """Admin/moderator accountability trail for a choir or church community —
-    who did what (delete a message, pin, change roles, remove a member, approve a
-    join, etc.). Keyed by (kind, community_id) so one table serves both. Visible
-    only to that community's admins/moderators."""
-    KIND_CHOICES = (('choir', 'Choir'), ('church', 'Church'))
-    kind = models.CharField(max_length=10, choices=KIND_CHOICES, db_index=True)
-    community_id = models.PositiveIntegerField(db_index=True)
-    actor = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
-    action = models.CharField(max_length=40)      # machine key, e.g. 'delete_message'
-    detail = models.CharField(max_length=300, blank=True, default='')  # human summary
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-created_at']
-        indexes = [models.Index(fields=['kind', 'community_id', '-created_at'])]
-
-    def __str__(self):
-        return f"{self.kind}:{self.community_id}:{self.action} by {self.actor_id}"
 
 
 class GroupPost(models.Model):
@@ -1956,3 +1751,431 @@ class CoHostRequest(models.Model):
 
     def __str__(self):
         return f"{self.user.username} -> {self.broadcast_id} ({self.status})"
+
+# ── Bible corpus & the daily quiz ─────────────────────────────────────────────
+class BibleVerse(models.Model):
+    """One verse of the KJV, stored locally.
+
+    The Bible reader fetches chapters live from bible-api.com, which is fine for
+    reading but no basis for a quiz: generating twenty questions would mean
+    twenty round trips, and a 'hard' question needs to pull distractors from the
+    same book, which means having the book. So the text lives here — imported
+    once (`manage.py import_bible`), then everything is a local query. KJV is
+    public domain, so storing it carries no licensing problem."""
+    book = models.CharField(max_length=40, db_index=True)
+    # Canonical order (1 = Genesis, 66 = Revelation). Sorting by name is wrong
+    # and testament is derived from this, so the number is worth storing.
+    book_number = models.PositiveSmallIntegerField(db_index=True)
+    chapter = models.PositiveSmallIntegerField()
+    verse = models.PositiveSmallIntegerField()
+    text = models.TextField()
+
+    OLD_TESTAMENT_BOOKS = 39
+
+    class Meta:
+        unique_together = ('book', 'chapter', 'verse')
+        ordering = ['book_number', 'chapter', 'verse']
+        indexes = [
+            models.Index(fields=['book_number', 'chapter']),
+        ]
+
+    @property
+    def is_old_testament(self):
+        return self.book_number <= self.OLD_TESTAMENT_BOOKS
+
+    @property
+    def reference(self):
+        return f"{self.book} {self.chapter}:{self.verse}"
+
+    def __str__(self):
+        return self.reference
+
+
+class DailyQuiz(models.Model):
+    """One quiz per calendar day, shared by everyone.
+
+    Built on first request for that date (there is no scheduler on this deploy)
+    and kept, so a late player gets the same twenty questions as an early one —
+    which is what makes a leaderboard mean anything."""
+    date = models.DateField(unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date']
+        verbose_name_plural = 'Daily quizzes'
+
+    def __str__(self):
+        return f"Quiz for {self.date.isoformat()}"
+
+
+class QuizQuestion(models.Model):
+    """A generated question. `choices` is an ordered list of strings and
+    `answer_index` points into it — the answer is never sent to the client."""
+    SIMPLE, MODERATE, HARD = 'simple', 'moderate', 'hard'
+    DIFFICULTY_CHOICES = ((SIMPLE, 'Simple'), (MODERATE, 'Moderate'), (HARD, 'Hard'))
+    # How the question was built. Kept so the mix can be tuned and so a bad
+    # generator can be identified from the data rather than guessed at.
+    KIND_CHOICES = (
+        ('book', 'Which book'),
+        ('blank', 'Missing word'),
+        ('reference', 'Which reference'),
+        ('order', 'Which comes first'),
+    )
+
+    # Which part of scripture this came from. Derived from the verse's book at
+    # generation, so it needs no curation — a table of editable categories can
+    # replace this later if questions are ever authored by hand.
+    CATEGORY_CHOICES = (
+        ('law', 'The Law'), ('history', 'History'), ('wisdom', 'Wisdom'),
+        ('major_prophets', 'Major Prophets'), ('minor_prophets', 'Minor Prophets'),
+        ('gospels', 'Gospels'), ('acts', 'Acts'), ('epistles', 'Epistles'),
+        ('revelation', 'Revelation'),
+    )
+
+    # A question belongs to exactly one of the two: the shared daily quiz, or a
+    # single player's practice session. Same table, because a question is the
+    # same thing either way — only who can see it differs.
+    quiz = models.ForeignKey(
+        DailyQuiz, on_delete=models.CASCADE, related_name='questions',
+        null=True, blank=True,
+    )
+    session = models.ForeignKey(
+        'QuizSession', on_delete=models.CASCADE, related_name='questions',
+        null=True, blank=True,
+    )
+    order = models.PositiveSmallIntegerField()
+    difficulty = models.CharField(max_length=10, choices=DIFFICULTY_CHOICES, db_index=True)
+    category = models.CharField(
+        max_length=20, choices=CATEGORY_CHOICES, blank=True, default='', db_index=True,
+    )
+    # What the player is shown after answering. For a blanked verse this is the
+    # verse restored — genuinely worth reading. Never invented commentary.
+    explanation = models.TextField(blank=True, default='')
+    # Difficulty is worth more than a flat point: hard questions pay more.
+    base_points = models.PositiveSmallIntegerField(default=10)
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES)
+    prompt = models.TextField()
+    passage = models.TextField(blank=True, default='')      # the verse being asked about
+    choices = models.JSONField(default=list)
+    answer_index = models.PositiveSmallIntegerField()
+    reference = models.CharField(max_length=80, blank=True, default='')  # revealed after answering
+
+    class Meta:
+        ordering = ['order']
+        unique_together = (('quiz', 'order'), ('session', 'order'))
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(quiz__isnull=False, session__isnull=True)
+                    | models.Q(quiz__isnull=True, session__isnull=False)
+                ),
+                name='question_belongs_to_one_owner',
+            ),
+        ]
+
+    def __str__(self):
+        return f"[{self.difficulty}] {self.prompt[:50]}"
+
+
+class QuizAttempt(models.Model):
+    """One person's run at one day's quiz. One attempt per person per day, so a
+    score means the same thing for everyone on the board."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='quiz_attempts')
+    quiz = models.ForeignKey(DailyQuiz, on_delete=models.CASCADE, related_name='attempts')
+    # `score` counts correct answers; `points` is what the scoring rules award
+    # (difficulty + speed + streak). The board ranks on points, but a plain
+    # "17/20" is still what a person wants to read.
+    score = models.PositiveSmallIntegerField(default=0)
+    total = models.PositiveSmallIntegerField(default=0)
+    points = models.PositiveIntegerField(default=0, db_index=True)
+    longest_streak = models.PositiveSmallIntegerField(default=0)
+    # {question_id: chosen_index} — the flat map, kept for quick lookups. The
+    # per-question detail lives in QuizAnswer.
+    answers = models.JSONField(default=dict)
+    # Seconds taken, used only to break ties on the leaderboard.
+    duration_seconds = models.PositiveIntegerField(null=True, blank=True)
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'quiz')
+        ordering = ['-points', '-score', 'duration_seconds']
+        indexes = [models.Index(fields=['quiz', '-points'])]
+
+    def __str__(self):
+        return f"{self.user.username}: {self.score}/{self.total} on {self.quiz.date}"
+
+
+class QuizAnswer(models.Model):
+    """One question, as one person answered it.
+
+    The attempt already carries a flat {question: choice} map, which is enough
+    to score but not to *learn* anything: it cannot say how long each answer
+    took, where a streak broke, or which difficulty someone struggles with. A
+    row per question is what turns a score into a profile."""
+    # An answer belongs to a daily attempt or to a practice session — the same
+    # record either way, so the analytics that read it need no special cases.
+    attempt = models.ForeignKey(
+        QuizAttempt, on_delete=models.CASCADE, related_name='answer_rows',
+        null=True, blank=True,
+    )
+    session = models.ForeignKey(
+        'QuizSession', on_delete=models.CASCADE, related_name='answer_rows',
+        null=True, blank=True,
+    )
+    question = models.ForeignKey(QuizQuestion, on_delete=models.CASCADE, related_name='+')
+    # Null when the question was left unanswered — distinct from a wrong answer.
+    chosen_index = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_correct = models.BooleanField(default=False)
+    points_earned = models.PositiveSmallIntegerField(default=0)
+    # Seconds spent on this question, as reported by the client. Advisory only:
+    # it shapes the speed bonus but is clamped, so a forged value cannot mint
+    # points.
+    response_seconds = models.FloatField(null=True, blank=True)
+    # The streak this answer left behind, so a run can be replayed.
+    streak_after = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        unique_together = (('attempt', 'question'), ('session', 'question'))
+        ordering = ['question__order']
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(attempt__isnull=False, session__isnull=True)
+                    | models.Q(attempt__isnull=True, session__isnull=False)
+                ),
+                name='answer_belongs_to_one_owner',
+            ),
+        ]
+
+    def __str__(self):
+        owner = self.attempt or self.session
+        who = owner.user.username if owner else '?'
+        return f"{who} q{self.question_id}: {'ok' if self.is_correct else 'x'}"
+
+
+class QuizSession(models.Model):
+    """One run of a practice mode — Speed Quiz or Streak.
+
+    The daily quiz is shared and ranked, so it is one attempt per person per
+    day. These are personal: play them as often as you like. They own their own
+    questions, generated when the session starts, so two people never wait on
+    the same set and nobody can look up someone else's answers.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='quiz_sessions')
+    mode = models.CharField(max_length=12, db_index=True)
+    # Filled in as the run proceeds — a session is scored answer by answer, not
+    # in one submission at the end, because Streak has to know immediately.
+    score = models.PositiveSmallIntegerField(default=0)
+    answered = models.PositiveSmallIntegerField(default=0)
+    points = models.PositiveIntegerField(default=0)
+    streak = models.PositiveSmallIntegerField(default=0)
+    longest_streak = models.PositiveSmallIntegerField(default=0)
+    is_finished = models.BooleanField(default=False, db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [models.Index(fields=['user', 'mode', '-points'])]
+
+    def __str__(self):
+        return f"{self.user.username} · {self.mode} · {self.points} pts"
+
+
+class QuizReminder(models.Model):
+    """One row per person per day a morning reminder went out.
+
+    Notification.sender is required, so a system nudge does not fit there
+    without inventing a sender. This is cheaper anyway: it makes the send
+    idempotent (a cron that fires twice cannot double-push) and leaves an audit
+    of who was reminded and when.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='quiz_reminders')
+    date = models.DateField(db_index=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'date')
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"reminded {self.user.username} on {self.date}"
+
+
+# ── Word puzzle ───────────────────────────────────────────────────────────────
+class PuzzleTheme(models.Model):
+    """A subject a word puzzle is built from — a group of books, a passage, or
+    a topic searched across scripture.
+
+    The words are never authored: `source` says where to draw them from and the
+    generator reads the local corpus. So a new theme is a row, and it stays
+    truthful to the text because it comes from the text.
+
+        {"kind": "books",   "first": 1, "last": 5}       the Law
+        {"kind": "passage", "book": "Psalms", "chapter": 23}
+        {"kind": "topic",   "term": "faith"}
+    """
+    BOOKS, PASSAGE, TOPIC = 'books', 'passage', 'topic'
+
+    name = models.CharField(max_length=60, unique=True)
+    slug = models.SlugField(max_length=60, unique=True)
+    description = models.CharField(max_length=200, blank=True, default='')
+    icon = models.CharField(max_length=40, blank=True, default='book')
+    source = models.JSONField(default=dict)
+    # Lowest first — the order themes are offered in.
+    order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class WordPuzzle(models.Model):
+    """One level of one theme: a letter grid with words hidden in it.
+
+    Shared, not per-player — everyone gets the same level 3 of Psalms, which is
+    what lets progress and coin rewards mean the same thing for everyone. Built
+    once on first request and kept.
+    """
+    theme = models.ForeignKey(PuzzleTheme, on_delete=models.CASCADE, related_name='puzzles')
+    level = models.PositiveSmallIntegerField()
+    size = models.PositiveSmallIntegerField()
+    # The wheel: the letters every answer is spelled from, shuffled once so the
+    # base word is not sitting in plain order.
+    letters = models.CharField(max_length=12, blank=True, default='')
+    # Rows of letters: ["ABCD", "EFGH", ...] — one string per row.
+    grid = models.JSONField(default=list)
+    # [{word, row, col, dr, dc}] — where each word sits. Never sent to the
+    # client before it is found, or the puzzle solves itself.
+    placements = models.JSONField(default=list)
+    # Real words the wheel can spell that are *not* on the board. Finding one
+    # pays a little and costs the puzzle nothing — it rewards curiosity instead
+    # of punishing a guess, which is what keeps a stuck player playing.
+    bonus_words = models.JSONField(default=list)
+    # The verse the level's letters were drawn from, revealed once the board is
+    # finished. Held back until then: the base word is in this text, so showing
+    # it early would hand over the longest answer.
+    verse = models.ForeignKey(
+        'BibleVerse', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='puzzles',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('theme', 'level')
+        ordering = ['theme__order', 'level']
+
+    @property
+    def words(self):
+        return [p['word'] for p in self.placements]
+
+    def __str__(self):
+        return f"{self.theme.name} level {self.level}"
+
+
+class PuzzleProgress(models.Model):
+    """How far one person has got with one puzzle."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='puzzle_progress')
+    puzzle = models.ForeignKey(WordPuzzle, on_delete=models.CASCADE, related_name='progress')
+    # The words found so far, uppercase.
+    found = models.JSONField(default=list)
+    # Words a paid hint has pointed at. Kept apart from  so a hinted
+    # word still has to be located, and so the reveal survives a reload — a
+    # hint someone paid for must not evaporate.
+    hinted = models.JSONField(default=list)
+    # Bonus words found — kept apart from `found`, which decides completion.
+    # A bonus word must never bring a level closer to finished.
+    bonus = models.JSONField(default=list)
+    hints_used = models.PositiveSmallIntegerField(default=0)
+    coins_earned = models.PositiveIntegerField(default=0)
+    is_complete = models.BooleanField(default=False, db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('user', 'puzzle')
+        ordering = ['-started_at']
+
+    def __str__(self):
+        return f"{self.user.username} · {self.puzzle} · {len(self.found)} found"
+
+
+class CoinSpend(models.Model):
+    """Coins going out.
+
+    Until now coins only ever accumulated, so a total was a sum. A hint costs
+    coins, which makes the number a balance — and a balance needs both sides
+    written down. Every deduction is a row here, so what someone has can always
+    be reconciled against what they earned and what they spent.
+    """
+    HINT = 'hint'
+    REASON_CHOICES = ((HINT, 'Puzzle hint'),)
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='coin_spends')
+    amount = models.PositiveIntegerField()
+    reason = models.CharField(max_length=20, choices=REASON_CHOICES, default=HINT)
+    # What it was spent on, for the audit trail.
+    puzzle = models.ForeignKey(
+        WordPuzzle, null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['user', '-created_at'])]
+
+    def __str__(self):
+        return f"{self.user.username} -{self.amount} ({self.reason})"
+
+
+class PlayDay(models.Model):
+    """One row per person per day they played anything.
+
+    The streak used to be counted from quiz attempts alone, which made it a
+    quiz streak wearing a general name: a day spent on the puzzle broke it. A
+    streak is a record of showing up, so it is recorded where showing up
+    happens — every game writes a row, and the streak is read from here.
+
+    Cheap by design: one `get_or_create` per play, at most one row per day.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='play_days')
+    date = models.DateField()
+
+    class Meta:
+        unique_together = ('user', 'date')
+        ordering = ['-date']
+        indexes = [models.Index(fields=['user', '-date'])]
+
+    def __str__(self):
+        return f"{self.user.username} · {self.date}"
+
+
+class BibleWord(models.Model):
+    """A distinct word of the KJV, indexed for the word-connect puzzle.
+
+    The puzzle needs to ask "which real words can be spelled from these
+    letters?" — a question the verse table cannot answer quickly. This is that
+    question's index: one row per distinct word, with its letters sorted so a
+    candidate set can be narrowed by length and letter before the exact subset
+    check runs.
+
+    Built by `manage.py build_word_index` from the corpus, so the dictionary is
+    scripture's own vocabulary and nothing else.
+    """
+    word = models.CharField(max_length=24, unique=True)
+    length = models.PositiveSmallIntegerField(db_index=True)
+    # Letters in alphabetical order — 'BREAD' -> 'ABDER'.
+    letters = models.CharField(max_length=24, db_index=True)
+    # How often it appears; common words make better puzzle answers than
+    # something that occurs once in Chronicles.
+    frequency = models.PositiveIntegerField(default=0, db_index=True)
+
+    class Meta:
+        ordering = ['-frequency', 'word']
+        indexes = [models.Index(fields=['length', '-frequency'])]
+
+    def __str__(self):
+        return self.word

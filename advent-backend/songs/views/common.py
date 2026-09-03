@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.core.cache import cache
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, BasePermission
+from rest_framework.permissions import IsAuthenticated, BasePermission, IsAuthenticatedOrReadOnly
 from rest_framework.permissions import AllowAny
 from django.utils.text import slugify
 from rest_framework.exceptions import ValidationError
@@ -20,13 +20,14 @@ import time as time_module
 from django.db import transaction
 from django.contrib.auth.decorators import login_required
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import APIException
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser,JSONParser
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from .. import media
 from .. import r2
-from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Church,Videostudio, Choir, ChoirMembership, ChoirJoinRequest, ChoirMessage, ChoirMessageReaction, ChurchMembership, ChurchJoinRequest, ChurchMessage, ChurchMessageReaction, Group, GroupMember, GroupJoinRequest, GroupPost,GroupAuditLog,CommunityAuditLog,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress,FollowRequest,can_view_profile,hidden_private_author_ids,Wallpaper
+from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Videostudio, CommunityCategory,PuzzleTheme,WordPuzzle,PuzzleProgress,CoinSpend,BibleVerse,DailyQuiz,QuizQuestion,QuizAttempt, Group, GroupMember, GroupJoinRequest, GroupPost,GroupAuditLog,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress,FollowRequest,can_view_profile,hidden_private_author_ids,Wallpaper
 from ..push import notify_user
 from ..tasks import run_in_background
 from ..serializers import (
@@ -45,7 +46,6 @@ from ..serializers import (
     PostCommentSerializer,
     PostSaveSerializer,
     NotificationSerializer,
-    ChurchSerializer,
     NoticeSerializer,
     WallpaperSerializer,
     AdminNoteSerializer,
@@ -56,14 +56,7 @@ from ..serializers import (
     ChapterSerializer,
     VideoStudioSerializer,
     VideoStudioListSerializer,
-    ChoirSerializer,
-    ChoirListSerializer,
-    ChoirMembershipSerializer,
-    ChoirJoinRequestSerializer,
-    ChoirMessageSerializer,
-    ChurchMembershipSerializer,
-    ChurchJoinRequestSerializer,
-    ChurchMessageSerializer,
+    CommunityCategorySerializer,
     GroupSerializer,
     GroupMemberSerializer, 
     GroupJoinRequestSerializer, 

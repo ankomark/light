@@ -43,7 +43,6 @@ import Articles from './pages/Articles';
 import PublicationDetail from './pages/PublicationDetail';
 import ChapterReader from './pages/ChapterReader';
 import PublicationEditor from './pages/PublicationEditor';
-import Churches from './pages/Churches';
 import About from './pages/About';
 import UserGuide from './pages/UserGuide';
 import LegalPage from './pages/LegalPage';
@@ -52,11 +51,13 @@ import Settings from './pages/Settings';
 import Help from './pages/Help';
 import BlockedUsers from './pages/BlockedUsers';
 import FollowRequests from './pages/FollowRequests';
-import Choirs from './pages/Choirs';
-import ChoirCommunity from './pages/ChoirCommunity';
-import ChurchCommunity from './pages/ChurchCommunity';
 import Studios from './pages/Studios';
 import GroupList from './pages/GroupList';
+import BibleQuiz from './pages/BibleQuiz';
+import QuizHome from './pages/QuizHome';
+import QuizPlay from './pages/QuizPlay';
+import PuzzleHome from './pages/PuzzleHome';
+import PuzzlePlay from './pages/PuzzlePlay';
 import GroupDetail from './pages/GroupDetail';
 import CreateGroup from './pages/CreateGroup';
 import GroupMembers from './pages/GroupMembers';
@@ -274,7 +275,6 @@ const App = () => {
                 <Stack.Screen name="PublicationDetail" component={PublicationDetail} />
                 <Stack.Screen name="ChapterReader" component={ChapterReader} />
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
-                <Stack.Screen name="Churches" component={ChurchesWrapper} />
                 <Stack.Screen name="About" component={About} />
                 <Stack.Screen name="UserGuide" component={UserGuide} />
                 <Stack.Screen name="PrivacyCentre" component={PrivacyCentre} />
@@ -284,10 +284,13 @@ const App = () => {
                 <Stack.Screen name="BlockedUsers" component={BlockedUsers} options={{ headerShown: false }} />
                 <Stack.Screen name="FollowRequests" component={FollowRequests} options={{ headerShown: false }} />
                 <Stack.Screen name="Studios" component={StudiosWrapper} />
-                <Stack.Screen name="Choirs" component={ChoirsWrapper} />
-                <Stack.Screen name="ChoirCommunity" component={ChoirCommunity} options={{ headerShown: false }} />
-                <Stack.Screen name="ChurchCommunity" component={ChurchCommunity} options={{ headerShown: false }} />
                 <Stack.Screen name="Groups" component={GroupListWrapper} />
+                <Stack.Screen name="Communities" component={CommunityListWrapper} />
+                <Stack.Screen name="BibleQuiz" component={BibleQuiz} options={{ headerShown: false }} />
+                <Stack.Screen name="QuizHome" component={QuizHomeWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="QuizPlay" component={QuizPlay} options={{ headerShown: false }} />
+                <Stack.Screen name="PuzzleHome" component={PuzzleHomeWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="PuzzlePlay" component={PuzzlePlay} options={{ headerShown: false }} />
                 <Stack.Screen name="GroupDetail" component={GroupDetail} />
                 <Stack.Screen name="CreateGroup" component={CreateGroup} />
                 <Stack.Screen name="GroupMembers" component={GroupMembers} options={{ title: 'Group Members' }}/>
@@ -347,12 +350,46 @@ const App = () => {
     );
 };
 
-const GroupListWrapper = ({ navigation }) => (
+// The games sit under the same header and the same wallpaper as everything
+// else — reached from the hamburger menu, they should not feel like a separate
+// app. The play screens stay full-screen: mid-question is no place for app
+// chrome, so they draw their own wallpaper and their own compact bar.
+const QuizHomeWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="The quiz couldn't load.">
+      <QuizHome navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const PuzzleHomeWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="The puzzle couldn't load.">
+      <PuzzleHome navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const GroupListWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
     <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Groups couldn't load.">
-      <GroupList navigation={navigation} />
+      <GroupList navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const CommunityListWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Communities couldn't load.">
+      <GroupList navigation={navigation} route={route} mode="community" />
     </ErrorBoundary>
   </View>
 );
@@ -390,26 +427,6 @@ const ExploreWrapper = ({ navigation }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Explore couldn't load.">
       <ExploreScreen navigation={navigation} />
-    </ErrorBoundary>
-  </View>
-);
-
-const ChoirsWrapper = ({ navigation }) => (
-  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
-    <Header navigation={navigation} transparentBg />
-    <ErrorBoundary fallbackMessage="Choir Community couldn't load.">
-      <Choirs navigation={navigation} />
-    </ErrorBoundary>
-  </View>
-);
-
-const ChurchesWrapper = ({ navigation }) => (
-  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
-    <Header navigation={navigation} transparentBg />
-    <ErrorBoundary fallbackMessage="Church Community couldn't load.">
-      <Churches navigation={navigation} />
     </ErrorBoundary>
   </View>
 );
@@ -474,7 +491,7 @@ const FavoritesWrapper = ({ navigation }) => (
 );
 
 // Shared luxury backdrop (rotating wallpaper + transparent nav bar) for every
-// marketplace screen, matching Studios/Churches. The screen itself renders on a
+// marketplace screen, matching Studios/Communities. The screen itself renders on a
 // transparent surface so the wallpaper shows through behind cards & the header.
 const marketWrap = (Screen, fallbackMessage = "Marketplace couldn't load.") =>
   ({ navigation, route }) => (

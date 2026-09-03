@@ -64,19 +64,32 @@ ALLOWED_HOSTS = [
 
 ]
 
+# Hosts for the deploy target, comma-separated — e.g.
+# DJANGO_ALLOWED_HOSTS=api.example.com,.example.com
+ALLOWED_HOSTS += [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',') if h.strip()]
+
 # In development, accept requests from any device/emulator IP on the LAN so the
 # Expo app can reach `runserver` regardless of this machine's current address.
 if DEBUG:
     ALLOWED_HOSTS = ['*']
 
 # ── Production HTTPS hardening ────────────────────────────────────────────────
-# Gated to the real deploy only (Railway auto-sets RAILWAY_ENVIRONMENT) so local
-# dev — even running with DEBUG off against the shared DB — never redirects to
-# HTTPS or drops insecure cookies. Railway terminates TLS at the edge and
-# forwards the original scheme in X-Forwarded-Proto, so we trust that, then
-# force HTTPS + HSTS and mark cookies secure. SSL redirect is env-overridable in
-# case a platform health check ever hits plain HTTP (set DJANGO_SSL_REDIRECT=False).
-if os.getenv('RAILWAY_ENVIRONMENT'):
+# Gated to a real deploy so local dev — even running with DEBUG off against the
+# shared DB — never redirects to HTTPS or drops insecure cookies. Set
+# DJANGO_ENV=production on the server; RAILWAY_ENVIRONMENT is still honoured for
+# the legacy Railway deploy. A reverse proxy (nginx/Caddy on a VPS, or a platform
+# edge) terminates TLS and forwards the original scheme in X-Forwarded-Proto, so
+# we trust that, then force HTTPS + HSTS and mark cookies secure. SSL redirect is
+# env-overridable in case a health check hits plain HTTP (DJANGO_SSL_REDIRECT=False).
+#
+# SECURITY: trusting X-Forwarded-Proto is only safe when the app is reachable
+# ONLY through the proxy. Bind gunicorn/daphne to 127.0.0.1 (or a private
+# network) so a client cannot connect directly and spoof that header.
+IS_PRODUCTION_DEPLOY = (
+    os.getenv('DJANGO_ENV', '').lower() == 'production'
+    or bool(os.getenv('RAILWAY_ENVIRONMENT'))
+)
+if IS_PRODUCTION_DEPLOY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = os.getenv('DJANGO_SSL_REDIRECT', 'True') == 'True'
     SECURE_HSTS_SECONDS = 31536000            # 1 year
@@ -119,6 +132,17 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.1.126:19006",  # Add port
     "http://10.0.2.2:19006"        # For Android emulator
 
+]
+
+# Extra browser origins for the deploy target, comma-separated — e.g.
+# DJANGO_CORS_ORIGINS=https://app.example.com
+CORS_ALLOWED_ORIGINS += [o.strip() for o in os.getenv('DJANGO_CORS_ORIGINS', '').split(',') if o.strip()]
+
+# Origins trusted for session-authenticated POSTs (Django admin, web build) once
+# served over HTTPS on a custom domain — e.g.
+# DJANGO_CSRF_TRUSTED_ORIGINS=https://api.example.com,https://app.example.com
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()
 ]
 
 # Allow the Expo web dev server (localhost:8081 by default) and any local-network
@@ -191,6 +215,8 @@ REST_FRAMEWORK = {
         'password_reset': '5/hour',
         'email_verify': '10/hour',
         # Abuse guards: appeal/report submission and admin bulk actions.
+        # Quiz reads are cheap; the submit is one per day anyway.
+        'quiz': '60/min',
         'appeals': '5/hour',
         'reports': '20/hour',
         'admin_bulk': '30/min',
@@ -369,6 +395,10 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
+
+# The window the daily quiz reminder judges "morning" in. The server runs on
+# UTC but the audience does not, so the cron fires at 04:00 UTC for 07:00 here.
+QUIZ_REMINDER_TZ = os.getenv('QUIZ_REMINDER_TZ', 'Africa/Nairobi')
 
 USE_I18N = True
 

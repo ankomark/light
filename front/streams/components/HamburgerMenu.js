@@ -40,10 +40,13 @@ const SECTIONS = [
     title: 'Community',
     items: [
       { label: 'Messages', route: 'Inbox', set: 'ion', icon: 'chatbubbles-outline' },
-      { label: 'Choir Community', route: 'Choirs', set: 'mci', icon: 'account-music-outline' },
-      { label: 'Church Community', route: 'Churches', set: 'mci', icon: 'church' },
+      // Churches and choirs are no longer separate entries — they are
+      // categories inside Community, alongside any kind someone starts.
+      { label: 'Communities', route: 'Communities', set: 'mci', icon: 'account-multiple-outline' },
       { label: 'Groups', route: 'Groups', set: 'mci', icon: 'account-group-outline' },
       { label: 'Notice Board', route: 'NoticeBoard', set: 'mci', icon: 'bulletin-board' },
+      { label: 'Bible Quiz', route: 'QuizHome', set: 'mci', icon: 'head-question-outline' },
+      { label: 'Word Puzzle', route: 'PuzzleHome', set: 'mci', icon: 'grid' },
     ],
   },
   {

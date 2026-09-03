@@ -26,15 +26,10 @@ NOTIFICATION_CATEGORIES = {
     'group_join_approved': 'groups',
     'group_join_rejected': 'groups',
     'group_added': 'groups',
-    'church_request': 'communities',
-    'church_approved': 'communities',
-    'church_added': 'communities',
-    'choir_request': 'communities',
-    'choir_approved': 'communities',
-    'choir_added': 'communities',
     'live': 'live',
     'cohost_request': 'live',
     'cohost_approved': 'live',
+    'quiz_reminder': 'quiz',
 }
 
 

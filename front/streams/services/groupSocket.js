@@ -81,8 +81,3 @@ function createSocket(path, handlers = {}) {
 export function createGroupSocket(slug, handlers = {}) {
   return createSocket(`ws/groups/${encodeURIComponent(slug)}/`, handlers);
 }
-
-// Choir / church community chat. kind = 'choir' | 'church'.
-export function createCommunitySocket(kind, communityId, handlers = {}) {
-  return createSocket(`ws/community/${kind}/${encodeURIComponent(communityId)}/`, handlers);
-}

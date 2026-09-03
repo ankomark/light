@@ -15,8 +15,18 @@ function timeAgo(dateStr, t) {
   return new Date(dateStr).toLocaleDateString();
 }
 
-const previewText = (lm, t) => {
-  if (!lm) return t('group.preview.noMessages');
+const previewText = (lm, t, group) => {
+  if (!lm) {
+    // A quiet community sits in a list beside busy ones, so "No messages yet"
+    // reads like something is missing. Say what the community IS instead — its
+    // own description if it has one, otherwise how someone gets in.
+    if (group?.kind === 'community') {
+      const about = (group.description || '').trim();
+      if (about) return about;
+      return t(group.is_private ? 'community.preview.private' : 'community.preview.public');
+    }
+    return t('group.preview.noMessages');
+  }
   if (lm.message_type === 'system') return lm.content;
   const body = lm.content
     || ({
@@ -56,7 +66,7 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
         </View>
         <View style={styles.bottomRow}>
           <Text style={[styles.preview, unread > 0 && styles.previewBold]} numberOfLines={1}>
-            {previewText(lm, t)}
+            {previewText(lm, t, group)}
           </Text>
           {unread > 0 ? (
             <View style={styles.badge}><Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text></View>

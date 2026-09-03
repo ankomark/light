@@ -77,6 +77,7 @@ const NOTIFICATION_CATEGORIES = [
   { key: 'groups', labelKey: 'settings.notif.groups', icon: 'account-group-outline' },
   { key: 'communities', labelKey: 'settings.notif.communities', icon: 'church' },
   { key: 'live', labelKey: 'settings.notif.live', icon: 'broadcast' },
+  { key: 'quiz', labelKey: 'settings.notif.quiz', icon: 'head-question-outline' },
 ];
 
 // Module scope: no hook here, so the caller passes t in.

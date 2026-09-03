@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 
 from songs.models import (
     User, Profile, Publication, Product, ProductReview, Group, GroupPost,
-    Choir, ChoirMessage, Church, ChurchMessage, Videostudio, MediaStation,
+    Videostudio, MediaStation,
     SocialPost,
 )
 
@@ -37,12 +37,6 @@ class ContentModerationTests(APITestCase):
         )
         self.group = Group.objects.create(name='G', creator=self.author, is_private=False, slug='cm-g')
         self.gpost = GroupPost.objects.create(group=self.group, user=self.author, content='hi group')
-        self.choir = Choir.objects.create(name='Voices', location='Nairobi', created_by=self.author)
-        self.cmsg = ChoirMessage.objects.create(choir=self.choir, sender=self.author, content='hi choir')
-        self.church = Church.objects.create(
-            name='Central', country='Kenya', conference='CKC', location='Nairobi', created_by=self.author,
-        )
-        self.chmsg = ChurchMessage.objects.create(church=self.church, sender=self.author, content='hi church')
         self.studio = Videostudio.objects.create(
             name='HopeWorks', location='Nairobi', service_types=['editing'], created_by=self.author,
         )
@@ -51,8 +45,7 @@ class ContentModerationTests(APITestCase):
         # (type, instance) for the uniform admin remove/restore loop.
         self.targets = [
             ('publication', self.pub), ('product', self.product), ('productreview', self.review),
-            ('grouppost', self.gpost), ('choirmessage', self.cmsg), ('churchmessage', self.chmsg),
-            ('church', self.church), ('choir', self.choir),
+            ('grouppost', self.gpost),
             ('videostudio', self.studio), ('mediastation', self.station),
         ]
 
@@ -98,8 +91,6 @@ class ContentModerationTests(APITestCase):
             ('/api/publications/', 'publication', self.pub, {}),
             ('/api/marketplace/products/', 'product', self.product, {}),
             (f'/api/marketplace/products/{self.product.slug}/reviews/', 'productreview', self.review, {}),
-            ('/api/churches/', 'church', self.church, {}),
-            ('/api/choirs/', 'choir', self.choir, {}),
             ('/api/video-studios/', 'videostudio', self.studio, {}),
             ('/api/media-stations/', 'mediastation', self.station, {}),
         ]

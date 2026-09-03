@@ -15,7 +15,11 @@ const resolveApiBase = () => {
     // Web dev: Constants.hostUri is empty in the browser, so derive the backend
     // host from the page URL (the dev server runs on the same machine).
     if (typeof window !== 'undefined' && window.location?.hostname) {
-      return `http://${window.location.hostname}:8000`;
+      // Use 127.0.0.1 rather than `localhost`: on Windows `localhost` resolves to
+      // ::1 first, and the dev server (daphne/runserver) binds IPv4 only, so the
+      // browser gets ECONNREFUSED and axios reports a bare "Network Error".
+      const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+      return `http://${host}:8000`;
     }
     const hostUri =
       Constants.expoConfig?.hostUri ||
@@ -581,56 +585,6 @@ export const toggleFavorite = async (hymnId) => {
   return apiRequest('post', `/hymns/${hymnId}/toggle_favorite/`);
 };
 
-//church endpoints
-
-// Returns the paginated response { results, next, ... } so the caller can
-// infinite-scroll. (Legacy callers that read an array should use res.results.)
-export const fetchChurches = async (params = {}) => {
-  const queryString = new URLSearchParams({ page_size: 20, ...params }).toString();
-  return apiRequest('get', `/churches/?${queryString}`);
-};
-
-// Follow a paginated `next` link (preserves path + query) for infinite scroll.
-export const fetchChurchesByUrl = async (nextUrl) => {
-  if (!nextUrl) return null;
-  const [base, qs] = nextUrl.split('?');
-  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
-  const params = {};
-  (qs || '').split('&').forEach((kv) => {
-    if (!kv) return;
-    const [k, v] = kv.split('=');
-    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
-  });
-  return apiRequest('get', path, null, { params });
-};
-
-export const fetchChurchById = async (id) => {
-  return apiRequest('get', `/churches/${id}/`);
-};
-
-export const fetchMyChurches = async () => {
-  return apiRequest('get', '/churches/my_churches/');
-};
-
-export const createChurch = async (formData) => {
-  return apiRequest('post', '/churches/', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-};
-
-export const updateChurch = async (id, formData) => {
-  return apiRequest('patch', `/churches/${id}/`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-};
-
-export const deleteChurch = async (id) => {
-  return apiRequest('delete', `/churches/${id}/`);
-};
 
 // ==================== MEDIA STATIONS ====================
 // Shared, backend-owned. Each row carries `is_owner` so the UI can show
@@ -766,47 +720,38 @@ export const deleteAudioStudio = async (id) => {
   return apiRequest('delete', `/audio-studios/${id}/`);
 };
 
-// ==================== CHOIRS ====================
-// Returns the paginated response { results, next, ... } so the caller can
-// infinite-scroll. (Legacy callers that read an array should use res.results.)
-export const fetchChoirs = async (params = {}) => {
-  const queryString = new URLSearchParams({ page_size: 20, ...params }).toString();
-  return apiRequest('get', `/choirs/?${queryString}`);
-};
+// ==================== COMMUNITIES ====================
+// One community engine for every kind — church, choir, news, or anything a user
+// invents. The kind is a category row (see fetchCommunityCategories), and each
+// category declares the extra fields its communities carry, so this API needs no
+// per-kind endpoints. `/communities/` and `/groups/` are the same resource.
 
-// Follow a paginated `next` link (preserves path + query) for infinite scroll.
-export const fetchChoirsByUrl = async (nextUrl) => {
-  if (!nextUrl) return null;
-  const [base, qs] = nextUrl.split('?');
-  const path = base.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
-  const params = {};
-  (qs || '').split('&').forEach((kv) => {
-    if (!kv) return;
-    const [k, v] = kv.split('=');
-    params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+export const fetchCommunityCategories = async () =>
+  apiRequest('get', '/community-categories/');
+
+export const createCommunityCategory = async (data) =>
+  apiRequest('post', '/community-categories/', data);
+
+export const deleteCommunityCategory = async (slug) =>
+  apiRequest('delete', `/community-categories/${slug}/`);
+
+// `filters` carries the category-specific keys (e.g. { conference: 'Central' })
+// alongside category/search — exactly the directory browse Churches.js had.
+export const fetchCommunities = async ({ category, search, parent, page = 1, ...filters } = {}) => {
+  const params = new URLSearchParams({ page: String(page), page_size: '20' });
+  if (category && category !== 'all') params.set('category', category);
+  if (search) params.set('search', search);
+  if (parent) params.set('parent', parent);
+  Object.entries(filters).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') params.set(k, v);
   });
-  return apiRequest('get', path, null, { params });
+  return apiRequest('get', `/communities/?${params.toString()}`);
 };
 
-export const fetchChoirById = async (id) => {
-  return apiRequest('get', `/choirs/${id}/`);
-};
-
-export const fetchMyChoirs = async () => {
-  return apiRequest('get', '/choirs/my_choirs/');
-};
-
-// Choirs use JSON; images are R2 URLs (uploaded client-side before create).
-export const createChoir = async (data) => {
-  return apiRequest('post', '/choirs/', data);
-};
-
-export const updateChoir = async (id, data) => {
-  return apiRequest('patch', `/choirs/${id}/`, data);
-};
-
-export const deleteChoir = async (id) => {
-  return apiRequest('delete', `/choirs/${id}/`);
+export const fetchCommunitiesByUrl = async (nextUrl) => {
+  if (!nextUrl) return null;
+  const path = nextUrl.replace(API_URL, '');
+  return apiRequest('get', path);
 };
 
 // ==================== SOLO ARTISTS ====================
@@ -842,134 +787,70 @@ export const updateSoloArtist = async (id, formData) => {
 export const deleteSoloArtist = async (id) => {
   return apiRequest('delete', `/solo-artists/${id}/`);
 };
-// Toggle active status
-export const toggleChoirActive = async (choirId) => {
-  return apiRequest('post', `/choirs/${choirId}/toggle_active/`);
-};
 
-// Update members count
-export const updateChoirMembers = async (choirId, count) => {
-  return apiRequest('post', `/choirs/${choirId}/update_members/`, { count });
-};
+// ==================== DAILY BIBLE QUIZ ====================
+// Twenty questions a day, generated server-side from the local KJV corpus and
+// shared by everyone, so the leaderboard compares like with like. The answers
+// are not in the payload — they come back only after you submit.
 
-// ── Choir community (membership / requests / chat) ───────────────────────────
-export const fetchChoirCommunity = (id) =>
-  apiRequest('get', `/choirs/${id}/community/`);
-export const fetchChoirMembers = (id) =>
-  apiRequest('get', `/choirs/${id}/members/`);
-export const requestJoinChoir = (id, message = '') =>
-  apiRequest('post', `/choirs/${id}/request-join/`, { message });
-export const fetchChoirJoinRequests = (id) =>
-  apiRequest('get', `/choirs/${id}/join-requests/`);
-export const approveChoirRequest = (id, requestId) =>
-  apiRequest('post', `/choirs/${id}/approve-request/`, { request_id: requestId });
-export const rejectChoirRequest = (id, requestId) =>
-  apiRequest('post', `/choirs/${id}/reject-request/`, { request_id: requestId });
-export const removeChoirMember = (id, userId) =>
-  apiRequest('post', `/choirs/${id}/remove-member/`, { user_id: userId });
-// Admin moderation: add members, change roles, lock the chat to admins.
-export const searchChoirUsers = (id, q) =>
-  apiRequest('get', `/choirs/${id}/search-users/`, null, { params: { q } });
-export const addChoirMember = (id, userId) =>
-  apiRequest('post', `/choirs/${id}/add-member/`, { user_id: userId });
-export const setChoirMemberRole = (id, userId, role) =>
-  apiRequest('post', `/choirs/${id}/set-role/`, { user_id: userId, role });
-export const setChoirPostingPolicy = (id, onlyAdmins) =>
-  apiRequest('post', `/choirs/${id}/posting-policy/`, { only_admins_can_post: onlyAdmins });
-export const leaveChoir = (id) =>
-  apiRequest('post', `/choirs/${id}/leave/`);
-// Smaller page → a lighter first payload (messages can carry base64 media).
-// Cursor-paginated: no params = newest page; { before: id } / { after: id } page
-// older / newer from an anchor. Returns { results, has_more }.
-export const fetchChoirMessages = (id, params = {}) =>
-  apiRequest('get', `/choirs/${id}/messages/`, null, { params });
-export const sendChoirMessage = (id, payload) =>
-  apiRequest('post', `/choirs/${id}/messages/`, payload);
-export const deleteChoirMessage = (id, messageId) =>
-  apiRequest('post', `/choirs/${id}/messages/${messageId}/delete/`);
-export const reactToChoirMessage = (id, messageId, emoji) =>
-  apiRequest('post', `/choirs/${id}/messages/${messageId}/react/`, { emoji });
-// Phase 3: edit / pin / receipts / search / context.
-export const editChoirMessage = (id, messageId, content) =>
-  apiRequest('patch', `/choirs/${id}/messages/${messageId}/edit/`, { content });
-export const pinChoirMessage = (id, messageId) =>
-  apiRequest('post', `/choirs/${id}/messages/${messageId}/pin/`);
-export const unpinChoirMessage = (id) =>
-  apiRequest('post', `/choirs/${id}/unpin/`);
-export const markChoirRead = (id) =>
-  apiRequest('post', `/choirs/${id}/mark-read/`);
-export const fetchChoirReceipts = (id, messageId) =>
-  apiRequest('get', `/choirs/${id}/messages/${messageId}/receipts/`);
-export const searchChoirMessages = (id, q) =>
-  apiRequest('get', `/choirs/${id}/search/`, null, { params: { q } });
-export const fetchChoirContext = (id, messageId) =>
-  apiRequest('get', `/choirs/${id}/context/`, null, { params: { message_id: messageId } });
-// Phase 4: moderator role + audit log.
-export const setChoirModerator = (id, userId, isModerator) =>
-  apiRequest('post', `/choirs/${id}/set-moderator/`, { user_id: userId, is_moderator: isModerator });
-export const fetchChoirAuditLog = (id) =>
-  apiRequest('get', `/choirs/${id}/audit-log/`);
-export const fetchChoirMedia = (id, page = 1) =>
-  apiRequest('get', `/choirs/${id}/media/`, null, { params: { page } });
+export const fetchDailyQuiz = async (day) =>
+  apiRequest('get', `/quiz/today/${day ? `?date=${day}` : ''}`);
 
-// ── Church community (membership / requests / chat) — mirrors the choir API ───
-export const fetchChurchCommunity = (id) =>
-  apiRequest('get', `/churches/${id}/community/`);
-export const fetchChurchMembers = (id) =>
-  apiRequest('get', `/churches/${id}/members/`);
-export const requestJoinChurch = (id, message = '') =>
-  apiRequest('post', `/churches/${id}/request-join/`, { message });
-export const fetchChurchJoinRequests = (id) =>
-  apiRequest('get', `/churches/${id}/join-requests/`);
-export const approveChurchRequest = (id, requestId) =>
-  apiRequest('post', `/churches/${id}/approve-request/`, { request_id: requestId });
-export const rejectChurchRequest = (id, requestId) =>
-  apiRequest('post', `/churches/${id}/reject-request/`, { request_id: requestId });
-export const removeChurchMember = (id, userId) =>
-  apiRequest('post', `/churches/${id}/remove-member/`, { user_id: userId });
-// Admin moderation: add members, change roles, lock the chat to admins.
-export const searchChurchUsers = (id, q) =>
-  apiRequest('get', `/churches/${id}/search-users/`, null, { params: { q } });
-export const addChurchMember = (id, userId) =>
-  apiRequest('post', `/churches/${id}/add-member/`, { user_id: userId });
-export const setChurchMemberRole = (id, userId, role) =>
-  apiRequest('post', `/churches/${id}/set-role/`, { user_id: userId, role });
-export const setChurchPostingPolicy = (id, onlyAdmins) =>
-  apiRequest('post', `/churches/${id}/posting-policy/`, { only_admins_can_post: onlyAdmins });
-export const leaveChurch = (id) =>
-  apiRequest('post', `/churches/${id}/leave/`);
-// Cursor-paginated: no params = newest page; { before: id } / { after: id } page
-// older / newer from an anchor. Returns { results, has_more }.
-export const fetchChurchMessages = (id, params = {}) =>
-  apiRequest('get', `/churches/${id}/messages/`, null, { params });
-export const sendChurchMessage = (id, payload) =>
-  apiRequest('post', `/churches/${id}/messages/`, payload);
-export const deleteChurchMessage = (id, messageId) =>
-  apiRequest('post', `/churches/${id}/messages/${messageId}/delete/`);
-export const reactToChurchMessage = (id, messageId, emoji) =>
-  apiRequest('post', `/churches/${id}/messages/${messageId}/react/`, { emoji });
-// Phase 3: edit / pin / receipts / search / context.
-export const editChurchMessage = (id, messageId, content) =>
-  apiRequest('patch', `/churches/${id}/messages/${messageId}/edit/`, { content });
-export const pinChurchMessage = (id, messageId) =>
-  apiRequest('post', `/churches/${id}/messages/${messageId}/pin/`);
-export const unpinChurchMessage = (id) =>
-  apiRequest('post', `/churches/${id}/unpin/`);
-export const markChurchRead = (id) =>
-  apiRequest('post', `/churches/${id}/mark-read/`);
-export const fetchChurchReceipts = (id, messageId) =>
-  apiRequest('get', `/churches/${id}/messages/${messageId}/receipts/`);
-export const searchChurchMessages = (id, q) =>
-  apiRequest('get', `/churches/${id}/search/`, null, { params: { q } });
-export const fetchChurchContext = (id, messageId) =>
-  apiRequest('get', `/churches/${id}/context/`, null, { params: { message_id: messageId } });
-// Phase 4: moderator role + audit log.
-export const setChurchModerator = (id, userId, isModerator) =>
-  apiRequest('post', `/churches/${id}/set-moderator/`, { user_id: userId, is_moderator: isModerator });
-export const fetchChurchAuditLog = (id) =>
-  apiRequest('get', `/churches/${id}/audit-log/`);
-export const fetchChurchMedia = (id, page = 1) =>
-  apiRequest('get', `/churches/${id}/media/`, null, { params: { page } });
+export const submitDailyQuiz = async (answers, durationSeconds) =>
+  apiRequest('post', '/quiz/submit/', {
+    answers,
+    duration_seconds: durationSeconds,
+  });
+
+export const fetchQuizLeaderboard = async (day) =>
+  apiRequest('get', `/quiz/leaderboard/${day ? `?date=${day}` : ''}`);
+
+export const fetchQuizHistory = async () => apiRequest('get', '/quiz/my-history/');
+
+// Lifetime progress: coins from the daily quiz and practice combined, plus the
+// level they add up to, with the bar fraction already worked out.
+export const fetchQuizStats = async () => apiRequest('get', '/quiz/stats/');
+
+// ── Practice modes (Speed Quiz, Streak) ──────────────────────────────────────
+// Personal runs, answered one question at a time: Streak has to know the moment
+// you are wrong, and Speed times each question separately. The server holds the
+// rules — the clock here drives the UI, it does not decide the score.
+
+export const startQuizSession = async (mode) =>
+  apiRequest('post', '/quiz-sessions/', { mode });
+
+export const fetchQuizSession = async (id) =>
+  apiRequest('get', `/quiz-sessions/${id}/`);
+
+export const answerQuizSession = async (id, questionId, choice, seconds) =>
+  apiRequest('post', `/quiz-sessions/${id}/answer/`, {
+    question_id: questionId,
+    choice,
+    seconds,
+  });
+
+export const finishQuizSession = async (id) =>
+  apiRequest('post', `/quiz-sessions/${id}/finish/`, {});
+
+export const fetchQuizBests = async () => apiRequest('get', '/quiz-sessions/best/');
+
+// ── Word puzzle ──────────────────────────────────────────────────────────────
+// Levels are built from the local scripture corpus and shared by everyone. The
+// grid comes down without the answers: a word is claimed by sending the two
+// ends of the drag, and the server reads its own grid to decide.
+
+export const fetchPuzzleThemes = async () => apiRequest('get', '/puzzle-themes/');
+
+export const fetchPuzzleLevel = async (theme, level = 1) =>
+  apiRequest('get', `/puzzles/level/?theme=${encodeURIComponent(theme)}&level=${level}`);
+
+export const claimPuzzleWord = async (puzzleId, word) =>
+  apiRequest('post', `/puzzles/${puzzleId}/found/`, { word });
+
+export const buyPuzzleHint = async (puzzleId) =>
+  apiRequest('post', `/puzzles/${puzzleId}/hint/`, {});
+
+export const fetchCoinWallet = async () => apiRequest('get', '/puzzles/wallet/');
 
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);
@@ -1010,12 +891,15 @@ export const fetchGroupDetails = async (slug) => {
   return apiRequest('get', `/groups/${slug}/`);
 };
 
-export const createGroup = async (formData) => {
+// Groups and communities are the same resource on two routes — the route is
+// what decides which one you get, so creating must post to the right one.
+// Posting a community to /groups/ silently makes a group AND drops its
+// category, which is exactly the bug this pair exists to prevent.
+const createOnPath = async (path, formData) => {
   try {
-   
     const token = await getAuthToken();
-    
-    const response = await axios.post(`${API_URL}/groups/`, formData, {
+
+    const response = await axios.post(`${API_URL}${path}`, formData, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'multipart/form-data',
@@ -1025,10 +909,13 @@ export const createGroup = async (formData) => {
 
     return response.data;
   } catch (error) {
-    console.error('Group creation error:', error.response?.data || error.message);
-    throw error.response?.data || { message: 'Failed to create group' };
+    console.error(`Creation error (${path}):`, error.response?.data || error.message);
+    throw error.response?.data || { message: 'Failed to create' };
   }
 };
+
+export const createGroup = (formData) => createOnPath('/groups/', formData);
+export const createCommunity = (formData) => createOnPath('/communities/', formData);
 
 export const requestJoinGroup = async (slug, message = "") => {
   try {
@@ -1107,6 +994,14 @@ export const deleteGroupPost = async (slug, postId) =>
 export const leaveGroup = async (slug) =>
   apiRequest('post', `/groups/${slug}/leave/`);
 
+
+export const updateCommunity = async (slug, formData) => {
+  return apiRequest('patch', `/communities/${slug}/`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+};
 
 export const updateGroup = async (groupSlug, formData) => {
   return apiRequest('patch', `/groups/${groupSlug}/`, formData, {
@@ -1917,12 +1812,6 @@ export default {
   fetchPostComments,
   fetchTrackComments,
   fetchUnreadNotificationCount,
-  fetchChurches,
-  fetchChurchById,
-  fetchMyChurches,
-  createChurch,
-  updateChurch,
-  deleteChurch,
   fetchVideoStudios,
   fetchVideoStudioById,
   fetchMyVideoStudios,
@@ -1935,23 +1824,38 @@ export default {
   createAudioStudio,
   updateAudioStudio,
   deleteAudioStudio,
-  fetchChoirs,
-  fetchChoirsByUrl,
-  fetchChoirById,
-  fetchMyChoirs,
-  createChoir,
-  updateChoir,
-  deleteChoir,
   fetchSoloArtists,
   fetchSoloArtistById,
   fetchMySoloArtistProfile,
   createSoloArtist,
   updateSoloArtist,
   deleteSoloArtist,
+  startQuizSession,
+  fetchQuizSession,
+  answerQuizSession,
+  finishQuizSession,
+  fetchQuizBests,
+  fetchDailyQuiz,
+  submitDailyQuiz,
+  fetchQuizLeaderboard,
+  fetchQuizHistory,
+  fetchQuizStats,
+  fetchPuzzleThemes,
+  fetchPuzzleLevel,
+  claimPuzzleWord,
+  buyPuzzleHint,
+  fetchCoinWallet,
+  fetchCommunityCategories,
+  createCommunityCategory,
+  deleteCommunityCategory,
+  fetchCommunities,
+  fetchCommunitiesByUrl,
   fetchGroups,
   fetchGroupsByUrl,
   fetchGroupDetails,
   createGroup,
+  createCommunity,
+  updateCommunity,
   requestJoinGroup,
   fetchGroupPosts,
   createGroupPost,

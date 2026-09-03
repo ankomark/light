@@ -24,10 +24,6 @@ const TYPES = [
   { key: 'product', label: 'Products' },
   { key: 'productreview', label: 'Product reviews' },
   { key: 'grouppost', label: 'Group messages' },
-  { key: 'choirmessage', label: 'Choir messages' },
-  { key: 'churchmessage', label: 'Church messages' },
-  { key: 'church', label: 'Churches' },
-  { key: 'choir', label: 'Choirs' },
   { key: 'videostudio', label: 'Studios' },
   { key: 'mediastation', label: 'Media stations' },
 ];

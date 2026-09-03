@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     User, Track, Playlist, Comment, Like, Category, Profile,
     SocialPost, PostLike, PostComment, PostSave, Notification,
-    Church, Videostudio, Choir, Group, GroupMember, GroupJoinRequest,
+    Videostudio, CommunityCategory, Group, GroupMember, GroupJoinRequest,
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
     Report, AdminActionLog, Appeal, Role, LiveBroadcast, CoHostRequest,
@@ -73,9 +73,8 @@ admin.site.register(PostLike)
 admin.site.register(PostComment)
 admin.site.register(PostSave)
 admin.site.register(Notification)
-admin.site.register(Church)
 admin.site.register(Videostudio)
-admin.site.register(Choir)
+admin.site.register(CommunityCategory)
 admin.site.register(Group)
 admin.site.register(GroupMember)
 admin.site.register(GroupJoinRequest)

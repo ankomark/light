@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
+import { API_BASE } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import { typography, spacing, radius, shadows } from '../constants/theme';
@@ -38,8 +39,20 @@ const LoginPage = () => {
       const { isVerified, hasProfile } = await login(formData.username.trim(), formData.password);
       const target = !isVerified ? 'EmailVerification' : (hasProfile ? 'Home' : 'CreateProfile');
       navigation.reset({ index: 0, routes: [{ name: target }] });
-    } catch {
-      setError(t('auth.invalidCredentials'));
+    } catch (e) {
+      // Only a real HTTP response means bad credentials. Anything else (server
+      // unreachable, throttled, 5xx) must say so — reporting it as "invalid
+      // password" sends you chasing a password that was never checked.
+      if (e?.response) {
+        const status = e.response.status;
+        setError(
+          status === 429
+            ? 'Too many attempts. Wait a minute and try again.'
+            : (e.response.data?.detail || t('auth.invalidCredentials'))
+        );
+      } else {
+        setError(`Can't reach the server at ${API_BASE}. ${e?.message || ''}`.trim());
+      }
     } finally {
       setLoading(false);
     }

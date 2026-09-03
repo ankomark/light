@@ -1,29 +1,6 @@
 from .common import *  # noqa: F401,F403
 
 
-class CommunityAuditLogSerializer(serializers.ModelSerializer):
-    actor = SimpleUserSerializer(read_only=True)
-
-    class Meta:
-        model = CommunityAuditLog
-        fields = ['id', 'actor', 'action', 'detail', 'created_at']
-
-
-def community_pinned_preview(msg):
-    """Compact pinned-message shape for a choir/church community, shared by the
-    serializer and the pin actions. Mirrors groups.pinned_preview but the sender
-    field is `sender` (not `user`)."""
-    if not msg:
-        return None
-    return {
-        'id': msg.id,
-        'content': msg.content,
-        'message_type': msg.message_type,
-        'file_name': msg.file_name,
-        'sender_username': msg.sender.username if msg.sender_id else None,
-    }
-
-
 class MediaStationSerializer(serializers.ModelSerializer):
     is_owner = serializers.SerializerMethodField()
     created_by_username = serializers.CharField(
@@ -85,42 +62,11 @@ class AdminNoteSerializer(serializers.ModelSerializer):
 class NotificationPreferenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationPreference
-        fields = ['likes', 'comments', 'follows', 'messages', 'groups', 'communities', 'live', 'updated_at']
+        fields = [
+            'likes', 'comments', 'follows', 'messages', 'groups', 'communities',
+            'live', 'quiz', 'updated_at',
+        ]
         read_only_fields = ['updated_at']
-
-
-class ChurchSerializer(serializers.ModelSerializer):
-    image = CloudinaryFieldSerializer(read_only=True)
-    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
-    created_by_picture = serializers.SerializerMethodField()
-    # Expose the pin as a compact preview, not a bare PK.
-    pinned_message = serializers.SerializerMethodField()
-    # Unread chat messages for the caller — populated from a context map the list
-    # view precomputes (0 when the caller isn't a member or the map is absent).
-    unread_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Church
-        fields = '__all__'
-        read_only_fields = ('created_by', 'created_at', 'updated_at', 'id')
-
-    def get_pinned_message(self, obj):
-        return community_pinned_preview(obj.pinned_message)
-
-    def get_unread_count(self, obj):
-        return (self.context.get('unread_by_id') or {}).get(obj.id, 0)
-
-    def get_created_by_picture(self, obj):
-        # Null-safe: a creator may not have a profile or a picture set.
-        profile = getattr(obj.created_by, 'profile', None)
-        if profile and profile.picture:
-            return media.resolve(profile.picture)
-        return None
-
-
-# Add to existing serializers
-# from .models import Videostudio, Audiostudio, Choir
-
 
 
 class VideoStudioSerializer(serializers.ModelSerializer):
@@ -163,181 +109,6 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
 
     def get_cover_image(self, obj):
         return media.resolve(obj.cover_image) or ''
-
-
-class ChoirSerializer(serializers.ModelSerializer):
-    created_by = SimpleUserSerializer(read_only=True)
-    is_owner = serializers.SerializerMethodField()
-    # Expose the pin as a compact preview, not a bare PK.
-    pinned_message = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Choir
-        fields = '__all__'
-        read_only_fields = ('created_by', 'members_count')
-
-    def get_pinned_message(self, obj):
-        return community_pinned_preview(obj.pinned_message)
-
-    def get_is_owner(self, obj):
-        request = self.context.get('request')
-        return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
-
-
-class ChoirListSerializer(serializers.ModelSerializer):
-    """Lightweight list payload. profile_image/cover_image are R2 URLs served
-    directly."""
-    created_by = SimpleUserSerializer(read_only=True)
-    is_owner = serializers.SerializerMethodField()
-    profile_image = serializers.SerializerMethodField()
-    cover_image = serializers.SerializerMethodField()
-    # Unread chat messages for the caller — populated from a context map the list
-    # view precomputes (0 when the caller isn't a member or the map is absent).
-    unread_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Choir
-        fields = '__all__'
-        read_only_fields = ('created_by', 'members_count')
-
-    def get_is_owner(self, obj):
-        request = self.context.get('request')
-        return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
-
-    def get_profile_image(self, obj):
-        return media.resolve(obj.profile_image) or ''
-
-    def get_cover_image(self, obj):
-        return media.resolve(obj.cover_image) or ''
-
-    def get_unread_count(self, obj):
-        return (self.context.get('unread_by_id') or {}).get(obj.id, 0)
-
-
-# ── Choir community (membership / requests / chat) ────────────────────────────
-class ChoirMembershipSerializer(serializers.ModelSerializer):
-    user = SimpleUserSerializer(read_only=True)
-
-    class Meta:
-        model = ChoirMembership
-        fields = ['id', 'user', 'role', 'is_moderator', 'joined_at']
-        read_only_fields = fields
-
-
-class ChoirJoinRequestSerializer(serializers.ModelSerializer):
-    user = SimpleUserSerializer(read_only=True)
-
-    class Meta:
-        model = ChoirJoinRequest
-        fields = ['id', 'user', 'message', 'status', 'created_at']
-        read_only_fields = ['id', 'user', 'status', 'created_at']
-
-
-class ChoirMessageSerializer(serializers.ModelSerializer):
-    sender = SimpleUserSerializer(read_only=True)
-    reply_to = serializers.SerializerMethodField()
-    reactions = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ChoirMessage
-        fields = [
-            'id', 'sender', 'content', 'message_type', 'attachment', 'attachment_blurhash',
-            'file_name', 'duration', 'reply_to', 'reactions', 'created_at', 'edited_at',
-        ]
-        read_only_fields = ['id', 'sender', 'created_at']
-
-    def get_reply_to(self, obj):
-        if not obj.reply_to_id:
-            return None
-        r = obj.reply_to
-        return {
-            'id': r.id,
-            'sender': r.sender.username,
-            'message_type': r.message_type,
-            # A short preview only — never echo a full base64 attachment back.
-            'content': (r.content or r.message_type)[:120],
-        }
-
-    def get_reactions(self, obj):
-        """Aggregate emoji → count, plus the current user's own pick (if any).
-        Relies on the view prefetching `reactions` to avoid N+1 queries."""
-        request = self.context.get('request')
-        uid = request.user.id if request and request.user.is_authenticated else None
-        # Super admins react invisibly: skip their reactions for regular clients.
-        hidden = self.context.get('hide_super_ids') or ()
-        counts, mine = {}, None
-        for r in obj.reactions.all():
-            if r.user_id in hidden:
-                continue
-            counts[r.emoji] = counts.get(r.emoji, 0) + 1
-            if uid and r.user_id == uid:
-                mine = r.emoji
-        summary = [{'emoji': e, 'count': c}
-                   for e, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
-        return {'summary': summary, 'mine': mine}
-
-
-# ── Church community (membership / requests / chat) ───────────────────────────
-class ChurchMembershipSerializer(serializers.ModelSerializer):
-    user = SimpleUserSerializer(read_only=True)
-
-    class Meta:
-        model = ChurchMembership
-        fields = ['id', 'user', 'role', 'is_moderator', 'joined_at']
-        read_only_fields = fields
-
-
-class ChurchJoinRequestSerializer(serializers.ModelSerializer):
-    user = SimpleUserSerializer(read_only=True)
-
-    class Meta:
-        model = ChurchJoinRequest
-        fields = ['id', 'user', 'message', 'status', 'created_at']
-        read_only_fields = ['id', 'user', 'status', 'created_at']
-
-
-class ChurchMessageSerializer(serializers.ModelSerializer):
-    sender = SimpleUserSerializer(read_only=True)
-    reply_to = serializers.SerializerMethodField()
-    reactions = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ChurchMessage
-        fields = [
-            'id', 'sender', 'content', 'message_type', 'attachment', 'attachment_blurhash',
-            'file_name', 'duration', 'reply_to', 'reactions', 'created_at', 'edited_at',
-        ]
-        read_only_fields = ['id', 'sender', 'created_at']
-
-    def get_reply_to(self, obj):
-        if not obj.reply_to_id:
-            return None
-        r = obj.reply_to
-        return {
-            'id': r.id,
-            'sender': r.sender.username,
-            'message_type': r.message_type,
-            # A short preview only — never echo a full base64 attachment back.
-            'content': (r.content or r.message_type)[:120],
-        }
-
-    def get_reactions(self, obj):
-        """Aggregate emoji → count, plus the current user's own pick. Relies on
-        the view prefetching `reactions` to avoid N+1 queries."""
-        request = self.context.get('request')
-        uid = request.user.id if request and request.user.is_authenticated else None
-        # Super admins react invisibly: skip their reactions for regular clients.
-        hidden = self.context.get('hide_super_ids') or ()
-        counts, mine = {}, None
-        for r in obj.reactions.all():
-            if r.user_id in hidden:
-                continue
-            counts[r.emoji] = counts.get(r.emoji, 0) + 1
-            if uid and r.user_id == uid:
-                mine = r.emoji
-        summary = [{'emoji': e, 'count': c}
-                   for e, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
-        return {'summary': summary, 'mine': mine}
 
 
 class LiveEventSerializer(serializers.ModelSerializer):

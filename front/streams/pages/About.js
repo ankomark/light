@@ -39,7 +39,7 @@ const FEATURES = [
   { icon: 'storefront-outline', labelKey: 'about.feature.market', descKey: 'about.feature.marketDesc' },
   { icon: 'broadcast', labelKey: 'about.feature.live', descKey: 'about.feature.liveDesc' },
   { icon: 'book-open-variant', labelKey: 'about.feature.bible', descKey: 'about.feature.bibleDesc' },
-  { icon: 'church', labelKey: 'about.feature.churches', descKey: 'about.feature.churchesDesc' },
+  { icon: 'account-group-outline', labelKey: 'about.feature.communities', descKey: 'about.feature.communitiesDesc' },
 ];
 
 // Module scope: no hook here, so the caller passes t in.

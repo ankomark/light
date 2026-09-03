@@ -322,38 +322,6 @@ class AdminContentGroupPostSerializer(serializers.ModelSerializer):
         fields = ['id', 'content', 'message_type', 'group', 'is_removed', 'created_at', 'author']
 
 
-class AdminContentChoirMessageSerializer(serializers.ModelSerializer):
-    author = SimpleUserSerializer(source='sender', read_only=True)
-
-    class Meta:
-        model = ChoirMessage
-        fields = ['id', 'content', 'choir', 'is_removed', 'created_at', 'author']
-
-
-class AdminContentChurchMessageSerializer(serializers.ModelSerializer):
-    author = SimpleUserSerializer(source='sender', read_only=True)
-
-    class Meta:
-        model = ChurchMessage
-        fields = ['id', 'content', 'church', 'is_removed', 'created_at', 'author']
-
-
-class AdminContentChurchSerializer(serializers.ModelSerializer):
-    author = SimpleUserSerializer(source='created_by', read_only=True)
-
-    class Meta:
-        model = Church
-        fields = ['id', 'name', 'country', 'is_removed', 'created_at', 'author']
-
-
-class AdminContentChoirSerializer(serializers.ModelSerializer):
-    author = SimpleUserSerializer(source='created_by', read_only=True)
-
-    class Meta:
-        model = Choir
-        fields = ['id', 'name', 'location', 'is_removed', 'created_at', 'author']
-
-
 class AdminContentVideostudioSerializer(serializers.ModelSerializer):
     author = SimpleUserSerializer(source='created_by', read_only=True)
 

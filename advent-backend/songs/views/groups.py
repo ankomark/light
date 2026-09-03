@@ -34,6 +34,10 @@ def log_group_action(group, actor, action, detail=''):
 
 @method_decorator(cache_control(no_cache=True, no_store=True, must_revalidate=True), name='dispatch')
 class GroupViewSet(viewsets.ModelViewSet):
+    # Groups and communities run on the same engine but are separate features.
+    # The subclass below serves communities; everything else here is shared.
+    kind = Group.KIND_GROUP
+
     queryset = Group.objects.all().order_by('-created_at')
     serializer_class = GroupSerializer
     permission_classes = [IsAuthenticated]
@@ -97,6 +101,71 @@ class GroupViewSet(viewsets.ModelViewSet):
             anno_last_at=Subquery(last.values('created_at')[:1]),
         )
 
+    def _scope_to_kind(self, qs):
+        """Keep the two features apart in listings. Detail and action routes are
+        deliberately left unscoped: a community and a group are the same row
+        shape, and the chat/members/moderation endpoints are shared by both."""
+        return qs.filter(kind=self.kind) if self.action == 'list' else qs
+
+    def _apply_scope(self, qs):
+        """The list's three tabs. Resolved server-side so they page correctly —
+        filtering whichever page happened to load would hide anything past the
+        first 20 rows."""
+        scope = self.request.query_params.get('scope')
+        user = self.request.user
+        if scope == 'public':
+            return qs.filter(is_private=False)
+        if scope == 'private':
+            return qs.filter(is_private=True)
+        if scope == 'mine':
+            if not user.is_authenticated:
+                return qs.none()
+            return qs.filter(members__user=user).distinct()
+        return qs
+
+    def _apply_discovery_filters(self, qs):
+        """Category, per-category detail filters and search — the directory
+        browse that Churches.js/Choirs.js used to get from dedicated endpoints.
+
+        A category declares its own fields in `field_schema`, so the filters a
+        category offers come from data, not from code: a church filters by
+        conference, a user-invented category filters by whatever it declared."""
+        params = self.request.query_params
+
+        category_slug = params.get('category')
+        if category_slug and category_slug != 'all':
+            qs = qs.filter(category__slug=category_slug)
+
+        parent_slug = params.get('parent')
+        if parent_slug:
+            qs = qs.filter(parent__slug=parent_slug)
+
+        # Detail filters: only keys a category actually declares are honoured,
+        # so a stray query param can't turn into an arbitrary JSON lookup.
+        allowed = {}
+        cat_qs = (CommunityCategory.objects.filter(slug=category_slug)
+                  if category_slug and category_slug != 'all'
+                  else CommunityCategory.objects.all())
+        for cat in cat_qs:
+            for field in (cat.field_schema or []):
+                if isinstance(field, dict) and field.get('key'):
+                    allowed.setdefault(field['key'], field)
+
+        for key, field in allowed.items():
+            value = params.get(key)
+            if value:
+                qs = qs.filter(**{f'details__{key}__icontains': value})
+
+        search = (params.get('search') or '').strip()
+        if search:
+            cond = Q(name__icontains=search) | Q(description__icontains=search)
+            for key, field in allowed.items():
+                if field.get('searchable'):
+                    cond |= Q(**{f'details__{key}__icontains': search})
+            qs = qs.filter(cond)
+
+        return qs
+
     def get_queryset(self):
         # For authenticated users
         if self.request.user.is_authenticated:
@@ -109,9 +178,13 @@ class GroupViewSet(viewsets.ModelViewSet):
                     Q(creator=self.request.user) |  # Show groups user created
                     Q(members__user=self.request.user)  # Show groups user is member of
                 ).filter(is_removed=False).distinct().order_by('-created_at')
-            return self._annotate(base)
+            return self._annotate(
+                self._apply_scope(self._apply_discovery_filters(self._scope_to_kind(base)))
+            )
         # For unauthenticated users (if needed)
-        return Group.objects.filter(is_private=False, is_removed=False).order_by('-created_at')
+        return self._apply_scope(self._apply_discovery_filters(self._scope_to_kind(
+            Group.objects.filter(is_private=False, is_removed=False).order_by('-created_at')
+        )))
 
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
@@ -135,13 +208,19 @@ class GroupViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        group = serializer.save(creator=self.request.user)
+        # A group has no category or per-category details — those belong to
+        # communities, so drop them rather than trusting the client.
+        extra = {'kind': self.kind}
+        if self.kind == Group.KIND_GROUP:
+            extra.update(category=None, details={})
+        group = serializer.save(creator=self.request.user, **extra)
         GroupMember.objects.create(
             group=group,
             user=self.request.user,
             is_admin=True
         )
-        group_system_message(group, f"{self.request.user.username} created the group", self.request.user)
+        noun = 'community' if self.kind == Group.KIND_COMMUNITY else 'group'
+        group_system_message(group, f"{self.request.user.username} created the {noun}", self.request.user)
         return group
 
     @action(detail=True, methods=['post'], url_path='mark-read')
@@ -190,6 +269,20 @@ class GroupViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "You are already a member of this group"},
                 status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # A public community is open to anyone — joining is the act itself, not a
+        # petition. Private communities and all groups still go through approval,
+        # so the creator controls who gets in.
+        if group.kind == Group.KIND_COMMUNITY and not group.is_private:
+            GroupMember.objects.create(group=group, user=request.user)
+            GroupJoinRequest.objects.filter(group=group, user=request.user).update(
+                status='approved'
+            )
+            group_system_message(group, f"{request.user.username} joined", request.user)
+            return Response(
+                {"status": "joined", "joined": True},
+                status=status.HTTP_200_OK,
             )
 
         message = request.data.get('message', '')
@@ -912,3 +1005,49 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
 
 # Add to existing views.py
 
+
+class CommunityCategoryViewSet(viewsets.ModelViewSet):
+    """The kinds of community people can start.
+
+    Read is open so the create form and the browse filters can populate before
+    a user commits to anything. Anyone signed in may add a category — that is
+    the point of the merge: nobody has to ship code for a new kind of
+    community. Built-ins are protected from edit and deletion, and a category
+    still in use can't be deleted out from under its communities."""
+    queryset = CommunityCategory.objects.all()
+    serializer_class = CommunityCategorySerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    lookup_field = 'slug'
+    pagination_class = None
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, is_builtin=False)
+
+    def _guard_builtin(self, instance):
+        if instance.is_builtin and not getattr(self.request.user, 'is_super_admin', False):
+            raise PermissionDenied('Built-in categories cannot be changed.')
+
+    def perform_update(self, serializer):
+        self._guard_builtin(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._guard_builtin(instance)
+        in_use = instance.communities.count()
+        if in_use:
+            raise ValidationError(
+                f'{in_use} community(ies) still use this category. '
+                'Move them to another category first.'
+            )
+        instance.delete()
+
+
+class CommunityViewSet(GroupViewSet):
+    """Communities: churches, choirs, news circles — anything anyone starts.
+
+    Same engine as GroupViewSet (membership, chat, moderation all inherited);
+    the difference is which rows it lists and what it stamps on create. Browsing
+    by category and the per-category filters are inherited too, and only mean
+    anything here since groups carry no category.
+    """
+    kind = Group.KIND_COMMUNITY

@@ -115,6 +115,9 @@
     "react-test-renderer": "^19.0.0",
     "typescript": "~5.9.2"
   },
+  "engines": {
+    "node": ">=22.0.0 <23"
+  },
   "private": true,
   "expo": {
     "doctor": {

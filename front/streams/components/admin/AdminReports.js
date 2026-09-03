@@ -29,7 +29,7 @@ const FILTERS = [
 const REMOVABLE = new Set([
   'post', 'comment', 'track', 'trackcomment', 'group', 'story',
   'publication', 'product', 'productreview', 'grouppost',
-  'choirmessage', 'churchmessage', 'church', 'choir', 'videostudio', 'mediastation',
+  'videostudio', 'mediastation',
 ]);
 
 const TargetPreview = ({ target }) => {

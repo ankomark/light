@@ -27,7 +27,7 @@ export const PRIVACY = P(
     { h: 'Information you provide', p: [
       'Account details: your username, email address, and a securely hashed password.',
       'Profile information you choose to add, such as a display name, picture and bio.',
-      'Content you create: posts, photos, videos, captions, comments, messages, choir/church/group activity, and marketplace listings.',
+      'Content you create: posts, photos, videos, captions, comments, messages, community activity, and marketplace listings.',
       'Payments: marketplace purchases are processed by Stripe. We do not see or store your full card details — Stripe handles them under its own privacy policy.',
     ] },
     { h: 'Information collected automatically', p: [

@@ -14,6 +14,51 @@ def pinned_preview(post):
     }
 
 
+class CommunityCategorySerializer(serializers.ModelSerializer):
+    """A kind of community. `field_schema` travels to the client so the create
+    form and the browse filters build themselves from the category rather than
+    from hardcoded screens."""
+    community_count = serializers.SerializerMethodField()
+    created_by = SimpleUserSerializer(read_only=True)
+
+    class Meta:
+        model = CommunityCategory
+        fields = [
+            'id', 'name', 'slug', 'description', 'icon', 'is_builtin',
+            'field_schema', 'community_count', 'created_by', 'created_at',
+        ]
+        read_only_fields = ['slug', 'is_builtin', 'created_by', 'created_at']
+
+    def get_community_count(self, obj):
+        return obj.communities.filter(is_removed=False).count()
+
+    def validate_field_schema(self, value):
+        """Field descriptors are consumed by the client to render inputs and by
+        the API to build ORM lookups, so reject anything malformed at the door."""
+        if not isinstance(value, list):
+            raise serializers.ValidationError('field_schema must be a list.')
+        allowed_types = {'text', 'email', 'tel', 'url', 'date', 'number'}
+        cleaned = []
+        for item in value:
+            if not isinstance(item, dict) or not item.get('key'):
+                raise serializers.ValidationError('Each field needs a "key".')
+            key = str(item['key']).strip()
+            if not key.replace('_', '').isalnum():
+                raise serializers.ValidationError(
+                    f'Invalid field key {key!r}: letters, digits and underscores only.'
+                )
+            cleaned.append({
+                'key': key,
+                'label': str(item.get('label') or key.replace('_', ' ').title())[:60],
+                'type': item['type'] if item.get('type') in allowed_types else 'text',
+                'filterable': bool(item.get('filterable')),
+                'searchable': bool(item.get('searchable')),
+            })
+        if len(cleaned) > 12:
+            raise serializers.ValidationError('A category may declare at most 12 fields.')
+        return cleaned
+
+
 class GroupSerializer(serializers.ModelSerializer):
     creator = SimpleUserSerializer(read_only=True)
     member_count = serializers.SerializerMethodField()
@@ -28,6 +73,12 @@ class GroupSerializer(serializers.ModelSerializer):
     is_private = serializers.BooleanField(default=False)
     # Override the model field: the invite token is only ever revealed to admins.
     invite_code = serializers.SerializerMethodField()
+    # `category` stays writable as a plain pk; the nested copy carries the
+    # field_schema the client needs to render this community's extra fields.
+    category_detail = CommunityCategorySerializer(source='category', read_only=True)
+    parent_slug = serializers.SlugRelatedField(
+        source='parent', slug_field='slug', read_only=True,
+    )
 
     def get_pinned_message(self, obj):
         return pinned_preview(obj.pinned_post)

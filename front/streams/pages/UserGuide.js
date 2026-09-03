@@ -14,9 +14,7 @@ import { useI18n } from '../context/I18nContext';
 const SECTIONS = [
   { icon: 'heart-multiple-outline', key: 'feed' },
   { icon: 'headphones', key: 'music' },
-  { icon: 'account-music-outline', key: 'choirs' },
-  { icon: 'church', key: 'churches' },
-  { icon: 'account-group-outline', key: 'groups' },
+  { icon: 'account-group-outline', key: 'communities' },
   { icon: 'chat-outline', key: 'messages' },
   { icon: 'broadcast', key: 'live' },
   { icon: 'book-open-variant', key: 'bible' },
