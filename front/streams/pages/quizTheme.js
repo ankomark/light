@@ -175,6 +175,13 @@ export const Coins = ({ value, size = 15, textSize, style, textStyle }) => (
 );
 
 const coinStyles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  value: { fontFamily: DISPLAY, color: GOLD },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  // Gold on a photograph needs help: the shadow is what makes the number
+  // legible over a bright patch of wallpaper, not the weight.
+  value: {
+    fontFamily: DISPLAY, fontWeight: '700', color: GOLD, letterSpacing: 0.4,
+    textShadowColor: 'rgba(0,0,0,0.7)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
 });

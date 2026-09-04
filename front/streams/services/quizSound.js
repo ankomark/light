@@ -10,9 +10,14 @@
  * is worth interrupting a quiz for — so every call is wrapped and a failure
  * simply means no sound.
  *
- * Background music loops under the games at low volume, on the same switch as
- * everything else. It ducks out the moment sound is muted or a game is left,
- * so it can never outlive the screen that started it.
+ * Music and effects are on SEPARATE switches, and that separation matters:
+ * muting the background music is something people do constantly — it is the
+ * thing that gets tiring — while the little click that says a word was right
+ * is information, not decoration. Tying them together meant that turning the
+ * music off also turned the game's answers silent.
+ *
+ * The music still ducks out the moment a game is left, so it can never outlive
+ * the screen that started it.
  */
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
@@ -22,6 +27,7 @@ const SOURCES = {
   wrong: require('../assets/sounds/wrong.wav'),
   tick: require('../assets/sounds/tick.wav'),
   finish: require('../assets/sounds/finish.wav'),
+  bonus: require('../assets/sounds/bonus.wav'),
   loop: require('../assets/sounds/loop.mp3'),
 };
 
@@ -29,25 +35,39 @@ const SOURCES = {
 // to make a quiz stutter on the fifth question.
 const players = {};
 let loopPlayer = null;
-let enabled = true;
+let enabled = true;        // effect sounds and haptics
+let musicOn = true;        // the background loop, muted on its own
 let configured = false;
 
-/** Mirror the user's preference in here so callers need not pass it every time. */
+/** Effect sounds and haptics. Nothing to do with the music. */
 export const setSoundEnabled = (value) => {
   enabled = !!value;
-  if (!enabled) stopLoop();
 };
 
 export const isSoundEnabled = () => enabled;
+
+/** The background music, and only that. */
+export const setMusicEnabled = (value) => {
+  musicOn = !!value;
+  if (!musicOn) stopLoop();
+};
+
+export const isMusicEnabled = () => musicOn;
 
 const ensureAudioMode = async () => {
   if (configured) return;
   configured = true;
   try {
-    // Play through the silent switch: someone who has left sound on has asked
-    // for it. Never take over the audio session in the background — this app
-    // also plays music, and a quiz must not fight it.
-    await setAudioModeAsync({ playsInSilentModeIOS: true, shouldPlayInBackground: false });
+    // Respect the hardware silent switch. It used to play through it, on the
+    // reasoning that someone who left sound on had asked for it — but that was
+    // when one button governed everything and muting was one tap away inside
+    // the game. Now that effects are on by default and separate from the
+    // music, the switch on the side of the phone is the escape hatch, and a
+    // game that ignores it is a game that embarrasses someone in a quiet room.
+    //
+    // Never take over the audio session in the background either — this app
+    // also plays music, and a game must not fight it.
+    await setAudioModeAsync({ playsInSilentModeIOS: false, shouldPlayInBackground: false });
   } catch {
     // Not fatal — effects will still play under the default mode.
   }
@@ -82,7 +102,7 @@ export const play = (name) => {
 };
 
 export const playLoop = () => {
-  if (!enabled || !SOURCES.loop) return;
+  if (!musicOn || !SOURCES.loop) return;
   ensureAudioMode();
   try {
     if (!loopPlayer) {
@@ -102,6 +122,11 @@ export const stopLoop = () => {
   } catch {
     // ignore
   }
+  // Pausing the only thing that was playing can leave the audio session
+  // inactive, and the next short effect is then swallowed silently. Clearing
+  // this makes the next effect re-assert the mode before it plays, which
+  // reactivates the session. Cheap: it happens once per mute, not per sound.
+  configured = false;
 };
 
 /** Release everything — call when leaving the quiz. */
@@ -142,6 +167,18 @@ export const finishFeedback = () => {
   play('finish');
   if (!enabled) return;
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+};
+
+/** A word the wheel spells that was never on the board.
+ *
+ * Its own sound, not the one a board word gets: hearing the difference is how
+ * you learn that a guess which found nothing on the board was still worth
+ * making.
+ */
+export const bonusFeedback = () => {
+  play('bonus');
+  if (!enabled) return;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 };
 
 /** A run of correct answers deserves something extra — fired on milestones. */

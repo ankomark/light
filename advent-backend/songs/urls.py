@@ -29,6 +29,8 @@ from .views import (
     DeactivateAccountView,
     DeleteAccountView,
     NotificationPreferenceView,
+    WeatherPlaceView,
+    DailyVerseView,
     SessionsView,
     RevokeSessionView,
     RevokeOtherSessionsView,
@@ -160,6 +162,10 @@ urlpatterns = [
     path('auth/sessions/revoke-others/', RevokeOtherSessionsView.as_view(), name='session-revoke-others'),
     path('auth/export-data/', ExportDataView.as_view(), name='export-data'),
     path('notification-preferences/', NotificationPreferenceView.as_view(), name='notification-preferences'),
+    # The place the morning weather briefing is sent for.
+    path('weather-place/', WeatherPlaceView.as_view(), name='weather-place'),
+    # One encouraging verse a day, chosen from the imported KJV.
+    path('daily-verse/', DailyVerseView.as_view(), name='daily-verse'),
     path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
     path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
     path('live/webhook/', LiveKitWebhookView.as_view(), name='livekit-webhook'),

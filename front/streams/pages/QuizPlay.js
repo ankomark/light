@@ -22,7 +22,7 @@ import { useI18n } from '../context/I18nContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
-  setSoundEnabled, tapFeedback, correctFeedback, wrongFeedback, tickFeedback,
+  setSoundEnabled, setMusicEnabled, tapFeedback, correctFeedback, wrongFeedback, tickFeedback,
   finishFeedback, streakFeedback, playLoop, stopLoop, unload as unloadSound,
 } from '../services/quizSound';
 import {
@@ -35,6 +35,7 @@ const QuizPlay = ({ navigation, route }) => {
   const { preferences, setPreference } = usePreferences();
   const mode = route?.params?.mode === 'streak' ? 'streak' : 'speed';
   const soundOn = preferences?.[PREF_KEYS.quizSound] !== false;
+  const musicOn = preferences?.[PREF_KEYS.quizMusic] !== false;
 
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -74,9 +75,14 @@ const QuizPlay = ({ navigation, route }) => {
   // The service holds the switch so it need not be threaded through every call.
   useEffect(() => {
     setSoundEnabled(soundOn);
-    // The music follows the same switch as everything else.
-    if (soundOn) playLoop(); else stopLoop();
   }, [soundOn]);
+
+  // The music is muted on its own — the button in the header is a music
+  // button, and silencing it never silences the answers.
+  useEffect(() => {
+    setMusicEnabled(musicOn);
+    if (musicOn) playLoop(); else stopLoop();
+  }, [musicOn]);
   // Leaving the screen must never leave music playing behind it.
   useEffect(() => () => { stopLoop(); unloadSound(); }, []);
 
@@ -268,15 +274,15 @@ const QuizPlay = ({ navigation, route }) => {
           </TouchableOpacity>
           <Text style={q.headerTitle}>{config.label}</Text>
           <TouchableOpacity
-            onPress={() => setPreference(PREF_KEYS.quizSound, !soundOn)}
+            onPress={() => setPreference(PREF_KEYS.quizMusic, !musicOn)}
             style={q.iconBtn}
             hitSlop={10}
-            accessibilityLabel={t(soundOn ? 'quiz.soundOff' : 'quiz.soundOn')}
+            accessibilityLabel={t(musicOn ? 'quiz.musicOff' : 'quiz.musicOn')}
           >
             <Ionicons
-              name={soundOn ? 'volume-medium' : 'volume-mute'}
+              name={musicOn ? 'musical-notes' : 'musical-notes-outline'}
               size={19}
-              color={soundOn ? GOLD : MUTED}
+              color={musicOn ? GOLD : MUTED}
             />
           </TouchableOpacity>
           <View style={q.iconBtn}>

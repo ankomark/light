@@ -24,7 +24,7 @@ import CameraCapture from './components/CameraCapture';
 import Music from './components/Music';
 import EditTrackScreen from './components/EditTrackScreen';
 import PostDetail from './components/PostDetail'
-import { View, ActivityIndicator, LogBox } from 'react-native';
+import { View, Image, StyleSheet, ActivityIndicator, LogBox } from 'react-native';
 
 // Known, benign library warning: on camera flip, LiveKit's restartTrack calls
 // setMediaStreamTrack, and @livekit/react-native-webrtc's event-target-shim
@@ -44,6 +44,10 @@ import PublicationDetail from './pages/PublicationDetail';
 import ChapterReader from './pages/ChapterReader';
 import PublicationEditor from './pages/PublicationEditor';
 import About from './pages/About';
+import Calculator from './pages/Calculator';
+import CalendarPage from './pages/Calendar';
+import Weather from './pages/Weather';
+import DailyVerse from './pages/DailyVerse';
 import UserGuide from './pages/UserGuide';
 import LegalPage from './pages/LegalPage';
 import PrivacyCentre from './pages/PrivacyCentre';
@@ -56,7 +60,6 @@ import GroupList from './pages/GroupList';
 import BibleQuiz from './pages/BibleQuiz';
 import QuizHome from './pages/QuizHome';
 import QuizPlay from './pages/QuizPlay';
-import PuzzleHome from './pages/PuzzleHome';
 import PuzzlePlay from './pages/PuzzlePlay';
 import GroupDetail from './pages/GroupDetail';
 import CreateGroup from './pages/CreateGroup';
@@ -276,6 +279,11 @@ const App = () => {
                 <Stack.Screen name="ChapterReader" component={ChapterReader} />
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
                 <Stack.Screen name="About" component={About} />
+                {/* Utilities: their own headers, so no app bar above them. */}
+                <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />
+                <Stack.Screen name="Calendar" component={CalendarPage} options={{ headerShown: false }} />
+                <Stack.Screen name="Weather" component={WeatherWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="DailyVerse" component={DailyVerseWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="UserGuide" component={UserGuide} />
                 <Stack.Screen name="PrivacyCentre" component={PrivacyCentre} />
                 <Stack.Screen name="LegalPage" component={LegalPage} />
@@ -289,8 +297,7 @@ const App = () => {
                 <Stack.Screen name="BibleQuiz" component={BibleQuiz} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizHome" component={QuizHomeWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizPlay" component={QuizPlay} options={{ headerShown: false }} />
-                <Stack.Screen name="PuzzleHome" component={PuzzleHomeWrapper} options={{ headerShown: false }} />
-                <Stack.Screen name="PuzzlePlay" component={PuzzlePlay} options={{ headerShown: false }} />
+                <Stack.Screen name="PuzzlePlay" component={PuzzlePlayWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="GroupDetail" component={GroupDetail} />
                 <Stack.Screen name="CreateGroup" component={CreateGroup} />
                 <Stack.Screen name="GroupMembers" component={GroupMembers} options={{ title: 'Group Members' }}/>
@@ -364,12 +371,66 @@ const QuizHomeWrapper = ({ navigation, route }) => (
   </View>
 );
 
-const PuzzleHomeWrapper = ({ navigation, route }) => (
+// The puzzle is one page: the board, the wheel, and everything about them.
+// A hub in front of it was a screen you had to get past to play, so the board
+// itself carries the level, the progress and the purse.
+//
+// No app header here, unlike every other screen. A board sized to the space
+// left over cannot spare 50pt to a bar that only repeats the app's name, and
+// the game's own row already carries what this screen needs — including the
+// way back. It keeps the wallpaper so it still belongs to the app.
+// Weather keeps the app header: unlike the puzzle board it is not fighting for
+// vertical space.
+//
+// The bar gets the app's deep blue laid under it, and is rendered transparent
+// over that. Two reasons rather than one: left opaque it pulls a remote photo,
+// which is a different look on every load and needs the network; left properly
+// transparent it would show the screen's black photograph and the nav would
+// read as belonging to some other app. A flat blue under the glass is the
+// header the rest of the app has.
+const HEADER_BLUE = '#102E50';           // colors.surface
+
+// Same treatment as Weather: the app's deep blue laid under a transparent
+// bar. The screen's own teal lives inside the screen, so a bar left properly
+// transparent would show the flat backing above it and seam.
+const DailyVerseWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#004B51' }}>
+    <View style={{ backgroundColor: HEADER_BLUE }}>
+      <Header navigation={navigation} transparentBg />
+    </View>
+    <ErrorBoundary fallbackMessage="The verse couldn't load.">
+      <DailyVerse navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const WeatherWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#000000' }}>
+    <View style={{ backgroundColor: HEADER_BLUE }}>
+      <Header navigation={navigation} transparentBg />
+    </View>
+    <ErrorBoundary fallbackMessage="The forecast couldn't load.">
+      <Weather navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const PuzzlePlayWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
-    <Header navigation={navigation} transparentBg />
+    {/* One picture, not the rotating set: a board you stare at for ten minutes
+        wants a background that stays put, and this one is dark enough to sit
+        under white tiles without a heavy scrim flattening it. */}
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Image
+        source={require('./assets/puzzle-bg.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+        accessibilityIgnoresInvertColors
+      />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(6,10,20,0.45)' }]} />
+    </View>
     <ErrorBoundary fallbackMessage="The puzzle couldn't load.">
-      <PuzzleHome navigation={navigation} route={route} />
+      <PuzzlePlay navigation={navigation} route={route} />
     </ErrorBoundary>
   </View>
 );

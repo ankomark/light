@@ -726,6 +726,8 @@ class NotificationPreference(models.Model):
     communities = models.BooleanField(default=True)
     live = models.BooleanField(default=True)
     quiz = models.BooleanField(default=True)
+    weather = models.BooleanField(default=True)
+    verse = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -2179,3 +2181,72 @@ class BibleWord(models.Model):
 
     def __str__(self):
         return self.word
+
+
+class WeatherPlace(models.Model):
+    """The one place a person wants their weather for.
+
+    Kept on the server, not just on the device, because the morning briefing is
+    sent from a cron job that has no access to anyone's phone storage. One row
+    per person: this is "my weather", not a list of saved cities.
+
+    The coordinates are what the forecast is actually fetched with; the name is
+    only what the notification calls the place.
+    """
+    user = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name='weather_place',
+    )
+    name = models.CharField(max_length=120)
+    # What locates the name: county or state, and the country. Stored so the
+    # morning push can say "Kilimani, Nairobi County" rather than leaving a
+    # neighbourhood to stand on its own — there are three Westlands.
+    region = models.CharField(max_length=120, blank=True, default='')
+    country = models.CharField(max_length=80, blank=True, default='')
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    # Whether the daily morning briefing is wanted. Separate from having a
+    # place: plenty of people want the screen without the push.
+    briefing = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['user__username']
+
+    def __str__(self):
+        return f"{self.user.username} · {self.name}"
+
+
+class VerseSend(models.Model):
+    """One row per person per day the verse of the day went out.
+
+    The same idempotence as QuizReminder and WeatherBriefing: a cron that fires
+    twice cannot send twice, and there is a record of what went where.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='verse_sends')
+    date = models.DateField(db_index=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'date')
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.user.username} · {self.date}"
+
+
+class WeatherBriefing(models.Model):
+    """One row per person per day a morning briefing went out.
+
+    The same idempotence trick as QuizReminder: a cron that fires twice cannot
+    push twice, and there is an audit of what was sent.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='weather_briefings')
+    date = models.DateField(db_index=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'date')
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.user.username} · {self.date}"

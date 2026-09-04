@@ -10,6 +10,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from songs.bible_books import BOOKS_BY_NAME
+from songs.streaks import forget_recorded_plays
 from songs.models import BibleVerse, DailyQuiz, QuizAttempt, QuizQuestion
 from songs.quiz import QUESTIONS_PER_DAY, generate_for_date
 
@@ -37,6 +38,7 @@ class QuizGenerationTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        forget_recorded_plays()
 
     def test_generates_twenty_questions(self):
         quiz = generate_for_date(date(2026, 1, 1))
@@ -108,6 +110,7 @@ class QuizApiTests(APITestCase):
     def setUp(self):
         # Throttle counts live in a shared cache across the run.
         cache.clear()
+        forget_recorded_plays()
         from songs.models import User
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.rival = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
@@ -224,6 +227,7 @@ class ScoringRuleTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        forget_recorded_plays()
 
     def test_difficulty_sets_the_base(self):
         from songs.scoring import base_points_for
@@ -278,6 +282,7 @@ class QuizEngineTests(APITestCase):
     def setUp(self):
         # Throttle counts live in a shared cache across the run.
         cache.clear()
+        forget_recorded_plays()
         from songs.models import User
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.rival = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
@@ -390,6 +395,7 @@ class GameModeTests(APITestCase):
     def setUp(self):
         # Throttle counts live in a shared cache across the run.
         cache.clear()
+        forget_recorded_plays()
         from songs.models import User
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
@@ -586,6 +592,7 @@ class QuizStatsTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        forget_recorded_plays()
         from songs.models import User
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
@@ -667,6 +674,7 @@ class DayStreakTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        forget_recorded_plays()
         from songs.models import User
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
@@ -736,6 +744,7 @@ class SessionLimitTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        forget_recorded_plays()
         from songs.models import User
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
@@ -768,6 +777,7 @@ class SessionCleanupTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        forget_recorded_plays()
         from songs.models import User
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
@@ -836,6 +846,7 @@ class QuizReminderTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        forget_recorded_plays()
         from songs.models import DeviceToken, User
         self.regular = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.never = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')

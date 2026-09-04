@@ -439,3 +439,30 @@ class FollowRequestViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         # design — the requester isn't told they were turned down.
         follow_request.delete()
         return Response({'status': 'rejected', 'requester_id': requester_id})
+
+
+class WeatherPlaceView(APIView):
+    """Get, set or clear the signed-in user's weather place.
+
+    The device keeps its own copy for the screen; this is the copy the morning
+    briefing reads, because a cron job cannot ask a sleeping phone where it is.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        place = WeatherPlace.objects.filter(user=request.user).first()
+        if not place:
+            return Response({})
+        return Response(WeatherPlaceSerializer(place).data)
+
+    def put(self, request):
+        place = WeatherPlace.objects.filter(user=request.user).first()
+        serializer = WeatherPlaceSerializer(place, data=request.data, partial=bool(place))
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+        return Response(serializer.data)
+
+    def delete(self, request):
+        """Forget the place, and with it the briefings."""
+        WeatherPlace.objects.filter(user=request.user).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

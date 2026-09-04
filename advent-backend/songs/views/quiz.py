@@ -404,3 +404,48 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                 'best_score': top.score if top else 0,
             }
         return Response(out)
+
+
+class DailyVerseView(APIView):
+    """The verse of the day.
+
+    Deterministic by date rather than stored: everyone opening the app on the
+    same day gets the same verse, yesterday's is still yesterday's, and there
+    is no table to keep in step. See songs/devotion.py for why the selection is
+    curated rather than searched.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_scope = 'quiz'
+
+    # How far back the app may look. Enough for a week of catching up, bounded
+    # so the endpoint cannot be walked through the whole rotation at once.
+    HISTORY_DAYS = 14
+
+    def get(self, request):
+        from ..devotion import verse_for_date
+
+        today = timezone.localdate()
+        raw = request.query_params.get('date')
+        day = today
+        if raw:
+            try:
+                day = date_cls.fromisoformat(raw)
+            except ValueError:
+                raise ValidationError({'date': 'Use YYYY-MM-DD.'})
+            if day > today or (today - day).days > self.HISTORY_DAYS:
+                raise ValidationError(
+                    {'date': 'Only today and the last %d days.' % self.HISTORY_DAYS})
+
+        verse = verse_for_date(day)
+        if not verse:
+            raise APIException('The Bible text has not been imported yet.')
+
+        return Response({
+            'date': day.isoformat(),
+            'reference': verse.reference,
+            'book': verse.book,
+            'chapter': verse.chapter,
+            'verse': verse.verse,
+            'text': verse.text,
+            'is_today': day == today,
+        })

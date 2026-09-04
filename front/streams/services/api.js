@@ -839,10 +839,12 @@ export const fetchQuizBests = async () => apiRequest('get', '/quiz-sessions/best
 // grid comes down without the answers: a word is claimed by sending the two
 // ends of the drag, and the server reads its own grid to decide.
 
-export const fetchPuzzleThemes = async () => apiRequest('get', '/puzzle-themes/');
-
 export const fetchPuzzleLevel = async (theme, level = 1) =>
   apiRequest('get', `/puzzles/level/?theme=${encodeURIComponent(theme)}&level=${level}`);
+
+// The level to play now, chosen by the server. Takes no theme on purpose:
+// which subject comes next is not the client's decision.
+export const fetchNextPuzzle = async () => apiRequest('get', '/puzzles/next/');
 
 export const claimPuzzleWord = async (puzzleId, word) =>
   apiRequest('post', `/puzzles/${puzzleId}/found/`, { word });
@@ -851,6 +853,17 @@ export const buyPuzzleHint = async (puzzleId) =>
   apiRequest('post', `/puzzles/${puzzleId}/hint/`, {});
 
 export const fetchCoinWallet = async () => apiRequest('get', '/puzzles/wallet/');
+
+// The weather place lives on the server as well as the device: the morning
+// briefing is sent by a cron job, which cannot ask a sleeping phone where it is.
+export const fetchWeatherPlace = async () => apiRequest('get', '/weather-place/');
+export const saveWeatherPlace = async (place) => apiRequest('put', '/weather-place/', place);
+export const clearWeatherPlace = async () => apiRequest('delete', '/weather-place/');
+
+// One encouraging verse a day, chosen on the server so everyone sees the same
+// one. `day` is optional and only reaches back as far as the server allows.
+export const fetchDailyVerse = async (day = null) =>
+  apiRequest('get', day ? `/daily-verse/?date=${encodeURIComponent(day)}` : '/daily-verse/');
 
 export const toggleSoloArtistActive = async (artistId) => {
   return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);
@@ -1840,11 +1853,15 @@ export default {
   fetchQuizLeaderboard,
   fetchQuizHistory,
   fetchQuizStats,
-  fetchPuzzleThemes,
   fetchPuzzleLevel,
+  fetchNextPuzzle,
   claimPuzzleWord,
   buyPuzzleHint,
   fetchCoinWallet,
+  fetchWeatherPlace,
+  saveWeatherPlace,
+  clearWeatherPlace,
+  fetchDailyVerse,
   fetchCommunityCategories,
   createCommunityCategory,
   deleteCommunityCategory,

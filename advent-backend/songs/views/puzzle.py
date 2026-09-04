@@ -12,7 +12,7 @@ from collections import Counter
 
 from .common import *  # noqa: F401,F403
 from ..models import CoinSpend, PuzzleProgress, PuzzleTheme, WordPuzzle
-from ..puzzle import generate
+from ..puzzle import LEVEL_LIMIT, generate, next_puzzle
 from ..scoring import (
     COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, coin_balance, completion_bonus,
 )
@@ -73,8 +73,8 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             level = int(request.query_params.get('level', 1))
         except (TypeError, ValueError):
             raise ValidationError({'level': 'Must be a number.'})
-        if not 1 <= level <= 50:
-            raise ValidationError({'level': 'Levels run from 1 to 50.'})
+        if not 1 <= level <= LEVEL_LIMIT:
+            raise ValidationError({'level': 'That is not a level.'})
 
         try:
             puzzle = generate(theme, level)
@@ -83,7 +83,23 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             # undersized puzzle that still pays a completion bonus.
             raise APIException(str(exc))
 
-        puzzle._progress_cache = self._progress(puzzle)
+        puzzle._progress_cache = self._progress(puzzle, create=False)
+        return Response(self.get_serializer(puzzle).data)
+
+    @action(detail=False, methods=['get'])
+    def next(self, request):
+        """GET /api/puzzles/next/ — the level to play now, server's choice.
+
+        The same payload `level` returns, so the client has one thing to render
+        either way. It takes no theme parameter on purpose: choosing is not the
+        client's to do.
+        """
+        try:
+            puzzle = next_puzzle(request.user)
+        except ValueError as exc:
+            raise APIException(str(exc))
+
+        puzzle._progress_cache = self._progress(puzzle, create=False)
         return Response(self.get_serializer(puzzle).data)
 
     @action(detail=True, methods=['post'])
@@ -94,8 +110,21 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         the answers were never sent, so a client cannot enumerate them without
         actually forming words from the letters it was given.
         """
-        puzzle = get_object_or_404(self.get_queryset(), pk=pk)
-        progress = self._progress(puzzle)
+        # One query, not two. The progress row knows its puzzle, and after the
+        # first word of a level that row always exists — so the common case is
+        # a single join instead of a lookup for the board and another for the
+        # player's place in it.
+        progress = (PuzzleProgress.objects
+                    .select_related('puzzle', 'puzzle__theme', 'puzzle__verse')
+                    .filter(user=request.user, puzzle_id=pk)
+                    .first())
+        if progress:
+            puzzle = progress.puzzle
+        else:
+            puzzle = get_object_or_404(self.get_queryset(), pk=pk)
+            progress, _ = PuzzleProgress.objects.get_or_create(
+                user=request.user, puzzle=puzzle,
+            )
 
         word = str(request.data.get('word') or '').strip().upper()
         if not word:
@@ -117,19 +146,22 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
                 'found': progress.found, 'coins_earned': 0, 'placement': match,
             })
 
-        with transaction.atomic():
-            progress.found = list(progress.found or []) + [word]
-            coins = COINS_PER_WORD
-            complete = len(set(progress.found)) >= len(puzzle.placements)
-            bonus = 0
-            if complete and not progress.is_complete:
-                bonus = completion_bonus(puzzle.level)
-                progress.is_complete = True
-                progress.completed_at = timezone.now()
-            progress.coins_earned = (progress.coins_earned or 0) + coins + bonus
-            progress.save()
+        # No explicit transaction: this is one UPDATE, atomic on its own. The
+        # BEGIN and COMMIT around it were two more round trips on the path a
+        # player is actually waiting on.
+        progress.found = list(progress.found or []) + [word]
+        coins = COINS_PER_WORD
+        complete = len(set(progress.found)) >= len(puzzle.placements)
+        bonus = 0
+        fields = ['found', 'coins_earned']
+        if complete and not progress.is_complete:
+            bonus = completion_bonus(puzzle.level)
+            progress.is_complete = True
+            progress.completed_at = timezone.now()
+            fields += ['is_complete', 'completed_at']
+        progress.coins_earned = (progress.coins_earned or 0) + coins + bonus
+        progress.save(update_fields=fields)
 
-        earned, spent, balance = coin_balance(request.user)
         return Response({
             'correct': True,
             'word': word,
@@ -138,7 +170,12 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             'completion_bonus': bonus,
             'is_complete': progress.is_complete,
             'found': progress.found,
-            'balance': balance,
+            # What was earned, not what is left. Reconciling the whole purse
+            # took four aggregate queries on every single word, and the client
+            # can add a number it already knows to one it already has. The
+            # authoritative balance comes back when the level ends — rare
+            # enough to pay for, and the moment it matters most.
+            'balance': coin_balance(request.user)[2] if progress.is_complete else None,
             # The reward for finishing: the verse these words came out of.
             # Held back until the board is done — the base word is in this
             # text, so an early reveal would give the longest answer away.
@@ -161,12 +198,10 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
                 'word': word, 'bonus_found': progress.bonus, 'coins_earned': 0,
             })
 
-        with transaction.atomic():
-            progress.bonus = list(progress.bonus or []) + [word]
-            progress.coins_earned = (progress.coins_earned or 0) + COINS_PER_BONUS_WORD
-            progress.save(update_fields=['bonus', 'coins_earned'])
+        progress.bonus = list(progress.bonus or []) + [word]
+        progress.coins_earned = (progress.coins_earned or 0) + COINS_PER_BONUS_WORD
+        progress.save(update_fields=['bonus', 'coins_earned'])
 
-        _, _, balance = coin_balance(request.user)
         return Response({
             'correct': False,
             'bonus': True,
@@ -174,7 +209,6 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             'coins_earned': COINS_PER_BONUS_WORD,
             'bonus_found': progress.bonus,
             'bonus_total': len(puzzle.bonus_words or []),
-            'balance': balance,
         })
 
     @action(detail=True, methods=['post'])

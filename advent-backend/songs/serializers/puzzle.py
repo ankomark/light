@@ -1,6 +1,7 @@
 from .common import *  # noqa: F401,F403
 
 from ..models import PuzzleProgress, PuzzleTheme, WordPuzzle
+from ..puzzle import band_for
 
 
 class PuzzleThemeSerializer(serializers.ModelSerializer):
@@ -39,13 +40,14 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
     hints_used = serializers.SerializerMethodField()
     is_complete = serializers.SerializerMethodField()
     verse = serializers.SerializerMethodField()
+    band = serializers.SerializerMethodField()
 
     class Meta:
         model = WordPuzzle
         fields = [
             'id', 'theme', 'level', 'letters', 'rows', 'cols', 'layout',
             'slots', 'revealed', 'found', 'bonus', 'bonus_total',
-            'hints_used', 'is_complete', 'verse',
+            'hints_used', 'is_complete', 'verse', 'band',
         ]
 
     # ── the board's shape ────────────────────────────────────────────────────
@@ -75,9 +77,8 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not (request and request.user.is_authenticated):
             return None
-        cached = getattr(obj, '_progress_cache', None)
-        if cached is not None:
-            return cached
+        if hasattr(obj, '_progress_cache'):
+            return obj._progress_cache
         return PuzzleProgress.objects.filter(user=request.user, puzzle=obj).first()
 
     def get_found(self, obj):
@@ -91,6 +92,10 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
             return []
         seen = set(p.found or []) | set(p.hinted or [])
         return [x for x in obj.placements if x['word'] in seen]
+
+    def get_band(self, obj):
+        """How hard this level calls itself: simple, moderate or hard."""
+        return band_for(obj.level)
 
     def get_bonus(self, obj):
         """Bonus words this player has turned up — theirs, not the board's."""

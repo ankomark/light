@@ -18,63 +18,110 @@ import { colors, spacing, radius, typography } from '../constants/theme';
 const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
+// Some rows carry artwork instead of a glyph, and keep their own colours —
+// tinting a multicolour mark to a single grey throws away the reason to use
+// it. Declared above SECTIONS, which reads them as the module loads.
+const EXPLORE_ART = require('../assets/explore-icon.png');
+const PUBLISHING_ART = require('../assets/publishing-icon.png');
+const FAVORITES_ART = require('../assets/favorites-icon.png');
+const PLAYLISTS_ART = require('../assets/playlists-icon.png');
+const SERVICES_ART = require('../assets/services-icon.png');
+const MESSAGES_ART = require('../assets/messages-icon.png');
+const COMMUNITIES_ART = require('../assets/communities-icon.png');
+const GROUPS_ART = require('../assets/groups-icon.png');
+const NOTICE_ART = require('../assets/noticeboard-icon.png');
+const QUIZ_ART = require('../assets/quiz-icon.png');
+const PUZZLE_ART = require('../assets/puzzle-icon.png');
+const MARKET_ART = require('../assets/marketplace-icon.png');
+const CART_ART = require('../assets/cart-icon.png');
+const SELL_ART = require('../assets/sell-icon.png');
+const SETTINGS_ART = require('../assets/settings-icon.png');
+const ORDERS_ART = require('../assets/orders-icon.png');
+const HELP_ART = require('../assets/help-icon.png');
+const ABOUT_ART = require('../assets/about-icon.png');
+const GUIDE_ART = require('../assets/userguide-icon.png');
+const PRIVACY_ART = require('../assets/privacy-icon.png');
+const TERMS_ART = require('../assets/terms-icon.png');
+const GUIDELINES_ART = require('../assets/guidelines-icon.png');
+const CALC_ART = require('../assets/calculator-icon.png');
+const WEATHER_ART = require('../assets/weather-icon.png');
+
+// The calendar's own red. Deliberately not colors.error, which is reserved
+// for things that have gone wrong — a red calendar is a convention, a red
+// warning is a message.
+const CALENDAR_RED = '#EA4335';
+
+// The teal of the verse screen's own artwork, so the row points at it.
+const VERSE_TEAL = '#2E9E96';
+
 // label = what the user sees; route = the registered screen name; set/icon = glyph.
 const SECTIONS = [
   {
     title: 'Discover',
     items: [
-      { label: 'Explore', route: 'Explore', set: 'ion', icon: 'compass-outline' },
-      { label: 'Publishing', route: 'Publishing', set: 'mci', icon: 'newspaper-variant-outline' },
+      { label: 'Explore', route: 'Explore', art: EXPLORE_ART },
+      { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
       { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true },
     ],
   },
   {
     title: 'Media',
     items: [
-      { label: 'Favorites', route: 'Favorites', set: 'ion', icon: 'heart-outline' },
-      { label: 'Playlists', route: 'Playlists', set: 'mci', icon: 'playlist-music-outline' },
-      { label: 'Services', route: 'Studios', set: 'mci', icon: 'video-outline' },
+      { label: 'Favorites', route: 'Favorites', art: FAVORITES_ART },
+      { label: 'Playlists', route: 'Playlists', art: PLAYLISTS_ART },
+      { label: 'Services', route: 'Studios', art: SERVICES_ART },
     ],
   },
   {
     title: 'Community',
     items: [
-      { label: 'Messages', route: 'Inbox', set: 'ion', icon: 'chatbubbles-outline' },
+      { label: 'Messages', route: 'Inbox', art: MESSAGES_ART },
       // Churches and choirs are no longer separate entries — they are
       // categories inside Community, alongside any kind someone starts.
-      { label: 'Communities', route: 'Communities', set: 'mci', icon: 'account-multiple-outline' },
-      { label: 'Groups', route: 'Groups', set: 'mci', icon: 'account-group-outline' },
-      { label: 'Notice Board', route: 'NoticeBoard', set: 'mci', icon: 'bulletin-board' },
-      { label: 'Bible Quiz', route: 'QuizHome', set: 'mci', icon: 'head-question-outline' },
-      { label: 'Word Puzzle', route: 'PuzzleHome', set: 'mci', icon: 'grid' },
+      { label: 'Communities', route: 'Communities', art: COMMUNITIES_ART },
+      { label: 'Groups', route: 'Groups', art: GROUPS_ART },
+      { label: 'Notice Board', route: 'NoticeBoard', art: NOTICE_ART },
+      { label: 'Verse of the Day', route: 'DailyVerse', set: 'mci', icon: 'book-open-variant',
+        tint: VERSE_TEAL },
+      { label: 'Bible Quiz', route: 'QuizHome', art: QUIZ_ART },
+      { label: 'Word Puzzle', route: 'PuzzlePlay', art: PUZZLE_ART },
     ],
   },
   {
     title: 'Marketplace',
     items: [
-      { label: 'Marketplace', route: 'MarketplaceHome', set: 'mci', icon: 'storefront-outline' },
-      { label: 'Cart', route: 'Cart', set: 'mci', icon: 'cart-outline' },
+      { label: 'Marketplace', route: 'MarketplaceHome', art: MARKET_ART },
+      { label: 'Cart', route: 'Cart', art: CART_ART },
       { label: 'Wishlist', route: 'Wishlist', set: 'mci', icon: 'heart-outline' },
-      { label: 'My Orders', route: 'OrderHistory', set: 'mci', icon: 'package-variant-closed' },
-      { label: 'Sell', route: 'SellerDashboard', set: 'mci', icon: 'store-outline' },
+      { label: 'My Orders', route: 'OrderHistory', art: ORDERS_ART },
+      { label: 'Sell', route: 'SellerDashboard', art: SELL_ART },
+    ],
+  },
+  {
+    title: 'Tools',
+    items: [
+      { label: 'Calculator', route: 'Calculator', art: CALC_ART },
+      { label: 'Calendar', route: 'Calendar', set: 'mci', icon: 'calendar-month-outline',
+        tint: CALENDAR_RED },
+      { label: 'Weather', route: 'Weather', art: WEATHER_ART },
     ],
   },
   {
     title: 'More',
     items: [
-      { label: 'Settings', route: 'Settings', set: 'ion', icon: 'settings-outline' },
-      { label: 'Help', route: 'Help', set: 'ion', icon: 'help-circle-outline' },
-      { label: 'About', route: 'About', set: 'mci', icon: 'information-outline' },
-      { label: 'User Guide', route: 'UserGuide', set: 'mci', icon: 'compass-outline' },
+      { label: 'Settings', route: 'Settings', art: SETTINGS_ART },
+      { label: 'Help', route: 'Help', art: HELP_ART },
+      { label: 'About', route: 'About', art: ABOUT_ART },
+      { label: 'User Guide', route: 'UserGuide', art: GUIDE_ART },
     ],
   },
   {
     title: 'Legal & Privacy',
     items: [
       { label: 'Privacy Centre', route: 'PrivacyCentre', set: 'mci', icon: 'shield-account-outline' },
-      { label: 'Privacy Policy', route: 'LegalPage', params: { docKey: 'privacy' }, set: 'mci', icon: 'shield-check-outline' },
-      { label: 'Terms of Service', route: 'LegalPage', params: { docKey: 'terms' }, set: 'mci', icon: 'file-document-outline' },
-      { label: 'Guidelines', route: 'LegalPage', params: { docKey: 'guidelines' }, set: 'mci', icon: 'account-group-outline' },
+      { label: 'Privacy Policy', route: 'LegalPage', params: { docKey: 'privacy' }, art: PRIVACY_ART },
+      { label: 'Terms of Service', route: 'LegalPage', params: { docKey: 'terms' }, art: TERMS_ART },
+      { label: 'Guidelines', route: 'LegalPage', params: { docKey: 'guidelines' }, art: GUIDELINES_ART },
     ],
   },
 ];
@@ -101,10 +148,21 @@ const APPEAL_SECTION = {
   ],
 };
 
-const Glyph = ({ set, name, color, size }) =>
-  set === 'mci'
+const Glyph = ({ set, name, art, color, size }) => {
+  if (art) {
+    return (
+      <Image
+        source={art}
+        style={{ width: size + 4, height: size + 4 }}
+        resizeMode="contain"
+        accessibilityIgnoresInvertColors
+      />
+    );
+  }
+  return set === 'mci'
     ? <MaterialCommunityIcons name={name} size={size} color={color} />
     : <Ionicons name={name} size={size} color={color} />;
+};
 
 function HamburgerMenu() {
   const navigation = useNavigation();
@@ -237,7 +295,16 @@ function HamburgerMenu() {
                         ]}
                       >
                         <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
-                          <Glyph set={item.set} name={item.icon} size={20} color={active ? colors.accent : (item.danger ? colors.error : colors.textSecondary)} />
+                          <Glyph
+                            set={item.set}
+                            name={item.icon}
+                            art={item.art}
+                            size={20}
+                            color={active ? colors.accent
+                              : item.tint ? item.tint
+                              : item.danger ? colors.error
+                              : colors.textSecondary}
+                          />
                         </View>
                         <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
                           {item.label}

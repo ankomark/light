@@ -77,7 +77,11 @@ const NOTIFICATION_CATEGORIES = [
   { key: 'groups', labelKey: 'settings.notif.groups', icon: 'account-group-outline' },
   { key: 'communities', labelKey: 'settings.notif.communities', icon: 'church' },
   { key: 'live', labelKey: 'settings.notif.live', icon: 'broadcast' },
+  // Covers the puzzle too: the two games share one streak, so one reminder
+  // serves both and a second switch would gate nothing.
   { key: 'quiz', labelKey: 'settings.notif.quiz', icon: 'head-question-outline' },
+  { key: 'weather', labelKey: 'settings.notif.weather', icon: 'weather-partly-cloudy' },
+  { key: 'verse', labelKey: 'settings.notif.verse', icon: 'book-open-variant' },
 ];
 
 // Module scope: no hook here, so the caller passes t in.
@@ -579,7 +583,7 @@ const Settings = () => {
               key={cat.key}
               icon={cat.icon}
               label={t(cat.labelKey)}
-              last={i === NOTIFICATION_CATEGORIES.length - 1}
+              last={false}
               right={
                 <Switch
                   value={notifPrefs ? notifPrefs[cat.key] !== false : true}
@@ -591,6 +595,25 @@ const Settings = () => {
               }
             />
           ))}
+
+          {/* Calendar reminders are scheduled by this phone rather than sent
+              from the server, so they survive having no signal — and they are
+              not gated by the push master switch above, which is why this row
+              sits outside that condition. */}
+          <Row
+            icon="calendar-clock"
+            label={t('settings.notif.calendar')}
+            sub={t('settings.notif.calendarSub')}
+            last
+            right={
+              <Switch
+                value={prefs[PREF_KEYS.calendarReminders] !== false}
+                onValueChange={(v) => updatePref(PREF_KEYS.calendarReminders, v)}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.white}
+              />
+            }
+          />
         </Section>
 
         {/* ── Playback & Data ───────────────────────────────────── */}
@@ -616,6 +639,21 @@ const Settings = () => {
               <Switch
                 value={!!prefs[PREF_KEYS.dataSaver]}
                 onValueChange={(v) => updatePref(PREF_KEYS.dataSaver, v)}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.white}
+              />
+            }
+          />
+          {/* The games' little correct/wrong sounds. The mute button inside a
+              game is for its music; this is the switch for the rest. */}
+          <Row
+            icon="gamepad-variant-outline"
+            label={t('settings.playback.gameSounds')}
+            sub={t('settings.gameSoundsSub')}
+            right={
+              <Switch
+                value={!!prefs[PREF_KEYS.quizSound]}
+                onValueChange={(v) => updatePref(PREF_KEYS.quizSound, v)}
                 trackColor={{ false: colors.border, true: colors.primary }}
                 thumbColor={colors.white}
               />

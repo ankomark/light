@@ -27,7 +27,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from .. import media
 from .. import r2
-from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Videostudio, CommunityCategory,PuzzleTheme,WordPuzzle,PuzzleProgress,CoinSpend,BibleVerse,DailyQuiz,QuizQuestion,QuizAttempt, Group, GroupMember, GroupJoinRequest, GroupPost,GroupAuditLog,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress,FollowRequest,can_view_profile,hidden_private_author_ids,Wallpaper
+from ..models import User,SocialPost,PostSave,PostComment, PostLike, LiveEvent, Track, Playlist, Profile, Comment, Like, Category, Notification, DeviceToken, Conversation, Message, EmailVerification, PasswordResetCode, Story, StoryView, Report,Videostudio, CommunityCategory,PuzzleTheme,WordPuzzle,PuzzleProgress,CoinSpend,BibleVerse,DailyQuiz,QuizQuestion,QuizAttempt, Group, GroupMember, GroupJoinRequest, GroupPost,GroupAuditLog,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,Block,blocked_ids_for,is_blocked_between,Publication,Chapter,PublicationLike,PublicationBookmark,ReadingProgress,FollowRequest,can_view_profile,hidden_private_author_ids,Wallpaper,WeatherPlace
 from ..push import notify_user
 from ..tasks import run_in_background
 from ..serializers import (
@@ -50,6 +50,7 @@ from ..serializers import (
     WallpaperSerializer,
     AdminNoteSerializer,
     NotificationPreferenceSerializer,
+    WeatherPlaceSerializer,
     MediaStationSerializer,
     PublicationListSerializer,
     PublicationDetailSerializer,

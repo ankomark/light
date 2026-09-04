@@ -17,7 +17,10 @@ export const PREF_KEYS = {
   pushEnabled: 'pushEnabled',
   themeMode: 'themeMode',       // 'system' | 'light' | 'dark'
   language: 'language',         // 'system' | 'en' | 'sw' | ...
-  quizSound: 'quizSound',       // quiz effect sounds + haptics
+  quizSound: 'quizSound',       // game effect sounds + haptics
+  quizMusic: 'quizMusic',       // the background music, muted separately
+  weatherPlace: 'weatherPlace', // the town the weather screen opens on
+  calendarReminders: 'calendarReminders', // date reminders, scheduled on-device
 };
 
 export const DEFAULT_PREFERENCES = {
@@ -30,9 +33,13 @@ export const DEFAULT_PREFERENCES = {
   // user explicitly opts into light/system.
   [PREF_KEYS.themeMode]: 'dark',
   [PREF_KEYS.language]: 'system',
-  // Sound on by default — a game that starts silent feels broken, and it
-  // is one tap to turn off from the quiz header.
+  // Sound on by default — a game that starts silent feels broken. The effects
+  // are turned off from Settings; the header button is for the music.
   [PREF_KEYS.quizSound]: true,
+  [PREF_KEYS.quizMusic]: true,
+  // No default place: the weather screen asks once, then remembers.
+  [PREF_KEYS.weatherPlace]: null,
+  [PREF_KEYS.calendarReminders]: true,
 };
 
 const serialize = (value) => JSON.stringify(value);
@@ -41,17 +48,50 @@ const deserialize = (raw, fallback) => {
   try { return JSON.parse(raw); } catch { return fallback; }
 };
 
+// The mute button in the games used to govern the music AND the effect sounds
+// together. When they were split, `quizSound` kept its old stored value — so
+// anyone who had ever muted was left with the correct/wrong sounds switched
+// off, meaning nothing at all, because the button they were pressing now wrote
+// `quizMusic` instead. Their game went silent and no amount of unmuting fixed
+// it. This gives the effects back once, on the next load.
+const SOUND_SPLIT_KEY = PREFIX + 'migrated:soundSplit';
+
+const migrateSoundSplit = async (prefs, raws) => {
+  try {
+    if (await AsyncStorage.getItem(SOUND_SPLIT_KEY)) return prefs;
+
+    const next = { ...prefs };
+    if (prefs[PREF_KEYS.quizSound] === false) {
+      // That `false` meant "mute", from a time when muting meant everything.
+      next[PREF_KEYS.quizSound] = true;
+      await setPreference(PREF_KEYS.quizSound, true);
+      // Carry the intent to where it belongs — unless the music has since been
+      // set deliberately, in which case that choice wins.
+      if (raws[PREF_KEYS.quizMusic] == null) {
+        next[PREF_KEYS.quizMusic] = false;
+        await setPreference(PREF_KEYS.quizMusic, false);
+      }
+    }
+    await AsyncStorage.setItem(SOUND_SPLIT_KEY, '1');
+    return next;
+  } catch {
+    return prefs;      // a migration that cannot run must not break loading
+  }
+};
+
 // Load every known preference in one multiGet, falling back to defaults.
 export const getPreferences = async () => {
   try {
     const keys = Object.values(PREF_KEYS);
     const pairs = await AsyncStorage.multiGet(keys.map((k) => PREFIX + k));
     const result = { ...DEFAULT_PREFERENCES };
+    const raws = {};
     pairs.forEach(([storageKey, raw]) => {
       const key = storageKey.slice(PREFIX.length);
+      raws[key] = raw;
       result[key] = deserialize(raw, DEFAULT_PREFERENCES[key]);
     });
-    return result;
+    return await migrateSoundSplit(result, raws);
   } catch {
     return { ...DEFAULT_PREFERENCES };
   }

@@ -30,6 +30,8 @@ NOTIFICATION_CATEGORIES = {
     'cohost_request': 'live',
     'cohost_approved': 'live',
     'quiz_reminder': 'quiz',
+    'weather_briefing': 'weather',
+    'verse_of_the_day': 'verse',
 }
 
 
@@ -100,17 +102,30 @@ def send_expo_push(tokens, title, body, data=None):
         return None
 
 
-def notify_user(recipient, notification_type, message, data=None):
+def notify_user(recipient, notification_type, message, data=None, title=None,
+                category=None):
     """Send a push notification to all active devices of a recipient user.
 
     The token lookup is cheap and stays synchronous; the network round-trip to
     Expo is offloaded to a background thread so it never blocks the request.
+
+    `title` overrides the per-type heading for the cases where it is not the
+    same for everyone — the morning weather briefing greets people by name.
+
+    `category` overrides which preference gates the send, for the cases where
+    the type alone cannot say. Communities and groups are the same model with a
+    different `kind`, so they share notification types but must honour separate
+    switches.
     """
     from .models import DeviceToken
     from .tasks import run_in_background
 
     # Respect the recipient's per-category push preference.
-    if not _is_category_enabled(recipient, notification_type):
+    if category:
+        prefs = getattr(recipient, 'notification_preference', None)
+        if prefs is not None and not getattr(prefs, category, True):
+            return
+    elif not _is_category_enabled(recipient, notification_type):
         return
 
     tokens = list(
@@ -119,5 +134,6 @@ def notify_user(recipient, notification_type, message, data=None):
     )
     if not tokens:
         return
-    title = NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
+    if not title:
+        title = NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
     run_in_background(send_expo_push, tokens, title, message, data)

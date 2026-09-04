@@ -32,6 +32,16 @@ def log_group_action(group, actor, action, detail=''):
     GroupAuditLog.objects.create(group=group, actor=actor, action=action, detail=(detail or '')[:300])
 
 
+def _push_category(group):
+    """Which preference gates this group's pushes.
+
+    Communities and groups are one model separated by `kind`, so they share
+    notification types. Without this the "Communities" switch in Settings
+    gated nothing at all — every community push went out under `groups`.
+    """
+    return 'communities' if group.kind == Group.KIND_COMMUNITY else 'groups'
+
+
 @method_decorator(cache_control(no_cache=True, no_store=True, must_revalidate=True), name='dispatch')
 class GroupViewSet(viewsets.ModelViewSet):
     # Groups and communities run on the same engine but are separate features.
@@ -328,7 +338,8 @@ class GroupViewSet(viewsets.ModelViewSet):
                 group=group,
             )
             notify_user(admin.user, 'group_join_request', msg,
-                        data={'groupSlug': group.slug, 'type': 'group_join_request'})
+                        data={'groupSlug': group.slug, 'type': 'group_join_request'},
+                        category=_push_category(group))
         
         serializer = GroupJoinRequestSerializer(join_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -492,7 +503,8 @@ class GroupViewSet(viewsets.ModelViewSet):
             Notification.objects.create(
                 recipient=user, sender=request.user, message=msg, notification_type='group_added',
             )
-            notify_user(user, 'group_added', msg, data={'groupSlug': group.slug})
+            notify_user(user, 'group_added', msg, data={'groupSlug': group.slug},
+                        category=_push_category(group))
         return Response(
             GroupMemberSerializer(member, context={'request': request}).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -965,7 +977,8 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
             group=group,
         )
         notify_user(join_request.user, 'group_join_approved', msg,
-                    data={'groupSlug': group.slug, 'type': 'group_join_approved'})
+                    data={'groupSlug': group.slug, 'type': 'group_join_approved'},
+                    category=_push_category(group))
         log_group_action(group, request.user, 'approve_join', f"Approved {join_request.user.username}")
 
         return Response({"status": "Request approved"}, status=status.HTTP_200_OK)
@@ -993,7 +1006,8 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
             group=group,
         )
         notify_user(join_request.user, 'group_join_rejected', msg,
-                    data={'groupSlug': group.slug, 'type': 'group_join_rejected'})
+                    data={'groupSlug': group.slug, 'type': 'group_join_rejected'},
+                    category=_push_category(group))
         log_group_action(group, request.user, 'reject_join', f"Declined {join_request.user.username}")
 
         return Response({"status": "Request rejected"}, status=status.HTTP_200_OK)

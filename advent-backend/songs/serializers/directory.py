@@ -64,7 +64,7 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         model = NotificationPreference
         fields = [
             'likes', 'comments', 'follows', 'messages', 'groups', 'communities',
-            'live', 'quiz', 'updated_at',
+            'live', 'quiz', 'weather', 'verse', 'updated_at',
         ]
         read_only_fields = ['updated_at']
 
@@ -306,3 +306,36 @@ class WallpaperSerializer(serializers.ModelSerializer):
         if len(value) > 500:
             raise serializers.ValidationError('Image URL is too long.')
         return value
+
+
+class WeatherPlaceSerializer(serializers.ModelSerializer):
+    """The one place a person wants their weather for.
+
+    Coordinates are validated rather than trusted. They arrive from a search on
+    the device, and a bad pair would send the morning cron looking for weather
+    in the middle of the ocean every day until somebody noticed.
+    """
+
+    class Meta:
+        model = WeatherPlace
+        fields = [
+            'name', 'region', 'country', 'latitude', 'longitude',
+            'briefing', 'updated_at',
+        ]
+        read_only_fields = ['updated_at']
+
+    def validate_latitude(self, value):
+        if not -90 <= value <= 90:
+            raise serializers.ValidationError('Latitude must be between -90 and 90.')
+        return value
+
+    def validate_longitude(self, value):
+        if not -180 <= value <= 180:
+            raise serializers.ValidationError('Longitude must be between -180 and 180.')
+        return value
+
+    def validate_name(self, value):
+        name = (value or '').strip()
+        if not name:
+            raise serializers.ValidationError('A place needs a name.')
+        return name

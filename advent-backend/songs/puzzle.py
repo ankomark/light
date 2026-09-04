@@ -21,21 +21,58 @@ from collections import Counter
 
 from django.db import transaction
 
-from .bible_books import BIBLE_BOOKS
-from .models import BibleVerse, BibleWord, PuzzleTheme, WordPuzzle
+from django.db.models import Count
+
+from .models import BibleVerse, BibleWord, PuzzleProgress, PuzzleTheme, WordPuzzle
 
 MIN_ANSWER = 3          # shortest word the wheel will accept
-BASE_MIN, BASE_MAX = 5, 7   # letters on the wheel
+BASE_MIN, BASE_MAX = 5, 8   # letters on the wheel
 
-# Answers per level, and how far the wheel grows.
+# There is no last level. Scripture's vocabulary is far larger than any run of
+# levels will exhaust, so the game keeps going and gets harder instead of
+# stopping. Three things climb with the level: the wheel grows, more of what it
+# spells has to be found, and the words themselves get less worn.
+
 def level_base_length(level):
-    """5 letters for the first levels, 6 then 7 as they go on."""
-    return min(BASE_MAX, BASE_MIN + (level - 1) // 4)
+    """5 letters to begin with, 8 once the levels are long past easy."""
+    return min(BASE_MAX, BASE_MIN + (level - 1) // 5)
 
 
 def level_answer_count(level):
-    """Six answers at level 1, rising to twelve."""
-    return min(12, 5 + (level + 1) // 2)
+    """Six answers at level 1, rising to fourteen."""
+    return min(14, 5 + (level + 1) // 2)
+
+
+# Bands, for the label a player sees. The curve underneath is continuous; these
+# are just the names for stretches of it.
+SIMPLE_UNTIL, MODERATE_UNTIL = 10, 25
+
+
+def band_for(level):
+    """'simple', 'moderate' or 'hard' — what this level calls itself."""
+    if level <= SIMPLE_UNTIL:
+        return 'simple'
+    if level <= MODERATE_UNTIL:
+        return 'moderate'
+    return 'hard'
+
+
+# A level's answers are drawn from words at least this common. Early boards use
+# words nobody has to reach for; the floor comes down as levels rise, so later
+# ones reach into the less worn vocabulary. It never falls below
+# ANSWER_MIN_FREQUENCY — under that the corpus is mostly place and person
+# names, which make miserable answers at any difficulty.
+# Measured against the corpus rather than guessed: 1,847 words clear the
+# standard floor, 564 clear 120, and only 130 clear 600. A floor much above
+# this leaves too small a vocabulary to build a board from at all.
+EARLY_FREQUENCY = 120
+FLOOR_REACHED_AT = 25
+
+
+def answer_floor(level):
+    """How common a word must be to be an answer at this level."""
+    reached = min(1.0, max(0, level - 1) / float(FLOOR_REACHED_AT))
+    return int(round(EARLY_FREQUENCY + (ANSWER_MIN_FREQUENCY - EARLY_FREQUENCY) * reached))
 
 
 def _seed_for(theme_slug, level):
@@ -48,32 +85,57 @@ def _clean(word):
 
 # ── the letters, drawn from the theme ────────────────────────────────────────
 
-def _theme_words(theme):
-    """Candidate words for a theme, most characteristic first."""
+# How many verses to read for a theme's vocabulary. Enough that a broad theme
+# is properly represented, bounded so a whole-testament theme is not a scan of
+# the corpus. Generation is cached per level, so this is paid once.
+THEME_VERSE_SAMPLE = 1500
+
+def _thin(words):
+    """True when some wheel size cannot be filled from these words.
+
+    Judged per length, not on the total: The Beatitudes has 143 words, which
+    looks ample until you notice only ten of them are eight letters long — and
+    every level needing an eight-letter wheel would have been built from the
+    corpus instead.
+    """
+    for length in range(BASE_MIN, BASE_MAX + 1):
+        if sum(1 for w in words if len(w) == length) < MIN_BASE_POOL:
+            return True
+    return False
+
+
+def _scope(theme, widen=False):
+    """The verses a theme is built from.
+
+    `widen` drops the narrowest part of the scope — a single chapter becomes
+    its whole book — for themes too small to supply a game on their own. A
+    Psalm 23 level built from words elsewhere in the Psalms is still a Psalms
+    level; one built from the corpus at large is a theme in name only.
+    """
     source = theme.source or {}
     kind = source.get('kind', PuzzleTheme.BOOKS)
 
     if kind == PuzzleTheme.BOOKS:
         first, last = int(source.get('first', 1)), int(source.get('last', 66))
-        return [
-            _clean(b['name'].split()[-1]) for b in BIBLE_BOOKS
-            if first <= b['number'] <= last
-        ]
+        return BibleVerse.objects.filter(
+            book_number__gte=first, book_number__lte=last,
+        )
 
     if kind == PuzzleTheme.PASSAGE:
         verses = BibleVerse.objects.filter(book=source.get('book', ''))
-        if source.get('chapter'):
+        if source.get('chapter') and not widen:
             verses = verses.filter(chapter=int(source['chapter']))
-        texts = verses.values_list('text', flat=True)[:400]
-    else:                                   # topic
-        term = (source.get('term') or '').strip()
-        if not term:
-            return []
-        texts = (BibleVerse.objects.filter(text__icontains=term)
-                 .values_list('text', flat=True)[:300])
+        return verses
 
+    term = (source.get('term') or '').strip()
+    if not term:
+        return BibleVerse.objects.none()
+    return BibleVerse.objects.filter(text__icontains=term)
+
+
+def _count_words(verses):
     counts = Counter()
-    for text in texts:
+    for text in verses.values_list('text', flat=True)[:THEME_VERSE_SAMPLE]:
         for raw in text.split():
             word = _clean(raw)
             if BASE_MIN <= len(word) <= BASE_MAX:
@@ -81,24 +143,151 @@ def _theme_words(theme):
     return [w for w, _ in counts.most_common()]
 
 
-def _theme_verses(theme):
-    """Every verse inside a theme's scope."""
-    source = theme.source or {}
-    kind = source.get('kind', PuzzleTheme.BOOKS)
-    verses = BibleVerse.objects.all()
+_THEME_WORDS = {}
 
-    if kind == PuzzleTheme.BOOKS:
-        first, last = int(source.get('first', 1)), int(source.get('last', 66))
-        return verses.filter(book_number__gte=first, book_number__lte=last)
 
-    if kind == PuzzleTheme.PASSAGE:
-        verses = verses.filter(book=source.get('book', ''))
-        if source.get('chapter'):
-            verses = verses.filter(chapter=int(source['chapter']))
-        return verses
+def _theme_words(theme):
+    """Candidate words for a theme, most characteristic first.
 
-    term = (source.get('term') or '').strip()
-    return verses.filter(text__icontains=term) if term else verses.none()
+    Read from the theme's own scripture. The book-range themes used to return
+    the words of their book NAMES — five words for the whole Law — so every
+    board they produced actually came from the fallback corpus and had nothing
+    to do with the theme. They read their verses now, like everything else.
+    """
+    key = (theme.pk, theme.slug)
+    if key in _THEME_WORDS:
+        return _THEME_WORDS[key]
+
+    words = _count_words(_scope(theme))
+    if _thin(words):
+        wider = _count_words(_scope(theme, widen=True))
+        if len(wider) > len(words):
+            words = wider
+
+    if len(_THEME_WORDS) > 200:
+        _THEME_WORDS.clear()
+    _THEME_WORDS[key] = words
+    return words
+
+
+def reset_theme_words():
+    """Drop the cached vocabularies — for tests, and after an import."""
+    _THEME_WORDS.clear()
+
+
+# A theme with fewer base words than this repeats itself within a few levels,
+# which is what made the boards stop changing around level six.
+MIN_BASE_POOL = 24
+
+
+def base_pool(theme, length, min_frequency):
+    """Candidate wheels of `length` for a theme, most characteristic first.
+
+    A single chapter yields a handful of words of any one length, so a theme
+    left to its own vocabulary runs out almost immediately and starts handing
+    back the board it gave two levels ago. When that happens the pool is topped
+    up from the wider corpus — the theme still leads, and its verse reveal is
+    still drawn from its own text, but the game does not stall.
+    """
+    words = _theme_words(theme)
+    if not words:
+        # A theme with no vocabulary at all is misconfigured — a passage that
+        # was never imported, a topic that matches nothing. Topping that up
+        # from the corpus would paper over the mistake and serve a board with
+        # no connection to its own name, so it is left to fail.
+        return []
+
+    own = [w for w in words if len(w) == length]
+    if len(own) >= MIN_BASE_POOL:
+        return own
+
+    seen = set(own)
+    wider = (BibleWord.objects
+             .filter(length=length, frequency__gte=min_frequency)
+             .order_by('-frequency')
+             .values_list('word', flat=True)[:400])
+    return own + [w for w in wider if w not in seen]
+
+
+# Not a finish line — a bound on what the level query parameter will accept,
+# so a malformed request cannot ask for level nine million.
+LEVEL_LIMIT = 9999
+
+
+def candidates_for(user):
+    """Every (theme, level) this person could be given now, best first.
+
+    Picking a subject is not a decision worth handing to the player. Left to
+    choose, most people take the first row every time and never see the rest;
+    and a list of themes is a menu to get through rather than a game to play.
+    So the server decides, on two rules:
+
+      · anything already opened and unfinished is resumed — being handed a new
+        board while one sits half-done is the one thing this must never do;
+      · otherwise the themes rotate, so consecutive levels change subject
+        rather than marching through one theme to level fifty.
+
+    A list rather than a single answer, because a theme can turn out not to
+    build: `next_puzzle` walks it and takes the first that does. Deterministic
+    given the same progress, so asking twice cannot skip a level.
+    """
+    themes = list(PuzzleTheme.objects.filter(is_active=True))
+    if not themes:
+        return []
+
+    options = []
+    started = (PuzzleProgress.objects
+               .filter(user=user, is_complete=False)
+               .select_related('puzzle', 'puzzle__theme')
+               .order_by('-started_at')
+               .first())
+    if started and started.puzzle.theme.is_active:
+        options.append((started.puzzle.theme, started.puzzle.level))
+
+    done = PuzzleProgress.objects.filter(user=user, is_complete=True)
+    per_theme = dict(
+        done.values_list('puzzle__theme')
+            .annotate(n=Count('id'))
+            .values_list('puzzle__theme', 'n')
+    )
+
+    # Rotate the running order by how much has been finished overall.
+    turn = sum(per_theme.values()) % len(themes)
+    for theme in themes[turn:] + themes[:turn]:
+        level = per_theme.get(theme.id, 0) + 1
+        if (theme, level) not in options:
+            options.append((theme, level))
+    return options
+
+
+def choose_for(user):
+    """The single best (theme, level) — what `candidates_for` puts first."""
+    options = candidates_for(user)
+    if not options:
+        raise ValueError('No puzzle themes are active.')
+    return options[0]
+
+
+def next_puzzle(user):
+    """The level to play now: the first candidate that actually builds.
+
+    A theme whose source cannot yield a workable level — too few words, a
+    passage that was never imported — must not dead-end the player. The chooser
+    moves past it rather than handing back an error, and only a set where
+    nothing at all builds is a real failure.
+    """
+    failure = None
+    for theme, level in candidates_for(user):
+        try:
+            return generate(theme, level)
+        except ValueError as exc:
+            failure = exc
+    raise ValueError(str(failure) if failure else 'No puzzle themes are active.')
+
+
+def _theme_verses(theme, widen=False):
+    """Every verse inside a theme's scope — the same scope its words came from."""
+    return _scope(theme, widen=widen)
 
 
 # How many of a level's words to try before settling for any verse in scope.
@@ -117,14 +306,17 @@ def _verse_for(theme, words, rng):
     without the second pass "ART" would match "heART" and the reveal would look
     like a mistake.
     """
-    verses = _theme_verses(theme)
-    for word in words[:VERSE_SEARCH_WORDS]:
-        pool = list(verses.filter(text__icontains=word)[:40])
-        hits = [v for v in pool
-                if re.search(r'\b%s\b' % re.escape(word), v.text, re.I)]
-        if hits:
-            return rng.choice(hits)
-    return verses.first()
+    # The narrow scope first — a Psalm 23 level would rather reveal a verse of
+    # Psalm 23 — then the wider one its words may have come from.
+    for widen in (False, True):
+        verses = _theme_verses(theme, widen=widen)
+        for word in words[:VERSE_SEARCH_WORDS]:
+            pool = list(verses.filter(text__icontains=word)[:40])
+            hits = [v for v in pool
+                    if re.search(r'\b%s\b' % re.escape(word), v.text, re.I)]
+            if hits:
+                return rng.choice(hits)
+    return _theme_verses(theme).first()
 
 
 # ── which words the letters can spell ────────────────────────────────────────
@@ -141,19 +333,20 @@ ANSWER_MIN_FREQUENCY = 25
 
 
 def dictionary():
-    """(word, Counter) for every answerable word, loaded once per process.
+    """(word, Counter, frequency) for every answerable word, loaded once.
 
     A few thousand words is small enough to hold and check in memory; the subset
     test cannot be done in SQL, and running it per level against the verse table
-    would be far slower.
+    would be far slower. The frequency rides along so a level can ask for only
+    the common part of it without a second query.
     """
     global _DICTIONARY
     if _DICTIONARY is None:
         _DICTIONARY = [
-            (w, Counter(w))
-            for w in BibleWord.objects
+            (w, Counter(w), f)
+            for w, f in BibleWord.objects
             .filter(length__gte=MIN_ANSWER, frequency__gte=ANSWER_MIN_FREQUENCY)
-            .order_by('-frequency').values_list('word', flat=True)
+            .order_by('-frequency').values_list('word', 'frequency')
         ]
     return _DICTIONARY
 
@@ -164,14 +357,17 @@ def reset_dictionary():
     _DICTIONARY = None
 
 
-def words_from(letters):
+def words_from(letters, min_frequency=ANSWER_MIN_FREQUENCY):
     """Every indexed word spellable from `letters`, longest first.
 
     A letter may be used only as often as it appears — two Ls need two Ls.
+    `min_frequency` raises the bar for a level that wants only common words.
     """
     have = Counter(letters)
     out = []
-    for word, need in dictionary():
+    for word, need, freq in dictionary():
+        if freq < min_frequency:
+            continue
         if len(word) <= len(letters) and not (need - have):
             out.append(word)
     return sorted(out, key=lambda w: (-len(w), w))
@@ -316,19 +512,26 @@ def generate(theme, level, force=False):
     rng = random.Random(_seed_for(theme.slug, level))
     target_len = level_base_length(level)
     wanted = level_answer_count(level)
+    floor = answer_floor(level)
 
-    # Try theme words of the right length until one yields enough answers.
-    candidates = [w for w in _theme_words(theme) if len(w) == target_len] \
-        or [w for w in _theme_words(theme) if BASE_MIN <= len(w) <= BASE_MAX]
+    candidates = base_pool(theme, target_len, floor)
     if not candidates:
         raise ValueError('Theme "%s" has no usable words.' % theme.name)
 
-    # Later levels start further down the list, so they are not the same puzzle.
-    start = min((level - 1) * 2, max(0, len(candidates) - 1))
+    # Start somewhere different every level. The old rule walked two places
+    # further down the list per level and then clamped at the end, so once a
+    # thin theme ran out every later level rebuilt the same board. A seeded
+    # start cannot run out, and stays deterministic for a given level.
+    start = rng.randrange(len(candidates))
     ordered = candidates[start:] + candidates[:start]
 
-    for base in ordered[:25]:
-        answers = words_from(base)
+    for base in ordered[:40]:
+        answers = words_from(base, floor)
+        if len(answers) < 5:
+            # These letters cannot make five words that common. Take the wheel
+            # anyway at the standard floor: an easy level built from slightly
+            # rarer words beats a level that refuses to exist.
+            answers = words_from(base)
         if len(answers) < 5:
             continue
         chosen = answers[:wanted]
@@ -344,7 +547,7 @@ def generate(theme, level, force=False):
         # Everything else the wheel can spell. `letters` is a shuffle of `base`,
         # so this is the same set of words, minus the ones on the board.
         on_board = {p['word'] for p in placements}
-        bonus = [w for w in answers if w not in on_board]
+        bonus = [w for w in words_from(letters) if w not in on_board]
         verse = _verse_for(theme, [p['word'] for p in placements], rng)
 
         with transaction.atomic():

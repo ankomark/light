@@ -194,7 +194,13 @@ def quiz_session_played(sender, instance, raw=False, **kwargs):
 @receiver(post_save, sender=PuzzleProgress)
 def puzzle_played(sender, instance, raw=False, **kwargs):
     """Today, not when the level was started — someone can come back to an old
-    level a week later, and that week later is when they played."""
+    level a week later, and that week later is when they played.
+
+    An empty row is not a play. Opening a board can leave one behind, and a
+    streak that a player keeps alive by opening a screen is not a streak.
+    """
     if raw:
+        return
+    if not (instance.found or instance.bonus or instance.hints_used):
         return
     record_play(instance.user_id)

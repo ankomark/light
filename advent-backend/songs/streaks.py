@@ -13,6 +13,13 @@ from django.utils import timezone
 from .models import PlayDay
 
 
+# Who has already been recorded, and for which day. A player finds a word
+# every few seconds and the row exists after the first one, so without this
+# every single word pays for a lookup that can only ever say "yes, already".
+# Wrong only in the harmless direction: a cold process re-checks once.
+_RECORDED = {}
+
+
 def record_play(user, when=None):
     """Note that this person played on a day. Idempotent within that day.
 
@@ -22,7 +29,21 @@ def record_play(user, when=None):
     user_id = getattr(user, 'pk', user)
     if not user_id:
         return
-    PlayDay.objects.get_or_create(user_id=user_id, date=when or timezone.localdate())
+
+    day = when or timezone.localdate()
+    if _RECORDED.get(user_id) == day:
+        return
+
+    PlayDay.objects.get_or_create(user_id=user_id, date=day)
+
+    if len(_RECORDED) > 5000:        # a long-lived process, many players
+        _RECORDED.clear()
+    _RECORDED[user_id] = day
+
+
+def forget_recorded_plays():
+    """Drop the memo — for tests, which travel in time."""
+    _RECORDED.clear()
 
 
 def day_streaks(dates_desc, today):
