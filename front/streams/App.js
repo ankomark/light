@@ -18,6 +18,7 @@ import Header from './components/Header'; // Move the import to the top
 import SocialFeed from './components/SocialFeed';
 import RotatingBackground from './components/RotatingBackground';
 import UploadStatus from './components/UploadStatus';
+import HashtagScreen from './components/HashtagScreen';
 import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold } from '@expo-google-fonts/cinzel';
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import CreatePost from './components/CreatePost';
@@ -267,6 +268,7 @@ const App = () => {
                 <Stack.Screen name="Playlists" component={PlaylistsWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="PlaylistDetail" component={PlaylistDetailWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: false }} />
+                <Stack.Screen name="Hashtag" component={HashtagScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="CameraCapture" component={CameraCapture} options={{ headerShown: false, presentation: 'fullScreenModal' }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>

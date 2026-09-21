@@ -199,6 +199,43 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         return Response({'status': 'unblocked', 'is_blocked': False})
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def mention_suggest(self, request):
+        """Autocomplete for @mentions in a caption: usernames starting with
+        ?q=, people you follow first (they're who you usually tag), then
+        everyone else by followers. Never blocked accounts either way."""
+        from django.db.models import Case, When, Value, IntegerField as IntF
+        q = (request.query_params.get('q') or '').strip().lstrip('@')[:150]
+        me = request.user
+        following = me.followed_by.values('pk')
+        qs = (
+            User.objects.exclude(pk=me.pk).exclude(is_deactivated=True)
+            .select_related('profile')
+            .annotate(
+                is_followed=Case(When(pk__in=following, then=Value(0)), default=Value(1), output_field=IntF()),
+                n_followers=Count('followers', distinct=True),
+            )
+        )
+        if q:
+            qs = qs.filter(username__istartswith=q)
+        else:
+            qs = qs.filter(pk__in=following)  # empty "@" → the people you follow
+        blocked = blocked_ids_for(me)
+        if blocked:
+            qs = qs.exclude(pk__in=blocked)
+        rows = qs.order_by('is_followed', '-n_followers', 'username')[:10]
+        return Response(SimpleUserSerializer(rows, many=True, context={'request': request}).data)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def by_username(self, request):
+        """Resolve an @name from a caption to a user id, so tapping a mention
+        can open the profile. Case-insensitive, like mention matching."""
+        name = (request.query_params.get('u') or '').strip().lstrip('@')
+        user = User.objects.filter(username__iexact=name, is_deactivated=False).first() if name else None
+        if user is None or user.pk in blocked_ids_for(request.user):
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'id': user.pk, 'username': user.username})
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def blocked(self, request):
         """List the users the current user has blocked."""
         qs = User.objects.filter(blocks_received__blocker=request.user).select_related('profile')
@@ -210,7 +247,8 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         user = self.get_object()
         # Moderator takedowns stay hidden here too (see the feed and the grid on
         # UserSerializer) — this endpoint feeds the same profile grid.
-        posts = SocialPost.objects.filter(user=user, is_removed=False).select_related('user__profile')
+        posts = (SocialPost.objects.filter(user=user, is_removed=False)
+                 .filter(visible_posts_q(request.user)).select_related('user__profile'))
         
         page = self.paginate_queryset(posts)
         if page is not None:

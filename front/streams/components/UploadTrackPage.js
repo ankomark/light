@@ -13,7 +13,6 @@ import { useNavigation } from '@react-navigation/native';
 import { createSound } from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
 import { enqueueUpload } from '../services/uploadQueue';
-import { buildTrackJob } from '../services/postUploads';
 import RotatingBackground from './RotatingBackground';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { colors, spacing, radius, shadows } from '../constants/theme';
@@ -143,13 +142,15 @@ const TrackUploadForm = () => {
       kind: 'track',
       title: title.trim(),
       thumbUri: coverImage?.uri || null,
-      run: buildTrackJob({
+      // A plain snapshot, so the queue can persist it and resume the upload
+      // if the app is killed before it finishes.
+      snap: {
         title: title.trim(),
         album: album.trim(),
         lyrics: lyrics.trim(),
         audio: { uri: audioFile.uri, name: audioFile.name, mimeType: audioFile.mimeType },
         cover: coverImage,
-      }),
+      },
     });
     submittedRef.current = true;
     navigation.goBack();

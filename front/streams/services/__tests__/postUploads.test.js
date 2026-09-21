@@ -82,8 +82,20 @@ describe('image post', () => {
         { public_id: 'https://r2/a.jpg', width: 1080, height: 1350 },
         { public_id: 'https://r2/b.jpg', width: 1080, height: 1080 },
       ],
+      visibility: 'public',
+      comments_enabled: true,
     });
     expect(created.id).toBe(99);
+  });
+
+  it('sends privacy, the comment switch and the idempotency key', async () => {
+    await buildPostJob({
+      contentType: 'image', caption: 'c', images: [{ uri: 'a.jpg', width: 1, height: 1 }],
+      visibility: 'followers', commentsEnabled: false, clientId: 'up_abc',
+    })(ctx());
+    expect(createSocialPost.mock.calls[0][0]).toMatchObject({
+      visibility: 'followers', comments_enabled: false, client_id: 'up_abc',
+    });
   });
 
   it('attaches a library song with its trim window', async () => {
@@ -124,11 +136,22 @@ describe('video post', () => {
       trim: { start: 5, end: 20.4 },
     })(c);
     expect(processVideo).toHaveBeenCalledWith(expect.objectContaining({ uri: 'raw.mp4', startSec: 5, endSec: 20.4 }));
+    // No cover picked → first frame of the trimmed clip.
+    expect(processVideo.mock.calls[0][0].thumbnailAtSec).toBe(0);
     expect(c.thumbnail).toHaveBeenCalledWith('poster.jpg');
     const sent = createSocialPost.mock.calls[0][0];
     expect(sent).toMatchObject({ content_type: 'video', width: 720, height: 1280, duration: 15 });
     expect(sent.media_file).toMatch(/social-video/);
     expect(sent.thumbnail).toMatch(/social-image/);
+  });
+
+  it('takes the poster at the chosen cover, relative to the trimmed clip', async () => {
+    processVideo.mockResolvedValue({ uri: 'cut.mp4', processed: true, thumbnailUri: 'poster.jpg' });
+    await buildPostJob({
+      contentType: 'video', caption: '', video: { uri: 'raw.mp4' },
+      trim: { start: 10, end: 25 }, coverSec: 17.5,
+    })(ctx());
+    expect(processVideo.mock.calls[0][0].thumbnailAtSec).toBe(7.5);
   });
 
   it('still posts when the poster upload fails', async () => {
@@ -172,5 +195,11 @@ describe('track upload', () => {
       lyrics: 'la',
     });
     expect(track.id).toBe(5);
+  });
+
+  it('sends the idempotency key with the track', async () => {
+    compressAudio.mockResolvedValue({ uri: 'a.m4a', compressed: false });
+    await buildTrackJob({ title: 'T', audio: { uri: 'a.mp3' }, clientId: 'up_t' })(ctx());
+    expect(apiRequest.mock.calls[0][2]).toMatchObject({ client_id: 'up_t' });
   });
 });

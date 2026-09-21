@@ -43,12 +43,15 @@ const toMs = (sec) => Math.max(0, Math.round((Number(sec) || 0) * 1000));
  * @param {number} [input.width]         source pixel width  (for downscale math)
  * @param {number} [input.height]        source pixel height
  * @param {boolean}[input.thumbnail]     also extract a poster frame
+ * @param {number} [input.thumbnailAtSec=0] poster frame time, in seconds from
+ *                                       the start of the TRIMMED clip (the
+ *                                       cover the user picked)
  * @returns {Promise<{uri, thumbnailUri, width, height, processed}>}
  *   `processed` is false when the native module was unavailable and the raw
  *   clip is returned untouched (so callers can still upload something).
  */
 export const processVideo = async ({
-  uri, startSec = 0, endSec, width, height, thumbnail = false,
+  uri, startSec = 0, endSec, width, height, thumbnail = false, thumbnailAtSec = 0,
 }) => {
   if (!isVideoProcessingAvailable()) {
     return { uri, thumbnailUri: null, width, height, processed: false };
@@ -83,12 +86,12 @@ export const processVideo = async ({
   const compressed = await VideoTrim.compress(workingUri, compressOpts);
   const finalUri = compressed.outputPath;
 
-  // 3. Optional poster frame (first frame of the trimmed clip).
+  // 3. Optional poster frame — the chosen cover, or the first frame.
   let thumbnailUri = null;
   if (thumbnail) {
     try {
       const frame = await VideoTrim.getFrameAt(finalUri, {
-        time: 0, maxWidth: THUMB_MAX_EDGE, format: 'jpeg', quality: 80,
+        time: toMs(thumbnailAtSec), maxWidth: THUMB_MAX_EDGE, format: 'jpeg', quality: 80,
       });
       thumbnailUri = frame.outputPath;
     } catch (e) {
@@ -103,6 +106,18 @@ export const processVideo = async ({
 
 // Best-effort cleanup of the intermediate files this library writes to its
 // scratch dir. Safe to call after a successful upload.
+/**
+ * A still from `uri` at `sec` seconds, for the cover picker. Returns a local
+ * jpeg uri, or null when the native module isn't in this build.
+ */
+export const extractFrame = async (uri, sec, maxWidth = 360) => {
+  if (!VideoTrim?.getFrameAt) return null;
+  const frame = await VideoTrim.getFrameAt(uri, {
+    time: toMs(sec), maxWidth, format: 'jpeg', quality: 70,
+  });
+  return frame?.outputPath ? (frame.outputPath.startsWith('file://') ? frame.outputPath : `file://${frame.outputPath}`) : null;
+};
+
 export const cleanupProcessedVideos = async () => {
   try {
     if (VideoTrim?.cleanFiles) await VideoTrim.cleanFiles();

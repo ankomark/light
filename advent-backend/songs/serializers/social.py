@@ -49,12 +49,16 @@ class SocialPostSerializer(serializers.ModelSerializer):
             'video_start_time', 'video_end_time',
             'caption', 'tags', 'location', 'duration', 'width', 'height',
             'created_at', 'updated_at', 'likes_count', 'comments_count',
-            'view_count', 'is_liked', 'is_saved', 'can_edit','optimized_url'
+            'view_count', 'is_liked', 'is_saved', 'can_edit','optimized_url',
+            'visibility', 'comments_enabled', 'client_id',
         ]
         read_only_fields = ['user', 'created_at', 'updated_at', 'view_count']
         extra_kwargs = {
             'media_file': {'write_only': True},
             'gallery': {'write_only': True},
+            # The uploader's idempotency key; nobody else needs to see it.
+            'client_id': {'write_only': True, 'required': False, 'allow_null': True,
+                          'allow_blank': True, 'max_length': 64},
         }
     
     def to_representation(self, instance):
@@ -181,6 +185,11 @@ class SocialPostSerializer(serializers.ModelSerializer):
             return obj.saves.filter(user=request.user).exists()
         return False
 
+    def validate_client_id(self, value):
+        # '' is not NULL, so two blank keys would collide on the unique
+        # (user, client_id) constraint. No key means NULL.
+        return (value or '').strip() or None
+
     def validate(self, data):
         if data.get('content_type') == 'video':
             duration = data.get('duration')
@@ -273,7 +282,7 @@ class ProfilePostThumbSerializer(serializers.ModelSerializer):
         # view_count is a plain column, so the grid's play-count badge costs no
         # extra query on top of the thumbnail payload.
         fields = ['id', 'content_type', 'media_url', 'optimized_url', 'thumbnail_url',
-                  'width', 'height', 'view_count']
+                  'width', 'height', 'view_count', 'visibility']
 
     def get_media_url(self, obj):
         return _thumb_helper.get_media_url(obj)

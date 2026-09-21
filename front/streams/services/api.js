@@ -603,6 +603,25 @@ export const fetchUserById = async (userId) => {
   return apiRequest('get', `/users/${userId}/`);
 };
 
+// Resolve an @name from a caption to { id, username } (404 if unknown/blocked).
+export const fetchUserByUsername = (username) =>
+  apiRequest('get', '/users/by_username/', null, { params: { u: username } });
+
+// Caption autocomplete.
+export const fetchMentionSuggestions = (q) =>
+  apiRequest('get', '/users/mention_suggest/', null, { params: { q } });
+export const fetchHashtagSuggestions = (q) =>
+  apiRequest('get', '/explore/hashtag_suggest/', null, { params: { q } });
+
+// Tag page: the header ({ tag, posts_count }) and the posts under it.
+export const fetchHashtagInfo = (tag) =>
+  apiRequest('get', '/explore/hashtag/', null, { params: { tag } });
+export const fetchPostsByTag = (tag, page = 1) =>
+  apiRequest('get', '/social-posts/', null, { params: { tag, page } });
+
+// Sounds people are putting on posts right now (falls back to most-liked).
+export const fetchTrendingSounds = () => apiRequest('get', '/tracks/trending_sounds/');
+
 // Paginated list of a given user's social posts.
 export const fetchUserPosts = async (userId, page = 1) => {
   return apiRequest('get', `/users/${userId}/social_posts/`, null, {

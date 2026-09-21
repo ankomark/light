@@ -184,6 +184,10 @@ class Track(models.Model):
     is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Set by the app's background uploader, once per upload attempt chain. A
+    # retried upload (network blip, app killed and resumed) re-sends the same
+    # key and gets the track it already created instead of a duplicate.
+    client_id = models.CharField(max_length=64, null=True, blank=True)
     # A user's "favorites" are the tracks they've liked (the Like model);
     # there is no separate favorite relation.
     class Meta:
@@ -193,6 +197,13 @@ class Track(models.Model):
         # table per request.
         indexes = [models.Index(fields=['-created_at'],
                                 name='track_created_idx')]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['artist', 'client_id'],
+                condition=models.Q(client_id__isnull=False),
+                name='track_artist_client_id_uniq',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.title} by {self.artist.username}"
@@ -200,8 +211,18 @@ class Track(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.title)
+            self.slug = self._unique_slug()
         super().save(*args, **kwargs)
+
+    def _unique_slug(self):
+        # slug is unique, and it used to be slugify(title) verbatim — so the
+        # second "Amazing Grace" anyone uploaded failed with an IntegrityError.
+        base = (slugify(self.title) or 'track')[:40]
+        slug, n = base, 2
+        while Track.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+            slug = f'{base}-{n}'
+            n += 1
+        return slug
 
     def __str__(self):
         return f'{self.title} - {self.artist.username}'
@@ -282,12 +303,31 @@ class Profile(models.Model):
         return f'Profile of {self.user.username}'
 
 
+class Hashtag(models.Model):
+    """A #tag, stored lowercase without the '#'. Posts link to it through
+    SocialPost.hashtags, written from the caption on create/edit."""
+    name = models.CharField(max_length=100, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'#{self.name}'
+
+
 class SocialPost(models.Model):
     CONTENT_TYPES = (
         ('video', 'Video'),
         ('image', 'Image'),
     )
-    
+    # Who can see the post. Enforced by visible_posts_q() on every read path.
+    VISIBILITY_PUBLIC = 'public'
+    VISIBILITY_FOLLOWERS = 'followers'
+    VISIBILITY_PRIVATE = 'private'
+    VISIBILITY_CHOICES = (
+        (VISIBILITY_PUBLIC, 'Everyone'),
+        (VISIBILITY_FOLLOWERS, 'Followers'),
+        (VISIBILITY_PRIVATE, 'Only me'),
+    )
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='social_posts')
     content_type = models.CharField(max_length=5, choices=CONTENT_TYPES)
     # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
@@ -332,10 +372,23 @@ class SocialPost(models.Model):
     comments_count = models.PositiveIntegerField(default=0)
     # Soft moderation takedown — hidden from public feed/explore, kept for admin.
     is_removed = models.BooleanField(default=False)
+    visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default=VISIBILITY_PUBLIC)
+    comments_enabled = models.BooleanField(default=True)
+    hashtags = models.ManyToManyField(Hashtag, related_name='posts', blank=True)
+    mentions = models.ManyToManyField(User, related_name='mentioned_in_posts', blank=True)
+    # Idempotency key from the background uploader (see Track.client_id).
+    client_id = models.CharField(max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'client_id'],
+                condition=models.Q(client_id__isnull=False),
+                name='socialpost_user_client_id_uniq',
+            ),
+        ]
         # Feed queries order by -created_at; index it for fast pagination.
         indexes = [
             models.Index(fields=['-created_at']),
@@ -829,6 +882,41 @@ def hidden_private_author_ids(user):
     # `followed_by` is the reverse of `followers`, i.e. the people `user` follows.
     following = set(user.followed_by.values_list('id', flat=True))
     return private_ids - following - {user.pk}
+
+
+def visible_posts_q(user, prefix=''):
+    """Q() for the posts `user` may see under each post's own visibility
+    setting: everyone's public posts, followers-only posts from accounts they
+    follow, and all of their own. `prefix` points it at a relation (e.g.
+    'post__' from a comment).
+
+    This is the per-POST rule. The per-ACCOUNT rules (blocks, private
+    accounts, deactivation) are separate and still apply on top of it."""
+    public = models.Q(**{f'{prefix}visibility': SocialPost.VISIBILITY_PUBLIC})
+    if not getattr(user, 'is_authenticated', False):
+        return public
+    Follow = User.followers.through
+    follows_author = models.Exists(Follow.objects.filter(
+        from_user_id=models.OuterRef(f'{prefix}user_id'), to_user_id=user.pk,
+    ))
+    return (
+        public
+        | models.Q(**{f'{prefix}user_id': user.pk})
+        | (models.Q(**{f'{prefix}visibility': SocialPost.VISIBILITY_FOLLOWERS}) & models.Q(follows_author))
+    )
+
+
+def can_view_post(user, post):
+    """Python-side twin of visible_posts_q for a single loaded post."""
+    if post.visibility == SocialPost.VISIBILITY_PUBLIC:
+        return True
+    if not getattr(user, 'is_authenticated', False):
+        return False
+    if post.user_id == user.pk:
+        return True
+    if post.visibility == SocialPost.VISIBILITY_FOLLOWERS:
+        return post.user.followers.filter(pk=user.pk).exists()
+    return False
 
 
 def blocked_ids_for(user):

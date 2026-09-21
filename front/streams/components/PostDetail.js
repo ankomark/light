@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../services/api';
 import CommentAction from './CommentAction';
+import RichCaption from './RichCaption';
 import PostActions from '../components/PostActions';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -306,10 +307,11 @@ const PostDetail = ({ route, navigation }) => {
         {/* Caption */}
         {post.caption ? (
           <View style={styles.captionCard}>
-            <Text style={styles.caption}>
-              <Text style={styles.captionAuthor}>{post.user.username} </Text>
-              {post.caption}
-            </Text>
+            <RichCaption
+              style={styles.caption}
+              text={post.caption}
+              prefix={<Text style={styles.captionAuthor}>{post.user.username} </Text>}
+            />
           </View>
         ) : null}
 
@@ -340,6 +342,7 @@ const PostDetail = ({ route, navigation }) => {
         autoOpen={shouldOpenComments}
         onCommentsLoaded={handleCommentsLoaded}
         onCommentPosted={updateCommentsCount}
+        commentsEnabled={post?.comments_enabled !== false}
         triggerVariant="bar"
       />
       </SafeAreaView>

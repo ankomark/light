@@ -3,6 +3,9 @@ import base64
 import os
 from django.http import HttpResponse, Http404, HttpResponseNotFound
 from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F
+from django.db import IntegrityError, transaction
+import re
+from ..post_links import sync_post_links
 from django.conf import settings
 from django.core.cache import cache
 
@@ -89,6 +92,8 @@ def feed_post_queryset(user):
     qs = (
         SocialPost.objects
         .filter(is_removed=False)  # hide moderator takedowns from all public surfaces
+        # Each post's own "who can see this" (everyone / followers / only me).
+        .filter(visible_posts_q(user))
         .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile')
         .annotate(author_followers_count=Subquery(author_followers, output_field=IntegerField()))
     )
@@ -154,7 +159,7 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         # see. Dropping them here would turn an invisible post into an
         # actionable one, so only the annotations go.
         if self.action in self.LEAN_ACTIONS:
-            qs = SocialPost.objects.filter(is_removed=False)
+            qs = SocialPost.objects.filter(is_removed=False).filter(visible_posts_q(user))
         else:
             qs = feed_post_queryset(user).order_by('-created_at')
 
@@ -174,9 +179,18 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             if ni:
                 qs = qs.exclude(id__in=ni)
 
-        tag = self.request.query_params.get('tag')
+        tag = (self.request.query_params.get('tag') or '').strip().lstrip('#').lower()
         if tag:
-            qs = qs.filter(tags__icontains=tag)
+            # Exact hashtag first. The substring match on the legacy `tags`
+            # string used to make #love also return #loveliness; it stays
+            # only for posts that predate hashtag rows.
+            # Both branches are EXISTS, never a join: joining hashtags would
+            # repeat a post once per tag it carries.
+            links = SocialPost.hashtags.through.objects
+            tagged = links.filter(socialpost_id=OuterRef('pk'), hashtag__name=tag)
+            untagged = ~Exists(links.filter(socialpost_id=OuterRef('pk')))
+            legacy = Q(tags__iregex=rf'(^|\s)#?{re.escape(tag)}(\s|$)')
+            qs = qs.filter(Q(Exists(tagged)) | (Q(untagged) & legacy))
 
         # Media-type filter powers the dedicated Videos page (?content_type=video).
         ctype = self.request.query_params.get('content_type')
@@ -208,11 +222,32 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         return context
     
 
+    def create(self, request, *args, **kwargs):
+        # The background uploader retries a failed upload — and resumes one the
+        # OS killed — with the same client_id. If the first attempt reached the
+        # server, hand back that post instead of creating it twice.
+        client_id = (request.data.get('client_id') or '').strip()[:64] or None
+        if client_id and request.user.is_authenticated:
+            existing = SocialPost.objects.filter(user=request.user, client_id=client_id).first()
+            if existing:
+                return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
+        try:
+            return super().create(request, *args, **kwargs)
+        except IntegrityError:
+            # Two retries raced past the check above; the unique constraint
+            # let exactly one through — return it.
+            existing = SocialPost.objects.filter(user=request.user, client_id=client_id).first()
+            if client_id and existing:
+                return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
+            raise
+
     def perform_create(self, serializer):
         try:
             # Create the post with the authenticated user
             logger.info(f"Creating post with data: {serializer.validated_data}")
-            post = serializer.save(user=self.request.user)
+            with transaction.atomic():
+                post = serializer.save(user=self.request.user)
+            sync_post_links(post)
             if post.media_file:
                 logger.info(f"Created post ID {post.id} with media_file: {post.media_file}")
                 logger.info(f"Media type: {post.content_type}, Size: {post.width}x{post.height}")
@@ -222,6 +257,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
 
         except ValidationError as ve:
             logger.warning(f"Validation error: {ve}")
+            raise
+        except IntegrityError:
+            # A duplicate client_id — create() turns it into the existing post.
             raise
         except Exception as e:
             logger.exception("Post creation failed with exception:")
@@ -277,13 +315,16 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             )
         
         # Only allow updating certain fields for existing posts
-        allowed_fields = ['caption', 'tags', 'location']
+        allowed_fields = ['caption', 'tags', 'location', 'visibility', 'comments_enabled']
         filtered_data = {k: v for k, v in request.data.items() if k in allowed_fields}
-        
+
         serializer = self.get_serializer(instance, data=filtered_data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        
+        post = serializer.save()
+        if 'caption' in filtered_data or 'visibility' in filtered_data:
+            sync_post_links(post)
+        _bump_feed_version(request.user.id)
+
         return Response(serializer.data)
 
     def destroy(self, request, *args, **kwargs):
@@ -460,6 +501,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def comment(self, request, pk=None):
         post = self.get_object()
+        if not post.comments_enabled:
+            return Response({'error': 'Comments are turned off for this post.'},
+                            status=status.HTTP_403_FORBIDDEN)
         serializer = PostCommentSerializer(data=request.data, context={'request': request})
         
         if serializer.is_valid():
@@ -508,7 +552,8 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         filters as the feed so the client's "new posts" pill isn't a false alarm."""
         from .. import feed as feedrank
         user = request.user
-        qs = SocialPost.objects.filter(is_removed=False).exclude(user__is_deactivated=True)
+        qs = (SocialPost.objects.filter(is_removed=False).filter(visible_posts_q(user))
+              .exclude(user__is_deactivated=True))
         # Private accounts are hidden from anonymous viewers too, so this runs
         # outside the is_authenticated branch.
         private_hidden = hidden_private_author_ids(user)
@@ -668,7 +713,9 @@ class PostCommentViewSet(viewsets.ModelViewSet):
         post_id = self.kwargs.get('post_pk')
         if post_id:
             qs = qs.filter(post__id=post_id)
-        return qs
+        # A post you can't see has no readable comments either — they used to
+        # be listable by post id regardless of who could see the post.
+        return qs.filter(visible_posts_q(self.request.user, prefix='post__'))
 
     def perform_create(self, serializer):
         # The post comes from the nested route (/social-posts/<post_pk>/comments/).
@@ -682,10 +729,12 @@ class PostCommentViewSet(viewsets.ModelViewSet):
                 'error': 'Post a comment to /api/social-posts/<post_id>/comments/ '
                          '— this route cannot tell which post you mean.'
             })
-        try:
-            post = SocialPost.objects.get(id=post_id)
-        except SocialPost.DoesNotExist:
+        post = (SocialPost.objects.filter(id=post_id, is_removed=False)
+                .filter(visible_posts_q(self.request.user)).first())
+        if post is None:
             raise ValidationError({"error": "Post not found"})
+        if not post.comments_enabled:
+            raise PermissionDenied('Comments are turned off for this post.')
         comment = serializer.save(user=self.request.user, post=post)
         # Create notification only if comment author is not the post owner
         if comment.user != post.user:
@@ -707,7 +756,8 @@ class PostSaveViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return self.queryset.filter(user=self.request.user)
+        return self.queryset.filter(user=self.request.user).filter(
+            visible_posts_q(self.request.user, prefix='post__'))
 
 
 
@@ -884,20 +934,52 @@ class ExploreViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def trending_hashtags(self, request):
         """Return the most-used hashtags in the last 7 days."""
+        cached = cache.get('explore:trending_hashtags')
+        if cached is not None:
+            return Response(cached)
         week_ago = timezone.now() - timedelta(days=7)
-        posts_with_tags = SocialPost.objects.filter(
-            created_at__gte=week_ago, tags__gt='', is_removed=False
-        ).values_list('tags', flat=True)
+        # Counted in SQL over hashtag rows. Public posts only: a trending tag
+        # must not leak that followers-only or private posts exist.
+        top = (
+            Hashtag.objects
+            .filter(posts__created_at__gte=week_ago, posts__is_removed=False,
+                    posts__visibility=SocialPost.VISIBILITY_PUBLIC)
+            .annotate(n=Count('posts', distinct=True))
+            .order_by('-n', 'name')[:20]
+        )
+        data = [{'tag': h.name, 'count': h.n} for h in top]
+        cache.set('explore:trending_hashtags', data, 300)
+        return Response(data)
 
-        counts = {}
-        for tag_str in posts_with_tags:
-            for tag in tag_str.split():
-                tag = tag.strip().lower()
-                if tag:
-                    counts[tag] = counts.get(tag, 0) + 1
+    @action(detail=False, methods=['get'])
+    def hashtag_suggest(self, request):
+        """Autocomplete for the caption box: tags starting with ?q=, most
+        used first, with how many public posts carry each."""
+        q = (request.query_params.get('q') or '').strip().lstrip('#').lower()[:100]
+        qs = Hashtag.objects.all()
+        if q:
+            qs = qs.filter(name__startswith=q)
+        rows = (
+            qs.annotate(n=Count('posts', filter=Q(posts__is_removed=False,
+                                                  posts__visibility=SocialPost.VISIBILITY_PUBLIC),
+                                distinct=True))
+            .order_by('-n', 'name')[:10]
+        )
+        return Response([{'tag': h.name, 'count': h.n} for h in rows])
 
-        top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:20]
-        return Response([{'tag': t, 'count': c} for t, c in top])
+    @action(detail=False, methods=['get'])
+    def hashtag(self, request):
+        """Header for a tag page: the tag and how many posts the caller can
+        see under it. The posts themselves come from the list with ?tag=."""
+        tag = (request.query_params.get('tag') or '').strip().lstrip('#').lower()
+        if not tag:
+            return Response({'error': 'tag is required'}, status=status.HTTP_400_BAD_REQUEST)
+        hidden = blocked_ids_for(request.user) | hidden_private_author_ids(request.user)
+        posts = (SocialPost.objects.filter(hashtags__name=tag, is_removed=False)
+                 .filter(visible_posts_q(request.user)).exclude(user__is_deactivated=True))
+        if hidden:
+            posts = posts.exclude(user_id__in=hidden)
+        return Response({'tag': tag, 'posts_count': posts.distinct().count()})
 
     @action(detail=False, methods=['get'])
     def search(self, request):
@@ -1162,7 +1244,13 @@ def post_share_page(request, post_id):
     thumbnail) and deep-links into the app via the `streams://post/<id>` scheme.
     """
     try:
-        post = get_object_or_404(SocialPost.objects.select_related('user'), id=post_id)
+        # Anyone can fetch this page (crawlers, logged-out friends), so it
+        # serves only what everyone may see: public posts that are still up.
+        post = get_object_or_404(
+            SocialPost.objects.select_related('user').filter(
+                is_removed=False, visibility=SocialPost.VISIBILITY_PUBLIC,
+                user__is_deactivated=False),
+            id=post_id)
     except Exception:
         return HttpResponseNotFound('Post not found')
 

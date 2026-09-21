@@ -60,9 +60,11 @@ const localAudioFile = async (localAudio) => {
 
 /**
  * Snapshot shape:
- *   { contentType: 'image'|'video', caption,
+ *   { contentType: 'image'|'video', caption, visibility, commentsEnabled,
+ *     clientId,                                     // set by the queue
  *     images: [{uri,width,height}],                 // image posts
  *     video: {uri,width,height,duration}, trim: {start,end},   // video posts
+ *     coverSec,                                     // chosen cover, source-video seconds
  *     song: { title, artist, audioUrl, songId?, start, end, localAudio? } }
  */
 export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => {
@@ -119,6 +121,9 @@ export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => 
       width: video.width,
       height: video.height,
       thumbnail: true,
+      // The picker gives source-video time; the poster comes from the trimmed
+      // clip, which starts at trim.start.
+      thumbnailAtSec: Math.max(0, (snap.coverSec ?? trim.start) - trim.start),
     });
     if (!processed.processed) {
       console.warn('[postUploads] video processing unavailable — uploading raw clip.');
@@ -157,7 +162,12 @@ export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => 
   }
 
   stage('finishing');
-  const created = await createSocialPost(postData);
+  const created = await createSocialPost({
+    ...postData,
+    visibility: snap.visibility || 'public',
+    comments_enabled: snap.commentsEnabled !== false,
+    ...(snap.clientId ? { client_id: snap.clientId } : {}),
+  });
   progress(1);
   cleanupProcessedVideos();
   return created;
@@ -191,6 +201,7 @@ export const buildTrackJob = (snap) => async ({ progress, stage }) => {
     cover_image: coverUpload?.publicId || null,
     album: snap.album || null,
     lyrics: snap.lyrics || null,
+    ...(snap.clientId ? { client_id: snap.clientId } : {}),
   });
   progress(1);
   return track;

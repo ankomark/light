@@ -70,7 +70,7 @@ CommentRow.displayName = 'CommentRow';
 const renderComment = ({ item }) => <CommentRow item={item} />;
 const commentKey = (item) => item.id.toString();
 
-const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, onCommentPosted, currentUserAvatar, triggerVariant = 'icon' }) => {
+const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, onCommentPosted, currentUserAvatar, commentsEnabled = true, triggerVariant = 'icon' }) => {
   const { t } = useI18n();
   const kbHeight = useKeyboardHeight(); // float the comment box above the keyboard (edge-to-edge safe)
   const [comments, setComments] = useState(() => peekCache(commentsKey(postId)) ?? []);
@@ -188,7 +188,9 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
       setComments((prev) => prev.filter((c) => c.id !== tempId));
       setAdded((n) => Math.max(0, n - 1));
       setNewComment(content);
-      Alert.alert(t('common.error'), t('comments.postFailed'));
+      // 403 = the author turned comments off after this sheet opened.
+      Alert.alert(t('common.error'),
+        error?.response?.status === 403 ? t('comments.turnedOff') : t('comments.postFailed'));
       console.error('Comment post error:', error);
     }
   };
@@ -293,6 +295,14 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
             />
           )}
 
+          {!commentsEnabled ? (
+            // The author switched comments off: existing ones stay readable,
+            // there's just nowhere to add a new one.
+            <View style={styles.closedNotice}>
+              <Feather name="slash" size={16} color={colors.textMuted} />
+              <Text style={styles.closedText}>{t('comments.turnedOff')}</Text>
+            </View>
+          ) : (
           <View style={styles.inputContainer}>
             <Image
               source={myAvatar ? { uri: myAvatar } : DEFAULT_AVATAR}
@@ -319,6 +329,7 @@ const CommentAction = ({ postId, commentCount, flatListRef, autoOpen, onComments
               <Feather name="send" size={20} color={colors.white} />
             </TouchableOpacity>
           </View>
+          )}
           </SafeAreaView>
         </View>
       </Modal>
@@ -487,6 +498,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  closedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  closedText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: '600',
   },
   postButtonDisabled: {
     opacity: 0.45,

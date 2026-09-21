@@ -20,6 +20,7 @@ import { PREF_KEYS, resolveVideoQuality } from '../utils/preferences';
 import { useI18n } from '../context/I18nContext';
 import { LikeButton, SaveButton, ShareButton } from './SocialActions';
 import CommentAction from './CommentAction';
+import RichCaption from './RichCaption';
 import { colors, typography } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -209,7 +210,7 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
           />
         </View>
         <View style={styles.railItem}>
-          <CommentAction postId={item.id} commentCount={item.comments_count || 0} currentUserAvatar={currentUser?.profile_picture} />
+          <CommentAction postId={item.id} commentCount={item.comments_count || 0} currentUserAvatar={currentUser?.profile_picture} commentsEnabled={item.comments_enabled !== false} />
         </View>
         <View style={styles.railItem}>
           <ShareButton postId={item.id} caption={item.caption} username={author.username} />
@@ -232,7 +233,9 @@ const VideoItem = ({ item, height, isActive, screenFocused, muted, onToggleMute,
             <Text style={styles.authorName} numberOfLines={1}>@{author.username || 'user'}</Text>
           </TouchableOpacity>
         </View>
-        {item.caption ? <Text style={styles.caption} numberOfLines={2}>{item.caption}</Text> : null}
+        {item.caption ? (
+          <RichCaption style={styles.caption} numberOfLines={2} text={item.caption} linkStyle={styles.captionLink} />
+        ) : null}
         <View style={styles.viewsRow}>
           <Ionicons name="play" size={12} color="rgba(255,255,255,0.85)" />
           <Text style={styles.viewsText}>{formatCount(item.view_count || 0)}</Text>
@@ -550,6 +553,8 @@ const styles = StyleSheet.create({
   authorAvatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)' },
   authorName: { color: '#fff', fontWeight: '800', fontSize: 15, textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   caption: { color: '#fff', fontSize: 14, lineHeight: 19, textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  // Over video, the brand blue is hard to read — bold white stands out instead.
+  captionLink: { color: '#fff', fontWeight: '800' },
   viewsRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
   viewsText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   songRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },

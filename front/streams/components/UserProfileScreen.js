@@ -6,7 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { fetchUserById, followUser, getOrCreateConversation, blockUser } from '../services/api';
+import { fetchUserById, fetchUserByUsername, followUser, getOrCreateConversation, blockUser } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import RotatingBackground from './RotatingBackground';
@@ -47,8 +47,19 @@ const UserProfileScreen = () => {
   const route = useRoute();
   const { currentUser } = useAuth();
   const { t } = useI18n();
-  const userId = route.params?.userId;
   const initialUsername = route.params?.username;
+  // Opened from an @mention, only the name is known — resolve it to an id.
+  const [userId, setUserId] = useState(route.params?.userId ?? null);
+  const [resolving, setResolving] = useState(!route.params?.userId && !!initialUsername);
+  useEffect(() => {
+    if (route.params?.userId || !initialUsername) return undefined;
+    let cancelled = false;
+    fetchUserByUsername(initialUsername)
+      .then((res) => { if (!cancelled) setUserId(res?.id ?? null); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setResolving(false); });
+    return () => { cancelled = true; };
+  }, [route.params?.userId, initialUsername]);
 
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
@@ -68,6 +79,7 @@ const UserProfileScreen = () => {
   const isOwnProfile = currentUser?.id === userId;
 
   const loadProfile = useCallback(async () => {
+    if (resolving) return;
     if (!userId) {
       setError(new Error('No user specified'));
       setLoading(false);
@@ -88,7 +100,7 @@ const UserProfileScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, resolving]);
 
   useEffect(() => {
     loadProfile();

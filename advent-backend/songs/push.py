@@ -11,6 +11,7 @@ NOTIFICATION_TITLES = {
     'group_join_approved': '✅ Request Approved',
     'group_join_rejected': '\U0001f6ab Request Declined',
     'message': '\U0001f4ac New Message',
+    'mention': '@ You were mentioned',
     'security': '\U0001f512 Security alert',
 }
 
@@ -20,6 +21,9 @@ NOTIFICATION_TITLES = {
 NOTIFICATION_CATEGORIES = {
     'like': 'likes',
     'comment': 'comments',
+    # No separate switch for mentions: they ride on the comments one, which is
+    # where people expect "someone is talking to me" alerts to live.
+    'mention': 'comments',
     'follow': 'follows',
     'message': 'messages',
     'group_join_request': 'groups',

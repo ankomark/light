@@ -1,6 +1,7 @@
 ﻿from .common import *  # noqa: F401,F403
 from django.db.models import Exists, OuterRef, Subquery, IntegerField
 from django.db.models.functions import Coalesce
+from django.db import IntegrityError, transaction
 from .. import r2
 
 
@@ -268,11 +269,47 @@ class TrackViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='upload')
     def upload_track(self, request):
+        # The background uploader retries (and resumes after the app is killed)
+        # with the same client_id; the first attempt that landed wins.
+        client_id = (request.data.get('client_id') or '').strip()[:64] or None
+        if client_id:
+            existing = Track.objects.filter(artist=request.user, client_id=client_id).first()
+            if existing:
+                return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
         serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(artist=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                serializer.save(artist=request.user, client_id=client_id)
+        except IntegrityError:
+            existing = client_id and Track.objects.filter(artist=request.user, client_id=client_id).first()
+            if not existing:
+                raise
+            return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def trending_sounds(self, request):
+        """Library tracks people are putting on posts right now: most used on
+        public posts over the last two weeks. On a quiet week it falls back to
+        the most-liked tracks, so the picker's first tab is never empty."""
+        since = timezone.now() - timedelta(days=14)
+        uses = (
+            SocialPost.objects
+            .filter(song=OuterRef('pk'), is_removed=False, created_at__gte=since,
+                    visibility=SocialPost.VISIBILITY_PUBLIC)
+            .order_by().values('song').annotate(n=Count('id')).values('n')[:1]
+        )
+        base = self.get_queryset().annotate(
+            recent_uses=Coalesce(Subquery(uses, output_field=IntegerField()), 0))
+        rows = list(base.filter(recent_uses__gt=0).order_by('-recent_uses', '-created_at')[:20])
+        if not rows:
+            rows = list(base.order_by('-likes_total', '-created_at')[:20])
+        data = TrackListSerializer(rows, many=True, context=self.get_serializer_context()).data
+        for row, track in zip(data, rows):
+            row['recent_uses'] = track.recent_uses
+        return Response(data)
 
 
 

@@ -7,7 +7,7 @@
  */
 import {
   enqueueUpload, retryUpload, dismissUpload, getJobs, subscribe,
-  configureUploadQueue, __resetUploadQueue,
+  configureUploadQueue, restoreUploads, __resetUploadQueue,
 } from '../uploadQueue';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -95,6 +95,109 @@ it('lets a job update its stage and thumbnail', async () => {
   await flush();
   expect(getJobs()[0]).toMatchObject({ stage: 'Optimizing', thumbUri: 'file://poster.jpg' });
   gate.resolve();
+});
+
+describe('surviving an app restart', () => {
+  const memoryStorage = () => {
+    let saved = [];
+    return {
+      load: jest.fn(async () => saved),
+      save: jest.fn(async (records) => { saved = JSON.parse(JSON.stringify(records)); }),
+      get saved() { return saved; },
+    };
+  };
+
+  it('persists a snap job once its media is staged, with the id as client key', async () => {
+    const storage = memoryStorage();
+    const gate = deferred();
+    const seen = [];
+    configureUploadQueue({
+      storage,
+      stage: async (id, snap) => ({ ...snap, uri: `durable/${id}.jpg` }),
+      builders: { post: (snap) => async () => { seen.push(snap); await gate.promise; return { id: 1 }; } },
+    });
+    const id = enqueueUpload({ kind: 'post', title: 't', snap: { uri: 'cache/a.jpg' } });
+    await flush(); await flush();
+    expect(storage.saved).toEqual([expect.objectContaining({
+      id, kind: 'post', status: 'queued', snap: { uri: `durable/${id}.jpg` },
+    })]);
+    expect(seen[0]).toEqual({ uri: `durable/${id}.jpg`, clientId: id });
+    gate.resolve();
+    await flush();
+    expect(storage.saved).toEqual([]); // done jobs are forgotten
+  });
+
+  it('points the thumbnail and preview at the staged copies', async () => {
+    configureUploadQueue({
+      stage: async (id, snap) => ({ ...snap, images: [{ uri: `durable/${id}.jpg` }] }),
+      builders: { post: () => () => new Promise(() => {}) },
+    });
+    const id = enqueueUpload({
+      kind: 'post', thumbUri: 'cache/a.jpg',
+      preview: { uri: 'cache/a.jpg', caption: 'c' },
+      snap: { images: [{ uri: 'cache/a.jpg' }] },
+    });
+    await flush(); await flush();
+    const job = getJobs().find((j) => j.id === id);
+    expect(job.thumbUri).toBe(`durable/${id}.jpg`);
+    expect(job.preview).toEqual({ uri: `durable/${id}.jpg`, caption: 'c' });
+  });
+
+  it('restores interrupted jobs and resumes them with the same key', async () => {
+    const storage = memoryStorage();
+    await storage.save([
+      { id: 'up_old', kind: 'post', title: 'resumed', snap: { uri: 'durable/x.jpg' }, status: 'queued' },
+      { id: 'up_bad', kind: 'post', title: 'failed', snap: { uri: 'durable/y.jpg' }, status: 'failed', error: 'offline' },
+    ]);
+    const runs = [];
+    configureUploadQueue({
+      storage,
+      builders: { post: (snap) => async () => { runs.push(snap.clientId); return { id: 2 }; } },
+    });
+    expect(await restoreUploads()).toBe(2);
+    await flush(); await flush();
+    expect(runs).toEqual(['up_old']);                      // failed one waits for a tap
+    const failed = getJobs().find((j) => j.id === 'up_bad');
+    expect(failed).toMatchObject({ status: 'failed', error: 'offline' });
+    retryUpload('up_bad');
+    await flush(); await flush();
+    expect(runs).toEqual(['up_old', 'up_bad']);
+  });
+
+  it('does not restore the same job twice', async () => {
+    const storage = memoryStorage();
+    await storage.save([{ id: 'up_1', kind: 'post', snap: {}, status: 'failed' }]);
+    configureUploadQueue({ storage, builders: { post: () => async () => ({}) } });
+    await restoreUploads();
+    await restoreUploads();
+    expect(getJobs()).toHaveLength(1);
+  });
+
+  it('cleans up staged media when a job finishes or a failed one is dismissed', async () => {
+    const cleanup = jest.fn();
+    configureUploadQueue({
+      cleanup,
+      builders: { post: (snap) => async () => { if (snap.fail) throw new Error('x'); return {}; } },
+    });
+    const ok = enqueueUpload({ kind: 'post', snap: {} });
+    const bad = enqueueUpload({ kind: 'post', snap: { fail: true } });
+    await flush(); await flush(); await flush();
+    expect(cleanup).toHaveBeenCalledWith(ok);
+    expect(cleanup).not.toHaveBeenCalledWith(bad);        // kept for a retry
+    dismissUpload(bad);
+    expect(cleanup).toHaveBeenCalledWith(bad);
+  });
+
+  it('still uploads from the originals if staging fails', async () => {
+    const seen = [];
+    configureUploadQueue({
+      stage: async () => { throw new Error('disk full'); },
+      builders: { post: (snap) => async () => { seen.push(snap.uri); return {}; } },
+    });
+    enqueueUpload({ kind: 'post', snap: { uri: 'cache/a.jpg' } });
+    await flush(); await flush();
+    expect(seen).toEqual(['cache/a.jpg']);
+  });
 });
 
 it('will not dismiss a job that is still running', async () => {

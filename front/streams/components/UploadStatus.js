@@ -9,9 +9,15 @@ import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { initialWindowMetrics } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  useUploads, configureUploadQueue, retryUpload, dismissUpload,
+  useUploads, configureUploadQueue, retryUpload, dismissUpload, restoreUploads,
 } from '../services/uploadQueue';
+import { buildPostJob, buildTrackJob } from '../services/postUploads';
+import {
+  copySnapMedia, uploadsDir, draftsDir, moveDir, rebaseSnap, removeDir,
+} from '../utils/mediaStore';
+import { useAuth } from '../context/useAuth';
 import { emit, EVENTS } from '../utils/appEvents';
 import { navigate } from '../services/navigationRef';
 import { useI18n } from '../context/I18nContext';
@@ -33,6 +39,30 @@ const notify = async (title, body, data) => {
   } catch {
     // no notifications on this device / build — the pill covers it
   }
+};
+
+// Give a job's media a home the OS won't purge, so the job can be resumed if
+// the app is killed. A draft's folder is moved rather than copied again.
+const stageMedia = async (jobId, snap) => {
+  const to = uploadsDir(jobId);
+  if (snap.draftId) {
+    const from = draftsDir(snap.draftId);
+    try {
+      await moveDir(from, to);
+      return { ...rebaseSnap(snap, from, to), draftId: null };
+    } catch {
+      // draft folder gone — fall through and copy whatever the uris point at
+    }
+  }
+  return copySnapMedia(to, snap);
+};
+
+const queueStorage = (userId) => {
+  const key = `@uploads:v1:u${userId}`;
+  return {
+    load: async () => JSON.parse((await AsyncStorage.getItem(key)) || '[]'),
+    save: (records) => AsyncStorage.setItem(key, JSON.stringify(records)),
+  };
 };
 
 const statusLabel = (job, t) => {
@@ -91,6 +121,8 @@ const UploadPill = ({ job }) => {
 
 const UploadStatus = () => {
   const { t } = useI18n();
+  const { currentUser } = useAuth();
+  const userId = currentUser?.id;
   const jobs = useUploads();
   // The queue calls these long after the screen that queued the job is gone,
   // so they read the latest translator through a ref.
@@ -99,6 +131,9 @@ const UploadStatus = () => {
 
   useEffect(() => {
     configureUploadQueue({
+      builders: { post: buildPostJob, track: buildTrackJob },
+      stage: stageMedia,
+      cleanup: (id) => removeDir(uploadsDir(id)),
       onDone: (job, result) => {
         const tr = tRef.current;
         if (job.kind === 'track') {
@@ -116,6 +151,16 @@ const UploadStatus = () => {
       },
     });
   }, []);
+
+  // Per account: the queue persists under the signed-in user and, on sign-in,
+  // picks up anything a killed app left unfinished. Declared AFTER the effect
+  // above on purpose — restore skips jobs it has no builder for, and effects
+  // run in declaration order.
+  useEffect(() => {
+    if (!userId) return;
+    configureUploadQueue({ storage: queueStorage(userId) });
+    restoreUploads();
+  }, [userId]);
 
   // Finished uploads clear themselves; failed ones wait for retry or dismiss.
   useEffect(() => {

@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo, useSyncExternalStore } from 'react';
 import {
-  View, Text, TouchableOpacity, TextInput, StyleSheet,
-  ScrollView, Alert, Modal, useWindowDimensions, ActivityIndicator, FlatList,
+  View, Text, TouchableOpacity, StyleSheet, Switch,
+  ScrollView, Alert, Modal, useWindowDimensions, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useFocusEffect } from '@react-navigation/native';
 import AudioTrimmer from './AudioTrimmer';
+import CaptionComposer from './CaptionComposer';
+import CoverPicker from './CoverPicker';
+import SoundLibrary from './SoundLibrary';
+import DraftsList from './DraftsList';
+import FullSheet from './FullSheet';
 import ImageCropper from './ImageCropper';
 import VideoTrimmer from './VideoTrimmer';
 import RotatingBackground from './RotatingBackground';
@@ -14,15 +19,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { fetchTracks } from '../services/api';
 import { compressImage as compressImageFile } from '../services/imageProcessing';
+import { isVideoProcessingAvailable } from '../services/videoProcessing';
 import { enqueueUpload } from '../services/uploadQueue';
-import { buildPostJob } from '../services/postUploads';
 import * as DocumentPicker from 'expo-document-picker';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
-import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { userKey } from '../utils/screenCache';
+import { listDrafts, saveDraft, deleteDraft } from '../utils/drafts';
 import { colors, radius, spacing, shadows } from '../constants/theme';
 
 // Instagram-style aspect-ratio clamp (matches the feed's mediaAspectRatio so the
@@ -45,6 +50,11 @@ const MAX_IMAGES = 4;
 const MAX_CLIP = 30; // seconds — the trimmed audio clip is capped at 30s
 const MAX_CAPTION = 2200;
 const PAD = spacing.md;
+const VISIBILITY_OPTIONS = [
+  { key: 'public', icon: 'globe', label: 'create.post.visEveryone' },
+  { key: 'followers', icon: 'users', label: 'create.post.visFollowers' },
+  { key: 'private', icon: 'lock', label: 'create.post.visPrivate' },
+];
 
 // Format seconds as m:ss.
 const fmtTime = (s) => {
@@ -135,7 +145,7 @@ const ImageCarousel = memo(({ images, width, onRemove, onCrop, onAdd, t }) => {
 });
 ImageCarousel.displayName = 'ImageCarousel';
 
-const VideoPreview = memo(({ media, trimSecs, onTrim, onChange, t }) => (
+const VideoPreview = memo(({ media, trimSecs, onTrim, onChange, onCover, coverUri, t }) => (
   <View style={styles.mediaBlock}>
     <View style={[styles.carouselWrap, { aspectRatio: clampAspect(media.width, media.height) }]}>
       <AppVideo
@@ -152,6 +162,14 @@ const VideoPreview = memo(({ media, trimSecs, onTrim, onChange, t }) => (
         <Feather name="scissors" size={15} color={colors.primary} />
         <Text style={styles.chipText}>{t('create.post.trimLabel', { secs: trimSecs })}</Text>
       </TouchableOpacity>
+      {onCover && (
+        <TouchableOpacity style={styles.chip} onPress={onCover}>
+          {coverUri
+            ? <Image source={{ uri: coverUri }} style={styles.chipThumb} contentFit="cover" />
+            : <Feather name="image" size={15} color={colors.primary} />}
+          <Text style={styles.chipText}>{t('create.post.cover')}</Text>
+        </TouchableOpacity>
+      )}
       <TouchableOpacity style={styles.chip} onPress={onChange}>
         <Feather name="refresh-cw" size={15} color={colors.primary} />
         <Text style={styles.chipText}>{t('create.post.changeVideo')}</Text>
@@ -175,31 +193,6 @@ const EmptyPicker = memo(({ onCamera, onPick, label, t }) => (
 ));
 EmptyPicker.displayName = 'EmptyPicker';
 
-// A full-screen dark sheet used by the song list and both trimmers.
-const Sheet = ({ visible, title, onClose, children, gestures = false }) => {
-  const body = (
-    <View style={styles.sheetRoot}>
-      <SafeAreaView edges={['top', 'bottom']} style={styles.sheetSafe}>
-        <View style={styles.sheetHeader}>
-          <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.headerIcon}>
-            <Feather name="x" size={24} color={colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.sheetTitle}>{title}</Text>
-          <View style={styles.headerIcon} />
-        </View>
-        {children}
-      </SafeAreaView>
-    </View>
-  );
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      {/* A Modal is its own native window, outside the app-root
-          GestureHandlerRootView, so the trimmers' pan gestures need their own. */}
-      {gestures ? <GestureHandlerRootView style={{ flex: 1 }}>{body}</GestureHandlerRootView> : body}
-    </Modal>
-  );
-};
-
 const CreatePost = ({ navigation }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
@@ -214,12 +207,29 @@ const CreatePost = ({ navigation }) => {
   const [preparingMedia, setPreparingMedia] = useState(false);
   const [caption, setCaption] = useState('');
 
-  // Song library: painted from the Music tab's cache, fetched only when the
-  // picker opens. It used to download the library every time this screen
+  // Song library: the picker paints from the Music tab's cache and loads only
+  // when opened. It used to download the library every time this screen
   // opened, for a picker most posts never touch.
   const tracksKey = userKey(currentUser?.id, 'tracks');
-  const [tracks, setTracks] = useState(() => peekCache(tracksKey) ?? []);
-  const [tracksLoading, setTracksLoading] = useState(false);
+
+  // Who can see it, and whether people can comment.
+  const [visibility, setVisibility] = useState('public');
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
+
+  // Video cover: a moment of the source clip (seconds) plus its preview still.
+  const [coverSec, setCoverSec] = useState(null);
+  const [coverUri, setCoverUri] = useState(null);
+  const [showCover, setShowCover] = useState(false);
+  const coverAvailable = isVideoProcessingAvailable();
+
+  // Drafts saved on this device.
+  const [draftId, setDraftId] = useState(null);
+  const [drafts, setDrafts] = useState([]);
+  const [showDrafts, setShowDrafts] = useState(false);
+  const refreshDrafts = useCallback(() => {
+    listDrafts(currentUser?.id).then(setDrafts);
+  }, [currentUser?.id]);
+  useFocusEffect(refreshDrafts);
 
   const [selectedSong, setSelectedSong] = useState(null);
   const [showSongModal, setShowSongModal] = useState(false);
@@ -253,11 +263,20 @@ const CreatePost = ({ navigation }) => {
   const hasWork = images.length > 0 || !!media || caption.trim().length > 0 || !!selectedSong;
   const hasWorkRef = useRef(hasWork);
   hasWorkRef.current = hasWork;
+  const saveDraftRef = useRef(null);
   useEffect(() => navigation.addListener('beforeRemove', (e) => {
     if (submittedRef.current || !hasWorkRef.current) return;
     e.preventDefault();
-    Alert.alert(t('create.post.discardTitle'), t('create.post.discardBody'), [
+    Alert.alert(t('create.post.discardTitle'), t('create.post.leaveBody'), [
       { text: t('create.post.keepEditing'), style: 'cancel' },
+      {
+        text: t('create.post.saveDraft'),
+        onPress: async () => {
+          await saveDraftRef.current?.();
+          submittedRef.current = true;
+          navigation.dispatch(e.data.action);
+        },
+      },
       { text: t('create.post.discard'), style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
     ]);
   }), [navigation, t]);
@@ -313,24 +332,7 @@ const CreatePost = ({ navigation }) => {
     if (soundRef.current) soundRef.current.unloadAsync().catch(() => {});
   }, []);
 
-  const openSongLibrary = useCallback(() => {
-    setShowSongModal(true);
-    if (!tracks.length) setTracksLoading(true);
-    // Cold start without a session copy: the disk copy first, then the network.
-    if (!tracks.length) {
-      readCache(tracksKey).then((cached) => {
-        if (Array.isArray(cached) && cached.length) setTracks((prev) => (prev.length ? prev : cached));
-      });
-    }
-    fetchTracks()
-      .then((data) => {
-        const list = Array.isArray(data) ? data : data?.results ?? [];
-        setTracks(list);
-        if (list.length) writeCache(tracksKey, list);
-      })
-      .catch(() => {})
-      .finally(() => setTracksLoading(false));
-  }, [tracks.length, tracksKey]);
+  const openSongLibrary = useCallback(() => setShowSongModal(true), []);
 
   // Compress an image to a sane upload size (cap at 1080px wide, no upscaling).
   const compressImage = (uri, width) =>
@@ -345,10 +347,19 @@ const CreatePost = ({ navigation }) => {
       return;
     }
     setMedia(asset);
+    setCoverSec(null);
+    setCoverUri(null);
     const durSec = (asset.duration || 0) / 1000;
     setVideoTrim({ start: 0, end: Math.min(30, durSec || 30) });
     setShowVideoTrimmer(true);
   }, [t]);
+
+  useEffect(() => {
+    if (coverSec != null && (coverSec < videoTrim.start || coverSec > videoTrim.end)) {
+      setCoverSec(null);
+      setCoverUri(null);
+    }
+  }, [videoTrim.start, videoTrim.end, coverSec]);
 
   const pickMedia = useCallback(async () => {
     try {
@@ -557,6 +568,67 @@ const CreatePost = ({ navigation }) => {
 
   const closeTrim = async () => { await stopPreview(); setShowTrimModal(false); };
 
+  // Everything on this screen, as a plain object — what a draft stores.
+  const draftState = () => ({
+    contentType, caption, images, video: media, trim: videoTrim,
+    coverSec, thumbUri: coverUri, visibility, commentsEnabled,
+    song: selectedSong ? {
+      ...selectedSong, start: trimStart, end: trimEnd,
+      localAudio: isLocalSong(selectedSong) ? localAudio : null,
+    } : null,
+  });
+
+  const saveCurrentDraft = async () => {
+    try {
+      const entry = await saveDraft(currentUser?.id, { id: draftId, state: draftState() });
+      setDraftId(entry.id);
+      refreshDrafts();
+      return entry;
+    } catch (e) {
+      console.warn('[CreatePost] draft save failed', e?.message);
+      Alert.alert(t('common.error'), t('create.post.draftFailed'));
+      return null;
+    }
+  };
+  saveDraftRef.current = saveCurrentDraft;
+
+  const openDraft = async (entry) => {
+    const s = entry.state || {};
+    await stopPreview();
+    setShowDrafts(false);
+    setDraftId(entry.id);
+    setContentType(s.contentType || 'image');
+    setCaption(s.caption || '');
+    setImages(Array.isArray(s.images) ? s.images : []);
+    originalAssetRef.current = s.images?.[0] || null;
+    setMedia(s.video || null);
+    setVideoTrim(s.trim || { start: 0, end: 30 });
+    setCoverSec(s.coverSec ?? null);
+    setCoverUri(s.thumbUri || null);
+    setVisibility(s.visibility || 'public');
+    setCommentsEnabled(s.commentsEnabled !== false);
+    if (s.song) {
+      const { start, end, localAudio: la, ...song } = s.song;
+      // A local song's player source is its draft copy, not the long-gone
+      // picker cache file.
+      setSelectedSong(la ? { ...song, audio_url: la.uri } : song);
+      setLocalAudio(la || null);
+      setTrimStart(start || 0);
+      setTrimEnd(end || 30);
+      trimStartRef.current = start || 0;
+      trimEndRef.current = end || 30;
+    } else {
+      setSelectedSong(null);
+      setLocalAudio(null);
+    }
+  };
+
+  const removeDraft = async (entry) => {
+    await deleteDraft(currentUser?.id, entry.id);
+    if (entry.id === draftId) setDraftId(null);
+    refreshDrafts();
+  };
+
   const removeSong = async () => {
     await stopPreview();
     setSelectedSong(null);
@@ -577,9 +649,18 @@ const CreatePost = ({ navigation }) => {
     const snap = {
       contentType,
       caption,
-      images,
-      video: media,
+      visibility,
+      commentsEnabled,
+      images: contentType === 'image' ? images : [],
+      video: contentType === 'video' ? media : null,
       trim: videoTrim,
+      coverSec: contentType === 'video' ? coverSec : null,
+      // The cover still, staged with the media so the feed card still has a
+      // picture if the upload resumes after a restart. The job ignores it.
+      thumbUri: contentType === 'video' ? coverUri : null,
+      // Posting a draft: its media folder becomes the upload's (moved, not
+      // copied again — see UploadStatus' stageMedia).
+      draftId,
       song: contentType === 'image' && selectedSong ? {
         title: selectedSong.title || '',
         artist: artistName(selectedSong),
@@ -591,12 +672,25 @@ const CreatePost = ({ navigation }) => {
       } : null,
     };
 
+    const previewUri = contentType === 'image' ? images[0].uri : coverUri;
     enqueueUpload({
       kind: 'post',
       title: caption.trim().slice(0, 60),
-      thumbUri: contentType === 'image' ? images[0].uri : null,
-      run: buildPostJob(snap),
+      thumbUri: previewUri,
+      // What the feed's "posting…" card shows until the real post lands.
+      preview: {
+        contentType,
+        uri: previewUri,
+        aspect: contentType === 'image'
+          ? clampAspect(images[0].width, images[0].height)
+          : clampAspect(media.width, media.height),
+        caption: caption.trim(),
+        visibility,
+      },
+      snap,
     });
+    // The draft's files now belong to the upload; only forget the entry.
+    if (draftId) deleteDraft(currentUser?.id, draftId, { keepFiles: true });
     submittedRef.current = true;
     navigation.goBack();
   };
@@ -604,6 +698,8 @@ const CreatePost = ({ navigation }) => {
   const canPost = contentType === 'image' ? images.length > 0 : !!media;
   const trimSecs = (videoTrim.end - videoTrim.start).toFixed(0);
   const openVideoTrimmer = useCallback(() => setShowVideoTrimmer(true), []);
+  const openCover = useCallback(() => setShowCover(true), []);
+  const postsLabel = useCallback((n) => t('sound.uses', { count: n }), [t]);
 
   return (
     <View style={styles.root}>
@@ -615,7 +711,17 @@ const CreatePost = ({ navigation }) => {
             <Feather name="x" size={26} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('create.post.title')}</Text>
-          <View style={styles.headerIcon} />
+          <TouchableOpacity
+            onPress={() => setShowDrafts(true)}
+            hitSlop={8}
+            style={styles.draftsBtn}
+            accessibilityLabel={t('create.post.drafts')}
+          >
+            <Feather name="file-text" size={20} color={colors.textPrimary} />
+            {drafts.length > 0 && (
+              <View style={styles.badge}><Text style={styles.badgeText}>{drafts.length}</Text></View>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Photo / Video switch */}
@@ -647,7 +753,15 @@ const CreatePost = ({ navigation }) => {
         >
           {contentType === 'video' ? (
             media ? (
-              <VideoPreview media={media} trimSecs={trimSecs} onTrim={openVideoTrimmer} onChange={pickMedia} t={t} />
+              <VideoPreview
+                media={media}
+                trimSecs={trimSecs}
+                onTrim={openVideoTrimmer}
+                onChange={pickMedia}
+                onCover={coverAvailable ? openCover : null}
+                coverUri={coverUri}
+                t={t}
+              />
             ) : (
               <EmptyPicker onCamera={openCamera} onPick={pickMedia} label={t('create.post.selectVideo')} t={t} />
             )
@@ -666,16 +780,44 @@ const CreatePost = ({ navigation }) => {
 
           {/* Caption */}
           <View style={styles.card}>
-            <TextInput
-              style={styles.captionInput}
-              placeholder={t('create.post.captionPlaceholder')}
-              placeholderTextColor={colors.placeholder}
+            <CaptionComposer
               value={caption}
               onChangeText={setCaption}
-              multiline
+              placeholder={t('create.post.captionPlaceholder')}
               maxLength={MAX_CAPTION}
+              postsLabel={postsLabel}
             />
-            <Text style={styles.charCount}>{caption.length}/{MAX_CAPTION}</Text>
+          </View>
+
+          {/* Privacy + comments */}
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>{t('create.post.whoCanSee')}</Text>
+            <View style={styles.visRow}>
+              {VISIBILITY_OPTIONS.map((opt) => {
+                const active = visibility === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.visChip, active && styles.visChipActive]}
+                    onPress={() => setVisibility(opt.key)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Feather name={opt.icon} size={14} color={active ? '#fff' : colors.textSecondary} />
+                    <Text style={[styles.visText, active && styles.visTextActive]}>{t(opt.label)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>{t('create.post.allowComments')}</Text>
+              <Switch
+                value={commentsEnabled}
+                onValueChange={setCommentsEnabled}
+                trackColor={{ false: 'rgba(255,255,255,0.2)', true: colors.primary }}
+                thumbColor="#fff"
+              />
+            </View>
           </View>
 
           {/* Song (photos only) */}
@@ -725,6 +867,21 @@ const CreatePost = ({ navigation }) => {
         {!kbHeight && (
           <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.sm) + spacing.xs }]}>
             <TouchableOpacity
+              style={[styles.draftButton, !hasWork && styles.postButtonDisabled]}
+              onPress={async () => {
+                const saved = await saveCurrentDraft();
+                if (saved) {
+                  submittedRef.current = true;
+                  navigation.goBack();
+                }
+              }}
+              disabled={!hasWork}
+              activeOpacity={0.85}
+            >
+              <Feather name="save" size={17} color={colors.textPrimary} />
+              <Text style={styles.draftButtonText}>{t('create.post.saveDraft')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={[styles.postButton, !canPost && styles.postButtonDisabled]}
               onPress={handlePost}
               disabled={!canPost}
@@ -738,39 +895,18 @@ const CreatePost = ({ navigation }) => {
       </SafeAreaView>
 
       {/* Song library */}
-      <Sheet visible={showSongModal} title={t('create.post.selectSong')} onClose={() => setShowSongModal(false)}>
-        {tracksLoading && !tracks.length ? (
-          <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.primary} />
-        ) : (
-          <FlatList
-            data={tracks}
-            keyExtractor={(item) => String(item.id)}
-            contentContainerStyle={{ paddingHorizontal: PAD, paddingBottom: spacing.lg }}
-            initialNumToRender={12}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[styles.libraryRow, selectedSong?.id === item.id && styles.libraryRowActive]}
-                onPress={() => handleTrimSong(item)}
-              >
-                {item.cover_image ? (
-                  <Image source={{ uri: item.cover_image }} style={styles.libraryCover} contentFit="cover" cachePolicy="memory-disk" />
-                ) : (
-                  <View style={[styles.libraryCover, styles.songIcon]}><MaterialIcons name="music-note" size={20} color={colors.accent} /></View>
-                )}
-                <View style={styles.flex}>
-                  <Text style={styles.songTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={styles.songArtist} numberOfLines={1}>{artistName(item)}</Text>
-                </View>
-                <Feather name="chevron-right" size={20} color={colors.textMuted} />
-              </TouchableOpacity>
-            )}
-          />
-        )}
-      </Sheet>
+      <FullSheet visible={showSongModal} title={t('create.post.selectSong')} onClose={() => setShowSongModal(false)}>
+        <SoundLibrary
+          tracksKey={tracksKey}
+          selectedId={selectedSong?.id}
+          onPick={handleTrimSong}
+          t={t}
+        />
+      </FullSheet>
 
       {/* Song trimming */}
       {showTrimModal && selectedSong && (
-        <Sheet visible={showTrimModal} title={t('create.post.trimSong')} onClose={closeTrim} gestures>
+        <FullSheet visible={showTrimModal} title={t('create.post.trimSong')} onClose={closeTrim} gestures>
           {playbackStatus ? (
             <View style={styles.trimContainer}>
               <Text style={styles.songTitle} numberOfLines={1}>{selectedSong.title || 'Untitled Song'}</Text>
@@ -809,12 +945,12 @@ const CreatePost = ({ navigation }) => {
           ) : (
             <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.primary} />
           )}
-        </Sheet>
+        </FullSheet>
       )}
 
       {/* Video trimming */}
       {showVideoTrimmer && media && contentType === 'video' && (
-        <Sheet visible={showVideoTrimmer} title={t('create.post.trimVideo')} onClose={() => setShowVideoTrimmer(false)}>
+        <FullSheet visible={showVideoTrimmer} title={t('create.post.trimVideo')} onClose={() => setShowVideoTrimmer(false)}>
           <ScrollView contentContainerStyle={styles.trimContainer}>
             <VideoTrimmer
               uri={media.uri}
@@ -826,8 +962,37 @@ const CreatePost = ({ navigation }) => {
               <Text style={styles.confirmButtonText}>{t('common.done')}</Text>
             </TouchableOpacity>
           </ScrollView>
-        </Sheet>
+        </FullSheet>
       )}
+
+      {/* Video cover */}
+      {showCover && media && (
+        <FullSheet
+          visible={showCover}
+          title={t('create.post.selectCover')}
+          onClose={() => setShowCover(false)}
+          right={(
+            <TouchableOpacity onPress={() => setShowCover(false)} hitSlop={8}>
+              <Text style={styles.doneText}>{t('common.done')}</Text>
+            </TouchableOpacity>
+          )}
+        >
+          <CoverPicker
+            uri={media.uri}
+            start={videoTrim.start}
+            end={videoTrim.end}
+            value={coverSec}
+            aspect={clampAspect(media.width, media.height)}
+            onPick={(sec, uri) => { setCoverSec(sec); setCoverUri(uri); }}
+            t={t}
+          />
+        </FullSheet>
+      )}
+
+      {/* Drafts */}
+      <FullSheet visible={showDrafts} title={t('create.post.drafts')} onClose={() => setShowDrafts(false)}>
+        <DraftsList drafts={drafts} onOpen={openDraft} onDelete={removeDraft} t={t} />
+      </FullSheet>
 
       {/* Preparing overlay while big picked images are compressed. */}
       <Modal visible={preparingMedia} transparent animationType="fade" onRequestClose={() => {}}>
@@ -866,6 +1031,13 @@ const styles = StyleSheet.create({
   },
   headerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '800', letterSpacing: 0.2 },
+  draftsBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  badge: {
+    position: 'absolute', top: 3, right: 1, minWidth: 17, height: 17, borderRadius: 9, paddingHorizontal: 4,
+    backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center',
+  },
+  badgeText: { color: '#0A1628', fontSize: 10, fontWeight: '800' },
+  doneText: { color: colors.primary, fontSize: 15, fontWeight: '800' },
 
   segment: {
     flexDirection: 'row', marginHorizontal: PAD, marginBottom: spacing.sm,
@@ -918,14 +1090,27 @@ const styles = StyleSheet.create({
     borderRadius: radius.full, backgroundColor: GLASS, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(29,161,242,0.5)',
   },
   chipText: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
+  chipThumb: { width: 18, height: 24, borderRadius: 3 },
 
   card: {
     backgroundColor: GLASS, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.md,
     borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
   },
   cardLabel: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', marginBottom: spacing.sm, letterSpacing: 0.3 },
-  captionInput: { minHeight: 96, color: colors.textPrimary, fontSize: 16, lineHeight: 22, textAlignVertical: 'top', padding: 0 },
-  charCount: { color: colors.textMuted, fontSize: 12, textAlign: 'right', marginTop: spacing.xs },
+  visRow: { flexDirection: 'row', gap: spacing.xs, flexWrap: 'wrap' },
+  visChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: radius.full, backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  visChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  visText: { color: colors.textSecondary, fontSize: 13, fontWeight: '700' },
+  visTextActive: { color: '#fff' },
+  switchRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.md,
+    paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HAIRLINE,
+  },
+  switchLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
 
   songOptions: { flexDirection: 'row', gap: spacing.sm },
   songOption: {
@@ -944,30 +1129,23 @@ const styles = StyleSheet.create({
   songArtist: { color: colors.textSecondary, fontSize: 13, marginTop: 2 },
 
   footer: {
+    flexDirection: 'row', gap: spacing.sm,
     paddingHorizontal: PAD, paddingTop: spacing.sm,
     backgroundColor: 'rgba(8,18,34,0.92)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HAIRLINE,
   },
+  draftButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 15, paddingHorizontal: spacing.md, borderRadius: radius.full,
+    backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  draftButtonText: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
   postButton: {
+    flex: 1,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: colors.primary, paddingVertical: 15, borderRadius: radius.full, ...shadows.md,
   },
   postButtonDisabled: { opacity: 0.4 },
   postButtonText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.3 },
-
-  sheetRoot: { flex: 1, backgroundColor: colors.bg },
-  sheetSafe: { flex: 1 },
-  sheetHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HAIRLINE,
-  },
-  sheetTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
-  libraryRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, paddingHorizontal: spacing.sm,
-    borderRadius: radius.md, marginBottom: 4,
-  },
-  libraryRowActive: { backgroundColor: 'rgba(29,161,242,0.14)' },
-  libraryCover: { width: 44, height: 44, borderRadius: radius.sm, backgroundColor: colors.surface },
 
   trimContainer: { padding: PAD },
   trimTimes: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 10 },

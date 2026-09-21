@@ -31,6 +31,8 @@ import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, markPostsViewed, fetc
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
+import RichCaption from './RichCaption';
+import PendingPosts from './PendingPosts';
 import { DownloadButton, SaveButton, LikeButton, ShareButton } from './SocialActions';
 import { PostSkeleton } from './SkeletonLoader';
 import StoriesBar from './StoriesBar';
@@ -1214,6 +1216,15 @@ const SocialFeed = ({ showBackground = true }) => {
                 </Text>
               </View>
             )}
+            {/* Who can see it — only worth saying when it isn't everyone. */}
+            {item.visibility && item.visibility !== 'public' && (
+              <View style={styles.reasonChip}>
+                <MaterialIcons name={item.visibility === 'private' ? 'lock' : 'people'} size={11} color={colors.primary} />
+                <Text style={styles.reasonChipText} numberOfLines={1}>
+                  {t(item.visibility === 'private' ? 'create.post.visPrivate' : 'create.post.visFollowers')}
+                </Text>
+              </View>
+            )}
           </View>
         </TouchableOpacity>
         <View style={styles.headerActions}>
@@ -1250,6 +1261,7 @@ const SocialFeed = ({ showBackground = true }) => {
             postId={item.id}
             commentCount={item.comments_count || 0}
             currentUserAvatar={currentUser?.profile_picture}
+            commentsEnabled={item.comments_enabled !== false}
           />
           <ShareButton
             postId={item.id}
@@ -1278,7 +1290,7 @@ const SocialFeed = ({ showBackground = true }) => {
             and content honours the reader's font size. The caps above are only
             on chrome that lives in a fixed-size container. */}
         {item.caption ? (
-          <Text style={styles.caption} numberOfLines={3}>{item.caption}</Text>
+          <RichCaption style={styles.caption} numberOfLines={3} text={item.caption} />
         ) : null}
       </View>
     </View>
@@ -1455,6 +1467,8 @@ const SocialFeed = ({ showBackground = true }) => {
                 scrolls up behind it for the frosted-glass effect. */}
             <View style={{ height: topBarH }} />
             <StoriesBar navigation={navigation} />
+            {/* Your own posts that are still uploading. */}
+            <PendingPosts />
           </View>
         }
         ListEmptyComponent={renderEmptyComponent}

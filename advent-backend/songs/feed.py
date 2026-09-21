@@ -18,6 +18,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import (
@@ -205,7 +206,8 @@ def compute_trending():
     now = timezone.now()
     rows = list(
         SocialPost.objects
-        .filter(is_removed=False, created_at__gte=now - timedelta(days=TRENDING_WINDOW_DAYS))
+        .filter(is_removed=False, created_at__gte=now - timedelta(days=TRENDING_WINDOW_DAYS),
+                visibility=SocialPost.VISIBILITY_PUBLIC)
         .exclude(user__is_deactivated=True)
         .values('id', 'user_id', 'likes_count', 'comments_count', 'view_count', 'created_at')
         [:CANDIDATE_CAP * 2]
@@ -332,6 +334,10 @@ def build_ranked_feed(user):
                     user_id__in=author_ids)
             .exclude(user_id=user.id)
             .exclude(user__is_deactivated=True)
+            .filter(
+                Q(visibility=SocialPost.VISIBILITY_PUBLIC)
+                | Q(visibility=SocialPost.VISIBILITY_FOLLOWERS, user_id__in=followee_ids)
+            )
         )
         if blocked:
             qs = qs.exclude(user_id__in=blocked)

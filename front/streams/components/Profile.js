@@ -225,6 +225,12 @@ const Profile = () => {
             <Ionicons name="play" size={12} color={colors.white} />
           </View>
         )}
+        {/* Only on your own grid: who can see a post that isn't public. */}
+        {item.visibility && item.visibility !== 'public' && (
+          <View style={styles.lockBadge}>
+            <Feather name={item.visibility === 'private' ? 'lock' : 'users'} size={11} color={colors.white} />
+          </View>
+        )}
         {/* Play count, bottom-left over the thumbnail — the TikTok grid badge. */}
         <View style={styles.viewsBadge}>
           <Ionicons name="play" size={11} color={colors.white} />
@@ -459,6 +465,15 @@ const styles = StyleSheet.create({
     height: 22,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  lockBadge: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    padding: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
 
   viewsBadge: {
