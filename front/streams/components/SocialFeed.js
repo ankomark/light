@@ -1423,6 +1423,11 @@ const SocialFeed = ({ showBackground = true }) => {
       )}
 
       <FlatList
+        // Each row hosts a comment sheet (a Modal). Touches inside a Modal still
+        // bubble through this list in the React tree, and with the default
+        // ('never') the list swallowed the first tap to close the keyboard, so
+        // posting a comment took two taps. 'handled' lets the button take it.
+        keyboardShouldPersistTaps="handled"
         ref={flatListRef}
         data={posts}
         renderItem={renderItem}
