@@ -247,16 +247,28 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
     def _follow_list_response(self, queryset):
         """Paginated, lightweight user list with each row's is_following flag."""
         queryset = queryset.select_related('profile').order_by('username')
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = FollowListSerializer(
-                page, many=True, context=self.get_serializer_context()
-            )
-            return self.get_paginated_response(serializer.data)
+        viewer = self.request.user
+        if viewer.is_authenticated:
+            # Each row's Follow/Following button used to cost its own EXISTS
+            # query — a full page of 20 was 22 queries. Resolved in the page
+            # query instead. `obj.followers` holds from_user=obj, to_user=fan.
+            from django.db.models import Exists, OuterRef
+            Follow = User.followers.through
+            queryset = queryset.annotate(viewer_follows=Exists(
+                Follow.objects.filter(from_user=OuterRef('pk'), to_user=viewer.pk)
+            ))
+        # Paginated explicitly: this viewset has no pagination_class (its
+        # `list` returns a bare array other code relies on), so
+        # paginate_queryset() here used to return None and a popular account
+        # shipped its ENTIRE follower list in one response before the first
+        # row could paint. The client already sends ?page= and reads
+        # results/next.
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(queryset, self.request, view=self)
         serializer = FollowListSerializer(
-            queryset, many=True, context=self.get_serializer_context()
+            page, many=True, context=self.get_serializer_context()
         )
-        return Response(serializer.data)
+        return paginator.get_paginated_response(serializer.data)
 
     @action(detail=True, methods=['get'])
     def followers(self, request, pk=None):

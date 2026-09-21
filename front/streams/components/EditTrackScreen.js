@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, Alert, StyleSheet, TouchableOpacity,
   KeyboardAvoidingView, ScrollView, Platform, ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { apiRequest } from '../services/api';
+import { apiRequest, fetchTrackLyrics, invalidateTrackLyrics } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -15,12 +15,42 @@ const EditTrackScreen = () => {
 
   const [title, setTitle] = useState(track.title || '');
   const [album, setAlbum] = useState(track.album || '');
-  const [lyrics, setLyrics] = useState(track.lyrics || '');
   const [saving, setSaving] = useState(false);
+
+  // `null` means "not loaded yet", which is NOT the same as "no lyrics".
+  //
+  // This screen is opened from a track row, and the list payload no longer
+  // carries the lyrics text (it carries `has_lyrics`). Seeding the field with
+  // `track.lyrics || ''` would therefore start it empty and the PATCH below
+  // would overwrite the real lyrics with an empty string — silently deleting
+  // them. So we fetch them first and refuse to save until they are in hand.
+  const [lyrics, setLyrics] = useState(
+    typeof track.lyrics === 'string' ? track.lyrics : null
+  );
+  const [lyricsError, setLyricsError] = useState(false);
+
+  useEffect(() => {
+    if (lyrics !== null) return undefined;
+    let cancelled = false;
+    fetchTrackLyrics(track.id)
+      .then((text) => { if (!cancelled) setLyrics(text); })
+      .catch(() => { if (!cancelled) setLyricsError(true); });
+    return () => { cancelled = true; };
+    // Only on mount / track change — re-running on every keystroke would fight
+    // the user's typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track.id]);
+
+  const lyricsReady = lyrics !== null;
 
   const handleUpdate = async () => {
     if (!title.trim()) {
       Alert.alert(t('track.edit.requiredTitle'), t('track.edit.requiredBody'));
+      return;
+    }
+    if (!lyricsReady) {
+      // Belt and braces — the button is disabled in this state too.
+      Alert.alert(t('common.error'), t('track.edit.lyricsNotLoaded'));
       return;
     }
     setSaving(true);
@@ -31,6 +61,9 @@ const EditTrackScreen = () => {
         album: album.trim(),
         lyrics: lyrics.trim(),
       });
+      // The sheet and Now Playing cache lyrics per track for the session; drop
+      // this one so they don't keep showing the words that were just replaced.
+      invalidateTrackLyrics(track.id);
       // TrackList reloads on focus, so just go back.
       navigation.goBack();
     } catch (error) {
@@ -72,19 +105,29 @@ const EditTrackScreen = () => {
         <Text style={styles.label}>{t('track.lyrics')}</Text>
         <TextInput
           style={[styles.input, styles.lyrics]}
-          value={lyrics}
+          value={lyrics ?? ''}
           onChangeText={setLyrics}
-          placeholder={t('track.edit.lyricsPlaceholder')}
+          placeholder={
+            lyricsReady
+              ? t('track.edit.lyricsPlaceholder')
+              : t('track.edit.lyricsLoading')
+          }
           placeholderTextColor={colors.placeholder}
+          // Not editable until the existing lyrics are in hand, so typing can't
+          // start from a blank field and replace them.
+          editable={lyricsReady}
           multiline
           textAlignVertical="top"
           maxLength={5000}
         />
+        {lyricsError && (
+          <Text style={styles.lyricsError}>{t('track.edit.lyricsLoadFailed')}</Text>
+        )}
 
         <TouchableOpacity
-          style={[styles.button, saving && styles.buttonDisabled]}
+          style={[styles.button, (saving || !lyricsReady) && styles.buttonDisabled]}
           onPress={handleUpdate}
-          disabled={saving}
+          disabled={saving || !lyricsReady}
           activeOpacity={0.85}
         >
           {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>{t('track.edit.save')}</Text>}
@@ -114,6 +157,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   lyrics: { minHeight: 140, textAlignVertical: 'top' },
+  lyricsError: {
+    ...typography.caption,
+    color: colors.error,
+    marginTop: spacing.xs,
+  },
   button: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,

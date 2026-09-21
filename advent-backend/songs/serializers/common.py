@@ -294,6 +294,10 @@ class FollowListSerializer(SimpleUserSerializer):
     def get_is_following(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated and request.user != obj:
+            # Annotated by the follow-list views; the query is the fallback
+            # for any caller that serializes a plain queryset.
+            if hasattr(obj, 'viewer_follows'):
+                return obj.viewer_follows
             return obj.followers.filter(id=request.user.id).exists()
         return False
 

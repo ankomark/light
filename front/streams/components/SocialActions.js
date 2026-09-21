@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   TouchableOpacity,
   Text,
@@ -24,119 +24,182 @@ import { useI18n } from '../context/I18nContext';
 // wordmark + medallion for a premium feel.
 const LIKE_GOLD = '#E8C66B';
 
+// Optimistic toggles, without the spinner that used to hide them.
+//
+// The old shape set the optimistic state and then rendered an ActivityIndicator
+// in place of the icon until the server answered — so the work of updating
+// instantly was done and then thrown away, and every tap read as a wait. It
+// also locked the button for the duration, which meant a quick like/unlike
+// silently dropped the second tap.
+//
+// What replaces it: the icon always shows what the user last asked for, and a
+// tiny reconcile loop pushes that intent at the server. `desired` is what the
+// user wants, `server` is what we believe is stored. When they differ and
+// nothing is in flight, we send one toggle. Taps landing mid-request just move
+// `desired`; the loop re-checks on settle and sends another toggle only if the
+// two still disagree. So N fast taps cost at most 2 requests and always land on
+// what the user actually chose.
+const useToggle = ({ initial, request, onSettle, onFail }) => {
+  const [value, setValue] = useState(!!initial);
+  const desired = useRef(!!initial);
+  const server = useRef(!!initial);
+  const inFlight = useRef(false);
+
+  // Adopt a new persisted value from the parent (row recycled, post refreshed),
+  // but never while the user's own intent is still unresolved — that would
+  // overwrite a tap with the stale prop it hasn't been told about yet.
+  useEffect(() => {
+    if (inFlight.current || desired.current !== server.current) return;
+    setValue(!!initial);
+    desired.current = !!initial;
+    server.current = !!initial;
+  }, [initial]);
+
+  const sync = useCallback(async () => {
+    if (inFlight.current || desired.current === server.current) return;
+    inFlight.current = true;
+    try {
+      const res = await request();
+      server.current = typeof res?.confirmed === 'boolean'
+        ? res.confirmed
+        : !server.current;
+      if (server.current === desired.current) {
+        setValue(server.current);          // settled: adopt the server's word
+        onSettle?.(server.current, res);
+      }
+    } catch (error) {
+      desired.current = server.current;    // roll back to the last known truth
+      setValue(server.current);
+      onFail?.(server.current, error);
+    } finally {
+      inFlight.current = false;
+      if (desired.current !== server.current) sync();   // tapped again mid-flight
+    }
+  }, [request, onSettle, onFail]);
+
+  const toggle = useCallback(() => {
+    const next = !desired.current;
+    desired.current = next;
+    setValue(next);                        // paints this frame, no await
+    return next;
+  }, []);
+
+  return { value, toggle, sync };
+};
+
 export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
   const { t } = useI18n();
   const [likes, setLikes] = useState(initialLikes || 0);
-  const [liked, setLiked] = useState(!!isLiked);
-  const [loading, setLoading] = useState(false);
+  const likesRef = useRef(initialLikes || 0);       // what's on screen now
+  const serverLikesRef = useRef(initialLikes || 0); // last count the server gave
+  const setLikeCount = useCallback((n) => {
+    likesRef.current = n;
+    setLikes(n);
+  }, []);
 
-  // Reflect persisted values when the row re-mounts / the post updates.
-  useEffect(() => { setLikes(initialLikes || 0); }, [initialLikes]);
-  useEffect(() => { setLiked(!!isLiked); }, [isLiked]);
+  useEffect(() => {
+    setLikeCount(initialLikes || 0);
+    serverLikesRef.current = initialLikes || 0;
+  }, [initialLikes, setLikeCount]);
 
-  const handleLike = async () => {
-    if (loading) return;
-    const prevLiked = liked;
-    const prevLikes = likes;
-    const nextLiked = !prevLiked;
-    const nextLikes = Math.max(0, prevLikes + (nextLiked ? 1 : -1));
+  const request = useCallback(async () => {
+    const res = await likePost(postId);
+    return {
+      confirmed: typeof res?.is_liked === 'boolean' ? res.is_liked : undefined,
+      count: typeof res?.likes_count === 'number' ? res.likes_count : undefined,
+    };
+  }, [postId]);
 
+  const onSettle = useCallback((confirmed, res) => {
+    // The server's count is authoritative once the toggles have settled — it
+    // also folds in likes other people added while we were tapping.
+    const count = res?.count;
+    if (typeof count === 'number') {
+      serverLikesRef.current = count;
+      setLikeCount(count);
+    }
+    onLikeChange?.({ is_liked: confirmed, likes_count: count ?? likesRef.current });
+  }, [onLikeChange, setLikeCount]);
+
+  const onFail = useCallback((restored) => {
+    // Roll the number back to the last count the server actually confirmed —
+    // undoing one optimistic step isn't enough when the user tapped repeatedly
+    // before the request failed.
+    setLikeCount(serverLikesRef.current);
+    onLikeChange?.({ is_liked: restored, likes_count: serverLikesRef.current });
+    Alert.alert(t('common.error'), t('social.likeFailed'));
+  }, [onLikeChange, setLikeCount, t]);
+
+  const { value: liked, toggle, sync } = useToggle({
+    initial: isLiked, request, onSettle, onFail,
+  });
+
+  const handleLike = useCallback(() => {
+    const next = toggle();
+    setLikeCount(Math.max(0, likesRef.current + (next ? 1 : -1)));
+    onLikeChange?.({ is_liked: next, likes_count: likesRef.current });
     // A light tap on like, a soft one on unlike — tactile "premium" feedback.
     Haptics.impactAsync(
-      nextLiked ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Soft
+      next ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Soft
     ).catch(() => {});
-    setLiked(nextLiked);                                  // optimistic
-    setLikes(nextLikes);
-    onLikeChange?.({ is_liked: nextLiked, likes_count: nextLikes });
-    setLoading(true);
-    try {
-      const res = await likePost(postId);
-      const cLiked = typeof res?.is_liked === 'boolean' ? res.is_liked : nextLiked;
-      const cLikes = typeof res?.likes_count === 'number' ? res.likes_count : nextLikes;
-      setLiked(cLiked);
-      setLikes(cLikes);
-      onLikeChange?.({ is_liked: cLiked, likes_count: cLikes });
-    } catch (error) {
-      console.error('Like error:', error);
-      setLiked(prevLiked);                                // rollback
-      setLikes(prevLikes);
-      onLikeChange?.({ is_liked: prevLiked, likes_count: prevLikes });
-      Alert.alert(t('common.error'), t('social.likeFailed'));
-    } finally {
-      setLoading(false);
-    }
-  };
+    sync();
+  }, [toggle, sync, onLikeChange, setLikeCount]);
 
   return (
     <TouchableOpacity
       style={styles.actionButton}
       onPress={handleLike}
-      disabled={loading}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: liked }}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={liked ? LIKE_GOLD : "#FFF"} />
-      ) : (
-        <>
-          <MaterialCommunityIcons
-            name={liked ? "heart" : "heart-outline"}
-            size={24}
-            color={liked ? LIKE_GOLD : "#FFF"}
-            style={liked ? styles.likeGlow : undefined}
-          />
-          <Text style={[styles.actionText, liked && { color: LIKE_GOLD }]}>{likes}</Text>
-        </>
-      )}
+      <MaterialCommunityIcons
+        name={liked ? "heart" : "heart-outline"}
+        size={24}
+        color={liked ? LIKE_GOLD : "#FFF"}
+        style={liked ? styles.likeGlow : undefined}
+      />
+      <Text style={[styles.actionText, liked && { color: LIKE_GOLD }]}>{likes}</Text>
     </TouchableOpacity>
   );
 };
 
 export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
   const { t } = useI18n();
-  const [saved, setSaved] = useState(!!initialSaved);
-  const [loading, setLoading] = useState(false);
 
-  // Reflect the persisted value when the row re-mounts / the post updates.
-  useEffect(() => { setSaved(!!initialSaved); }, [initialSaved]);
+  const request = useCallback(async () => {
+    const res = await savePost(postId);
+    return { confirmed: typeof res?.is_saved === 'boolean' ? res.is_saved : undefined };
+  }, [postId]);
 
-  const handleSave = async () => {
-    if (loading) return;
-    const previous = saved;
-    const next = !previous;
-    setSaved(next);           // optimistic
-    onSaveChange?.(next);     // persist to the feed immediately
-    setLoading(true);
-    try {
-      const res = await savePost(postId);
-      const confirmed = typeof res?.is_saved === 'boolean' ? res.is_saved : next;
-      setSaved(confirmed);
-      onSaveChange?.(confirmed);
-    } catch (error) {
-      console.error('Save error:', error);
-      setSaved(previous);     // rollback
-      onSaveChange?.(previous);
-      Alert.alert(t('common.error'), t('social.saveFailed'));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const onSettle = useCallback((confirmed) => onSaveChange?.(confirmed), [onSaveChange]);
+  const onFail = useCallback((restored) => {
+    onSaveChange?.(restored);
+    Alert.alert(t('common.error'), t('social.saveFailed'));
+  }, [onSaveChange, t]);
+
+  const { value: saved, toggle, sync } = useToggle({
+    initial: initialSaved, request, onSettle, onFail,
+  });
+
+  const handleSave = useCallback(() => {
+    onSaveChange?.(toggle());   // paints immediately, and tells the feed row
+    sync();
+  }, [toggle, sync, onSaveChange]);
 
   return (
     <TouchableOpacity
       style={styles.actionButton}
       onPress={handleSave}
-      disabled={loading}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: saved }}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={saved ? "#1DA1F2" : "#FFF"} />
-      ) : (
-        <MaterialCommunityIcons
-          name={saved ? "bookmark" : "bookmark-outline"}
-          size={24}
-          color={saved ? "#1DA1F2" : "#FFF"}
-        />
-      )}
+      <MaterialCommunityIcons
+        name={saved ? "bookmark" : "bookmark-outline"}
+        size={24}
+        color={saved ? "#1DA1F2" : "#FFF"}
+      />
     </TouchableOpacity>
   );
 };

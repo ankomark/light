@@ -361,13 +361,22 @@ class StorySerializer(serializers.ModelSerializer):
                   'caption', 'created_at', 'expires_at', 'is_viewed', 'views_count']
         read_only_fields = ['id', 'user', 'created_at', 'expires_at', 'is_viewed', 'views_count']
 
+    # Both of these prefer an annotation set by story_queryset() — one query for
+    # the whole bar — and fall back to a per-object query only for call sites
+    # that serialize a bare Story (e.g. the create response, a single row).
     def get_is_viewed(self, obj):
+        viewed = getattr(obj, 'viewed_by_me', None)
+        if viewed is not None:
+            return viewed
         request = self.context.get('request')
         if not request:
             return False
         return obj.views.filter(viewer=request.user).exists()
 
     def get_views_count(self, obj):
+        count = getattr(obj, 'views_total', None)
+        if count is not None:
+            return count
         return obj.views.count()
 
 

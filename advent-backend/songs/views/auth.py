@@ -1,8 +1,20 @@
 from .common import *  # noqa: F401,F403
 
 
-def _send_verification_email(user):
-    """Generate a 6-digit code and email it to the user. Returns the code."""
+def _send_verification_email(user, background=False):
+    """Generate a 6-digit code and email it to the user. Returns the code.
+
+    The code row is always written synchronously — it has to exist before the
+    email can be acted on. Only the SMTP round trip is optional.
+
+    `background=True` hands that round trip to the task pool. Use it where a
+    send failure is already being swallowed, because there the synchronous call
+    buys nothing and costs the user the whole SMTP handshake: with a real mail
+    backend that is a connect + TLS + auth to the provider, seconds on a bad
+    day, and it lands on signup — the slowest, most abandonable moment in the
+    app. Callers that actually SHOW the user a send failure (resend, password
+    reset) must stay synchronous; they cannot report what they did not wait for.
+    """
     import random
     from django.core.mail import send_mail
     from django.utils import timezone
@@ -12,20 +24,26 @@ def _send_verification_email(user):
     expires_at = timezone.now() + timedelta(minutes=15)
     EmailVerification.objects.create(user=user, code=code, expires_at=expires_at)
 
-    # Synchronous so the caller can surface a real SMTP failure (raises on error).
-    send_mail(
-        subject=f"{settings.SITE_NAME} — Verify your email",
-        message=(
-            f"Hi {user.username},\n\n"
-            f"Your verification code is: {code}\n\n"
-            f"This code expires in 15 minutes.\n\n"
-            f"If you didn't create an account, you can ignore this email.\n\n"
-            f"— {settings.SITE_NAME} Team"
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        fail_silently=False,
-    )
+    def _send():
+        send_mail(
+            subject=f"{settings.SITE_NAME} — Verify your email",
+            message=(
+                f"Hi {user.username},\n\n"
+                f"Your verification code is: {code}\n\n"
+                f"This code expires in 15 minutes.\n\n"
+                f"If you didn't create an account, you can ignore this email.\n\n"
+                f"— {settings.SITE_NAME} Team"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+
+    if background:
+        from ..tasks import run_in_background
+        run_in_background(_send)
+    else:
+        _send()
     return code
 
 
@@ -66,8 +84,14 @@ class SignUpView(APIView):
             user = serializer.save()
             # Account is created regardless; a failed verification email can be
             # resent later (and verification is gated off until SMTP is ready).
+            #
+            # Backgrounded precisely BECAUSE the failure is swallowed here: the
+            # response is identical either way, so waiting out the SMTP
+            # handshake only delays the account the user just asked for. The
+            # task pool logs anything that goes wrong, and "Resend code" is the
+            # recovery path — that one still waits, and still reports.
             try:
-                _send_verification_email(user)
+                _send_verification_email(user, background=True)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Verification email failed at signup for %s: %s", user.email, exc)
             return Response(

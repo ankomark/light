@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -12,7 +11,11 @@ import {
 import SeekBar from './SeekBar';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius, shadows, typography } from '../constants/theme';
-import { usePlayer } from '../context/PlayerContext';
+// expo-image so the mini player's cover comes from the same cache the track
+// row and Now Playing use, rather than being fetched a third time.
+import { Image } from 'expo-image';
+import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
+import { useContentWidth, FONT_SCALE } from '../utils/layout';
 import { navigate } from '../services/navigationRef';
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
@@ -34,8 +37,6 @@ const MiniPlayer = () => {
     isPlaying,
     isLoading,
     isBuffering,
-    positionMs,
-    durationMs,
     repeatMode,
     shuffle,
     hasNext,
@@ -49,6 +50,12 @@ const MiniPlayer = () => {
     seekTo,
     closePlayer,
   } = usePlayer();
+  // Position lives in its own context so the ~2x/second tick doesn't re-render
+  // everything else that uses the player.
+  const { positionMs, durationMs } = usePlayerProgress();
+  // Centred over the same column as the feed and the library, so the bar doesn't
+  // span a whole tablet while the content above it sits in the middle.
+  const { sideMargin } = useContentWidth({ gutter: 0 });
 
   const [seekValue, setSeekValue] = useState(null);
 
@@ -96,7 +103,10 @@ const MiniPlayer = () => {
   const busy = isLoading || isBuffering;
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, sideMargin > 0 && {
+      left: sideMargin + spacing.sm,
+      right: sideMargin + spacing.sm,
+    }]}>
       <View style={styles.topRow}>
         <TouchableOpacity onPress={toggleShuffle} hitSlop={HIT}>
           <Ionicons name="shuffle" size={18} color={shuffle ? colors.primary : colors.textMuted} />
@@ -136,7 +146,13 @@ const MiniPlayer = () => {
         >
           <Animated.View style={[styles.coverWrap, { transform: [{ rotate }] }]}>
             {cover ? (
-              <Image source={{ uri: cover }} style={styles.cover} />
+              <Image
+                source={{ uri: cover }}
+                style={styles.cover}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={150}
+              />
             ) : (
               <View style={[styles.cover, styles.coverPlaceholder]}>
                 <Ionicons name="musical-notes" size={20} color={colors.textMuted} />
@@ -146,7 +162,7 @@ const MiniPlayer = () => {
           </Animated.View>
 
           <View style={styles.meta}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={styles.title} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>
               {currentTrack.title}
             </Text>
             <Text style={styles.sub} numberOfLines={1}>

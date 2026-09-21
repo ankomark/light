@@ -9,6 +9,8 @@ import { usePlayer } from '../context/PlayerContext';
 import TrackItem from './TrackItem';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { peekCache, readCache, writeCache } from '../utils/screenCache';
+import { TrackListSkeleton } from './SkeletonLoader';
 
 const PlaylistDetail = () => {
   const { t } = useI18n();
@@ -17,10 +19,29 @@ const PlaylistDetail = () => {
   const { playQueue } = usePlayer();
   const playlistId = route.params?.playlistId;
 
-  const [playlist, setPlaylist] = useState(null);
-  const [tracks, setTracks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Keyed by playlist, not by user: a playlist is already scoped to its owner
+  // server-side, and this screen is only reachable from that owner's list.
+  const cacheKey = `playlist:${playlistId}`;
+  const cached = peekCache(cacheKey);
+
+  const [playlist, setPlaylist] = useState(cached ?? null);
+  const [tracks, setTracks] = useState(
+    () => (Array.isArray(cached?.tracks) ? cached.tracks : [])
+  );
+  const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState(null);
+
+  // Cold open: paint the last version from disk, then revalidate behind it.
+  useEffect(() => {
+    let cancelled = false;
+    readCache(cacheKey).then((hit) => {
+      if (cancelled || !hit) return;
+      setPlaylist((prev) => prev ?? hit);
+      setTracks((prev) => (prev.length ? prev : (Array.isArray(hit.tracks) ? hit.tracks : [])));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]);
 
   const load = useCallback(async () => {
     try {
@@ -28,12 +49,13 @@ const PlaylistDetail = () => {
       const data = await fetchPlaylist(playlistId);
       setPlaylist(data);
       setTracks(Array.isArray(data?.tracks) ? data.tracks : []);
+      if (data) writeCache(cacheKey, data);
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
     }
-  }, [playlistId]);
+  }, [playlistId, cacheKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -51,7 +73,7 @@ const PlaylistDetail = () => {
       artist: t.artist,
       cover_image: t.cover_image,
       audio_file: t.audio_file,
-      lyrics: t.lyrics,
+      has_lyrics: t.has_lyrics,
     })),
     [tracks]
   );
@@ -117,15 +139,17 @@ const PlaylistDetail = () => {
     </View>
   ), [playlist?.name, tracks.length, buildQueue, playQueue, handleDeletePlaylist, t]);
 
-  if (loading) {
+  // Skeleton rows rather than a centered spinner, and only when there is
+  // genuinely nothing cached to show.
+  if (loading && !playlist) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={styles.container}>
+        <TrackListSkeleton count={8} />
       </View>
     );
   }
 
-  if (error || !playlist) {
+  if ((error && !playlist) || !playlist) {
     return (
       <View style={styles.centered}>
         <MaterialIcons name="error-outline" size={48} color={colors.textMuted} />

@@ -4,6 +4,7 @@ import React, {
   useRef,
   useState,
   useEffect,
+  useMemo,
   useCallback,
 } from 'react';
 import { createSound, setAudioModeAsync } from '../services/audioPlayer';
@@ -13,11 +14,33 @@ import {
 import { usePreferences } from './PreferencesContext';
 import { applyAudioQuality, resolveAudioQuality } from '../utils/preferences';
 
+// Two contexts, deliberately.
+//
+// The playback position ticks every 500ms. It used to live in the same context
+// value as the controls — and that value was a fresh object literal on every
+// render — so while a track played, EVERY usePlayer() consumer re-rendered
+// twice a second: the whole social feed, the track list, and every row in it.
+// Almost none of them care what the position is; they want `currentTrack` and
+// the controls, which change only when the user does something.
+//
+// So the fast-changing part gets its own context. Anything that draws a
+// progress bar reads usePlayerProgress(); everything else reads usePlayer() and
+// is left alone during playback.
 const PlayerContext = createContext(null);
+const PlayerProgressContext = createContext(null);
 
+/** Track, playback flags and controls. Stable during playback. */
 export const usePlayer = () => {
   const ctx = useContext(PlayerContext);
   if (!ctx) throw new Error('usePlayer must be used within a PlayerProvider');
+  return ctx;
+};
+
+/** `{ positionMs, durationMs }` — changes ~2x/second while playing, so only
+ *  subscribe to it from something that actually draws the position. */
+export const usePlayerProgress = () => {
+  const ctx = useContext(PlayerProgressContext);
+  if (!ctx) throw new Error('usePlayerProgress must be used within a PlayerProvider');
   return ctx;
 };
 
@@ -282,36 +305,40 @@ export const PlayerProvider = ({ children }) => {
     } catch {}
   }, []);
 
-  const skip = useCallback(
-    async (deltaMs) => {
-      const s = soundRef.current;
-      if (!s || !durationMs) return;
-      const target = Math.max(0, Math.min(durationMs, positionMs + deltaMs));
-      try {
-        await s.setPositionAsync(target);
-        setPositionMs(target);
-      } catch {}
-    },
-    [durationMs, positionMs]
-  );
+  // Read position/duration through refs. As dependencies they would re-create
+  // these callbacks on every 500ms tick, which would rebuild the "stable"
+  // context value and undo the whole split above.
+  const positionRef = useRef(0);
+  const durationRef = useRef(0);
+  useEffect(() => { positionRef.current = positionMs; }, [positionMs]);
+  useEffect(() => { durationRef.current = durationMs; }, [durationMs]);
+
+  const skip = useCallback(async (deltaMs) => {
+    const s = soundRef.current;
+    const duration = durationRef.current;
+    if (!s || !duration) return;
+    const target = Math.max(0, Math.min(duration, positionRef.current + deltaMs));
+    try {
+      await s.setPositionAsync(target);
+      setPositionMs(target);
+    } catch {}
+  }, []);
 
   const beginSeek = useCallback(() => {
     seekingRef.current = true;
   }, []);
 
-  const seekTo = useCallback(
-    async (ratio) => {
-      seekingRef.current = false;
-      const s = soundRef.current;
-      if (!s || !durationMs) return;
-      const target = Math.max(0, Math.min(durationMs, ratio * durationMs));
-      try {
-        await s.setPositionAsync(target);
-        setPositionMs(target);
-      } catch {}
-    },
-    [durationMs]
-  );
+  const seekTo = useCallback(async (ratio) => {
+    seekingRef.current = false;
+    const s = soundRef.current;
+    const duration = durationRef.current;
+    if (!s || !duration) return;
+    const target = Math.max(0, Math.min(duration, ratio * duration));
+    try {
+      await s.setPositionAsync(target);
+      setPositionMs(target);
+    } catch {}
+  }, []);
 
   const closePlayer = useCallback(async () => {
     const s = soundRef.current;
@@ -330,13 +357,15 @@ export const PlayerProvider = ({ children }) => {
     setHasPrev(false);
   }, []);
 
-  const value = {
+  // Memoized, and WITHOUT positionMs/durationMs: this object must keep its
+  // identity through a whole track, so consumers that only want the controls
+  // don't re-render on every progress tick. Every callback below is already
+  // stable (refs, not state, in their dependency lists).
+  const value = useMemo(() => ({
     currentTrack,
     isPlaying,
     isLoading,
     isBuffering,
-    positionMs,
-    durationMs,
     repeatMode,
     shuffle,
     hasNext,
@@ -353,9 +382,25 @@ export const PlayerProvider = ({ children }) => {
     beginSeek,
     seekTo,
     closePlayer,
-  };
+  }), [
+    currentTrack, isPlaying, isLoading, isBuffering, repeatMode, shuffle,
+    hasNext, hasPrev, playTrack, playQueue, playNext, playPrevious, togglePlay,
+    pause, toggleShuffle, cycleRepeat, skip, beginSeek, seekTo, closePlayer,
+  ]);
 
-  return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
+  // The fast-changing half. Only progress bars subscribe here.
+  const progress = useMemo(
+    () => ({ positionMs, durationMs }),
+    [positionMs, durationMs],
+  );
+
+  return (
+    <PlayerContext.Provider value={value}>
+      <PlayerProgressContext.Provider value={progress}>
+        {children}
+      </PlayerProgressContext.Provider>
+    </PlayerContext.Provider>
+  );
 };
 
 export default PlayerContext;

@@ -115,6 +115,12 @@ def _bump_feed_version(user_id):
 
 
 class SocialPostViewSet(viewsets.ModelViewSet):
+    # Actions that fetch a post in order to act on it and never serialize it
+    # back. These skip the feed's presentation annotations (see get_queryset);
+    # everything that returns a rendered post must NOT be listed here, or its
+    # serializer would fall back to a per-field query.
+    LEAN_ACTIONS = {'like', 'save_post', 'viewed', 'comment', 'not_interested'}
+
     pagination_class = StandardPagination
     queryset = SocialPost.objects.all()
     serializer_class = SocialPostSerializer
@@ -134,7 +140,23 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         user = self.request.user
         # Shared annotated queryset (no N+1 in the serializer); likes_count /
         # comments_count are denormalised columns, so no DISTINCT COUNT joins.
-        qs = feed_post_queryset(user).order_by('-created_at')
+        #
+        # ...except for the actions that only ACT on a post and never serialize
+        # it. A like used to load the row through the full feed query: a join
+        # across author + profile + song + song artist + that artist's profile,
+        # a correlated subquery for the author's follower count, and three
+        # EXISTS for liked/saved/following — every bit of it thrown away, since
+        # the response is `{likes_count, is_liked}`. They get a plain row.
+        #
+        # The FILTERS below are not skipped, deliberately. They are not
+        # presentation: they are what stops someone liking a post belonging to
+        # an account that blocked them, or to a private account they cannot
+        # see. Dropping them here would turn an invisible post into an
+        # actionable one, so only the annotations go.
+        if self.action in self.LEAN_ACTIONS:
+            qs = SocialPost.objects.filter(is_removed=False)
+        else:
+            qs = feed_post_queryset(user).order_by('-created_at')
 
         # Hide posts from anyone the user has blocked (or who blocked them),
         # plus private accounts they haven't been approved to follow.
@@ -421,9 +443,14 @@ class SocialPostViewSet(viewsets.ModelViewSet):
                 )
                 notify_user(post.user, 'like', msg)
         
-        # Get updated like count
-        likes_count = PostLike.objects.filter(post=post).count()
-        
+        # Read back the denormalised counter rather than COUNT()ing the likes
+        # table. The signal on PostLike has already applied the delta, so this
+        # is a single-row primary-key read instead of an aggregate that gets
+        # slower the more popular the post is — exactly backwards from what you
+        # want on the posts people actually like.
+        post.refresh_from_db(fields=['likes_count'])
+        likes_count = post.likes_count
+
         return Response({
             'status': 'success',
             'likes_count': likes_count,
@@ -644,7 +671,17 @@ class PostCommentViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        # The post comes from the nested route (/social-posts/<post_pk>/comments/).
+        # On the flat /post-comments/ route there is no post_pk at all, so this
+        # used to fail with "Post not found" no matter what was sent — a
+        # registered, reachable endpoint that could never succeed. Say what is
+        # actually wrong instead of blaming the post.
         post_id = self.kwargs.get('post_pk')
+        if post_id is None:
+            raise ValidationError({
+                'error': 'Post a comment to /api/social-posts/<post_id>/comments/ '
+                         '— this route cannot tell which post you mean.'
+            })
         try:
             post = SocialPost.objects.get(id=post_id)
         except SocialPost.DoesNotExist:
@@ -674,15 +711,34 @@ class PostSaveViewSet(viewsets.ModelViewSet):
 
 
 
+def story_queryset(user):
+    """Live stories with the viewer's per-story state resolved in the main query.
+
+    `prefetch_related('views')` does NOT help here: `obj.views.filter(...)` on a
+    prefetched manager re-queries the database, so the old bar cost three
+    queries per story (has_unviewed, is_viewed, views_count). Annotating costs
+    none — StorySerializer reads viewed_by_me / views_total when present.
+    """
+    return (
+        Story.objects
+        .filter(expires_at__gt=timezone.now(), is_removed=False)
+        .select_related('user__profile')
+        .annotate(
+            viewed_by_me=Exists(
+                StoryView.objects.filter(story=OuterRef('pk'), viewer=user)
+            ),
+            views_total=Count('views', distinct=True),
+        )
+    )
+
+
 class StoryViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly]
     serializer_class = StorySerializer
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
     def get_queryset(self):
-        return Story.objects.filter(
-            expires_at__gt=timezone.now(), is_removed=False
-        ).select_related('user__profile').prefetch_related('views')
+        return story_queryset(self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(
@@ -702,11 +758,12 @@ class StoryViewSet(viewsets.ModelViewSet):
         following_ids = list(request.user.followed_by.values_list('id', flat=True))
         following_ids.append(request.user.id)
 
-        stories = Story.objects.filter(
+        # One query for the whole bar: viewed_by_me / views_total arrive as
+        # annotations, so neither the grouping below nor the serializer touches
+        # the database again.
+        stories = story_queryset(request.user).filter(
             user_id__in=following_ids,
-            expires_at__gt=timezone.now(),
-            is_removed=False,
-        ).select_related('user__profile').prefetch_related('views').order_by('user_id', '-created_at')
+        ).order_by('user_id', '-created_at')
 
         # Group by user
         grouped = {}
@@ -715,7 +772,7 @@ class StoryViewSet(viewsets.ModelViewSet):
             if uid not in grouped:
                 grouped[uid] = {'user': story.user, 'stories': [], 'has_unviewed': False}
             grouped[uid]['stories'].append(story)
-            if not story.views.filter(viewer=request.user).exists():
+            if not story.viewed_by_me:
                 grouped[uid]['has_unviewed'] = True
 
         # Own stories first, then following

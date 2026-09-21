@@ -3,6 +3,8 @@ from .common import *  # noqa: F401,F403
 
 class TrackSerializer(serializers.ModelSerializer):
      likes_count = serializers.SerializerMethodField()
+     comments_count = serializers.SerializerMethodField()
+     has_lyrics = serializers.SerializerMethodField()
      is_liked = serializers.SerializerMethodField()
      # Lightweight artist ref. The full UserSerializer caused infinite recursion
      # (track.artist -> social_posts -> post.song -> track.artist -> ...), and
@@ -17,8 +19,9 @@ class TrackSerializer(serializers.ModelSerializer):
         model = Track
         fields = [
             'id', 'title', 'artist', 'album', 'audio_file','is_owner',
-            'cover_image', 'lyrics', 'slug', 
-            'views', 'downloads','likes_count','is_liked', 'created_at', 'updated_at'
+            'cover_image', 'lyrics', 'has_lyrics', 'slug',
+            'views', 'downloads','likes_count','comments_count','is_liked',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['artist', 'slug', 'views', 'downloads', 'created_at', 'updated_at']
         # extra_kwargs = {
@@ -34,6 +37,18 @@ class TrackSerializer(serializers.ModelSerializer):
         # COUNT query per row; fall back to a live count for other call sites.
         count = getattr(obj, 'likes_total', None)
         return count if count is not None else obj.likes.count()
+     def get_comments_count(self, obj):
+        # Annotation from TrackViewSet.get_queryset. The count exists so the
+        # row's comment button can show a number without the client fetching
+        # the whole comment list per track just to call .length on it.
+        count = getattr(obj, 'comments_total', None)
+        return count if count is not None else obj.comments.filter(is_removed=False).count()
+
+     def get_has_lyrics(self, obj):
+        # Lets the list hide or show the lyrics button without shipping the
+        # lyrics themselves — see TrackListSerializer.
+        return bool((obj.lyrics or '').strip())
+
      def get_is_liked(self, obj):
         # Prefer the per-user annotation (liked_by_me) to avoid an N+1 query.
         liked = getattr(obj, 'liked_by_me', None)
@@ -51,6 +66,22 @@ class TrackSerializer(serializers.ModelSerializer):
 
 
 
+class TrackListSerializer(TrackSerializer):
+    """The library list payload: everything TrackSerializer has EXCEPT the
+    lyrics themselves.
+
+    Lyrics are a full song's text — commonly 1–3 KB each, and the single
+    largest field on a track. Twenty of them per page is most of the response
+    body, spent on text that is only read when someone actually opens the
+    lyrics sheet for one song. The list carries `has_lyrics` instead, which is
+    all the row needs to decide whether to show the button, and the text is
+    fetched per-track on open (see TrackViewSet.lyrics).
+    """
+
+    class Meta(TrackSerializer.Meta):
+        fields = [f for f in TrackSerializer.Meta.fields if f != 'lyrics']
+
+
 class TrackQueueSerializer(serializers.ModelSerializer):
     """Lean payload for building a playback queue (e.g. shuffle). Only the fields
     the player needs — no per-row like counts / annotations / ownership — so a
@@ -61,14 +92,25 @@ class TrackQueueSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Track
-        fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image', 'lyrics', 'slug']
+        # No lyrics: a 200-track shuffle sample was shipping 200 song texts to
+        # build a queue, and the player fetches the current track's lyrics on
+        # demand anyway.
+        fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image',
+                  'has_lyrics', 'slug']
+
+    has_lyrics = serializers.SerializerMethodField()
+
+    def get_has_lyrics(self, obj):
+        return bool((obj.lyrics or '').strip())
 
 
 class PlaylistSerializer(serializers.ModelSerializer):
     # Slim owner ref (the full UserSerializer drags in the whole social-posts
     # payload, which is wasteful for a playlist).
     user = SimpleUserSerializer(read_only=True)
-    tracks = TrackSerializer(many=True, read_only=True)
+    # TrackListSerializer, not TrackSerializer: opening a 40-track playlist was
+    # downloading 40 full song texts to render a list of titles.
+    tracks = TrackListSerializer(many=True, read_only=True)
     track_count = serializers.SerializerMethodField()
 
     class Meta:

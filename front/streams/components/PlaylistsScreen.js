@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Modal, TextInput, Alert, Pressable,
@@ -7,6 +7,10 @@ import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { fetchPlaylists, createPlaylist } from '../services/api';
+import { useAuth } from '../context/useAuth';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { useContentWidth } from '../utils/layout';
+import { TrackListSkeleton } from './SkeletonLoader';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -36,8 +40,13 @@ const CoverCollage = ({ images = [] }) => {
 const PlaylistsScreen = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const [playlists, setPlaylists] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  const cacheKey = userKey(currentUser?.id, 'playlists');
+  const { sideMargin } = useContentWidth({ gutter: 0 });
+  // Open on the last known playlists instead of a centered spinner — same rule
+  // as the feed and the library.
+  const [playlists, setPlaylists] = useState(() => peekCache(cacheKey) ?? []);
+  const [loading, setLoading] = useState(() => (peekCache(cacheKey) ?? []).length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
@@ -45,18 +54,29 @@ const PlaylistsScreen = () => {
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    readCache(cacheKey).then((cached) => {
+      if (cancelled || !Array.isArray(cached) || !cached.length) return;
+      setPlaylists((prev) => (prev.length ? prev : cached));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]);
+
   const load = useCallback(async () => {
     try {
       setError(null);
       const data = await fetchPlaylists();
       setPlaylists(data);
+      if (data?.length && currentUser?.id) writeCache(cacheKey, data);
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [cacheKey, currentUser?.id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -99,10 +119,12 @@ const PlaylistsScreen = () => {
     </TouchableOpacity>
   ), [navigation]);
 
-  if (loading) {
+  // Skeleton rows, not a centered spinner: the list fills in place rather than
+  // the screen sitting empty and then snapping to content.
+  if (loading && playlists.length === 0) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={[styles.container, { paddingHorizontal: sideMargin }]}>
+        <TrackListSkeleton count={6} />
       </View>
     );
   }

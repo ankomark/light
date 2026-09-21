@@ -10,6 +10,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 import * as SecureStore from '../services/secureStorage'; // web-safe shim (expo-secure-store stubs web)
 import axios from 'axios';
 import { API_URL, storeTokens, clearTokens } from '../services/api';
+import { clearAllCaches } from '../utils/screenCache';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 
 const AuthContext = createContext(null);
@@ -61,6 +62,10 @@ export const AuthProvider = ({ children }) => {
 
   const clearAuthData = async () => {
     await clearTokens();
+    // Screens paint their last cached payload on open. Those payloads are keyed
+    // per account, but dropping them on the way out means a shared phone can't
+    // flash the previous user's feed even for a frame.
+    await clearAllCaches();
     setCurrentUser(null);
     setIsAuthenticated(false);
     setIsEmailVerified(false);

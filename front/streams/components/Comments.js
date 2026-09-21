@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,15 +7,16 @@ import {
   StyleSheet,
   FlatList,
   Modal,
-  Image,
   Alert
 } from 'react-native';
+// expo-image: the comment avatars are the same faces over and over, so a
+// real memory+disk cache means they paint from cache instead of re-fetching.
+import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { useFocusEffect } from '@react-navigation/native';
-import axios from 'axios';
-import { fetchComments, postComment, getAccessToken, API_URL } from '../services/api';
+import { fetchComments, postComment, getAccessToken } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -39,36 +40,66 @@ const CommentSkeleton = () => (
   </View>
 );
 
-const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
+const Comments = ({ trackId, initialCount = 0, highlightCommentId, autoOpen = false }) => {
     const { t } = useI18n();
     const kbHeight = useKeyboardHeight(); // float the comment box above the keyboard (edge-to-edge safe)
     const flatListRef = useRef(null);
     const [highlightedComment, setHighlightedComment] = useState(null);
     const [comments, setComments] = useState([]);
-    const [loading, setLoading] = useState(true);
+    // Starts false: nothing is being fetched until the sheet is opened.
+    const [loading, setLoading] = useState(false);
+    // Whether this track's comments have ever been fetched — drives both the
+    // count shown on the closed button and the stale-while-revalidate reopen.
+    const [fetched, setFetched] = useState(false);
     const [newComment, setNewComment] = useState('');
     const [showComments, setShowComments] = useState(autoOpen);
-    const [userProfile, setUserProfile] = useState(null);
     const { currentUser } = useAuth();
 
-    const fetchCommentData = async () => {
+    // Mirrors `comments` so the fetch below can check for a cached list without
+    // depending on it (which would re-create the callback on every change).
+    // Declared HERE, above its first reader: it used to sit further down, which
+    // worked only because nothing read it during render — a temporal-dead-zone
+    // trap for the next person to touch this file.
+    const commentsRef = useRef([]);
+
+    const fetchCommentData = useCallback(async () => {
+        const hadCache = commentsRef.current.length > 0;
         try {
-            setLoading(true);
+            // Only block the sheet on a true cold load. On reopen we keep the
+            // cached list up and refresh behind it.
+            if (!hadCache) setLoading(true);
             // The serializer now includes user.profile_picture, so this is a
             // single request — no more per-comment profile lookups (N+1).
             const data = await fetchComments(trackId);
             setComments(Array.isArray(data) ? data : []);
+            setFetched(true);
         } catch (error) {
             console.error('Failed to fetch comments:', error);
-            Alert.alert(t('common.error'), t('comments.loadFailed'));
+            if (!hadCache) Alert.alert(t('common.error'), t('comments.loadFailed'));
         } finally {
             setLoading(false);
         }
-    };
+    }, [trackId, t]);
 
+    // Fetch ONLY when the sheet is open.
+    //
+    // This component is rendered inside every row of the track list, and when
+    // closed it draws one thing: a button with a number on it. It used to get
+    // that number by downloading the track's entire comment list on mount — so
+    // opening the music screen fired one comment request per visible row, plus
+    // more as you scrolled. The count comes from the track payload now
+    // (`comments_count`), and the list is fetched when someone opens it. The
+    // feed's CommentAction was fixed this way already; this is the same fix.
     useEffect(() => {
+        if (!showComments) return;
         fetchCommentData();
-    }, [trackId]);
+    }, [showComments, fetchCommentData]);
+
+    useEffect(() => { commentsRef.current = comments; }, [comments]);
+
+    // What the closed button shows: the server's count until we've fetched the
+    // list ourselves, then the live length (so a comment just posted counts).
+    const displayCount = fetched ? comments.length : (initialCount ?? 0);
 
     useEffect(() => {
         if (autoOpen) {
@@ -94,23 +125,9 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
         }, [comments, highlightCommentId])
     );
 
-    const fetchUserProfile = async () => {
-        try {
-            const token = await getAccessToken();
-            if (!token) return;
-
-            const response = await axios.get(`${API_URL}/profiles/me/`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            setUserProfile(response.data);
-        } catch (error) {
-            console.error('Error fetching user profile:', error);
-        }
-    };
-
-    useEffect(() => {
-        fetchUserProfile();
-    }, []);
+    // The input avatar comes from the session's user, not a request. This used
+    // to hit /profiles/me/ on mount from every row of the track list — the same
+    // response, fetched once per visible track, for one small picture.
 
     // Optimistic post: the comment appears immediately, reconciles with the
     // server response in place; rolls back on failure.
@@ -133,7 +150,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
             pending: true,
             user: {
                 username: currentUser?.username || 'You',
-                profile_picture: userProfile?.picture || currentUser?.profile_picture || null,
+                profile_picture: currentUser?.profile_picture || null,
             },
         };
         setComments(prev => [...prev, optimistic]);
@@ -144,7 +161,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
             const posted = await postComment(trackId, content, token);
             posted.user = {
                 ...posted.user,
-                profile_picture: userProfile?.picture || null,
+                profile_picture: currentUser?.profile_picture || null,
             };
             setComments(prev => prev.map(c => (c.id === tempId ? posted : c)));
         } catch (error) {
@@ -167,11 +184,15 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
         <View style={styles.commentsSection}>
             <TouchableOpacity onPress={toggleComments} style={styles.triggerButton}>
                 <Feather name="message-circle" size={18} color="#fff" />
-                <Text style={styles.triggerText}>{comments.length}</Text>
+                <Text style={styles.triggerText}>{displayCount}</Text>
             </TouchableOpacity>
 
+            {/* Mounted only while open. This component sits in every row of
+                the track list, so an always-mounted Modal per row is a lot of
+                view hierarchy for something nobody has opened. */}
+            {showComments && (
             <Modal
-                visible={showComments}
+                visible
                 animationType="slide"
                 onRequestClose={toggleComments}
             >
@@ -207,7 +228,9 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                                     ]}>
                                         <Image
                                             source={item.user?.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
-                                            defaultSource={DEFAULT_AVATAR}
+                                            placeholder={DEFAULT_AVATAR}
+                                            cachePolicy="memory-disk"
+                                            contentFit="cover"
                                             style={styles.avatar}
                                         />
                                         <View style={styles.commentContent}>
@@ -233,8 +256,10 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
 
                         <View style={styles.inputContainer}>
                             <Image
-                                source={userProfile?.picture ? { uri: userProfile.picture } : DEFAULT_AVATAR}
-                                defaultSource={DEFAULT_AVATAR}
+                                source={currentUser?.profile_picture ? { uri: currentUser.profile_picture } : DEFAULT_AVATAR}
+                                placeholder={DEFAULT_AVATAR}
+                                cachePolicy="memory-disk"
+                                contentFit="cover"
                                 style={styles.userAvatar}
                             />
                             <TextInput
@@ -258,6 +283,7 @@ const Comments = ({ trackId, highlightCommentId, autoOpen = false }) => {
                     </SafeAreaView>
                 </View>
             </Modal>
+            )}
         </View>
     );
 };

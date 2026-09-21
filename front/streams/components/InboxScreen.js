@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   ActivityIndicator, AppState, RefreshControl,
@@ -7,6 +7,9 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchConversations, fetchConversationsByUrl } from '../services/api';
+import { useAuth } from '../context/useAuth';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { PersonListSkeleton } from './SkeletonLoader';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -32,7 +35,9 @@ const previewText = (last) => {
   }
 };
 
-const ConversationItem = ({ item, onPress }) => {
+// Memoised: the inbox polls every 15 s and re-renders the list; rows whose
+// conversation object didn't change skip their render entirely.
+const ConversationItem = memo(({ item, onPress }) => {
   const other = item.other_participant;
   const last = item.last_message;
   const hasUnread = item.unread_count > 0;
@@ -73,17 +78,40 @@ const ConversationItem = ({ item, onPress }) => {
       </View>
     </TouchableOpacity>
   );
-};
+});
+ConversationItem.displayName = 'ConversationItem';
+
+const inboxCacheKey = (userId) => userKey(userId, 'inbox');
 
 const InboxScreen = ({ navigation }) => {
   const { t } = useI18n();
-  const [conversations, setConversations] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  const cacheKey = inboxCacheKey(currentUser?.id);
+  // Paint the last inbox we saw — synchronously when this session already
+  // has it, from disk otherwise (below). The first request then refreshes it
+  // in place instead of the screen opening on a spinner.
+  const [conversations, setConversations] = useState(() => peekCache(cacheKey) ?? []);
+  const [loading, setLoading] = useState(() => !peekCache(cacheKey));
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
   const appState = useRef(AppState.currentState);
   const pollRef = useRef(null);
+  // Read by the focus effect without making it re-subscribe on every change.
+  const conversationsRef = useRef(conversations);
+  const cursorSetRef = useRef(false);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+
+  // Cold start: the disk copy, if the network hasn't answered first.
+  useEffect(() => {
+    let cancelled = false;
+    readCache(cacheKey).then((cached) => {
+      if (cancelled || !Array.isArray(cached) || !cached.length) return;
+      setConversations((prev) => (prev.length ? prev : cached));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]);
 
   // Initial/refresh: replace with page 1 (freshest) + capture the next cursor.
   // Silent poll: merge page 1 on top of the loaded list (deduped) so new
@@ -98,14 +126,21 @@ const InboxScreen = ({ navigation }) => {
         const ids = new Set(page1.map((c) => c.id));
         return [...page1, ...prev.filter((c) => !ids.has(c.id))];
       });
-      if (!silent) setNextUrl(res?.next ?? null);
+      // Only the freshest page is cached: it's what the next open paints.
+      writeCache(cacheKey, page1);
+      // A silent refresh on a list painted from cache still needs a cursor —
+      // but only the first time; after that the scroll owns it.
+      if (!silent || !cursorSetRef.current) {
+        cursorSetRef.current = true;
+        setNextUrl(res?.next ?? null);
+      }
     } catch {
       // ignore
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [cacheKey]);
 
   // Infinite scroll: append the next page of older conversations.
   const loadMore = useCallback(async () => {
@@ -127,7 +162,7 @@ const InboxScreen = ({ navigation }) => {
 
   useFocusEffect(
     useCallback(() => {
-      load(conversations.length > 0); // keep the list visible while refreshing on re-focus
+      load(conversationsRef.current.length > 0); // keep the list visible while refreshing on re-focus
       pollRef.current = setInterval(() => load(true), 15000);
 
       const sub = AppState.addEventListener('change', next => {
@@ -143,7 +178,6 @@ const InboxScreen = ({ navigation }) => {
         clearInterval(pollRef.current);
         sub.remove();
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [load])
   );
 
@@ -153,19 +187,25 @@ const InboxScreen = ({ navigation }) => {
   }, [load]);
 
   const openChat = useCallback((conversation) => {
+    // The chat marks itself read as it opens; clear the badge now rather than
+    // leaving it lit until the next poll, 15 seconds later.
+    if (conversation.unread_count > 0) {
+      setConversations((prev) => {
+        const next = prev.map((c) => (c.id === conversation.id ? { ...c, unread_count: 0 } : c));
+        writeCache(cacheKey, next.slice(0, 20));
+        return next;
+      });
+    }
     navigation.navigate('Chat', {
       conversationId: conversation.id,
       otherUser: conversation.other_participant,
     });
-  }, [navigation]);
+  }, [navigation, cacheKey]);
 
-  if (loading && conversations.length === 0) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.accent} />
-      </View>
-    );
-  }
+  const renderItem = useCallback(
+    ({ item }) => <ConversationItem item={item} onPress={openChat} />,
+    [openChat]
+  );
 
   return (
     <View style={styles.container}>
@@ -180,7 +220,7 @@ const InboxScreen = ({ navigation }) => {
       <FlatList
         data={conversations}
         keyExtractor={item => item.id.toString()}
-        renderItem={({ item }) => <ConversationItem item={item} onPress={openChat} />}
+        renderItem={renderItem}
         contentContainerStyle={[styles.listContent, conversations.length === 0 && styles.emptyContent]}
         showsVerticalScrollIndicator={false}
         onEndReached={loadMore}
@@ -194,6 +234,8 @@ const InboxScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" colors={[colors.accent]} />
         }
         ListEmptyComponent={
+          // Nothing cached yet: rows that are about to fill in, not a spinner.
+          loading ? <PersonListSkeleton count={7} avatar={52} /> : (
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubbles-outline" size={56} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>{t('inbox.empty')}</Text>
@@ -201,6 +243,7 @@ const InboxScreen = ({ navigation }) => {
               Follow someone and tap their profile to send a message
             </Text>
           </View>
+          )
         }
       />
     </View>

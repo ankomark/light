@@ -8,7 +8,6 @@ import {
   Alert,
   TouchableOpacity,
   Pressable,
-  useWindowDimensions,
   Platform,
   AppState,
   Animated,
@@ -39,6 +38,8 @@ import AudioVisualizer from './AudioVisualizer';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import formatCount from '../utils/formatCount';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { useContentWidth, useMaxMediaHeight, FONT_SCALE } from '../utils/layout';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -52,17 +53,11 @@ const FEED_REASON = {
   discovery: { key: 'feed.reason.discovery', icon: 'explore' },
   trending: { key: 'feed.reason.trending', icon: 'trending-up' },
 };
-// Post card width. Capped on wide screens (tablets/landscape) so the feed reads
-// as a centered column instead of stretching edge-to-edge; on phones it's just
-// the window width minus the 12px side margins, so their layout is unchanged.
-const MAX_FEED_W = 600;
-// Reactive feed-card width: full width minus gutters on phones, capped at
-// MAX_FEED_W (centered column) on tablets/web. A hook — not a module-scope
-// Dimensions.get snapshot — so it reflows on rotation / web resize.
-const useCardWidth = () => {
-  const { width } = useWindowDimensions();
-  return Math.min(width - 24, MAX_FEED_W);
-};
+// Post card width: full width minus the 12px side margins on a phone, capped to
+// a centered column on tablets/web. Now the shared app-wide rule (utils/layout)
+// rather than a private constant, so the music library and the mini player
+// centre to the same column instead of stretching.
+const useCardWidth = () => useContentWidth({ gutter: 24 }).width;
 
 // Compact relative time, e.g. "now", "5m", "3h", "2d", "4w", or a date.
 const timeAgo = (dateStr) => {
@@ -92,6 +87,22 @@ const mediaAspectRatio = (width, height) => {
   if (!isFinite(r) || r <= 0) return 1;
   return Math.min(1.91, Math.max(0.5, r));
 };
+
+// One cached payload per (account, tab). Keyed by account so a second login on
+// a shared phone never paints the previous user's feed, and by tab because For
+// You and Following are different lists — sharing a key would flash the wrong
+// one every time the user switches.
+const feedCacheKey = (userId, feedType) => userKey(userId, `feed:${feedType}`);
+
+// The tab the app lands on. Named because the cached first paint below has to
+// read the same tab the feed is about to show — two places agreeing by
+// coincidence is how a stale Following feed ends up flashing under For You.
+const DEFAULT_FEED_TYPE = 'for_you';
+
+// How stale a feed may be and still be worth painting instantly. Half an hour
+// of drift on a social feed is invisible — the revalidation lands a moment
+// later anyway — but a day-old feed opening as if it were current is not.
+const FEED_MAX_AGE_MS = 30 * 60 * 1000;
 
 const processPost = (post, existingFollowStates = {}) => {
   if (!post.user || typeof post.user !== 'object') {
@@ -175,12 +186,19 @@ const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPre
         }
         renderItem={({ item: url }) => (
           <Pressable onPress={onPressSlide} disabled={!onPressSlide} style={{ width: cardW, height: '100%' }}>
-            <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={150} />
+            <Image
+              source={{ uri: url }}
+              style={{ width: '100%', height: '100%' }}
+              contentFit="cover"
+              transition={150}
+              cachePolicy="memory-disk"
+              recyclingKey={url}
+            />
           </Pressable>
         )}
       />
       <GlassView intensity={28} tint="dark" style={styles.carouselCounter} pointerEvents="none">
-        <Text style={styles.carouselCounterText}>{index + 1}/{urls.length}</Text>
+        <Text style={styles.carouselCounterText} maxFontSizeMultiplier={FONT_SCALE.tight}>{index + 1}/{urls.length}</Text>
       </GlassView>
       <View style={styles.carouselDots} pointerEvents="none">
         {urls.map((_, i) => (
@@ -227,7 +245,19 @@ const PostMedia = React.memo(function PostMedia({
   const posterFade = useRef(new Animated.Value(1)).current;
   // When autoplay is off, the video starts paused; tap toggles play/pause.
   const [manualPaused, setManualPaused] = useState(!autoplay);
-  const aspectRatio = mediaAspectRatio(item.width, item.height);
+  // The post's own ratio, then floored so the card can never be taller than the
+  // viewport allows. Without the floor an extreme portrait runs several screens
+  // tall for a single post on a short viewport (split screen, a foldable's
+  // cover display, any unlocked landscape surface) and the feed stops reading
+  // as a feed — you can't see that anything follows. contentFit="cover" centre-
+  // crops the overflow, which is what every feed does at the extremes.
+  const cardW = useCardWidth();
+  const maxMediaH = useMaxMediaHeight();
+  const aspectRatio = useMemo(() => {
+    const raw = mediaAspectRatio(item.width, item.height);
+    const tallestAllowed = maxMediaH > 0 ? cardW / maxMediaH : 0;
+    return Math.max(raw, tallestAllowed);
+  }, [item.width, item.height, cardW, maxMediaH]);
 
   useEffect(() => {
     setCurrentUrl(item.mediaUrl);
@@ -362,6 +392,8 @@ const PostMedia = React.memo(function PostMedia({
               style={[styles.media, { aspectRatio }]}
               contentFit="cover"
               transition={150}
+              cachePolicy="memory-disk"
+              recyclingKey={String(item.id)}
             />
           ) : (
             <View style={[styles.media, styles.videoPosterFallback, { aspectRatio }]} />
@@ -412,6 +444,8 @@ const PostMedia = React.memo(function PostMedia({
               source={{ uri: item.thumbnailUrl }}
               style={[styles.media, { aspectRatio }]}
               contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={String(item.id)}
             />
           </Animated.View>
         )}
@@ -491,16 +525,23 @@ const PostMedia = React.memo(function PostMedia({
       style={styles.mediaContainer}
       onPress={() => handleTap(hasAudio ? () => onToggleAudio?.(item) : null)}
     >
-      {isLoading && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#1DA1F2" />
-        </View>
-      )}
+      {/* No spinner and no opacity-0 here any more. The card already reserves
+          the image's exact aspect ratio, the feed prefetched this URL when the
+          page landed, and expo-image fades in from its own cache — so hiding
+          the image until onLoad fired was showing a spinner over a picture that
+          was ready to draw. The reserved box means nothing below it shifts. */}
       <Image
         source={{ uri: currentUrl }}
-        style={[styles.media, { aspectRatio }, isLoading && { opacity: 0 }]}
+        style={[styles.media, { aspectRatio }]}
         contentFit="cover"
         transition={150}
+        // Keep decoded bitmaps in memory as well as on disk: scrolling back up
+        // then re-paints instead of re-decoding from the file.
+        cachePolicy="memory-disk"
+        // FlatList recycles cells. Without this, a recycled cell keeps drawing
+        // the previous post's photo until the new one decodes — the flash of
+        // "wrong image" people read as jank.
+        recyclingKey={String(item.id)}
         onError={handleError}
         onLoad={handleLoad}
       />
@@ -524,24 +565,77 @@ const PostMedia = React.memo(function PostMedia({
   );
 });
 
+// One feed card, memoized.
+//
+// `renderItem` has to depend on the focus/audio state, which changes on every
+// scroll as posts come into view — and when renderItem's identity changes,
+// FlatList re-renders every visible cell. Without a component boundary here,
+// that meant rebuilding each card's whole header and footer subtree (avatar,
+// follow button, like/save/share/comment/download) several times a second
+// while scrolling.
+//
+// With it, a cell re-render is just recreating this element and a shallow prop
+// compare; only the one or two cards whose focus actually changed do real work.
+// Hence the primitives rather than an object: `isFocused` and `isAudioActive`
+// are resolved by the caller so this compares cheaply.
+const PostCard = React.memo(function PostCard({
+  item, cardW, isFocused, isMuted, isAudioActive, isAudioPlaying,
+  onToggleMute, onToggleAudio, onDoubleTapLike, renderHeader, renderFooter,
+}) {
+  return (
+    <View style={[styles.postContainer, { width: cardW }]}>
+      {renderHeader({ item })}
+      <PostMedia
+        item={item}
+        isFocused={isFocused}
+        isMuted={isMuted}
+        onToggleMute={onToggleMute}
+        isAudioActive={isAudioActive}
+        isAudioPlaying={isAudioPlaying}
+        onToggleAudio={onToggleAudio}
+        onDoubleTapLike={onDoubleTapLike}
+      />
+      {renderFooter({ item })}
+    </View>
+  );
+});
+
 const SocialFeed = ({ showBackground = true }) => {
   const { t } = useI18n();
   const cardW = useCardWidth();
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser: _cu } = useAuth();
+  // Paint whatever this session already has for this tab, with no await at all:
+  // a tab switch back to Home is then a plain re-render, not a fetch-and-flash.
+  // A cold start misses here and is filled by the disk read in the effect below.
+  const [posts, setPosts] = useState(
+    () => peekCache(feedCacheKey(_cu?.id, DEFAULT_FEED_TYPE)) ?? []
+  );
+  // `loading` now means "nothing to show yet", not "a request is in flight".
+  // With rows already on screen the refresh happens behind them, so the
+  // skeleton — which is what the user reads as slowness — never appears.
+  const [loading, setLoading] = useState(() => posts.length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null); // full `next` URL for the next page
   const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [feedType, setFeedType] = useState('for_you'); // 'following' | 'for_you' — land on the ranked feed
+  const [feedType, setFeedType] = useState(DEFAULT_FEED_TYPE); // 'following' | 'for_you' — land on the ranked feed
   const [newPostsAvailable, setNewPostsAvailable] = useState(false);
   const [topBarH, setTopBarH] = useState(0);
   const [error, setError] = useState(null);
-  const [followStates, setFollowStates] = useState({});
+  // Local follow overrides, applied to freshly-fetched rows so a follow the user
+  // just made isn't undone by a page that was already in flight.
+  //
+  // This is a ref, NOT state, and that is the whole point: as state it sat in
+  // loadPosts's dependency list, so every Follow tap re-created loadPosts, which
+  // re-ran the mount effect below, which refetched the entire feed and threw the
+  // user back to the top. The visible post rows are patched directly by
+  // handleFollowChange's setPosts — this map only needs to survive, not to
+  // re-render anything.
+  const followStatesRef = useRef({});
   const navigation = useNavigation();
   const audioRef = useRef(null);
-  const { currentUser } = useAuth();
+  const currentUser = _cu;
   const { pause: pauseMusic } = usePlayer();
   const { preferences } = usePreferences();
   const lastFetchTimeRef = useRef(0);
@@ -549,8 +643,14 @@ const SocialFeed = ({ showBackground = true }) => {
   // Warm the image cache for a freshly-loaded batch so posts appear instantly as
   // the user scrolls into them. Skipped under Data saver (don't pre-download on a
   // metered connection). Best-effort — prefetch failures are ignored.
+  // Read through a ref: `preferences` flips once from defaults to the stored
+  // values just after boot, and as a dependency that rebuilt prefetchMedia,
+  // then loadPosts, then re-ran the mount effect — a second full feed fetch
+  // during the slowest moment of startup.
+  const dataSaverRef = useRef(false);
+  dataSaverRef.current = !!preferences[PREF_KEYS.dataSaver];
   const prefetchMedia = useCallback((list) => {
-    if (preferences[PREF_KEYS.dataSaver]) return;
+    if (dataSaverRef.current) return;
     const urls = [];
     for (const p of list) {
       if (p.content_type === 'video') {
@@ -562,7 +662,7 @@ const SocialFeed = ({ showBackground = true }) => {
       if (pic && pic !== AVATAR_FAILED) urls.push(pic);
     }
     if (urls.length) Image.prefetch(urls).catch(() => {});
-  }, [preferences]);
+  }, []);
   const [currentlyPlayingPostId, setCurrentlyPlayingPostId] = useState(null);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false); // play/pause of attached song
   const playingSongPostIdRef = useRef(null); // mirrors the attached-song post id
@@ -619,14 +719,67 @@ const SocialFeed = ({ showBackground = true }) => {
     logWatchEvents(events).catch(() => {});
   }, []);
 
-  useEffect(() => { topPostIdRef.current = posts[0]?.id ?? null; }, [posts]);
+  // Mirrors `posts` for callbacks that need the current length but must not be
+  // re-created when it changes (loadPosts is one — see followStatesRef).
+  const postsRef = useRef(posts);
+  useEffect(() => {
+    postsRef.current = posts;
+    topPostIdRef.current = posts[0]?.id ?? null;
+  }, [posts]);
+
+  const cacheKey = useMemo(
+    () => feedCacheKey(currentUser?.id, feedType),
+    [currentUser?.id, feedType],
+  );
+
+  // Which cache key the rows currently on screen came from. Without this, the
+  // hydration below can't tell "we already have the right rows" from "we have
+  // the OTHER tab's rows" — and switching For You <-> Following left the
+  // previous tab's posts on screen until the network answered, which is both
+  // wrong content and the slowest possible way to show it.
+  const postsKeyRef = useRef(null);
+
+  // Fill from disk on a cold start, on a tab this session hasn't shown yet, and
+  // whenever the rows on screen belong to a different tab. Rows fetched for THIS
+  // key always win — the peek above and any landed response are fresher than a
+  // slower disk read.
+  useEffect(() => {
+    let cancelled = false;
+    if (searchRef.current) return undefined;
+    const key = cacheKey;
+    readCache(key, FEED_MAX_AGE_MS).then((cached) => {
+      if (cancelled || !Array.isArray(cached) || !cached.length) return;
+      setPosts((prev) => {
+        if (prev.length && postsKeyRef.current === key) return prev;
+        postsKeyRef.current = key;
+        return cached;
+      });
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]);
+
+  // Switching tabs: drop the outgoing tab's rows immediately rather than
+  // leaving them under the new tab's header. The hydration above repaints from
+  // cache on the next tick when there is one, so this is a flash of skeleton
+  // only for a tab that has never been opened.
+  useEffect(() => {
+    if (postsKeyRef.current && postsKeyRef.current !== cacheKey) {
+      setPosts((prev) => (prev.length ? [] : prev));
+      setLoading(true);
+    }
+  }, [cacheKey]);
 
   const loadPosts = useCallback(async (isRefresh = false) => {
     const now = Date.now();
     if (!isRefresh && now - lastFetchTimeRef.current < 1000) return;
 
     try {
-      if (isRefresh) setRefreshing(true); else setLoading(true);
+      // Only claim "loading" when there is genuinely nothing on screen. With
+      // rows already painted this is a silent background revalidation, which is
+      // the difference between a feed that flashes and one that just updates.
+      if (isRefresh) setRefreshing(true);
+      else setLoading((wasLoading) => wasLoading && postsRef.current.length === 0);
       setError(null);
 
       // Search is global; otherwise honor the selected feed tab. Pull-to-refresh
@@ -637,14 +790,21 @@ const SocialFeed = ({ showBackground = true }) => {
       const response = await fetchSocialPosts(null, search ? null : feedType, search, { fresh: isRefresh, rank: useRank });
       const raw = response?.results ?? [];
       const valid = raw.filter(p => p.user && typeof p.user === 'object');
-      const processed = valid.map(p => processPost(p, followStates));
+      const processed = valid.map(p => processPost(p, followStatesRef.current));
 
       setPosts(processed);
+      postsKeyRef.current = search ? null : cacheKey;
       prefetchMedia(processed);
       setNextUrl(response?.next ?? null);
       setHasMore(!!response?.next);
       setNewPostsAvailable(false);
       lastFetchTimeRef.current = now;
+      // Only page one, never a search result, and never before we know who the
+      // viewer is — a write under the anonymous key would be a payload no
+      // signed-in session ever reads back.
+      if (!search && processed.length && currentUser?.id) {
+        writeCache(cacheKey, processed);
+      }
     } catch (err) {
       setError(err);
       if (!isRefresh) {
@@ -660,7 +820,7 @@ const SocialFeed = ({ showBackground = true }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [followStates, feedType, prefetchMedia, t]);
+  }, [feedType, prefetchMedia, cacheKey, currentUser?.id, t]);
 
   const loadMorePosts = useCallback(async () => {
     if (loadingMore || !hasMore || loading || !nextUrl) return;
@@ -672,7 +832,7 @@ const SocialFeed = ({ showBackground = true }) => {
       const raw = response?.results ?? [];
       const processed = raw
         .filter(p => p.user && typeof p.user === 'object')
-        .map(p => processPost(p, followStates));
+        .map(p => processPost(p, followStatesRef.current));
       setPosts(prev => [...prev, ...processed]);
       prefetchMedia(processed);
       setNextUrl(response?.next ?? null);
@@ -682,7 +842,7 @@ const SocialFeed = ({ showBackground = true }) => {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, loading, nextUrl, followStates, prefetchMedia]);
+  }, [loadingMore, hasMore, loading, nextUrl, prefetchMedia]);
 
   const handleRefresh = useCallback(() => loadPosts(true), [loadPosts]);
 
@@ -905,13 +1065,13 @@ const SocialFeed = ({ showBackground = true }) => {
   }), []);
 
   const handleFollowChange = useCallback((data) => {
-    setFollowStates(prev => ({
-      ...prev,
+    followStatesRef.current = {
+      ...followStatesRef.current,
       [data.id]: {
         is_following: data.is_following,
         followers_count: data.followers_count
       }
-    }));
+    };
     setPosts(prev => prev.map(post => {
       if (post.user.id === data.id) {
         return {
@@ -1006,6 +1166,8 @@ const SocialFeed = ({ showBackground = true }) => {
               placeholder={DEFAULT_AVATAR}
               contentFit="cover"
               transition={150}
+              cachePolicy="memory-disk"
+              recyclingKey={`avatar_${item.user.id}`}
               style={styles.profileImage}
               onError={() => setPosts(prev => prev.map(p =>
                 p.id === item.id
@@ -1015,7 +1177,7 @@ const SocialFeed = ({ showBackground = true }) => {
             />
           </View>
           <View style={styles.userTextContainer}>
-            <Text style={styles.username} numberOfLines={1}>
+            <Text style={styles.username} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>
               {String(item.user.username || 'Unknown user')}
             </Text>
             <Text style={styles.metaText} numberOfLines={1}>
@@ -1090,10 +1252,13 @@ const SocialFeed = ({ showBackground = true }) => {
       <View style={styles.postInfo}>
         <View style={styles.viewsRow}>
           <MaterialIcons name="play-arrow" size={14} color={colors.textMuted} />
-          <Text style={styles.viewsText}>
+          <Text style={styles.viewsText} maxFontSizeMultiplier={FONT_SCALE.tight}>
             {t('post.viewsCount', { count: formatCount(item.view_count || 0) })}
           </Text>
         </View>
+        {/* No maxFontSizeMultiplier here, deliberately: the caption is content,
+            and content honours the reader's font size. The caps above are only
+            on chrome that lives in a fixed-size container. */}
         {item.caption ? (
           <Text style={styles.caption} numberOfLines={3}>{item.caption}</Text>
         ) : null}
@@ -1102,20 +1267,19 @@ const SocialFeed = ({ showBackground = true }) => {
   ), [currentUser?.profile_picture, handleSaveChange, handleLikeChange, t]);
 
   const renderItem = useCallback(({ item }) => (
-    <View style={[styles.postContainer, { width: cardW }]}>
-      {renderPostHeader({ item })}
-      <PostMedia
-        item={item}
-        isFocused={focusedVideoId === item.id}
-        isMuted={isMuted}
-        onToggleMute={toggleMute}
-        isAudioActive={currentlyPlayingPostId === item.id}
-        isAudioPlaying={currentlyPlayingPostId === item.id ? isAudioPlaying : false}
-        onToggleAudio={toggleSongPlayback}
-        onDoubleTapLike={handleDoubleTapLike}
-      />
-      {renderPostFooter({ item })}
-    </View>
+    <PostCard
+      item={item}
+      cardW={cardW}
+      isFocused={focusedVideoId === item.id}
+      isMuted={isMuted}
+      onToggleMute={toggleMute}
+      isAudioActive={currentlyPlayingPostId === item.id}
+      isAudioPlaying={currentlyPlayingPostId === item.id ? isAudioPlaying : false}
+      onToggleAudio={toggleSongPlayback}
+      onDoubleTapLike={handleDoubleTapLike}
+      renderHeader={renderPostHeader}
+      renderFooter={renderPostFooter}
+    />
   ), [cardW, renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
       currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback, handleDoubleTapLike]);
 
@@ -1230,7 +1394,7 @@ const SocialFeed = ({ showBackground = true }) => {
               onPress={() => selectFeed('following')}
               activeOpacity={0.8}
             >
-              <Text style={[styles.tabText, feedType === 'following' && styles.tabTextActive]}>
+              <Text style={[styles.tabText, feedType === 'following' && styles.tabTextActive]} maxFontSizeMultiplier={FONT_SCALE.chrome}>
                 Following
               </Text>
             </TouchableOpacity>
@@ -1239,7 +1403,7 @@ const SocialFeed = ({ showBackground = true }) => {
               onPress={() => selectFeed('for_you')}
               activeOpacity={0.8}
             >
-              <Text style={[styles.tabText, feedType === 'for_you' && styles.tabTextActive]}>
+              <Text style={[styles.tabText, feedType === 'for_you' && styles.tabTextActive]} maxFontSizeMultiplier={FONT_SCALE.chrome}>
                 For You
               </Text>
             </TouchableOpacity>
@@ -1254,7 +1418,7 @@ const SocialFeed = ({ showBackground = true }) => {
           activeOpacity={0.85}
         >
           <MaterialIcons name="arrow-upward" size={16} color={colors.white} />
-          <Text style={styles.newPostsText}>{t('feed.newPosts')}</Text>
+          <Text style={styles.newPostsText} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('feed.newPosts')}</Text>
         </TouchableOpacity>
       )}
 
@@ -1283,11 +1447,17 @@ const SocialFeed = ({ showBackground = true }) => {
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         onEndReached={loadMorePosts}
-        onEndReachedThreshold={0.5}
+        // Start the next page a screen and a half early. At 0.5 the request
+        // only began once the user had nearly hit the bottom, so the footer
+        // spinner was almost guaranteed; at 1.5 the rows are usually already
+        // there by the time they're scrolled to, and the spinner never shows.
+        onEndReachedThreshold={1.5}
         ListFooterComponent={renderFooter}
         maxToRenderPerBatch={5}
         updateCellsBatchingPeriod={100}
-        initialNumToRender={5}
+        // Feed cards are close to a full screen each, so rendering five before
+        // first paint delays it for four cards nobody can see yet.
+        initialNumToRender={3}
         windowSize={10}
         removeClippedSubviews={Platform.OS === 'android'}
       />

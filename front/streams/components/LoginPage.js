@@ -47,7 +47,7 @@ const LoginPage = () => {
         const status = e.response.status;
         setError(
           status === 429
-            ? 'Too many attempts. Wait a minute and try again.'
+            ? t('auth.tooManyAttempts')
             : (e.response.data?.detail || t('auth.invalidCredentials'))
         );
       } else {

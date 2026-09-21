@@ -34,6 +34,7 @@ from ..serializers import (
     UserSerializer,
     FollowRequestSerializer,
     TrackSerializer,
+    TrackListSerializer,
     TrackQueueSerializer,
     PlaylistSerializer,
     PlaylistListSerializer,

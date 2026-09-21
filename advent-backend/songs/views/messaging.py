@@ -12,8 +12,19 @@ class ConversationViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
     http_method_names = ['get', 'post', 'head', 'options']
 
+    # Actions that only need "is this my conversation?" — not the inbox row.
+    LEAN_ACTIONS = {'messages', 'send_message', 'mark_read'}
+
     def get_queryset(self):
         user = self.request.user
+        if self.action in self.LEAN_ACTIONS:
+            # The chat screen polls `messages` every 3 seconds. It used to load
+            # the full inbox row to find the conversation — six latest-message
+            # subqueries, an unread count, and every participant's profile — and
+            # throw all of it away. Filtering on participants is still the
+            # access check: someone else's conversation is a 404 here, exactly
+            # as before.
+            return Conversation.objects.filter(participants=user)
         # Latest message per conversation + unread count, resolved as subqueries
         # in the single list query — no per-row .last()/.count()/.first() N+1.
         last = Message.objects.filter(conversation=OuterRef('pk')).order_by('-created_at')

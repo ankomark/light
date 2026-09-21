@@ -1,5 +1,6 @@
 ﻿from .common import *  # noqa: F401,F403
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Subquery, IntegerField
+from django.db.models.functions import Coalesce
 from .. import r2
 
 
@@ -125,6 +126,14 @@ class TrackViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsNotSuspended]
     pagination_class = StandardPagination
 
+    def get_serializer_class(self):
+        # The list drops `lyrics` (see TrackListSerializer) — retrieve, create
+        # and update keep the full payload, so editing a track still round-trips
+        # its lyrics untouched.
+        if self.action == 'list':
+            return TrackListSerializer
+        return TrackSerializer
+
     def get_queryset(self):
         """Optimized track list.
 
@@ -135,11 +144,33 @@ class TrackViewSet(viewsets.ModelViewSet):
         - optional ?search= over title / album / artist username.
         """
         user = self.request.user
+        # likes_total as a correlated subquery, not Count('likes'): an aggregate
+        # over the artist/profile join forces a LEFT JOIN + GROUP BY across every
+        # selected column, which is what made a page of tracks slow. The subquery
+        # reads the likes index once per row and leaves the outer query flat.
+        like_count = (
+            Like.objects.filter(track=OuterRef('pk'))
+            .order_by().values('track')
+            .annotate(n=Count('id')).values('n')[:1]
+        )
+        # Same shape for comments. The row's comment button used to get its
+        # number by fetching that track's ENTIRE comment list on mount — one
+        # request per visible row — so the count has to ride along here.
+        comment_count = (
+            Comment.objects.filter(track=OuterRef('pk'), is_removed=False)
+            .order_by().values('track')
+            .annotate(n=Count('id')).values('n')[:1]
+        )
         qs = (
             Track.objects
             .filter(is_removed=False)  # hide moderator takedowns
             .select_related('artist__profile')
-            .annotate(likes_total=Count('likes', distinct=True))
+            .annotate(
+                likes_total=Coalesce(
+                    Subquery(like_count, output_field=IntegerField()), 0),
+                comments_total=Coalesce(
+                    Subquery(comment_count, output_field=IntegerField()), 0),
+            )
         )
         if user and user.is_authenticated:
             qs = qs.annotate(
@@ -215,6 +246,25 @@ class TrackViewSet(viewsets.ModelViewSet):
         tracks = qs.order_by('?')[:limit]
         data = TrackQueueSerializer(tracks, many=True, context={'request': request}).data
         return Response({'results': data, 'count': len(data)})
+
+    @action(detail=True, methods=['get'], url_path='lyrics')
+    def lyrics(self, request, pk=None):
+        """This track's lyrics, fetched when someone actually opens them.
+
+        Paired with `has_lyrics` on the list payload: the row knows whether to
+        show the button without the text, and the text arrives only for the one
+        song being read. Deliberately tiny and cacheable — no annotations, no
+        joins, one indexed column read.
+        """
+        try:
+            row = Track.objects.filter(is_removed=False).values('id', 'lyrics').get(pk=pk)
+        except Track.DoesNotExist:
+            return Response({'error': 'Track not found'}, status=status.HTTP_404_NOT_FOUND)
+        resp = Response({'id': row['id'], 'lyrics': row['lyrics'] or ''})
+        # Lyrics change only when the owner edits the track, so let the client
+        # hold onto them rather than re-asking every time the sheet opens.
+        resp['Cache-Control'] = 'private, max-age=3600'
+        return resp
 
     @action(detail=False, methods=['post'], url_path='upload')
     def upload_track(self, request):

@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, View } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { followUser } from '../services/api';
 
 const FollowButton = ({
@@ -12,71 +12,87 @@ const FollowButton = ({
 }) => {
   // Three states, not two: following a private account leaves the request
   // pending, and the button has to say so rather than claim it worked.
-  const [followStatus, setFollowStatus] = useState(
-    initialFollowStatus ?? (initialFollowing ? 'following' : 'none')
-  );
+  const resolved = initialFollowStatus ?? (initialFollowing ? 'following' : 'none');
+  const [followStatus, setFollowStatus] = useState(resolved);
   const [followersCount, setFollowersCount] = useState(initialFollowersCount || 0);
-  const [loading, setLoading] = useState(false);
-  const isFollowing = followStatus === 'following';
-  const isRequested = followStatus === 'requested';
 
-  // Update internal state when props change (important for refresh scenarios)
+  // Same reconcile loop as the like/save buttons: the label always shows what
+  // the user last asked for, and the request catches up behind it. Previously
+  // the optimistic update was computed and then immediately covered by an
+  // ActivityIndicator, so following someone looked like waiting rather than
+  // following, and a re-tap during the request was dropped on the floor.
+  const desired = useRef(resolved === 'following');   // what the user wants
+  const server = useRef(resolved === 'following');    // what we think is stored
+  const serverCount = useRef(initialFollowersCount || 0);
+  const inFlight = useRef(false);
+
+  // Adopt new props (row recycled, profile refreshed) only when the user's own
+  // intent has settled — otherwise a stale prop would undo a fresh tap.
   useEffect(() => {
-    setFollowStatus(initialFollowStatus ?? (initialFollowing ? 'following' : 'none'));
+    if (inFlight.current || desired.current !== server.current) return;
+    const next = initialFollowStatus ?? (initialFollowing ? 'following' : 'none');
+    setFollowStatus(next);
     setFollowersCount(initialFollowersCount || 0);
+    desired.current = next === 'following';
+    server.current = next === 'following';
+    serverCount.current = initialFollowersCount || 0;
   }, [initialFollowing, initialFollowersCount, initialFollowStatus]);
 
-  const handleFollow = async () => {
-    if (loading) return; // Prevent double-tap issues
-    
+  const sync = useCallback(async () => {
+    if (inFlight.current || desired.current === server.current) return;
+    inFlight.current = true;
     try {
-      setLoading(true);
-
-      // Optimistic UI update. A private target may come back 'requested'
-      // instead, so only adjust the count for a real follow — the server value
-      // below is authoritative either way.
-      const newFollowingState = !isFollowing;
-      const newCount = newFollowingState ? followersCount + 1 : Math.max(0, followersCount - 1);
-
-      setFollowStatus(newFollowingState ? 'following' : 'none');
-      setFollowersCount(newCount);
-
-      // Make API call
       const response = await followUser(userId);
-
-      // Update state with actual server response
-      const serverFollowing = response.is_following;
+      const serverFollowing = !!response.is_following;
       const serverStatus =
         response.follow_status ?? (serverFollowing ? 'following' : 'none');
-      const serverCount = response.followers_count;
+      server.current = serverFollowing;
+      if (typeof response.followers_count === 'number') {
+        serverCount.current = response.followers_count;
+      }
 
-      setFollowStatus(serverStatus);
-      setFollowersCount(serverCount);
-
-      // Notify parent component
-      if (onFollowChange) {
-        onFollowChange({
+      if (server.current === desired.current) {
+        // Settled. The server's answer is authoritative — and it's the only
+        // thing that can tell us a private account turned this into a request.
+        setFollowStatus(serverStatus);
+        setFollowersCount(serverCount.current);
+        onFollowChange?.({
           id: userId,
           is_following: serverFollowing,
           follow_status: serverStatus,
-          followers_count: serverCount
+          followers_count: serverCount.current,
         });
       }
-
     } catch (error) {
       console.error('Follow error:', error);
-
-      // Revert optimistic updates on error
-      setFollowStatus(initialFollowStatus ?? (initialFollowing ? 'following' : 'none'));
-      setFollowersCount(initialFollowersCount || 0);
-      
-      // You might want to show an error message to the user here
-      // Alert.alert('Error', 'Failed to update follow status. Please try again.');
-      
+      desired.current = server.current;                   // roll back
+      setFollowStatus(server.current ? 'following' : 'none');
+      setFollowersCount(serverCount.current);
+      onFollowChange?.({
+        id: userId,
+        is_following: server.current,
+        follow_status: server.current ? 'following' : 'none',
+        followers_count: serverCount.current,
+      });
     } finally {
-      setLoading(false);
+      inFlight.current = false;
+      if (desired.current !== server.current) sync();     // tapped again mid-flight
     }
-  };
+  }, [userId, onFollowChange]);
+
+  const handleFollow = useCallback(() => {
+    const next = !desired.current;
+    desired.current = next;
+    // Paint this frame. A private account may come back 'requested' instead,
+    // which `sync` corrects on settle — optimistically showing 'Following' is
+    // the right guess for the common case.
+    setFollowStatus(next ? 'following' : 'none');
+    setFollowersCount((c) => (next ? c + 1 : Math.max(0, c - 1)));
+    sync();
+  }, [sync]);
+
+  const isFollowing = followStatus === 'following';
+  const isRequested = followStatus === 'requested';
 
   return (
     <TouchableOpacity
@@ -84,27 +100,23 @@ const FollowButton = ({
         styles.button,
         isFollowing ? styles.unfollowButton : styles.followButton,
         isRequested && styles.requestedButton,
-        loading && styles.disabledButton
       ]}
       onPress={handleFollow}
-      disabled={loading}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityState={{ selected: isFollowing }}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color="#fff" />
-      ) : (
-        <View style={styles.buttonContent}>
-          <Text style={[styles.buttonText, loading && styles.disabledText]}>
-            {isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow'}
+      <View style={styles.buttonContent}>
+        <Text style={styles.buttonText}>
+          {isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow'}
+        </Text>
+        {/* Only show count when following and count > 0 */}
+        {isFollowing && followersCount > 0 && (
+          <Text style={styles.followersCountText}>
+            {followersCount}
           </Text>
-          {/* Only show count when following and count > 0 */}
-          {isFollowing && followersCount > 0 && (
-            <Text style={[styles.followersCountText, loading && styles.disabledText]}>
-              {followersCount}
-            </Text>
-          )}
-        </View>
-      )}
+        )}
+      </View>
     </TouchableOpacity>
   );
 };

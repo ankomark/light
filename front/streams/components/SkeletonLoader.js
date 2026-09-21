@@ -50,6 +50,47 @@ export const PostSkeleton = () => (
   </View>
 );
 
+// Mirrors a TrackItem row (cover, title, artist, action) so the library fills
+// in place instead of jumping when the real rows land.
+export const TrackSkeleton = () => (
+  <View style={styles.trackRow}>
+    <SkeletonBox width={52} height={52} borderRadius={radius.sm} />
+    <View style={styles.trackText}>
+      <SkeletonBox width="65%" height={14} style={{ marginBottom: 7 }} />
+      <SkeletonBox width="40%" height={11} />
+    </View>
+    <SkeletonBox width={24} height={24} borderRadius={12} />
+  </View>
+);
+
+/** `count` skeleton rows — what a list screen shows when it has nothing cached
+ *  to paint. A list of rows reads as "about to fill in"; a centered spinner
+ *  reads as "stopped". */
+export const TrackListSkeleton = ({ count = 8 }) => (
+  <View>
+    {Array.from({ length: count }, (_, i) => <TrackSkeleton key={i} />)}
+  </View>
+);
+
+// Mirrors a person row — avatar, name, a preview line, and (for follow lists)
+// the button on the right. Shared by the inbox and the follower lists.
+export const PersonSkeleton = ({ avatar = 48, withButton = false }) => (
+  <View style={styles.personRow}>
+    <SkeletonBox width={avatar} height={avatar} borderRadius={avatar / 2} />
+    <View style={styles.trackText}>
+      <SkeletonBox width="45%" height={14} style={{ marginBottom: 7 }} />
+      {!withButton && <SkeletonBox width="70%" height={11} />}
+    </View>
+    {withButton && <SkeletonBox width={84} height={30} borderRadius={radius.full} />}
+  </View>
+);
+
+export const PersonListSkeleton = ({ count = 8, ...row }) => (
+  <View>
+    {Array.from({ length: count }, (_, i) => <PersonSkeleton key={i} {...row} />)}
+  </View>
+);
+
 export const ProfileSkeleton = () => (
   <View style={styles.profileCard}>
     <SkeletonBox width="100%" height={140} borderRadius={0} />
@@ -93,6 +134,25 @@ const styles = StyleSheet.create({
   captionRow: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
+  },
+  trackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  trackText: {
+    flex: 1,
+  },
+  personRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
   },
   profileCard: {
     backgroundColor: colors.card,

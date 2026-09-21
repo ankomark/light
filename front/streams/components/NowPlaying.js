@@ -1,13 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, Image, StyleSheet, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
   useWindowDimensions, ActivityIndicator, Platform, StatusBar,
 } from 'react-native';
+// expo-image: the cover is the same artwork the track row already loaded, so a
+// shared memory+disk cache means opening Now Playing shows it instantly.
+import { Image } from 'expo-image';
 import SeekBar from './SeekBar';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import { usePlayer } from '../context/PlayerContext';
+import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
+import { fetchTrackLyrics } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -41,8 +45,6 @@ const NowPlaying = () => {
     isPlaying,
     isLoading,
     isBuffering,
-    positionMs,
-    durationMs,
     repeatMode,
     shuffle,
     hasNext,
@@ -55,10 +57,18 @@ const NowPlaying = () => {
     beginSeek,
     seekTo,
   } = usePlayer();
+  // Position lives in its own context so the ~2x/second tick doesn't re-render
+  // everything else that uses the player.
+  const { positionMs, durationMs } = usePlayerProgress();
 
   const [seekValue, setSeekValue] = useState(null);
   const [showLyrics, setShowLyrics] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
+  // The queue no longer carries lyrics (a 200-track shuffle used to ship 200
+  // song texts). They're fetched for the track being played, and only when the
+  // lyrics view is actually opened — cached per track for the session, so
+  // toggling back and forth costs nothing.
+  const [lyricsText, setLyricsText] = useState('');
 
   const lyricsRef = useRef(null);
   const userScrollingRef = useRef(false);
@@ -81,12 +91,36 @@ const NowPlaying = () => {
 
   useEffect(() => () => clearTimeout(resumeTimer.current), []);
 
+  // Fetch this track's lyrics when the view is open. Re-runs on track change,
+  // so lyrics follow the song as the queue advances.
+  const trackId = currentTrack?.id;
+  const inlineLyrics = currentTrack?.lyrics;
+  useEffect(() => {
+    if (!showLyrics || trackId == null) return undefined;
+    // A full track object (detail/edit paths) still carries them inline.
+    if (typeof inlineLyrics === 'string') {
+      setLyricsText(inlineLyrics);
+      return undefined;
+    }
+    let cancelled = false;
+    setLyricsText('');
+    fetchTrackLyrics(trackId)
+      .then((text) => { if (!cancelled) setLyricsText(text); })
+      .catch(() => { if (!cancelled) setLyricsText(''); });
+    return () => { cancelled = true; };
+  }, [showLyrics, trackId, inlineLyrics]);
+
   if (!currentTrack) return null;
 
   const progress = seekValue != null ? seekValue : durationMs > 0 ? positionMs / durationMs : 0;
   const busy = isLoading || isBuffering;
   const cover = !coverFailed ? upscaleCover(currentTrack.cover_image) : null;
-  const lyrics = (currentTrack.lyrics || '').trim();
+  const lyrics = lyricsText.trim();
+  // Whether the button is enabled comes from the flag on the payload, not from
+  // the text — the text isn't fetched until the button is pressed.
+  const hasLyrics = typeof currentTrack.has_lyrics === 'boolean'
+    ? currentTrack.has_lyrics
+    : !!(currentTrack.lyrics || '').trim();
   const repeatIcon = repeatMode === 'one' ? 'repeat-one' : 'repeat';
   const displayedMs = seekValue != null ? seekValue * durationMs : positionMs;
 
@@ -112,12 +146,12 @@ const NowPlaying = () => {
         <TouchableOpacity
           onPress={() => setShowLyrics((s) => !s)}
           hitSlop={HIT}
-          disabled={!lyrics}
+          disabled={!hasLyrics}
         >
           <MaterialIcons
             name="lyrics"
             size={24}
-            color={lyrics ? (showLyrics ? colors.primary : colors.textSecondary) : colors.textMuted}
+            color={hasLyrics ? (showLyrics ? colors.primary : colors.textSecondary) : colors.textMuted}
           />
         </TouchableOpacity>
       </View>
@@ -143,6 +177,9 @@ const NowPlaying = () => {
           <Image
             source={{ uri: cover }}
             style={[styles.art, artDim]}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={200}
             onError={() => setCoverFailed(true)}
           />
         ) : (

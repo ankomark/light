@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import { createSound } from '../../services/audioPlayer';
-import { PlayerProvider, usePlayer } from '../PlayerContext';
+import { PlayerProvider, usePlayer, usePlayerProgress } from '../PlayerContext';
 import { PreferencesProvider } from '../PreferencesContext';
 
 // --- audio adapter mock -----------------------------------------------------
@@ -63,7 +63,12 @@ test('playTrack loads the track and exposes it as currentTrack', async () => {
 });
 
 test('status updates drive isPlaying / position / duration', async () => {
-  const { result } = renderHook(() => usePlayer(), { wrapper });
+  // Position and duration live in their own context now, so the 500ms progress
+  // tick doesn't re-render every usePlayer() consumer. Read both here.
+  const { result } = renderHook(
+    () => ({ ...usePlayer(), ...usePlayerProgress() }),
+    { wrapper },
+  );
   await act(async () => { await result.current.playTrack(TRACK(1)); });
 
   await emit({ isPlaying: true, positionMillis: 500, durationMillis: 2000 });
@@ -71,6 +76,21 @@ test('status updates drive isPlaying / position / duration', async () => {
   expect(result.current.isPlaying).toBe(true);
   expect(result.current.positionMs).toBe(500);
   expect(result.current.durationMs).toBe(2000);
+});
+
+test('the control context keeps its identity across progress ticks', async () => {
+  // The guarantee the split exists for: a track playing must not re-render the
+  // feed, the track list, or every row in it, twice a second.
+  const { result } = renderHook(() => usePlayer(), { wrapper });
+  await act(async () => { await result.current.playTrack(TRACK(1)); });
+
+  await emit({ isPlaying: true, positionMillis: 500, durationMillis: 2000 });
+  const afterFirstTick = result.current;
+
+  await emit({ isPlaying: true, positionMillis: 1000, durationMillis: 2000 });
+  await emit({ isPlaying: true, positionMillis: 1500, durationMillis: 2000 });
+
+  expect(result.current).toBe(afterFirstTick);
 });
 
 test('togglePlay pauses a playing track', async () => {

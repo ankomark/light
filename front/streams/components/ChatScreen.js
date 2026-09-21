@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, AppState, Modal,
@@ -24,6 +24,8 @@ import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import RotatingBackground from './RotatingBackground';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { cacheableMessages, nextTempId, reconcileSent, mergeFullLoad } from '../utils/chatMessages';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -45,11 +47,78 @@ const cldThumb = (url) => {
 
 const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
+const chatCacheKey = (userId, conversationId) => userKey(userId, `chat:${conversationId}`);
+
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const fmtDuration = (s) => {
   const sec = Math.max(0, Math.round(s || 0));
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 };
+
+// One bubble. Memoised with primitive props, so a new message, a read receipt
+// or a keystroke in the composer re-renders only the rows that changed — not
+// every bubble on screen.
+const MessageRow = memo(({ item, isOwn, showAvatar, isPlaying, imgSide, onOpenImage, onOpenFile, onPlayAudio }) => {
+  const type = item.message_type || 'text';
+  return (
+    <View style={[styles.msgRow, isOwn ? styles.msgRowOwn : styles.msgRowOther]}>
+      {!isOwn && (
+        <View style={styles.avatarPlaceholder}>
+          {showAvatar && (
+            <Image
+              source={item.sender?.profile_picture ? { uri: item.sender.profile_picture } : DEFAULT_AVATAR}
+              placeholder={DEFAULT_AVATAR}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
+              style={styles.msgAvatar}
+            />
+          )}
+        </View>
+      )}
+      <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, type === 'image' && styles.bubbleMedia, item.pending && styles.bubblePending]}>
+        {type === 'image' && item.attachment ? (
+          <Pressable onPress={() => onOpenImage(item.attachment)}>
+            <Image source={{ uri: cldThumb(item.attachment) }} style={[styles.imageMsg, { width: imgSide, height: imgSide }]} contentFit="cover" cachePolicy="memory-disk" transition={150} />
+          </Pressable>
+        ) : type === 'file' ? (
+          <Pressable style={styles.fileRow} onPress={() => onOpenFile(item)}>
+            <View style={styles.fileIcon}><Ionicons name="document-text" size={22} color={colors.primary} /></View>
+            <Text style={[styles.fileName, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther]} numberOfLines={1}>
+              {item.file_name || 'File'}
+            </Text>
+            <Ionicons name="download-outline" size={18} color={isOwn ? 'rgba(255,255,255,0.8)' : colors.textMuted} />
+          </Pressable>
+        ) : type === 'audio' ? (
+          <Pressable style={styles.audioRow} onPress={() => onPlayAudio(item)}>
+            <Ionicons
+              name={isPlaying ? 'pause-circle' : 'play-circle'}
+              size={30}
+              color={isOwn ? colors.white : colors.primary}
+            />
+            <View style={styles.audioBar}>
+              <View style={[styles.audioBarFill, { backgroundColor: isOwn ? 'rgba(255,255,255,0.55)' : colors.primary }]} />
+            </View>
+            <Text style={[styles.audioDuration, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther]}>
+              {fmtDuration(item.duration)}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {!!item.content && (
+          <Text style={[styles.bubbleText, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther, type === 'image' && { marginTop: spacing.xs }]}>
+            {item.content}
+          </Text>
+        )}
+
+        <Text style={[styles.bubbleTime, isOwn ? styles.bubbleTimeOwn : styles.bubbleTimeOther]}>
+          {fmtTime(item.created_at)}{isOwn ? (item.pending ? ' ◷' : item.read ? ' ✓✓' : ' ✓') : ''}
+        </Text>
+      </View>
+    </View>
+  );
+});
+MessageRow.displayName = 'MessageRow';
 
 const ChatScreen = ({ route, navigation }) => {
   const { conversationId, otherUser } = route.params;
@@ -59,8 +128,13 @@ const ChatScreen = ({ route, navigation }) => {
   const imgSide = winW * 0.6;  // chat image bubble, 60% of the live window width
   const kbHeight = useKeyboardHeight(); // float the composer above the keyboard (edge-to-edge safe)
 
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = chatCacheKey(currentUser?.id, conversationId);
+  // Open on the last messages we saw in this chat — straight from memory when
+  // this session has them, from disk otherwise (below) — and refresh behind
+  // them. The chat used to open on a spinner every time, even seconds after
+  // leaving it.
+  const [messages, setMessages] = useState(() => peekCache(cacheKey) ?? []);
+  const [loading, setLoading] = useState(() => !peekCache(cacheKey));
   const [sending, setSending] = useState(false);
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -84,6 +158,29 @@ const ChatScreen = ({ route, navigation }) => {
   const recordTimerRef = useRef(null);
   const recordStartRef = useRef(0);
   const soundRef = useRef(null);
+  // playAudio reads this instead of the state, so it stays a stable callback
+  // and toggling playback re-renders only the two affected bubbles.
+  const playingIdRef = useRef(null);
+  useEffect(() => { playingIdRef.current = playingId; }, [playingId]);
+
+  // Cold start: the disk copy, if the network hasn't answered first.
+  useEffect(() => {
+    let cancelled = false;
+    readCache(cacheKey).then((cached) => {
+      if (cancelled || !Array.isArray(cached) || !cached.length) return;
+      setMessages((prev) => (prev.length ? prev : cached));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]);
+
+  // Keep the cache current with whatever is on screen (debounced — a burst of
+  // polls and sends becomes one write).
+  useEffect(() => {
+    if (!messages.length) return undefined;
+    const handle = setTimeout(() => writeCache(cacheKey, cacheableMessages(messages)), 400);
+    return () => clearTimeout(handle);
+  }, [messages, cacheKey]);
 
   // Highest numeric (server-assigned) id in a list, ignoring optimistic temps.
   const maxNumericId = (arr) =>
@@ -103,7 +200,10 @@ const ChatScreen = ({ route, navigation }) => {
       if (!silent || lastIdRef.current === 0) {
         const data = await fetchMessages(conversationId);
         if (Array.isArray(data)) {
-          setMessages(data);
+          // Keep any still-sending bubbles: the chat now opens instantly from
+          // cache, so a message typed before this fetch lands is likely, and
+          // replacing the list outright would make it vanish mid-send.
+          setMessages((prev) => mergeFullLoad(prev, data));
           lastIdRef.current = maxNumericId(data);
           oldestIdRef.current = minNumericId(data);
           hasMoreOlderRef.current = data.length >= 100;  // a full page implies older exist
@@ -193,7 +293,7 @@ const ChatScreen = ({ route, navigation }) => {
 
   // Generic send with optimistic insert.
   const sendPayload = useCallback(async (payload, optimisticExtra = {}) => {
-    const tempId = `temp_${Date.now()}`;
+    const tempId = nextTempId();
     const optimistic = {
       id: tempId,
       sender: { id: currentUser?.id, username: currentUser?.username, profile_picture: null },
@@ -202,30 +302,31 @@ const ChatScreen = ({ route, navigation }) => {
       attachment: payload.attachment || '',
       file_name: payload.file_name || '',
       read: false,
+      pending: true,
       created_at: new Date().toISOString(),
       ...optimisticExtra,
     };
+    // No `sending` lock for text: each message carries its own temp id, so
+    // three quick messages are three bubbles in flight, not one bubble and a
+    // disabled button.
     setMessages((prev) => [...prev, optimistic]);
-    setSending(true);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
     try {
       const saved = await sendMessage(conversationId, payload);
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? saved : m)));
+      setMessages((prev) => reconcileSent(prev, tempId, saved));
       if (typeof saved?.id === 'number') {
         lastIdRef.current = Math.max(lastIdRef.current, saved.id);
       }
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       Alert.alert(t('common.error'), t('chat.sendFailed'));
-    } finally {
-      setSending(false);
     }
   }, [conversationId, currentUser, t]);
 
   // Media send: show the local file instantly (optimistic), upload it to
   // Cloudinary in the background, then persist the message with just the URL.
   const sendMediaMessage = useCallback(async ({ localUri, uploadType, message_type, file_name = '', duration = null, mimeType }) => {
-    const tempId = `temp_${Date.now()}`;
+    const tempId = nextTempId();
     const optimistic = {
       id: tempId,
       sender: { id: currentUser?.id, username: currentUser?.username, profile_picture: null },
@@ -235,6 +336,7 @@ const ChatScreen = ({ route, navigation }) => {
       file_name,
       duration,
       read: false,
+      pending: true,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
@@ -251,7 +353,7 @@ const ChatScreen = ({ route, navigation }) => {
         file_name,
         duration,
       });
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? saved : m)));
+      setMessages((prev) => reconcileSent(prev, tempId, saved));
       if (typeof saved?.id === 'number') {
         lastIdRef.current = Math.max(lastIdRef.current, saved.id);
       }
@@ -265,11 +367,11 @@ const ChatScreen = ({ route, navigation }) => {
 
   const handleSendText = useCallback(() => {
     const content = text.trim();
-    if (!content || sending) return;
+    if (!content) return;
     setText('');
     setShowEmoji(false);
     sendPayload({ content, message_type: 'text' });
-  }, [text, sending, sendPayload]);
+  }, [text, sendPayload]);
 
   const attachImage = useCallback(async () => {
     try {
@@ -394,7 +496,7 @@ const ChatScreen = ({ route, navigation }) => {
   const playAudio = useCallback(async (msg) => {
     try {
       if (soundRef.current) { await soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; }
-      if (playingId === msg.id) { setPlayingId(null); return; } // toggle off
+      if (playingIdRef.current === msg.id) { setPlayingId(null); return; } // toggle off
       // Legacy base64 → write to a cache file first; Cloudinary/local URIs play
       // directly (expo-av streams https).
       let sourceUri = msg.attachment;
@@ -424,7 +526,7 @@ const ChatScreen = ({ route, navigation }) => {
       Alert.alert(t('common.error'), t('chat.playVoiceFailed'));
       setPlayingId(null);
     }
-  }, [playingId, t]);
+  }, [t]);
 
   // Cleanup audio on unmount.
   useEffect(() => () => {
@@ -435,66 +537,29 @@ const ChatScreen = ({ route, navigation }) => {
 
   const renderMessage = useCallback(({ item, index }) => {
     const isOwn = item.sender?.id === currentUser?.id;
-    const showAvatar = !isOwn && (index === 0 || messages[index - 1]?.sender?.id !== item.sender?.id);
-    const type = item.message_type || 'text';
-
     return (
-      <View style={[styles.msgRow, isOwn ? styles.msgRowOwn : styles.msgRowOther]}>
-        {!isOwn && (
-          <View style={styles.avatarPlaceholder}>
-            {showAvatar && (
-              <Image
-                source={item.sender?.profile_picture ? { uri: item.sender.profile_picture } : DEFAULT_AVATAR}
-                placeholder={DEFAULT_AVATAR}
-                contentFit="cover"
-                transition={150}
-                style={styles.msgAvatar}
-              />
-            )}
-          </View>
-        )}
-        <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, type === 'image' && styles.bubbleMedia]}>
-          {type === 'image' && item.attachment ? (
-            <Pressable onPress={() => setViewer(item.attachment)}>
-              <Image source={{ uri: cldThumb(item.attachment) }} style={[styles.imageMsg, { width: imgSide, height: imgSide }]} contentFit="cover" transition={150} />
-            </Pressable>
-          ) : type === 'file' ? (
-            <Pressable style={styles.fileRow} onPress={() => openFile(item)}>
-              <View style={styles.fileIcon}><Ionicons name="document-text" size={22} color={colors.primary} /></View>
-              <Text style={[styles.fileName, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther]} numberOfLines={1}>
-                {item.file_name || 'File'}
-              </Text>
-              <Ionicons name="download-outline" size={18} color={isOwn ? 'rgba(255,255,255,0.8)' : colors.textMuted} />
-            </Pressable>
-          ) : type === 'audio' ? (
-            <Pressable style={styles.audioRow} onPress={() => playAudio(item)}>
-              <Ionicons
-                name={playingId === item.id ? 'pause-circle' : 'play-circle'}
-                size={30}
-                color={isOwn ? colors.white : colors.primary}
-              />
-              <View style={styles.audioBar}>
-                <View style={[styles.audioBarFill, { backgroundColor: isOwn ? 'rgba(255,255,255,0.55)' : colors.primary }]} />
-              </View>
-              <Text style={[styles.audioDuration, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther]}>
-                {fmtDuration(item.duration)}
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {!!item.content && (
-            <Text style={[styles.bubbleText, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther, type === 'image' && { marginTop: spacing.xs }]}>
-              {item.content}
-            </Text>
-          )}
-
-          <Text style={[styles.bubbleTime, isOwn ? styles.bubbleTimeOwn : styles.bubbleTimeOther]}>
-            {fmtTime(item.created_at)}{isOwn ? (item.read ? ' ✓✓' : ' ✓') : ''}
-          </Text>
-        </View>
-      </View>
+      <MessageRow
+        item={item}
+        isOwn={isOwn}
+        showAvatar={!isOwn && (index === 0 || messages[index - 1]?.sender?.id !== item.sender?.id)}
+        isPlaying={playingId === item.id}
+        imgSide={imgSide}
+        onOpenImage={setViewer}
+        onOpenFile={openFile}
+        onPlayAudio={playAudio}
+      />
     );
-  }, [currentUser?.id, messages, openFile, imgSide]);
+  }, [currentUser?.id, messages, playingId, imgSide, openFile, playAudio]);
+
+  const keyExtractor = useCallback((item) => String(item.id), []);
+  // Don't yank the view to the bottom while we're prepending history.
+  const onContentSizeChange = useCallback(() => {
+    if (!loadingOlderRef.current) listRef.current?.scrollToEnd({ animated: false });
+  }, []);
+  // Load older history when the user scrolls near the top.
+  const onScroll = useCallback((e) => {
+    if (e.nativeEvent.contentOffset.y <= 48) loadOlder();
+  }, [loadOlder]);
 
   return (
     <View style={styles.root}>
@@ -524,14 +589,12 @@ const ChatScreen = ({ route, navigation }) => {
         <FlatList
           ref={listRef}
           data={messages}
-          keyExtractor={(item) => String(item.id)}
+          keyExtractor={keyExtractor}
           renderItem={renderMessage}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          // Don't yank the view to the bottom while we're prepending history.
-          onContentSizeChange={() => { if (!loadingOlderRef.current) listRef.current?.scrollToEnd({ animated: false }); }}
-          // Load older history when the user scrolls near the top.
-          onScroll={(e) => { if (e.nativeEvent.contentOffset.y <= 48) loadOlder(); }}
+          onContentSizeChange={onContentSizeChange}
+          onScroll={onScroll}
           scrollEventThrottle={64}
           maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
           ListHeaderComponent={
@@ -595,12 +658,11 @@ const ChatScreen = ({ route, navigation }) => {
             />
             {text.trim() ? (
               <TouchableOpacity
-                style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
+                style={styles.sendBtn}
                 onPress={handleSendText}
-                disabled={sending}
                 activeOpacity={0.8}
               >
-                {sending ? <ActivityIndicator size="small" color={colors.white} /> : <Ionicons name="send" size={18} color={colors.white} />}
+                <Ionicons name="send" size={18} color={colors.white} />
               </TouchableOpacity>
             ) : (
               <TouchableOpacity style={styles.sendBtn} onPress={startRecording} disabled={sending} activeOpacity={0.8}>
@@ -679,6 +741,7 @@ const styles = StyleSheet.create({
   msgAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface },
   bubble: { maxWidth: '78%', borderRadius: radius.lg, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs + 2, ...shadows.sm },
   bubbleMedia: { padding: 4 },
+  bubblePending: { opacity: 0.75 },
   bubbleOwn: { backgroundColor: '#15407A', borderBottomRightRadius: 4 },
   bubbleOther: { backgroundColor: 'rgba(18,30,46,0.92)', borderBottomLeftRadius: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)' },
   bubbleText: { fontSize: 15, lineHeight: 21 },

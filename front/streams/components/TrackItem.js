@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import GlassView from './GlassView';
@@ -9,18 +9,24 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import axios from 'axios';
-import { API_URL, getAccessToken } from '../services/api';
+import { API_URL, getAccessToken, fetchTrackLyrics } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer } from '../context/PlayerContext';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import ReportModal from './ReportModal';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { FONT_SCALE } from '../utils/layout';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
-const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist }) => {
+// React.memo so a list re-render (a search keystroke, a page append, another
+// row's like) doesn't re-render every visible row. It only holds because the
+// list passes stable callbacks — see TrackList's renderItem.
+const TrackItem = React.memo(function TrackItem({
+  track, index, onDelete, onRefresh, onPlay, onRemoveFromPlaylist,
+}) {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { currentTrack, isPlaying, isLoading, isBuffering, playTrack, togglePlay } = usePlayer();
@@ -34,7 +40,28 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
   const [menuVisible, setMenuVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
 
-  const hasLyrics = typeof track.lyrics === 'string' && track.lyrics.trim().length > 0;
+  // The list payload carries `has_lyrics` rather than the lyrics themselves.
+  // The `track.lyrics` fallback keeps this working wherever a full track object
+  // is still passed in (the detail/edit paths, and any cached older payload).
+  const hasLyrics = typeof track.has_lyrics === 'boolean'
+    ? track.has_lyrics
+    : (typeof track.lyrics === 'string' && track.lyrics.trim().length > 0);
+
+  // Fetched when the sheet opens, then cached per track for the session.
+  const [lyricsText, setLyricsText] = useState(
+    typeof track.lyrics === 'string' ? track.lyrics : null
+  );
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+
+  const openLyrics = useCallback(() => {
+    setLyricsVisible(true);           // sheet opens on this frame, always
+    if (lyricsText !== null) return;  // already have them
+    setLyricsLoading(true);
+    fetchTrackLyrics(track.id)
+      .then((text) => setLyricsText(text))
+      .catch(() => setLyricsText(''))
+      .finally(() => setLyricsLoading(false));
+  }, [track.id, lyricsText]);
 
   // Media are R2 URLs now (served as-is); the old Cloudinary delivery
   // transforms were a no-op on them, so we use the stored URL directly.
@@ -56,8 +83,10 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
     }
     // A list screen can supply onPlay to start the whole list as a queue
     // (so next/previous traverse it). Otherwise play this track on its own.
+    // The index is passed for lists that share ONE stable handler across rows;
+    // call sites that close over their own index just ignore the argument.
     if (onPlay) {
-      onPlay();
+      onPlay(index);
       return;
     }
     playTrack({
@@ -67,7 +96,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
       artist: track.artist,
       cover_image: optimizedCover,
       audio_file: optimizedAudio,
-      lyrics: track.lyrics,
+      has_lyrics: hasLyrics,
     });
   };
 
@@ -161,7 +190,11 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.info} onPress={handlePlay} activeOpacity={0.7}>
-          <Text style={[styles.title, isActive && styles.titleActive]} numberOfLines={1}>
+          <Text
+            style={[styles.title, isActive && styles.titleActive]}
+            numberOfLines={1}
+            maxFontSizeMultiplier={FONT_SCALE.chrome}
+          >
             {track.title}
           </Text>
           <View style={styles.artistRow}>
@@ -172,7 +205,11 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
               transition={150}
               style={styles.avatar}
             />
-            <Text style={styles.subtitle} numberOfLines={1}>
+            <Text
+              style={styles.subtitle}
+              numberOfLines={1}
+              maxFontSizeMultiplier={FONT_SCALE.chrome}
+            >
               {track.artist?.username}
               {!!track.album && `  ·  ${track.album}`}
             </Text>
@@ -197,9 +234,9 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
       <View style={styles.actionBar}>
         <View style={styles.actionLeft}>
           <Likes trackId={track.id} initialLikes={track.likes_count} initialIsLiked={track.is_liked} />
-          <Comments trackId={track.id} />
+          <Comments trackId={track.id} initialCount={track.comments_count} />
           {hasLyrics && (
-            <TouchableOpacity style={styles.iconBtn} onPress={() => setLyricsVisible(true)} hitSlop={HIT}>
+            <TouchableOpacity style={styles.iconBtn} onPress={openLyrics} hitSlop={HIT}>
               <MaterialIcons name="lyrics" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           )}
@@ -259,8 +296,11 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
       />
 
       {/* Floating lyrics page */}
+      {/* Mounted only while open. A Modal per row, times every visible row,
+          is real view-hierarchy weight for something nobody has opened. */}
+      {lyricsVisible && (
       <Modal
-        visible={lyricsVisible}
+        visible
         animationType="slide"
         transparent
         onRequestClose={() => setLyricsVisible(false)}
@@ -283,13 +323,18 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
               contentContainerStyle={styles.lyricsContent}
               showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.lyricsText}>
-                {track.lyrics?.trim() || t('music.noLyricsAdded')}
-              </Text>
+              {lyricsLoading && lyricsText === null ? (
+                <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.lg }} />
+              ) : (
+                <Text style={styles.lyricsText}>
+                  {lyricsText?.trim() || t('music.noLyricsAdded')}
+                </Text>
+              )}
             </ScrollView>
           </View>
         </View>
       </Modal>
+      )}
 
       {/* Owner action sheet: Edit / Delete (tap the "..." to open). */}
       <Modal
@@ -321,7 +366,7 @@ const TrackItem = ({ track, onDelete, onRefresh, onPlay, onRemoveFromPlaylist })
       </Modal>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   card: {

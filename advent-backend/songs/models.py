@@ -188,6 +188,11 @@ class Track(models.Model):
     # there is no separate favorite relation.
     class Meta:
         ordering = ['-created_at']
+        # The library list is ordered by -created_at on every page; the default
+        # ordering alone doesn't create an index, so this was sorting the whole
+        # table per request.
+        indexes = [models.Index(fields=['-created_at'],
+                                name='track_created_idx')]
 
     def __str__(self):
         return f"{self.title} by {self.artist.username}"
@@ -332,7 +337,15 @@ class SocialPost(models.Model):
 
     class Meta:
         # Feed queries order by -created_at; index it for fast pagination.
-        indexes = [models.Index(fields=['-created_at'])]
+        indexes = [
+            models.Index(fields=['-created_at']),
+            # Every author-scoped read walks this: the Following feed
+            # (user_id IN followees ORDER BY -created_at), the ranked feed's
+            # candidate pools (same shape, plus a created_at window), and the
+            # profile grid. Without it each one seq-scans posts and sorts.
+            models.Index(fields=['user', '-created_at'],
+                         name='socialpost_user_created_idx'),
+        ]
 
     def __str__(self):
         return f"{self.user.username}'s {self.content_type} post"
@@ -624,6 +637,14 @@ class Message(models.Model):
 
     class Meta:
         ordering = ['created_at']
+        # Every read of a chat is "this conversation's messages by time": the
+        # inbox's latest-message subqueries, opening a chat (newest 100), the
+        # 3-second poll and scroll-up history. With only the FK index each of
+        # those sorted the conversation's whole history first. A b-tree scans
+        # either direction, so one index serves ASC and DESC.
+        indexes = [
+            models.Index(fields=['conversation', 'created_at'], name='message_conv_created_idx'),
+        ]
 
     def __str__(self):
         return f"{self.sender.username}: {(self.content or self.message_type)[:50]}"

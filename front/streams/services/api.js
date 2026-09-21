@@ -46,9 +46,28 @@ axios.defaults.headers.common['Content-Type'] = 'application/json';
 export const API_URL = `${API_BASE}/api`;
 
 // ── Secure token storage (uses iOS Keychain / Android Keystore) ───────────────
+// The access token is mirrored in memory. Every outbound request runs through
+// the interceptor below, and SecureStore.getItemAsync is a *native* call into
+// the Keychain / Android Keystore — a few milliseconds each, on the bridge,
+// serialized ahead of the request that needs it. A screen that opens five
+// endpoints paid that five times before the first byte left the device.
+//
+// The process memory holding this is no more exposed than the request headers
+// it is about to be written into; the Keystore remains the only thing that
+// survives the process, which is the property that actually matters. The mirror
+// is cleared on logout and on any refresh failure, so a stale token can't
+// outlive the session it belongs to.
+let _accessToken = null;
+
 /** Use this anywhere you need the current access token instead of reading AsyncStorage directly. */
-export const getAccessToken = () => SecureStore.getItemAsync('accessToken');
+export const getAccessToken = async () => {
+  if (_accessToken) return _accessToken;
+  _accessToken = await SecureStore.getItemAsync('accessToken');
+  return _accessToken;
+};
+
 export const storeTokens = async (access, refresh) => {
+  _accessToken = access;
   await Promise.all([
     SecureStore.setItemAsync('accessToken', access),
     SecureStore.setItemAsync('refreshToken', refresh),
@@ -56,6 +75,7 @@ export const storeTokens = async (access, refresh) => {
 };
 
 export const clearTokens = async () => {
+  _accessToken = null;
   await Promise.all([
     SecureStore.deleteItemAsync('accessToken').catch(() => {}),
     SecureStore.deleteItemAsync('refreshToken').catch(() => {}),
@@ -63,7 +83,7 @@ export const clearTokens = async () => {
 };
 
 const getAuthToken = async () => {
-  const token = await SecureStore.getItemAsync('accessToken');
+  const token = await getAccessToken();
   if (!token) {
     await clearTokens();
     throw new Error('No authentication token found');
@@ -273,6 +293,41 @@ export const fetchTracks = async (page = 1, search = '') => {
   const params = { page, page_size: 20 };
   if (search) params.search = search;
   return apiRequest('get', '/tracks/', null, { params });
+};
+
+// ── Lyrics, fetched on demand ────────────────────────────────────────────────
+// The list payload carries `has_lyrics`, not the text: a page of 20 tracks was
+// ~59 KB, almost all of it song lyrics nobody had asked to read. The text now
+// arrives only for the track whose lyrics are actually opened.
+//
+// Cached in memory for the session and de-duplicated in flight, because two
+// things open lyrics for the same song — the row's sheet and the Now Playing
+// panel — and re-reading a song's words should never cost a second request.
+const _lyricsCache = new Map();     // trackId -> string
+const _lyricsInFlight = new Map();  // trackId -> Promise<string>
+
+export const fetchTrackLyrics = async (trackId) => {
+  if (trackId == null) return '';
+  const key = String(trackId);
+  if (_lyricsCache.has(key)) return _lyricsCache.get(key);
+  if (_lyricsInFlight.has(key)) return _lyricsInFlight.get(key);
+
+  const p = apiRequest('get', `/tracks/${trackId}/lyrics/`)
+    .then((data) => {
+      const text = data?.lyrics ?? '';
+      _lyricsCache.set(key, text);
+      return text;
+    })
+    .finally(() => { _lyricsInFlight.delete(key); });
+
+  _lyricsInFlight.set(key, p);
+  return p;
+};
+
+/** Drop a cached copy after the owner edits the track, so the sheet doesn't
+ *  keep showing the words they just replaced. */
+export const invalidateTrackLyrics = (trackId) => {
+  _lyricsCache.delete(String(trackId));
 };
 
 // A capped random sample to seed a "shuffle whole library" queue in one request

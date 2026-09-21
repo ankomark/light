@@ -1,52 +1,85 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
 import { toggleTrackLike } from '../services/api';
 import { useI18n } from '../context/I18nContext';
+
 const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
   const { t } = useI18n();
-    const [likes, setLikes] = useState(initialLikes);
-    const [isLiked, setIsLiked] = useState(initialIsLiked);
-    // const [isLiked, setIsLiked] = useState(false);
-    const [busy, setBusy] = useState(false);
-    useEffect(() => {
-        setLikes(initialLikes);
-        setIsLiked(initialIsLiked);
-      }, [initialLikes, initialIsLiked]);
+  const [likes, setLikes] = useState(initialLikes || 0);
+  const [isLiked, setIsLiked] = useState(!!initialIsLiked);
 
-    const handleLikeClick = async () => {
-        // One request in flight at a time, as on the feed and publication
-        // buttons: a double-tap would otherwise send two toggles that race, and
-        // whichever response landed last would decide the state on screen.
-        if (busy) return;
-        setBusy(true);
-        try {
-            const response = await toggleTrackLike(trackId);
+  // This button had no optimistic update at all: the heart only changed once
+  // the server answered, so liking a track always felt like a wait — and the
+  // in-flight lock meant a quick second tap was dropped rather than queued.
+  //
+  // Now the heart shows the user's intent immediately and a reconcile loop
+  // pushes it at the server: `desired` is what the user wants, `server` is what
+  // we believe is stored, and we send a toggle only while they disagree. Taps
+  // during a request just move `desired`, so N taps cost at most 2 requests and
+  // always settle on what the user chose.
+  const desired = useRef(!!initialIsLiked);
+  const server = useRef(!!initialIsLiked);
+  const serverLikes = useRef(initialLikes || 0);
+  const inFlight = useRef(false);
 
-            if (response && typeof response.likes_count === 'number') {
-              setLikes(response.likes_count);
-              setIsLiked(response.is_liked);
-            }
-          } catch (error) {
-            Alert.alert(t('common.error'), error.message || t('social.likeStatusFailed'));
-          } finally {
-            setBusy(false);
-          }
-        };
+  useEffect(() => {
+    // Don't let a stale prop overwrite an intent that hasn't settled yet.
+    if (inFlight.current || desired.current !== server.current) return;
+    setLikes(initialLikes || 0);
+    setIsLiked(!!initialIsLiked);
+    desired.current = !!initialIsLiked;
+    server.current = !!initialIsLiked;
+    serverLikes.current = initialLikes || 0;
+  }, [initialLikes, initialIsLiked]);
 
+  const sync = useCallback(async () => {
+    if (inFlight.current || desired.current === server.current) return;
+    inFlight.current = true;
+    try {
+      const response = await toggleTrackLike(trackId);
+      server.current = typeof response?.is_liked === 'boolean'
+        ? response.is_liked
+        : !server.current;
+      if (typeof response?.likes_count === 'number') {
+        serverLikes.current = response.likes_count;
+      }
+      if (server.current === desired.current) {
+        setIsLiked(server.current);          // settled — take the server's word
+        setLikes(serverLikes.current);
+      }
+    } catch (error) {
+      desired.current = server.current;      // roll back to the last known truth
+      setIsLiked(server.current);
+      setLikes(serverLikes.current);
+      Alert.alert(t('common.error'), error.message || t('social.likeStatusFailed'));
+    } finally {
+      inFlight.current = false;
+      if (desired.current !== server.current) sync();   // tapped again mid-flight
+    }
+  }, [trackId, t]);
 
-    return (
-        <TouchableOpacity
-        style={styles.likeButton}
-        onPress={handleLikeClick}
-        disabled={busy}
-        testID="like-button"
+  const handleLikeClick = useCallback(() => {
+    const next = !desired.current;
+    desired.current = next;
+    setIsLiked(next);                                   // paints this frame
+    setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
+    sync();
+  }, [sync]);
+
+  return (
+    <TouchableOpacity
+      style={styles.likeButton}
+      onPress={handleLikeClick}
+      testID="like-button"
+      accessibilityRole="button"
+      accessibilityState={{ selected: isLiked }}
     >
-        <Text style={[styles.likeText, isLiked && styles.liked]}>
+      <Text style={[styles.likeText, isLiked && styles.liked]}>
         {isLiked ? '❤️' : '🤍'} {likes}
-        </Text>
+      </Text>
     </TouchableOpacity>
-    );
+  );
 };
 
 export default LikeButton;

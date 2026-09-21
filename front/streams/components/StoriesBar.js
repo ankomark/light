@@ -1,13 +1,25 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, Image, StyleSheet, ActivityIndicator,
+  View, Text, FlatList, TouchableOpacity, StyleSheet,
 } from 'react-native';
+// expo-image, not RN's: it keeps a real memory+disk cache keyed by URL, so an
+// avatar already seen anywhere in the app paints from cache instead of being
+// re-fetched every time the bar mounts.
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchStoryFeed } from '../services/api';
 import { useAuth } from '../context/useAuth';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { colors, spacing, radius, typography } from '../constants/theme';
+
+// Stories expire in 24h and the ring state changes rarely, so a cached bar is
+// accurate for far longer than the few minutes we keep it.
+const STORIES_MAX_AGE_MS = 10 * 60 * 1000;
+// Don't re-hit the endpoint on every single Home focus — moving between tabs
+// was a full request each way.
+const STORIES_REFETCH_MS = 60 * 1000;
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -28,7 +40,7 @@ const StoryRing = ({ hasUnviewed, size }) => {
   );
 };
 
-const StoryBubble = ({ group, onPress, isOwn, onCreatePress }) => {
+const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onCreatePress }) {
   const avatarSize = 58;
   const avatar = group.user.profile_picture;
   const hasStories = group.stories?.length > 0;
@@ -46,7 +58,10 @@ const StoryBubble = ({ group, onPress, isOwn, onCreatePress }) => {
         }
         <Image
           source={avatar ? { uri: avatar } : DEFAULT_AVATAR}
-          defaultSource={DEFAULT_AVATAR}
+          placeholder={DEFAULT_AVATAR}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={120}
           style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
         />
         {isOwn && !hasStories && (
@@ -60,25 +75,47 @@ const StoryBubble = ({ group, onPress, isOwn, onCreatePress }) => {
       </Text>
     </TouchableOpacity>
   );
-};
+});
 
 const StoriesBar = ({ navigation }) => {
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
   const { currentUser } = useAuth();
+  const cacheKey = userKey(currentUser?.id, 'stories');
+
+  // Same instant-paint rule as the feed: show the last known bar immediately,
+  // then revalidate behind it. The bar used to mount empty with a spinner and
+  // refetch on every focus, so returning to Home always cost a visible gap in
+  // the header.
+  const [groups, setGroups] = useState(() => peekCache(cacheKey) ?? []);
+  const [loaded, setLoaded] = useState(() => (peekCache(cacheKey) ?? []).length > 0);
+  const lastFetchRef = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    readCache(cacheKey, STORIES_MAX_AGE_MS).then((cached) => {
+      if (cancelled || !Array.isArray(cached) || !cached.length) return;
+      setGroups((prev) => (prev.length ? prev : cached));
+      setLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]);
 
   const load = useCallback(async () => {
     try {
       const data = await fetchStoryFeed();
-      setGroups(Array.isArray(data) ? data : []);
+      const next = Array.isArray(data) ? data : [];
+      setGroups(next);
+      lastFetchRef.current = Date.now();
+      if (next.length) writeCache(cacheKey, next);
     } catch {
       // silent — stories bar should never crash the feed
     } finally {
-      setLoading(false);
+      setLoaded(true);
     }
-  }, []);
+  }, [cacheKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => {
+    if (Date.now() - lastFetchRef.current > STORIES_REFETCH_MS) load();
+  }, [load]));
 
   const openViewer = useCallback((group) => {
     navigation.navigate('StoryViewer', { group });
@@ -88,39 +125,49 @@ const StoriesBar = ({ navigation }) => {
     navigation.navigate('CreateStory');
   }, [navigation]);
 
-  // Always show own bubble even if no story yet
-  const ownGroup = groups.find(g => g.user.id === currentUser?.id) ?? {
-    user: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
-    stories: [],
-    has_unviewed: false,
-  };
-  const others = groups.filter(g => g.user.id !== currentUser?.id);
-  const allGroups = [ownGroup, ...others];
+  // Always show own bubble even if no story yet.
+  const allGroups = useMemo(() => {
+    const own = groups.find(g => g.user.id === currentUser?.id) ?? {
+      user: {
+        id: currentUser?.id,
+        username: currentUser?.username,
+        profile_picture: currentUser?.profile_picture,
+      },
+      stories: [],
+      has_unviewed: false,
+    };
+    return [own, ...groups.filter(g => g.user.id !== currentUser?.id)];
+  }, [groups, currentUser?.id, currentUser?.username, currentUser?.profile_picture]);
 
-  if (loading) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="small" color={colors.primary} />
-      </View>
-    );
+  // Stable identity, so a parent re-render doesn't re-render every bubble.
+  const renderItem = useCallback(({ item, index }) => (
+    <StoryBubble
+      group={item}
+      onPress={openViewer}
+      isOwn={index === 0}
+      onCreatePress={openCreate}
+    />
+  ), [openViewer, openCreate]);
+
+  const keyExtractor = useCallback((item) => String(item.user.id), []);
+
+  // Nothing cached and nothing fetched yet: hold the bar's height rather than
+  // showing a spinner, so the feed below doesn't jump when the row arrives.
+  if (!loaded && groups.length === 0) {
+    return <View style={styles.loadingWrap} />;
   }
 
   return (
     <View style={styles.container}>
       <FlatList
         data={allGroups}
-        keyExtractor={(item) => String(item.user.id)}
-        renderItem={({ item, index }) => (
-          <StoryBubble
-            group={item}
-            onPress={openViewer}
-            isOwn={index === 0}
-            onCreatePress={openCreate}
-          />
-        )}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        initialNumToRender={6}
+        windowSize={3}
       />
     </View>
   );

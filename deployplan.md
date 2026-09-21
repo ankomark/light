@@ -124,13 +124,30 @@ link. Budget ~€10–15/yr for the domain.
 | # | Location | Problem | Fix |
 |---|---|---|---|
 | 1 | `:79` `if os.getenv('RAILWAY_ENVIRONMENT'):` | **Security regression.** All HTTPS hardening (HSTS, SSL redirect, secure cookies) is gated on a Railway-only env var. On Hetzner it silently switches **off**, undoing commit `d8be8a2`. | Gate on a platform-neutral flag: `if os.getenv('DJANGO_PRODUCTION') or os.getenv('RAILWAY_ENVIRONMENT'):` and set `DJANGO_PRODUCTION=True` on the box. |
-| 2 | `:286` `ssl_require=True` | Hardcoded. Postgres on the private Docker network doesn't speak TLS, so Django won't connect at all. | `ssl_require=os.getenv('DB_SSL_REQUIRE', 'True') == 'True'`, set `DB_SSL_REQUIRE=False`. |
+| 2 | ~~`:286` `ssl_require=True`~~ | ~~Hardcoded. Postgres on the private Docker network doesn't speak TLS, so Django won't connect at all.~~ | ✅ **Done.** Now `ssl_require=os.getenv('DB_SSL_REQUIRE', 'True') == 'True'`. Still set `DB_SSL_REQUIRE=False` on the box. |
 | 3 | `:56` `ALLOWED_HOSTS` | Hardcoded Railway hostnames. | Add the custom domain; ideally read from env. |
 | 4 | `:115` `CORS_ALLOWED_ORIGINS` | Hardcoded Railway origin — the web admin build will be blocked. | Add the custom domain / web-admin origin. |
 
 Already done, no work needed: `DB_USE_PGBOUNCER` + `DISABLE_SERVER_SIDE_CURSORS`
 (`:280–290`) — PgBouncer is config-only. Redis cache + channel layer already
 switch on `REDIS_URL` (`:308`, `:334`).
+
+### Sizing note — password hashing
+
+Passwords are hashed with **Argon2id** (`PASSWORD_HASHERS`, `argon2-cffi` in
+requirements). This replaced PBKDF2 at 1,000,000 iterations, which measured
+**2.1 s per login** on a dev laptop and would be worse on a shared vCPU — it was
+the single slowest thing in the app and a cheap way for someone to burn CPU by
+hammering the login endpoint. Argon2id measures ~190 ms for the same work.
+
+Argon2 is memory-hard by design: Django's default parameters cost **~100 MiB per
+hash in flight**. That is the property doing the security work, so size for it
+rather than lowering it — the CX33 (8 GB) in the table above has ample headroom
+for concurrent logins; on the CX23 (4 GB) fallback keep an eye on it if signups
+ever arrive in bursts.
+
+No migration is needed: existing PBKDF2 hashes still verify, and Django
+transparently re-hashes each one to Argon2 on that user's next successful login.
 
 ### Frontend — `front/streams/services/api.js`
 

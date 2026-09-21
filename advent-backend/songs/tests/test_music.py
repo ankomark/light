@@ -265,9 +265,15 @@ class TrackShuffleTests(APITestCase):
         # Lean payload: queue fields only, no like/owner extras.
         row = results[0]
         self.assertIn('audio_file', row)
-        self.assertIn('lyrics', row)
         self.assertNotIn('likes_count', row)
         self.assertNotIn('is_liked', row)
+        # Nor the lyrics. This used to assert the opposite, back when the queue
+        # carried each track's full text — a 200-track shuffle shipped 200 song
+        # texts to build a playback queue. The queue now carries `has_lyrics`
+        # and the player fetches the words for the one track being played, so
+        # "lean" means this too.
+        self.assertNotIn('lyrics', row)
+        self.assertIn('has_lyrics', row)
 
     def test_shuffle_limit_is_bounded_and_randomises(self):
         self.client.force_authenticate(self.alice)
