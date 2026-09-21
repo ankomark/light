@@ -1,29 +1,35 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo, useSyncExternalStore } from 'react';
 import {
-  View, Text, TouchableOpacity, Image, TextInput, StyleSheet,
-  ScrollView, Alert, Modal, useWindowDimensions, ActivityIndicator
+  View, Text, TouchableOpacity, TextInput, StyleSheet,
+  ScrollView, Alert, Modal, useWindowDimensions, ActivityIndicator, FlatList,
 } from 'react-native';
+import { Image } from 'expo-image';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AudioTrimmer from './AudioTrimmer';
 import ImageCropper from './ImageCropper';
 import VideoTrimmer from './VideoTrimmer';
+import RotatingBackground from './RotatingBackground';
 import * as ImagePicker from 'expo-image-picker';
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { createSocialPost, fetchTracks } from '../services/api';
-import { uploadMedia } from '../services/cloudinary';
-import { processVideo, cleanupProcessedVideos } from '../services/videoProcessing';
+import { fetchTracks } from '../services/api';
 import { compressImage as compressImageFile } from '../services/imageProcessing';
-import { compressAudio } from '../services/audioProcessing';
+import { enqueueUpload } from '../services/uploadQueue';
+import { buildPostJob } from '../services/postUploads';
 import * as DocumentPicker from 'expo-document-picker';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { colors, radius, spacing, shadows } from '../constants/theme';
 
 // Instagram-style aspect-ratio clamp (matches the feed's mediaAspectRatio so the
 // preview is WYSIWYG): width:height between 1.91:1 (landscape) and 4:5 (portrait,
-// ratio 0.8). Outside that range the image is center-cropped via resizeMode
-// "cover"; the 4:5 floor caps height at 1.25×width so tall portraits never run
-// past the screen. Falls back to square when dimensions are unknown.
+// ratio 0.8). Outside that range the image is center-cropped; the 4:5 floor caps
+// height at 1.25×width so tall portraits never run past the screen. Falls back
+// to square when dimensions are unknown.
 const clampAspect = (w, h) => {
   if (!w || !h) return 1;
   const r = w / h;
@@ -35,33 +41,195 @@ const clampAspect = (w, h) => {
 // 1080p clip (portrait or landscape) has a 1080px short side, while 1440p/4K
 // have 1440/2160. The tolerance covers encoders that pad 1080 up to 1088.
 const MAX_VIDEO_SHORT_SIDE = 1130;
+const MAX_IMAGES = 4;
+const MAX_CLIP = 30; // seconds — the trimmed audio clip is capped at 30s
+const MAX_CAPTION = 2200;
+const PAD = spacing.md;
+
+// Format seconds as m:ss.
+const fmtTime = (s) => {
+  const total = Math.max(0, Math.floor(s));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+};
+
+// Library tracks expose the audio at `audio_file`; local picks use `audio_url`.
+const songAudioUri = (song) => song?.audio_file || song?.audio_url || null;
+// Local picks get a string id like `local-1700…`; library tracks have a numeric id.
+const isLocalSong = (song) => String(song?.id ?? '').startsWith('local-');
+// Library tracks serialize `artist` as a nested user object; local picks use a
+// plain string.
+const artistName = (song) =>
+  typeof song?.artist === 'string' ? song.artist : song?.artist?.username || 'Unknown Artist';
+
+// The trim preview reports its position every 50 ms. Kept out of React state on
+// purpose: as state it re-rendered this entire screen twenty times a second
+// while a song played. Only the trimmer's playhead subscribes to it.
+const createPlayhead = () => {
+  let value = null;
+  const subs = new Set();
+  return {
+    get: () => value,
+    set: (v) => { if (v !== value) { value = v; subs.forEach((fn) => fn()); } },
+    subscribe: (fn) => { subs.add(fn); return () => subs.delete(fn); },
+  };
+};
+
+const LiveAudioTrimmer = ({ playhead, ...props }) => {
+  const playheadMs = useSyncExternalStore(playhead.subscribe, playhead.get, playhead.get);
+  return <AudioTrimmer {...props} playheadMs={playheadMs} />;
+};
+
+// ── Media previews ────────────────────────────────────────────────────────────
+// Memoised so typing a caption doesn't re-render (and re-decode) the carousel
+// or the video player on every keystroke.
+
+const ImageCarousel = memo(({ images, width, onRemove, onCrop, onAdd, t }) => {
+  const [index, setIndex] = useState(0);
+  return (
+    <View style={styles.mediaBlock}>
+      <View style={[styles.carouselWrap, { aspectRatio: clampAspect(images[0].width, images[0].height) }]}>
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
+        >
+          {images.map((img, i) => (
+            <View key={`${img.uri}_${i}`} style={{ width, height: '100%' }}>
+              <Image source={{ uri: img.uri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={120} />
+              <TouchableOpacity style={styles.removeImageBtn} onPress={() => onRemove(i)} hitSlop={8}>
+                <Feather name="x" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </ScrollView>
+        {images.length > 1 && (
+          <View style={styles.counterBadge}>
+            <Text style={styles.counterText}>{Math.min(index + 1, images.length)}/{images.length}</Text>
+          </View>
+        )}
+      </View>
+
+      {images.length > 1 && (
+        <View style={styles.dotsRow}>
+          {images.map((_, i) => <View key={i} style={[styles.dot, i === index && styles.dotActive]} />)}
+        </View>
+      )}
+
+      <View style={styles.chipRow}>
+        {images.length === 1 && (
+          <TouchableOpacity style={styles.chip} onPress={onCrop}>
+            <Feather name="crop" size={15} color={colors.primary} />
+            <Text style={styles.chipText}>{t('create.post.crop')}</Text>
+          </TouchableOpacity>
+        )}
+        {images.length < MAX_IMAGES && (
+          <TouchableOpacity style={styles.chip} onPress={onAdd}>
+            <Feather name="plus" size={15} color={colors.primary} />
+            <Text style={styles.chipText}>{t('create.post.addMore', { count: images.length, max: MAX_IMAGES })}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+});
+ImageCarousel.displayName = 'ImageCarousel';
+
+const VideoPreview = memo(({ media, trimSecs, onTrim, onChange, t }) => (
+  <View style={styles.mediaBlock}>
+    <View style={[styles.carouselWrap, { aspectRatio: clampAspect(media.width, media.height) }]}>
+      <AppVideo
+        source={{ uri: media.uri }}
+        style={StyleSheet.absoluteFill}
+        useNativeControls
+        resizeMode="cover"
+        isLooping
+        shouldPlay={false}
+      />
+    </View>
+    <View style={styles.chipRow}>
+      <TouchableOpacity style={styles.chip} onPress={onTrim}>
+        <Feather name="scissors" size={15} color={colors.primary} />
+        <Text style={styles.chipText}>{t('create.post.trimLabel', { secs: trimSecs })}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.chip} onPress={onChange}>
+        <Feather name="refresh-cw" size={15} color={colors.primary} />
+        <Text style={styles.chipText}>{t('create.post.changeVideo')}</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+));
+VideoPreview.displayName = 'VideoPreview';
+
+const EmptyPicker = memo(({ onCamera, onPick, label, t }) => (
+  <View style={styles.mediaBlock}>
+    <TouchableOpacity style={styles.pickArea} onPress={onPick} activeOpacity={0.85}>
+      <View style={styles.pickIcon}><Feather name="image" size={28} color={colors.primary} /></View>
+      <Text style={styles.pickText}>{label}</Text>
+    </TouchableOpacity>
+    <TouchableOpacity style={styles.cameraButton} onPress={onCamera} activeOpacity={0.85}>
+      <Feather name="camera" size={18} color="#fff" />
+      <Text style={styles.cameraButtonText}>{t('camera.open')}</Text>
+    </TouchableOpacity>
+  </View>
+));
+EmptyPicker.displayName = 'EmptyPicker';
+
+// A full-screen dark sheet used by the song list and both trimmers.
+const Sheet = ({ visible, title, onClose, children, gestures = false }) => {
+  const body = (
+    <View style={styles.sheetRoot}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.sheetSafe}>
+        <View style={styles.sheetHeader}>
+          <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.headerIcon}>
+            <Feather name="x" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.sheetTitle}>{title}</Text>
+          <View style={styles.headerIcon} />
+        </View>
+        {children}
+      </SafeAreaView>
+    </View>
+  );
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      {/* A Modal is its own native window, outside the app-root
+          GestureHandlerRootView, so the trimmers' pan gestures need their own. */}
+      {gestures ? <GestureHandlerRootView style={{ flex: 1 }}>{body}</GestureHandlerRootView> : body}
+    </Modal>
+  );
+};
 
 const CreatePost = ({ navigation }) => {
   const { t } = useI18n();
-  // Reactive carousel-slide width (window minus the 20px content padding each
-  // side) — reflows on rotation / web resize; was a module-scope snapshot.
+  const { currentUser } = useAuth();
+  const insets = useSafeAreaInsets();
+  const kbHeight = useKeyboardHeight();
   const { width: winW } = useWindowDimensions();
-  const previewW = winW - 40;
+  const previewW = winW - PAD * 2;
+
   const [contentType, setContentType] = useState('image');
   const [media, setMedia] = useState(null);          // single video
   const [images, setImages] = useState([]);          // 1–4 image carousel: [{uri,width,height}]
-  const [preparingMedia, setPreparingMedia] = useState(false); // compressing picked images
-  const [previewIndex, setPreviewIndex] = useState(0);
-  const MAX_IMAGES = 4;
+  const [preparingMedia, setPreparingMedia] = useState(false);
   const [caption, setCaption] = useState('');
-  const [tracks, setTracks] = useState([]);
+
+  // Song library: painted from the Music tab's cache, fetched only when the
+  // picker opens. It used to download the library every time this screen
+  // opened, for a picker most posts never touch.
+  const tracksKey = userKey(currentUser?.id, 'tracks');
+  const [tracks, setTracks] = useState(() => peekCache(tracksKey) ?? []);
+  const [tracksLoading, setTracksLoading] = useState(false);
+
   const [selectedSong, setSelectedSong] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0); // 0..1 across all files
   const [showSongModal, setShowSongModal] = useState(false);
   const [showTrimModal, setShowTrimModal] = useState(false);
   const [playbackStatus, setPlaybackStatus] = useState(null);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(30);
   const [isPreviewing, setIsPreviewing] = useState(false);
-  const [previewPosMs, setPreviewPosMs] = useState(null); // playhead during preview
+  const playhead = useMemo(createPlayhead, []);
   const soundRef = useRef(null);
-  const previewTimerRef = useRef(null);
   const [localAudio, setLocalAudio] = useState(null);
 
   // Image cropping
@@ -80,52 +248,42 @@ const CreatePost = ({ navigation }) => {
   trimStartRef.current = trimStart;
   trimEndRef.current = trimEnd;
 
-  const MAX_CLIP = 30; // seconds — the trimmed audio clip is capped at 30s
-
-  // Format seconds as m:ss.
-  const fmtTime = (s) => {
-    const total = Math.max(0, Math.floor(s));
-    const m = Math.floor(total / 60);
-    const sec = String(total % 60).padStart(2, '0');
-    return `${m}:${sec}`;
-  };
-
-  // Library tracks expose the audio at `audio_file`; local picks use `audio_url`.
-  const songAudioUri = (song) => song?.audio_file || song?.audio_url || null;
-
-  // Local picks get a string id like `local-1700…`; library tracks have a numeric id.
-  const isLocalSong = (song) => String(song?.id ?? '').startsWith('local-');
-
-  // Library tracks serialize `artist` as a nested user object; local picks use a
-  // plain string. Normalise to a display/storage string either way.
-  const artistName = (song) =>
-    typeof song?.artist === 'string'
-      ? song.artist
-      : song?.artist?.username || 'Unknown Artist';
+  // ── Leaving with unsaved work ──
+  const submittedRef = useRef(false);
+  const hasWork = images.length > 0 || !!media || caption.trim().length > 0 || !!selectedSong;
+  const hasWorkRef = useRef(hasWork);
+  hasWorkRef.current = hasWork;
+  useEffect(() => navigation.addListener('beforeRemove', (e) => {
+    if (submittedRef.current || !hasWorkRef.current) return;
+    e.preventDefault();
+    Alert.alert(t('create.post.discardTitle'), t('create.post.discardBody'), [
+      { text: t('create.post.keepEditing'), style: 'cancel' },
+      { text: t('create.post.discard'), style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation, t]);
 
   // Drives the playhead and loops playback within the selected [start, end]
   // window (never jumps back to 0). Set once on the sound; reads live refs.
-  const onPreviewStatus = (status) => {
+  const onPreviewStatus = useCallback((status) => {
     if (!status.isLoaded || !isPreviewingRef.current) return;
     const pos = status.positionMillis || 0;
     const startMs = trimStartRef.current * 1000;
     const endMs = trimEndRef.current * 1000;
     if (pos >= endMs - 20) {
       soundRef.current?.setPositionAsync(startMs).catch(() => {});
-      setPreviewPosMs(startMs);
+      playhead.set(startMs);
     } else {
-      setPreviewPosMs(pos);
+      playhead.set(pos);
     }
-  };
+  }, [playhead]);
 
-  // Play the selected region, looping it.
   const startPreview = async () => {
     if (!soundRef.current) return;
     try {
       isPreviewingRef.current = true;
       setIsPreviewing(true);
       await soundRef.current.setPositionAsync(trimStartRef.current * 1000);
-      setPreviewPosMs(trimStartRef.current * 1000);
+      playhead.set(trimStartRef.current * 1000);
       await soundRef.current.playAsync();
     } catch {
       isPreviewingRef.current = false;
@@ -133,55 +291,66 @@ const CreatePost = ({ navigation }) => {
     }
   };
 
-  // Stop preview playback and hide the playhead.
-  const stopPreview = async () => {
+  const stopPreview = useCallback(async () => {
     isPreviewingRef.current = false;
-    if (previewTimerRef.current) {
-      clearTimeout(previewTimerRef.current);
-      previewTimerRef.current = null;
-    }
     setIsPreviewing(false);
-    setPreviewPosMs(null);
+    playhead.set(null);
     try {
       if (soundRef.current) await soundRef.current.pauseAsync();
-    } catch {}
-  };
+    } catch { /* already stopped */ }
+  }, [playhead]);
 
   // The trimmer reports the window in ms; mirror to seconds (state + refs).
-  const onTrimChange = (startMs, endMs) => {
+  const onTrimChange = useCallback((startMs, endMs) => {
     trimStartRef.current = startMs / 1000;
     trimEndRef.current = endMs / 1000;
     setTrimStart(startMs / 1000);
     setTrimEnd(endMs / 1000);
-  };
+  }, []);
 
-  // Unload audio + clear timers when leaving the screen.
+  // Unload audio when leaving the screen.
   useEffect(() => () => {
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     if (soundRef.current) soundRef.current.unloadAsync().catch(() => {});
   }, []);
 
-  // Request media library permissions
-  useEffect(() => {
-    (async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(t('create.post.permissionTitle'), t('create.post.permissionBody'));
-      }
-    })();
+  const openSongLibrary = useCallback(() => {
+    setShowSongModal(true);
+    if (!tracks.length) setTracksLoading(true);
+    // Cold start without a session copy: the disk copy first, then the network.
+    if (!tracks.length) {
+      readCache(tracksKey).then((cached) => {
+        if (Array.isArray(cached) && cached.length) setTracks((prev) => (prev.length ? prev : cached));
+      });
+    }
+    fetchTracks()
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data?.results ?? [];
+        setTracks(list);
+        if (list.length) writeCache(tracksKey, list);
+      })
+      .catch(() => {})
+      .finally(() => setTracksLoading(false));
+  }, [tracks.length, tracksKey]);
+
+  // Compress an image to a sane upload size (cap at 1080px wide, no upscaling).
+  const compressImage = (uri, width) =>
+    compressImageFile(uri, { maxWidth: 1080, sourceWidth: width, quality: 0.8 });
+
+  const acceptVideo = useCallback((asset) => {
+    // Reject 2K/4K — only 1080p and below. (Unknown dimensions are allowed
+    // through; the backend caps resolution on upload as a net.)
+    const shortSide = asset.width && asset.height ? Math.min(asset.width, asset.height) : 0;
+    if (shortSide > MAX_VIDEO_SHORT_SIDE) {
+      Alert.alert(t('create.post.resolutionTitle'), t('create.post.resolutionBody'));
+      return;
+    }
+    setMedia(asset);
+    const durSec = (asset.duration || 0) / 1000;
+    setVideoTrim({ start: 0, end: Math.min(30, durSec || 30) });
+    setShowVideoTrimmer(true);
   }, [t]);
 
-  useEffect(() => {
-    if (contentType === 'image') {
-      // fetchTracks returns a paginated { results, next, ... } object; unwrap to
-      // an array (tolerating a bare array) so the song picker can map over it.
-      fetchTracks()
-        .then(data => setTracks(Array.isArray(data) ? data : data?.results ?? []))
-        .catch(() => setTracks([]));
-    }
-  }, [contentType]);
-
-  const pickMedia = async () => {
+  const pickMedia = useCallback(async () => {
     try {
       if (contentType === 'video') {
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -192,32 +361,16 @@ const CreatePost = ({ navigation }) => {
         });
         if (result.canceled || !result.assets?.length) return;
         const selected = result.assets[0];
-        // Reject 2K/4K — only 1080p and below are accepted. (Unknown dimensions
-        // are allowed through; the backend caps resolution on upload as a net.)
-        const shortSide = selected.width && selected.height
-          ? Math.min(selected.width, selected.height)
-          : 0;
-        if (shortSide > MAX_VIDEO_SHORT_SIDE) {
-          Alert.alert(
-            t('create.post.resolutionTitle'),
-            t('create.post.resolutionBody'),
-          );
-          return;
-        }
-        // Any length is allowed — the user trims to ≤30s next. Only guard against
-        // an unreasonably large raw file (the full file still uploads).
+        // Any length is allowed — the user trims to ≤30s next. Only guard
+        // against an unreasonably large raw file.
         if (selected.fileSize && selected.fileSize > 300 * 1024 * 1024) {
           Alert.alert(t('common.error'), t('create.post.videoTooLarge'));
           return;
         }
-        setMedia(selected);
-        const durSec = (selected.duration || 0) / 1000;
-        setVideoTrim({ start: 0, end: Math.min(30, durSec || 30) });
-        setShowVideoTrimmer(true);
+        acceptVideo(selected);
         return;
       }
 
-      // Images: select up to the remaining slots (max 4 total).
       const remaining = MAX_IMAGES - images.length;
       if (remaining <= 0) {
         Alert.alert(t('create.post.limitTitle'), t('create.post.limitBody', { max: MAX_IMAGES }));
@@ -231,14 +384,10 @@ const CreatePost = ({ navigation }) => {
         selectionLimit: remaining,
       });
       if (result.canceled || !result.assets?.length) return;
-
       const picked = result.assets.slice(0, remaining);
 
-      // A single image picked into an empty post → offer the crop editor.
-      // Pre-downscale to the upload cap (≤1080px) BEFORE opening the cropper, so
-      // it decodes a small file and opens fast instead of chewing on a full-res
-      // photo. The final post is capped at 1080 anyway, so there's no extra
-      // quality loss. The "Preparing…" overlay covers this brief step.
+      // A single image into an empty post → offer the crop editor, after a
+      // pre-downscale to the upload cap so the cropper decodes a small file.
       if (picked.length === 1 && images.length === 0) {
         const sel = picked[0];
         setPreparingMedia(true);
@@ -259,8 +408,6 @@ const CreatePost = ({ navigation }) => {
         return;
       }
 
-      // Otherwise just compress each and append to the carousel. Big images take
-      // a moment — show a "Preparing…" overlay so it doesn't look like it failed.
       setPreparingMedia(true);
       try {
         const compressed = await Promise.all(
@@ -281,36 +428,20 @@ const CreatePost = ({ navigation }) => {
       console.error('Media picker error:', error);
       Alert.alert(t('common.error'), t('create.post.pickMediaFailed'));
     }
-  };
+  }, [contentType, images.length, acceptVideo, t]);
 
-  const removeImage = (index) => {
+  const removeImage = useCallback((index) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
-  };
+  }, []);
 
-  // Compress an image to a sane upload size (cap at 1080px wide, no upscaling).
-  const compressImage = (uri, width) =>
-    compressImageFile(uri, { maxWidth: 1080, sourceWidth: width, quality: 0.8 });
-
-  // A shot captured in the in-app camera comes back as an ImagePicker-shaped
-  // asset and flows into the same paths as a gallery pick (video → trimmer,
-  // photo → crop/compress). Camera videos have unknown dimensions, which the
-  // resolution check treats as allowed.
+  // A shot from the in-app camera flows into the same paths as a gallery pick.
   const handleCapturedAsset = async (asset) => {
     if (!asset?.uri) return;
     if (asset.type === 'video') {
       setContentType('video');
-      const shortSide = asset.width && asset.height ? Math.min(asset.width, asset.height) : 0;
-      if (shortSide > MAX_VIDEO_SHORT_SIDE) {
-        Alert.alert(t('create.post.resolutionTitle'), t('create.post.resolutionBody'));
-        return;
-      }
-      setMedia(asset);
-      const durSec = (asset.duration || 0) / 1000;
-      setVideoTrim({ start: 0, end: Math.min(30, durSec || 30) });
-      setShowVideoTrimmer(true);
+      acceptVideo(asset);
       return;
     }
-    // Photo.
     setContentType('image');
     if (images.length >= MAX_IMAGES) {
       Alert.alert(t('create.post.limitTitle'), t('create.post.limitBody', { max: MAX_IMAGES }));
@@ -332,68 +463,36 @@ const CreatePost = ({ navigation }) => {
       }
     } finally { setPreparingMedia(false); }
   };
+  const handleCapturedRef = useRef(handleCapturedAsset);
+  handleCapturedRef.current = handleCapturedAsset;
 
-  const openCamera = () => navigation.navigate('CameraCapture', { onCapture: handleCapturedAsset });
+  const openCamera = useCallback(
+    () => navigation.navigate('CameraCapture', { onCapture: (a) => handleCapturedRef.current(a) }),
+    [navigation],
+  );
 
-  // Cropper confirmed: compress the cropped output → single-image post.
-  // (Crop is only offered for single-image posts, so this replaces the carousel.)
-  // The cropper already outputs a compressed JPEG capped at 1080px (and the
-  // source was pre-downscaled), so use it directly — no redundant re-compress.
+  // The cropper outputs a compressed JPEG capped at 1080px — used directly.
   const handleCropped = ({ uri, width, height }) => {
     setShowCropper(false);
     setImages([{ uri, width, height }]);
   };
 
-  // Cropper cancelled. On a re-crop, keep the current image. On the very first
-  // pick, fall back to the original (uncropped) so the user can still post it.
-  const handleCropCancel = async () => {
+  // Cropper cancelled: keep the current image on a re-crop; on the first pick,
+  // fall back to the (pre-downscaled) original so it can still be posted.
+  const handleCropCancel = () => {
     setShowCropper(false);
-    if (images.length) return; // re-crop cancelled — keep what's already there
-    // originalAssetRef already holds the pre-downscaled image, so use it directly.
+    if (images.length) return;
     const asset = originalAssetRef.current;
-    if (!asset) return;
-    setImages([{ uri: asset.uri, width: asset.width, height: asset.height }]);
+    if (asset) setImages([{ uri: asset.uri, width: asset.width, height: asset.height }]);
   };
 
-  // Re-open the cropper from the originally picked image.
-  const reopenCropper = () => {
+  const reopenCropper = useCallback(() => {
     const asset = originalAssetRef.current;
     if (!asset) { pickMedia(); return; }
     setCropTarget({ uri: asset.uri, width: asset.width, height: asset.height });
     setShowCropper(true);
-  };
-  const pickLocalAudio = async () => {
-  try {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: 'audio/*',
-      copyToCacheDirectory: true,
-    });
+  }, [pickMedia]);
 
-    // Expo SDK 53 returns { canceled, assets:[...] }; tolerate the legacy
-    // { type:'success', uri,... } shape too.
-    if (result.canceled) return;
-    const asset = result.assets?.[0] ?? (result.type === 'success' ? result : null);
-    if (!asset?.uri) return;
-
-    const name = asset.name || `audio_${Date.now()}.mp3`;
-    setLocalAudio({
-      uri: asset.uri,
-      name,
-      type: asset.mimeType || 'audio/mpeg',
-      size: asset.size,
-    });
-    // Open the trim editor (loads the audio for preview + trimming).
-    handleTrimSong({
-      id: `local-${Date.now()}`,
-      title: name.replace(/\.[^/.]+$/, ''),
-      artist: 'Local File',
-      audio_url: asset.uri,
-    });
-  } catch (error) {
-    console.error('Error picking audio:', error);
-    Alert.alert(t('common.error'), t('create.post.pickAudioFailed'));
-  }
-};
   const handleTrimSong = async (song) => {
     const uri = songAudioUri(song);
     if (!uri) {
@@ -401,8 +500,8 @@ const CreatePost = ({ navigation }) => {
       return;
     }
     setSelectedSong(song);
-    setShowSongModal(false);   // close the library list
-    setShowTrimModal(true);    // open the trim editor
+    setShowSongModal(false);
+    setShowTrimModal(true);
     setPlaybackStatus(null);
     setTrimStart(0);
 
@@ -412,560 +511,334 @@ const CreatePost = ({ navigation }) => {
         await soundRef.current.unloadAsync();
         soundRef.current = null;
       }
-
       const { sound } = await createSound(
         { uri },
         { shouldPlay: false, progressUpdateIntervalMillis: 50, isLooping: true },
         onPreviewStatus
       );
       soundRef.current = sound;
-
       const status = await sound.getStatusAsync();
       setPlaybackStatus(status);
 
-      // Default trim range: a 30s window centred on the song (or the whole song
-      // if it's shorter), so the user starts from the middle instead of the top.
+      // Default: a 30s window centred on the song (or the whole song if shorter).
       const songSeconds = (status.durationMillis || 0) / 1000;
       const clip = Math.min(MAX_CLIP, songSeconds || MAX_CLIP);
       const start = Math.max(0, (songSeconds - clip) / 2);
-      const end = start + clip;
       trimStartRef.current = start;
-      trimEndRef.current = end;
+      trimEndRef.current = start + clip;
       setTrimStart(start);
-      setTrimEnd(end);
+      setTrimEnd(start + clip);
     } catch (error) {
       console.error('Error loading song:', error);
       Alert.alert(t('common.error'), t('create.post.trimLoadFailed'));
     }
   };
 
-  const handlePost = async () => {
-  if (contentType === 'image' ? images.length === 0 : !media) {
-    Alert.alert(t('common.error'), contentType === 'image' ? t('create.post.needImage') : t('create.post.needVideo'));
-    return;
-  }
+  const pickLocalAudio = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true });
+      // Expo SDK 53+ returns { canceled, assets }; tolerate the legacy shape too.
+      if (result.canceled) return;
+      const asset = result.assets?.[0] ?? (result.type === 'success' ? result : null);
+      if (!asset?.uri) return;
+      const name = asset.name || `audio_${Date.now()}.mp3`;
+      setLocalAudio({ uri: asset.uri, name, type: asset.mimeType || 'audio/mpeg', size: asset.size });
+      handleTrimSong({
+        id: `local-${Date.now()}`,
+        title: name.replace(/\.[^/.]+$/, ''),
+        artist: 'Local File',
+        audio_url: asset.uri,
+      });
+    } catch (error) {
+      console.error('Error picking audio:', error);
+      Alert.alert(t('common.error'), t('create.post.pickAudioFailed'));
+    }
+  };
 
-  setIsUploading(true);
-  setUploadProgress(0);
-  try {
+  const closeTrim = async () => { await stopPreview(); setShowTrimModal(false); };
+
+  const removeSong = async () => {
+    await stopPreview();
+    setSelectedSong(null);
+    setLocalAudio(null);
+    setPlaybackStatus(null);
+  };
+
+  // Hand the post to the background queue and leave. Everything the job needs
+  // is copied into a plain snapshot — this screen is gone before it runs.
+  const handlePost = async () => {
+    if (contentType === 'image' ? images.length === 0 : !media) {
+      Alert.alert(t('common.error'), contentType === 'image' ? t('create.post.needImage') : t('create.post.needVideo'));
+      return;
+    }
     await stopPreview();
 
-    // Aggregate upload progress across every file (images + optional audio, or video).
-    const hasLocalAudio =
-      contentType === 'image' && selectedSong && isLocalSong(selectedSong) && !!localAudio;
-    const totalUploads = contentType === 'image' ? images.length + (hasLocalAudio ? 1 : 0) : 1;
-    let done = 0;
-    const fileProgress = (frac) =>
-      setUploadProgress(Math.min(0.99, (done + (frac || 0)) / totalUploads));
-    const fileDone = () => {
-      done += 1;
-      setUploadProgress(Math.min(0.99, done / totalUploads));
+    const local = selectedSong && isLocalSong(selectedSong);
+    const snap = {
+      contentType,
+      caption,
+      images,
+      video: media,
+      trim: videoTrim,
+      song: contentType === 'image' && selectedSong ? {
+        title: selectedSong.title || '',
+        artist: artistName(selectedSong),
+        audioUrl: local ? null : songAudioUri(selectedSong),
+        songId: local ? null : selectedSong.id,
+        start: trimStart,
+        end: trimEnd,
+        localAudio: local ? localAudio : null,
+      } : null,
     };
 
-    let postData;
-    if (contentType === 'image') {
-      // Upload every image; build the gallery + mirror the first onto media_file.
-      const uploads = [];
-      for (const img of images) {
-        const r = await uploadToCloudinary(img, 'image', fileProgress);
-        uploads.push({ public_id: r.public_id, width: r.width, height: r.height });
-        fileDone();
-      }
-
-      // Accompanying song (denormalised; works for library + local audio).
-      let songData = {};
-      if (selectedSong) {
-        const isLocal = isLocalSong(selectedSong);
-        let audioUrl = songAudioUri(selectedSong);
-        if (isLocal && localAudio) {
-          // Transcode to ~128 kbps AAC before upload to cut R2 cost; keeps the
-          // original if it was already low-bitrate. Relabel as m4a when compressed
-          // so the stored file's type matches its (AAC) bytes.
-          const { uri: aUri, compressed } = await compressAudio({ uri: localAudio.uri });
-          const audioFile = compressed
-            ? {
-                ...localAudio,
-                uri: aUri,
-                name: `audio_${Date.now()}.m4a`,
-                fileName: `audio_${Date.now()}.m4a`,
-                mimeType: 'audio/mp4',
-                type: 'audio/mp4',
-              }
-            : localAudio;
-          const audioUploadResult = await uploadToCloudinary(audioFile, 'audio', fileProgress);
-          audioUrl = audioUploadResult.secure_url;
-          fileDone();
-        }
-        if (audioUrl) {
-          songData = {
-            song_audio_url: audioUrl,
-            song_title: selectedSong.title || '',
-            song_artist: artistName(selectedSong),
-            song_start_time: Number(trimStart.toFixed(2)),
-            song_end_time: Number(trimEnd.toFixed(2)),
-            ...(!isLocal && { song_id: selectedSong.id }),
-          };
-        }
-      }
-
-      postData = {
-        caption: caption.trim(),
-        content_type: 'image',
-        media_file: uploads[0].public_id,
-        width: uploads[0].width,
-        height: uploads[0].height,
-        gallery: uploads,
-        ...songData,
-      };
-    } else {
-      // R2 stores bytes verbatim, so cut + compress the clip ON-DEVICE first
-      // (this is what Cloudinary used to do at ingest). Trims to the chosen
-      // window and downscales to 720p at a capped bitrate; the uploaded file IS
-      // the final clip.
-      const processed = await processVideo({
-        uri: media.uri,
-        startSec: videoTrim.start,
-        endSec: videoTrim.end,
-        width: media.width,
-        height: media.height,
-        thumbnail: true,   // grab a poster frame for the feed/explore grid
-      });
-      if (!processed.processed) {
-        console.warn('[CreatePost] video processing unavailable — uploading raw clip.');
-      }
-      const uploadResult = await uploadToCloudinary(
-        { ...media, uri: processed.uri }, 'video', fileProgress,
-      );
-
-      // Upload the poster frame (if we got one) so grids have a still to show —
-      // R2 has no server-side frame extraction.
-      let thumbnailUrl;
-      if (processed.thumbnailUri) {
-        try {
-          const thumb = await uploadMedia(
-            { uri: processed.thumbnailUri, name: `poster_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
-            'social-image',
-          );
-          thumbnailUrl = thumb.url;
-        } catch (e) {
-          console.warn('[CreatePost] poster upload failed', e?.message);
-        }
-      }
-      fileDone();
-      const clip = Math.max(1, Math.round(videoTrim.end - videoTrim.start));
-      postData = {
-        caption: caption.trim(),
-        content_type: 'video',
-        media_file: uploadResult.public_id,
-        ...(thumbnailUrl ? { thumbnail: thumbnailUrl } : {}),
-        width: uploadResult.width ?? media.width,
-        height: uploadResult.height ?? media.height,
-        // The stored file is already the trimmed clip starting at 0 — omit
-        // video_start/end_time so no player-side trim is applied.
-        duration: clip,
-      };
-    }
-
-    setUploadProgress(1);
-    await createSocialPost(postData);
-    cleanupProcessedVideos();  // best-effort: drop the on-device scratch files
-    Alert.alert(t('market.success'), t('create.post.createdOk'));
+    enqueueUpload({
+      kind: 'post',
+      title: caption.trim().slice(0, 60),
+      thumbUri: contentType === 'image' ? images[0].uri : null,
+      run: buildPostJob(snap),
+    });
+    submittedRef.current = true;
     navigation.goBack();
-  } catch (error) {
-    console.error('Upload error:', error);
-    Alert.alert(t('common.error'), error.message || t('create.post.createFailed'));
-  } finally {
-    setIsUploading(false);
-  }
-};
-
-const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
-  const uploadType =
-    type === 'video' ? 'social-video' : type === 'audio' ? 'audio' : 'social-image';
-  const ext = type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'jpg';
-  const defaultMime =
-    type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/mpeg' : 'image/jpeg';
-  const result = await uploadMedia(
-    {
-      uri: mediaFile.uri,
-      name: mediaFile.fileName ?? mediaFile.name ?? `post_${Date.now()}.${ext}`,
-      mimeType: mediaFile.mimeType ?? mediaFile.type ?? defaultMime,
-    },
-    uploadType,
-    onProgress,
-    opts
-  );
-  // Normalise to the shape the rest of CreatePost expects. R2 stores bytes
-  // verbatim and returns no image dimensions, so fall back to the source asset's
-  // width/height (from the image picker) — without these, the feed can't know a
-  // post's aspect ratio and center-crops every image into a square.
-  return {
-    public_id: result.publicId,
-    secure_url: result.url,
-    width: result.width ?? mediaFile.width ?? null,
-    height: result.height ?? mediaFile.height ?? null,
-    duration: result.duration,
   };
-};
+
+  const canPost = contentType === 'image' ? images.length > 0 : !!media;
+  const trimSecs = (videoTrim.end - videoTrim.start).toFixed(0);
+  const openVideoTrimmer = useCallback(() => setShowVideoTrimmer(true), []);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.title}>{t('create.post.title')}</Text>
+    <View style={styles.root}>
+      <RotatingBackground intervalMs={60000} scrimColor="rgba(8,18,34,0.72)" />
+      <SafeAreaView edges={['top']} style={styles.safe}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.headerIcon} accessibilityLabel={t('common.cancel')}>
+            <Feather name="x" size={26} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('create.post.title')}</Text>
+          <View style={styles.headerIcon} />
+        </View>
 
-      {/* Media Type Selector */}
-      <View style={styles.typeSelector}>
-        <TouchableOpacity
-          style={[styles.typeButton, contentType === 'image' && styles.activeType]}
-          onPress={() => setContentType('image')}
+        {/* Photo / Video switch */}
+        <View style={styles.segment}>
+          {[
+            { key: 'image', icon: 'image', label: t('create.post.photo') },
+            { key: 'video', icon: 'videocam', label: t('create.post.video') },
+          ].map((opt) => {
+            const active = contentType === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                onPress={() => setContentType(opt.key)}
+                activeOpacity={0.85}
+              >
+                <MaterialIcons name={opt.icon} size={18} color={active ? '#fff' : colors.textSecondary} />
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{opt.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + (kbHeight || 0) }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <MaterialIcons 
-            name="image" 
-            size={24} 
-            color={contentType === 'image' ? '#fff' : '#666'} 
-          />
-          <Text style={[styles.typeText, contentType === 'image' && styles.activeTypeText]}>
-            Image
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.typeButton, contentType === 'video' && styles.activeType]}
-          onPress={() => setContentType('video')}
-        >
-          <MaterialIcons 
-            name="videocam" 
-            size={24} 
-            color={contentType === 'video' ? '#fff' : '#666'} 
-          />
-          <Text style={[styles.typeText, contentType === 'video' && styles.activeTypeText]}>
-            Video
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Media Preview — images render as a swipeable carousel (up to 4) at one
-          shared aspect ratio; video is a single preview. */}
-      {contentType === 'video' ? (
-        media ? (
-          <View style={styles.mediaPreviewContainer}>
-            <AppVideo
-              source={{ uri: media.uri }}
-              style={[styles.mediaPreview, { aspectRatio: clampAspect(media.width, media.height) }]}
-              useNativeControls
-              resizeMode="cover"
-              isLooping
-              shouldPlay={false}
+          {contentType === 'video' ? (
+            media ? (
+              <VideoPreview media={media} trimSecs={trimSecs} onTrim={openVideoTrimmer} onChange={pickMedia} t={t} />
+            ) : (
+              <EmptyPicker onCamera={openCamera} onPick={pickMedia} label={t('create.post.selectVideo')} t={t} />
+            )
+          ) : images.length > 0 ? (
+            <ImageCarousel
+              images={images}
+              width={previewW}
+              onRemove={removeImage}
+              onCrop={reopenCropper}
+              onAdd={pickMedia}
+              t={t}
             />
-            <TouchableOpacity style={styles.cropMediaButton} onPress={() => setShowVideoTrimmer(true)}>
-              <Feather name="scissors" size={18} color="#fff" />
-              <Text style={styles.cropMediaText}>Trim · {(videoTrim.end - videoTrim.start).toFixed(0)}s</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.changeMediaButton} onPress={pickMedia}>
-              <Feather name="edit" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View>
-            <TouchableOpacity style={styles.cameraButton} onPress={openCamera} activeOpacity={0.85}>
-              <Feather name="camera" size={20} color="#fff" />
-              <Text style={styles.cameraButtonText}>{t('camera.open')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
-              <Feather name="upload" size={32} color="#666" />
-              <Text style={styles.uploadText}>{t('create.post.selectVideo')}</Text>
-            </TouchableOpacity>
-          </View>
-        )
-      ) : images.length > 0 ? (
-        <View style={styles.mediaPreviewContainer}>
-          <View style={[styles.carouselWrap, { aspectRatio: clampAspect(images[0].width, images[0].height) }]}>
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onMomentumScrollEnd={(e) =>
-                setPreviewIndex(Math.round(e.nativeEvent.contentOffset.x / previewW))
-              }
-            >
-              {images.map((img, i) => (
-                <View key={`${img.uri}_${i}`} style={{ width: previewW, height: '100%' }}>
-                  <Image source={{ uri: img.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                  <TouchableOpacity style={styles.removeImageBtn} onPress={() => removeImage(i)}>
-                    <Feather name="x" size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </ScrollView>
-            {images.length > 1 && (
-              <View style={styles.counterBadge}>
-                <Text style={styles.counterText}>{Math.min(previewIndex + 1, images.length)}/{images.length}</Text>
-              </View>
-            )}
-          </View>
-
-          {images.length > 1 && (
-            <View style={styles.dotsRow}>
-              {images.map((_, i) => (
-                <View key={i} style={[styles.dot, i === previewIndex && styles.dotActive]} />
-              ))}
-            </View>
+          ) : (
+            <EmptyPicker onCamera={openCamera} onPick={pickMedia} label={t('create.post.selectImages', { max: MAX_IMAGES })} t={t} />
           )}
 
-          <View style={styles.imageActionsRow}>
-            {images.length === 1 && (
-              <TouchableOpacity style={styles.imageActionBtn} onPress={reopenCropper}>
-                <Feather name="crop" size={16} color="#1DA1F2" />
-                <Text style={styles.imageActionText}>{t('create.post.crop')}</Text>
-              </TouchableOpacity>
-            )}
-            {images.length < MAX_IMAGES && (
-              <TouchableOpacity style={styles.imageActionBtn} onPress={pickMedia}>
-                <Feather name="plus" size={16} color="#1DA1F2" />
-                <Text style={styles.imageActionText}>Add ({images.length}/{MAX_IMAGES})</Text>
-              </TouchableOpacity>
-            )}
+          {/* Caption */}
+          <View style={styles.card}>
+            <TextInput
+              style={styles.captionInput}
+              placeholder={t('create.post.captionPlaceholder')}
+              placeholderTextColor={colors.placeholder}
+              value={caption}
+              onChangeText={setCaption}
+              multiline
+              maxLength={MAX_CAPTION}
+            />
+            <Text style={styles.charCount}>{caption.length}/{MAX_CAPTION}</Text>
           </View>
-        </View>
-      ) : (
-        <View>
-          <TouchableOpacity style={styles.cameraButton} onPress={openCamera} activeOpacity={0.85}>
-            <Feather name="camera" size={20} color="#fff" />
-            <Text style={styles.cameraButtonText}>{t('camera.open')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
-            <Feather name="upload" size={32} color="#666" />
-            <Text style={styles.uploadText}>Select Images (up to {MAX_IMAGES})</Text>
-          </TouchableOpacity>
-        </View>
+
+          {/* Song (photos only) */}
+          {contentType === 'image' && (
+            <View style={styles.card}>
+              <Text style={styles.cardLabel}>{t('create.post.song')}</Text>
+              {selectedSong ? (
+                <View style={styles.songRow}>
+                  <View style={styles.songIcon}><MaterialIcons name="music-note" size={20} color={colors.accent} /></View>
+                  <View style={styles.flex}>
+                    <Text style={styles.songTitle} numberOfLines={1}>{selectedSong.title}</Text>
+                    <Text style={styles.songArtist} numberOfLines={1}>
+                      {isLocalSong(selectedSong) ? t('create.post.localFile') : artistName(selectedSong)}
+                      {'  ·  '}
+                      {t('create.post.trimmed', { start: trimStart.toFixed(1), end: trimEnd.toFixed(1) })}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    hitSlop={8}
+                    style={styles.songAction}
+                    onPress={() => (isLocalSong(selectedSong) ? pickLocalAudio() : handleTrimSong(selectedSong))}
+                  >
+                    <Feather name="scissors" size={17} color={colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity hitSlop={8} style={styles.songAction} onPress={removeSong}>
+                    <Feather name="x" size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.songOptions}>
+                  <TouchableOpacity style={styles.songOption} onPress={openSongLibrary}>
+                    <MaterialIcons name="library-music" size={20} color={colors.primary} />
+                    <Text style={styles.songOptionText}>{t('create.post.chooseLibrary')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.songOption} onPress={pickLocalAudio}>
+                    <MaterialIcons name="audiotrack" size={20} color={colors.primary} />
+                    <Text style={styles.songOptionText}>{t('create.post.pickLocalAudio')}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Sticky Post bar, above the home indicator — hidden while typing so it
+            doesn't ride up over the caption. */}
+        {!kbHeight && (
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.sm) + spacing.xs }]}>
+            <TouchableOpacity
+              style={[styles.postButton, !canPost && styles.postButtonDisabled]}
+              onPress={handlePost}
+              disabled={!canPost}
+              activeOpacity={0.85}
+            >
+              <Feather name="send" size={18} color="#fff" />
+              <Text style={styles.postButtonText}>{t('create.post.share')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+
+      {/* Song library */}
+      <Sheet visible={showSongModal} title={t('create.post.selectSong')} onClose={() => setShowSongModal(false)}>
+        {tracksLoading && !tracks.length ? (
+          <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.primary} />
+        ) : (
+          <FlatList
+            data={tracks}
+            keyExtractor={(item) => String(item.id)}
+            contentContainerStyle={{ paddingHorizontal: PAD, paddingBottom: spacing.lg }}
+            initialNumToRender={12}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[styles.libraryRow, selectedSong?.id === item.id && styles.libraryRowActive]}
+                onPress={() => handleTrimSong(item)}
+              >
+                {item.cover_image ? (
+                  <Image source={{ uri: item.cover_image }} style={styles.libraryCover} contentFit="cover" cachePolicy="memory-disk" />
+                ) : (
+                  <View style={[styles.libraryCover, styles.songIcon]}><MaterialIcons name="music-note" size={20} color={colors.accent} /></View>
+                )}
+                <View style={styles.flex}>
+                  <Text style={styles.songTitle} numberOfLines={1}>{item.title}</Text>
+                  <Text style={styles.songArtist} numberOfLines={1}>{artistName(item)}</Text>
+                </View>
+                <Feather name="chevron-right" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+          />
+        )}
+      </Sheet>
+
+      {/* Song trimming */}
+      {showTrimModal && selectedSong && (
+        <Sheet visible={showTrimModal} title={t('create.post.trimSong')} onClose={closeTrim} gestures>
+          {playbackStatus ? (
+            <View style={styles.trimContainer}>
+              <Text style={styles.songTitle} numberOfLines={1}>{selectedSong.title || 'Untitled Song'}</Text>
+              <Text style={styles.songArtist} numberOfLines={1}>{artistName(selectedSong)}</Text>
+
+              <View style={styles.trimTimes}>
+                <Text style={styles.trimTimeText}>{fmtTime(trimStart)}</Text>
+                <View style={styles.trimDurationPill}>
+                  <Text style={styles.trimDurationPillText}>{(trimEnd - trimStart).toFixed(1)}s</Text>
+                </View>
+                <Text style={styles.trimTimeText}>{fmtTime(trimEnd)}</Text>
+              </View>
+
+              <LiveAudioTrimmer
+                playhead={playhead}
+                durationMs={playbackStatus.durationMillis || 0}
+                startMs={trimStart * 1000}
+                endMs={trimEnd * 1000}
+                maxClipMs={MAX_CLIP * 1000}
+                minClipMs={1000}
+                onChange={onTrimChange}
+              />
+
+              <Text style={styles.trimHint}>{t('create.post.trimHint', { max: MAX_CLIP })}</Text>
+
+              <TouchableOpacity style={styles.secondaryButton} onPress={isPreviewing ? stopPreview : startPreview}>
+                <Feather name={isPreviewing ? 'pause' : 'play'} size={18} color="#fff" />
+                <Text style={styles.secondaryButtonText}>
+                  {isPreviewing ? t('create.post.pause') : t('create.post.playSelection')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmButton} onPress={closeTrim}>
+                <Text style={styles.confirmButtonText}>{t('create.post.confirmSelection')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.primary} />
+          )}
+        </Sheet>
       )}
 
-      {/* Caption Input */}
-      <View style={styles.inputContainer}>
-        <Text style={styles.inputLabel}>{t('create.post.caption')}</Text>
-        <TextInput
-          style={styles.captionInput}
-          placeholder={t('create.post.captionPlaceholder')}
-          placeholderTextColor="#999"
-          value={caption}
-          onChangeText={setCaption}
-          multiline
-          maxLength={2200}
-        />
-        <Text style={styles.charCount}>{caption.length}/2200</Text>
-      </View>
-
-      {/* Song Picker (only for images) */}
-      {contentType === 'image' && (
-  <View style={styles.inputContainer}>
-    <Text style={styles.inputLabel}>{t('create.post.song')}</Text>
-    
-    <View style={styles.songOptionsContainer}>
-      <TouchableOpacity
-        style={styles.audioOptionButton}
-        onPress={pickLocalAudio}
-      >
-        <MaterialIcons name="audiotrack" size={24} color="#1DA1F2" />
-        <Text style={styles.audioOptionText}>{t('create.post.pickLocalAudio')}</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity
-        style={styles.audioOptionButton}
-        onPress={() => setShowSongModal(true)}
-      >
-        <MaterialIcons name="library-music" size={24} color="#1DA1F2" />
-        <Text style={styles.audioOptionText}>{t('create.post.chooseLibrary')}</Text>
-      </TouchableOpacity>
-    </View>
-
-    {selectedSong && (
-      <View style={styles.selectedSongContainer}>
-        <Text style={styles.songTitle}>{selectedSong.title}</Text>
-        <Text style={styles.songArtist}>{artistName(selectedSong)}</Text>
-        {isLocalSong(selectedSong) && (
-          <Text style={styles.localFileTag}>(Local File)</Text>
-        )}
-        <Text style={styles.trimInfo}>
-          Trimmed: {trimStart.toFixed(1)}s - {trimEnd.toFixed(1)}s
-        </Text>
-        <View style={styles.songActionButtons}>
-          <TouchableOpacity
-            style={styles.editSongButton}
-            onPress={() => isLocalSong(selectedSong) ? pickLocalAudio() : handleTrimSong(selectedSong)}
-          >
-            <Feather name="edit" size={16} color="#1DA1F2" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.removeSongButton}
-            onPress={async () => {
-              await stopPreview();
-              setSelectedSong(null);
-              setLocalAudio(null);
-              setPlaybackStatus(null);
-            }}
-          >
-            <Feather name="x-circle" size={16} color="#FF4444" />
-          </TouchableOpacity>
-        </View>
-      </View>
-    )}
-  </View>
-)}
-
-      {/* Post Button */}
-      <TouchableOpacity 
-        style={[styles.postButton, isUploading && styles.disabledButton]}
-        onPress={handlePost}
-        disabled={isUploading}
-      >
-        <Text style={styles.postButtonText}>
-          {isUploading ? `Posting… ${Math.round(uploadProgress * 100)}%` : 'Share Post'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Upload progress overlay */}
-      <Modal visible={isUploading} transparent animationType="fade" onRequestClose={() => {}}>
-        <View style={styles.progressBackdrop}>
-          <View style={styles.progressCard}>
-            <Text style={styles.progressTitle}>
-              {uploadProgress >= 1 ? 'Finishing up…' : 'Posting…'}
-            </Text>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.max(3, Math.round(uploadProgress * 100))}%` }]} />
-            </View>
-            <Text style={styles.progressPct}>{Math.round(uploadProgress * 100)}%</Text>
-            <Text style={styles.progressHint}>
-              {contentType === 'video' ? 'Uploading video' : `Uploading ${images.length} ${images.length === 1 ? 'image' : 'images'}`}
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Song Selection Modal */}
-      <Modal
-        visible={showSongModal}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setShowSongModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowSongModal(false)}>
-              <Feather name="x" size={24} color="#1DA1F2" />
+      {/* Video trimming */}
+      {showVideoTrimmer && media && contentType === 'video' && (
+        <Sheet visible={showVideoTrimmer} title={t('create.post.trimVideo')} onClose={() => setShowVideoTrimmer(false)}>
+          <ScrollView contentContainerStyle={styles.trimContainer}>
+            <VideoTrimmer
+              uri={media.uri}
+              durationSec={(media.duration || 0) / 1000}
+              aspectRatio={clampAspect(media.width, media.height)}
+              onChange={(start, end) => setVideoTrim({ start, end })}
+            />
+            <TouchableOpacity style={styles.confirmButton} onPress={() => setShowVideoTrimmer(false)}>
+              <Text style={styles.confirmButtonText}>{t('common.done')}</Text>
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>{t('create.post.selectSong')}</Text>
-            <View style={{ width: 24 }} />
-          </View>
-
-          <ScrollView>
-            {tracks.map(track => (
-              <TouchableOpacity
-                key={track.id}
-                style={[
-                  styles.songItem,
-                  selectedSong?.id === track.id && styles.selectedSongItem
-                ]}
-                onPress={() => handleTrimSong(track)}
-              >
-                <MaterialIcons name="music-note" size={24} color="#666" />
-                <View style={styles.songInfo}>
-                  <Text style={styles.songTitle}>{track.title}</Text>
-                  <Text style={styles.songArtist}>{artistName(track)}</Text>
-                </View>
-                <Feather name="chevron-right" size={20} color="#666" />
-              </TouchableOpacity>
-            ))}
           </ScrollView>
-        </View>
-      </Modal>
+        </Sheet>
+      )}
 
-      {/* Song Trimming Modal */}
-{showTrimModal && selectedSong && playbackStatus && (
-  <Modal
-    visible={showTrimModal}
-    animationType="slide"
-    transparent={false}
-    onRequestClose={async () => { await stopPreview(); setShowTrimModal(false); }}
-  >
-    {/* Own GestureHandlerRootView: a RN Modal renders in a separate native
-        window that the app-root GestureHandlerRootView doesn't cover, so the
-        trimmer's pan gesture needs this wrapper to receive touches (Android). */}
-    <GestureHandlerRootView style={{ flex: 1 }}>
-    <View style={styles.modalContainer}>
-      <View style={styles.modalHeader}>
-        <TouchableOpacity onPress={async () => { await stopPreview(); setShowTrimModal(false); }}>
-          <Feather name="x" size={24} color="#1DA1F2" />
-        </TouchableOpacity>
-        <Text style={styles.modalTitle}>{t('create.post.trimSong')}</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <View style={styles.trimContainer}>
-        <Text style={styles.songTitle} numberOfLines={1}>
-          {selectedSong.title || 'Untitled Song'}
-        </Text>
-        <Text style={styles.songArtist} numberOfLines={1}>
-          {artistName(selectedSong)}
-        </Text>
-
-        {/* Time read-out: start · selected length · end */}
-        <View style={styles.trimTimes}>
-          <Text style={styles.trimTimeText}>{fmtTime(trimStart)}</Text>
-          <View style={styles.trimDurationPill}>
-            <Text style={styles.trimDurationPillText}>
-              {(trimEnd - trimStart).toFixed(1)}s
-            </Text>
-          </View>
-          <Text style={styles.trimTimeText}>{fmtTime(trimEnd)}</Text>
-        </View>
-
-        <AudioTrimmer
-          durationMs={playbackStatus.durationMillis || 0}
-          startMs={trimStart * 1000}
-          endMs={trimEnd * 1000}
-          playheadMs={previewPosMs}
-          maxClipMs={MAX_CLIP * 1000}
-          minClipMs={1000}
-          onChange={onTrimChange}
-        />
-
-        <Text style={styles.trimHint}>
-          Drag the edges to trim · drag the waveform to move · max {MAX_CLIP}s
-        </Text>
-
-        <TouchableOpacity
-          style={styles.previewButton}
-          onPress={isPreviewing ? stopPreview : startPreview}
-        >
-          <Feather name={isPreviewing ? 'pause' : 'play'} size={20} color="white" />
-          <Text style={styles.previewButtonText}>
-            {isPreviewing ? 'Pause' : 'Play selection'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.confirmButton}
-          onPress={async () => { await stopPreview(); setShowTrimModal(false); }}
-        >
-          <Text style={styles.confirmButtonText}>{t('create.post.confirmSelection')}</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-    </GestureHandlerRootView>
-  </Modal>
-)}
-
-      {/* Preparing-media overlay: shown while big picked images are compressed,
-          so the wait before the cropper/carousel never looks like a failure. */}
+      {/* Preparing overlay while big picked images are compressed. */}
       <Modal visible={preparingMedia} transparent animationType="fade" onRequestClose={() => {}}>
         <View style={styles.preparingOverlay}>
           <View style={styles.preparingCard}>
-            <ActivityIndicator size="large" color="#1DA1F2" />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.preparingText}>{t('create.post.preparingImage')}</Text>
           </View>
         </View>
       </Modal>
 
-      {/* Image Cropper */}
       {showCropper && cropTarget && (
         <ImageCropper
           visible={showCropper}
@@ -976,520 +849,149 @@ const uploadToCloudinary = async (mediaFile, type, onProgress, opts) => {
           onCropped={handleCropped}
         />
       )}
-
-      {/* Video Trimmer */}
-      {showVideoTrimmer && media && contentType === 'video' && (
-        <Modal
-          visible={showVideoTrimmer}
-          animationType="slide"
-          transparent={false}
-          onRequestClose={() => setShowVideoTrimmer(false)}
-        >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowVideoTrimmer(false)}>
-                <Feather name="x" size={24} color="#1DA1F2" />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>{t('create.post.trimVideo')}</Text>
-              <View style={{ width: 24 }} />
-            </View>
-            <View style={styles.trimContainer}>
-              <VideoTrimmer
-                uri={media.uri}
-                durationSec={(media.duration || 0) / 1000}
-                aspectRatio={clampAspect(media.width, media.height)}
-                onChange={(start, end) => setVideoTrim({ start, end })}
-              />
-              <TouchableOpacity
-                style={styles.confirmButton}
-                onPress={() => setShowVideoTrimmer(false)}
-              >
-                <Text style={styles.confirmButtonText}>{t('common.done')}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-      )}
-    </ScrollView>
+    </View>
   );
 };
 
-// Keep the same styles as before
+const GLASS = 'rgba(14,30,52,0.82)';
+const HAIRLINE = 'rgba(255,255,255,0.10)';
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
+  root: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1 },
+  flex: { flex: 1 },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs,
   },
-  contentContainer: {
-    padding: 20,
-    paddingBottom: 40,
+  headerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '800', letterSpacing: 0.2 },
+
+  segment: {
+    flexDirection: 'row', marginHorizontal: PAD, marginBottom: spacing.sm,
+    padding: 4, borderRadius: radius.full, backgroundColor: GLASS,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#333',
+  segmentBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 9, borderRadius: radius.full,
   },
-  typeSelector: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 20,
+  segmentBtnActive: { backgroundColor: colors.primary },
+  segmentText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700' },
+  segmentTextActive: { color: '#fff' },
+
+  content: { paddingHorizontal: PAD, paddingTop: spacing.xs },
+
+  mediaBlock: { marginBottom: spacing.md },
+  pickArea: {
+    height: 220, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    backgroundColor: GLASS, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(29,161,242,0.45)',
   },
-  typeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ddd',
+  pickIcon: {
+    width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(29,161,242,0.14)',
   },
-  activeType: {
-    backgroundColor: '#1DA1F2',
-    borderColor: '#1DA1F2',
-  },
-  typeText: {
-    marginLeft: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  activeTypeText: {
-    color: '#fff',
-  },
+  pickText: { color: colors.textSecondary, fontSize: 15, fontWeight: '600', textAlign: 'center', paddingHorizontal: spacing.md },
   cameraButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: '#1DA1F2',
-    paddingVertical: 14,
-    borderRadius: 14,
-    marginBottom: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: spacing.sm, paddingVertical: 13, borderRadius: radius.full,
+    backgroundColor: 'rgba(29,161,242,0.18)', borderWidth: 1, borderColor: 'rgba(29,161,242,0.55)',
   },
-  cameraButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  uploadButton: {
-    height: 200,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#ddd',
-    borderRadius: 15,
-    borderStyle: 'dashed',
-    marginBottom: 20,
-  },
-  uploadText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  mediaPreviewContainer: {
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  mediaPreview: {
-    width: '100%',
-    borderRadius: 8,
-    backgroundColor: '#000'
-  },
-  changeMediaButton: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    backgroundColor: '#0008',
-    padding: 6,
-    borderRadius: 20,
-  },
-  cropMediaButton: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#0008',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  cropMediaText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  carouselWrap: {
-    width: '100%',
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#000',
-  },
+  cameraButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
+  carouselWrap: { width: '100%', borderRadius: radius.lg, overflow: 'hidden', backgroundColor: '#000' },
   removeImageBtn: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#0009',
-    alignItems: 'center',
-    justifyContent: 'center',
+    position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
   },
   counterBadge: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 12,
-    backgroundColor: '#0009',
+    position: 'absolute', top: 8, left: 8, paddingHorizontal: 10, paddingVertical: 3,
+    borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.6)',
   },
-  counterText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
+  counterText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  dotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 10 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
+  dotActive: { backgroundColor: colors.primary, width: 16 },
+  chipRow: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: radius.full, backgroundColor: GLASS, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(29,161,242,0.5)',
   },
-  dotsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 10,
+  chipText: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
+
+  card: {
+    backgroundColor: GLASS, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
   },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#ccc',
+  cardLabel: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', marginBottom: spacing.sm, letterSpacing: 0.3 },
+  captionInput: { minHeight: 96, color: colors.textPrimary, fontSize: 16, lineHeight: 22, textAlignVertical: 'top', padding: 0 },
+  charCount: { color: colors.textMuted, fontSize: 12, textAlign: 'right', marginTop: spacing.xs },
+
+  songOptions: { flexDirection: 'row', gap: spacing.sm },
+  songOption: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 11, paddingHorizontal: spacing.sm, borderRadius: radius.md,
+    backgroundColor: 'rgba(29,161,242,0.10)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(29,161,242,0.45)',
   },
-  dotActive: {
-    backgroundColor: '#1DA1F2',
+  songOptionText: { color: colors.textPrimary, fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  songRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  songIcon: {
+    width: 40, height: 40, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(244,162,97,0.14)',
   },
-  imageActionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 16,
-    marginTop: 12,
-  },
-  imageActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#1DA1F2',
-  },
-  imageActionText: {
-    color: '#1DA1F2',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 10,
-    color: '#333',
-  },
-  captionInput: {
-    height: 100,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 15,
-    fontSize: 16,
-    textAlignVertical: 'top',
-    color: '#333',
+  songAction: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  songTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  songArtist: { color: colors.textSecondary, fontSize: 13, marginTop: 2 },
+
+  footer: {
+    paddingHorizontal: PAD, paddingTop: spacing.sm,
+    backgroundColor: 'rgba(8,18,34,0.92)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HAIRLINE,
   },
   postButton: {
-    backgroundColor: '#1DA1F2',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.primary, paddingVertical: 15, borderRadius: radius.full, ...shadows.md,
   },
-  disabledButton: {
-    opacity: 0.7,
+  postButtonDisabled: { opacity: 0.4 },
+  postButtonText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.3 },
+
+  sheetRoot: { flex: 1, backgroundColor: colors.bg },
+  sheetSafe: { flex: 1 },
+  sheetHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HAIRLINE,
   },
-  postButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  sheetTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  libraryRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, paddingHorizontal: spacing.sm,
+    borderRadius: radius.md, marginBottom: 4,
   },
-  progressBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
+  libraryRowActive: { backgroundColor: 'rgba(29,161,242,0.14)' },
+  libraryCover: { width: 44, height: 44, borderRadius: radius.sm, backgroundColor: colors.surface },
+
+  trimContainer: { padding: PAD },
+  trimTimes: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 10 },
+  trimTimeText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+  trimDurationPill: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.primary },
+  trimDurationPillText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  trimHint: { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginTop: 12, marginBottom: 4 },
+  secondaryButton: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(29,161,242,0.18)', borderWidth: 1, borderColor: 'rgba(29,161,242,0.55)',
+    padding: 14, borderRadius: radius.full, marginTop: spacing.md,
   },
-  progressCard: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 22,
-    alignItems: 'center',
-  },
-  progressTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#222',
-    marginBottom: 16,
-  },
-  progressTrack: {
-    width: '100%',
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#e6eaf0',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 5,
-    backgroundColor: '#1DA1F2',
-  },
-  progressPct: {
-    marginTop: 12,
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#1DA1F2',
-    fontVariant: ['tabular-nums'],
-  },
-  progressHint: {
-    marginTop: 4,
-    fontSize: 13,
-    color: '#888',
-  },
-  videoThumbnail: {
-  width: '100%',
-  height: '100%',
-  resizeMode: 'cover',
-},
-videoContainer: {
-  position: 'relative',
-},
-songOption: {
-  backgroundColor: '#f9f9f9',
-  borderRadius: 10,
-  padding: 10,
-  marginRight: 10,
-  borderWidth: 1,
-  borderColor: '#ddd',
-},
-selectedSongOption: {
-  backgroundColor: '#1DA1F2',
-  borderColor: '#1DA1F2',
-},
-songTitle: {
-  fontSize: 16,
-  fontWeight: '500',
-  color: '#333',
-},
-songArtist: {
-  fontSize: 14,
-  color: '#666',
-},
-pickSongButton: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  padding: 10,
-  marginBottom: 10,
-  backgroundColor: '#f0f8ff',
-  borderRadius: 8,
-  borderWidth: 1,
-  borderColor: '#1DA1F2',
-},
-pickSongText: {
-  marginLeft: 8,
-  fontSize: 16,
-  color: '#1DA1F2',
-  fontWeight: '500',
-},
-removeSongButton: {
-  marginLeft: 10,
-},
-modalContainer: {
-    flex: 1,
-    backgroundColor: '#fff',
-    padding: 20,
-  },
-  preparingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  preparingCard: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 28,
-    paddingVertical: 24,
-    borderRadius: 16,
-    alignItems: 'center',
-    gap: 12,
-    minWidth: 160,
-  },
-  preparingText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0A1628',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  songItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  selectedSongItem: {
-    backgroundColor: '#e6f7ff',
-  },
-  songInfo: {
-    flex: 1,
-    marginLeft: 15,
-  },
-  trimContainer: {
-    padding: 20,
-  },
-  trimTimes: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 18,
-    marginBottom: 10,
-  },
-  trimTimeText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#555',
-    fontVariant: ['tabular-nums'],
-  },
-  trimDurationPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#1DA1F2',
-  },
-  trimDurationPillText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  trimHint: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  trimControls: {
-    marginVertical: 20,
-  },
-  slider: {
-    height: 40,
-    marginBottom: 20,
-  },
-  trimLabel: {
-    fontSize: 16,
-    marginBottom: 5,
-    color: '#333',
-  },
-  trimDuration: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginVertical: 10,
-  },
-  trimInfo: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  previewButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1DA1F2',
-    padding: 15,
-    borderRadius: 8,
-    marginVertical: 10,
-  },
-  previewButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 10,
-  },
+  secondaryButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   confirmButton: {
-    backgroundColor: '#34C759',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginVertical: 10,
+    backgroundColor: colors.primary, padding: 15, borderRadius: radius.full, alignItems: 'center', marginTop: spacing.sm,
   },
-  confirmButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+  confirmButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+
+  preparingOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  preparingCard: {
+    backgroundColor: 'rgba(14,30,52,0.97)', paddingHorizontal: 28, paddingVertical: 24, borderRadius: radius.lg,
+    alignItems: 'center', gap: 12, minWidth: 170, borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
   },
-  editSongButton: {
-    marginLeft: 10,
-    padding: 5,
-  },
-  selectedSongContainer: {
-    position: 'relative',
-    backgroundColor: '#e6f7ff',
-    borderRadius: 8,
-    padding: 15,
-    marginBottom: 10
-},
-songOptionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  audioOptionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 10,
-    backgroundColor: '#f0f8ff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#1DA1F2',
-    marginHorizontal: 5,
-  },
-  audioOptionText: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#1DA1F2',
-  },
-  localFileTag: {
-    fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
-  },
-  songActionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 8,
-  },
+  preparingText: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
 });
 
 export default CreatePost;

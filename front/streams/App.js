@@ -17,6 +17,7 @@ import CreateProfile from './components/CreateProfile';
 import Header from './components/Header'; // Move the import to the top
 import SocialFeed from './components/SocialFeed';
 import RotatingBackground from './components/RotatingBackground';
+import UploadStatus from './components/UploadStatus';
 import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold } from '@expo-google-fonts/cinzel';
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import CreatePost from './components/CreatePost';
@@ -256,7 +257,7 @@ const App = () => {
                 <Stack.Screen name="Login" component={LoginPage} />
                 <Stack.Screen name="CreateProfile" component={CreateProfile} />
                 <Stack.Screen name="Favorites" component={FavoritesWrapper} />
-                <Stack.Screen name="UploadTrack" component={UploadTrackPage} options={{ headerShown: true }} />
+                <Stack.Screen name="UploadTrack" component={UploadTrackPage} options={{ headerShown: false }} />
                 <Stack.Screen name="SocialFeed" component={SocialFeedWrapper} />
                 <Stack.Screen name="PostDetail" component={PostDetail} />
                 <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: true, title: 'Profile' }} />
@@ -265,7 +266,7 @@ const App = () => {
                 <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom' }} />
                 <Stack.Screen name="Playlists" component={PlaylistsWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="PlaylistDetail" component={PlaylistDetailWrapper} options={{ headerShown: false }} />
-                <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: true }} />
+                <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: false }} />
                 <Stack.Screen name="CameraCapture" component={CameraCapture} options={{ headerShown: false, presentation: 'fullScreenModal' }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>
@@ -344,6 +345,8 @@ const App = () => {
 
             </Stack.Navigator>
             <MiniPlayer />
+            {/* Background uploads: progress pill on every screen. */}
+            <UploadStatus />
         </NavigationContainer>
       </PlayerProvider>
       </WallpaperProvider>

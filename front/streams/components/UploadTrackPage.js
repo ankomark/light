@@ -1,80 +1,93 @@
 import 'react-native-get-random-values';
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, ScrollView,
+} from 'react-native';
+import { Image } from 'expo-image';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { createSound } from '../services/audioPlayer';
 import * as FileSystem from 'expo-file-system/legacy';
-import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
-import { API_URL, getAccessToken } from '../services/api';
-import { uploadMedia } from '../services/cloudinary';
+import { createSound } from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
-import { compressAudio } from '../services/audioProcessing';
-import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import { enqueueUpload } from '../services/uploadQueue';
+import { buildTrackJob } from '../services/postUploads';
+import RotatingBackground from './RotatingBackground';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
+import { colors, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+
+const MAX_AUDIO_SIZE_MB = 20;
+const MAX_IMAGE_SIZE_MB = 5;
+const PAD = spacing.md;
 
 const TrackUploadForm = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const [trackData, setTrackData] = useState({
-    title: '',
-    audioFile: null,
-    coverImage: null,
-    album: '',
-    lyrics: '',
-  });
-  const [isUploading, setIsUploading] = useState(false);
-  const [previewSound, setPreviewSound] = useState(null);
-  const [statusMessages, setStatusMessages] = useState({
-    audio: '',
-    image: ''
-  });
+  const insets = useSafeAreaInsets();
+  const kbHeight = useKeyboardHeight();
 
-  const MAX_AUDIO_SIZE_MB = 20;
-  const MAX_IMAGE_SIZE_MB = 5;
+  const [title, setTitle] = useState('');
+  const [album, setAlbum] = useState('');
+  const [lyrics, setLyrics] = useState('');
+  const [audioFile, setAudioFile] = useState(null);   // { uri, name, mimeType, sizeMB }
+  const [coverImage, setCoverImage] = useState(null); // { uri, mimeType }
+  const [audioError, setAudioError] = useState('');
+  const [imageError, setImageError] = useState('');
+  const [isPlaying, setIsPlaying] = useState(false);
 
-  // Clean up audio preview on unmount
-  useEffect(() => {
-    return () => {
-      if (previewSound) {
-        previewSound.unloadAsync();
-      }
-    };
-  }, [previewSound]);
+  // A ref, not state: the old version kept the sound in state and ALSO
+  // unloaded it from an effect keyed on it, so every new preview unloaded the
+  // previous sound twice.
+  const soundRef = useRef(null);
+
+  const stopPreview = useCallback(async () => {
+    const sound = soundRef.current;
+    soundRef.current = null;
+    setIsPlaying(false);
+    if (sound) {
+      try { await sound.stopAsync(); } catch { /* not playing */ }
+      sound.unloadAsync().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => () => { soundRef.current?.unloadAsync().catch(() => {}); }, []);
+
+  // ── Leaving with unsaved work ──
+  const submittedRef = useRef(false);
+  const hasWorkRef = useRef(false);
+  hasWorkRef.current = !!(audioFile || coverImage || title.trim() || lyrics.trim());
+  useEffect(() => navigation.addListener('beforeRemove', (e) => {
+    stopPreview();
+    if (submittedRef.current || !hasWorkRef.current) return;
+    e.preventDefault();
+    Alert.alert(t('track.upload.discardTitle'), t('create.post.discardBody'), [
+      { text: t('create.post.keepEditing'), style: 'cancel' },
+      { text: t('create.post.discard'), style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation, t, stopPreview]);
 
   const pickAudioFile = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: 'audio/*',
-        copyToCacheDirectory: true,
-      });
-      
-      if (result.canceled || !result.assets?.[0]) {
-        setStatusMessages(prev => ({ ...prev, audio: 'No file selected' }));
-        return;
-      }
-
+      const result = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true });
+      if (result.canceled || !result.assets?.[0]) return;
       const file = result.assets[0];
-      const fileInfo = await FileSystem.getInfoAsync(file.uri);
-      const fileSizeMB = fileInfo.size / (1024 * 1024);
-
-      if (fileSizeMB > MAX_AUDIO_SIZE_MB) {
-        setStatusMessages(prev => ({ 
-          ...prev, 
-          audio: `File too large (max ${MAX_AUDIO_SIZE_MB}MB)` 
-        }));
+      const info = await FileSystem.getInfoAsync(file.uri);
+      const sizeMB = (info.size || file.size || 0) / (1024 * 1024);
+      if (sizeMB > MAX_AUDIO_SIZE_MB) {
+        setAudioError(t('track.upload.tooLarge', { max: MAX_AUDIO_SIZE_MB }));
         return;
       }
-
-      setTrackData({...trackData, audioFile: file});
-      setStatusMessages(prev => ({ 
-        ...prev, 
-        audio: `Selected: ${file.name} (${fileSizeMB.toFixed(1)}MB)` 
-      }));
+      await stopPreview();
+      setAudioError('');
+      setAudioFile({ uri: file.uri, name: file.name, mimeType: file.mimeType, sizeMB });
+      // Pre-fill the title from the file name — one less thing to type.
+      setTitle((prev) => prev || (file.name || '').replace(/\.[^/.]+$/, ''));
     } catch (error) {
       console.error('Error picking audio file:', error);
-      setStatusMessages(prev => ({ ...prev, audio: t('track.selectAudioFailed') }));
+      setAudioError(t('track.selectAudioFailed'));
     }
   };
 
@@ -86,404 +99,250 @@ const TrackUploadForm = () => {
         aspect: [1, 1],
         quality: 0.8,
       });
-
-      if (result.canceled || !result.assets?.[0]) {
-        setStatusMessages(prev => ({ ...prev, image: 'No image selected' }));
-        return;
-      }
-
+      if (result.canceled || !result.assets?.[0]) return;
       const image = result.assets[0];
-      const fileInfo = await FileSystem.getInfoAsync(image.uri);
-      const fileSizeMB = fileInfo.size / (1024 * 1024);
-
-      if (fileSizeMB > MAX_IMAGE_SIZE_MB) {
-        setStatusMessages(prev => ({ 
-          ...prev, 
-          image: `Image too large (max ${MAX_IMAGE_SIZE_MB}MB)` 
-        }));
+      const info = await FileSystem.getInfoAsync(image.uri);
+      if ((info.size || 0) / (1024 * 1024) > MAX_IMAGE_SIZE_MB) {
+        setImageError(t('track.upload.tooLarge', { max: MAX_IMAGE_SIZE_MB }));
         return;
       }
-
-      // Compress cover image before upload
       const compressed = await compressImage(image.uri, { width: 800, quality: 0.8 });
-      setTrackData({...trackData, coverImage: { ...image, uri: compressed.uri }});
-      setStatusMessages(prev => ({ 
-        ...prev, 
-        image: `Selected: ${image.fileName || 'cover'} (${fileSizeMB.toFixed(1)}MB)` 
-      }));
+      setImageError('');
+      setCoverImage({ uri: compressed.uri, mimeType: 'image/jpeg', name: `cover_${Date.now()}.jpg` });
     } catch (error) {
       console.error('Error picking image:', error);
-      setStatusMessages(prev => ({ ...prev, image: t('track.selectImageFailed') }));
+      setImageError(t('track.selectImageFailed'));
     }
   };
 
-  const playPreview = async () => {
-    if (!trackData.audioFile) return;
-    
+  const togglePreview = async () => {
+    if (isPlaying) { await stopPreview(); return; }
+    if (!audioFile) return;
     try {
-      // Stop any existing playback
-      if (previewSound) {
-        await previewSound.unloadAsync();
-      }
-
-      const { sound } = await createSound(
-        { uri: trackData.audioFile.uri },
-        { shouldPlay: true }
-      );
-      setPreviewSound(sound);
-      await sound.playAsync();
+      await stopPreview();
+      const { sound } = await createSound({ uri: audioFile.uri }, { shouldPlay: true }, (st) => {
+        if (st.didJustFinish) stopPreview();
+      });
+      soundRef.current = sound;
+      setIsPlaying(true);
     } catch (error) {
       console.error('Error playing preview:', error);
       Alert.alert(t('track.playbackErrorTitle'), t('track.playbackErrorBody'));
     }
   };
 
-  const stopPreview = async () => {
-    if (previewSound) {
-      await previewSound.stopAsync();
-      await previewSound.unloadAsync();
-      setPreviewSound(null);
-    }
-  };
-
-  const uploadToCloudinary = async (file, type) => {
-    return uploadMedia(file, type);
-  };
-
+  // Hand the upload to the background queue and leave — the compress + upload
+  // used to run here behind a spinner while the user waited.
   const uploadTrack = async () => {
-    if (!trackData.title || !trackData.audioFile) {
+    if (!title.trim() || !audioFile) {
       Alert.alert(t('common.error'), t('track.required'));
       return;
     }
-
-    setIsUploading(true);
-
-    try {
-      // Transcode to ~128 kbps AAC before upload to cut R2 storage/egress cost.
-      // Keeps the crisp original if it was already low-bitrate (no size win).
-      setStatusMessages(prev => ({ ...prev, audio: t('track.optimizing') }));
-      const { uri: audioUri, compressed, savedPct } = await compressAudio({
-        uri: trackData.audioFile.uri,
-      });
-      const audioToUpload = compressed
-        ? { ...trackData.audioFile, uri: audioUri }
-        : trackData.audioFile;
-
-      // Upload audio to R2
-      setStatusMessages(prev => ({
-        ...prev,
-        audio: compressed ? `Uploading audio (−${savedPct}%)...` : 'Uploading audio...',
-      }));
-      const audioResponse = await uploadToCloudinary(audioToUpload, 'audio');
-
-      // Upload cover image if exists
-      let coverResponse = null;
-      if (trackData.coverImage) {
-        setStatusMessages(prev => ({ ...prev, image: 'Uploading cover...' }));
-        coverResponse = await uploadToCloudinary(trackData.coverImage, 'cover');
-      }
-
-      // Prepare data for backend
-      const trackPayload = {
-        title: trackData.title,
-        audio_file: audioResponse.publicId,
-        cover_image: coverResponse?.publicId || null,
-        album: trackData.album || null,
-        lyrics: trackData.lyrics || null
-      };
-
-      const token = await getAccessToken().catch(() => null);
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      // Send to your Django backend
-      const response = await axios.post(
-        `${API_URL}/tracks/upload/`,
-        trackPayload,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      );
-
-      Alert.alert(t('market.success'), t('track.uploadedOk'));
-      navigation.goBack();
-    } catch (error) {
-      console.error('Upload error:', error);
-      
-      // Improved error message
-      let errorMessage = 'Upload failed';
-      if (error.response) {
-        // Handle Django error formats
-        if (error.response.data?.detail) {
-          errorMessage = error.response.data.detail;
-        } else if (error.response.data?.error) {
-          errorMessage = error.response.data.error;
-        } else if (typeof error.response.data === 'string') {
-          errorMessage = error.response.data;
-        }
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      Alert.alert(t('track.uploadFailedTitle'), errorMessage);
-    } finally {
-      setIsUploading(false);
-      setStatusMessages({ audio: '', image: '' });
-    }
+    await stopPreview();
+    enqueueUpload({
+      kind: 'track',
+      title: title.trim(),
+      thumbUri: coverImage?.uri || null,
+      run: buildTrackJob({
+        title: title.trim(),
+        album: album.trim(),
+        lyrics: lyrics.trim(),
+        audio: { uri: audioFile.uri, name: audioFile.name, mimeType: audioFile.mimeType },
+        cover: coverImage,
+      }),
+    });
+    submittedRef.current = true;
+    navigation.goBack();
   };
 
+  const canUpload = !!audioFile && !!title.trim();
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <ScrollView 
-        contentContainerStyle={styles.scrollContainer}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.card}>
-          <Text style={styles.header}>{t('track.upload.title')}</Text>
-          
-          <View style={styles.formGroup}>
+    <View style={styles.root}>
+      <RotatingBackground scope="music" intervalMs={60000} scrimColor="rgba(8,18,34,0.72)" />
+      <SafeAreaView edges={['top']} style={styles.flex}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.headerIcon} accessibilityLabel={t('common.cancel')}>
+            <Feather name="x" size={26} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('track.upload.title')}</Text>
+          <View style={styles.headerIcon} />
+        </View>
+
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + (kbHeight || 0) }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Cover + audio, side by side like a record sleeve */}
+          <View style={styles.mediaRow}>
+            <TouchableOpacity style={styles.cover} onPress={pickCoverImage} activeOpacity={0.85}>
+              {coverImage ? (
+                <Image source={{ uri: coverImage.uri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={120} />
+              ) : (
+                <View style={styles.coverEmpty}>
+                  <Feather name="image" size={26} color={colors.primary} />
+                  <Text style={styles.coverText}>{t('track.upload.pickCover')}</Text>
+                </View>
+              )}
+              {coverImage && (
+                <View style={styles.coverEdit}><Feather name="edit-2" size={13} color="#fff" /></View>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.audioCard}>
+              {audioFile ? (
+                <>
+                  <View style={styles.audioTop}>
+                    <MaterialIcons name="audiotrack" size={20} color={colors.accent} />
+                    <Text style={styles.audioName} numberOfLines={2}>{audioFile.name}</Text>
+                  </View>
+                  <Text style={styles.audioMeta}>{audioFile.sizeMB.toFixed(1)} MB</Text>
+                  <View style={styles.audioActions}>
+                    <TouchableOpacity style={styles.smallBtn} onPress={togglePreview}>
+                      <Feather name={isPlaying ? 'square' : 'play'} size={14} color="#fff" />
+                      <Text style={styles.smallBtnText}>{isPlaying ? t('track.upload.stop') : t('track.upload.play')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.smallBtn, styles.smallBtnGhost]} onPress={pickAudioFile}>
+                      <Feather name="refresh-cw" size={14} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                <TouchableOpacity style={styles.audioEmpty} onPress={pickAudioFile} activeOpacity={0.85}>
+                  <Feather name="music" size={24} color={colors.primary} />
+                  <Text style={styles.audioEmptyText}>{t('track.upload.pickAudio')}</Text>
+                  <Text style={styles.audioMeta}>≤ {MAX_AUDIO_SIZE_MB} MB</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          {!!audioError && <Text style={styles.errorText}>{audioError}</Text>}
+          {!!imageError && <Text style={styles.errorText}>{imageError}</Text>}
+
+          <View style={styles.card}>
             <Text style={styles.label}>{t('track.title')}</Text>
             <TextInput
               style={styles.input}
-              value={trackData.title}
-              onChangeText={(text) => setTrackData({...trackData, title: text})}
+              value={title}
+              onChangeText={setTitle}
               placeholder={t('track.titlePlaceholder')}
               placeholderTextColor={colors.placeholder}
-              editable={!isUploading}
+              maxLength={200}
             />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>{t('track.audioFile')}</Text>
-            <TouchableOpacity 
-              style={[
-                styles.button,
-                isUploading && styles.buttonDisabled
-              ]} 
-              onPress={pickAudioFile}
-              disabled={isUploading}
-            >
-              <Text style={styles.buttonText}>
-                {trackData.audioFile ? 'Change Audio File' : 'Select Audio File'}
-              </Text>
-            </TouchableOpacity>
-            <Text style={[
-              styles.statusMessage,
-              statusMessages.audio.includes('Selected:') ? styles.statusSuccess : styles.statusInfo
-            ]}>
-              {statusMessages.audio}
-            </Text>
-
-            {trackData.audioFile && (
-              <View style={styles.previewControls}>
-                <TouchableOpacity 
-                  style={styles.previewButton} 
-                  onPress={playPreview}
-                >
-                  <Text style={styles.previewButtonText}>▶️ Play Preview</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.previewButton} 
-                  onPress={stopPreview}
-                >
-                  <Text style={styles.previewButtonText}>⏹ Stop</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>{t('track.coverImage')}</Text>
-            <TouchableOpacity 
-              style={[
-                styles.button,
-                isUploading && styles.buttonDisabled
-              ]} 
-              onPress={pickCoverImage}
-              disabled={isUploading}
-            >
-              <Text style={styles.buttonText}>
-                {trackData.coverImage ? 'Change Cover Image' : 'Select Cover Image'}
-              </Text>
-            </TouchableOpacity>
-            <Text style={[
-              styles.statusMessage,
-              statusMessages.image.includes('Selected:') ? styles.statusSuccess : styles.statusInfo
-            ]}>
-              {statusMessages.image}
-            </Text>
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>{t('track.album')}</Text>
+            <Text style={[styles.label, styles.labelSpaced]}>{t('track.album')}</Text>
             <TextInput
               style={styles.input}
-              value={trackData.album}
-              onChangeText={(text) => setTrackData({...trackData, album: text})}
+              value={album}
+              onChangeText={setAlbum}
               placeholder={t('track.albumPlaceholder')}
               placeholderTextColor={colors.placeholder}
-              editable={!isUploading}
+              maxLength={200}
             />
           </View>
 
-          <View style={styles.formGroup}>
+          <View style={styles.card}>
             <Text style={styles.label}>{t('track.lyrics')}</Text>
             <TextInput
               style={styles.textArea}
-              value={trackData.lyrics}
-              onChangeText={(text) => setTrackData({...trackData, lyrics: text})}
+              value={lyrics}
+              onChangeText={setLyrics}
               placeholder={t('track.lyricsPlaceholder')}
               placeholderTextColor={colors.placeholder}
               multiline
-              numberOfLines={6}
-              editable={!isUploading}
             />
           </View>
+        </ScrollView>
 
-          <TouchableOpacity 
-            style={[
-              styles.submitButton,
-              isUploading && styles.submitButtonDisabled
-            ]} 
-            onPress={uploadTrack}
-            disabled={isUploading}
-          >
-            {isUploading ? (
-              <ActivityIndicator color={colors.white} size="small" />
-            ) : (
-              <Text style={styles.submitButtonText}>{t('track.upload.button')}</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        {!kbHeight && (
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.sm) + spacing.xs }]}>
+            <TouchableOpacity
+              style={[styles.submitButton, !canUpload && styles.submitButtonDisabled]}
+              onPress={uploadTrack}
+              disabled={!canUpload}
+              activeOpacity={0.85}
+            >
+              <Feather name="upload-cloud" size={18} color="#fff" />
+              <Text style={styles.submitButtonText}>{t('track.upload.share')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+    </View>
   );
 };
 
+const GLASS = 'rgba(14,30,52,0.82)';
+const HAIRLINE = 'rgba(255,255,255,0.10)';
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  scrollContainer: {
-    padding: spacing.md,
-    paddingBottom: spacing.xl,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadows.md,
-  },
+  root: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   header: {
-    ...typography.h2,
-    color: colors.textPrimary,
-    marginBottom: spacing.lg,
-    textAlign: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs,
   },
-  formGroup: {
-    marginBottom: spacing.md + 4,
+  headerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  content: { paddingHorizontal: PAD, paddingTop: spacing.sm },
+
+  mediaRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  cover: {
+    width: 132, height: 132, borderRadius: radius.lg, overflow: 'hidden',
+    backgroundColor: GLASS, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(29,161,242,0.45)',
   },
-  label: {
-    ...typography.label,
-    color: colors.textSecondary,
-    marginBottom: spacing.sm,
+  coverEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, padding: spacing.sm },
+  coverText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  coverEdit: {
+    position: 'absolute', right: 6, bottom: 6, width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
   },
+  audioCard: {
+    flex: 1, minHeight: 132, borderRadius: radius.lg, padding: spacing.sm + 2,
+    backgroundColor: GLASS, borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
+  },
+  audioEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  audioEmptyText: { color: colors.textPrimary, fontSize: 14, fontWeight: '700', textAlign: 'center' },
+  audioTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  audioName: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  audioMeta: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  audioActions: { flexDirection: 'row', gap: spacing.xs, marginTop: 'auto' },
+  smallBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: radius.full, backgroundColor: colors.primary,
+  },
+  smallBtnGhost: { backgroundColor: 'transparent', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.3)' },
+  smallBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  errorText: { color: colors.error, fontSize: 13, marginBottom: spacing.sm },
+
+  card: {
+    backgroundColor: GLASS, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
+  },
+  label: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', marginBottom: spacing.xs, letterSpacing: 0.3 },
+  labelSpaced: { marginTop: spacing.md },
   input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    fontSize: 16,
-    color: colors.textPrimary,
-    backgroundColor: colors.inputBg,
+    height: 48, borderRadius: radius.md, paddingHorizontal: spacing.md, fontSize: 16,
+    color: colors.textPrimary, backgroundColor: 'rgba(6,16,32,0.6)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
   },
   textArea: {
-    height: 150,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    fontSize: 16,
-    color: colors.textPrimary,
-    backgroundColor: colors.inputBg,
-    textAlignVertical: 'top',
+    minHeight: 160, borderRadius: radius.md, padding: spacing.md, fontSize: 15, lineHeight: 21,
+    color: colors.textPrimary, backgroundColor: 'rgba(6,16,32,0.6)', textAlignVertical: 'top',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
   },
-  button: {
-    backgroundColor: colors.surface,
-    padding: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  buttonText: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  statusMessage: {
-    fontSize: 14,
-    marginTop: 6,
-    paddingHorizontal: 4,
-  },
-  statusInfo: {
-    color: colors.textMuted,
-  },
-  statusSuccess: {
-    color: colors.success,
-  },
-  previewControls: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: spacing.sm + 4,
-    gap: 10,
-  },
-  previewButton: {
-    backgroundColor: colors.surface,
-    padding: 10,
-    borderRadius: radius.sm,
-    flex: 1,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  previewButtonText: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '500',
+
+  footer: {
+    paddingHorizontal: PAD, paddingTop: spacing.sm,
+    backgroundColor: 'rgba(8,18,34,0.92)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HAIRLINE,
   },
   submitButton: {
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.md,
-    ...shadows.sm,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.primary, paddingVertical: 15, borderRadius: radius.full, ...shadows.md,
   },
-  submitButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
+  submitButtonDisabled: { opacity: 0.4 },
+  submitButtonText: { color: '#fff', fontSize: 17, fontWeight: '800' },
 });
 
 export default TrackUploadForm;

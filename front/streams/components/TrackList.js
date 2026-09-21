@@ -20,6 +20,7 @@ import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-ic
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { on, EVENTS } from '../utils/appEvents';
 import { useContentWidth, FONT_SCALE } from '../utils/layout';
 import { colors } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -114,6 +115,17 @@ const TrackList = () => {
     });
     return () => { cancelled = true; };
   }, [cacheKey, prefetchCovers]);
+
+  // A track upload finished in the background: show it at the top now
+  // rather than after the next throttled refresh.
+  useEffect(() => on(EVENTS.TRACK_CREATED, (track) => {
+    if (!track?.id || searchRef.current) return;
+    setTracks((prev) => {
+      const next = [track, ...prev.filter((tr) => tr.id !== track.id)];
+      writeCache(cacheKey, next.slice(0, 20));
+      return next;
+    });
+  }), [cacheKey]);
 
   const loadTracks = useCallback(async (search = searchRef.current) => {
     try {

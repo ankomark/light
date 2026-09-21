@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 8,
   },
-  timeText: { fontSize: 14, fontWeight: '600', color: '#555', fontVariant: ['tabular-nums'] },
+  timeText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary, fontVariant: ['tabular-nums'] },
   durPill: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.primary },
   durPillText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   track: {

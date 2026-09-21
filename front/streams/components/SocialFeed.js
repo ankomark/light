@@ -39,6 +39,7 @@ import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 import formatCount from '../utils/formatCount';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { on, EVENTS } from '../utils/appEvents';
 import { useContentWidth, useMaxMediaHeight, FONT_SCALE } from '../utils/layout';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
@@ -821,6 +822,23 @@ const SocialFeed = ({ showBackground = true }) => {
       setRefreshing(false);
     }
   }, [feedType, prefetchMedia, cacheKey, currentUser?.id, t]);
+
+  // A background upload just finished: put the post at the top of this feed
+  // now. The feed only revalidates every couple of minutes, so without this
+  // the author would come back to a feed that doesn't have their post yet.
+  useEffect(() => on(EVENTS.POST_CREATED, (post) => {
+    if (!post?.id || searchRef.current) return;
+    if (!post.user || typeof post.user !== 'object') {
+      loadPosts(true);  // unexpected shape — fall back to a real refresh
+      return;
+    }
+    const row = processPost(post, followStatesRef.current);
+    setPosts((prev) => {
+      const next = [row, ...prev.filter((p) => p.id !== row.id)];
+      if (postsKeyRef.current === cacheKey) writeCache(cacheKey, next.slice(0, 20));
+      return next;
+    });
+  }), [loadPosts, cacheKey]);
 
   const loadMorePosts = useCallback(async () => {
     if (loadingMore || !hasMore || loading || !nextUrl) return;
