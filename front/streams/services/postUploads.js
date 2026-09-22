@@ -136,7 +136,15 @@ export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => 
       progress, [20, processed.thumbnailUri ? 1 : 0], [0.15, 0.95],
     );
     const [upload, posterUrl] = await Promise.all([
-      uploadFile({ ...video, uri: processed.uri }, 'video', videoReport),
+      // The processed file's own displayed size — measured from a frame, so a
+      // rotated phone clip or a camera clip (no picker size) gets the right
+      // shape in the feed.
+      uploadFile({
+        ...video,
+        uri: processed.uri,
+        width: processed.width ?? video.width,
+        height: processed.height ?? video.height,
+      }, 'video', videoReport),
       processed.thumbnailUri
         ? uploadFile(
           { uri: processed.thumbnailUri, name: `poster_${Date.now()}.jpg`, mimeType: 'image/jpeg' },

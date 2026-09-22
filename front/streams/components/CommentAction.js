@@ -12,7 +12,7 @@
 // behind the scenes; a failure rolls back and says so.
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
-  View, Text, TouchableOpacity, TextInput, StyleSheet, Modal, FlatList, Alert, Pressable,
+  View, Text, TouchableOpacity, TextInput, StyleSheet, FlatList, Alert, Pressable,
 } from 'react-native';
 // expo-image: commenters' faces repeat across posts; the shared memory+disk
 // cache paints them instantly instead of re-downloading per sheet.
@@ -29,8 +29,7 @@ import {
 } from '../utils/commentThreads';
 import { useTokenSuggestions, useForcedSelection, SuggestionList } from './MentionSuggestions';
 import RichCaption from './RichCaption';
-import RotatingBackground from './RotatingBackground';
-import ScreenVignette from './ScreenVignette';
+import BottomSheet from './BottomSheet';
 import formatCount from '../utils/formatCount';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -460,21 +459,44 @@ const CommentAction = ({
         </TouchableOpacity>
       )}
 
-      <Modal visible={showComments} animationType="slide" onRequestClose={() => setShowComments(false)}>
-        <View style={styles.modalRoot}>
-          <RotatingBackground intervalMs={60000} blurIntensity={5} tint="default" scrimColor="transparent" />
-          <ScreenVignette tintRgb="6,16,34" zIndex={1} />
-
-          <SafeAreaView edges={['top', 'bottom']} style={[styles.content, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
-            <View style={styles.headerRow}>
-              <Text style={styles.headerTitle}>
-                {shownCount > 0 ? t('comments.titleCount', { count: formatCount(shownCount) }) : t('comments.title')}
+      {/* TikTok-style: a sheet over the lower part of the screen, the post
+          still visible above it. Swipe down, tap above it, or press back. */}
+      <BottomSheet
+        visible={showComments}
+        onClose={() => setShowComments(false)}
+        keyboardHeight={kbHeight}
+        header={(
+          <View style={styles.headerRow}>
+            <Text style={styles.headerTitle}>
+              {shownCount > 0 ? t('comments.titleCount', { count: formatCount(shownCount) }) : t('comments.title')}
+            </Text>
+            <TouchableOpacity style={styles.closeButton} onPress={() => setShowComments(false)} hitSlop={8}>
+              <Feather name="x" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
+        overlay={pickerFor ? (
+          // Reaction picker (long-press a comment or its heart)
+          <Pressable style={styles.pickerBackdrop} onPress={() => setPickerFor(null)}>
+            <View style={styles.picker}>
+              <Text style={styles.pickerTitle} numberOfLines={1}>
+                {t('comments.reactTo', { name: pickerFor.user?.username || '' })}
               </Text>
-              <TouchableOpacity style={styles.closeButton} onPress={() => setShowComments(false)} hitSlop={8}>
-                <Feather name="x" size={24} color={colors.textPrimary} />
-              </TouchableOpacity>
+              <View style={styles.pickerRow}>
+                {REACTIONS.map((e) => (
+                  <TouchableOpacity
+                    key={e}
+                    style={[styles.pickerBtn, pickerFor.reactions?.mine === e && styles.pickerBtnActive]}
+                    onPress={() => react(pickerFor, e)}
+                  >
+                    <Text style={styles.pickerEmoji}>{e}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-
+          </Pressable>
+        ) : null}
+      >
             {loading && comments.length === 0 ? (
               <CommentSkeleton />
             ) : (
@@ -570,31 +592,7 @@ const CommentAction = ({
                 </View>
               </View>
             )}
-          </SafeAreaView>
-
-          {/* Reaction picker (long-press a comment or its heart) */}
-          {pickerFor && (
-            <Pressable style={styles.pickerBackdrop} onPress={() => setPickerFor(null)}>
-              <View style={styles.picker}>
-                <Text style={styles.pickerTitle} numberOfLines={1}>
-                  {t('comments.reactTo', { name: pickerFor.user?.username || '' })}
-                </Text>
-                <View style={styles.pickerRow}>
-                  {REACTIONS.map((e) => (
-                    <TouchableOpacity
-                      key={e}
-                      style={[styles.pickerBtn, pickerFor.reactions?.mine === e && styles.pickerBtnActive]}
-                      onPress={() => react(pickerFor, e)}
-                    >
-                      <Text style={styles.pickerEmoji}>{e}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </Pressable>
-          )}
-        </View>
-      </Modal>
+      </BottomSheet>
     </>
   );
 };
@@ -620,11 +618,9 @@ const styles = StyleSheet.create({
   },
   commentBarText: { flex: 1, ...typography.label, color: colors.textSecondary, fontWeight: '600' },
 
-  modalRoot: { flex: 1, backgroundColor: colors.bg },
-  content: { flex: 1, zIndex: 2 },
   headerRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.10)',
+    paddingTop: 8, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.10)',
   },
   headerTitle: { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
   closeButton: { position: 'absolute', right: spacing.md, padding: 4 },
@@ -692,7 +688,7 @@ const styles = StyleSheet.create({
   closedText: { color: colors.textMuted, fontSize: 14, fontWeight: '600' },
 
   pickerBackdrop: {
-    ...StyleSheet.absoluteFillObject, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.45)',
+    ...StyleSheet.absoluteFillObject, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'center', alignItems: 'center', padding: spacing.lg,
   },
   picker: {

@@ -6,13 +6,20 @@ jest.mock('expo-image-manipulator', () => ({
   manipulateAsync: jest.fn(async () => ({ uri: 'file://out.jpg', width: 1080, height: 1350 })),
 }));
 
+const { Image } = require('react-native');
 const { manipulateAsync, SaveFormat } = require('expo-image-manipulator');
 const { compressImage } = require('../imageProcessing');
 
 // The (uri, actions, options) of the most recent manipulateAsync call.
 const lastCall = () => manipulateAsync.mock.calls[manipulateAsync.mock.calls.length - 1];
 
-beforeEach(() => manipulateAsync.mockClear());
+beforeEach(() => {
+  manipulateAsync.mockClear();
+  // compressImage reads the source size when the caller didn't pass it (to
+  // avoid upscaling). jest-expo's native getSize mock predates RN 0.81's
+  // promise call and crashes, so the JS method is stubbed: a big photo.
+  jest.spyOn(Image, 'getSize').mockImplementation((uri, ok) => ok(4000, 3000));
+});
 
 describe('compressImage — cap mode (feed/avatar uploads)', () => {
   test('downscales to maxWidth when the source is wider', async () => {
