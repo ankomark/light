@@ -18,6 +18,7 @@ import {
   copySnapMedia, uploadsDir, draftsDir, moveDir, rebaseSnap, removeDir,
 } from '../utils/mediaStore';
 import { useAuth } from '../context/useAuth';
+import { initDownloads } from '../utils/downloads';
 import { emit, EVENTS } from '../utils/appEvents';
 import { navigate } from '../services/navigationRef';
 import { useI18n } from '../context/I18nContext';
@@ -160,6 +161,8 @@ const UploadStatus = () => {
     if (!userId) return;
     configureUploadQueue({ storage: queueStorage(userId) });
     restoreUploads();
+    // This account's offline music, so the player can use the local files.
+    initDownloads(userId);
   }, [userId]);
 
   // Finished uploads clear themselves; failed ones wait for retry or dismiss.

@@ -242,9 +242,17 @@ class Playlist(models.Model):
 
 # Comment Model
 class Comment(models.Model):
+    """A comment on a track. Same shape as PostComment — one-level reply
+    threads, @mentions, denormalised reply/reaction counts — so the app runs
+    one comment section for both."""
     content = models.TextField()
     track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='comments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
+    reply_to = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    mentions = models.ManyToManyField(User, related_name='mentioned_in_track_comments', blank=True)
+    replies_count = models.PositiveIntegerField(default=0)
+    reactions_count = models.PositiveIntegerField(default=0)
     # Soft moderation takedown — hidden from public track-comment lists.
     is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -254,7 +262,10 @@ class Comment(models.Model):
         # Newest first + a composite index so "a track's comments, newest first
         # + paginate" is an index range scan instead of a full table sort.
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['track', '-created_at'], name='trackcomment_track_created_idx')]
+        indexes = [
+            models.Index(fields=['track', '-created_at'], name='trackcomment_track_created_idx'),
+            models.Index(fields=['parent', 'created_at'], name='trackcomment_parent_idx'),
+        ]
 
     def __str__(self):
         return f'Comment by {self.user.username} on {self.track.title}'
@@ -507,6 +518,21 @@ class PostComment(models.Model):
         ]
 
 
+class TrackCommentReaction(models.Model):
+    """CommentReaction's twin for track comments (same emoji set, same one-
+    per-person rule)."""
+    comment = models.ForeignKey('Comment', on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='track_comment_reactions')
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['comment', 'user'], name='trackcmtreaction_one_per_user'),
+        ]
+        indexes = [models.Index(fields=['comment', 'emoji'], name='trackcmtreaction_emoji')]
+
+
 class CommentReaction(models.Model):
     """One reaction per person per comment. The heart is the default ("like");
     a long-press picks another from REACTIONS. Changing it replaces the row."""
@@ -679,6 +705,7 @@ class Notification(models.Model):
     # The comment a reply / mention / reaction is about, so the tap can open
     # the post with that comment in view.
     comment = models.ForeignKey('PostComment', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    track_comment = models.ForeignKey('Comment', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

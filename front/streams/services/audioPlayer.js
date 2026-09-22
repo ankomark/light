@@ -113,9 +113,25 @@ class SoundAdapter {
       : null;
   }
 
+  // Lock screen / notification "now playing" controls (play/pause, seek, and
+  // the title + artwork). expo-audio drives the native media session; builds
+  // without it simply skip this.
+  setLockScreen(metadata, options) {
+    try {
+      this._player.setActiveForLockScreen?.(true, metadata, options);
+    } catch (e) {
+      console.warn('[audio] lock screen controls unavailable', e?.message);
+    }
+  }
+
+  clearLockScreen() {
+    try { this._player.clearLockScreenControls?.(); } catch { /* not active */ }
+  }
+
   async unloadAsync() {
     this._sub?.remove?.();
     this._sub = null;
+    this.clearLockScreen();
     this._player.remove();
   }
 }

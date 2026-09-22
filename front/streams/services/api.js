@@ -2038,3 +2038,12 @@ export default {
 
 
 
+
+// ── Music discovery ──────────────────────────────────────────────────────────
+// One track (full payload) — the song page opened from a notification.
+export const fetchTrack = (trackId) => apiRequest('get', `/tracks/${trackId}/`);
+// Picked for the viewer from likes; each row carries `reason`
+// (fans_also_like / from_artist / popular).
+export const fetchForYouTracks = () => apiRequest('get', '/tracks/for_you/');
+// "More like this" for one track.
+export const fetchSimilarTracks = (trackId) => apiRequest('get', `/tracks/${trackId}/similar/`);

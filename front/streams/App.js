@@ -19,6 +19,8 @@ import SocialFeed from './components/SocialFeed';
 import RotatingBackground from './components/RotatingBackground';
 import UploadStatus from './components/UploadStatus';
 import HashtagScreen from './components/HashtagScreen';
+import DownloadsScreen from './components/DownloadsScreen';
+import TrackDetailScreen from './components/TrackDetailScreen';
 import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold } from '@expo-google-fonts/cinzel';
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import CreatePost from './components/CreatePost';
@@ -205,7 +207,14 @@ const App = () => {
   React.useEffect(() => {
     const sub = addNotificationResponseListener(response => {
       const data = response.notification.request.content.data;
-      if (data?.postId) {
+      if (data?.trackId) {
+        // A track comment / reply / mention / like: the song page, with the
+        // comments open on that comment when there is one.
+        navigate('TrackDetail', {
+          trackId: data.trackId,
+          ...(data.trackCommentId ? { commentId: data.trackCommentId } : {}),
+        });
+      } else if (data?.postId) {
         // A comment, reply, mention or reaction carries its comment: open the
         // post with the comments up and that one in view.
         navigate('PostDetail', {
@@ -274,6 +283,8 @@ const App = () => {
                 <Stack.Screen name="PlaylistDetail" component={PlaylistDetailWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: false }} />
                 <Stack.Screen name="Hashtag" component={HashtagScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Downloads" component={DownloadsScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TrackDetail" component={TrackDetailScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="CameraCapture" component={CameraCapture} options={{ headerShown: false, presentation: 'fullScreenModal' }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>

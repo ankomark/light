@@ -2,6 +2,12 @@
 from django.db.models import Exists, OuterRef, Subquery, IntegerField
 from django.db.models.functions import Coalesce
 from django.db import IntegrityError, transaction
+from django.db.models import F
+from .. import discovery, audio_tags
+from ..comments import (
+    create_comment, set_reaction, reaction_summaries, TRACK as TRACK_COMMENTS,
+    REACTIONS as COMMENT_REACTIONS, LIKE as COMMENT_LIKE,
+)
 from .. import r2
 
 
@@ -289,6 +295,27 @@ class TrackViewSet(viewsets.ModelViewSet):
             return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    def _ordered_rows(self, ids, reasons):
+        by_id = {t.id: t for t in self.get_queryset().filter(id__in=ids)}
+        rows = [by_id[i] for i in ids if i in by_id]
+        data = TrackListSerializer(rows, many=True, context=self.get_serializer_context()).data
+        for row, track in zip(data, rows):
+            row['reason'] = reasons.get(track.id)
+        return data
+
+    @action(detail=False, methods=['get'], url_path='for_you')
+    def for_you(self, request):
+        """Tracks picked for the viewer from what they (and people like them)
+        have liked, each tagged with why: fans_also_like / from_artist / popular."""
+        ids, reasons = discovery.for_you(request.user)
+        return Response(self._ordered_rows(ids, reasons))
+
+    @action(detail=True, methods=['get'])
+    def similar(self, request, pk=None):
+        """'More like this' for one track."""
+        ids, reasons = discovery.similar(self.get_object(), request.user)
+        return Response(self._ordered_rows(ids, reasons))
+
     @action(detail=False, methods=['get'])
     def trending_sounds(self, request):
         """Library tracks people are putting on posts right now: most used on
@@ -326,6 +353,7 @@ class TrackViewSet(viewsets.ModelViewSet):
         _like, created = Like.objects.get_or_create(user=user, track=track)
         if not created:
             return Response({"error": "You have already liked this track."}, status=400)
+        discovery.forget_for_you(user.id)
 
     # Return the updated like count
         likes_count = Like.objects.filter(track=track).count()
@@ -341,6 +369,8 @@ class TrackViewSet(viewsets.ModelViewSet):
         # See `like` above: get_or_create keeps overlapping double-taps off the
         # unique constraint, and the loser reads as the toggle-off it looks like.
         like, created = Like.objects.get_or_create(user=user, track=track)
+        # Likes are the taste signal "For you" is built from.
+        discovery.forget_for_you(user.id)
         if not created:
             like.delete()
             likes_count = track.likes.count()
@@ -371,9 +401,13 @@ class TrackViewSet(viewsets.ModelViewSet):
         track = self.get_object()
         if not track.audio_file:
             return Response({'error': 'Audio file not found'}, status=404)
-        return Response({
-            'download_url': media.resolve(track.audio_file)
-        })
+        # The app calls this when it saves a track (to the phone or for offline
+        # listening); the counter existed but nothing ever incremented it.
+        Track.objects.filter(pk=track.pk).update(downloads=F('downloads') + 1)
+        # A copy with the title, artist, album and cover written into the file,
+        # so the phone's music player shows the song as it looks in the app.
+        url, filename, tagged = audio_tags.tagged_download(track)
+        return Response({'download_url': url, 'filename': filename, 'tagged': tagged})
     # "Favorites" == liked tracks. Toggling a favorite is just toggle_like; this
     # endpoint lists the current user's liked tracks for the Favorites screen.
     @action(detail=False, methods=['get'], url_path='favorites')
@@ -445,37 +479,80 @@ class PlaylistViewSet(viewsets.ModelViewSet):
 
 
 class CommentViewSet(viewsets.ModelViewSet):
+    """A track's comments — the same section as a post's: top comments first,
+    reply threads, reactions and @mentions (see songs/comments.py)."""
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        # select_related pulls the author (+ profile for the avatar) in one query
-        # so a page of comments doesn't N+1. Explicit ordering keeps pagination
-        # consistent (silences DRF's UnorderedObjectListWarning).
-        qs = Comment.objects.select_related('user', 'user__profile').filter(is_removed=False).order_by('-created_at')
+        user = self.request.user
+        qs = (Comment.objects.select_related('user', 'user__profile', 'reply_to', 'reply_to__profile')
+              .filter(is_removed=False, track__is_removed=False))
         track_id = self.kwargs.get('track_pk')
         if track_id:
             qs = qs.filter(track_id=track_id)
+        blocked = blocked_ids_for(user)
+        if blocked:
+            qs = qs.exclude(user_id__in=blocked)
+        if self.action == 'list':
+            qs = qs.filter(parent__isnull=True).order_by('-reactions_count', '-created_at', '-id')
+        else:
+            qs = qs.order_by('-created_at')
         return qs
 
-    def perform_create(self, serializer):
-        track_id = self.kwargs.get('track_pk')
-        track = get_object_or_404(Track, id=track_id)
-        # Single save â€” this used to call save() twice (a redundant write).
-        comment = serializer.save(user=self.request.user, track=track)
+    def _page_response(self, queryset):
+        page = self.paginate_queryset(queryset)
+        rows = list(page if page is not None else queryset)
+        ctx = self.get_serializer_context()
+        ctx['reaction_summaries'] = reaction_summaries([c.id for c in rows], self.request.user, TRACK_COMMENTS)
+        data = CommentSerializer(rows, many=True, context=ctx).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
 
-        if comment.user != track.artist:
-            msg = f"{self.request.user.username} commented on your track {track.title}"
-            Notification.objects.create(
-                recipient=track.artist,
-                sender=self.request.user,
-                message=msg,
-                notification_type='comment',
-                track=track
-            )
-            notify_user(track.artist, 'comment', msg)
+    def list(self, request, *args, **kwargs):
+        return self._page_response(self.filter_queryset(self.get_queryset()))
+
+    @action(detail=True, methods=['get'])
+    def replies(self, request, pk=None, track_pk=None):
+        parent = self.get_object()
+        blocked = blocked_ids_for(request.user)
+        qs = (parent.replies.filter(is_removed=False)
+              .select_related('user', 'user__profile', 'reply_to', 'reply_to__profile')
+              .order_by('created_at', 'id'))
+        if blocked:
+            qs = qs.exclude(user_id__in=blocked)
+        return self._page_response(qs)
+
+    @action(detail=True, methods=['post', 'delete'], permission_classes=[IsAuthenticated])
+    def react(self, request, pk=None, track_pk=None):
+        comment = self.get_object()
+        if request.method == 'DELETE':
+            emoji = None
+        else:
+            emoji = request.data.get('emoji') or COMMENT_LIKE
+            if emoji not in COMMENT_REACTIONS:
+                return Response({'error': 'Unsupported reaction.'}, status=status.HTTP_400_BAD_REQUEST)
+        mine = set_reaction(request.user, comment, emoji, TRACK_COMMENTS)
+        summary = reaction_summaries([comment.id], request.user, TRACK_COMMENTS)[comment.id]
+        return Response({'reactions': summary, 'mine': mine})
+
+    def create(self, request, *args, **kwargs):
+        track = get_object_or_404(Track, id=self.kwargs.get('track_pk'), is_removed=False)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        parent = None
+        parent_id = request.data.get('parent')
+        if parent_id not in (None, '', 0, '0'):
+            try:
+                parent = (Comment.objects.select_related('user', 'parent')
+                          .filter(pk=int(parent_id), track=track, is_removed=False).first())
+            except (TypeError, ValueError):
+                parent = None
+            if parent is None:
+                raise ValidationError({'parent': 'That comment no longer exists.'})
+        comment = create_comment(TRACK_COMMENTS, request.user, track, serializer.validated_data['content'], parent)
+        return Response(self.get_serializer(comment).data, status=status.HTTP_201_CREATED)
 
 
 

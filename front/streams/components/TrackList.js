@@ -11,7 +11,8 @@ import {
 } from "react-native";
 import { Image } from 'expo-image';
 import { useFocusEffect , useNavigation } from '@react-navigation/native';
-import { fetchTracks, fetchShuffledTracks } from "../services/api";
+import { fetchTracks, fetchShuffledTracks, fetchForYouTracks } from "../services/api";
+import TrackRail from './TrackRail';
 import TrackItem from "./TrackItem";
 import SearchBar from "./SearchBar";
 import { TrackListSkeleton } from './SkeletonLoader';
@@ -35,8 +36,16 @@ const TrackList = () => {
   // Same centered column the feed uses. On a phone this is the full width and
   // nothing changes; on a tablet the library stops stretching a 60px cover and
   // a title across 800px of empty row.
-  const { sideMargin } = useContentWidth({ gutter: 0 });
+  const { sideMargin, width: contentWidth } = useContentWidth({ gutter: 0 });
+  // Playlists / Downloads show their labels only when the row has room for
+  // four labelled buttons; on a phone they're round icon buttons, so the bar
+  // never runs past the screen edge.
+  const roomyBar = contentWidth >= 460;
   const cacheKey = userKey(currentUser?.id, 'tracks');
+  // "Made for you": painted from cache, refreshed when the screen is shown.
+  const forYouKey = userKey(currentUser?.id, 'music:foryou');
+  const [forYou, setForYou] = useState(() => peekCache(forYouKey) ?? []);
+  const [searching, setSearching] = useState(false);
   // Open on the last page-one we saw instead of a centered spinner. Same rule
   // as the feed: `loading` means "nothing to show", not "a request is running".
   const [tracks, setTracks] = useState(() => peekCache(cacheKey) ?? []);
@@ -178,18 +187,38 @@ const TrackList = () => {
     }, [loadTracks])
   );
 
+  const loadForYou = useCallback(() => {
+    fetchForYouTracks()
+      .then((rows) => {
+        if (Array.isArray(rows)) { setForYou(rows); writeCache(forYouKey, rows); }
+      })
+      .catch(() => {});
+  }, [forYouKey]);
+
+  useEffect(() => {
+    if (!forYou.length) {
+      readCache(forYouKey).then((c) => { if (Array.isArray(c) && c.length) setForYou((p) => (p.length ? p : c)); });
+    }
+    loadForYou();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadForYou]);
+
+  const reasonLabel = useCallback((r) => t(`music.reason.${r}`), [t]);
+
   // Server-side search: debounce keystrokes so we hit the API once the user
   // pauses, then reload page 1 with the new term.
   const handleSearch = useCallback((searchTerm) => {
     const term = (searchTerm ?? '').trim();
     searchRef.current = term;
+    setSearching(!!term);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => loadTracks(term), 350);
   }, [loadTracks]);
 
   const handleRefresh = useCallback(() => {
     loadTracks(searchRef.current);
-  }, [loadTracks]);
+    loadForYou();
+  }, [loadTracks, loadForYou]);
 
   const handleDelete = useCallback((deletedId) => {
     setTracks(prev => prev.filter(tr => tr.id !== deletedId));
@@ -238,39 +267,63 @@ const TrackList = () => {
       <SearchBar onSearch={handleSearch} />
 
       <View style={[styles.queueBar, { marginHorizontal: sideMargin }]}>
-        {tracks.length > 0 && (
-          <>
-            <TouchableOpacity
-              style={styles.queueBtn}
-              onPress={() => playQueue(buildQueue(), 0, { shuffle: false })}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="play" size={16} color="white" />
-              <Text style={styles.queueBtnText} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('music.playAll')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.queueBtn, styles.shuffleBtn]}
-              onPress={shuffleAll}
-              disabled={shuffling}
-              activeOpacity={0.85}
-            >
-              {shuffling ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <Ionicons name="shuffle" size={16} color={colors.primary} />
-              )}
-              <Text style={styles.shuffleBtnText} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('music.shuffle')}</Text>
-            </TouchableOpacity>
-          </>
-        )}
-        <TouchableOpacity
-          style={[styles.queueBtn, styles.playlistsBtn]}
-          onPress={() => navigation.navigate('Playlists')}
-          activeOpacity={0.85}
-        >
-          <MaterialCommunityIcons name="playlist-music" size={16} color={colors.primary} />
-          <Text style={styles.shuffleBtnText} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('playlist.title')}</Text>
-        </TouchableOpacity>
+        {/* Left: the two main actions. They may shrink (text truncates)
+            rather than push anything off-screen. */}
+        <View style={styles.queueMain}>
+          {tracks.length > 0 && (
+            <>
+              <TouchableOpacity
+                style={[styles.queueBtn, styles.queueBtnShrink]}
+                onPress={() => playQueue(buildQueue(), 0, { shuffle: false })}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="play" size={16} color="white" />
+                <Text style={styles.queueBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('music.playAll')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.queueBtn, styles.shuffleBtn, styles.queueBtnShrink]}
+                onPress={shuffleAll}
+                disabled={shuffling}
+                activeOpacity={0.85}
+              >
+                {shuffling ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="shuffle" size={16} color={colors.primary} />
+                )}
+                <Text style={styles.shuffleBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('music.shuffle')}</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
+        {/* Right: library shortcuts. Fixed size, never shrink. */}
+        <View style={styles.queueSide}>
+          <TouchableOpacity
+            style={[styles.sideBtn, roomyBar && styles.sideBtnLabelled]}
+            onPress={() => navigation.navigate('Playlists')}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={t('playlist.title')}
+          >
+            <MaterialCommunityIcons name="playlist-music" size={18} color={colors.primary} />
+            {roomyBar && (
+              <Text style={styles.shuffleBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('playlist.title')}</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sideBtn, roomyBar && styles.sideBtnLabelled]}
+            onPress={() => navigation.navigate('Downloads')}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={t('downloads.title')}
+          >
+            <MaterialIcons name="download-done" size={18} color={colors.primary} />
+            {roomyBar && (
+              <Text style={styles.shuffleBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('downloads.title')}</Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -282,6 +335,13 @@ const TrackList = () => {
         data={tracks}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
+        ListHeaderComponent={
+          searching ? null : (
+            // Edge to edge: the list pads its rows by sideMargin, so the rail
+            // cancels it to scroll under the screen edges.
+            <TrackRail title={t('music.madeForYou')} tracks={forYou} reasonLabel={reasonLabel} style={{ marginHorizontal: -sideMargin, marginTop: 4 }} />
+          )
+        }
         contentContainerStyle={[styles.trackList, { paddingHorizontal: sideMargin }]}
         refreshControl={
           <RefreshControl
@@ -366,18 +426,46 @@ const styles = StyleSheet.create({
   },
   queueBar: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 2,
+  },
+  queueMain: {
+    flex: 1,
+    minWidth: 0,          // lets the children actually shrink inside the row
+    flexDirection: 'row',
+    gap: 8,
+  },
+  queueBtnShrink: { flexShrink: 1, minWidth: 0 },
+  queueSide: {
+    flexDirection: 'row',
+    gap: 8,
+    flexShrink: 0,
+  },
+  sideBtn: {
+    height: 36,
+    minWidth: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  sideBtnLabelled: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 14,
   },
   queueBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     backgroundColor: colors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    height: 36,
     borderRadius: 999,
   },
   queueBtnText: {
@@ -389,12 +477,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.10)',
     borderWidth: 1,
     borderColor: colors.primary,
-  },
-  playlistsBtn: {
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    marginLeft: 'auto', // push to the right edge
   },
   shuffleBtnText: {
     color: colors.primary,

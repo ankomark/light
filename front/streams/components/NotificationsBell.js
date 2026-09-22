@@ -209,7 +209,12 @@ const NotificationsBell = ({ navigation }) => {
         username: item.sender.username,
       });
     } else if (item.track) {
-      navigation.navigate('Tracks');
+      // The song itself — with its comments open on the exact comment for a
+      // comment / reply / mention / reaction.
+      navigation.navigate('TrackDetail', {
+        trackId: item.track.id,
+        ...(item.related_comment_id ? { commentId: item.related_comment_id } : {}),
+      });
     }
   }, [handleMarkAsRead, navigation]);
 

@@ -1,4 +1,5 @@
-// A post's comments: the trigger (icon or bar) and the full-screen sheet.
+// A post's (or a track's) comments: the trigger and the full-screen sheet.
+// Pass `postId` for a post or `trackId` for a track — same section for both.
 //
 // TikTok-style comment section:
 //   - a heart with a count on every comment; long-press for other reactions
@@ -21,9 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { useAuth } from '../context/useAuth';
-import {
-  commentOnPost, fetchSocialPostComments, fetchCommentReplies, fetchPostComment, reactToComment,
-} from '../services/api';
+import { commentApi } from '../services/commentApi';
 import { peekCache, writeCache } from '../utils/screenCache';
 import {
   buildRows, toggleReaction, updateComment, addReply, mergeReplies, REACTIONS, LIKE, EMPTY_REACTIONS,
@@ -66,12 +65,11 @@ const CommentSkeleton = () => (
   </View>
 );
 
-// A post's top-level comments, kept for this session. The feed recycles its
-// cards, so a component-local list was lost the moment a post scrolled away.
-// Memory only: one key per post would grow disk storage without bound.
-const commentsKey = (postId) => `comments:post:${postId}`;
-const rememberComments = (postId, list) =>
-  writeCache(commentsKey(postId), list.filter((c) => !c.pending), { persist: false });
+// Top-level comments, kept for this session. The feed recycles its cards, so a
+// component-local list was lost the moment a post scrolled away. Memory only:
+// one key per post/track would grow disk storage without bound.
+const rememberComments = (key, list) =>
+  writeCache(key, list.filter((c) => !c.pending), { persist: false });
 
 const CommentRow = memo(({ comment, depth, highlighted, onReply, onHeart, onReact, onLink, t }) => {
   const r = comment.reactions || EMPTY_REACTIONS;
@@ -145,13 +143,17 @@ const MoreRow = memo(({ row, onToggle, t }) => {
 MoreRow.displayName = 'MoreRow';
 
 const CommentAction = ({
-  postId, commentCount, flatListRef, autoOpen, onCommentsLoaded, onCommentPosted,
+  postId, trackId, commentCount, flatListRef, autoOpen, onCommentsLoaded, onCommentPosted,
   currentUserAvatar, commentsEnabled = true, triggerVariant = 'icon', highlightCommentId = null,
 }) => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const kbHeight = useKeyboardHeight(); // float the comment box above the keyboard (edge-to-edge safe)
-  const [comments, setComments] = useState(() => peekCache(commentsKey(postId)) ?? []);
+  const api = useMemo(
+    () => (trackId != null ? commentApi('track', trackId) : commentApi('post', postId)),
+    [postId, trackId],
+  );
+  const [comments, setComments] = useState(() => peekCache(api.cacheKey) ?? []);
   // Reply threads: { [topCommentId]: { items, open, hasMore, page, loading } }
   const [threads, setThreads] = useState({});
   const [showComments, setShowComments] = useState(autoOpen || false);
@@ -195,18 +197,18 @@ const CommentAction = ({
     const hadCache = commentsRef.current.length > 0;
     try {
       if (!hadCache) setLoading(true);
-      const data = await fetchSocialPostComments(postId);
+      const data = await api.list();
       const list = Array.isArray(data) ? data : (data ?? []);
       // Keep a comment that's mid-post; the fetch can't know about it yet.
       setComments((prev) => [...prev.filter((c) => c.pending), ...list]);
-      rememberComments(postId, list);
+      rememberComments(api.cacheKey, list);
     } catch (error) {
       if (!hadCache) Alert.alert(t('common.error'), t('comments.loadFailed'));
       console.error('Comments fetch error:', error);
     } finally {
       setLoading(false);
     }
-  }, [postId, t]);
+  }, [api, t]);
 
   useEffect(() => {
     if (!showComments) return;
@@ -217,7 +219,7 @@ const CommentAction = ({
   const loadReplies = useCallback(async (parentId, page = 1) => {
     setThreads((prev) => ({ ...prev, [parentId]: { items: [], hasMore: false, ...prev[parentId], open: true, loading: true } }));
     try {
-      const res = await fetchCommentReplies(postId, parentId, page);
+      const res = await api.replies(parentId, page);
       const pageItems = res?.results ?? (Array.isArray(res) ? res : []);
       setThreads((prev) => {
         const th = prev[parentId] || { items: [] };
@@ -231,7 +233,7 @@ const CommentAction = ({
       setThreads((prev) => ({ ...prev, [parentId]: { ...prev[parentId], loading: false } }));
       return [];
     }
-  }, [postId]);
+  }, [api]);
 
   const toggleThread = useCallback((row) => {
     const id = row.parent.id;
@@ -258,12 +260,12 @@ const CommentAction = ({
     };
     apply(toggleReaction(before, emoji));
     try {
-      const res = await reactToComment(comment.id, emoji);
+      const res = await api.react(comment.id, emoji);
       if (res?.reactions) apply(res.reactions);
     } catch {
       apply(before);
     }
-  }, []);
+  }, [api]);
   const onHeart = useCallback((comment) => react(comment, LIKE), [react]);
   const onReact = useCallback((comment) => setPickerFor(comment), []);
 
@@ -328,12 +330,12 @@ const CommentAction = ({
     setReplyTarget(null);
 
     try {
-      const created = await commentOnPost(postId, content, target ? target.id : null);
+      const created = await api.create(content, target ? target.id : null);
       const real = { reactions: EMPTY_REACTIONS, replies_count: 0, ...created, user: created?.user || optimistic.user };
       const out = updateComment(commentsRef.current, threadsRef.current, tempId, () => real);
       setComments(out.comments);
       setThreads(out.threads);
-      if (!parentId) rememberComments(postId, out.comments);
+      if (!parentId) rememberComments(api.cacheKey, out.comments);
       onCommentPosted?.(shownCountRef.current);
     } catch (error) {
       // Roll back and restore the text so the user can retry.
@@ -365,14 +367,14 @@ const CommentAction = ({
     }
     (async () => {
       try {
-        const target = await fetchPostComment(id);
+        const target = await api.get(id);
         if (!target) return;
         if (!target.parent) {
           // A top comment beyond the first page: bring it to the top.
           setComments((prev) => (prev.some((c) => c.id === id) ? prev : [target, ...prev]));
         } else {
           if (!commentsRef.current.some((c) => c.id === target.parent)) {
-            const parent = await fetchPostComment(target.parent);
+            const parent = await api.get(target.parent);
             if (parent) setComments((prev) => [parent, ...prev.filter((c) => c.id !== parent.id)]);
           }
           // Open the thread, paging a little way in if the reply is deep.
@@ -386,7 +388,7 @@ const CommentAction = ({
         // deleted or hidden — the sheet just opens normally
       }
     })();
-  }, [showComments, highlightCommentId, loading, loadReplies]);
+  }, [showComments, highlightCommentId, loading, loadReplies, api]);
 
   useEffect(() => {
     if (!highlightedId) return undefined;
@@ -445,6 +447,12 @@ const CommentAction = ({
             <Feather name="chevron-right" size={18} color={colors.textMuted} />
           </TouchableOpacity>
         </SafeAreaView>
+      ) : triggerVariant === 'compact' ? (
+        // The small icon + count used in a track row's action bar.
+        <TouchableOpacity style={styles.compactButton} onPress={() => setShowComments(true)} hitSlop={8}>
+          <Feather name="message-circle" size={18} color={colors.textSecondary} />
+          <Text style={styles.compactText}>{formatCount(shownCount)}</Text>
+        </TouchableOpacity>
       ) : (
         <TouchableOpacity style={styles.actionButton} onPress={() => setShowComments(true)}>
           <Feather name="message-circle" size={24} color="#FFF" />
@@ -594,6 +602,8 @@ const CommentAction = ({
 const styles = StyleSheet.create({
   actionButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8 },
   actionText: { fontSize: 14, color: '#FFF' },
+  compactButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 6, paddingVertical: 4 },
+  compactText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
   commentBarWrap: {
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.10)',
     backgroundColor: 'rgba(8,20,40,0.6)',

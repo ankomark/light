@@ -13,6 +13,7 @@ import {
 } from '../utils/queueLogic';
 import { usePreferences } from './PreferencesContext';
 import { applyAudioQuality, resolveAudioQuality } from '../utils/preferences';
+import { getLocalUri, getLocalCover } from '../utils/downloads';
 
 // Two contexts, deliberately.
 //
@@ -50,10 +51,10 @@ const REPEAT_MODES = ['off', 'all', 'one'];
  * Global single-instance audio player with a play queue.
  *
  * Only one track is ever loaded/playing at a time. The queue lives entirely in
- * JS on top of expo-av, so it works as an OTA update with no native rebuild.
- * Lock-screen / notification controls are intentionally out of scope for now
- * (that layer needs a native module such as react-native-track-player and will
- * be added separately).
+ * JS on top of expo-audio. The playing track is published to the lock screen
+ * and the media notification (title, artist, artwork, play/pause and seek) via
+ * expo-audio's native media session, so it can be controlled with the phone
+ * locked. A downloaded track plays from its local file.
  *
  * Queue model: `queueRef` holds the tracks in their original order; `orderRef`
  * is a list of indices into the queue describing playback order (identity when
@@ -143,15 +144,17 @@ export const PlayerProvider = ({ children }) => {
           await soundRef.current.unloadAsync().catch(() => {});
           soundRef.current = null;
         }
-        const uri = applyAudioQuality(
+        // Downloaded? Play the file on the phone: instant, and it works with
+        // no connection. Quality / data-saver only apply to streaming.
+        const local = getLocalUri(track.id);
+        const uri = local || applyAudioQuality(
           track.audio_file,
           prefsRef.current.audioQuality,
           prefsRef.current.dataSaver
         );
-        const { downloadFirst } = resolveAudioQuality(
-          prefsRef.current.audioQuality,
-          prefsRef.current.dataSaver
-        );
+        const { downloadFirst } = local
+          ? { downloadFirst: false }
+          : resolveAudioQuality(prefsRef.current.audioQuality, prefsRef.current.dataSaver);
         const { sound } = await createSound(
           { uri },
           { shouldPlay: true, progressUpdateIntervalMillis: 500, downloadFirst },
@@ -163,6 +166,15 @@ export const PlayerProvider = ({ children }) => {
           return;
         }
         soundRef.current = sound;
+        sound.setLockScreen?.(
+          {
+            title: track.title || '',
+            artist: track.artist?.username || (typeof track.artist === 'string' ? track.artist : ''),
+            albumTitle: track.album || undefined,
+            artworkUrl: getLocalCover(track.id) || track.cover_image || undefined,
+          },
+          { showSeekForward: true, showSeekBackward: true },
+        );
       } catch (error) {
         console.error('Player: failed to load track', error);
       } finally {

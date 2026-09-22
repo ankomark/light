@@ -155,10 +155,33 @@ class CommentSerializer(serializers.ModelSerializer):
     # track re-serialized on every row.
     user = SimpleUserSerializer(read_only=True)
     track = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Same thread/reaction fields as post comments, so one comment sheet
+    # renders both.
+    parent = serializers.PrimaryKeyRelatedField(read_only=True)
+    reply_to = SimpleUserSerializer(read_only=True)
+    reactions = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
-        fields = ('id', 'content', 'user', 'track', 'created_at', 'updated_at')
+        fields = ('id', 'content', 'user', 'track', 'created_at', 'updated_at',
+                  'parent', 'reply_to', 'replies_count', 'reactions')
+        read_only_fields = ('parent', 'reply_to', 'replies_count')
+
+    def validate_content(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Comment cannot be empty.')
+        if len(value) > 2200:
+            raise serializers.ValidationError('Comment is too long.')
+        return value
+
+    def get_reactions(self, obj):
+        summaries = self.context.get('reaction_summaries')
+        if summaries is not None and obj.id in summaries:
+            return summaries[obj.id]
+        from ..comments import reaction_summaries, TRACK
+        request = self.context.get('request')
+        return reaction_summaries([obj.id], getattr(request, 'user', None), TRACK)[obj.id]
 
 
 

@@ -46,6 +46,8 @@ class NotificationSerializer(serializers.ModelSerializer):
         if obj.comment_id:
             # Stored on the notification since comment threads: exact.
             comment = obj.comment
+        elif obj.track_comment_id:
+            comment = obj.track_comment
         elif obj.notification_type == 'comment' and obj.post_id:
             from ..models import PostComment  # Import here to avoid circular imports
             # Comments order by -created_at, so .first() is the most recent comment

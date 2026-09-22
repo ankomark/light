@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  useWindowDimensions, ActivityIndicator, Platform, StatusBar,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
+  useWindowDimensions, ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // expo-image: the cover is the same artwork the track row already loaded, so a
 // shared memory+disk cache means opening Now Playing shows it instantly.
 import { Image } from 'expo-image';
@@ -11,11 +12,14 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
-import { fetchTrackLyrics } from '../services/api';
+import { fetchTrackLyrics, fetchSimilarTracks } from '../services/api';
+import LikeButton from './LikeButton';
+import CommentAction from './CommentAction';
+import DownloadButton from './DownloadButton';
+import FullSheet from './FullSheet';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 8 : 54;
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
 const formatTime = (ms) => {
@@ -37,8 +41,12 @@ const NowPlaying = () => {
   const navigation = useNavigation();
   // Reactive artwork size — reflows on rotation / web resize (was a module-scope
   // Dimensions.get snapshot captured once at import).
-  const { width: winW } = useWindowDimensions();
-  const artSize = Math.min(winW - spacing.lg * 2, 340);
+  const { width: winW, height: winH } = useWindowDimensions();
+  // Real safe-area insets instead of a guessed status-bar height, top and
+  // bottom (the controls used to sit on the home indicator on some phones).
+  const insets = useSafeAreaInsets();
+  // Leave room for the action row on shorter screens.
+  const artSize = Math.min(winW - spacing.lg * 2, 340, winH * 0.36);
   const artDim = { width: artSize, height: artSize };
   const {
     currentTrack,
@@ -56,6 +64,7 @@ const NowPlaying = () => {
     cycleRepeat,
     beginSeek,
     seekTo,
+    playQueue,
   } = usePlayer();
   // Position lives in its own context so the ~2x/second tick doesn't re-render
   // everything else that uses the player.
@@ -69,6 +78,10 @@ const NowPlaying = () => {
   // lyrics view is actually opened — cached per track for the session, so
   // toggling back and forth costs nothing.
   const [lyricsText, setLyricsText] = useState('');
+  // "More like this" for whatever is playing, loaded when the sheet opens.
+  const [showSimilar, setShowSimilar] = useState(false);
+  const [similar, setSimilar] = useState([]);
+  const [similarFor, setSimilarFor] = useState(null);
 
   const lyricsRef = useRef(null);
   const userScrollingRef = useRef(false);
@@ -110,6 +123,16 @@ const NowPlaying = () => {
     return () => { cancelled = true; };
   }, [showLyrics, trackId, inlineLyrics]);
 
+  useEffect(() => {
+    if (!showSimilar || trackId == null || similarFor === trackId) return undefined;
+    let cancelled = false;
+    setSimilar([]);
+    fetchSimilarTracks(trackId)
+      .then((rows) => { if (!cancelled && Array.isArray(rows)) { setSimilar(rows); setSimilarFor(trackId); } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [showSimilar, trackId, similarFor]);
+
   if (!currentTrack) return null;
 
   const progress = seekValue != null ? seekValue : durationMs > 0 ? positionMs / durationMs : 0;
@@ -138,7 +161,7 @@ const NowPlaying = () => {
       <LinearGradient colors={['#143A63', '#0A1628']} style={StyleSheet.absoluteFill} />
 
       {/* Top bar */}
-      <View style={[styles.topBar, { paddingTop: TOP_PAD }]}>
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={HIT}>
           <Ionicons name="chevron-down" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -198,6 +221,17 @@ const NowPlaying = () => {
         </Text>
       </View>
 
+      {/* Like · comments · download · more like this */}
+      <View style={styles.actionRow}>
+        <LikeButton trackId={currentTrack.id} initialLikes={currentTrack.likes_count} initialIsLiked={currentTrack.is_liked} />
+        <CommentAction trackId={currentTrack.id} commentCount={currentTrack.comments_count} triggerVariant="compact" />
+        <DownloadButton track={currentTrack} size={22} />
+        <TouchableOpacity style={styles.moreLike} onPress={() => setShowSimilar(true)} hitSlop={HIT}>
+          <Ionicons name="sparkles" size={16} color={colors.primary} />
+          <Text style={styles.moreLikeText}>{t('music.moreLikeThis')}</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Scrubber */}
       <View style={styles.scrubBlock}>
         <SeekBar
@@ -218,7 +252,7 @@ const NowPlaying = () => {
       </View>
 
       {/* Transport controls */}
-      <View style={styles.controls}>
+      <View style={[styles.controls, { marginBottom: Math.max(insets.bottom, spacing.md) + spacing.lg }]}>
         <TouchableOpacity onPress={toggleShuffle} hitSlop={HIT}>
           <Ionicons name="shuffle" size={24} color={shuffle ? colors.primary : colors.textSecondary} />
         </TouchableOpacity>
@@ -243,6 +277,41 @@ const NowPlaying = () => {
           <MaterialIcons name={repeatIcon} size={24} color={repeatMode !== 'off' ? colors.primary : colors.textSecondary} />
         </TouchableOpacity>
       </View>
+
+      <FullSheet visible={showSimilar} title={t('music.moreLikeThis')} onClose={() => setShowSimilar(false)}>
+        {similarFor !== trackId ? (
+          <ActivityIndicator style={styles.sheetSpinner} color={colors.primary} />
+        ) : (
+          <FlatList
+            data={similar}
+            keyExtractor={(tr) => `sim_${tr.id}`}
+            contentContainerStyle={styles.simList}
+            ListEmptyComponent={<Text style={styles.simEmpty}>{t('sound.empty')}</Text>}
+            renderItem={({ item, index }) => (
+              <TouchableOpacity
+                style={styles.simRow}
+                activeOpacity={0.85}
+                onPress={() => { setShowSimilar(false); playQueue(similar, index); }}
+              >
+                <View style={styles.simCover}>
+                  {item.cover_image ? (
+                    <Image source={{ uri: item.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" />
+                  ) : (
+                    <Ionicons name="musical-notes" size={20} color={colors.textMuted} />
+                  )}
+                </View>
+                <View style={styles.simBody}>
+                  <Text style={styles.simTitle} numberOfLines={1}>{item.title}</Text>
+                  <Text style={styles.simMeta} numberOfLines={1}>
+                    {item.artist?.username}{item.reason ? '  ·  ' + t('music.reason.' + item.reason) : ''}
+                  </Text>
+                </View>
+                <Ionicons name="play-circle" size={28} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+          />
+        )}
+      </FullSheet>
     </View>
   );
 };
@@ -291,7 +360,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.xs,
   },
-  scrubBlock: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
+  scrubBlock: { paddingHorizontal: spacing.lg, marginTop: spacing.sm },
+  actionRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg, marginTop: spacing.md,
+  },
+  moreLike: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: radius.full, backgroundColor: 'rgba(29,161,242,0.14)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(29,161,242,0.5)',
+  },
+  moreLikeText: { color: colors.textPrimary, fontSize: 12.5, fontWeight: '700' },
+  sheetSpinner: { marginTop: spacing.xl },
+  simList: { paddingHorizontal: spacing.md, paddingBottom: spacing.lg },
+  simEmpty: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
+  simRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 9 },
+  simCover: {
+    width: 50, height: 50, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  simBody: { flex: 1 },
+  simTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  simMeta: { color: colors.textSecondary, fontSize: 12.5, marginTop: 2 },
   slider: { width: '100%', height: 36 },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -4 },
   time: { ...typography.caption, color: colors.textMuted },
@@ -300,8 +390,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.xl,
-    marginTop: spacing.lg,
-    marginBottom: spacing.xxl,
+    marginTop: spacing.md,
   },
   playBtn: {
     width: 72,

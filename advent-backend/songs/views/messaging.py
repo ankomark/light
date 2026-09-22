@@ -261,6 +261,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
                 'track__artist__profile',
                 'group',
                 'comment',
+                'track_comment',
             )\
             .order_by('-created_at')
 

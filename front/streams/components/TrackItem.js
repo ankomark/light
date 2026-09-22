@@ -3,13 +3,13 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Mod
 import { Image } from 'expo-image';
 import GlassView from './GlassView';
 import Likes from './LikeButton';
-import Comments from './Comments';
+import CommentAction from './CommentAction';
+import DownloadButton from './DownloadButton';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
-import * as Sharing from 'expo-sharing';
+import { saveToPhone } from '../utils/saveToPhone';
 import axios from 'axios';
-import { API_URL, getAccessToken, fetchTrackLyrics } from '../services/api';
+import { API_URL, getAccessToken, fetchTrackLyrics, apiRequest } from '../services/api';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer } from '../context/PlayerContext';
 import AddToPlaylistModal from './AddToPlaylistModal';
@@ -34,7 +34,7 @@ const TrackItem = React.memo(function TrackItem({
 
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState(null);
+  const [, setDownloadError] = useState(null);
   const [lyricsVisible, setLyricsVisible] = useState(false);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -131,30 +131,37 @@ const TrackItem = React.memo(function TrackItem({
       setDownloadProgress(0);
       setDownloadError(null);
 
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') throw new Error('Storage access is required to save the track.');
+      // The server hands back a copy with the title, artist, album and cover
+      // written inside the file, plus the song's name as a file name — so the
+      // phone's music player shows it exactly as it looks here, instead of
+      // "track_7" with a blank square. Falls back to the plain file if that
+      // lookup fails.
+      let sourceUrl = optimizedAudio;
+      let fileName = `${(track.title || 'Song').replace(/[\\/:*?"<>|]/g, ' ').trim() || 'Song'}.mp3`;
+      try {
+        const info = await apiRequest('get', `/tracks/${track.id}/download/`);
+        if (info?.download_url) sourceUrl = info.download_url;
+        if (info?.filename) fileName = info.filename;
+      } catch { /* keep the plain file */ }
 
-      const safeTrackId = track.id.toString().replace(/[^a-zA-Z0-9]/g, '_');
-      const fileName = `track_${safeTrackId}.mp3`;
-      const downloadDir = `${FileSystem.documentDirectory}downloads/`;
+      // A folder per track, so two songs with the same title can't collide.
+      const downloadDir = `${FileSystem.documentDirectory}downloads/${track.id}/`;
       const fileUri = `${downloadDir}${fileName}`;
       await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
 
       const downloadResumable = FileSystem.createDownloadResumable(
-        optimizedAudio,
+        sourceUrl,
         fileUri,
         {},
         (p) => setDownloadProgress((p.totalBytesWritten / p.totalBytesExpectedToWrite) * 100)
       );
       const { uri } = await downloadResumable.downloadAsync();
-      const asset = await MediaLibrary.createAssetAsync(uri);
-      try {
-        await MediaLibrary.createAlbumAsync('Music Downloads', asset, false);
-      } catch (albumError) {
-        console.warn('Album creation failed:', albumError);
-      }
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
-      Alert.alert(t('market.success'), t('trackItem.downloadedOk'));
+      // Into the phone's music (Android) or the share sheet (iOS) — without the
+      // per-file "allow modifications" prompt; see utils/saveToPhone.
+      const where = await saveToPhone(uri);
+      // The phone has its own copy now; don't keep a second one in the app.
+      FileSystem.deleteAsync(downloadDir, { idempotent: true }).catch(() => {});
+      if (where === 'library') Alert.alert(t('market.success'), t('trackItem.downloadedOk'));
     } catch (error) {
       setDownloadError(error.message);
       Alert.alert(t('trackItem.downloadFailedTitle'), error.message || t('trackItem.downloadFailedBody'), [
@@ -234,7 +241,7 @@ const TrackItem = React.memo(function TrackItem({
       <View style={styles.actionBar}>
         <View style={styles.actionLeft}>
           <Likes trackId={track.id} initialLikes={track.likes_count} initialIsLiked={track.is_liked} />
-          <Comments trackId={track.id} initialCount={track.comments_count} />
+          <CommentAction trackId={track.id} commentCount={track.comments_count} triggerVariant="compact" />
           {hasLyrics && (
             <TouchableOpacity style={styles.iconBtn} onPress={openLyrics} hitSlop={HIT}>
               <MaterialIcons name="lyrics" size={20} color={colors.textSecondary} />
@@ -268,15 +275,15 @@ const TrackItem = React.memo(function TrackItem({
             <MaterialCommunityIcons name="playlist-plus" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
 
+          {/* Tap asks: save to the phone's storage (as this button always
+              did), or keep it in the app for offline listening. */}
           {isDownloading ? (
             <View style={styles.downloadProgress}>
               <ActivityIndicator size="small" color={colors.primary} />
               <Text style={styles.downloadText}>{Math.round(downloadProgress)}%</Text>
             </View>
           ) : (
-            <TouchableOpacity style={styles.iconBtn} onPress={handleDownload} hitSlop={HIT}>
-              <MaterialIcons name={downloadError ? 'error-outline' : 'file-download'} size={20} color={downloadError ? colors.error : colors.textSecondary} />
-            </TouchableOpacity>
+            <DownloadButton track={track} style={styles.iconBtn} onSaveToPhone={handleDownload} />
           )}
         </View>
       </View>

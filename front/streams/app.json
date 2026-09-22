@@ -86,6 +86,14 @@
       "@sentry/react-native",
       "expo-secure-store",
       "expo-video",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to save songs and media to your phone.",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save songs and media to your phone.",
+          "granularPermissions": ["audio", "photo"]
+        }
+      ],
       "expo-audio",
       [
         "expo-camera",
