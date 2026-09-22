@@ -294,6 +294,16 @@ class ProfilePostThumbSerializer(serializers.ModelSerializer):
         return _thumb_helper.get_thumbnail_url(obj)
 
 
+class ExplorePostSerializer(ProfilePostThumbSerializer):
+    """An Explore/search grid tile: the thumbnail plus the two counts drawn on
+    it. The grid used to ship the full feed payload per tile (author, song,
+    media items, liked/saved state) — ~0.8 KB each — for a square the user
+    only taps; the post page loads the full post when opened."""
+
+    class Meta(ProfilePostThumbSerializer.Meta):
+        fields = ProfilePostThumbSerializer.Meta.fields + ['likes_count', 'comments_count']
+
+
 class PostLikeSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     post = SocialPostSerializer(read_only=True)

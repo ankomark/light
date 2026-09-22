@@ -2,7 +2,7 @@ from .common import *  # noqa: F401,F403
 import base64
 import os
 from django.http import HttpResponse, Http404, HttpResponseNotFound
-from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F
+from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F, Case, When, Value
 from django.db import IntegrityError, transaction
 import re
 from ..post_links import sync_post_links
@@ -931,48 +931,124 @@ class ReportViewSet(viewsets.ViewSet):
 
 
 
+EXPLORE_PAGE = 30
+EXPLORE_RANKED = 150          # ranked candidates kept in the shared cache
+EXPLORE_TTL = 300
+
+
+def explore_hidden_authors(user):
+    """Accounts Explore must never show `user`: blocked either way, and private
+    accounts they don't follow."""
+    return blocked_ids_for(user) | hidden_private_author_ids(user)
+
+
+def _trending_ids():
+    """The global Explore ranking: public posts from the last week (the last
+    month on a quiet week), scored by likes, comments and views. Shared by
+    everyone and cached, so a busy Explore costs one ranking query per
+    TTL, not one per viewer. Only public posts on public accounts: Explore is
+    discovery, and anything narrower is filtered per viewer anyway."""
+    ids = cache.get('explore:trending_ids')
+    if ids is not None:
+        return ids
+    private_accounts = Profile.objects.filter(is_public=False).values('user_id')
+    base = (SocialPost.objects
+            .filter(is_removed=False, visibility=SocialPost.VISIBILITY_PUBLIC)
+            .exclude(user__is_deactivated=True)
+            .exclude(user_id__in=private_accounts)
+            .annotate(trend_score=F('likes_count') * 10 + F('comments_count') * 6 + F('view_count'))
+            .order_by('-trend_score', '-created_at'))
+    now = timezone.now()
+    ids = list(base.filter(created_at__gte=now - timedelta(days=7))
+               .values_list('id', flat=True)[:EXPLORE_RANKED])
+    if len(ids) < EXPLORE_PAGE:
+        ids = list(base.filter(created_at__gte=now - timedelta(days=30))
+                   .values_list('id', flat=True)[:EXPLORE_RANKED])
+    cache.set('explore:trending_ids', ids, EXPLORE_TTL)
+    return ids
+
+
+def _popular_user_ids():
+    """Most-followed active accounts, cached globally — the fallback for "people
+    to follow". Counting followers across every user on each request (per
+    viewer) was the old way."""
+    rows = cache.get('explore:popular_users')
+    if rows is not None:
+        return rows
+    rows = list(
+        User.objects.filter(is_deactivated=False)
+        .annotate(n=Count('followers', distinct=True))
+        .filter(n__gt=0).order_by('-n').values_list('id', flat=True)[:80]
+    )
+    cache.set('explore:popular_users', rows, 600)
+    return rows
+
+
 class ExploreViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     @action(detail=False, methods=['get'])
     def trending_posts(self, request):
-        """Top photos/videos from the last 7 days, ranked by a weighted score of
-        likes + comments + views (all denormalised columns — no aggregation, no
-        N+1). Cached briefly per user (the ranking is global; the per-user
-        liked/saved state rides along and is at most TTL seconds stale)."""
-        cache_key = f'explore:trending:{request.user.id}'
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return Response(cached)
-
-        week_ago = timezone.now() - timedelta(days=7)
-        posts = (
-            feed_post_queryset(request.user)
-            .filter(created_at__gte=week_ago)
-            .annotate(trend_score=F('likes_count') * 10 + F('comments_count') * 6 + F('view_count'))
-            .order_by('-trend_score', '-created_at')[:30]
-        )
-        data = SocialPostSerializer(posts, many=True, context={'request': request}).data
-        cache.set(cache_key, data, 120)
-        return Response(data)
+        """Trending posts for the Explore grid, ?page=N (30 per page). Built from
+        the shared ranking, minus what this viewer mustn't see (blocked,
+        private accounts they don't follow, "not interested")."""
+        from .. import feed as feedrank
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            page = 1
+        hidden_authors = explore_hidden_authors(request.user)
+        not_interested = feedrank.not_interested_ids(request.user.id)
+        ranked = _trending_ids()
+        candidates = (SocialPost.objects.filter(id__in=ranked)
+                      .exclude(user_id__in=hidden_authors).exclude(id__in=not_interested)
+                      .values_list('id', flat=True))
+        allowed = set(candidates)
+        ordered = [pid for pid in ranked if pid in allowed]
+        page_ids = ordered[(page - 1) * EXPLORE_PAGE: page * EXPLORE_PAGE]
+        by_id = {p.id: p for p in SocialPost.objects.filter(id__in=page_ids)}
+        rows = [by_id[i] for i in page_ids if i in by_id]
+        return Response(ExplorePostSerializer(rows, many=True, context={'request': request}).data)
 
     @action(detail=False, methods=['get'])
     def suggested_users(self, request):
-        cache_key = f'explore:suggested:{request.user.id}'
+        """People to follow: first those followed by people you follow (ranked by
+        how many of them do), then popular accounts. Never yourself, people you
+        already follow, blocked accounts or deactivated ones."""
+        me = request.user
+        cache_key = f'explore:suggested:{me.id}'
         cached = cache.get(cache_key)
         if cached is not None:
             return Response(cached)
 
-        following_ids = list(request.user.followed_by.values_list('id', flat=True))
-        users = User.objects.exclude(
-            id=request.user.id
-        ).exclude(
-            id__in=following_ids
-        ).annotate(
-            followers_count=Count('followers', distinct=True)
-        ).select_related('profile').order_by('-followers_count')[:12]
-        data = SimpleUserSerializer(users, many=True, context={'request': request}).data
-        cache.set(cache_key, data, 300)
+        following = set(me.followed_by.values_list('id', flat=True))
+        exclude = following | blocked_ids_for(me) | {me.id}
+        mutual = {}
+        if following:
+            for uid, n in (User.objects.filter(followers__in=following, is_deactivated=False)
+                           .exclude(id__in=exclude)
+                           .annotate(n=Count('followers', filter=Q(followers__in=following), distinct=True))
+                           .order_by('-n').values_list('id', 'n')[:12]):
+                mutual[uid] = n
+        ids = list(mutual)
+        for uid in _popular_user_ids():
+            if len(ids) >= 12:
+                break
+            if uid not in exclude and uid not in mutual:
+                ids.append(uid)
+
+        users = {u.id: u for u in (User.objects.filter(id__in=ids).select_related('profile')
+                                   .annotate(followers_count=Count('followers', distinct=True)))}
+        data = []
+        for uid in ids:
+            u = users.get(uid)
+            if u is None or u.is_deactivated:
+                continue
+            row = SimpleUserSerializer(u, context={'request': request}).data
+            row['followers_count'] = u.followers_count
+            row['mutual_count'] = mutual.get(uid, 0)
+            data.append(row)
+        cache.set(cache_key, data, 120)
         return Response(data)
 
     @action(detail=False, methods=['get'])
@@ -1029,16 +1105,40 @@ class ExploreViewSet(viewsets.ViewSet):
     def search(self, request):
         query = request.query_params.get('q', '').strip()
         if len(query) < 2:
-            return Response({'users': [], 'posts': [], 'tracks': [], 'groups': []})
-        users = User.objects.filter(
-            Q(username__icontains=query) | Q(profile__bio__icontains=query)
-        ).select_related('profile').distinct()[:10]
-        posts = feed_post_queryset(request.user).filter(
-            Q(caption__icontains=query) | Q(location__icontains=query)
-        ).order_by('-created_at')[:20]
+            return Response({'users': [], 'posts': [], 'tracks': [], 'groups': [], 'hashtags': []})
+        me = request.user
+        hidden_authors = explore_hidden_authors(me)
+        # People: usernames that START with the query first (that's who you're
+        # typing), then other matches, the more-followed first. Never blocked
+        # or deactivated accounts.
+        users = (
+            User.objects.filter(Q(username__icontains=query) | Q(profile__bio__icontains=query))
+            .exclude(id__in=blocked_ids_for(me)).exclude(is_deactivated=True)
+            .select_related('profile')
+            .annotate(
+                prefix=Case(When(username__istartswith=query, then=Value(0)), default=Value(1),
+                            output_field=IntegerField()),
+                followers_count=Count('followers', distinct=True),
+            )
+            .order_by('prefix', '-followers_count', 'username')[:10]
+        )
+        tag = query.lstrip('#').lower()
+        hashtags = (
+            Hashtag.objects.filter(name__startswith=tag)
+            .annotate(n=Count('posts', filter=Q(posts__is_removed=False,
+                                                posts__visibility=SocialPost.VISIBILITY_PUBLIC),
+                              distinct=True))
+            .order_by('-n', 'name')[:8]
+        ) if tag else []
+        # Posts: what this viewer can open — per-post visibility (the shared
+        # queryset) plus account privacy and blocks.
+        posts = (feed_post_queryset(me)
+                 .filter(Q(caption__icontains=query) | Q(location__icontains=query))
+                 .exclude(user_id__in=hidden_authors).exclude(user__is_deactivated=True)
+                 .order_by('-created_at')[:21])
         tracks = Track.objects.filter(
             Q(title__icontains=query) | Q(album__icontains=query), is_removed=False
-        ).select_related('artist').order_by('-created_at')[:10]
+        ).select_related('artist__profile').order_by('-created_at')[:10]
         # Never surface private groups the caller isn't part of — their very
         # existence must stay hidden from non-members.
         groups = Group.objects.filter(
@@ -1046,10 +1146,16 @@ class ExploreViewSet(viewsets.ViewSet):
         ).filter(
             Q(is_private=False) | Q(creator=request.user) | Q(members__user=request.user)
         ).filter(is_removed=False).distinct().order_by('-created_at')[:10]
+        user_rows = SimpleUserSerializer(users, many=True, context={'request': request}).data
+        for row, u in zip(user_rows, users):
+            row['followers_count'] = u.followers_count
         return Response({
-            'users': SimpleUserSerializer(users, many=True, context={'request': request}).data,
-            'posts': SocialPostSerializer(posts, many=True, context={'request': request}).data,
-            'tracks': TrackSerializer(tracks, many=True, context={'request': request}).data,
+            'users': user_rows,
+            'hashtags': [{'tag': h.name, 'count': h.n} for h in hashtags],
+            # Grid tiles, not full posts (the post page loads the rest).
+            'posts': ExplorePostSerializer(posts, many=True, context={'request': request}).data,
+            # List rows — without every song's full lyrics.
+            'tracks': TrackListSerializer(tracks, many=True, context={'request': request}).data,
             'groups': GroupSerializer(groups, many=True, context={'request': request}).data,
         })
 

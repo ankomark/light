@@ -43,6 +43,7 @@ from ..serializers import (
     LikeSerializer,
     CategorySerializer,
     SocialPostSerializer, 
+    ExplorePostSerializer,
     PostLikeSerializer,
     PostCommentSerializer,
     PostSaveSerializer,
