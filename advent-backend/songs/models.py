@@ -969,13 +969,26 @@ def visible_posts_q(user, prefix=''):
 
 
 def can_view_post(user, post):
-    """Python-side twin of visible_posts_q for a single loaded post."""
+    """Whether `user` could open `post` — every rule the post endpoints apply:
+    the post is up, its author's account is active and not private to them
+    (or blocked either way), and the post's own visibility lets them in.
+
+    Used to decide who a mention may notify. It used to check only the post's
+    own setting, so a public post on a PRIVATE account notified people who
+    don't follow it — and the notification then opened a post they weren't
+    allowed to see ("Failed to load post details")."""
+    if post.is_removed or getattr(post.user, 'is_deactivated', False):
+        return False
+    if getattr(user, 'is_authenticated', False) and post.user_id == user.pk:
+        return True
+    if not can_view_profile(user, post.user):
+        return False
+    if getattr(user, 'is_authenticated', False) and is_blocked_between(user, post.user):
+        return False
     if post.visibility == SocialPost.VISIBILITY_PUBLIC:
         return True
     if not getattr(user, 'is_authenticated', False):
         return False
-    if post.user_id == user.pk:
-        return True
     if post.visibility == SocialPost.VISIBILITY_FOLLOWERS:
         return post.user.followers.filter(pk=user.pk).exists()
     return False

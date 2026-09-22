@@ -252,7 +252,16 @@ class NotificationViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        return Notification.objects.filter(recipient=self.request.user)\
+        user = self.request.user
+        # A notification about a post you can no longer open (taken down, made
+        # private, or on a private account you don't follow) would only lead
+        # to "Failed to load post details" — so it isn't listed.
+        hidden_authors = blocked_ids_for(user) | hidden_private_author_ids(user)
+        post_ok = (Q(post__is_removed=False, post__user__is_deactivated=False)
+                   & visible_posts_q(user, prefix='post__')
+                   & ~Q(post__user_id__in=hidden_authors))
+        return Notification.objects.filter(recipient=user)\
+            .filter(Q(post__isnull=True) | post_ok)\
             .select_related(
                 'sender__profile',
                 'post',

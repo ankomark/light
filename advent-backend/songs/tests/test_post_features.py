@@ -272,6 +272,52 @@ class MentionTests(APITestCase):
         self.assertEqual(self.notified(self.other), 1)
 
 
+class PrivateAccountMentionTests(APITestCase):
+    """A public post on a PRIVATE account is still hidden from non-followers,
+    so a mention must not notify them — the tap would open a post they can't
+    see ("Failed to load post details")."""
+
+    def setUp(self):
+        self.author = User.objects.create_user('pm_author', 'pma@x.com', 'x')
+        self.fan = User.objects.create_user('pm_fan', 'pmf@x.com', 'x')
+        self.stranger = User.objects.create_user('pm_stranger', 'pms@x.com', 'x')
+        Profile.objects.create(user=self.author, is_public=False)
+        self.author.followers.add(self.fan)
+
+    def mentions(self, user):
+        return Notification.objects.filter(recipient=user, notification_type='mention')
+
+    def open_first_mention(self, user):
+        self.client.force_authenticate(user)
+        body = self.client.get('/api/notifications/').json()
+        rows = [n for n in body.get('results', body) if n['notification_type'] == 'mention']
+        return [self.client.get(f"/api/social-posts/{n['post']['id']}/").status_code for n in rows]
+
+    def test_caption_mention_only_reaches_people_who_can_open_it(self):
+        self.client.force_authenticate(self.author)
+        self.client.post('/api/social-posts/', {
+            'content_type': 'image', 'media_file': IMG, 'caption': 'hi @pm_fan @pm_stranger',
+        }, format='json')
+        self.assertEqual(self.mentions(self.stranger).count(), 0)
+        self.assertEqual(self.mentions(self.fan).count(), 1)
+        self.assertEqual(self.open_first_mention(self.fan), [200])   # the tap works
+
+    def test_comment_mention_follows_the_same_rule(self):
+        post = make_post(self.author, 'private account post')
+        self.client.force_authenticate(self.fan)
+        self.client.post(f'/api/social-posts/{post.id}/comment/', {'content': 'look @pm_stranger'}, format='json')
+        self.assertEqual(self.mentions(self.stranger).count(), 0)
+
+    def test_notifications_about_posts_you_cannot_open_are_not_listed(self):
+        post = make_post(self.fan, 'hi @pm_stranger')
+        Notification.objects.create(recipient=self.stranger, sender=self.fan, message='m',
+                                    notification_type='mention', post=post)
+        self.assertEqual(self.open_first_mention(self.stranger), [200])
+        post.visibility = 'private'
+        post.save(update_fields=['visibility'])
+        self.assertEqual(self.open_first_mention(self.stranger), [])  # gone, not a dead link
+
+
 class IdempotentCreateTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user('id_u', 'idu@x.com', 'x')

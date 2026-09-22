@@ -1,10 +1,14 @@
 // "Posting…" cards at the top of the home feed, TikTok-style: the author sees
-// their post in place the moment they tap Post, with a progress bar, until
-// the real one arrives (UploadStatus then inserts it into the feed and the
-// card disappears). A failed upload stays as a card with Retry / Remove.
+// their post in place the moment they tap Post, until the real one arrives
+// (UploadStatus then inserts it into the feed and the card disappears). A
+// failed upload stays as a card with Retry / Remove.
 //
-// Its own component, subscribed to the queue itself, so upload progress
-// re-renders these cards only — never the feed around them.
+// Deliberately no progress bar here: the pill at the top of the screen is the
+// one place upload progress is shown, so there are never two bars at once.
+//
+// Its own component, subscribed to the queue itself, so queue changes never
+// re-render the feed around it — and each card skips progress ticks entirely,
+// since it no longer shows progress.
 import React, { memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
@@ -17,7 +21,6 @@ const PendingCard = memo(({ job, t }) => {
   const failed = job.status === 'failed';
   const p = job.preview || {};
   const uri = job.thumbUri || p.uri;
-  const pct = Math.round((job.progress || 0) * 100);
   return (
     <View style={[styles.card, failed && styles.cardFailed]}>
       <View style={styles.thumb}>
@@ -43,16 +46,15 @@ const PendingCard = memo(({ job, t }) => {
               <Text style={styles.removeText}>{t('upload.remove')}</Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <View style={styles.progressRow}>
-            <View style={styles.track}><View style={[styles.fill, { width: `${Math.max(4, pct)}%` }]} /></View>
-            <Text style={styles.pct}>{pct}%</Text>
-          </View>
-        )}
+        ) : null}
       </View>
     </View>
   );
-});
+}, (a, b) => a.t === b.t
+  && a.job.status === b.job.status
+  && a.job.stage === b.job.stage
+  && a.job.thumbUri === b.job.thumbUri
+  && a.job.preview === b.job.preview);
 PendingCard.displayName = 'PendingCard';
 
 const PendingPosts = () => {
@@ -82,10 +84,6 @@ const styles = StyleSheet.create({
   body: { flex: 1, justifyContent: 'center', gap: 4 },
   status: { color: colors.textPrimary, fontSize: 14, fontWeight: '800' },
   caption: { color: colors.textSecondary, fontSize: 13 },
-  progressRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
-  track: { flex: 1, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: 2, backgroundColor: colors.primary },
-  pct: { color: colors.textMuted, fontSize: 12, fontVariant: ['tabular-nums'], minWidth: 34, textAlign: 'right' },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: 4 },
   retry: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6,

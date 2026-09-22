@@ -86,8 +86,16 @@ const PostDetail = ({ route, navigation }) => {
         setPost(processedPost);
         setCommentsCount(response.data.comments_count || 0);
       } catch (err) {
-        console.error('Error fetching post details:', err);
-        setError(t('post.loadFailed'));
+        // 404 = the post is gone or no longer visible to this person (deleted,
+        // taken down, made private, or on a private account they don't
+        // follow). Say that, rather than a generic failure that invites a
+        // pointless retry.
+        if (err?.response?.status === 404) {
+          setError(t('post.unavailable'));
+        } else {
+          console.error('Error fetching post details:', err);
+          setError(t('post.loadFailed'));
+        }
       } finally {
         setLoading(false);
       }

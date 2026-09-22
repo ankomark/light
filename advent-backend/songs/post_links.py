@@ -1,6 +1,6 @@
 """Keep a post's hashtag and mention relations in step with its caption."""
 from .captions import extract_hashtags, extract_mentions
-from .models import Hashtag, Notification, SocialPost, User, blocked_ids_for
+from .models import Hashtag, Notification, SocialPost, User, blocked_ids_for, can_view_post
 from .push import notify_user
 
 
@@ -19,9 +19,10 @@ def _mentionable(post, usernames):
     blocked = blocked_ids_for(post.user)
     if blocked:
         qs = qs.exclude(pk__in=blocked)
-    if post.visibility == SocialPost.VISIBILITY_FOLLOWERS:
-        qs = qs.filter(followed_by__isnull=False, pk__in=post.user.followers.values('pk'))
-    return list(qs.distinct())
+    # Only people who could actually open the post: its own visibility AND
+    # its author's account privacy (a private account's post is hidden from
+    # non-followers even when the post itself says "everyone").
+    return [u for u in qs.distinct() if can_view_post(u, post)]
 
 
 def sync_post_links(post, notify=True):
