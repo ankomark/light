@@ -43,7 +43,10 @@ class NotificationSerializer(serializers.ModelSerializer):
         if hasattr(obj, '_trig_comment'):
             return obj._trig_comment
         comment = None
-        if obj.notification_type == 'comment' and obj.post_id:
+        if obj.comment_id:
+            # Stored on the notification since comment threads: exact.
+            comment = obj.comment
+        elif obj.notification_type == 'comment' and obj.post_id:
             from ..models import PostComment  # Import here to avoid circular imports
             # Comments order by -created_at, so .first() is the most recent comment
             # by this sender on the post — i.e. the one that raised the alert.

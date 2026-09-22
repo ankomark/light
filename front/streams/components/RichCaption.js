@@ -10,7 +10,9 @@ import { useNavigation } from '@react-navigation/native';
 import { parseRichText } from '../utils/richText';
 import { colors } from '../constants/theme';
 
-const RichCaption = ({ text, style, numberOfLines, prefix = null, linkStyle }) => {
+// `onLinkPress(type, value)` replaces the default navigation — the comment
+// sheet uses it to close itself before opening a profile or tag page.
+const RichCaption = ({ text, style, numberOfLines, prefix = null, linkStyle, onLinkPress }) => {
   const navigation = useNavigation();
   const parts = useMemo(() => parseRichText(text || ''), [text]);
 
@@ -19,9 +21,11 @@ const RichCaption = ({ text, style, numberOfLines, prefix = null, linkStyle }) =
       {prefix}
       {parts.map((p, i) => {
         if (p.type === 'text') return p.text;
-        const onPress = p.type === 'hashtag'
-          ? () => navigation.navigate('Hashtag', { tag: p.value })
-          : () => navigation.navigate('UserProfile', { username: p.value });
+        const onPress = onLinkPress
+          ? () => onLinkPress(p.type, p.value)
+          : p.type === 'hashtag'
+            ? () => navigation.navigate('Hashtag', { tag: p.value })
+            : () => navigation.navigate('UserProfile', { username: p.value });
         return (
           <Text
             key={i}

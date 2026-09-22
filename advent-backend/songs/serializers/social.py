@@ -331,11 +331,33 @@ class PostCommentSerializer(serializers.ModelSerializer):
     # Just the id — the previous nested SocialPostSerializer re-serialized the
     # whole post (media, counts, author) on every single comment.
     post = serializers.PrimaryKeyRelatedField(read_only=True)
+    parent = serializers.PrimaryKeyRelatedField(read_only=True)
+    reply_to = CommentUserSerializer(read_only=True)
+    reactions = serializers.SerializerMethodField()
 
     class Meta:
         model = PostComment
-        fields = ['id', 'user', 'post', 'content', 'created_at']
-        read_only_fields = ['user', 'post', 'created_at']
+        fields = ['id', 'user', 'post', 'content', 'created_at',
+                  'parent', 'reply_to', 'replies_count', 'reactions']
+        read_only_fields = ['user', 'post', 'created_at', 'parent', 'reply_to', 'replies_count']
+
+    def validate_content(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Comment cannot be empty.')
+        if len(value) > 2200:
+            raise serializers.ValidationError('Comment is too long.')
+        return value
+
+    def get_reactions(self, obj):
+        # Lists compute every row's summary in two queries up front and pass
+        # them in; a single comment (create, retrieve) computes its own.
+        summaries = self.context.get('reaction_summaries')
+        if summaries is not None and obj.id in summaries:
+            return summaries[obj.id]
+        from ..comments import reaction_summaries
+        request = self.context.get('request')
+        return reaction_summaries([obj.id], getattr(request, 'user', None))[obj.id]
 
 
 

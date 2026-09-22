@@ -206,7 +206,12 @@ const App = () => {
     const sub = addNotificationResponseListener(response => {
       const data = response.notification.request.content.data;
       if (data?.postId) {
-        navigate('PostDetail', { postId: data.postId });
+        // A comment, reply, mention or reaction carries its comment: open the
+        // post with the comments up and that one in view.
+        navigate('PostDetail', {
+          postId: data.postId,
+          ...(data.commentId ? { commentId: data.commentId, shouldOpenComments: true } : {}),
+        });
       } else if (data?.groupSlug) {
         // Group taps deep-link like the in-app bell: a join request goes to the
         // group's pending-requests page, everything else to the group itself.

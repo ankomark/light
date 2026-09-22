@@ -6,6 +6,7 @@ from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F
 from django.db import IntegrityError, transaction
 import re
 from ..post_links import sync_post_links
+from ..comments import create_post_comment, set_reaction, reaction_summaries
 from django.conf import settings
 from django.core.cache import cache
 
@@ -505,25 +506,12 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Comments are turned off for this post.'},
                             status=status.HTTP_403_FORBIDDEN)
         serializer = PostCommentSerializer(data=request.data, context={'request': request})
-        
-        if serializer.is_valid():
-            comment = serializer.save(user=request.user, post=post)
-            
-            # Create notification if commenter is not the post owner
-            if request.user != post.user:
-                msg = f"{request.user.username} commented on your post"
-                Notification.objects.create(
-                    recipient=post.user,
-                    sender=request.user,
-                    message=msg,
-                    notification_type='comment',
-                    post=post
-                )
-                notify_user(post.user, 'comment', msg)
-
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        parent = resolve_comment_parent(post, request.data.get('parent'))
+        comment = create_post_comment(request.user, post, serializer.validated_data['content'], parent)
+        return Response(PostCommentSerializer(comment, context={'request': request}).data,
+                        status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def save_post(self, request, pk=None):
@@ -699,6 +687,22 @@ class PostLikeViewSet(viewsets.ModelViewSet):
 
 
 
+def resolve_comment_parent(post, parent_id):
+    """The comment a reply answers — it must be a live comment on the same
+    post. None when this isn't a reply."""
+    if parent_id in (None, '', 0, '0'):
+        return None
+    try:
+        pid = int(parent_id)
+    except (TypeError, ValueError):
+        raise ValidationError({'parent': 'Invalid comment id.'})
+    parent = (PostComment.objects.select_related('user', 'parent')
+              .filter(pk=pid, post=post, is_removed=False).first())
+    if parent is None:
+        raise ValidationError({'parent': 'That comment no longer exists.'})
+    return parent
+
+
 class PostCommentViewSet(viewsets.ModelViewSet):
     queryset = PostComment.objects.all()
     serializer_class = PostCommentSerializer
@@ -707,22 +711,69 @@ class PostCommentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # select_related pulls each comment's author (+ profile for the avatar)
-        # in the same query, so a page of comments is a couple of queries instead
-        # of one-per-row. Ordering/index come from PostComment.Meta.
-        qs = PostComment.objects.select_related('user', 'user__profile').filter(is_removed=False)
+        # and who it replies to in the same query.
+        user = self.request.user
+        qs = (PostComment.objects.select_related('user', 'user__profile', 'reply_to', 'reply_to__profile')
+              .filter(is_removed=False))
         post_id = self.kwargs.get('post_pk')
         if post_id:
             qs = qs.filter(post__id=post_id)
-        # A post you can't see has no readable comments either — they used to
-        # be listable by post id regardless of who could see the post.
-        return qs.filter(visible_posts_q(self.request.user, prefix='post__'))
+        # A post you can't see has no readable comments either.
+        qs = qs.filter(visible_posts_q(user, prefix='post__'))
+        # Nor do you see comments from people you've blocked, or who blocked you.
+        blocked = blocked_ids_for(user)
+        if blocked:
+            qs = qs.exclude(user_id__in=blocked)
+        if self.action == 'list':
+            # The sheet shows top-level comments; replies load per thread.
+            # Most-reacted first, then newest — TikTok's "top comments".
+            qs = qs.filter(parent__isnull=True).order_by('-reactions_count', '-created_at', '-id')
+        return qs
 
-    def perform_create(self, serializer):
+    def _page_response(self, queryset):
+        page = self.paginate_queryset(queryset)
+        rows = list(page if page is not None else queryset)
+        ctx = self.get_serializer_context()
+        # Every row's reaction summary in two queries, not two per row.
+        ctx['reaction_summaries'] = reaction_summaries([c.id for c in rows], self.request.user)
+        data = PostCommentSerializer(rows, many=True, context=ctx).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    def list(self, request, *args, **kwargs):
+        return self._page_response(self.filter_queryset(self.get_queryset()))
+
+    @action(detail=True, methods=['get'])
+    def replies(self, request, pk=None, post_pk=None):
+        """A comment's thread, oldest first (it reads as a conversation)."""
+        parent = self.get_object()
+        blocked = blocked_ids_for(request.user)
+        qs = (parent.replies.filter(is_removed=False)
+              .select_related('user', 'user__profile', 'reply_to', 'reply_to__profile')
+              .order_by('created_at', 'id'))
+        if blocked:
+            qs = qs.exclude(user_id__in=blocked)
+        return self._page_response(qs)
+
+    @action(detail=True, methods=['post', 'delete'],
+            permission_classes=[permissions.IsAuthenticated, IsNotSuspended])
+    def react(self, request, pk=None, post_pk=None):
+        """POST {"emoji": "😂"} sets your reaction (the same one again removes
+        it); DELETE removes it. Omitting emoji means the heart."""
+        comment = self.get_object()
+        if request.method == 'DELETE':
+            emoji = None
+        else:
+            emoji = request.data.get('emoji') or CommentReaction.LIKE
+            if emoji not in CommentReaction.REACTIONS:
+                return Response({'error': 'Unsupported reaction.'}, status=status.HTTP_400_BAD_REQUEST)
+        mine = set_reaction(request.user, comment, emoji)
+        summary = reaction_summaries([comment.id], request.user)[comment.id]
+        return Response({'reactions': summary, 'mine': mine})
+
+    def create(self, request, *args, **kwargs):
         # The post comes from the nested route (/social-posts/<post_pk>/comments/).
-        # On the flat /post-comments/ route there is no post_pk at all, so this
-        # used to fail with "Post not found" no matter what was sent — a
-        # registered, reachable endpoint that could never succeed. Say what is
-        # actually wrong instead of blaming the post.
+        # On the flat /post-comments/ route there is no post_pk at all, so say
+        # what is actually wrong instead of blaming the post.
         post_id = self.kwargs.get('post_pk')
         if post_id is None:
             raise ValidationError({
@@ -730,23 +781,16 @@ class PostCommentViewSet(viewsets.ModelViewSet):
                          '— this route cannot tell which post you mean.'
             })
         post = (SocialPost.objects.filter(id=post_id, is_removed=False)
-                .filter(visible_posts_q(self.request.user)).first())
+                .filter(visible_posts_q(request.user)).first())
         if post is None:
             raise ValidationError({"error": "Post not found"})
         if not post.comments_enabled:
             raise PermissionDenied('Comments are turned off for this post.')
-        comment = serializer.save(user=self.request.user, post=post)
-        # Create notification only if comment author is not the post owner
-        if comment.user != post.user:
-            msg = f"{self.request.user.username} commented on your post"
-            Notification.objects.create(
-                recipient=post.user,
-                sender=self.request.user,
-                message=msg,
-                notification_type='comment',
-                post=post
-            )
-            notify_user(post.user, 'comment', msg)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        parent = resolve_comment_parent(post, request.data.get('parent'))
+        comment = create_post_comment(request.user, post, serializer.validated_data['content'], parent)
+        return Response(self.get_serializer(comment).data, status=status.HTTP_201_CREATED)
 
 
 

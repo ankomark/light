@@ -151,17 +151,6 @@ const PostDetail = ({ route, navigation }) => {
     };
   }, [post]);
 
-  const handleCommentsLoaded = (comments) => {
-    if (commentId && flatListRef.current) {
-      const index = comments.findIndex((c) => c.id === commentId);
-      if (index >= 0) {
-        setTimeout(() => {
-          flatListRef.current?.scrollToIndex({ index, viewOffset: 50, animated: true });
-        }, 500);
-      }
-    }
-  };
-
   const updateCommentsCount = (newCount) => setCommentsCount(newCount);
   const handleMediaError = () => setMediaError(true);
 
@@ -338,9 +327,10 @@ const PostDetail = ({ route, navigation }) => {
       <CommentAction
         postId={postId}
         commentCount={commentsCount}
-        flatListRef={flatListRef}
         autoOpen={shouldOpenComments}
-        onCommentsLoaded={handleCommentsLoaded}
+        // Opened from a notification: the sheet finds this comment (opening
+        // its thread if it's a reply), scrolls to it and flashes it.
+        highlightCommentId={commentId}
         onCommentPosted={updateCommentsCount}
         commentsEnabled={post?.comments_enabled !== false}
         triggerVariant="bar"

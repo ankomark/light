@@ -19,6 +19,9 @@ const POLL_INTERVAL_MS = 15000;
 const TYPE_ICON = {
   like: { name: 'heart', color: '#E0245E' },
   comment: { name: 'chatbubble', color: colors.primary },
+  comment_reply: { name: 'return-down-forward', color: colors.primary },
+  comment_like: { name: 'heart', color: '#E0245E' },
+  mention: { name: 'at', color: colors.accent },
   follow: { name: 'person-add', color: '#17BF63' },
   group_join_request: { name: 'people', color: colors.accent },
   group_join_approved: { name: 'checkmark-circle', color: '#17BF63' },
@@ -191,10 +194,12 @@ const NotificationsBell = ({ navigation }) => {
         navigation.navigate('GroupDetail', { groupSlug: item.group_slug });
       }
     } else if (item.post) {
-      // Comment → open the post, auto-open comments, and scroll to the comment.
+      // Anything about a comment (a comment, a reply, a mention in one, a
+      // reaction to one) opens the post with that exact comment in view. A
+      // mention in a caption carries no comment and just opens the post.
       navigation.navigate('PostDetail', {
         postId: item.post.id,
-        ...(type === 'comment' && item.related_comment_id
+        ...(item.related_comment_id
           ? { commentId: item.related_comment_id, shouldOpenComments: true }
           : {}),
       });
@@ -214,6 +219,12 @@ const NotificationsBell = ({ navigation }) => {
       if (filter === 'all') return true;
       if (filter === 'follow') {
         return n.notification_type === 'follow' || n.notification_type === 'group_join_request';
+      }
+      if (filter === 'comment') {
+        return ['comment', 'comment_reply', 'mention'].includes(n.notification_type);
+      }
+      if (filter === 'like') {
+        return n.notification_type === 'like' || n.notification_type === 'comment_like';
       }
       return n.notification_type === filter;
     });

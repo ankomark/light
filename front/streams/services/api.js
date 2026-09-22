@@ -462,8 +462,9 @@ export const likePost = async (postId) => {
     return apiRequest('post', `/social-posts/${postId}/like/`);
   };
   
-  export const commentOnPost = async (postId, content) => {
-    return apiRequest('post', `/social-posts/${postId}/comment/`, { content });
+  // `parent` makes it a reply (to a top comment or to another reply).
+  export const commentOnPost = async (postId, content, parent = null) => {
+    return apiRequest('post', `/social-posts/${postId}/comment/`, { content, ...(parent ? { parent } : {}) });
   };
   
   export const savePost = async (postId) => {
@@ -529,6 +530,17 @@ export const fetchSocialPostComments = async (postId) => {
   const res = await apiRequest('get', `/social-posts/${postId}/comments/`);
   return res?.results ?? res;
 };
+
+// A comment's reply thread, oldest first: { results, next }.
+export const fetchCommentReplies = (postId, commentId, page = 1) =>
+  apiRequest('get', `/social-posts/${postId}/comments/${commentId}/replies/`, null, { params: { page } });
+
+// One comment (used to find a notified reply's thread).
+export const fetchPostComment = (commentId) => apiRequest('get', `/post-comments/${commentId}/`);
+
+// Set / toggle a reaction (❤️ by default). → { reactions, mine }
+export const reactToComment = (commentId, emoji) =>
+  apiRequest('post', `/post-comments/${commentId}/react/`, emoji ? { emoji } : {});
 
 // nitaona
 export const fetchComments = async (trackId) => {  // Renamed from fetchTrackComments

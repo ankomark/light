@@ -13,7 +13,7 @@ from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 
 from .models import (
-    Like, LiveBroadcast, PostLike, PostComment, PublicationLike,
+    Like, LiveBroadcast, PostLike, PostComment, CommentReaction, PublicationLike,
     Publication, PuzzleProgress, QuizAttempt, QuizSession, SocialPost, Track, User,
 )
 from .streaks import record_play
@@ -157,15 +157,39 @@ def broadcast_deleted(sender, instance, **kwargs):
     credit_user_likes(instance.host_id, -(stored or 0))
 
 
+def _bump_comment(comment_id, field, delta):
+    # Same guard as _bump: never below zero, and a no-op on a row that's gone
+    # (a parent deleted together with its replies).
+    if delta >= 0:
+        PostComment.objects.filter(pk=comment_id).update(**{field: F(field) + delta})
+    else:
+        PostComment.objects.filter(pk=comment_id, **{f'{field}__gt': 0}).update(**{field: F(field) + delta})
+
+
 @receiver(post_save, sender=PostComment)
 def comment_created(sender, instance, created, **kwargs):
     if created:
         _bump(instance.post_id, 'comments_count', 1)
+        if instance.parent_id:
+            _bump_comment(instance.parent_id, 'replies_count', 1)
 
 
 @receiver(post_delete, sender=PostComment)
 def comment_deleted(sender, instance, **kwargs):
     _bump(instance.post_id, 'comments_count', -1)
+    if instance.parent_id:
+        _bump_comment(instance.parent_id, 'replies_count', -1)
+
+
+@receiver(post_save, sender=CommentReaction)
+def comment_reaction_created(sender, instance, created, **kwargs):
+    if created:
+        _bump_comment(instance.comment_id, 'reactions_count', 1)
+
+
+@receiver(post_delete, sender=CommentReaction)
+def comment_reaction_deleted(sender, instance, **kwargs):
+    _bump_comment(instance.comment_id, 'reactions_count', -1)
 
 
 # ── the streak ───────────────────────────────────────────────────────────────

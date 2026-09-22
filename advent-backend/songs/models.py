@@ -481,6 +481,16 @@ class PostComment(models.Model):
     post = models.ForeignKey(SocialPost, on_delete=models.CASCADE, related_name='comments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='social_comments')
     content = models.TextField()
+    # Replies are one level deep, TikTok-style: a reply to a reply is stored
+    # under the same top-level comment, with `reply_to` naming who it answers
+    # (so the app can show "▸ name").
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
+    reply_to = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    mentions = models.ManyToManyField(User, related_name='mentioned_in_comments', blank=True)
+    # Denormalised, kept in step by signals — the list reads them per row
+    # without a COUNT per comment.
+    replies_count = models.PositiveIntegerField(default=0)
+    reactions_count = models.PositiveIntegerField(default=0)
     # Soft moderation takedown — hidden from public comment lists.
     is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -490,7 +500,29 @@ class PostComment(models.Model):
         # composite index makes "comments for a post, newest first + paginate"
         # an index-only range scan instead of a full table sort.
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['post', '-created_at'], name='postcomment_post_created_idx')]
+        indexes = [
+            models.Index(fields=['post', '-created_at'], name='postcomment_post_created_idx'),
+            # "Replies to this comment, oldest first" — the thread view.
+            models.Index(fields=['parent', 'created_at'], name='postcomment_parent_created_idx'),
+        ]
+
+
+class CommentReaction(models.Model):
+    """One reaction per person per comment. The heart is the default ("like");
+    a long-press picks another from REACTIONS. Changing it replaces the row."""
+    REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👏', '🔥', '🙌']
+    LIKE = '❤️'
+
+    comment = models.ForeignKey(PostComment, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comment_reactions')
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['comment', 'user'], name='commentreaction_one_per_user'),
+        ]
+        indexes = [models.Index(fields=['comment', 'emoji'], name='commentreaction_comment_emoji')]
 
 class PostSave(models.Model):
     post = models.ForeignKey(SocialPost, on_delete=models.CASCADE, related_name='saves')
@@ -644,6 +676,9 @@ class Notification(models.Model):
     # Set on group-related notifications (join request / approval / rejection) so
     # the client can deep-link the tap to the right group screen.
     group = models.ForeignKey('Group', null=True, blank=True, on_delete=models.CASCADE, related_name='+')
+    # The comment a reply / mention / reaction is about, so the tap can open
+    # the post with that comment in view.
+    comment = models.ForeignKey('PostComment', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

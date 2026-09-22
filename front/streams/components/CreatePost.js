@@ -700,6 +700,11 @@ const CreatePost = ({ navigation }) => {
   const openVideoTrimmer = useCallback(() => setShowVideoTrimmer(true), []);
   const openCover = useCallback(() => setShowCover(true), []);
   const postsLabel = useCallback((n) => t('sound.uses', { count: n }), [t]);
+  const captionHints = useMemo(() => ({
+    hashtag: t('create.post.hintHashtag'),
+    mention: t('create.post.hintMention'),
+    tip: t('create.post.hintTip'),
+  }), [t]);
 
   return (
     <View style={styles.root}>
@@ -786,6 +791,7 @@ const CreatePost = ({ navigation }) => {
               placeholder={t('create.post.captionPlaceholder')}
               maxLength={MAX_CAPTION}
               postsLabel={postsLabel}
+              hints={captionHints}
             />
           </View>
 
