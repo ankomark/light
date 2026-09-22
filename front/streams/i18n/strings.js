@@ -281,6 +281,10 @@ export const STRINGS = {
     'profile.messageFailed': 'Could not open conversation. Please try again.',
     'profile.unavailable': 'This profile is unavailable.',
     'profile.loadFailed': "Couldn't load this profile.",
+    'profile.followBack': 'Follow back',
+    'profile.followsYou': 'Follows you',
+    'profile.born': 'Born {date}',
+    'follow.noFollowers': 'No followers yet',
 
     'feed.mediaUnavailable': 'Media unavailable',
     'feed.retry': 'Retry',
@@ -2073,6 +2077,10 @@ export const STRINGS = {
     'profile.messageFailed': 'Imeshindwa kufungua mazungumzo. Tafadhali jaribu tena.',
     'profile.unavailable': 'Wasifu huu haupatikani.',
     'profile.loadFailed': 'Imeshindwa kupakia wasifu huu.',
+    'profile.followBack': 'Fuata pia',
+    'profile.followsYou': 'Anakufuata',
+    'profile.born': 'Alizaliwa {date}',
+    'follow.noFollowers': 'Hakuna wafuasi bado',
 
     'feed.mediaUnavailable': 'Maudhui hayapatikani',
     'feed.retry': 'Jaribu tena',

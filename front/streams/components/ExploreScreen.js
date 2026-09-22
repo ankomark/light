@@ -130,7 +130,9 @@ const ExploreScreen = ({ navigation }) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
-  const lastFetchRef = useRef(initial ? Date.now() : 0);
+  // When the copy on screen was fetched (kept in the cache, so an old copy
+  // from an earlier visit is refreshed on open).
+  const lastFetchRef = useRef(initial?.fetchedAt || 0);
 
   // Search.
   const [query, setQuery] = useState('');
@@ -158,7 +160,7 @@ const ExploreScreen = ({ navigation }) => {
       pageRef.current = 1;
       hasMoreRef.current = next.trending.length >= 30;
       lastFetchRef.current = Date.now();
-      writeCache(cacheKey, next);
+      writeCache(cacheKey, { ...next, fetchedAt: lastFetchRef.current });
     } catch {
       // keep whatever is on screen; pull to refresh retries
     } finally {

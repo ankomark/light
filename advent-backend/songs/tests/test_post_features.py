@@ -106,12 +106,12 @@ class VisibilityTests(APITestCase):
         res = self.client.get(f'/api/users/{self.author.id}/')
         grid = {p['id'] for p in res.json()['social_posts']}
         self.assertEqual(grid, {self.public.id})
-        self.assertEqual(res.json()['profile']['posts_count'], 1)
+        self.assertEqual(res.json()['posts_count'], 1)
         self.as_(self.author)
         res = self.client.get(f'/api/users/{self.author.id}/')
         grid = {p['id'] for p in res.json()['social_posts']}
         self.assertEqual(grid, {self.public.id, self.followers.id, self.private.id})
-        self.assertEqual(res.json()['profile']['posts_count'], 3)
+        self.assertEqual(res.json()['posts_count'], 3)
 
     def test_user_posts_endpoint(self):
         self.as_(self.stranger)

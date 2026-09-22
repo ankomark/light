@@ -1,5 +1,6 @@
 from .common import *  # noqa: F401,F403
 from rest_framework import mixins
+from django.db.models import Exists, OuterRef, Q
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import Appeal
 from ..serializers import AppealSerializer
@@ -56,35 +57,61 @@ class AppealViewSet(viewsets.GenericViewSet):
         return Response(self.get_serializer(appeal).data if appeal else None)
 
 
-class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    # List/retrieve + the follow/block/social actions only — NOT a full
+def not_blocked_q(me, field='pk'):
+    """Q that drops accounts blocked either way with `me`, as SQL subqueries —
+    folded into the main query instead of two extra lookups per request."""
+    return ~Q(**{f'{field}__in': Block.objects.filter(blocker=me).values('blocked_id')}) &         ~Q(**{f'{field}__in': Block.objects.filter(blocked=me).values('blocker_id')})
+
+
+class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    # Retrieve + the follow/block/social actions only — NOT a full
     # ModelViewSet. With default update/destroy and no ownership check, any
     # authenticated user could PATCH /users/<victim>/ to change another account's
     # email/password (takeover) or DELETE it. Account mutation goes through the
     # dedicated, self-scoped paths: SignUpView, /profiles/update_me/,
     # ChangePasswordView, DeleteAccountView.
+    #
+    # Signed-in only, and no list: GET /users/ used to hand anyone — even
+    # logged out — every account's email, profile and posts. Search and
+    # suggestions (Explore) are the ways to find people.
     queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    serializer_class = ProfileDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    # Actions that must still reach someone you've blocked (to undo it).
+    BLOCK_ACTIONS = ('block', 'unblock')
+
     def get_queryset(self):
-        queryset = super().get_queryset()
-        
-        # Annotate followers count if needed
-        if self.action in ['list', 'retrieve']:
+        queryset = super().get_queryset().select_related('profile')
+        me = self.request.user
+        if self.action not in self.BLOCK_ACTIONS:
+            # Someone who blocked you (or whom you blocked) and deactivated
+            # accounts simply don't exist here — profile, posts, follower
+            # lists and the follow button alike. You always exist to yourself.
+            queryset = (queryset.exclude(Q(is_deactivated=True) & ~Q(pk=me.pk))
+                        .filter(not_blocked_q(me)))
+        if self.action == 'retrieve':
+            # Every number and follow flag the profile header draws, in the
+            # one row query. `followers` rows are from_user=<account>,
+            # to_user=<fan>.
+            Follow = User.followers.through
             queryset = queryset.annotate(
-                followers_count=Count('followers', distinct=True),
-                following_count=Count('followed_by', distinct=True)
+                n_followers=Count('followers', distinct=True),
+                n_following=Count('followed_by', distinct=True),
+                viewer_follows=Exists(Follow.objects.filter(from_user=OuterRef('pk'), to_user=me.pk)),
+                follows_viewer=Exists(Follow.objects.filter(from_user=me.pk, to_user=OuterRef('pk'))),
+                viewer_requested=Exists(FollowRequest.objects.filter(
+                    requester=me.pk, target=OuterRef('pk'), status='pending')),
             )
-            
-            # For authenticated users, prefetch follow status
-            if self.request.user.is_authenticated:
-                queryset = queryset.prefetch_related(
-                    Prefetch('followers', 
-                           queryset=User.objects.filter(id=self.request.user.id),
-                           to_attr='followers_set')
-                )
-                
         return queryset
+
+    def _require_can_view(self, user):
+        """403 unless the viewer may see this account's content (a private
+        account shows its posts and follower lists only to approved followers)."""
+        if not can_view_profile(self.request.user, user):
+            return Response({'detail': 'This account is private.', 'code': 'private'},
+                            status=status.HTTP_403_FORBIDDEN)
+        return None
     def get_serializer_context(self):
         # (The old picture_width/crop/gravity context was Cloudinary-era and was
         # already dead — a second definition shadowed it — so it's dropped. R2
@@ -243,28 +270,28 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
 
     @action(detail=True, methods=['get'])
     def social_posts(self, request, pk=None):
-        """Get user's posts with optimized author pictures"""
+        """A profile's post grid, ?page=N (30 per page by default): light tiles,
+        newest first. Moderator takedowns and posts the viewer may not see
+        (followers-only / "only me") are left out, and a private account shows
+        nothing to anyone it hasn't approved.
+
+        This used to ignore paging entirely — the viewset has no paginator —
+        and ship every post with the full feed payload: 60 posts were 48 KB
+        and 122 queries."""
         user = self.get_object()
-        # Moderator takedowns stay hidden here too (see the feed and the grid on
-        # UserSerializer) — this endpoint feeds the same profile grid.
+        denied = self._require_can_view(user)
+        if denied:
+            return denied
         posts = (SocialPost.objects.filter(user=user, is_removed=False)
-                 .filter(visible_posts_q(request.user)).select_related('user__profile'))
-        
-        page = self.paginate_queryset(posts)
-        if page is not None:
-            serializer = SocialPostSerializer(
-                page, 
-                many=True,
-                context=self.get_serializer_context()
-            )
-            return self.get_paginated_response(serializer.data)
-            
-        serializer = SocialPostSerializer(
-            posts, 
-            many=True,
-            context=self.get_serializer_context()
-        )
-        return Response(serializer.data)
+                 .filter(visible_posts_q(request.user)).order_by('-created_at'))
+        content_type = request.query_params.get('content_type')
+        if content_type in ('image', 'video'):
+            posts = posts.filter(content_type=content_type)
+        paginator = StandardPagination()
+        paginator.page_size = 30
+        page = paginator.paginate_queryset(posts, request, view=self)
+        data = ProfilePostThumbSerializer(page, many=True, context=self.get_serializer_context()).data
+        return paginator.get_paginated_response(data)
     @action(detail=True, methods=['get'])
     def followers_count(self, request, pk=None):
         """Dedicated endpoint just for follower count"""
@@ -283,9 +310,11 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             "user_id": user.id
         })
     def _follow_list_response(self, queryset):
-        """Paginated, lightweight user list with each row's is_following flag."""
-        queryset = queryset.select_related('profile').order_by('username')
+        """Paginated, lightweight user list with each row's is_following flag.
+        Accounts blocked either way and deactivated ones aren't listed."""
         viewer = self.request.user
+        queryset = (queryset.select_related('profile').exclude(is_deactivated=True)
+                    .filter(not_blocked_q(viewer)).order_by('username'))
         if viewer.is_authenticated:
             # Each row's Follow/Following button used to cost its own EXISTS
             # query — a full page of 20 was 22 queries. Resolved in the page
@@ -312,24 +341,43 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
     def followers(self, request, pk=None):
         """Get the users who follow this user."""
         user = self.get_object()
-        return self._follow_list_response(user.followers.all())
+        return self._require_can_view(user) or self._follow_list_response(user.followers.all())
 
     @action(detail=True, methods=['get'])
     def following(self, request, pk=None):
         """Get the users this user follows."""
         user = self.get_object()
-        return self._follow_list_response(user.followed_by.all())
+        return self._require_can_view(user) or self._follow_list_response(user.followed_by.all())
 
 
 
-class ProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    # List/retrieve + self-scoped actions only. As a full ModelViewSet, default
+class ProfileViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    # Retrieve + self-scoped actions only. As a full ModelViewSet, default
     # destroy had no ownership check (any user could DELETE another's profile) and
     # create was unguarded. Profile changes go through the self-scoped actions
     # below (create_profile / update_me); reads via me / by_user / retrieve.
+    #
+    # Signed-in only, and no list: GET /profiles/ used to give anyone every
+    # member's email and birth date. Someone else's profile is the public
+    # view (PublicProfileSerializer); the full one is /profiles/me/ only.
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('user')
+        if self.action == 'retrieve':
+            me = self.request.user
+            qs = qs.exclude(Q(user__is_deactivated=True) & ~Q(user=me))
+            hidden = blocked_ids_for(me)
+            if hidden:
+                qs = qs.exclude(user_id__in=hidden)
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return PublicProfileSerializer
+        return ProfileSerializer
     def get_serializer_context(self):
         """Add picture transformation parameters to serializer context"""
         context = super().get_serializer_context()
@@ -400,16 +448,18 @@ class ProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
 
     @action(detail=False, methods=['get'], url_path='by_user/(?P<user_id>[^/.]+)')
     def by_user(self, request, user_id=None):
-        """Retrieve a profile by user ID."""
+        """Someone's public profile by user id (no email / birth date).
+        Blocked (either way) and deactivated accounts are "not found"."""
         try:
-            user = User.objects.get(id=user_id)
+            user = User.objects.select_related('profile').get(id=user_id)
             profile = user.profile
-            serializer = self.get_serializer(profile)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except User.DoesNotExist:
-            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
-        except Profile.DoesNotExist:
-            return Response({'detail': 'Profile not found for this user.'}, status=status.HTTP_404_NOT_FOUND)
+        except (User.DoesNotExist, Profile.DoesNotExist, ValueError):
+            return Response({'detail': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if user.pk != request.user.pk and (user.is_deactivated or user.pk in blocked_ids_for(request.user)):
+            return Response({'detail': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if user.pk == request.user.pk:
+            return Response(ProfileSerializer(profile, context={'request': request}).data)
+        return Response(PublicProfileSerializer(profile, context={'request': request}).data)
 
 
 

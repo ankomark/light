@@ -64,13 +64,11 @@ class FollowListQueryTests(APITestCase):
             'fl_fan00': False, 'fl_fan01': True, 'fl_fan02': False, 'fl_fan03': True,
         })
 
-    def test_anonymous_viewer_sees_false(self):
+    def test_logged_out_viewer_is_refused(self):
+        # Follower lists are for signed-in members only (they used to be open).
         self._add_fans(0, 2)
         self.client.force_authenticate(None)
-        body = self.client.get(f'/api/users/{self.star.id}/followers/').json()
-        rows = body['results'] if isinstance(body, dict) else body
-        self.assertTrue(rows)
-        self.assertTrue(all(r['is_following'] is False for r in rows))
+        self.assertEqual(self.client.get(f'/api/users/{self.star.id}/followers/').status_code, 401)
 
 
 class ChatQueryTests(APITestCase):

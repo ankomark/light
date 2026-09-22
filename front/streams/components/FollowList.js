@@ -67,12 +67,13 @@ const FollowList = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions?.({
-      title: type === 'followers' ? 'Followers' : 'Following',
+      title: type === 'followers' ? t('profile.followers') : t('profile.following'),
     });
-  }, [navigation, type]);
+  }, [navigation, type, t]);
 
   const fetchPage = useCallback(
     (p) => (type === 'followers' ? fetchFollowers(userId, p) : fetchFollowing(userId, p)),
@@ -93,7 +94,13 @@ const FollowList = () => {
       setPage(1);
       setHasMore(!!res?.next);
     } catch (err) {
-      console.error('Error loading follow list:', err);
+      // A private account's lists are for its approved followers only.
+      if (err?.response?.status === 403) {
+        setIsPrivate(true);
+        setRows([]);
+      } else {
+        console.error('Error loading follow list:', err);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -160,12 +167,14 @@ const FollowList = () => {
     <View style={styles.skeletonWrap}><PersonListSkeleton count={9} avatar={46} withButton /></View>
   ) : (
     <View style={styles.empty}>
-      <MaterialIcons name="people-outline" size={48} color={colors.textMuted} />
+      <MaterialIcons name={isPrivate ? 'lock-outline' : 'people-outline'} size={48} color={colors.textMuted} />
       <Text style={styles.emptyText}>
-        {type === 'followers' ? 'No followers yet' : t('follow.notFollowingAnyone')}
+        {isPrivate
+          ? t('profile.private')
+          : type === 'followers' ? t('follow.noFollowers') : t('follow.notFollowingAnyone')}
       </Text>
     </View>
-  )), [type, t, loading]);
+  )), [type, t, loading, isPrivate]);
 
   return (
     <FlatList

@@ -275,6 +275,139 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 
+PROFILE_POSTS_PAGE = 30
+
+
+class PublicProfileSerializer(serializers.ModelSerializer):
+    """Someone else's profile as other people see it: no email, birth date,
+    staff/admin flags or capabilities (ProfileSerializer carries those for the
+    owner's own /profiles/me/)."""
+    user_id = serializers.ReadOnlyField(source='user.id')
+    username = serializers.ReadOnlyField(source='user.username')
+    picture_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Profile
+        fields = ['user_id', 'username', 'bio', 'location', 'is_public', 'picture_url']
+
+    def get_picture_url(self, obj):
+        return media.resolve(obj.picture)
+
+
+class ProfileDetailSerializer(serializers.ModelSerializer):
+    """GET /users/<id>/ — everything a profile screen draws, in one response:
+    header, counts, follow state and the first page of the post grid.
+
+    Built for speed: every count and follow flag is annotated by the view
+    (UserViewSet.get_queryset), so the whole screen costs a handful of queries
+    whatever the account's size — it used to be a dozen, plus every post the
+    account ever made in one payload. Private fields (email, birth date) go to
+    the owner only."""
+    profile_picture = serializers.SerializerMethodField()
+    profile = serializers.SerializerMethodField()
+    followers_count = serializers.IntegerField(source='n_followers', read_only=True)
+    following_count = serializers.IntegerField(source='n_following', read_only=True)
+    posts_count = serializers.SerializerMethodField()
+    is_self = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+    follows_you = serializers.SerializerMethodField()
+    follow_status = serializers.SerializerMethodField()
+    is_private = serializers.SerializerMethodField()
+    can_view = serializers.SerializerMethodField()
+    social_posts = serializers.SerializerMethodField()
+    posts_has_more = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'profile_picture', 'profile',
+            'followers_count', 'following_count', 'posts_count', 'total_likes',
+            'is_self', 'is_following', 'follows_you', 'follow_status',
+            'is_private', 'can_view', 'social_posts', 'posts_has_more',
+        ]
+
+    def _viewer(self):
+        request = self.context.get('request')
+        return getattr(request, 'user', None) if request else None
+
+    def _is_self(self, obj):
+        viewer = self._viewer()
+        return bool(viewer and viewer.is_authenticated and viewer.pk == obj.pk)
+
+    def _profile(self, obj):
+        try:
+            return obj.profile
+        except Profile.DoesNotExist:
+            return None
+
+    def get_profile_picture(self, obj):
+        prof = self._profile(obj)
+        return media.resolve(prof.picture) if prof and prof.picture else None
+
+    def get_profile(self, obj):
+        prof = self._profile(obj)
+        if prof is None:
+            return {'bio': '', 'location': '', 'is_public': True}
+        data = {'bio': prof.bio or '', 'location': prof.location or '', 'is_public': prof.is_public}
+        if self._is_self(obj):
+            data['birth_date'] = prof.birth_date
+        return data
+
+    def get_is_self(self, obj):
+        return self._is_self(obj)
+
+    def get_is_following(self, obj):
+        return bool(getattr(obj, 'viewer_follows', False))
+
+    def get_follows_you(self, obj):
+        return bool(getattr(obj, 'follows_viewer', False)) and not self._is_self(obj)
+
+    def get_follow_status(self, obj):
+        if getattr(obj, 'viewer_follows', False):
+            return 'following'
+        if getattr(obj, 'viewer_requested', False):
+            return 'requested'
+        return 'none'
+
+    def get_is_private(self, obj):
+        prof = self._profile(obj)
+        return prof is not None and not prof.is_public
+
+    def get_can_view(self, obj):
+        prof = self._profile(obj)
+        return (prof is None or prof.is_public or self._is_self(obj)
+                or bool(getattr(obj, 'viewer_follows', False)))
+
+    def _visible_posts(self, obj):
+        from songs.models import visible_posts_q
+        return (obj.social_posts.filter(is_removed=False)
+                .filter(visible_posts_q(self._viewer())).order_by('-created_at'))
+
+    def get_posts_count(self, obj):
+        # The count stays visible on a private account (as on other networks);
+        # it's the posts themselves that are withheld.
+        return self._visible_posts(obj).count()
+
+    def _first_page(self, obj):
+        if not hasattr(self, '_page_cache'):
+            self._page_cache = {}
+        if obj.pk not in self._page_cache:
+            if not self.get_can_view(obj):
+                self._page_cache[obj.pk] = ([], False)
+            else:
+                rows = list(self._visible_posts(obj)[:PROFILE_POSTS_PAGE + 1])
+                self._page_cache[obj.pk] = (rows[:PROFILE_POSTS_PAGE], len(rows) > PROFILE_POSTS_PAGE)
+        return self._page_cache[obj.pk]
+
+    def get_social_posts(self, obj):
+        from songs.serializers import ProfilePostThumbSerializer
+        rows, _ = self._first_page(obj)
+        return ProfilePostThumbSerializer(rows, many=True, context=self.context).data
+
+    def get_posts_has_more(self, obj):
+        return self._first_page(obj)[1]
+
+
 class SimpleUserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
     

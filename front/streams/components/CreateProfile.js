@@ -44,7 +44,9 @@ const CreateProfile = () => {
             bio: existing.bio ?? '',
             birth_date: existing.birth_date ?? '',
             location: existing.location ?? '',
-            picture: existing.picture ?? null,
+            // `picture` is write-only on the API; the stored URL comes back
+            // as picture_url (reading `picture` left the photo blank).
+            picture: existing.picture_url ?? null,
           });
           if (existing.birth_date) setSelectedDate(new Date(existing.birth_date));
         }
@@ -172,7 +174,12 @@ const CreateProfile = () => {
       }
       // Refresh the shared auth state so the new/updated profile shows app-wide.
       await updateUser();
-      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      if (isEditMode && navigation.canGoBack()) {
+        // Editing: back to the profile you came from (it refreshes on focus).
+        navigation.goBack();
+      } else {
+        navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      }
     } catch (error) {
       console.error('Profile creation error:', error.response?.data || error);
       

@@ -84,6 +84,9 @@ from ..serializers import (
     ReportSerializer,
     SimpleUserSerializer,
     FollowListSerializer,
+    ProfileDetailSerializer,
+    PublicProfileSerializer,
+    ProfilePostThumbSerializer,
 )
 import logging
 import time

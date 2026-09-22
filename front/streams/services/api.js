@@ -635,9 +635,10 @@ export const fetchPostsByTag = (tag, page = 1) =>
 export const fetchTrendingSounds = () => apiRequest('get', '/tracks/trending_sounds/');
 
 // Paginated list of a given user's social posts.
-export const fetchUserPosts = async (userId, page = 1) => {
+// A profile's post grid, a page at a time (light tiles, newest first).
+export const fetchUserPosts = async (userId, page = 1, pageSize = 30) => {
   return apiRequest('get', `/users/${userId}/social_posts/`, null, {
-    params: { page, page_size: 18 },
+    params: { page, page_size: pageSize },
   });
 };
 
