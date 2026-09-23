@@ -12,6 +12,7 @@ from .views import (
     CategoryViewSet,
     SignUpView,
     FavoriteTracksView,
+    LibraryView,
     SocialPostViewSet,
     PostLikeViewSet,
     PostCommentViewSet,
@@ -177,6 +178,8 @@ urlpatterns = [
     path('tracks/<int:pk>/download/', TrackViewSet.as_view({'get': 'download'}), name='track-download'),
     path('tracks/upload/', TrackViewSet.as_view({'post': 'upload_track'}), name='track-upload'),
     path('tracks/favorites/', TrackViewSet.as_view({'get': 'get_favorites'}), name='track-favorites'),
+    # The Library screen's first paint, in one request.
+    path('library/', LibraryView.as_view(), name='library'),
     path('notifications/unread_count/', NotificationViewSet.as_view({'get': 'unread_count'}), name='notification-unread-count'),
     path('video-studios/my-studios/', VideoStudioViewSet.as_view({'get': 'my_videostudios'}), name='video-my-studios'),
     

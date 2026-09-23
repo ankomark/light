@@ -17,7 +17,7 @@ import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
-  fetchUserById, fetchUserPosts, fetchUserTracks, followUser, getOrCreateConversation, blockUser,
+  fetchUserById, fetchUserPosts, fetchUserTracks, fetchUserPlaylists, followUser, getOrCreateConversation, blockUser,
 } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
@@ -29,6 +29,7 @@ import { peekCache, readCache, writeCache, dropCache, userKey } from '../utils/s
 import ChoiceSheet from './ChoiceSheet';
 import ReportModal from './ReportModal';
 import TrackItem from './TrackItem';
+import PlaylistCover from './PlaylistCover';
 import toQueueTrack from '../utils/queueTrack';
 import { colors, typography, spacing, radius, profileColors as P } from '../constants/theme';
 
@@ -157,6 +158,12 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   const tracksPageRef = useRef(1);
   const tracksReqRef = useRef(0);
   const { playQueue } = usePlayer();
+
+  // Playlists tab: their public playlists (all of yours), loaded when opened.
+  const playlistsKey = userKey(currentUser?.id, `profile:${userId}:playlists`);
+  const [playlists, setPlaylists] = useState(() => peekCache(playlistsKey) ?? null);
+  const [playlistsLoading, setPlaylistsLoading] = useState(false);
+  const [playlistsError, setPlaylistsError] = useState(false);
   // When the copy on screen was fetched (kept in the cache, so a copy from an
   // earlier visit still counts as old and gets refreshed).
   const lastFetchRef = useRef(initial?._fetchedAt || 0);
@@ -271,24 +278,47 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     }
   }, [userId, tracksKey]);
 
+  const loadPlaylists = useCallback(async () => {
+    if (!userId) return;
+    setPlaylistsLoading(true);
+    try {
+      const rows = await fetchUserPlaylists(userId);
+      setPlaylists(rows);
+      setPlaylistsError(false);
+      writeCache(playlistsKey, rows);
+    } catch {
+      setPlaylistsError(true);
+    } finally {
+      setPlaylistsLoading(false);
+    }
+  }, [userId, playlistsKey]);
+
   const openTab = useCallback((next) => {
     setTab(next);
+    if (next === 'playlists') {
+      if (playlists === null) {
+        readCache(playlistsKey).then((c) => { if (Array.isArray(c)) setPlaylists((cur) => cur ?? c); });
+      }
+      loadPlaylists();
+      return;
+    }
     if (next !== 'music') return;
     if (tracks === null) {
       readCache(tracksKey).then((c) => { if (Array.isArray(c)) setTracks((cur) => cur ?? c); });
     }
     loadTracks();
-  }, [tracks, tracksKey, loadTracks]);
+  }, [tracks, tracksKey, loadTracks, playlists, playlistsKey, loadPlaylists]);
 
   const onEndReached = useCallback(() => {
     if (tab === 'posts') loadMore();
-    else if (tracksHasMore && !tracksLoading) loadTracks({ more: true });
+    else if (tab === 'music' && tracksHasMore && !tracksLoading) loadTracks({ more: true });
   }, [tab, loadMore, tracksHasMore, tracksLoading, loadTracks]);
 
   const onPull = useCallback(() => {
     load({ pull: true });
     if (tab === 'music') loadTracks();
-  }, [load, tab, loadTracks]);
+    if (tab === 'playlists') loadPlaylists();
+  }, [load, tab, loadTracks, loadPlaylists]);
 
   // Play from this row, with the rest of the account's songs as the queue.
   const tracksRef = useRef(tracks);
@@ -396,6 +426,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
 
   const followOff = !!user?.is_following || user?.follow_status === 'requested';
   const showMusic = isSelf || (user?.tracks_count ?? 0) > 0;
+  const showPlaylists = isSelf || (user?.playlists_count ?? 0) > 0;
 
   const header = user ? (
     <View>
@@ -485,12 +516,20 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
         ) : null}
       </View>
 
-      {/* Posts / Music. The counts live here now the stats row is three wide.
-          Music shows once the account has uploaded a song (always on your own). */}
+      {/* Posts / Music / Playlists. The counts live here now the stats row is
+          three wide. Music shows once the account has uploaded a song,
+          Playlists once it has a public one (both always on your own). */}
       <View style={styles.tabBar}>
         {[
           { key: 'posts', icon: 'grid-outline', label: t('profile.posts'), count: user.posts_count ?? posts.length },
           ...(showMusic ? [{ key: 'music', icon: 'musical-notes-outline', label: t('profile.music'), count: user.tracks_count ?? 0 }] : []),
+          ...(showPlaylists ? [{
+            key: 'playlists',
+            icon: 'list-outline',
+            label: t('playlist.title'),
+            // Yours: every playlist once loaded; theirs: the public ones.
+            count: isSelf && playlists ? playlists.length : (user.playlists_count ?? 0),
+          }] : []),
         ].map((it) => {
           const on = tab === it.key;
           return (
@@ -503,7 +542,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
               accessibilityState={{ selected: on }}
             >
               <Ionicons name={it.icon} size={18} color={on ? P.text : P.dim} />
-              <Text style={[styles.tabText, !on && styles.tabTextOff]}>{it.label} · {formatCount(it.count)}</Text>
+              <Text style={[styles.tabText, !on && styles.tabTextOff]} numberOfLines={1}>{it.label} · {formatCount(it.count)}</Text>
             </TouchableOpacity>
           );
         })}
@@ -545,6 +584,41 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     </View>
   );
 
+  const playlistsEmpty = !user ? null : !canView ? empty : playlistsLoading && !playlists?.length ? (
+    <ActivityIndicator style={styles.more} color={P.muted} />
+  ) : playlistsError && !playlists?.length ? (
+    <View style={styles.postsEmpty}>
+      <MaterialIcons name="wifi-off" size={40} color={P.dim} />
+      <Text style={styles.postsEmptyText}>{t('library.loadFailed')}</Text>
+      <TouchableOpacity style={styles.retryBtn} onPress={loadPlaylists} activeOpacity={0.85}>
+        <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
+      </TouchableOpacity>
+    </View>
+  ) : (
+    <View style={styles.postsEmpty}>
+      <MaterialIcons name="queue-music" size={40} color={P.dim} />
+      <Text style={styles.postsEmptyText}>{t('library.noPlaylists')}</Text>
+    </View>
+  );
+
+  const renderPlaylist = useCallback(({ item }) => (
+    <TouchableOpacity
+      style={styles.playlistRow}
+      activeOpacity={0.85}
+      onPress={() => navigation.navigate('PlaylistDetail', { playlistId: item.id, name: item.name })}
+    >
+      <PlaylistCover cover={item.cover_image} images={item.cover_images} size={56} />
+      <View style={styles.playlistBody}>
+        <Text style={styles.playlistName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.playlistMeta} numberOfLines={1}>
+          {[t('library.songCount', { n: item.track_count ?? 0 }),
+            isSelf && item.visibility ? t(`playlist.visibility.${item.visibility}`) : null].filter(Boolean).join('  ·  ')}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={P.dim} />
+    </TouchableOpacity>
+  ), [navigation, isSelf, t]);
+
   const renderTrack = useCallback(({ item, index }) => (
     <View style={styles.trackRow}>
       <TrackItem track={item} index={index} onPlay={playFrom} onDelete={onTrackDeleted} onRefresh={loadTracks} />
@@ -559,6 +633,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   // Your own profile always has the tab; someone else's loses it if their
   // last song goes, so fall back to Posts rather than an empty tab.
   const onMusic = tab === 'music' && showMusic;
+  const onPlaylists = tab === 'playlists' && showPlaylists;
 
   // ── states ──
   if (!user && loading) {
@@ -585,8 +660,15 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     <>
       <FlatList
         style={styles.list}
-        key={onMusic ? 'music' : `grid-${cols}`}
-        {...(onMusic ? {
+        key={onMusic ? 'music' : onPlaylists ? 'playlists' : `grid-${cols}`}
+        {...(onPlaylists ? {
+          data: canView ? (playlists ?? []) : [],
+          numColumns: 1,
+          keyExtractor: (item) => `ppl_${item.id}`,
+          renderItem: renderPlaylist,
+          ListEmptyComponent: playlistsEmpty,
+          ListFooterComponent: null,
+        } : onMusic ? {
           data: canView ? (tracks ?? []) : [],
           numColumns: 1,
           keyExtractor: (item) => `pt_${item.id}`,
@@ -697,6 +779,14 @@ const styles = StyleSheet.create({
   tabOn: { borderBottomColor: P.text },
   tabText: { fontSize: 13, fontWeight: '600', color: P.text },
   tabTextOff: { color: P.dim },
+  playlistRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    width: '100%', maxWidth: TRACKS_MAX, alignSelf: 'center',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  playlistBody: { flex: 1 },
+  playlistName: { fontSize: 15, fontWeight: '700', color: P.text },
+  playlistMeta: { fontSize: 13, color: P.muted, marginTop: 2 },
   trackRow: { width: '100%', maxWidth: TRACKS_MAX, alignSelf: 'center', paddingHorizontal: spacing.sm },
 
   gridRow: { gap: GRID_GAP },

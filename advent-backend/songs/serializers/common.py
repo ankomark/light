@@ -309,6 +309,8 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
     following_count = serializers.IntegerField(source='n_following', read_only=True)
     posts_count = serializers.SerializerMethodField()
     tracks_count = serializers.IntegerField(source='n_tracks', read_only=True, default=0)
+    # Public playlists (the Playlists tab shows on a profile that has some).
+    playlists_count = serializers.IntegerField(source='n_public_playlists', read_only=True, default=0)
     is_self = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
     follows_you = serializers.SerializerMethodField()
@@ -322,7 +324,7 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'profile_picture', 'profile',
-            'followers_count', 'following_count', 'posts_count', 'tracks_count', 'total_likes',
+            'followers_count', 'following_count', 'posts_count', 'tracks_count', 'playlists_count', 'total_likes',
             'is_self', 'is_following', 'follows_you', 'follow_status',
             'is_private', 'can_view', 'social_posts', 'posts_has_more',
         ]

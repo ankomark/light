@@ -135,49 +135,86 @@ class TrackQueueSerializer(serializers.ModelSerializer):
         return bool((obj.lyrics or '').strip())
 
 
-class PlaylistSerializer(serializers.ModelSerializer):
-    # Slim owner ref (the full UserSerializer drags in the whole social-posts
-    # payload, which is wasteful for a playlist).
-    user = SimpleUserSerializer(read_only=True)
-    # TrackListSerializer, not TrackSerializer: opening a 40-track playlist was
-    # downloading 40 full song texts to render a list of titles.
-    tracks = TrackListSerializer(many=True, read_only=True)
-    track_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Playlist
-        fields = ('id', 'name', 'user', 'tracks', 'track_count', 'created_at', 'updated_at')
-
-    def get_track_count(self, obj):
-        count = getattr(obj, 'tracks_total', None)
-        return count if count is not None else obj.tracks.count()
+def playlist_collage(playlist):
+    """Up to four covers (small size when processed) from the playlist's first
+    songs, for the collage shown when it has no cover of its own. Reads the
+    prefetched `items` when the view provided them."""
+    urls = []
+    for item in playlist.items.all():
+        ref = item.track.cover_small or item.track.cover_image
+        url = media.resolve(ref) if ref else None
+        if url:
+            urls.append(url)
+        if len(urls) == 4:
+            break
+    return urls
 
 
 class PlaylistListSerializer(serializers.ModelSerializer):
-    """Lightweight playlist for list views: counts + a few cover thumbnails,
-    no nested track payloads."""
+    """A playlist in a list (the Library, a profile, the add-to sheet): counts
+    and covers, no songs."""
+    cover_image = MediaReferenceField(required=False, allow_null=True)
     track_count = serializers.SerializerMethodField()
     cover_images = serializers.SerializerMethodField()
 
     class Meta:
         model = Playlist
-        fields = ('id', 'name', 'track_count', 'cover_images', 'created_at', 'updated_at')
+        fields = ('id', 'name', 'description', 'cover_image', 'visibility',
+                  'track_count', 'cover_images', 'created_at', 'updated_at')
 
     def get_track_count(self, obj):
         count = getattr(obj, 'tracks_total', None)
-        return count if count is not None else obj.tracks.count()
+        return count if count is not None else obj.items.count()
 
     def get_cover_images(self, obj):
-        # Up to 4 covers for a collage; reads the prefetched tracks cache.
-        field = CloudinaryFieldSerializer()
-        urls = []
-        for track in list(obj.tracks.all())[:4]:
-            if track.cover_image:
-                url = field.to_representation(track.cover_image)
-                if url:
-                    urls.append(url)
-        return urls
+        return playlist_collage(obj)
 
+
+class PlaylistSerializer(PlaylistListSerializer):
+    """One playlist, with its songs in order.
+
+    The songs come from the view (context['ordered_tracks']): a playlist of 40
+    used to cost a like-count and is-liked query per song; the view builds them
+    in one annotated query instead."""
+    # Slim owner ref (the full UserSerializer drags in the whole social-posts
+    # payload, which is wasteful for a playlist).
+    user = SimpleUserSerializer(read_only=True)
+    is_owner = serializers.SerializerMethodField()
+    tracks = serializers.SerializerMethodField()
+    duration_ms = serializers.SerializerMethodField()
+
+    class Meta(PlaylistListSerializer.Meta):
+        fields = PlaylistListSerializer.Meta.fields + ('user', 'is_owner', 'tracks', 'duration_ms')
+
+    def validate_name(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('A playlist needs a name.')
+        return value
+
+    def validate_description(self, value):
+        return (value or '').strip()
+
+    def to_internal_value(self, data):
+        # The cover column is a plain string: "no cover" is '' not NULL.
+        out = super().to_internal_value(data)
+        if 'cover_image' in out and out['cover_image'] is None:
+            out['cover_image'] = ''
+        return out
+
+    def _tracks(self, obj):
+        rows = self.context.get('ordered_tracks')
+        return rows if rows is not None else [i.track for i in obj.items.select_related('track') if not i.track.is_removed]
+
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.user_id == request.user.id)
+
+    def get_tracks(self, obj):
+        return TrackListSerializer(self._tracks(obj), many=True, context=self.context).data
+
+    def get_duration_ms(self, obj):
+        return sum(t.duration_ms or 0 for t in self._tracks(obj))
 
 
 class CommentSerializer(serializers.ModelSerializer):

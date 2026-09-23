@@ -110,6 +110,10 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
                     Track.objects.filter(artist=OuterRef('pk'), is_removed=False)
                     .order_by().values('artist').annotate(n=Count('id')).values('n')[:1],
                     output_field=IntegerField()), 0),
+                n_public_playlists=Coalesce(Subquery(
+                    Playlist.objects.filter(user=OuterRef('pk'), visibility=Playlist.PUBLIC)
+                    .order_by().values('user').annotate(n=Count('id')).values('n')[:1],
+                    output_field=IntegerField()), 0),
             )
         return queryset
 
@@ -130,10 +134,19 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
 
     @action(detail=True, methods=['get'])
     def playlists(self, request, pk=None):
+        """A profile's Playlists tab: the account's public playlists (all of
+        them on your own profile). This used to list every playlist anyone
+        had — private ones included — with their songs, to anyone asking."""
+        from .music import with_playlist_counts
         user = self.get_object()
-        playlists = Playlist.objects.filter(user=user)
-        serializer = PlaylistSerializer(playlists, many=True)
-        return Response(serializer.data)
+        denied = self._require_can_view(user)
+        if denied:
+            return denied
+        qs = Playlist.objects.filter(user=user)
+        if user != request.user:
+            qs = qs.filter(visibility=Playlist.PUBLIC)
+        qs = with_playlist_counts(qs).order_by('-updated_at')
+        return Response(PlaylistListSerializer(qs, many=True, context=self.get_serializer_context()).data)
 
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])

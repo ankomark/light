@@ -309,30 +309,19 @@ const TrackList = () => {
           )}
         </View>
 
-        {/* Right: library shortcuts. Fixed size, never shrink. */}
+        {/* Right: the Library (playlists, liked songs, downloads, recently
+            played). Fixed size, never shrinks. */}
         <View style={styles.queueSide}>
           <TouchableOpacity
             style={[styles.sideBtn, roomyBar && styles.sideBtnLabelled]}
             onPress={() => navigation.navigate('Playlists')}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel={t('playlist.title')}
+            accessibilityLabel={t('library.button')}
           >
-            <MaterialCommunityIcons name="playlist-music" size={18} color={colors.primary} />
+            <MaterialCommunityIcons name="bookshelf" size={18} color={colors.primary} />
             {roomyBar && (
-              <Text style={styles.shuffleBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('playlist.title')}</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.sideBtn, roomyBar && styles.sideBtnLabelled]}
-            onPress={() => navigation.navigate('Downloads')}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel={t('downloads.title')}
-          >
-            <MaterialIcons name="download-done" size={18} color={colors.primary} />
-            {roomyBar && (
-              <Text style={styles.shuffleBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('downloads.title')}</Text>
+              <Text style={styles.shuffleBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('library.button')}</Text>
             )}
           </TouchableOpacity>
         </View>

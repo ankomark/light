@@ -5,7 +5,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import F, Max
 from django.utils.dateparse import parse_datetime
 from rest_framework.throttling import ScopedRateThrottle
-from ..models import PlayEvent
+from ..models import PlayEvent, PlaylistTrack
+from django.db.models import Prefetch
 from .. import discovery, audio_tags
 from ..comments import (
     create_comment, set_reaction, reaction_summaries, TRACK as TRACK_COMMENTS,
@@ -563,34 +564,45 @@ class TrackViewSet(viewsets.ModelViewSet):
         # likes_total/liked_by_me annotations) so the Favorites screen isn't an
         # N+1 — the raw Track.objects.filter(...) here used to fire ~3 queries
         # per liked track (artist profile, like count, is-liked). Newest first.
-        favorites = self.get_queryset().filter(likes__user=request.user).order_by('-created_at')
+        # Most recently liked first (it used to be the songs' upload order).
+        liked_at = Like.objects.filter(track=OuterRef('pk'), user=request.user).values('created_at')[:1]
+        favorites = (self.get_queryset().filter(liked_by_me=True)
+                     .annotate(liked_at=Subquery(liked_at)).order_by('-liked_at'))
         serializer = self.get_serializer(favorites, many=True)
         return Response(serializer.data)
 
 
 
+def playlist_items_prefetch():
+    """The songs of each playlist, in order, with what the collage needs."""
+    return Prefetch('items', queryset=PlaylistTrack.objects.select_related('track').order_by('position', 'id'))
+
+
+def with_playlist_counts(qs):
+    return (qs.annotate(tracks_total=Count('items', filter=Q(items__track__is_removed=False), distinct=True))
+            .prefetch_related(playlist_items_prefetch()))
+
+
 class PlaylistViewSet(viewsets.ModelViewSet):
+    """Your playlists (the list), and any playlist you may open (detail): your
+    own, or someone's public or unlisted one. Only the owner edits one —
+    rename, describe, cover, visibility, add / remove / reorder songs."""
     queryset = Playlist.objects.all()
     serializer_class = PlaylistSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly]
 
     def get_queryset(self):
         user = self.request.user
-        if not user.is_authenticated:
-            return Playlist.objects.none()
-        qs = (
-            Playlist.objects
-            .filter(user=user)
-            .select_related('user__profile')
-            .annotate(tracks_total=Count('tracks', distinct=True))
-            .order_by('-created_at')
-        )
-        # The list only renders a count + up to 4 cover thumbnails, so it
-        # prefetches just the tracks; detail nests the full track payload
-        # (artist + avatar) and needs the deeper prefetch.
-        if self.action == 'list':
-            return qs.prefetch_related('tracks')
-        return qs.prefetch_related('tracks__artist__profile')
+        qs = with_playlist_counts(Playlist.objects.select_related('user__profile')).order_by('-updated_at')
+        if self.action == 'retrieve':
+            # Someone else's: only if they shared it (public / unlisted), and
+            # never across a block or from a deactivated account.
+            others = (Q(visibility__in=[Playlist.PUBLIC, Playlist.UNLISTED])
+                      & Q(user__is_deactivated=False)
+                      & ~Q(user__in=Block.objects.filter(blocker=user).values('blocked'))
+                      & ~Q(user__in=Block.objects.filter(blocked=user).values('blocker')))
+            return qs.filter(Q(user=user) | others)
+        return qs.filter(user=user)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -600,29 +612,104 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-    def _serialize_fresh(self, playlist):
-        # Re-fetch a plain instance: the object from get_queryset() carries a
-        # tracks_total annotation captured before the M2M change, which would
-        # make track_count stale in the response.
-        fresh = Playlist.objects.get(pk=playlist.pk)
-        return Response(
-            PlaylistSerializer(fresh, context=self.get_serializer_context()).data
-        )
+    def _ordered_tracks(self, playlist):
+        ids = list(PlaylistTrack.objects.filter(playlist=playlist)
+                   .order_by('position', 'id').values_list('track_id', flat=True))
+        by_id = annotated_tracks(self.request.user).filter(id__in=ids).in_bulk()
+        return [by_id[i] for i in ids if i in by_id]
+
+    def _respond(self, playlist, status_code=status.HTTP_200_OK):
+        # Re-read: counts and the collage change with the songs.
+        fresh = with_playlist_counts(Playlist.objects.select_related('user__profile')).get(pk=playlist.pk)
+        ctx = {**self.get_serializer_context(), 'ordered_tracks': self._ordered_tracks(fresh)}
+        return Response(PlaylistSerializer(fresh, context=ctx).data, status=status_code)
+
+    def retrieve(self, request, *args, **kwargs):
+        return self._respond(self.get_object())
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return self._respond(serializer.instance, status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        playlist = self.get_object()
+        serializer = self.get_serializer(playlist, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return self._respond(playlist)
 
     @action(detail=True, methods=['post'], url_path='add-track')
     def add_track(self, request, pk=None):
         playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
-        track = get_object_or_404(Track, id=request.data.get('track_id'))
-        playlist.tracks.add(track)
-        return self._serialize_fresh(playlist)
+        track = get_object_or_404(Track, id=request.data.get('track_id'), is_removed=False)
+        with transaction.atomic():
+            if not PlaylistTrack.objects.filter(playlist=playlist, track=track).exists():
+                last = PlaylistTrack.objects.filter(playlist=playlist).aggregate(m=Max('position'))['m']
+                PlaylistTrack.objects.create(playlist=playlist, track=track,
+                                             position=0 if last is None else last + 1)
+                Playlist.objects.filter(pk=playlist.pk).update(updated_at=timezone.now())
+        return self._respond(playlist)
 
     @action(detail=True, methods=['post'], url_path='remove-track')
     def remove_track(self, request, pk=None):
         playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
-        track = get_object_or_404(Track, id=request.data.get('track_id'))
-        playlist.tracks.remove(track)
-        return self._serialize_fresh(playlist)
+        PlaylistTrack.objects.filter(playlist=playlist, track_id=request.data.get('track_id')).delete()
+        Playlist.objects.filter(pk=playlist.pk).update(updated_at=timezone.now())
+        return self._respond(playlist)
 
+    @action(detail=True, methods=['post'])
+    def reorder(self, request, pk=None):
+        """{"track_ids": [...]}: the playlist's songs in their new order —
+        exactly the songs it has, each once."""
+        playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
+        items = {i.track_id: i for i in PlaylistTrack.objects.filter(playlist=playlist)}
+        try:
+            ids = [int(i) for i in request.data.get('track_ids')]
+        except (TypeError, ValueError):
+            return Response({'error': 'track_ids must be a list of song ids'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(ids) != len(set(ids)) or set(ids) != set(items):
+            return Response({'error': "track_ids must be exactly this playlist's songs"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        for pos, tid in enumerate(ids):
+            items[tid].position = pos
+        PlaylistTrack.objects.bulk_update(list(items.values()), ['position'])
+        Playlist.objects.filter(pk=playlist.pk).update(updated_at=timezone.now())
+        return self._respond(playlist)
+
+
+class LibraryView(APIView):
+    """Everything the Library screen opens on, in one request (it matters on a
+    slow connection): Liked Songs' count and covers, your playlists, and what
+    you played last. Downloads live on the phone and aren't here."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        me = request.user
+        liked = Track.objects.filter(is_removed=False, likes__user=me).order_by('-likes__created_at')
+        covers = []
+        for small, full in liked.values_list('cover_small', 'cover_image')[:12]:
+            url = media.resolve(small or full) if (small or full) else None
+            if url:
+                covers.append(url)
+            if len(covers) == 4:
+                break
+        playlists = with_playlist_counts(Playlist.objects.filter(user=me)).order_by('-updated_at')
+        recent_ids = list(
+            PlayEvent.objects.filter(user=me, track__is_removed=False)
+            .values('track_id').annotate(last=Max('started_at')).order_by('-last')
+            .values_list('track_id', flat=True)[:10]
+        )
+        by_id = annotated_tracks(me).filter(id__in=recent_ids).in_bulk()
+        recent = [by_id[i] for i in recent_ids if i in by_id]
+        ctx = {'request': request}
+        return Response({
+            'liked': {'count': liked.count(), 'covers': covers},
+            'playlists': PlaylistListSerializer(playlists, many=True, context=ctx).data,
+            'recent': TrackListSerializer(recent, many=True, context=ctx).data,
+        })
 
 
 class CommentViewSet(viewsets.ModelViewSet):

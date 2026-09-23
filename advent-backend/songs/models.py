@@ -263,14 +263,44 @@ class Track(models.Model):
 
 # Playlist Model
 class Playlist(models.Model):
+    """A listener's list of songs, in the order they arranged them.
+
+    Visibility: private (only the owner), unlisted (anyone with the link —
+    not shown on the profile), public (on the owner's profile too)."""
+    PRIVATE = 'private'
+    UNLISTED = 'unlisted'
+    PUBLIC = 'public'
+    VISIBILITY_CHOICES = [(PRIVATE, 'Private'), (UNLISTED, 'Unlisted'), (PUBLIC, 'Public')]
+
     name = models.CharField(max_length=100)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='playlists')
-    tracks = models.ManyToManyField(Track, related_name='playlists', blank=True)
+    description = models.CharField(max_length=300, blank=True, default='')
+    # Optional custom cover; without one the app shows a collage of the first
+    # four songs' covers.
+    cover_image = models.CharField(max_length=500, blank=True, default='')
+    visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default=PRIVATE)
+    tracks = models.ManyToManyField(Track, related_name='playlists', blank=True, through='PlaylistTrack')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f'{self.name} by {self.user.username}'
+
+
+class PlaylistTrack(models.Model):
+    """A song's place in a playlist. The table is the one the plain
+    many-to-many always used (migration 0125 adopted it), now with the order
+    and when each song was added."""
+    playlist = models.ForeignKey(Playlist, on_delete=models.CASCADE, related_name='items')
+    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='playlist_items')
+    position = models.PositiveIntegerField(default=0)
+    added_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'songs_playlist_tracks'
+        unique_together = ('playlist', 'track')
+        ordering = ['position', 'id']
+        indexes = [models.Index(fields=['playlist', 'position'], name='playlisttrack_order_idx')]
 
 
 # Comment Model

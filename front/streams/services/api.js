@@ -371,9 +371,29 @@ export const fetchPlaylist = async (id) => {
   return apiRequest('get', `/playlists/${id}/`);
 };
 
-export const createPlaylist = async (name) => {
-  return apiRequest('post', '/playlists/', { name });
+// `details`: { description, visibility ('private' | 'unlisted' | 'public') }.
+export const createPlaylist = async (name, details = {}) => {
+  return apiRequest('post', '/playlists/', { name, ...details });
 };
+
+// Owner only: { name, description, visibility, cover_image (URL or null) }.
+export const updatePlaylist = async (id, changes) => {
+  return apiRequest('patch', `/playlists/${id}/`, changes);
+};
+
+// The playlist's songs in their new order (exactly its songs, each once).
+export const reorderPlaylist = async (id, trackIds) => {
+  return apiRequest('post', `/playlists/${id}/reorder/`, { track_ids: trackIds });
+};
+
+// A profile's Playlists tab: their public playlists (all of yours on your own).
+export const fetchUserPlaylists = async (userId) => {
+  const data = await apiRequest('get', `/users/${userId}/playlists/`);
+  return Array.isArray(data) ? data : [];
+};
+
+// The Library screen in one request: { liked: {count, covers}, playlists, recent }.
+export const fetchLibrary = () => apiRequest('get', '/library/');
 
 export const deletePlaylist = async (id) => {
   return apiRequest('delete', `/playlists/${id}/`);
