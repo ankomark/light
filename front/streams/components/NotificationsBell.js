@@ -26,6 +26,8 @@ const TYPE_ICON = {
   group_join_request: { name: 'people', color: colors.accent },
   group_join_approved: { name: 'checkmark-circle', color: '#17BF63' },
   group_join_rejected: { name: 'close-circle', color: colors.error },
+  // "Your song reached 1,000 plays" (opens the song).
+  milestone: { name: 'trophy', color: '#E8C66B' },
 };
 
 // TikTok-style category filters across the top of the panel.

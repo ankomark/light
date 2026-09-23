@@ -43,6 +43,9 @@ class User(AbstractUser):
     )
     is_email_verified = models.BooleanField(default=False)
     # is_artist = models.BooleanField(default=False)
+    # The blue tick on an artist's profile: set by an admin (the Django admin)
+    # once they've confirmed who the account belongs to.
+    is_verified_artist = models.BooleanField(default=False)
 
     # ── Platform admin role (in-app moderation panel) ─────────────────────────
     # Distinct from Django's is_staff/is_superuser and from per-group is_admin.
@@ -170,7 +173,11 @@ class PasswordResetCode(models.Model):
 class Track(models.Model):
     title = models.CharField(max_length=100)
     artist = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tracks')
+    # The album's name as shown on the song (kept in step with `album_ref`
+    # when the song is on an album; free text on older songs).
     album = models.CharField(max_length=100, blank=True, null=True)
+    album_ref = models.ForeignKey('Album', null=True, blank=True, on_delete=models.SET_NULL, related_name='tracks')
+    track_number = models.PositiveSmallIntegerField(null=True, blank=True)
     # audio_file = models.FileField(upload_to='audio/')  
     # cover_image = models.ImageField(upload_to='covers/', blank=True, null=True)
     # Media references: absolute URL (R2) or legacy Cloudinary public_id.
@@ -259,6 +266,25 @@ class Track(models.Model):
 
     def __str__(self):
         return f'{self.title} - {self.artist.username}'
+
+
+class Album(models.Model):
+    """A release: an artist's songs as a set, in order (Track.album_ref and
+    track_number). Only the artist's own songs go on it."""
+    artist = models.ForeignKey(User, on_delete=models.CASCADE, related_name='albums')
+    title = models.CharField(max_length=100)
+    description = models.CharField(max_length=300, blank=True, default='')
+    cover_image = models.CharField(max_length=500, blank=True, default='')
+    release_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-release_date', '-created_at']
+        indexes = [models.Index(fields=['artist', '-created_at'], name='album_artist_idx')]
+
+    def __str__(self):
+        return f'{self.title} by {self.artist.username}'
 
 
 # Playlist Model

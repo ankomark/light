@@ -13,6 +13,7 @@ NOTIFICATION_TITLES = {
     'message': '\U0001f4ac New Message',
     'mention': '@ You were mentioned',
     'security': '\U0001f512 Security alert',
+    'milestone': '\U0001f389 Milestone',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.
@@ -20,6 +21,8 @@ NOTIFICATION_TITLES = {
 # delivered and cannot be turned off.
 NOTIFICATION_CATEGORIES = {
     'like': 'likes',
+    # "Your song reached 1,000 plays": good news about your music, like a like.
+    'milestone': 'likes',
     'comment': 'comments',
     # No separate switch for mentions: they ride on the comments one, which is
     # where people expect "someone is talking to me" alerts to live.

@@ -15,6 +15,8 @@ from .views import (
     LibraryView,
     MusicHomeView,
     MusicChartView,
+    AlbumViewSet,
+    StudioView,
     SocialPostViewSet,
     PostLikeViewSet,
     PostCommentViewSet,
@@ -85,6 +87,7 @@ router = DefaultRouter()
 router.register(r'users', UserViewSet)
 router.register(r'tracks', TrackViewSet)
 router.register(r'playlists', PlaylistViewSet)
+router.register(r'albums', AlbumViewSet)
 router.register(r'profiles', ProfileViewSet, basename='profiles')
 router.register(r'follow-requests', FollowRequestViewSet, basename='follow-requests')
 router.register(r'wallpapers', WallpaperViewSet, basename='wallpapers')
@@ -184,6 +187,8 @@ urlpatterns = [
     path('library/', LibraryView.as_view(), name='library'),
     # The Music home in one request, and a whole chart.
     path('music/home/', MusicHomeView.as_view(), name='music-home'),
+    # Artist Studio: your own numbers.
+    path('studio/', StudioView.as_view(), name='studio'),
     path('music/charts/<str:chart>/', MusicChartView.as_view(), name='music-chart'),
     path('notifications/unread_count/', NotificationViewSet.as_view({'get': 'unread_count'}), name='notification-unread-count'),
     path('video-studios/my-studios/', VideoStudioViewSet.as_view({'get': 'my_videostudios'}), name='video-my-studios'),

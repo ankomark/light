@@ -20,6 +20,7 @@ import { FONT_SCALE } from '../utils/layout';
 import formatCount from '../utils/formatCount';
 import formatDuration from '../utils/formatDuration';
 import toQueueTrack from '../utils/queueTrack';
+import VerifiedBadge from './VerifiedBadge';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
@@ -111,8 +112,8 @@ const TrackItem = React.memo(function TrackItem({
   };
 
   // Under the title: artist · plays · length (each only when known).
-  const meta = [
-    track.artist?.username,
+  // Under the title: artist (with the verified tick) · plays · length.
+  const stats = [
     track.views ? t('trackItem.plays', { count: formatCount(track.views) }) : null,
     formatDuration(track.duration_ms),
   ].filter(Boolean).join('  ·  ');
@@ -234,8 +235,14 @@ const TrackItem = React.memo(function TrackItem({
               numberOfLines={1}
               maxFontSizeMultiplier={FONT_SCALE.chrome}
             >
-              {meta}
+              {track.artist?.username}
             </Text>
+            {track.artist?.verified ? <VerifiedBadge size={12} style={styles.tick} /> : null}
+            {stats ? (
+              <Text style={styles.stats} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>
+                {`  ·  ${stats}`}
+              </Text>
+            ) : null}
           </View>
         </TouchableOpacity>
 
@@ -433,6 +440,8 @@ const styles = StyleSheet.create({
   artistRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   avatar: { width: 18, height: 18, borderRadius: 9, marginRight: spacing.xs, backgroundColor: colors.surface },
   subtitle: { ...typography.caption, color: colors.textSecondary, flexShrink: 1 },
+  tick: { marginLeft: 3 },
+  stats: { ...typography.caption, color: colors.textSecondary, flexShrink: 0 },
   playButton: {
     width: 44, height: 44, borderRadius: 22,
     backgroundColor: colors.primary,

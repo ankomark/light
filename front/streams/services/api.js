@@ -408,6 +408,21 @@ export const fetchUserPlaylists = async (userId) => {
   return Array.isArray(data) ? data : [];
 };
 
+// ── Artists ──
+// The artist part of a profile: { verified, monthly_listeners, top_tracks, albums }.
+export const fetchArtist = (userId) => apiRequest('get', `/users/${userId}/artist/`);
+// Artist Studio (your own numbers) for the last `days` (7 | 28 | 90).
+export const fetchStudio = (days = 28) => apiRequest('get', '/studio/', null, { params: { days } });
+// Albums: an artist's (yours when no id), one with its songs, and editing yours.
+export const fetchAlbums = (artistId) =>
+  apiRequest('get', '/albums/', null, { params: artistId ? { artist: artistId } : {} });
+export const fetchAlbum = (id) => apiRequest('get', `/albums/${id}/`);
+export const createAlbum = (data) => apiRequest('post', '/albums/', data);
+export const updateAlbum = (id, changes) => apiRequest('patch', `/albums/${id}/`, changes);
+export const deleteAlbum = (id) => apiRequest('delete', `/albums/${id}/`);
+// The album's songs in order (your own songs; left-out ones come off it).
+export const setAlbumTracks = (id, trackIds) => apiRequest('post', `/albums/${id}/set-tracks/`, { track_ids: trackIds });
+
 // The Library screen in one request: { liked: {count, covers}, playlists, recent }.
 export const fetchLibrary = () => apiRequest('get', '/library/');
 
@@ -905,40 +920,6 @@ export const fetchCommunitiesByUrl = async (nextUrl) => {
   return apiRequest('get', path);
 };
 
-// ==================== SOLO ARTISTS ====================
-export const fetchSoloArtists = async (params = {}) => {
-  const queryString = new URLSearchParams(params).toString();
-  return apiRequest('get', `/solo-artists/?${queryString}`);
-};
-
-export const fetchSoloArtistById = async (id) => {
-  return apiRequest('get', `/solo-artists/${id}/`);
-};
-
-export const fetchMySoloArtistProfile = async () => {
-  return apiRequest('get', '/solo-artists/my_profile/');
-};
-
-export const createSoloArtist = async (formData) => {
-  return apiRequest('post', '/solo-artists/', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-};
-
-export const updateSoloArtist = async (id, formData) => {
-  return apiRequest('patch', `/solo-artists/${id}/`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-};
-
-export const deleteSoloArtist = async (id) => {
-  return apiRequest('delete', `/solo-artists/${id}/`);
-};
-
 // ==================== DAILY BIBLE QUIZ ====================
 // Twenty questions a day, generated server-side from the local KJV corpus and
 // shared by everyone, so the leaderboard compares like with like. The answers
@@ -1015,10 +996,6 @@ export const clearWeatherPlace = async () => apiRequest('delete', '/weather-plac
 // one. `day` is optional and only reaches back as far as the server allows.
 export const fetchDailyVerse = async (day = null) =>
   apiRequest('get', day ? `/daily-verse/?date=${encodeURIComponent(day)}` : '/daily-verse/');
-
-export const toggleSoloArtistActive = async (artistId) => {
-  return apiRequest('post', `/solo-artists/${artistId}/toggle-active/`);
-};
 
 // Group endpoints
 // Returns the paginated envelope { results, next, ... } so the caller can
@@ -1988,12 +1965,6 @@ export default {
   createAudioStudio,
   updateAudioStudio,
   deleteAudioStudio,
-  fetchSoloArtists,
-  fetchSoloArtistById,
-  fetchMySoloArtistProfile,
-  createSoloArtist,
-  updateSoloArtist,
-  deleteSoloArtist,
   startQuizSession,
   fetchQuizSession,
   answerQuizSession,

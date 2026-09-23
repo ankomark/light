@@ -116,6 +116,8 @@ import PlaylistsScreen from './components/PlaylistsScreen';
 import PlaylistDetail from './components/PlaylistDetail';
 import ChartScreen from './components/ChartScreen';
 import GenreScreen from './components/GenreScreen';
+import AlbumScreen from './components/AlbumScreen';
+import ArtistStudio from './components/ArtistStudio';
 import { navigationRef, navigate } from './services/navigationRef';
 import { API_BASE, PUBLIC_BASE } from './services/api';
 
@@ -286,6 +288,8 @@ const App = () => {
                 <Stack.Screen name="PlaylistDetail" component={PlaylistDetailWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="MusicChart" component={MusicChartWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="Genre" component={GenreWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="Album" component={AlbumWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="ArtistStudio" component={ArtistStudioWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: false }} />
                 <Stack.Screen name="Hashtag" component={HashtagScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Downloads" component={DownloadsScreen} options={{ headerShown: false }} />
@@ -640,6 +644,25 @@ const GenreWrapper = ({ navigation }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="This genre couldn't load.">
       <GenreScreen />
+    </ErrorBoundary>
+  </View>
+);
+
+const AlbumWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="This album couldn't load.">
+      <AlbumScreen />
+    </ErrorBoundary>
+  </View>
+);
+
+const ArtistStudioWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <Header navigation={navigation} />
+    <ErrorBoundary fallbackMessage="Artist Studio couldn't load.">
+      <ArtistStudio />
     </ErrorBoundary>
   </View>
 );

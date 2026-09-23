@@ -1,4 +1,5 @@
 from .common import *  # noqa: F401,F403
+from ..models import Album
 
 
 class GenreField(serializers.Field):
@@ -50,19 +51,22 @@ class TrackSerializer(serializers.ModelSerializer):
      cover_small = MediaReferenceField(read_only=True)
      cover_medium = MediaReferenceField(read_only=True)
      genre = GenreField()
+     # The album the song is on (see AlbumViewSet.set_tracks), and its place there.
+     album_id = serializers.IntegerField(source='album_ref_id', read_only=True)
      class Meta:
         model = Track
         fields = [
             'id', 'title', 'artist', 'album', 'audio_file','is_owner',
             'cover_image', 'lyrics', 'has_lyrics', 'slug', 'duration_ms',
             'audio_low', 'audio_standard', 'audio_high', 'cover_small', 'cover_medium',
-            'processing_status', 'waveform', 'genre',
+            'processing_status', 'waveform', 'genre', 'album_id', 'track_number',
             'views', 'downloads','likes_count','comments_count','is_liked',
             'created_at', 'updated_at'
         ]
         # `views` is the play count (listens of 30s+); see PlayEvent.
+        # A song joins an album through the album (POST /albums/<id>/set-tracks/).
         read_only_fields = ['artist', 'slug', 'views', 'downloads', 'created_at', 'updated_at',
-                            'processing_status', 'waveform']
+                            'processing_status', 'waveform', 'album_id', 'track_number']
         # extra_kwargs = {
         #     'title': {'required': True, 'max_length': 200},
         #     'lyrics': {'allow_blank': True}
@@ -256,6 +260,57 @@ class PlaylistSerializer(PlaylistListSerializer):
 
     def get_duration_ms(self, obj):
         return sum(t.duration_ms or 0 for t in self._tracks(obj))
+
+
+class AlbumSerializer(serializers.ModelSerializer):
+    """An album. In a list: counts and cover; opened (context['album_tracks']),
+    with its songs in order. `cover` is its own cover, else its first song's."""
+    artist = SimpleUserSerializer(read_only=True)
+    cover_image = MediaReferenceField(required=False, allow_null=True)
+    cover = serializers.SerializerMethodField()
+    track_count = serializers.IntegerField(read_only=True, default=0)
+    duration_ms = serializers.SerializerMethodField()
+    is_owner = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Album
+        fields = ('id', 'title', 'description', 'cover_image', 'cover', 'release_date', 'artist',
+                  'track_count', 'duration_ms', 'is_owner', 'created_at')
+
+    def validate_title(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('An album needs a title.')
+        return value
+
+    def validate_description(self, value):
+        return (value or '').strip()
+
+    def to_internal_value(self, data):
+        out = super().to_internal_value(data)
+        if 'cover_image' in out and out['cover_image'] is None:
+            out['cover_image'] = ''
+        return out
+
+    def get_cover(self, obj):
+        if obj.cover_image:
+            return media.resolve(obj.cover_image)
+        first = getattr(obj, 'first_cover', None)
+        return media.resolve(first) if first else None
+
+    def get_duration_ms(self, obj):
+        return getattr(obj, 'duration_total', None) or 0
+
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.artist_id == request.user.id)
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        tracks = self.context.get('album_tracks')
+        if tracks is not None:
+            data['tracks'] = TrackListSerializer(tracks, many=True, context=self.context).data
+        return data
 
 
 class CommentSerializer(serializers.ModelSerializer):

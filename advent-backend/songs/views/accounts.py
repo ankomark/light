@@ -4,7 +4,8 @@ from django.db.models import Exists, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import Appeal
-from ..serializers import AppealSerializer, TrackListSerializer
+from ..serializers import AlbumSerializer, AppealSerializer, TrackListSerializer
+from ..models import Album
 from .music import annotated_tracks
 
 
@@ -131,6 +132,28 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+
+    @action(detail=True, methods=['get'])
+    def artist(self, request, pk=None):
+        """The artist part of a profile (its Music tab): the tick, monthly
+        listeners, the five most played songs and the albums."""
+        from .. import artists
+        from .music import albums_with_counts, annotated_tracks
+        user = self.get_object()
+        denied = self._require_can_view(user)
+        if denied:
+            return denied
+        top = list(annotated_tracks(request.user).filter(artist=user).order_by('-views', '-created_at')[:5])
+        albums = albums_with_counts(Album.objects.filter(artist=user))
+        if user != request.user:
+            albums = albums.filter(track_count__gt=0)
+        ctx = self.get_serializer_context()
+        return Response({
+            'verified': user.is_verified_artist,
+            'monthly_listeners': artists.monthly_listeners(user),
+            'top_tracks': TrackListSerializer(top, many=True, context=ctx).data,
+            'albums': AlbumSerializer(albums, many=True, context=ctx).data,
+        })
 
     @action(detail=True, methods=['get'])
     def playlists(self, request, pk=None):

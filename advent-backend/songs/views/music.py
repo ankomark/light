@@ -6,9 +6,11 @@ import re
 from django.db.models import F, Max
 from django.utils.dateparse import parse_datetime
 from rest_framework.throttling import ScopedRateThrottle
-from ..models import PlayEvent, PlaylistTrack
+from ..models import Album, PlayEvent, PlaylistTrack
+from ..serializers import AlbumSerializer
+from django.db.models import Sum
 from django.db.models import Prefetch
-from .. import discovery, audio_tags, charts
+from .. import discovery, audio_tags, charts, artists
 from ..comments import (
     create_comment, set_reaction, reaction_summaries, TRACK as TRACK_COMMENTS,
     REACTIONS as COMMENT_REACTIONS, LIKE as COMMENT_LIKE,
@@ -450,6 +452,8 @@ class TrackViewSet(viewsets.ModelViewSet):
                         ).count() < self.MAX_COUNTED_PLAYS_PER_DAY):
                     ev.counted = True
                     Track.objects.filter(pk=track.pk).update(views=F('views') + 1)
+                    # "Your song reached 1,000 plays" — once, as it crosses.
+                    transaction.on_commit(lambda tid=track.pk: artists.check_play_milestone(tid))
                 ev.save()
             if not track.duration_ms and 1000 <= c['duration'] <= 4 * 3600 * 1000:
                 Track.objects.filter(pk=track.pk, duration_ms__isnull=True).update(duration_ms=c['duration'])
@@ -803,6 +807,115 @@ class MusicChartView(APIView):
         info = {t: {'position': i + 1, 'plays': n} for i, (t, n) in enumerate(entries)}
         rows = _rows([t for t, _ in entries], request.user, {'request': request}, info)
         return Response({'chart': chart, 'country': country, 'tracks': rows})
+
+
+def albums_with_counts(qs):
+    live = Q(tracks__is_removed=False)
+    first_cover = (Track.objects.filter(album_ref=OuterRef('pk'), is_removed=False)
+                   .exclude(cover_image__isnull=True).exclude(cover_image='')
+                   .order_by('track_number', 'id').values('cover_image')[:1])
+    return qs.select_related('artist__profile').annotate(
+        track_count=Count('tracks', filter=live, distinct=True),
+        duration_total=Sum('tracks__duration_ms', filter=live),
+        first_cover=Subquery(first_cover),
+    )
+
+
+class AlbumViewSet(viewsets.ModelViewSet):
+    """Albums. ?artist=<id> lists an artist's (yours without it); anyone signed
+    in can open one; only the artist edits it or sets its songs — which must
+    be their own songs."""
+    queryset = Album.objects.all()
+    serializer_class = AlbumSerializer
+    permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
+    pagination_class = None
+
+    def get_queryset(self):
+        me = self.request.user
+        qs = albums_with_counts(Album.objects.all())
+        # Never across a block or from a deactivated account (yours always).
+        qs = qs.filter(Q(artist=me) | (Q(artist__is_deactivated=False)
+                       & ~Q(artist__in=Block.objects.filter(blocker=me).values('blocked'))
+                       & ~Q(artist__in=Block.objects.filter(blocked=me).values('blocker'))))
+        if self.action == 'list':
+            artist = self.request.query_params.get('artist')
+            if artist and str(artist) != str(me.pk):
+                qs = qs.filter(artist_id=artist, track_count__gt=0)   # others: only albums with songs
+            else:
+                qs = qs.filter(artist=me)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(artist=self.request.user)
+
+    def _songs(self, album):
+        ids = list(Track.objects.filter(album_ref=album, is_removed=False)
+                   .order_by('track_number', 'id').values_list('id', flat=True))
+        by_id = annotated_tracks(self.request.user).filter(id__in=ids).in_bulk()
+        return [by_id[i] for i in ids if i in by_id]
+
+    def _respond(self, album, code=status.HTTP_200_OK):
+        fresh = albums_with_counts(Album.objects.filter(pk=album.pk)).get()
+        ctx = {**self.get_serializer_context(), 'album_tracks': self._songs(fresh)}
+        return Response(AlbumSerializer(fresh, context=ctx).data, status=code)
+
+    def retrieve(self, request, *args, **kwargs):
+        return self._respond(self.get_object())
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return self._respond(serializer.instance, status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        album = self.get_object()
+        serializer = self.get_serializer(album, data=request.data, partial=kwargs.pop('partial', False))
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        # The name shown on its songs follows the album's.
+        Track.objects.filter(album_ref=album).update(album=album.title)
+        return self._respond(album)
+
+    def perform_destroy(self, album):
+        Track.objects.filter(album_ref=album).update(album_ref=None, track_number=None, album=None)
+        album.delete()
+
+    @action(detail=True, methods=['post'], url_path='set-tracks')
+    def set_tracks(self, request, pk=None):
+        """{"track_ids": [...]}: the album's songs, in order — your own songs.
+        Songs left out come off the album; a song on another of your albums
+        moves to this one."""
+        album = self.get_object()  # owner check via IsOwnerOrReadOnly
+        try:
+            ids = [int(i) for i in request.data.get('track_ids')]
+        except (TypeError, ValueError):
+            return Response({'error': 'track_ids must be a list of song ids'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(ids) != len(set(ids)):
+            return Response({'error': 'a song can only be on an album once'}, status=status.HTTP_400_BAD_REQUEST)
+        mine = set(Track.objects.filter(id__in=ids, artist=request.user, is_removed=False).values_list('id', flat=True))
+        if mine != set(ids):
+            return Response({'error': 'only your own songs can go on your album'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            Track.objects.filter(album_ref=album).exclude(id__in=ids).update(album_ref=None, track_number=None, album=None)
+            for n, tid in enumerate(ids, start=1):
+                Track.objects.filter(pk=tid).update(album_ref=album, track_number=n, album=album.title)
+            Album.objects.filter(pk=album.pk).update(updated_at=timezone.now())
+        return self._respond(album)
+
+
+class StudioView(APIView):
+    """Artist Studio: your streams, listeners, completion, likes, followers,
+    daily streams, top songs, countries and where listens start, for the
+    last ?days=7|28|90 (with change on the period before)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            days = int(request.query_params.get('days', 28))
+        except ValueError:
+            days = 28
+        return Response(artists.studio(request.user, days))
 
 
 class LibraryView(APIView):

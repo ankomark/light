@@ -17,7 +17,7 @@ import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
-  fetchUserById, fetchUserPosts, fetchUserTracks, fetchUserPlaylists, followUser, getOrCreateConversation, blockUser,
+  fetchUserById, fetchUserPosts, fetchUserTracks, fetchUserPlaylists, fetchArtist, followUser, getOrCreateConversation, blockUser,
 } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
@@ -30,6 +30,7 @@ import ChoiceSheet from './ChoiceSheet';
 import ReportModal from './ReportModal';
 import TrackItem from './TrackItem';
 import PlaylistCover from './PlaylistCover';
+import VerifiedBadge from './VerifiedBadge';
 import toQueueTrack from '../utils/queueTrack';
 import { colors, typography, spacing, radius, profileColors as P } from '../constants/theme';
 
@@ -159,6 +160,11 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   const tracksReqRef = useRef(0);
   const { playQueue } = usePlayer();
 
+  // The artist part (tick, monthly listeners, popular songs, albums): loaded
+  // for accounts that have songs, cache-first.
+  const artistKey = userKey(currentUser?.id, `profile:${userId}:artist`);
+  const [artist, setArtist] = useState(() => peekCache(artistKey));
+
   // Playlists tab: their public playlists (all of yours), loaded when opened.
   const playlistsKey = userKey(currentUser?.id, `profile:${userId}:playlists`);
   const [playlists, setPlaylists] = useState(() => peekCache(playlistsKey) ?? null);
@@ -277,6 +283,19 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
       if (req === tracksReqRef.current) setTracksLoading(false);
     }
   }, [userId, tracksKey]);
+
+  const hasSongs = (user?.tracks_count ?? 0) > 0;
+  const canSee = user ? user.can_view !== false : false;
+  useEffect(() => {
+    if (!userId || !hasSongs || !canSee) return undefined;
+    let cancelled = false;
+    if (!artist) readCache(artistKey).then((c) => { if (!cancelled && c) setArtist((a) => a ?? c); });
+    fetchArtist(userId)
+      .then((data) => { if (!cancelled && data) { setArtist(data); writeCache(artistKey, data); } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, hasSongs, canSee, artistKey]);
 
   const loadPlaylists = useCallback(async () => {
     if (!userId) return;
@@ -426,6 +445,8 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
 
   const followOff = !!user?.is_following || user?.follow_status === 'requested';
   const showMusic = isSelf || (user?.tracks_count ?? 0) > 0;
+  const isArtist = (user?.tracks_count ?? 0) > 0;
+  const verified = !!(user?.verified || artist?.verified);
   const showPlaylists = isSelf || (user?.playlists_count ?? 0) > 0;
 
   const header = user ? (
@@ -444,11 +465,15 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
 
         <View style={styles.nameRow}>
           <Text style={styles.handle} numberOfLines={1}>@{user.username}</Text>
+          {verified ? <VerifiedBadge size={17} /> : null}
           {user.is_private && <Feather name="lock" size={14} color={P.muted} />}
         </View>
         {user.follows_you && !isSelf && (
           <View style={styles.followsYou}><Text style={styles.followsYouText}>{t('profile.followsYou')}</Text></View>
         )}
+        {isArtist && artist?.monthly_listeners ? (
+          <Text style={styles.listeners}>{t('artist.monthlyListeners', { n: formatCount(artist.monthly_listeners) })}</Text>
+        ) : null}
 
         <View style={styles.statsRow}>
           <StatBox value={user.following_count} label={t('profile.following')} onPress={canView ? () => openList('following') : undefined} />
@@ -474,6 +499,16 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
               >
                 <Ionicons name="heart-outline" size={20} color={P.text} />
               </TouchableOpacity>
+              {isArtist ? (
+                <TouchableOpacity
+                  style={styles.squareBtn}
+                  onPress={() => navigation.navigate('ArtistStudio')}
+                  activeOpacity={0.85}
+                  accessibilityLabel={t('artist.studio')}
+                >
+                  <Ionicons name="stats-chart" size={19} color={P.gold} />
+                </TouchableOpacity>
+              ) : null}
             </>
           ) : (
             <>
@@ -619,6 +654,56 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     </TouchableOpacity>
   ), [navigation, isSelf, t]);
 
+  const playTop = useCallback((index) => {
+    playQueue((artist?.top_tracks ?? []).map(toQueueTrack), index, { source: 'profile' });
+  }, [playQueue, artist?.top_tracks]);
+
+  const musicIntro = artist && (artist.top_tracks?.length || artist.albums?.length) ? (
+    <View style={styles.artistBlock}>
+      {artist.top_tracks?.length ? (
+        <>
+          <Text style={styles.blockTitle}>{t('artist.popular')}</Text>
+          {artist.top_tracks.map((tr, i) => (
+            <TouchableOpacity key={tr.id} style={styles.popRow} onPress={() => playTop(i)} activeOpacity={0.8}>
+              <Text style={styles.popPos}>{i + 1}</Text>
+              <View style={styles.popCover}>
+                {(tr.cover_small || tr.cover_image) ? (
+                  <Image source={{ uri: tr.cover_small || tr.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" />
+                ) : <Ionicons name="musical-notes" size={16} color={P.dim} />}
+              </View>
+              <View style={styles.popBody}>
+                <Text style={styles.popTitle} numberOfLines={1}>{tr.title}</Text>
+                <Text style={styles.popMeta} numberOfLines={1}>{t('trackItem.plays', { count: formatCount(tr.views || 0) })}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </>
+      ) : null}
+      {artist.albums?.length ? (
+        <>
+          <Text style={styles.blockTitle}>{t('artist.albums')}</Text>
+          <FlatList
+            horizontal
+            data={artist.albums}
+            keyExtractor={(a) => `alb_${a.id}`}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.albumRail}
+            renderItem={({ item: a }) => (
+              <TouchableOpacity style={styles.albumCard} onPress={() => navigation.navigate('Album', { albumId: a.id, title: a.title })} activeOpacity={0.85}>
+                <PlaylistCover cover={a.cover} images={[]} size={128} radius={8} />
+                <Text style={styles.albumTitle} numberOfLines={1}>{a.title}</Text>
+                <Text style={styles.albumMeta} numberOfLines={1}>
+                  {[a.release_date ? a.release_date.slice(0, 4) : null, t('library.songCount', { n: a.track_count })].filter(Boolean).join('  ·  ')}
+                </Text>
+              </TouchableOpacity>
+            )}
+          />
+        </>
+      ) : null}
+      <Text style={styles.blockTitle}>{t('music.allSongs')}</Text>
+    </View>
+  ) : null;
+
   const renderTrack = useCallback(({ item, index }) => (
     <View style={styles.trackRow}>
       <TrackItem track={item} index={index} onPlay={playFrom} onDelete={onTrackDeleted} onRefresh={loadTracks} />
@@ -684,7 +769,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
           ListEmptyComponent: empty,
           ListFooterComponent: loadingMore ? <ActivityIndicator style={styles.more} color={P.muted} /> : null,
         })}
-        ListHeaderComponent={header}
+        ListHeaderComponent={onMusic && musicIntro ? <>{header}{musicIntro}</> : header}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.6}
         refreshControl={(
@@ -779,6 +864,22 @@ const styles = StyleSheet.create({
   tabOn: { borderBottomColor: P.text },
   tabText: { fontSize: 13, fontWeight: '600', color: P.text },
   tabTextOff: { color: P.dim },
+  listeners: { marginTop: 6, fontSize: 13, color: P.muted },
+  artistBlock: { width: '100%', maxWidth: TRACKS_MAX, alignSelf: 'center', paddingTop: spacing.sm },
+  blockTitle: { fontSize: 16, fontWeight: '800', color: P.text, marginHorizontal: spacing.md, marginTop: spacing.md, marginBottom: spacing.sm },
+  popRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: 6 },
+  popPos: { width: 20, textAlign: 'center', color: P.muted, fontWeight: '700' },
+  popCover: {
+    width: 44, height: 44, borderRadius: 4, overflow: 'hidden', backgroundColor: P.raised,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  popBody: { flex: 1 },
+  popTitle: { fontSize: 15, fontWeight: '600', color: P.text },
+  popMeta: { fontSize: 12.5, color: P.muted, marginTop: 1 },
+  albumRail: { paddingHorizontal: spacing.md, gap: spacing.md },
+  albumCard: { width: 128 },
+  albumTitle: { fontSize: 13.5, fontWeight: '700', color: P.text, marginTop: 6 },
+  albumMeta: { fontSize: 12, color: P.muted, marginTop: 1 },
   playlistRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     width: '100%', maxWidth: TRACKS_MAX, alignSelf: 'center',

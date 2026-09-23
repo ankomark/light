@@ -309,6 +309,7 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
     following_count = serializers.IntegerField(source='n_following', read_only=True)
     posts_count = serializers.SerializerMethodField()
     tracks_count = serializers.IntegerField(source='n_tracks', read_only=True, default=0)
+    verified = serializers.BooleanField(source='is_verified_artist', read_only=True)
     # Public playlists (the Playlists tab shows on a profile that has some).
     playlists_count = serializers.IntegerField(source='n_public_playlists', read_only=True, default=0)
     is_self = serializers.SerializerMethodField()
@@ -325,7 +326,7 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'profile_picture', 'profile',
             'followers_count', 'following_count', 'posts_count', 'tracks_count', 'playlists_count', 'total_likes',
-            'is_self', 'is_following', 'follows_you', 'follow_status',
+            'is_self', 'is_following', 'follows_you', 'follow_status', 'verified',
             'is_private', 'can_view', 'social_posts', 'posts_has_more',
         ]
 
@@ -413,10 +414,12 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
 
 class SimpleUserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
+    # The verified-artist tick, next to the name on songs, comments, lists.
+    verified = serializers.BooleanField(source='is_verified_artist', read_only=True)
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'profile_picture']
+        fields = ['id', 'username', 'profile_picture', 'verified']
     
     def get_profile_picture(self, obj):
         if not hasattr(obj, 'profile'):
