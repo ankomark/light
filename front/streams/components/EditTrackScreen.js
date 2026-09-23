@@ -7,6 +7,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { apiRequest, fetchTrackLyrics, invalidateTrackLyrics } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import GenrePicker from './GenrePicker';
 
 const EditTrackScreen = () => {
   const { t } = useI18n();
@@ -15,6 +16,7 @@ const EditTrackScreen = () => {
 
   const [title, setTitle] = useState(track.title || '');
   const [album, setAlbum] = useState(track.album || '');
+  const [genre, setGenre] = useState(track.genre?.slug ?? null);
   const [saving, setSaving] = useState(false);
 
   // `null` means "not loaded yet", which is NOT the same as "no lyrics".
@@ -60,6 +62,9 @@ const EditTrackScreen = () => {
         title: title.trim(),
         album: album.trim(),
         lyrics: lyrics.trim(),
+        // Only when changed: a row cached before songs had genres has none,
+        // and sending that would clear the real one.
+        ...(genre !== (track.genre?.slug ?? null) ? { genre } : {}),
       });
       // The sheet and Now Playing cache lyrics per track for the session; drop
       // this one so they don't keep showing the words that were just replaced.
@@ -101,6 +106,9 @@ const EditTrackScreen = () => {
           placeholderTextColor={colors.placeholder}
           maxLength={100}
         />
+
+        <Text style={styles.label}>{t('track.genre')}</Text>
+        <GenrePicker value={genre} onChange={setGenre} />
 
         <Text style={styles.label}>{t('track.lyrics')}</Text>
         <TextInput

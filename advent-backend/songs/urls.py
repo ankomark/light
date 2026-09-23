@@ -13,6 +13,8 @@ from .views import (
     SignUpView,
     FavoriteTracksView,
     LibraryView,
+    MusicHomeView,
+    MusicChartView,
     SocialPostViewSet,
     PostLikeViewSet,
     PostCommentViewSet,
@@ -180,6 +182,9 @@ urlpatterns = [
     path('tracks/favorites/', TrackViewSet.as_view({'get': 'get_favorites'}), name='track-favorites'),
     # The Library screen's first paint, in one request.
     path('library/', LibraryView.as_view(), name='library'),
+    # The Music home in one request, and a whole chart.
+    path('music/home/', MusicHomeView.as_view(), name='music-home'),
+    path('music/charts/<str:chart>/', MusicChartView.as_view(), name='music-chart'),
     path('notifications/unread_count/', NotificationViewSet.as_view({'get': 'unread_count'}), name='notification-unread-count'),
     path('video-studios/my-studios/', VideoStudioViewSet.as_view({'get': 'my_videostudios'}), name='video-my-studios'),
     

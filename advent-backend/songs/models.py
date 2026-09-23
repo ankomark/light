@@ -349,9 +349,18 @@ class Like(models.Model):
 
 # Category Model
 class Category(models.Model):
+    """A music genre (Gospel, Hymns, Choir...). A song has one, picked on
+    upload; the Music home lists the genres that have songs. Managed in the
+    admin (the API is read-only); `slug` is the stable key the app uses (and
+    translates the name by), `position` the order they're shown in."""
     name = models.CharField(max_length=100, unique=True)
-    
+    slug = models.SlugField(max_length=60, unique=True, null=True, blank=True)
+    position = models.PositiveSmallIntegerField(default=100)
+
     tracks = models.ManyToManyField(Track, related_name='categories', blank=True)
+
+    class Meta:
+        ordering = ['position', 'name']
 
     def __str__(self):
         return self.name
@@ -1104,6 +1113,24 @@ class WatchEvent(models.Model):
         indexes = [models.Index(fields=['user', '-created_at'])]
 
 
+class ChartEntry(models.Model):
+    """One row of a music chart, as last computed (songs/charts.py):
+    'trending' (plays this week) or 'top' (the last four weeks), for the
+    world (country '') or one country."""
+    TRENDING = 'trending'
+    TOP = 'top'
+    chart = models.CharField(max_length=12)
+    country = models.CharField(max_length=2, blank=True, default='')
+    position = models.PositiveSmallIntegerField()
+    track = models.ForeignKey('Track', on_delete=models.CASCADE, related_name='chart_entries')
+    plays = models.PositiveIntegerField(default=0)
+    computed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['position']
+        indexes = [models.Index(fields=['chart', 'country', 'position'], name='chart_lookup_idx')]
+
+
 class Job(models.Model):
     """A unit of background work, queued in Postgres and run by
     `manage.py run_worker` (songs/jobs.py).
@@ -1167,6 +1194,8 @@ class PlayEvent(models.Model):
     # connection — both optional, for stats.
     source = models.CharField(max_length=24, blank=True, default='')
     network = models.CharField(max_length=12, blank=True, default='')
+    # The phone's region (ISO code, e.g. KE), for country charts.
+    country = models.CharField(max_length=2, blank=True, default='')
     started_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

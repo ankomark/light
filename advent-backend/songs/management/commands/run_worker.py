@@ -13,7 +13,7 @@ from django.core.management.base import BaseCommand
 
 from songs import jobs
 # Importing registers the handlers.
-from songs import audio_processing  # noqa: F401
+from songs import audio_processing, charts  # noqa: F401
 
 
 class Command(BaseCommand):

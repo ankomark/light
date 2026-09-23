@@ -114,6 +114,8 @@ import Profile from './components/Profile';
 import NowPlaying from './components/NowPlaying';
 import PlaylistsScreen from './components/PlaylistsScreen';
 import PlaylistDetail from './components/PlaylistDetail';
+import ChartScreen from './components/ChartScreen';
+import GenreScreen from './components/GenreScreen';
 import { navigationRef, navigate } from './services/navigationRef';
 import { API_BASE, PUBLIC_BASE } from './services/api';
 
@@ -282,6 +284,8 @@ const App = () => {
                 <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom' }} />
                 <Stack.Screen name="Playlists" component={PlaylistsWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="PlaylistDetail" component={PlaylistDetailWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="MusicChart" component={MusicChartWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="Genre" component={GenreWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: false }} />
                 <Stack.Screen name="Hashtag" component={HashtagScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Downloads" component={DownloadsScreen} options={{ headerShown: false }} />
@@ -615,6 +619,27 @@ const PlaylistDetailWrapper = ({ navigation, route }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="This playlist couldn’t load.">
       <PlaylistDetail navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+// The Music home's charts and genres: same backdrop and app bar as playlists.
+const MusicChartWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="This chart couldn't load.">
+      <ChartScreen />
+    </ErrorBoundary>
+  </View>
+);
+
+const GenreWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="This genre couldn't load.">
+      <GenreScreen />
     </ErrorBoundary>
   </View>
 );

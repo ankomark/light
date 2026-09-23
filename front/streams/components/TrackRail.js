@@ -38,13 +38,21 @@ const Card = memo(({ track, index, onPlay, active, reasonLabel }) => (
 ));
 Card.displayName = 'TrackRailCard';
 
-const TrackRail = ({ title, tracks, reasonLabel = () => null, style, source = '' }) => {
+// `action`: an optional { label, onPress } link beside the title ("See all").
+const TrackRail = ({ title, tracks, reasonLabel = () => null, style, source = '', action }) => {
   const { playQueue, currentTrack } = usePlayer();
   const onPlay = useCallback((i) => playQueue(tracks.map(toQueueTrack), i, { source }), [playQueue, tracks, source]);
   if (!tracks?.length) return null;
   return (
     <View style={[styles.wrap, style]}>
-      <Text style={styles.heading}>{title}</Text>
+      <View style={styles.headRow}>
+        <Text style={styles.heading} numberOfLines={1}>{title}</Text>
+        {action ? (
+          <TouchableOpacity onPress={action.onPress} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.action}>{action.label}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
       <FlatList
         horizontal
         data={tracks}
@@ -61,7 +69,9 @@ const TrackRail = ({ title, tracks, reasonLabel = () => null, style, source = ''
 
 const styles = StyleSheet.create({
   wrap: { marginBottom: spacing.sm },
-  heading: { color: colors.textPrimary, fontSize: 17, fontWeight: '800', marginHorizontal: spacing.md, marginBottom: spacing.sm },
+  headRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: spacing.md, marginBottom: spacing.sm },
+  heading: { color: colors.textPrimary, fontSize: 17, fontWeight: '800', flexShrink: 1 },
+  action: { color: colors.primary, fontSize: 13, fontWeight: '700' },
   list: { paddingHorizontal: spacing.md, gap: spacing.sm },
   card: { width: CARD },
   cover: {

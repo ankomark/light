@@ -49,6 +49,8 @@ def make_track(**kw):
 
 class JobQueueTests(TestCase):
     def setUp(self):
+        # Migrations seed jobs (the first chart refresh); start from an empty queue.
+        Job.objects.all().delete()
         self.calls = []
         jobs._HANDLERS['t_ok'] = (lambda **p: self.calls.append(p), None)
         self.failed = []
@@ -389,6 +391,7 @@ class DeletePrefixTests(TestCase):
 class WorkerCommandTests(TestCase):
     def test_once_drains_ready_jobs_and_exits(self):
         from django.core.management import call_command
+        Job.objects.all().delete()   # the migration-seeded chart refresh
         done = []
         jobs._HANDLERS['t_cmd'] = (lambda **p: done.append(p['n']), None)
         self.addCleanup(jobs._HANDLERS.pop, 't_cmd', None)

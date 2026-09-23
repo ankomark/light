@@ -289,10 +289,26 @@ export const checkProfileExistence = async () => {
 };
 
 // Track endpoints
-export const fetchTracks = async (page = 1, search = '') => {
+export const fetchTracks = async (page = 1, search = '', genre = '') => {
   const params = { page, page_size: 20 };
   if (search) params.search = search;
+  if (genre) params.genre = genre;
   return apiRequest('get', '/tracks/', null, { params });
+};
+
+// The Music home in one request (see the backend's MusicHomeView):
+// { recent, for_you, trending, new_releases, following, top_country, top_world, genres }.
+export const fetchMusicHome = (country = '') =>
+  apiRequest('get', '/music/home/', null, { params: country ? { country } : {} });
+
+// A whole chart ('trending' | 'top'); no country = worldwide.
+export const fetchMusicChart = (chart, country = '') =>
+  apiRequest('get', `/music/charts/${chart}/`, null, { params: country ? { country } : {} });
+
+// Genres, for the upload picker: [{ id, slug, name, track_count }].
+export const fetchGenres = async () => {
+  const data = await apiRequest('get', '/categories/');
+  return Array.isArray(data) ? data : data?.results ?? [];
 };
 
 // ── Lyrics, fetched on demand ────────────────────────────────────────────────

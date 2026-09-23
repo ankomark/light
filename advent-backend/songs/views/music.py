@@ -2,12 +2,13 @@
 from django.db.models import Exists, OuterRef, Subquery, IntegerField
 from django.db.models.functions import Coalesce
 from django.db import IntegrityError, transaction
+import re
 from django.db.models import F, Max
 from django.utils.dateparse import parse_datetime
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import PlayEvent, PlaylistTrack
 from django.db.models import Prefetch
-from .. import discovery, audio_tags
+from .. import discovery, audio_tags, charts
 from ..comments import (
     create_comment, set_reaction, reaction_summaries, TRACK as TRACK_COMMENTS,
     REACTIONS as COMMENT_REACTIONS, LIKE as COMMENT_LIKE,
@@ -156,6 +157,8 @@ def annotated_tracks(user):
         Track.objects
         .filter(is_removed=False)  # hide moderator takedowns
         .select_related('artist__profile')
+        # The row's genre: one query for the whole page, not one per song.
+        .prefetch_related('categories')
         .annotate(
             likes_total=Coalesce(
                 Subquery(like_count, output_field=IntegerField()), 0),
@@ -204,6 +207,11 @@ class TrackViewSet(viewsets.ModelViewSet):
         - optional ?search= over title / album / artist username.
         """
         qs = annotated_tracks(self.request.user)
+
+        # ?genre=<slug>: a genre's page.
+        genre = self.request.query_params.get('genre', '').strip()
+        if genre:
+            qs = qs.filter(categories__slug=genre)
 
         search = self.request.query_params.get('search', '').strip()
         if search:
@@ -396,6 +404,7 @@ class TrackViewSet(viewsets.ModelViewSet):
                 'ended': bool(e.get('ended')) or bool(prev and prev['ended']),
                 'source': str(e.get('source') or '')[:24],
                 'network': str(e.get('network') or '')[:12],
+                'country': _country(e.get('country')),
                 'started': started,
             }
         if not cleaned:
@@ -421,7 +430,8 @@ class TrackViewSet(viewsets.ModelViewSet):
                         with transaction.atomic():
                             ev = PlayEvent.objects.create(
                                 user=user, track=track, play_id=play_id,
-                                source=c['source'], network=c['network'], started_at=c['started'],
+                                source=c['source'], network=c['network'], country=c['country'],
+                                started_at=c['started'],
                             )
                     except IntegrityError:  # the same listen, racing itself
                         ev = PlayEvent.objects.get(user=user, play_id=play_id)
@@ -680,6 +690,121 @@ class PlaylistViewSet(viewsets.ModelViewSet):
         return self._respond(playlist)
 
 
+_COUNTRY = re.compile(r'^[A-Z]{2}$')
+
+
+def _country(value):
+    """A two-letter region code (the phone's), or ''."""
+    code = str(value or '').strip().upper()
+    return code if _COUNTRY.match(code) else ''
+
+
+def _rows(ids, user, context, extra=None):
+    """Track rows for `ids`, in that order, in one annotated query."""
+    by_id = annotated_tracks(user).filter(id__in=ids).in_bulk()
+    tracks = [by_id[i] for i in ids if i in by_id]
+    data = TrackListSerializer(tracks, many=True, context=context).data
+    if extra:
+        for row in data:
+            row.update(extra.get(row['id'], {}))
+    return data
+
+
+class MusicHomeView(APIView):
+    """The Music home in one request (it matters on a slow connection):
+
+      recent        what you played last
+      for_you       picked from what you like and listen to (with reasons)
+      trending      the most played this week — in your country when it has
+                    its own charts, else worldwide
+      new_releases  uploaded in the last month
+      following     new from the artists you follow
+      top_country   Top 50 of your country (?country=, the phone's region),
+                    first ten — null until it has enough listening
+      top_world     worldwide Top 50, first ten
+      genres        the genres that have songs, with a cover each
+    """
+    permission_classes = [IsAuthenticated]
+    RAIL = 20
+    CHART_PREVIEW = 10
+
+    def get(self, request):
+        me = request.user
+        country = _country(request.query_params.get('country'))
+        now = timezone.now()
+
+        recent = list(
+            PlayEvent.objects.filter(user=me, track__is_removed=False)
+            .values('track_id').annotate(last=Max('started_at')).order_by('-last')
+            .values_list('track_id', flat=True)[:self.RAIL])
+        for_you, reasons = discovery.for_you(me)
+        top_country = charts.read('top', country) if country else []
+        top_world = charts.read('top')
+        trending = [t for t, _ in (charts.read('trending', country) if top_country else [])] or \
+            [t for t, _ in charts.read('trending')]
+        new_releases = list(
+            Track.objects.filter(is_removed=False, created_at__gte=now - timedelta(days=30))
+            .exclude(artist=me).order_by('-created_at').values_list('id', flat=True)[:self.RAIL])
+        following = list(
+            Track.objects.filter(is_removed=False, artist__in=me.followed_by.all(),
+                                 created_at__gte=now - timedelta(days=90))
+            .order_by('-created_at').values_list('id', flat=True)[:self.RAIL])
+
+        top_country = top_country[:self.CHART_PREVIEW]
+        top_world = top_world[:self.CHART_PREVIEW]
+        # One query for every song on the page.
+        ids = list(dict.fromkeys(
+            recent + for_you + trending[:self.RAIL] + new_releases + following
+            + [t for t, _ in top_country] + [t for t, _ in top_world]))
+        ctx = {'request': request}
+        rows = {r['id']: r for r in _rows(ids, me, ctx)}
+        pick = lambda tids: [rows[t] for t in tids if t in rows]  # noqa: E731
+
+        def chart(entries, code):
+            if not entries:
+                return None
+            return {'country': code, 'tracks': [
+                {**rows[t], 'position': i + 1, 'plays': n} for i, (t, n) in enumerate(entries) if t in rows]}
+
+        genres = (Category.objects.exclude(slug__isnull=True)
+                  .annotate(track_count=Count('tracks', filter=Q(tracks__is_removed=False), distinct=True))
+                  .filter(track_count__gt=0).order_by('position', 'name'))
+        genre_rows = []
+        for g in genres:
+            cover = (g.tracks.filter(is_removed=False).exclude(cover_image__isnull=True).exclude(cover_image='')
+                     .order_by('-views', '-created_at').values_list('cover_medium', 'cover_image').first())
+            genre_rows.append({
+                'slug': g.slug, 'name': g.name, 'track_count': g.track_count,
+                'cover': media.resolve(cover[0] or cover[1]) if cover else None,
+            })
+
+        return Response({
+            'recent': pick(recent),
+            'for_you': [{**rows[t], 'reason': reasons.get(t)} for t in for_you if t in rows],
+            'trending': pick(trending[:self.RAIL]),
+            'new_releases': pick(new_releases),
+            'following': pick(following),
+            'top_country': chart(top_country, country),
+            'top_world': chart(top_world, ''),
+            'genres': genre_rows,
+        })
+
+
+class MusicChartView(APIView):
+    """A whole chart: GET /music/charts/<trending|top>/?country=KE (no
+    country: worldwide). Each row carries its position and plays."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, chart):
+        if chart not in ('trending', 'top'):
+            return Response({'error': 'Unknown chart'}, status=status.HTTP_404_NOT_FOUND)
+        country = _country(request.query_params.get('country'))
+        entries = charts.read(chart, country)
+        info = {t: {'position': i + 1, 'plays': n} for i, (t, n) in enumerate(entries)}
+        rows = _rows([t for t, _ in entries], request.user, {'request': request}, info)
+        return Response({'chart': chart, 'country': country, 'tracks': rows})
+
+
 class LibraryView(APIView):
     """Everything the Library screen opens on, in one request (it matters on a
     slow connection): Liked Songs' count and covers, your playlists, and what
@@ -800,10 +925,19 @@ class LikeViewSet(viewsets.ModelViewSet):
 
 
 
-class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.all()
+class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """Music genres, for the upload picker and the Music home. Read-only:
+    genres are managed in the admin (any signed-in user could create, rename
+    or delete them through this endpoint before)."""
+    queryset = Category.objects.all()  # names the route; get_queryset filters
     serializer_class = CategorySerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        return Category.objects.exclude(slug__isnull=True).annotate(
+            track_count=Count('tracks', filter=Q(tracks__is_removed=False), distinct=True),
+        ).order_by('position', 'name')
 
 
 

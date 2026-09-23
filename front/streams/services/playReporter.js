@@ -15,6 +15,7 @@ import { AppState } from 'react-native';
 import { postPlays } from './api';
 import { readCache, writeCache, userKey } from '../utils/screenCache';
 import { mergeEvents } from '../utils/listenTracker';
+import { deviceCountry } from '../utils/region';
 
 const BATCH = 50;
 const MAX_OUTBOX = 500;
@@ -83,7 +84,9 @@ export function setReporterUser(id) {
 /** Queue one listen report (merged with any unsent one for the same listen). */
 export function reportPlay(event) {
   if (userId == null || !event?.play_id) return;
-  outbox.set(event.play_id, mergeEvents(outbox.get(event.play_id), event));
+  // The phone's region, for country charts.
+  const withCountry = event.country ? event : { ...event, country: deviceCountry() };
+  outbox.set(event.play_id, mergeEvents(outbox.get(event.play_id), withCountry));
   if (outbox.size > MAX_OUTBOX) {
     // Oldest first out: a phone offline for weeks keeps its latest listens.
     const drop = outbox.size - MAX_OUTBOX;

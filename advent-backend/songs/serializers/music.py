@@ -1,6 +1,33 @@
 from .common import *  # noqa: F401,F403
 
 
+class GenreField(serializers.Field):
+    """A song's genre: written as the genre's slug ('' or null for none),
+    read as {slug, name} (or null). Stored on the Category many-to-many,
+    one genre per song."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault('source', '*')
+        kwargs.setdefault('required', False)
+        kwargs.setdefault('allow_null', True)
+        super().__init__(**kwargs)
+
+    def to_representation(self, track):
+        # Reads the prefetched categories when the view provided them.
+        cats = [c for c in track.categories.all() if c.slug]
+        if not cats:
+            return None
+        return {'slug': cats[0].slug, 'name': cats[0].name}
+
+    def to_internal_value(self, data):
+        if data in (None, ''):
+            return {'genre': None}
+        genre = Category.objects.filter(slug=str(data)).exclude(slug__isnull=True).first()
+        if genre is None:
+            raise serializers.ValidationError('Unknown genre.')
+        return {'genre': genre}
+
+
 class TrackSerializer(serializers.ModelSerializer):
      likes_count = serializers.SerializerMethodField()
      comments_count = serializers.SerializerMethodField()
@@ -22,13 +49,14 @@ class TrackSerializer(serializers.ModelSerializer):
      audio_high = MediaReferenceField(read_only=True)
      cover_small = MediaReferenceField(read_only=True)
      cover_medium = MediaReferenceField(read_only=True)
+     genre = GenreField()
      class Meta:
         model = Track
         fields = [
             'id', 'title', 'artist', 'album', 'audio_file','is_owner',
             'cover_image', 'lyrics', 'has_lyrics', 'slug', 'duration_ms',
             'audio_low', 'audio_standard', 'audio_high', 'cover_small', 'cover_medium',
-            'processing_status', 'waveform',
+            'processing_status', 'waveform', 'genre',
             'views', 'downloads','likes_count','comments_count','is_liked',
             'created_at', 'updated_at'
         ]
@@ -46,11 +74,24 @@ class TrackSerializer(serializers.ModelSerializer):
             return None
         return value
 
+     def create(self, validated_data):
+        genre_given = 'genre' in validated_data
+        genre = validated_data.pop('genre', None)
+        track = super().create(validated_data)
+        if genre_given and genre:
+            track.categories.set([genre])
+        return track
+
      def update(self, instance, validated_data):
         # Set once (upload, first play or backfill), never edited after.
         if instance.duration_ms:
             validated_data.pop('duration_ms', None)
-        return super().update(instance, validated_data)
+        genre_given = 'genre' in validated_data
+        genre = validated_data.pop('genre', None)
+        track = super().update(instance, validated_data)
+        if genre_given:
+            track.categories.set([genre] if genre else [])
+        return track
 
      def validate_title(self, value):
         if not value or not value.strip():
@@ -263,9 +304,13 @@ class LikeSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
+    # (It listed created_at / updated_at, which genres don't have: the
+    # endpoint answered every request with an error.)
+    track_count = serializers.IntegerField(read_only=True, default=0)
+
     class Meta:
         model = Category
-        fields = ('id', 'name', 'created_at', 'updated_at')
+        fields = ('id', 'slug', 'name', 'track_count')
 
 
 

@@ -11,8 +11,9 @@ import {
 } from "react-native";
 import { Image } from 'expo-image';
 import { useFocusEffect , useNavigation } from '@react-navigation/native';
-import { fetchTracks, fetchShuffledTracks, fetchForYouTracks, fetchRecentTracks } from "../services/api";
-import TrackRail from './TrackRail';
+import { fetchTracks, fetchShuffledTracks, fetchMusicHome } from "../services/api";
+import MusicHome from './MusicHome';
+import { deviceCountry } from '../utils/region';
 import toQueueTrack from '../utils/queueTrack';
 import TrackItem from "./TrackItem";
 import SearchBar from "./SearchBar";
@@ -43,12 +44,11 @@ const TrackList = () => {
   // never runs past the screen edge.
   const roomyBar = contentWidth >= 460;
   const cacheKey = userKey(currentUser?.id, 'tracks');
-  // "Made for you": painted from cache, refreshed when the screen is shown.
-  const forYouKey = userKey(currentUser?.id, 'music:foryou');
-  const [forYou, setForYou] = useState(() => peekCache(forYouKey) ?? []);
-  // "Recently played": what you last listened to, to jump back in.
-  const recentKey = userKey(currentUser?.id, 'music:recent');
-  const [recent, setRecent] = useState(() => peekCache(recentKey) ?? []);
+  // The home sections (Recently played, Made for you, charts, trending, new,
+  // following, genres) — one request, painted from cache, refreshed each
+  // time the screen is shown.
+  const homeKey = userKey(currentUser?.id, 'music:home');
+  const [home, setHome] = useState(() => peekCache(homeKey));
   const [searching, setSearching] = useState(false);
   // Open on the last page-one we saw instead of a centered spinner. Same rule
   // as the feed: `loading` means "nothing to show", not "a request is running".
@@ -173,46 +173,29 @@ const TrackList = () => {
 
   // Reload on focus, but throttled — don't refetch the whole list on every tab
   // switch (only when it's been a while, or the list is empty).
-  const loadRecent = useCallback(() => {
-    fetchRecentTracks(20)
-      .then((rows) => {
-        if (Array.isArray(rows)) { setRecent(rows); writeCache(recentKey, rows); }
+  const loadHome = useCallback(() => {
+    fetchMusicHome(deviceCountry())
+      .then((data) => {
+        if (data && typeof data === 'object') { setHome(data); writeCache(homeKey, data); }
       })
       .catch(() => {});
-  }, [recentKey]);
+  }, [homeKey]);
 
   useFocusEffect(
     useCallback(() => {
       if (tracksRef.current.length === 0 || Date.now() - lastFetchRef.current > 120000) {
         loadTracks(searchRef.current);
       }
-      // Cheap, and changes with every song you play: refresh on every visit.
-      loadRecent();
-    }, [loadTracks, loadRecent])
+      // One request, and "Recently played" changes with every song you play:
+      // refresh on every visit.
+      loadHome();
+    }, [loadTracks, loadHome])
   );
 
   useEffect(() => {
-    if (!recent.length) {
-      readCache(recentKey).then((c) => { if (Array.isArray(c) && c.length) setRecent((p) => (p.length ? p : c)); });
-    }
+    if (!home) readCache(homeKey).then((c) => { if (c) setHome((p) => p ?? c); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recentKey]);
-
-  const loadForYou = useCallback(() => {
-    fetchForYouTracks()
-      .then((rows) => {
-        if (Array.isArray(rows)) { setForYou(rows); writeCache(forYouKey, rows); }
-      })
-      .catch(() => {});
-  }, [forYouKey]);
-
-  useEffect(() => {
-    if (!forYou.length) {
-      readCache(forYouKey).then((c) => { if (Array.isArray(c) && c.length) setForYou((p) => (p.length ? p : c)); });
-    }
-    loadForYou();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadForYou]);
+  }, [homeKey]);
 
   const reasonLabel = useCallback((r) => t(`music.reason.${r}`), [t]);
 
@@ -228,9 +211,8 @@ const TrackList = () => {
 
   const handleRefresh = useCallback(() => {
     loadTracks(searchRef.current);
-    loadForYou();
-    loadRecent();
-  }, [loadTracks, loadForYou, loadRecent]);
+    loadHome();
+  }, [loadTracks, loadHome]);
 
   const handleDelete = useCallback((deletedId) => {
     setTracks(prev => prev.filter(tr => tr.id !== deletedId));
@@ -338,12 +320,9 @@ const TrackList = () => {
         renderItem={renderItem}
         ListHeaderComponent={
           searching ? null : (
-            // Edge to edge: the list pads its rows by sideMargin, so the rail
-            // cancels it to scroll under the screen edges.
-            <>
-              <TrackRail title={t('music.recentlyPlayed')} tracks={recent} source="recent" style={{ marginHorizontal: -sideMargin, marginTop: 4 }} />
-              <TrackRail title={t('music.madeForYou')} tracks={forYou} reasonLabel={reasonLabel} source="for_you" style={{ marginHorizontal: -sideMargin, marginTop: 4 }} />
-            </>
+            // Rails run edge to edge: the list pads its rows by sideMargin,
+            // so MusicHome cancels it for them.
+            <MusicHome home={home} sideMargin={sideMargin} reasonLabel={reasonLabel} />
           )
         }
         contentContainerStyle={[styles.trackList, { paddingHorizontal: sideMargin }]}

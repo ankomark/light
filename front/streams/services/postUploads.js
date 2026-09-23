@@ -209,6 +209,7 @@ export const buildTrackJob = (snap) => async ({ progress, stage }) => {
     cover_image: coverUpload?.publicId || null,
     album: snap.album || null,
     lyrics: snap.lyrics || null,
+    ...(snap.genre ? { genre: snap.genre } : {}),
     // Measured on the phone when the file was picked (null when unreadable).
     ...(snap.durationMs ? { duration_ms: snap.durationMs } : {}),
     ...(snap.clientId ? { client_id: snap.clientId } : {}),

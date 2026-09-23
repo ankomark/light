@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { createSound, measureDurationMs } from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
 import { enqueueUpload } from '../services/uploadQueue';
+import GenrePicker from './GenrePicker';
 import RotatingBackground from './RotatingBackground';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { colors, spacing, radius, shadows } from '../constants/theme';
@@ -30,6 +31,7 @@ const TrackUploadForm = () => {
 
   const [title, setTitle] = useState('');
   const [album, setAlbum] = useState('');
+  const [genre, setGenre] = useState(null);
   const [lyrics, setLyrics] = useState('');
   const [audioFile, setAudioFile] = useState(null);   // { uri, name, mimeType, sizeMB }
   const [coverImage, setCoverImage] = useState(null); // { uri, mimeType }
@@ -151,6 +153,7 @@ const TrackUploadForm = () => {
       snap: {
         title: title.trim(),
         album: album.trim(),
+        genre,
         lyrics: lyrics.trim(),
         durationMs: audioFile.durationMs || null,
         audio: { uri: audioFile.uri, name: audioFile.name, mimeType: audioFile.mimeType },
@@ -246,6 +249,8 @@ const TrackUploadForm = () => {
               placeholderTextColor={colors.placeholder}
               maxLength={200}
             />
+            <Text style={[styles.label, styles.labelSpaced]}>{t('track.genre')}</Text>
+            <GenrePicker value={genre} onChange={setGenre} />
           </View>
 
           <View style={styles.card}>
