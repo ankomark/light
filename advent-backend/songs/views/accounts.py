@@ -1,9 +1,11 @@
 from .common import *  # noqa: F401,F403
 from rest_framework import mixins
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, IntegerField, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import Appeal
-from ..serializers import AppealSerializer
+from ..serializers import AppealSerializer, TrackListSerializer
+from .music import annotated_tracks
 
 
 class NotificationPreferenceView(APIView):
@@ -102,6 +104,12 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
                 follows_viewer=Exists(Follow.objects.filter(from_user=me.pk, to_user=OuterRef('pk'))),
                 viewer_requested=Exists(FollowRequest.objects.filter(
                     requester=me.pk, target=OuterRef('pk'), status='pending')),
+                # A subquery, not Count('tracks'): a third join would multiply
+                # the follower rows the two Counts above already aggregate.
+                n_tracks=Coalesce(Subquery(
+                    Track.objects.filter(artist=OuterRef('pk'), is_removed=False)
+                    .order_by().values('artist').annotate(n=Count('id')).values('n')[:1],
+                    output_field=IntegerField()), 0),
             )
         return queryset
 
@@ -292,6 +300,23 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         page = paginator.paginate_queryset(posts, request, view=self)
         data = ProfilePostThumbSerializer(page, many=True, context=self.get_serializer_context()).data
         return paginator.get_paginated_response(data)
+    @action(detail=True, methods=['get'])
+    def tracks(self, request, pk=None):
+        """A profile's Music tab, ?page=N (20 per page): the songs this
+        account uploaded, newest first, as the same rows the library shows (so
+        they play, like and comment the same way). Held back from viewers a
+        private account hasn't approved, like its posts."""
+        user = self.get_object()
+        denied = self._require_can_view(user)
+        if denied:
+            return denied
+        qs = annotated_tracks(request.user).filter(artist=user).order_by('-created_at')
+        paginator = StandardPagination()
+        paginator.page_size = 20
+        page = paginator.paginate_queryset(qs, request, view=self)
+        data = TrackListSerializer(page, many=True, context=self.get_serializer_context()).data
+        return paginator.get_paginated_response(data)
+
     @action(detail=True, methods=['get'])
     def followers_count(self, request, pk=None):
         """Dedicated endpoint just for follower count"""

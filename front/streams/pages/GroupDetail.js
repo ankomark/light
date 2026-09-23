@@ -719,6 +719,8 @@ const GroupDetail = ({ route, navigation }) => {
       await setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
       const { sound } = await createSound({ uri: sourceUri }, { shouldPlay: true });
       soundRef.current = sound; setPlayingId(msg.id);
+      // Another sound started (only one plays at a time): this note is done.
+      sound.setOnFocusLost(() => { setPlayingId(null); sound.unloadAsync().catch(() => {}); if (soundRef.current === sound) soundRef.current = null; });
       sound.setOnPlaybackStatusUpdate((st) => { if (st.didJustFinish) { setPlayingId(null); sound.unloadAsync().catch(() => {}); soundRef.current = null; } });
     } catch { Alert.alert(t('common.error'), t('chat.playVoiceFailed')); setPlayingId(null); }
   }, [playingId, t]);

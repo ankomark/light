@@ -974,6 +974,9 @@ const SocialFeed = ({ showBackground = true }) => {
       playingSongPostIdRef.current = post.id;
       setCurrentlyPlayingPostId(post.id);
       setIsAudioPlaying(true);
+      // Paused because another sound started (music player, a voice note):
+      // show it as paused; a tap on the post resumes it.
+      sound.setOnFocusLost(() => setIsAudioPlaying(false));
       const start = post.song_start_time || 0;
       await sound.playFromPositionAsync(start * 1000);
       if (post.song_end_time && post.song_end_time > start) {

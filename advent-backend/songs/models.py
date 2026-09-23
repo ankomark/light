@@ -178,7 +178,13 @@ class Track(models.Model):
     cover_image = models.CharField(max_length=500, blank=True, null=True)
     lyrics = models.TextField(blank=True, null=True)
     slug = models.SlugField(unique=True)
+    # The play count: listens of 30s or more, bumped by PlayEvent ingestion
+    # (TrackViewSet.plays). The name predates plays being counted at all.
     views = models.PositiveIntegerField(default=0)
+    # Length, so rows can show "3:42" and the player a full seek bar before the
+    # audio loads. Sent by the app on upload, learned from the first play, or
+    # backfilled from the file (manage.py backfill_track_durations).
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
     downloads = models.PositiveIntegerField(default=0)
     # Soft moderation takedown — hidden from public lists, kept for admin/audit.
     is_removed = models.BooleanField(default=False)
@@ -1039,6 +1045,45 @@ class WatchEvent(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['user', '-created_at'])]
+
+
+class PlayEvent(models.Model):
+    """One listen of a track: how much was heard and how it ended.
+
+    The app reports a listen at the 30-second mark and again when it ends
+    (finished, skipped, or the player moved on), both under the same client
+    `play_id`, so a report retried from the phone's offline outbox updates the
+    row instead of adding a second one. A listen of 30s+ adds one to the
+    track's play count (Track.views), once.
+
+    The raw material for play counts, "Recently played", trending by plays,
+    completion/skip rates for recommendations, and artist stats."""
+    COUNT_AFTER_MS = 30000
+
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='play_events')
+    track = models.ForeignKey('Track', on_delete=models.CASCADE, related_name='play_events')
+    play_id = models.CharField(max_length=64)
+    ms_played = models.PositiveIntegerField(default=0)
+    completed = models.BooleanField(default=False)
+    # Ended before the 30s mark without finishing: a strong "not for me".
+    skipped = models.BooleanField(default=False)
+    # Added to the track's play count (at most once per listen).
+    counted = models.BooleanField(default=False)
+    # Where the listen started (library, profile, for_you, ...) and on what
+    # connection — both optional, for stats.
+    source = models.CharField(max_length=24, blank=True, default='')
+    network = models.CharField(max_length=12, blank=True, default='')
+    started_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'play_id'], name='playevent_user_play_uniq'),
+        ]
+        indexes = [
+            models.Index(fields=['user', '-started_at'], name='playevent_user_recent_idx'),
+            models.Index(fields=['track', '-started_at'], name='playevent_track_recent_idx'),
+        ]
 
 
 class MediaStation(models.Model):

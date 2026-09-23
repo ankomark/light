@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView, Pressable, Platform, ToastAndroid } from 'react-native';
 import { Image } from 'expo-image';
 import GlassView from './GlassView';
 import Likes from './LikeButton';
@@ -17,6 +17,9 @@ import ReportModal from './ReportModal';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { FONT_SCALE } from '../utils/layout';
+import formatCount from '../utils/formatCount';
+import formatDuration from '../utils/formatDuration';
+import toQueueTrack from '../utils/queueTrack';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
@@ -29,7 +32,9 @@ const TrackItem = React.memo(function TrackItem({
 }) {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const { currentTrack, isPlaying, isLoading, isBuffering, playTrack, togglePlay } = usePlayer();
+  const {
+    currentTrack, isPlaying, isLoading, isBuffering, playTrack, togglePlay, playNextInQueue, addToQueue,
+  } = usePlayer();
   const isOwner = track.is_owner;
 
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -89,16 +94,27 @@ const TrackItem = React.memo(function TrackItem({
       onPlay(index);
       return;
     }
-    playTrack({
-      id: track.id,
-      title: track.title,
-      album: track.album,
-      artist: track.artist,
-      cover_image: optimizedCover,
-      audio_file: optimizedAudio,
-      has_lyrics: hasLyrics,
-    });
+    playTrack(toQueueTrack({ ...track, cover_image: optimizedCover, audio_file: optimizedAudio, has_lyrics: hasLyrics }));
   };
+
+  // "Play next" / "Add to queue" from the menu. Android confirms with a toast;
+  // on iOS the song simply shows up in the queue.
+  const enqueue = (where) => {
+    setMenuVisible(false);
+    const item = toQueueTrack({ ...track, has_lyrics: hasLyrics });
+    if (where === 'next') playNextInQueue(item);
+    else addToQueue(item);
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(t(where === 'next' ? 'queue.willPlayNext' : 'queue.added'), ToastAndroid.SHORT);
+    }
+  };
+
+  // Under the title: artist · plays · length (each only when known).
+  const meta = [
+    track.artist?.username,
+    track.views ? t('trackItem.plays', { count: formatCount(track.views) }) : null,
+    formatDuration(track.duration_ms),
+  ].filter(Boolean).join('  ·  ');
 
   const handleDelete = () => {
     Alert.alert(t('trackItem.deleteTitle'), t('trackItem.deleteConfirm'), [
@@ -217,8 +233,7 @@ const TrackItem = React.memo(function TrackItem({
               numberOfLines={1}
               maxFontSizeMultiplier={FONT_SCALE.chrome}
             >
-              {track.artist?.username}
-              {!!track.album && `  ·  ${track.album}`}
+              {meta}
             </Text>
           </View>
         </TouchableOpacity>
@@ -250,20 +265,10 @@ const TrackItem = React.memo(function TrackItem({
         </View>
 
         <View style={styles.actionRight}>
-          {isOwner && (
-            <TouchableOpacity style={styles.iconBtn} onPress={() => setMenuVisible(true)} hitSlop={HIT}
-              accessibilityRole="button" accessibilityLabel="Track options">
-              <MaterialIcons name="more-horiz" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          )}
-
-          {/* Report — a direct flag on other artists' tracks (mirrors posts). */}
-          {!isOwner && (
-            <TouchableOpacity style={styles.iconBtn} onPress={() => setReportVisible(true)} hitSlop={HIT}
-              accessibilityRole="button" accessibilityLabel="Report track">
-              <MaterialIcons name="flag" size={20} color={colors.warning} />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setMenuVisible(true)} hitSlop={HIT}
+            accessibilityRole="button" accessibilityLabel={t('trackItem.options')}>
+            <MaterialIcons name="more-horiz" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
 
           {onRemoveFromPlaylist && (
             <TouchableOpacity style={styles.iconBtn} onPress={onRemoveFromPlaylist} hitSlop={HIT}>
@@ -343,7 +348,8 @@ const TrackItem = React.memo(function TrackItem({
       </Modal>
       )}
 
-      {/* Owner action sheet: Edit / Delete (tap the "..." to open). */}
+      {/* Song menu (tap the "..."): queue it; then Edit / Delete for your
+          own songs, Report for everyone else's. */}
       <Modal
         visible={menuVisible}
         transparent
@@ -354,20 +360,40 @@ const TrackItem = React.memo(function TrackItem({
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuVisible(false)} />
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
-            <TouchableOpacity
-              style={styles.sheetItem}
-              onPress={() => { setMenuVisible(false); navigation.navigate('EditTrack', { track }); }}
-            >
-              <MaterialIcons name="edit" size={22} color={colors.primary} />
-              <Text style={styles.sheetLabel}>{t('trackItem.edit')}</Text>
+            <TouchableOpacity style={styles.sheetItem} onPress={() => enqueue('next')}>
+              <MaterialCommunityIcons name="playlist-play" size={22} color={colors.primary} />
+              <Text style={styles.sheetLabel}>{t('queue.playNext')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.sheetItem}
-              onPress={() => { setMenuVisible(false); handleDelete(); }}
-            >
-              <MaterialIcons name="delete-outline" size={22} color={colors.error} />
-              <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>{t('trackItem.delete')}</Text>
+            <TouchableOpacity style={styles.sheetItem} onPress={() => enqueue('end')}>
+              <MaterialIcons name="queue-music" size={22} color={colors.primary} />
+              <Text style={styles.sheetLabel}>{t('queue.addToQueue')}</Text>
             </TouchableOpacity>
+            {isOwner ? (
+              <>
+                <TouchableOpacity
+                  style={styles.sheetItem}
+                  onPress={() => { setMenuVisible(false); navigation.navigate('EditTrack', { track }); }}
+                >
+                  <MaterialIcons name="edit" size={22} color={colors.primary} />
+                  <Text style={styles.sheetLabel}>{t('trackItem.edit')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.sheetItem}
+                  onPress={() => { setMenuVisible(false); handleDelete(); }}
+                >
+                  <MaterialIcons name="delete-outline" size={22} color={colors.error} />
+                  <Text style={[styles.sheetLabel, styles.sheetLabelDestructive]}>{t('trackItem.delete')}</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity
+                style={styles.sheetItem}
+                onPress={() => { setMenuVisible(false); setReportVisible(true); }}
+              >
+                <MaterialIcons name="flag" size={22} color={colors.warning} />
+                <Text style={styles.sheetLabel}>{t('common.report')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>

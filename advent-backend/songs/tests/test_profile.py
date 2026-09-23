@@ -5,7 +5,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase, APIClient
 
-from songs.models import Block, FollowRequest, Profile, SocialPost, User
+from songs.models import Block, FollowRequest, Profile, SocialPost, Track, User
 
 IMG = 'https://media.example.com/p.jpg'
 
@@ -128,3 +128,45 @@ class PrivacyTests(Base):
         Block.objects.create(blocker=self.me, blocked=blocked)
         names = [r['username'] for r in self.get(self.star, 'followers/').json()['results']]
         self.assertEqual(names, ['pf_ok'])
+
+
+def track(user, title='Hymn', **kw):
+    return Track.objects.create(title=title, artist=user, audio_file='https://m.x/a.mp3', lyrics='words', **kw)
+
+
+class MusicTabTests(Base):
+    def test_profile_lists_the_accounts_own_tracks_newest_first(self):
+        track(self.star, 'Old')
+        track(self.star, 'New')
+        track(self.star, 'Taken down', is_removed=True)
+        track(self.me, 'Mine')
+        self.assertEqual(self.get(self.star).json()['tracks_count'], 2)
+        data = self.get(self.star, 'tracks/').json()
+        self.assertEqual([r['title'] for r in data['results']], ['New', 'Old'])
+        row = data['results'][0]
+        self.assertTrue(row['has_lyrics'])
+        self.assertNotIn('lyrics', row)  # the list payload, not the full track
+        self.assertEqual(row['artist']['id'], self.star.id)
+
+    def test_private_account_withholds_tracks_until_approved(self):
+        priv = User.objects.create_user('pf_privm', 'pfpm@x.com', 'x')
+        Profile.objects.create(user=priv, is_public=False)
+        track(priv)
+        self.assertEqual(self.get(priv).json()['tracks_count'], 1)
+        self.assertEqual(self.get(priv, 'tracks/').status_code, 403)
+        priv.followers.add(self.me)
+        self.assertEqual(len(self.get(priv, 'tracks/').json()['results']), 1)
+
+    def test_blocked_account_tracks_not_found(self):
+        track(self.star)
+        Block.objects.create(blocker=self.star, blocked=self.me)
+        self.assertEqual(self.get(self.star, 'tracks/').status_code, 404)
+
+    def test_query_count_is_flat(self):
+        def measure(n):
+            for i in range(n):
+                track(self.star, f'T{i}')
+            with CaptureQueriesContext(connection) as ctx:
+                self.get(self.star, 'tracks/?page=1')
+            return len(ctx.captured_queries)
+        self.assertEqual(measure(2), measure(25))

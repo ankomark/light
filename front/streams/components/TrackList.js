@@ -11,8 +11,9 @@ import {
 } from "react-native";
 import { Image } from 'expo-image';
 import { useFocusEffect , useNavigation } from '@react-navigation/native';
-import { fetchTracks, fetchShuffledTracks, fetchForYouTracks } from "../services/api";
+import { fetchTracks, fetchShuffledTracks, fetchForYouTracks, fetchRecentTracks } from "../services/api";
 import TrackRail from './TrackRail';
+import toQueueTrack from '../utils/queueTrack';
 import TrackItem from "./TrackItem";
 import SearchBar from "./SearchBar";
 import { TrackListSkeleton } from './SkeletonLoader';
@@ -45,6 +46,9 @@ const TrackList = () => {
   // "Made for you": painted from cache, refreshed when the screen is shown.
   const forYouKey = userKey(currentUser?.id, 'music:foryou');
   const [forYou, setForYou] = useState(() => peekCache(forYouKey) ?? []);
+  // "Recently played": what you last listened to, to jump back in.
+  const recentKey = userKey(currentUser?.id, 'music:recent');
+  const [recent, setRecent] = useState(() => peekCache(recentKey) ?? []);
   const [searching, setSearching] = useState(false);
   // Open on the last page-one we saw instead of a centered spinner. Same rule
   // as the feed: `loading` means "nothing to show", not "a request is running".
@@ -73,17 +77,7 @@ const TrackList = () => {
 
   // Minimal playable shape for the queue (mini-player reads these fields).
   const buildQueue = useCallback(
-    () => tracksRef.current.map(t => ({
-      id: t.id,
-      title: t.title,
-      album: t.album,
-      artist: t.artist,
-      cover_image: t.cover_image,
-      audio_file: t.audio_file,
-      // Not the lyrics themselves — NowPlaying fetches them for the track being
-      // played, so a queue is a list of pointers rather than a pile of text.
-      has_lyrics: t.has_lyrics,
-    })),
+    () => tracksRef.current.map(toQueueTrack),
     []
   );
 
@@ -96,10 +90,10 @@ const TrackList = () => {
     setShuffling(true);
     try {
       const sample = await fetchShuffledTracks(200, searchRef.current);
-      if (sample.length) playQueue(sample, 0, { shuffle: true });
-      else if (tracks.length) playQueue(buildQueue(), 0, { shuffle: true });
+      if (sample.length) playQueue(sample, 0, { shuffle: true, source: 'library' });
+      else if (tracks.length) playQueue(buildQueue(), 0, { shuffle: true, source: 'library' });
     } catch {
-      if (tracks.length) playQueue(buildQueue(), 0, { shuffle: true });
+      if (tracks.length) playQueue(buildQueue(), 0, { shuffle: true, source: 'library' });
     } finally {
       setShuffling(false);
     }
@@ -179,13 +173,30 @@ const TrackList = () => {
 
   // Reload on focus, but throttled — don't refetch the whole list on every tab
   // switch (only when it's been a while, or the list is empty).
+  const loadRecent = useCallback(() => {
+    fetchRecentTracks(20)
+      .then((rows) => {
+        if (Array.isArray(rows)) { setRecent(rows); writeCache(recentKey, rows); }
+      })
+      .catch(() => {});
+  }, [recentKey]);
+
   useFocusEffect(
     useCallback(() => {
       if (tracksRef.current.length === 0 || Date.now() - lastFetchRef.current > 120000) {
         loadTracks(searchRef.current);
       }
-    }, [loadTracks])
+      // Cheap, and changes with every song you play: refresh on every visit.
+      loadRecent();
+    }, [loadTracks, loadRecent])
   );
+
+  useEffect(() => {
+    if (!recent.length) {
+      readCache(recentKey).then((c) => { if (Array.isArray(c) && c.length) setRecent((p) => (p.length ? p : c)); });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentKey]);
 
   const loadForYou = useCallback(() => {
     fetchForYouTracks()
@@ -218,7 +229,8 @@ const TrackList = () => {
   const handleRefresh = useCallback(() => {
     loadTracks(searchRef.current);
     loadForYou();
-  }, [loadTracks, loadForYou]);
+    loadRecent();
+  }, [loadTracks, loadForYou, loadRecent]);
 
   const handleDelete = useCallback((deletedId) => {
     setTracks(prev => prev.filter(tr => tr.id !== deletedId));
@@ -227,7 +239,7 @@ const TrackList = () => {
   // Play from this row's position in the current queue. Stable, so it doesn't
   // re-create every row's props — it reads the queue through tracksRef.
   const handlePlay = useCallback((index) => {
-    playQueue(buildQueue(), index);
+    playQueue(buildQueue(), index, { source: 'library' });
   }, [playQueue, buildQueue]);
 
   // Stable identities: an inline renderItem is a new function every render, so
@@ -274,7 +286,7 @@ const TrackList = () => {
             <>
               <TouchableOpacity
                 style={[styles.queueBtn, styles.queueBtnShrink]}
-                onPress={() => playQueue(buildQueue(), 0, { shuffle: false })}
+                onPress={() => playQueue(buildQueue(), 0, { shuffle: false, source: 'library' })}
                 activeOpacity={0.85}
               >
                 <Ionicons name="play" size={16} color="white" />
@@ -339,7 +351,10 @@ const TrackList = () => {
           searching ? null : (
             // Edge to edge: the list pads its rows by sideMargin, so the rail
             // cancels it to scroll under the screen edges.
-            <TrackRail title={t('music.madeForYou')} tracks={forYou} reasonLabel={reasonLabel} style={{ marginHorizontal: -sideMargin, marginTop: 4 }} />
+            <>
+              <TrackRail title={t('music.recentlyPlayed')} tracks={recent} source="recent" style={{ marginHorizontal: -sideMargin, marginTop: 4 }} />
+              <TrackRail title={t('music.madeForYou')} tracks={forYou} reasonLabel={reasonLabel} source="for_you" style={{ marginHorizontal: -sideMargin, marginTop: 4 }} />
+            </>
           )
         }
         contentContainerStyle={[styles.trackList, { paddingHorizontal: sideMargin }]}

@@ -642,6 +642,12 @@ export const fetchUserPosts = async (userId, page = 1, pageSize = 30) => {
   });
 };
 
+// A profile's Music tab: the songs that account uploaded, 20 a page, as the
+// same rows the library shows.
+export const fetchUserTracks = async (userId, page = 1) => {
+  return apiRequest('get', `/users/${userId}/tracks/`, null, { params: { page } });
+};
+
 // A user's profile only (lighter than fetchUserById — no posts payload).
 export const fetchProfileByUser = async (userId) => {
   return apiRequest('get', `/profiles/by_user/${userId}/`);
@@ -2048,3 +2054,7 @@ export const fetchTrack = (trackId) => apiRequest('get', `/tracks/${trackId}/`);
 export const fetchForYouTracks = () => apiRequest('get', '/tracks/for_you/');
 // "More like this" for one track.
 export const fetchSimilarTracks = (trackId) => apiRequest('get', `/tracks/${trackId}/similar/`);
+// Listens (see services/playReporter): a batch of play events.
+export const postPlays = (events) => apiRequest('post', '/tracks/plays/', { events });
+// Recently played, most recent first, each track once.
+export const fetchRecentTracks = (limit = 20) => apiRequest('get', '/tracks/recent/', null, { params: { limit } });

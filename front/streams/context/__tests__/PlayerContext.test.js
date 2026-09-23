@@ -15,6 +15,8 @@ const mockSound = {
   playAsync: jest.fn().mockResolvedValue(undefined),
   setPositionAsync: jest.fn().mockResolvedValue(undefined),
   setStatusAsync: jest.fn().mockResolvedValue(undefined),
+  // A preloaded sound gets its status callback when it takes over.
+  setOnPlaybackStatusUpdate: jest.fn((cb) => { mockAudioState.onStatus = cb; }),
 };
 const mockAudioState = { onStatus: null };
 
@@ -25,6 +27,15 @@ jest.mock('../../services/audioPlayer', () => ({
     return { sound: mockSound };
   }),
 }));
+
+// Listens go to the reporter; capture them instead of hitting the network.
+jest.mock('../../services/playReporter', () => ({
+  reportPlay: jest.fn(),
+  flushPlays: jest.fn(),
+  setReporterUser: jest.fn(),
+  currentNetwork: () => 'wifi',
+}));
+const { reportPlay } = require('../../services/playReporter');
 
 // PlayerProvider reads audio-quality prefs via usePreferences(), so it must be
 // rendered inside a PreferencesProvider.
@@ -151,4 +162,105 @@ test('repeat-one replays the same track on finish instead of advancing', async (
   expect(mockSound.setStatusAsync).toHaveBeenCalledWith(
     expect.objectContaining({ shouldPlay: true, positionMillis: 0 }),
   );
+});
+
+test('play next goes after the current song; add to queue goes last', async () => {
+  const { result } = renderHook(() => usePlayer(), { wrapper });
+  await act(async () => { result.current.playQueue([TRACK(1), TRACK(2)], 0); });
+  await waitFor(() => expect(result.current.currentTrack?.id).toBe(1));
+
+  act(() => { result.current.addToQueue(TRACK(9)); });
+  act(() => { result.current.playNextInQueue(TRACK(5)); });
+  expect(result.current.getUpNext().map((u) => u.track.id)).toEqual([5, 2, 9]);
+
+  act(() => { result.current.moveInQueue(3, 2); });   // 9 before 2
+  expect(result.current.getUpNext().map((u) => u.track.id)).toEqual([5, 9, 2]);
+  act(() => { result.current.removeFromQueue(1); });  // drop 5
+  expect(result.current.getUpNext().map((u) => u.track.id)).toEqual([9, 2]);
+
+  await emit({ didJustFinish: true, positionMillis: 1000, durationMillis: 1000 });
+  await waitFor(() => expect(result.current.currentTrack?.id).toBe(9));
+});
+
+test('the next song preloads near the end and takes over without a new load', async () => {
+  const { result } = renderHook(() => usePlayer(), { wrapper });
+  await act(async () => { result.current.playQueue([TRACK(1), TRACK(2)], 0); });
+  await waitFor(() => expect(result.current.currentTrack?.id).toBe(1));
+  const onStatusOfTrack1 = mockAudioState.onStatus;
+
+  // 10s from the end: track 2 starts loading, silently.
+  await act(async () => { onStatusOfTrack1({ isLoaded: true, isPlaying: true, positionMillis: 170000, durationMillis: 180000 }); });
+  expect(createSound).toHaveBeenLastCalledWith({ uri: 'uri-2' }, expect.objectContaining({ shouldPlay: false }));
+  const loads = createSound.mock.calls.length;
+
+  await act(async () => { onStatusOfTrack1({ isLoaded: true, didJustFinish: true, positionMillis: 180000, durationMillis: 180000 }); });
+  await waitFor(() => expect(result.current.currentTrack?.id).toBe(2));
+  await waitFor(() => expect(mockSound.playAsync).toHaveBeenCalled());
+  expect(createSound.mock.calls.length).toBe(loads);   // reused, not reloaded
+});
+
+test('a listen is reported at 30s and again when it ends', async () => {
+  const { result } = renderHook(() => usePlayer(), { wrapper });
+  await act(async () => { result.current.playQueue([TRACK(1), TRACK(2)], 0, { source: 'profile' }); });
+  await waitFor(() => expect(result.current.currentTrack?.id).toBe(1));
+
+  for (let p = 0; p <= 31000; p += 500) {
+    await emit({ isPlaying: true, positionMillis: p, durationMillis: 600000 });
+  }
+  expect(reportPlay).toHaveBeenCalledTimes(1);
+  expect(reportPlay.mock.calls[0][0]).toMatchObject({ track: 1, ms_played: 30000, ended: false, source: 'profile', network: 'wifi' });
+
+  await act(async () => { result.current.playNext(); });
+  expect(reportPlay).toHaveBeenCalledTimes(2);
+  expect(reportPlay.mock.calls[1][0]).toMatchObject({ track: 1, ended: true, completed: false });
+  expect(reportPlay.mock.calls[1][0].play_id).toBe(reportPlay.mock.calls[0][0].play_id);
+});
+
+test('sleep timer "end of this song" stops instead of advancing', async () => {
+  const { result } = renderHook(() => usePlayer(), { wrapper });
+  await act(async () => { result.current.playQueue([TRACK(1), TRACK(2)], 0); });
+  await waitFor(() => expect(result.current.currentTrack?.id).toBe(1));
+
+  act(() => { result.current.setSleepTimer('track'); });
+  expect(result.current.sleepTimer).toEqual({ mode: 'track' });
+  await emit({ didJustFinish: true, positionMillis: 1000, durationMillis: 1000 });
+
+  expect(result.current.currentTrack?.id).toBe(1);
+  expect(result.current.sleepTimer).toBeNull();
+  expect(mockSound.setStatusAsync).toHaveBeenCalledWith(expect.objectContaining({ shouldPlay: false, positionMillis: 0 }));
+});
+
+test('sleep timer by time pauses once it runs out', async () => {
+  const { result } = renderHook(() => usePlayer(), { wrapper });
+  await act(async () => { await result.current.playTrack(TRACK(1)); });
+  const now = Date.now();
+  const spy = jest.spyOn(Date, 'now');
+  spy.mockReturnValue(now);
+  act(() => { result.current.setSleepTimer(15); });
+  spy.mockReturnValue(now + 15 * 60 * 1000 + 1);
+  await emit({ isPlaying: true, positionMillis: 5000, durationMillis: 600000 });
+  spy.mockRestore();
+  expect(mockSound.pauseAsync).toHaveBeenCalled();
+  expect(result.current.sleepTimer).toBeNull();
+});
+
+test('a slow load that finishes after a newer one is thrown away, even for the same song', async () => {
+  const fake = () => ({ ...mockSound, unloadAsync: jest.fn().mockResolvedValue(undefined), pauseAsync: jest.fn().mockResolvedValue(undefined) });
+  const slow = fake();
+  const fast = fake();
+  let releaseSlow;
+  createSound
+    .mockImplementationOnce(() => new Promise((res) => { releaseSlow = () => res({ sound: slow }); }))
+    .mockImplementationOnce(async () => ({ sound: fast }));
+
+  const { result } = renderHook(() => usePlayer(), { wrapper });
+  await act(async () => { result.current.playQueue([TRACK(1)], 0); });   // still loading…
+  await act(async () => { result.current.playQueue([TRACK(1)], 0); });   // tapped again
+  await act(async () => { releaseSlow(); });
+
+  expect(slow.unloadAsync).toHaveBeenCalled();   // never left playing
+  expect(fast.unloadAsync).not.toHaveBeenCalled();
+  await act(async () => { await result.current.togglePlay(); });
+  expect(fast.pauseAsync).toHaveBeenCalled();    // the controls drive the kept one
+  expect(slow.pauseAsync).not.toHaveBeenCalled();
 });

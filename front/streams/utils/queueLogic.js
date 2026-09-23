@@ -70,7 +70,44 @@ function canPrev(length, pos, repeat) {
   return length > 0 && (pos > 0 || (repeat === 'all' && length > 1));
 }
 
+// ── Editing the queue ────────────────────────────────────────────────────────
+// Only what's still to come can change: entries at or before `pos` (played, or
+// playing now) are left alone, so the cursor never moves under the listener.
+
+/** Put queue index `idx` right after the current track ("Play next"). */
+function insertNext(order, pos, idx) {
+  const o = [...order];
+  o.splice(Math.max(0, pos + 1), 0, idx);
+  return o;
+}
+
+/** Put queue index `idx` at the end ("Add to queue"). */
+function appendToOrder(order, idx) {
+  return [...order, idx];
+}
+
+/** Drop the upcoming entry at order position `at`. */
+function removeAt(order, pos, at) {
+  if (at <= pos || at >= order.length) return order;
+  const o = [...order];
+  o.splice(at, 1);
+  return o;
+}
+
+/** Move an upcoming entry from order position `from` to `to`. */
+function moveUpcoming(order, pos, from, to) {
+  if (from === to || from <= pos || to <= pos || from >= order.length || to >= order.length) return order;
+  const o = [...order];
+  const [item] = o.splice(from, 1);
+  o.splice(to, 0, item);
+  return o;
+}
+
 module.exports = {
+  insertNext,
+  appendToOrder,
+  removeAt,
+  moveUpcoming,
   range,
   shuffle,
   makeOrder,

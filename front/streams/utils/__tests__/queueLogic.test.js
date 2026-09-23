@@ -1,5 +1,6 @@
 const {
   shuffle, makeOrder, reshuffleOrder, nextPos, prevPos, canNext, canPrev,
+  insertNext, appendToOrder, removeAt, moveUpcoming,
 } = require('../queueLogic');
 
 // Deterministic rng: always returns 0 so Fisher-Yates is a fixed permutation —
@@ -68,4 +69,39 @@ test('canNext / canPrev reflect bounds and repeat-all (needs >1 track)', () => {
   expect(canPrev(3, 0, 'off')).toBe(false);
   expect(canPrev(3, 0, 'all')).toBe(true);
   expect(canPrev(1, 0, 'all')).toBe(false);
+});
+
+describe('editing the queue', () => {
+  // Playing order[1] (queue index 1); 2 and 3 are up next.
+  const order = [0, 1, 2, 3];
+  const pos = 1;
+
+  test('play next goes straight after the current track; the latest wins', () => {
+    const once = insertNext(order, pos, 4);
+    expect(once).toEqual([0, 1, 4, 2, 3]);
+    expect(insertNext(once, pos, 5)).toEqual([0, 1, 5, 4, 2, 3]);
+    expect(order).toEqual([0, 1, 2, 3]); // pure
+  });
+
+  test('play next with nothing queued yet', () => {
+    expect(insertNext([], -1, 0)).toEqual([0]);
+  });
+
+  test('add to queue goes to the end', () => {
+    expect(appendToOrder(order, 4)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  test('only upcoming entries can be removed', () => {
+    expect(removeAt(order, pos, 2)).toEqual([0, 1, 3]);
+    expect(removeAt(order, pos, 1)).toBe(order); // playing now
+    expect(removeAt(order, pos, 0)).toBe(order); // already played
+    expect(removeAt(order, pos, 9)).toBe(order);
+  });
+
+  test('only upcoming entries can be moved, and only among upcoming', () => {
+    expect(moveUpcoming(order, pos, 3, 2)).toEqual([0, 1, 3, 2]);
+    expect(moveUpcoming(order, pos, 2, 1)).toBe(order);
+    expect(moveUpcoming(order, pos, 1, 3)).toBe(order);
+    expect(moveUpcoming(order, pos, 2, 2)).toBe(order);
+  });
 });

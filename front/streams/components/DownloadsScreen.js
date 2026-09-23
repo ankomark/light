@@ -20,7 +20,7 @@ const DownloadsScreen = ({ navigation }) => {
   const renderItem = useCallback(({ item, index }) => {
     const active = currentTrack?.id === item.id;
     return (
-      <TouchableOpacity style={[styles.row, active && styles.rowActive]} activeOpacity={0.85} onPress={() => playQueue(tracks, index)}>
+      <TouchableOpacity style={[styles.row, active && styles.rowActive]} activeOpacity={0.85} onPress={() => playQueue(tracks, index, { source: 'downloads' })}>
         <View style={styles.cover}>
           {item.cover_image ? (
             <Image source={{ uri: item.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" />
@@ -51,7 +51,7 @@ const DownloadsScreen = ({ navigation }) => {
             <Text style={styles.sub}>{t('downloads.count', { count: tracks.length })}</Text>
           </View>
           {tracks.length > 0 && (
-            <TouchableOpacity style={styles.playAll} onPress={() => playQueue(tracks, 0)} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.playAll} onPress={() => playQueue(tracks, 0, { source: 'downloads' })} activeOpacity={0.85}>
               <Ionicons name="play" size={16} color="#fff" />
               <Text style={styles.playAllText}>{t('music.playAll')}</Text>
             </TouchableOpacity>

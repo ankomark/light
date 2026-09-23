@@ -19,15 +19,29 @@ class TrackSerializer(serializers.ModelSerializer):
         model = Track
         fields = [
             'id', 'title', 'artist', 'album', 'audio_file','is_owner',
-            'cover_image', 'lyrics', 'has_lyrics', 'slug',
+            'cover_image', 'lyrics', 'has_lyrics', 'slug', 'duration_ms',
             'views', 'downloads','likes_count','comments_count','is_liked',
             'created_at', 'updated_at'
         ]
+        # `views` is the play count (listens of 30s+); see PlayEvent.
         read_only_fields = ['artist', 'slug', 'views', 'downloads', 'created_at', 'updated_at']
         # extra_kwargs = {
         #     'title': {'required': True, 'max_length': 200},
         #     'lyrics': {'allow_blank': True}
         # }
+     def validate_duration_ms(self, value):
+        # The app measures the file before uploading it. Anything outside a
+        # second to four hours is a bad reading; keep it unknown instead.
+        if value is not None and not (1000 <= value <= 4 * 3600 * 1000):
+            return None
+        return value
+
+     def update(self, instance, validated_data):
+        # Set once (upload, first play or backfill), never edited after.
+        if instance.duration_ms:
+            validated_data.pop('duration_ms', None)
+        return super().update(instance, validated_data)
+
      def validate_title(self, value):
         if not value or not value.strip():
             raise serializers.ValidationError("Title cannot be empty")
@@ -96,7 +110,7 @@ class TrackQueueSerializer(serializers.ModelSerializer):
         # build a queue, and the player fetches the current track's lyrics on
         # demand anyway.
         fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image',
-                  'has_lyrics', 'slug']
+                  'has_lyrics', 'slug', 'duration_ms', 'views']
 
     has_lyrics = serializers.SerializerMethodField()
 

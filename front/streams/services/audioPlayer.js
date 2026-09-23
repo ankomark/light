@@ -65,6 +65,22 @@ const toAvStatus = (s, player) => {
   };
 };
 
+// ── One sound at a time ──────────────────────────────────────────────────────
+// Every sound in the app (the music player, a post's song, voice notes,
+// previews) is a SoundAdapter, so this is the one place that can guarantee two
+// never play over each other: whenever a sound starts, every other live sound
+// is paused. That covers races inside one screen too — a song still loading
+// when the listener has already moved on is paused before it can start. A
+// paused sound's owner hears about it through setOnFocusLost (its status
+// callback also reports isPlaying: false).
+const liveSounds = new Set();
+
+function takeFocus(owner) {
+  for (const other of liveSounds) {
+    if (other !== owner) other._yield();
+  }
+}
+
 class SoundAdapter {
   constructor(source, initialStatus = {}) {
     // expo-audio takes its options as one object; build it from the expo-av-ish
@@ -84,16 +100,37 @@ class SoundAdapter {
     if (initialStatus.isLooping) this._player.loop = true;
     if (typeof initialStatus.volume === 'number') this._player.volume = initialStatus.volume;
     this._sub = null;
-    if (initialStatus.shouldPlay) this._player.play();
+    this._onFocusLost = null;
+    this._removed = false;
+    liveSounds.add(this);
+    if (initialStatus.shouldPlay) this._play();
   }
 
-  async playAsync() { this._player.play(); }
+  _play() {
+    if (this._removed) return;
+    takeFocus(this);
+    this._player.play();
+  }
+
+  // Another sound started: stop this one. Paused unconditionally — a sound
+  // still loading may not report `playing` yet but would start once loaded.
+  _yield() {
+    if (this._removed) return;
+    const wasPlaying = !!this._player.playing;
+    try { this._player.pause(); } catch { /* already released */ }
+    if (wasPlaying) this._onFocusLost?.();
+  }
+
+  /** Called when this sound is paused because another one started. */
+  setOnFocusLost(callback) { this._onFocusLost = callback || null; }
+
+  async playAsync() { this._play(); }
   async pauseAsync() { this._player.pause(); }
   async stopAsync() { this._player.pause(); await this._player.seekTo(0); }
   async setPositionAsync(positionMillis) { await this._player.seekTo((positionMillis || 0) / 1000); }
   async playFromPositionAsync(positionMillis) {
     await this._player.seekTo((positionMillis || 0) / 1000);
-    this._player.play();
+    this._play();
   }
   async getStatusAsync() { return toAvStatus(this._player.currentStatus, this._player); }
 
@@ -102,7 +139,7 @@ class SoundAdapter {
     if (typeof status.volume === 'number') this._player.volume = status.volume;
     if (typeof status.isLooping === 'boolean') this._player.loop = status.isLooping;
     if (typeof status.positionMillis === 'number') await this._player.seekTo(status.positionMillis / 1000);
-    if (status.shouldPlay === true) this._player.play();
+    if (status.shouldPlay === true) this._play();
     else if (status.shouldPlay === false) this._player.pause();
   }
 
@@ -129,9 +166,16 @@ class SoundAdapter {
   }
 
   async unloadAsync() {
+    if (this._removed) return;
+    this._removed = true;
+    liveSounds.delete(this);
     this._sub?.remove?.();
     this._sub = null;
+    this._onFocusLost = null;
     this.clearLockScreen();
+    // Stop it first: a player that's the lock-screen's active one can outlive
+    // remove() on Android and keep sounding.
+    try { this._player.pause(); } catch { /* not loaded */ }
     this._player.remove();
   }
 }
@@ -145,6 +189,30 @@ export const createSound = async (source, initialStatus = {}, onPlaybackStatusUp
   if (onPlaybackStatusUpdate) sound.setOnPlaybackStatusUpdate(onPlaybackStatusUpdate);
   return { sound };
 };
+
+/**
+ * Length of an audio file in ms, read by loading it silently (the player
+ * learns the duration from the file's header). Resolves null if it can't tell
+ * within `timeoutMs` — the server then learns the length from the first play.
+ */
+export const measureDurationMs = (uri, timeoutMs = 8000) => new Promise((resolve) => {
+  let sound = null;
+  let done = false;
+  const finish = (ms) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    sound?.unloadAsync().catch(() => {});
+    resolve(ms && ms > 0 ? Math.round(ms) : null);
+  };
+  const timer = setTimeout(() => finish(null), timeoutMs);
+  try {
+    sound = new SoundAdapter({ uri }, { shouldPlay: false });
+    sound.setOnPlaybackStatusUpdate((st) => { if (st.isLoaded && st.durationMillis) finish(st.durationMillis); });
+  } catch {
+    finish(null);
+  }
+});
 
 // Map the old expo-av audio-mode keys to expo-audio's AudioMode and apply it.
 // Only the keys the app actually set are translated.

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
   useWindowDimensions, ActivityIndicator,
@@ -17,6 +17,8 @@ import LikeButton from './LikeButton';
 import CommentAction from './CommentAction';
 import DownloadButton from './DownloadButton';
 import FullSheet from './FullSheet';
+import QueueSheet from './QueueSheet';
+import ChoiceSheet from './ChoiceSheet';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -65,6 +67,10 @@ const NowPlaying = () => {
     beginSeek,
     seekTo,
     playQueue,
+    queueVersion,
+    getUpNext,
+    sleepTimer,
+    setSleepTimer,
   } = usePlayer();
   // Position lives in its own context so the ~2x/second tick doesn't re-render
   // everything else that uses the player.
@@ -82,6 +88,18 @@ const NowPlaying = () => {
   const [showSimilar, setShowSimilar] = useState(false);
   const [similar, setSimilar] = useState([]);
   const [similarFor, setSimilarFor] = useState(null);
+  const [showQueue, setShowQueue] = useState(false);
+  const [showSleep, setShowSleep] = useState(false);
+  // Minutes left on the sleep timer, re-read every 15s while one is set.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (sleepTimer?.mode !== 'time') return undefined;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(id);
+  }, [sleepTimer]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const upNextCount = useMemo(() => getUpNext().length, [queueVersion, getUpNext]);
 
   const lyricsRef = useRef(null);
   const userScrollingRef = useRef(false);
@@ -146,6 +164,9 @@ const NowPlaying = () => {
     : !!(currentTrack.lyrics || '').trim();
   const repeatIcon = repeatMode === 'one' ? 'repeat-one' : 'repeat';
   const displayedMs = seekValue != null ? seekValue * durationMs : positionMs;
+  const sleepLabel = !sleepTimer ? t('player.sleepTimer')
+    : sleepTimer.mode === 'track' ? t('player.sleepEndOfSong')
+      : t('player.sleepMinutesLeft', { n: Math.max(1, Math.ceil((sleepTimer.endsAt - now) / 60000)) });
 
   const onLyricsScrollBegin = () => {
     userScrollingRef.current = true;
@@ -252,7 +273,7 @@ const NowPlaying = () => {
       </View>
 
       {/* Transport controls */}
-      <View style={[styles.controls, { marginBottom: Math.max(insets.bottom, spacing.md) + spacing.lg }]}>
+      <View style={styles.controls}>
         <TouchableOpacity onPress={toggleShuffle} hitSlop={HIT}>
           <Ionicons name="shuffle" size={24} color={shuffle ? colors.primary : colors.textSecondary} />
         </TouchableOpacity>
@@ -278,6 +299,35 @@ const NowPlaying = () => {
         </TouchableOpacity>
       </View>
 
+      {/* Sleep timer · queue */}
+      <View style={[styles.utilRow, { marginBottom: Math.max(insets.bottom, spacing.md) + spacing.sm }]}>
+        <TouchableOpacity style={styles.utilBtn} onPress={() => setShowSleep(true)} hitSlop={HIT} accessibilityRole="button">
+          <Ionicons name={sleepTimer ? 'moon' : 'moon-outline'} size={20} color={sleepTimer ? colors.primary : colors.textSecondary} />
+          <Text style={[styles.utilText, sleepTimer && styles.utilTextOn]}>{sleepLabel}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.utilBtn} onPress={() => setShowQueue(true)} hitSlop={HIT} accessibilityRole="button">
+          <MaterialIcons name="queue-music" size={22} color={colors.textSecondary} />
+          <Text style={styles.utilText}>
+            {upNextCount ? t('player.upNextCount', { n: upNextCount }) : t('player.queue')}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <QueueSheet visible={showQueue} onClose={() => setShowQueue(false)} />
+      <ChoiceSheet
+        visible={showSleep}
+        title={t('player.sleepTimer')}
+        onClose={() => setShowSleep(false)}
+        cancelLabel={t('common.cancel')}
+        options={[
+          ...[15, 30, 45, 60].map((n) => ({
+            key: `m${n}`, label: t('player.sleepInMinutes', { n }), icon: 'bedtime', onPress: () => setSleepTimer(n),
+          })),
+          { key: 'track', label: t('player.sleepEndOfSong'), icon: 'music-note', onPress: () => setSleepTimer('track') },
+          ...(sleepTimer ? [{ key: 'off', label: t('player.sleepOff'), icon: 'timer-off', destructive: true, onPress: () => setSleepTimer(null) }] : []),
+        ]}
+      />
+
       <FullSheet visible={showSimilar} title={t('music.moreLikeThis')} onClose={() => setShowSimilar(false)}>
         {similarFor !== trackId ? (
           <ActivityIndicator style={styles.sheetSpinner} color={colors.primary} />
@@ -291,7 +341,7 @@ const NowPlaying = () => {
               <TouchableOpacity
                 style={styles.simRow}
                 activeOpacity={0.85}
-                onPress={() => { setShowSimilar(false); playQueue(similar, index); }}
+                onPress={() => { setShowSimilar(false); playQueue(similar, index, { source: 'similar' }); }}
               >
                 <View style={styles.simCover}>
                   {item.cover_image ? (
@@ -372,6 +422,13 @@ const styles = StyleSheet.create({
   },
   moreLikeText: { color: colors.textPrimary, fontSize: 12.5, fontWeight: '700' },
   sheetSpinner: { marginTop: spacing.xl },
+  utilRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: spacing.lg, marginTop: spacing.md,
+  },
+  utilBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44 },
+  utilText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  utilTextOn: { color: colors.primary },
   simList: { paddingHorizontal: spacing.md, paddingBottom: spacing.lg },
   simEmpty: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
   simRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 9 },

@@ -10,7 +10,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useNavigation } from '@react-navigation/native';
-import { createSound } from '../services/audioPlayer';
+import { createSound, measureDurationMs } from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
 import { enqueueUpload } from '../services/uploadQueue';
 import RotatingBackground from './RotatingBackground';
@@ -82,6 +82,10 @@ const TrackUploadForm = () => {
       await stopPreview();
       setAudioError('');
       setAudioFile({ uri: file.uri, name: file.name, mimeType: file.mimeType, sizeMB });
+      // Its length, so the song shows "3:42" from the first moment it's live.
+      measureDurationMs(file.uri).then((durationMs) => {
+        setAudioFile((cur) => (cur?.uri === file.uri ? { ...cur, durationMs } : cur));
+      });
       // Pre-fill the title from the file name — one less thing to type.
       setTitle((prev) => prev || (file.name || '').replace(/\.[^/.]+$/, ''));
     } catch (error) {
@@ -148,6 +152,7 @@ const TrackUploadForm = () => {
         title: title.trim(),
         album: album.trim(),
         lyrics: lyrics.trim(),
+        durationMs: audioFile.durationMs || null,
         audio: { uri: audioFile.uri, name: audioFile.name, mimeType: audioFile.mimeType },
         cover: coverImage,
       },

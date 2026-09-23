@@ -52,6 +52,20 @@ export const lightColors = {
   overlay: 'rgba(0,0,0,0.45)',
 };
 
+// The profile screen's "Stage" look: near-black, gold for the one action that
+// matters (Follow), everything else quiet grey.
+export const profileColors = {
+  bg: '#06080C',
+  raised: '#1B1E24',
+  divider: '#262A31',
+  text: '#F4F5F7',
+  body: '#D5D8DE',
+  muted: '#8A909A',
+  dim: '#5E646E',
+  gold: '#E8C66B',
+  onGold: '#1A1406',
+};
+
 // Back-compat default export used across the app (dark).
 export const colors = darkColors;
 

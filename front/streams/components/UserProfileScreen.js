@@ -7,10 +7,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { fetchUserByUsername } from '../services/api';
 import { useI18n } from '../context/I18nContext';
-import RotatingBackground from './RotatingBackground';
-import ScreenVignette from './ScreenVignette';
 import ProfileView from './ProfileView';
-import { colors, typography, spacing } from '../constants/theme';
+import { colors, typography, spacing, profileColors } from '../constants/theme';
 
 const UserProfileScreen = () => {
   const navigation = useNavigation();
@@ -33,12 +31,12 @@ const UserProfileScreen = () => {
   }, [route.params?.userId, initialUsername]);
 
   // Keep the header title in step with the loaded username, and theme the
-  // native header dark so it sits cohesively over the wallpaper.
+  // native header to match the profile's black.
   useEffect(() => {
     navigation.setOptions?.({
       title: title || t('profile.title'),
-      headerStyle: { backgroundColor: '#0A1628' },
-      headerTintColor: colors.textPrimary,
+      headerStyle: { backgroundColor: profileColors.bg },
+      headerTintColor: profileColors.text,
       headerShadowVisible: false,
     });
   }, [navigation, title, t]);
@@ -49,9 +47,6 @@ const UserProfileScreen = () => {
 
   return (
     <View style={styles.root}>
-      {/* Luxury backdrop: rotating wallpaper + navy vignette behind the profile. */}
-      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.5)" />
-      <ScreenVignette tintRgb="6,16,34" zIndex={1} />
       <View style={styles.content}>
         {noOne ? (
           <View style={styles.centered}>
@@ -67,8 +62,8 @@ const UserProfileScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0A1628' },
-  content: { flex: 1, zIndex: 2 },
+  root: { flex: 1, backgroundColor: profileColors.bg },
+  content: { flex: 1 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
   errorText: { ...typography.body, color: colors.textMuted, marginTop: spacing.sm, textAlign: 'center' },
 });

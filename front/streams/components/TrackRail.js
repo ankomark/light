@@ -1,4 +1,5 @@
-// A horizontal rail of track cards — "Made for you" on the music screen,
+// A horizontal rail of track cards — "Recently played" and "Made for you" on
+// the music screen,
 // "More like this" on the song page. Tapping a card plays the rail as a queue
 // from that card, so next/previous stay inside the recommendations.
 import React, { memo, useCallback } from 'react';
@@ -6,6 +7,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { usePlayer } from '../context/PlayerContext';
+import toQueueTrack from '../utils/queueTrack';
 import { colors, radius, spacing } from '../constants/theme';
 
 const CARD = 128;
@@ -36,9 +38,9 @@ const Card = memo(({ track, index, onPlay, active, reasonLabel }) => (
 ));
 Card.displayName = 'TrackRailCard';
 
-const TrackRail = ({ title, tracks, reasonLabel = () => null, style }) => {
+const TrackRail = ({ title, tracks, reasonLabel = () => null, style, source = '' }) => {
   const { playQueue, currentTrack } = usePlayer();
-  const onPlay = useCallback((i) => playQueue(tracks, i), [playQueue, tracks]);
+  const onPlay = useCallback((i) => playQueue(tracks.map(toQueueTrack), i, { source }), [playQueue, tracks, source]);
   if (!tracks?.length) return null;
   return (
     <View style={[styles.wrap, style]}>

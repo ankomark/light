@@ -230,6 +230,8 @@ REST_FRAMEWORK = {
         'quiz': '60/min',
         'appeals': '5/hour',
         'reports': '20/hour',
+        # Listening reports: two per song played, plus offline backlogs.
+        'plays': '120/min',
         'admin_bulk': '30/min',
         # Live broadcasting abuse guards.
         'go_live': '20/hour',

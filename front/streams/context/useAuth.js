@@ -206,6 +206,10 @@ export const AuthProvider = ({ children }) => {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
+// For providers that also run outside the app shell (their tests render them
+// without an AuthProvider): null when there's no auth context.
+export const useOptionalAuth = () => useContext(AuthContext);
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === null) {

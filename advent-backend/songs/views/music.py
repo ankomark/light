@@ -2,7 +2,10 @@
 from django.db.models import Exists, OuterRef, Subquery, IntegerField
 from django.db.models.functions import Coalesce
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Max
+from django.utils.dateparse import parse_datetime
+from rest_framework.throttling import ScopedRateThrottle
+from ..models import PlayEvent
 from .. import discovery, audio_tags
 from ..comments import (
     create_comment, set_reaction, reaction_summaries, TRACK as TRACK_COMMENTS,
@@ -127,11 +130,60 @@ class TrackUploadView(APIView):
 
 
 
+def annotated_tracks(user):
+    """Live tracks with the counts and flags a track row draws (likes,
+    comments, liked-by-me), each one annotation instead of a query per row.
+    Shared by the library list and a profile's Music tab."""
+    # likes_total as a correlated subquery, not Count('likes'): an aggregate
+    # over the artist/profile join forces a LEFT JOIN + GROUP BY across every
+    # selected column, which is what made a page of tracks slow. The subquery
+    # reads the likes index once per row and leaves the outer query flat.
+    like_count = (
+        Like.objects.filter(track=OuterRef('pk'))
+        .order_by().values('track')
+        .annotate(n=Count('id')).values('n')[:1]
+    )
+    # Same shape for comments. The row's comment button used to get its
+    # number by fetching that track's ENTIRE comment list on mount — one
+    # request per visible row — so the count has to ride along here.
+    comment_count = (
+        Comment.objects.filter(track=OuterRef('pk'), is_removed=False)
+        .order_by().values('track')
+        .annotate(n=Count('id')).values('n')[:1]
+    )
+    qs = (
+        Track.objects
+        .filter(is_removed=False)  # hide moderator takedowns
+        .select_related('artist__profile')
+        .annotate(
+            likes_total=Coalesce(
+                Subquery(like_count, output_field=IntegerField()), 0),
+            comments_total=Coalesce(
+                Subquery(comment_count, output_field=IntegerField()), 0),
+        )
+    )
+    if user and user.is_authenticated:
+        qs = qs.annotate(
+            liked_by_me=Exists(
+                Like.objects.filter(track=OuterRef('pk'), user=user)
+            )
+        )
+    return qs
+
+
 class TrackViewSet(viewsets.ModelViewSet):
     queryset = Track.objects.all().order_by('-created_at')
     serializer_class = TrackSerializer
     permission_classes = [IsAuthenticated, IsNotSuspended]
     pagination_class = StandardPagination
+
+    def get_throttles(self):
+        # Play reports come from every listener's phone, often as a flushed
+        # offline backlog: their own, generous bucket.
+        if self.action == 'plays':
+            self.throttle_scope = 'plays'
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_serializer_class(self):
         # The list drops `lyrics` (see TrackListSerializer) — retrieve, create
@@ -150,41 +202,7 @@ class TrackViewSet(viewsets.ModelViewSet):
           liked_by_me (per-user, avoids the is_liked N+1).
         - optional ?search= over title / album / artist username.
         """
-        user = self.request.user
-        # likes_total as a correlated subquery, not Count('likes'): an aggregate
-        # over the artist/profile join forces a LEFT JOIN + GROUP BY across every
-        # selected column, which is what made a page of tracks slow. The subquery
-        # reads the likes index once per row and leaves the outer query flat.
-        like_count = (
-            Like.objects.filter(track=OuterRef('pk'))
-            .order_by().values('track')
-            .annotate(n=Count('id')).values('n')[:1]
-        )
-        # Same shape for comments. The row's comment button used to get its
-        # number by fetching that track's ENTIRE comment list on mount — one
-        # request per visible row — so the count has to ride along here.
-        comment_count = (
-            Comment.objects.filter(track=OuterRef('pk'), is_removed=False)
-            .order_by().values('track')
-            .annotate(n=Count('id')).values('n')[:1]
-        )
-        qs = (
-            Track.objects
-            .filter(is_removed=False)  # hide moderator takedowns
-            .select_related('artist__profile')
-            .annotate(
-                likes_total=Coalesce(
-                    Subquery(like_count, output_field=IntegerField()), 0),
-                comments_total=Coalesce(
-                    Subquery(comment_count, output_field=IntegerField()), 0),
-            )
-        )
-        if user and user.is_authenticated:
-            qs = qs.annotate(
-                liked_by_me=Exists(
-                    Like.objects.filter(track=OuterRef('pk'), user=user)
-                )
-            )
+        qs = annotated_tracks(self.request.user)
 
         search = self.request.query_params.get('search', '').strip()
         if search:
@@ -315,6 +333,120 @@ class TrackViewSet(viewsets.ModelViewSet):
         """'More like this' for one track."""
         ids, reasons = discovery.similar(self.get_object(), request.user)
         return Response(self._ordered_rows(ids, reasons))
+
+    # A listener counts toward a track's plays at most this many times a day,
+    # so a song left on repeat can't farm its number.
+    MAX_COUNTED_PLAYS_PER_DAY = 10
+    MAX_PLAY_EVENTS = 50
+
+    @action(detail=False, methods=['post'])
+    def plays(self, request):
+        """Ingest listens: {"events": [{"play_id", "track", "ms_played",
+        "duration_ms"?, "completed"?, "ended"?, "source"?, "network"?,
+        "started_at"?}]}.
+
+        The app sends a listen at 30s and again when it ends, under the same
+        play_id, and keeps unsent ones in an outbox (offline listening of
+        downloads included) — so each event is an idempotent upsert: the
+        longest ms_played wins and `completed` never un-sets. A listen of 30s+
+        adds one to the track's play count, once; the artist's own listens
+        don't count. The track's length is learned here if it's unknown."""
+        events = request.data.get('events')
+        if not isinstance(events, list):
+            return Response({'error': 'events must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        user = request.user
+        now = timezone.now()
+
+        cleaned = {}
+        for e in events[:self.MAX_PLAY_EVENTS]:
+            if not isinstance(e, dict):
+                continue
+            play_id = str(e.get('play_id') or '')[:64]
+            try:
+                track_id = int(e.get('track'))
+                ms = max(0, min(int(e.get('ms_played') or 0), 6 * 3600 * 1000))
+                duration = int(e.get('duration_ms') or 0)
+            except (TypeError, ValueError):
+                continue
+            if not play_id:
+                continue
+            started = parse_datetime(str(e.get('started_at') or '')) if e.get('started_at') else None
+            if started is None or timezone.is_naive(started) or not (now - timedelta(days=30) <= started <= now + timedelta(minutes=5)):
+                started = now
+            prev = cleaned.get(play_id)
+            cleaned[play_id] = {
+                'track_id': track_id,
+                'ms': max(ms, prev['ms']) if prev else ms,
+                'duration': duration,
+                'completed': bool(e.get('completed')) or bool(prev and prev['completed']),
+                'ended': bool(e.get('ended')) or bool(prev and prev['ended']),
+                'source': str(e.get('source') or '')[:24],
+                'network': str(e.get('network') or '')[:12],
+                'started': started,
+            }
+        if not cleaned:
+            return Response({'stored': 0})
+
+        tracks = Track.objects.filter(
+            id__in={c['track_id'] for c in cleaned.values()}, is_removed=False,
+        ).only('id', 'artist_id', 'duration_ms').in_bulk()
+        existing = {
+            ev.play_id: ev for ev in
+            PlayEvent.objects.filter(user=user, play_id__in=list(cleaned))
+        }
+        day_ago = now - timedelta(days=1)
+        stored = 0
+        for play_id, c in cleaned.items():
+            track = tracks.get(c['track_id'])
+            if track is None:
+                continue
+            with transaction.atomic():
+                ev = existing.get(play_id)
+                if ev is None:
+                    try:
+                        with transaction.atomic():
+                            ev = PlayEvent.objects.create(
+                                user=user, track=track, play_id=play_id,
+                                source=c['source'], network=c['network'], started_at=c['started'],
+                            )
+                    except IntegrityError:  # the same listen, racing itself
+                        ev = PlayEvent.objects.get(user=user, play_id=play_id)
+                elif ev.track_id != track.id:
+                    continue
+                ev.ms_played = max(ev.ms_played, c['ms'])
+                ev.completed = ev.completed or c['completed']
+                if c['ended']:
+                    ev.skipped = not ev.completed and ev.ms_played < PlayEvent.COUNT_AFTER_MS
+                length = track.duration_ms or c['duration']
+                heard_enough = ev.ms_played >= PlayEvent.COUNT_AFTER_MS or (
+                    ev.completed and length and length < PlayEvent.COUNT_AFTER_MS)
+                if (heard_enough and not ev.counted and track.artist_id != user.id
+                        and PlayEvent.objects.filter(
+                            user=user, track=track, counted=True, started_at__gte=day_ago,
+                        ).count() < self.MAX_COUNTED_PLAYS_PER_DAY):
+                    ev.counted = True
+                    Track.objects.filter(pk=track.pk).update(views=F('views') + 1)
+                ev.save()
+            if not track.duration_ms and 1000 <= c['duration'] <= 4 * 3600 * 1000:
+                Track.objects.filter(pk=track.pk, duration_ms__isnull=True).update(duration_ms=c['duration'])
+                track.duration_ms = c['duration']
+            stored += 1
+        return Response({'stored': stored})
+
+    @action(detail=False, methods=['get'])
+    def recent(self, request):
+        """Recently played: the viewer's last listened tracks, most recent
+        first, each once (?limit=, up to 50)."""
+        try:
+            limit = max(1, min(int(request.query_params.get('limit', 20)), 50))
+        except ValueError:
+            limit = 20
+        ids = list(
+            PlayEvent.objects.filter(user=request.user, track__is_removed=False)
+            .values('track_id').annotate(last=Max('started_at')).order_by('-last')
+            .values_list('track_id', flat=True)[:limit]
+        )
+        return Response(self._ordered_rows(ids, {}))
 
     @action(detail=False, methods=['get'])
     def trending_sounds(self, request):

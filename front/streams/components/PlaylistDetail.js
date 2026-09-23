@@ -6,6 +6,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { fetchPlaylist, deletePlaylist, removeTrackFromPlaylist } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
+import toQueueTrack from '../utils/queueTrack';
 import TrackItem from './TrackItem';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -66,15 +67,7 @@ const PlaylistDetail = () => {
   }, [navigation, playlist?.name, route.params?.name]);
 
   const buildQueue = useCallback(
-    () => tracks.map((t) => ({
-      id: t.id,
-      title: t.title,
-      album: t.album,
-      artist: t.artist,
-      cover_image: t.cover_image,
-      audio_file: t.audio_file,
-      has_lyrics: t.has_lyrics,
-    })),
+    () => tracks.map(toQueueTrack),
     [tracks]
   );
 
@@ -116,7 +109,7 @@ const PlaylistDetail = () => {
       <View style={styles.actions}>
         <TouchableOpacity
           style={[styles.actionBtn, tracks.length === 0 && styles.actionDisabled]}
-          onPress={() => tracks.length && playQueue(buildQueue(), 0, { shuffle: false })}
+          onPress={() => tracks.length && playQueue(buildQueue(), 0, { shuffle: false, source: 'playlist' })}
           disabled={tracks.length === 0}
           activeOpacity={0.85}
         >
@@ -125,7 +118,7 @@ const PlaylistDetail = () => {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionBtn, styles.shuffleBtn, tracks.length === 0 && styles.actionDisabled]}
-          onPress={() => tracks.length && playQueue(buildQueue(), 0, { shuffle: true })}
+          onPress={() => tracks.length && playQueue(buildQueue(), 0, { shuffle: true, source: 'playlist' })}
           disabled={tracks.length === 0}
           activeOpacity={0.85}
         >
@@ -174,7 +167,7 @@ const PlaylistDetail = () => {
       renderItem={({ item, index }) => (
         <TrackItem
           track={item}
-          onPlay={() => playQueue(buildQueue(), index)}
+          onPlay={() => playQueue(buildQueue(), index, { source: 'playlist' })}
           onRemoveFromPlaylist={() => handleRemove(item.id)}
         />
       )}

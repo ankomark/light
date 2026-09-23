@@ -17,6 +17,7 @@ import CreateProfile from './components/CreateProfile';
 import Header from './components/Header'; // Move the import to the top
 import SocialFeed from './components/SocialFeed';
 import RotatingBackground from './components/RotatingBackground';
+import { profileColors } from './constants/theme';
 import UploadStatus from './components/UploadStatus';
 import HashtagScreen from './components/HashtagScreen';
 import DownloadsScreen from './components/DownloadsScreen';
@@ -679,9 +680,9 @@ const SocialFeedWrapper = ({ navigation }) => (
     </View>
 );
 
+// The profile is solid black ("Stage"), so no wallpaper behind it.
 const ProfileWrapper = ({ navigation }) => (
-    <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-        <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.5)" />
+    <View style={{ flex: 1, backgroundColor: profileColors.bg }}>
         <Header navigation={navigation} transparentBg />
         <ErrorBoundary fallbackMessage="Your profile couldn't load.">
             <Profile />

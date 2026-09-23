@@ -76,7 +76,7 @@ const TrackDetailScreen = ({ route, navigation }) => {
                 <TouchableOpacity
                   style={styles.play}
                   activeOpacity={0.85}
-                  onPress={() => (isCurrent ? togglePlay() : playQueue([track, ...similar], 0))}
+                  onPress={() => (isCurrent ? togglePlay() : playQueue([track, ...similar], 0, { source: 'track' }))}
                 >
                   <Ionicons name={isCurrent && isPlaying ? 'pause' : 'play'} size={30} color="#fff" style={!(isCurrent && isPlaying) && { marginLeft: 3 }} />
                 </TouchableOpacity>

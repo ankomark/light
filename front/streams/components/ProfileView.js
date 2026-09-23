@@ -14,12 +14,12 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
-  fetchUserById, fetchUserPosts, followUser, getOrCreateConversation, blockUser,
+  fetchUserById, fetchUserPosts, fetchUserTracks, followUser, getOrCreateConversation, blockUser,
 } from '../services/api';
+import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import useGridColumns from '../utils/useGridColumns';
@@ -28,13 +28,21 @@ import { mergePage } from '../utils/exploreLogic';
 import { peekCache, readCache, writeCache, dropCache, userKey } from '../utils/screenCache';
 import ChoiceSheet from './ChoiceSheet';
 import ReportModal from './ReportModal';
-import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import TrackItem from './TrackItem';
+import toQueueTrack from '../utils/queueTrack';
+import { colors, typography, spacing, radius, profileColors as P } from '../constants/theme';
 
-const AVATAR_SIZE = 94;
-const GRID_GAP = 3;
+const AVATAR_SIZE = 90;
+const GRID_GAP = 1;
+// Grid tiles are portrait (3:4), like the rest of the social screens.
+const tileHeightFor = (size) => Math.round((size * 4) / 3);
 const PAGE_SIZE = 30;
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const STALE_MS = 30 * 1000;
+// On a tablet the header and song rows stay a readable width, centred; the
+// post grid still uses the full width (more columns).
+const CONTENT_MAX = 560;
+const TRACKS_MAX = 720;
 
 /**
  * Still-image thumbnail for a post. Videos use the poster frame captured on
@@ -53,7 +61,7 @@ const StatBox = ({ value, label, onPress }) => {
     </>
   );
   return onPress ? (
-    <TouchableOpacity style={styles.statBox} onPress={onPress} activeOpacity={0.7}>{body}</TouchableOpacity>
+    <TouchableOpacity style={styles.statBox} onPress={onPress} activeOpacity={0.7} accessibilityRole="button">{body}</TouchableOpacity>
   ) : (
     <View style={styles.statBox}>{body}</View>
   );
@@ -62,16 +70,16 @@ const StatBox = ({ value, label, onPress }) => {
 const PostTile = memo(({ post, size, isSelf, onPress }) => {
   const thumb = getPostThumb(post);
   return (
-    <TouchableOpacity style={[styles.tile, { width: size, height: size }]} activeOpacity={0.85} onPress={() => onPress(post)}>
+    <TouchableOpacity style={[styles.tile, { width: size, height: tileHeightFor(size) }]} activeOpacity={0.85} onPress={() => onPress(post)}>
       {thumb ? (
         <Image source={{ uri: thumb }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" transition={120} recyclingKey={String(post.id)} />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.tileFallback]}>
-          <Feather name="image" size={22} color={colors.textMuted} />
+          <Feather name="image" size={22} color={P.dim} />
         </View>
       )}
       {post.content_type === 'video' && (
-        <View style={styles.videoBadge}><Ionicons name="play" size={12} color={colors.white} /></View>
+        <View style={styles.videoBadge}><Ionicons name="play" size={10} color={colors.white} /></View>
       )}
       {/* Only on your own grid: who can see a post that isn't public. */}
       {isSelf && post.visibility && post.visibility !== 'public' && (
@@ -92,18 +100,26 @@ PostTile.displayName = 'PostTile';
 const Pulse = ({ style }) => <View style={[styles.skel, style]} />;
 
 const HeaderSkeleton = ({ cols, tileSize }) => (
-  <View>
-    <View style={styles.cover} />
-    <View style={styles.avatarRow}>
-      <Pulse style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 }} />
+  <View style={styles.list}>
+    <View style={styles.head}>
+      <Pulse style={{ width: AVATAR_SIZE + 10, height: AVATAR_SIZE + 10, borderRadius: (AVATAR_SIZE + 10) / 2 }} />
+      <Pulse style={{ width: 130, height: 16, marginTop: spacing.md }} />
+      <View style={styles.statsRow}>
+        {[0, 1, 2].map((i) => (
+          <View key={i} style={styles.statBox}>
+            <Pulse style={{ width: 44, height: 18 }} />
+            <Pulse style={{ width: 60, height: 11, marginTop: 6 }} />
+          </View>
+        ))}
+      </View>
+      <View style={styles.actionRow}>
+        <Pulse style={{ width: 164, height: 44 }} />
+        <Pulse style={{ width: 48, height: 44 }} />
+      </View>
+      <Pulse style={{ width: 240, height: 13, marginTop: spacing.md }} />
     </View>
-    <View style={styles.nameBlock}>
-      <Pulse style={{ width: 160, height: 20, marginBottom: 8 }} />
-      <Pulse style={{ width: 110, height: 13 }} />
-    </View>
-    <Pulse style={[styles.statsRow, { height: 64 }]} />
     <View style={[styles.gridRow, styles.skelGrid]}>
-      {Array.from({ length: cols * 2 }, (_, i) => <Pulse key={i} style={{ width: tileSize, height: tileSize, borderRadius: 4 }} />)}
+      {Array.from({ length: cols * 2 }, (_, i) => <Pulse key={i} style={{ width: tileSize, height: tileHeightFor(tileSize), borderRadius: 0 }} />)}
     </View>
   </View>
 );
@@ -113,7 +129,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   const navigation = useNavigation();
   const { currentUser } = useAuth();
   const { cols, tileSize } = useGridColumns({
-    target: 124, min: 3, max: 6, horizontalPadding: GRID_GAP * 2, gap: GRID_GAP,
+    target: 124, min: 3, max: 6, horizontalPadding: 0, gap: GRID_GAP,
   });
 
   const cacheKey = userKey(currentUser?.id, `profile:${userId}`);
@@ -130,6 +146,17 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const pageRef = useRef(1);
+
+  // Music tab: loaded the first time it's opened, from cache first.
+  const tracksKey = userKey(currentUser?.id, `profile:${userId}:tracks`);
+  const [tab, setTab] = useState('posts');
+  const [tracks, setTracks] = useState(() => peekCache(tracksKey) ?? null);
+  const [tracksHasMore, setTracksHasMore] = useState(false);
+  const [tracksLoading, setTracksLoading] = useState(false);
+  const [tracksError, setTracksError] = useState(false);
+  const tracksPageRef = useRef(1);
+  const tracksReqRef = useRef(0);
+  const { playQueue } = usePlayer();
   // When the copy on screen was fetched (kept in the cache, so a copy from an
   // earlier visit still counts as old and gets refreshed).
   const lastFetchRef = useRef(initial?._fetchedAt || 0);
@@ -216,6 +243,64 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
       setLoadingMore(false);
     }
   }, [loadingMore, hasMore, loading, userId]);
+
+  const loadTracks = useCallback(async ({ more = false } = {}) => {
+    if (!userId) return;
+    const req = ++tracksReqRef.current;
+    const page = more ? tracksPageRef.current + 1 : 1;
+    setTracksLoading(true);
+    try {
+      const res = await fetchUserTracks(userId, page);
+      if (req !== tracksReqRef.current) return;
+      const list = res?.results ?? [];
+      tracksPageRef.current = page;
+      setTracksHasMore(!!res?.next);
+      setTracksError(false);
+      if (more) {
+        setTracks((prev) => mergePage(prev ?? [], list));
+      } else {
+        setTracks(list);
+        writeCache(tracksKey, list);
+      }
+    } catch {
+      if (req !== tracksReqRef.current) return;
+      setTracksError(true);
+      if (more) setTracksHasMore(false);
+    } finally {
+      if (req === tracksReqRef.current) setTracksLoading(false);
+    }
+  }, [userId, tracksKey]);
+
+  const openTab = useCallback((next) => {
+    setTab(next);
+    if (next !== 'music') return;
+    if (tracks === null) {
+      readCache(tracksKey).then((c) => { if (Array.isArray(c)) setTracks((cur) => cur ?? c); });
+    }
+    loadTracks();
+  }, [tracks, tracksKey, loadTracks]);
+
+  const onEndReached = useCallback(() => {
+    if (tab === 'posts') loadMore();
+    else if (tracksHasMore && !tracksLoading) loadTracks({ more: true });
+  }, [tab, loadMore, tracksHasMore, tracksLoading, loadTracks]);
+
+  const onPull = useCallback(() => {
+    load({ pull: true });
+    if (tab === 'music') loadTracks();
+  }, [load, tab, loadTracks]);
+
+  // Play from this row, with the rest of the account's songs as the queue.
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
+  const playFrom = useCallback((index) => {
+    playQueue((tracksRef.current ?? []).map(toQueueTrack), index, { source: 'profile' });
+  }, [playQueue]);
+
+  const onTrackDeleted = useCallback((id) => {
+    setTracks((prev) => (prev ?? []).filter((tr) => tr.id !== id));
+    setUser((u) => (u ? { ...u, tracks_count: Math.max(0, (u.tracks_count ?? 1) - 1) } : u));
+  }, []);
 
   // ── actions ──
   const handleFollow = useCallback(async () => {
@@ -309,12 +394,13 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
       ? t('profile.requested')
       : user?.follows_you ? t('profile.followBack') : t('profile.follow');
 
+  const followOff = !!user?.is_following || user?.follow_status === 'requested';
+  const showMusic = isSelf || (user?.tracks_count ?? 0) > 0;
+
   const header = user ? (
     <View>
-      <LinearGradient colors={['rgba(16,46,80,0.55)', 'rgba(10,22,40,0.2)']} style={styles.cover} />
-
-      <View style={styles.avatarRow}>
-        <View style={styles.avatarWrapper}>
+      <View style={styles.head}>
+        <View style={styles.avatarRing}>
           <Image
             source={user.profile_picture ? { uri: user.profile_picture } : DEFAULT_AVATAR}
             placeholder={DEFAULT_AVATAR}
@@ -325,98 +411,103 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
           />
         </View>
 
+        <View style={styles.nameRow}>
+          <Text style={styles.handle} numberOfLines={1}>@{user.username}</Text>
+          {user.is_private && <Feather name="lock" size={14} color={P.muted} />}
+        </View>
+        {user.follows_you && !isSelf && (
+          <View style={styles.followsYou}><Text style={styles.followsYouText}>{t('profile.followsYou')}</Text></View>
+        )}
+
+        <View style={styles.statsRow}>
+          <StatBox value={user.following_count} label={t('profile.following')} onPress={canView ? () => openList('following') : undefined} />
+          <View style={styles.statDivider} />
+          <StatBox value={user.followers_count} label={t('profile.followers')} onPress={canView ? () => openList('followers') : undefined} />
+          <View style={styles.statDivider} />
+          {/* Lifetime likes across this user's posts, tracks and publications. */}
+          <StatBox value={user.total_likes ?? 0} label={t('profile.likes')} />
+        </View>
+
         <View style={styles.actionRow}>
           {isSelf ? (
             <>
-              <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('CreateProfile')} activeOpacity={0.85}>
-                <Ionicons name="pencil-outline" size={15} color={colors.white} />
-                <Text style={styles.editBtnText}>{t('profile.editProfile')}</Text>
+              <TouchableOpacity style={[styles.mainBtn, styles.mainBtnQuiet]} onPress={() => navigation.navigate('CreateProfile')} activeOpacity={0.85}>
+                <Text style={[styles.mainBtnText, styles.mainBtnTextQuiet]}>{t('profile.editProfile')}</Text>
+              </TouchableOpacity>
+              {/* Saved music & posts (your own profile only). */}
+              <TouchableOpacity
+                style={styles.squareBtn}
+                onPress={() => navigation.navigate('Favorites')}
+                activeOpacity={0.85}
+                accessibilityLabel={t('profile.myFavorites')}
+              >
+                <Ionicons name="heart-outline" size={20} color={P.text} />
               </TouchableOpacity>
             </>
           ) : (
             <>
               <TouchableOpacity
-                style={[
-                  styles.followBtn,
-                  user.is_following && styles.followingBtn,
-                  user.follow_status === 'requested' && styles.requestedBtn,
-                ]}
+                style={[styles.mainBtn, followOff && styles.mainBtnQuiet]}
                 onPress={handleFollow}
                 disabled={followBusy}
                 activeOpacity={0.85}
               >
-                <Text style={styles.followBtnText}>{followLabel}</Text>
+                <Text style={[styles.mainBtnText, followOff && styles.mainBtnTextQuiet]}>{followLabel}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.roundBtn} onPress={handleMessage} disabled={messageBusy} activeOpacity={0.85}>
+              <TouchableOpacity style={styles.squareBtn} onPress={handleMessage} disabled={messageBusy} activeOpacity={0.85} accessibilityLabel={t('profile.message')}>
                 {messageBusy
-                  ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <Ionicons name="chatbubble-outline" size={18} color={colors.primary} />}
+                  ? <ActivityIndicator size="small" color={P.text} />
+                  : <Ionicons name="chatbubble-outline" size={19} color={P.text} />}
               </TouchableOpacity>
-              <TouchableOpacity style={styles.roundBtn} onPress={() => setMenuOpen(true)} activeOpacity={0.85} hitSlop={8}>
-                <Ionicons name="ellipsis-horizontal" size={18} color={colors.primary} />
+              <TouchableOpacity style={styles.squareBtn} onPress={() => setMenuOpen(true)} activeOpacity={0.85} accessibilityLabel={t('profile.moreOptions')}>
+                <Ionicons name="ellipsis-horizontal" size={19} color={P.text} />
               </TouchableOpacity>
             </>
           )}
         </View>
+
+        {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
+        {(profile.location || bornText) ? (
+          <View style={styles.metaRow}>
+            {profile.location ? (
+              <View style={styles.metaItem}>
+                <Ionicons name="location-outline" size={14} color={P.muted} />
+                <Text style={styles.metaText}>{profile.location}</Text>
+              </View>
+            ) : null}
+            {bornText ? (
+              <View style={styles.metaItem}>
+                <Ionicons name="calendar-outline" size={14} color={P.muted} />
+                <Text style={styles.metaText}>{bornText}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
       </View>
 
-      <View style={styles.nameBlock}>
-        <View style={styles.nameRow}>
-          <Text style={styles.displayName} numberOfLines={1}>{user.username}</Text>
-          {user.is_private && <Feather name="lock" size={15} color={colors.textSecondary} style={styles.nameLock} />}
-        </View>
-        <View style={styles.nameRow}>
-          <Text style={styles.handle}>@{user.username}</Text>
-          {user.follows_you && !isSelf && (
-            <View style={styles.followsYou}><Text style={styles.followsYouText}>{t('profile.followsYou')}</Text></View>
-          )}
-        </View>
+      {/* Posts / Music. The counts live here now the stats row is three wide.
+          Music shows once the account has uploaded a song (always on your own). */}
+      <View style={styles.tabBar}>
+        {[
+          { key: 'posts', icon: 'grid-outline', label: t('profile.posts'), count: user.posts_count ?? posts.length },
+          ...(showMusic ? [{ key: 'music', icon: 'musical-notes-outline', label: t('profile.music'), count: user.tracks_count ?? 0 }] : []),
+        ].map((it) => {
+          const on = tab === it.key;
+          return (
+            <TouchableOpacity
+              key={it.key}
+              style={[styles.tab, on && styles.tabOn]}
+              onPress={() => openTab(it.key)}
+              activeOpacity={0.8}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+            >
+              <Ionicons name={it.icon} size={18} color={on ? P.text : P.dim} />
+              <Text style={[styles.tabText, !on && styles.tabTextOff]}>{it.label} · {formatCount(it.count)}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
-
-      <View style={styles.statsRow}>
-        <StatBox value={user.posts_count} label={t('profile.posts')} />
-        <View style={styles.statDivider} />
-        <StatBox value={user.followers_count} label={t('profile.followers')} onPress={canView ? () => openList('followers') : undefined} />
-        <View style={styles.statDivider} />
-        <StatBox value={user.following_count} label={t('profile.following')} onPress={canView ? () => openList('following') : undefined} />
-        <View style={styles.statDivider} />
-        {/* Lifetime likes across this user's posts, tracks and publications. */}
-        <StatBox value={user.total_likes ?? 0} label={t('profile.likes')} />
-      </View>
-
-      {/* Quick link to saved music & posts (your own profile only). */}
-      {isSelf && (
-        <TouchableOpacity style={styles.favoritesLink} onPress={() => navigation.navigate('Favorites')} activeOpacity={0.85}>
-          <Ionicons name="heart" size={18} color={colors.accent} />
-          <Text style={styles.favoritesLinkText}>{t('profile.myFavorites')}</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={styles.chevron} />
-        </TouchableOpacity>
-      )}
-
-      {(profile.bio || profile.location || bornText) ? (
-        <View style={styles.infoSection}>
-          {profile.bio ? (
-            <View style={styles.infoCard}>
-              <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
-              <Text style={styles.infoText}>{profile.bio}</Text>
-            </View>
-          ) : null}
-          {profile.location ? (
-            <View style={styles.infoCard}>
-              <Ionicons name="location-outline" size={18} color={colors.primary} />
-              <Text style={styles.infoText}>{profile.location}</Text>
-            </View>
-          ) : null}
-          {bornText ? (
-            <View style={styles.infoCard}>
-              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-              <Text style={styles.infoText}>{bornText}</Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-
-      <Text style={styles.sectionTitle}>{t('profile.posts')}</Text>
     </View>
   ) : null;
 
@@ -424,7 +515,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     // A private account the viewer isn't approved for: a locked state, not
     // "No posts yet", which would misrepresent it.
     <View style={styles.postsEmpty}>
-      <MaterialIcons name="lock-outline" size={40} color={colors.textMuted} />
+      <MaterialIcons name="lock-outline" size={40} color={P.dim} />
       <Text style={styles.postsEmptyText}>{t('profile.private')}</Text>
       <Text style={styles.postsLockedSub}>
         {user.follow_status === 'requested' ? t('profile.privateRequestPending') : t('profile.privateFollowPrompt')}
@@ -432,15 +523,42 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     </View>
   ) : (
     <View style={styles.postsEmpty}>
-      <MaterialIcons name="photo-library" size={40} color={colors.textMuted} />
+      <MaterialIcons name="photo-library" size={40} color={P.dim} />
       <Text style={styles.postsEmptyText}>{t('profile.noPosts')}</Text>
     </View>
   );
+
+  const musicEmpty = !user ? null : !canView ? empty : tracksLoading && !tracks?.length ? (
+    <ActivityIndicator style={styles.more} color={P.muted} />
+  ) : tracksError && !tracks?.length ? (
+    <View style={styles.postsEmpty}>
+      <MaterialIcons name="wifi-off" size={40} color={P.dim} />
+      <Text style={styles.postsEmptyText}>{t('profile.musicLoadFailed')}</Text>
+      <TouchableOpacity style={styles.retryBtn} onPress={() => loadTracks()} activeOpacity={0.85}>
+        <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
+      </TouchableOpacity>
+    </View>
+  ) : (
+    <View style={styles.postsEmpty}>
+      <MaterialIcons name="library-music" size={40} color={P.dim} />
+      <Text style={styles.postsEmptyText}>{t('profile.noMusic')}</Text>
+    </View>
+  );
+
+  const renderTrack = useCallback(({ item, index }) => (
+    <View style={styles.trackRow}>
+      <TrackItem track={item} index={index} onPlay={playFrom} onDelete={onTrackDeleted} onRefresh={loadTracks} />
+    </View>
+  ), [playFrom, onTrackDeleted, loadTracks]);
 
   const renderPost = useCallback(
     ({ item }) => <PostTile post={item} size={tileSize} isSelf={isSelf} onPress={openPost} />,
     [tileSize, isSelf, openPost],
   );
+
+  // Your own profile always has the tab; someone else's loses it if their
+  // last song goes, so fall back to Posts rather than an empty tab.
+  const onMusic = tab === 'music' && showMusic;
 
   // ── states ──
   if (!user && loading) {
@@ -450,7 +568,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   if (!user) {
     return (
       <View style={styles.centered}>
-        <MaterialIcons name="person-off" size={56} color={colors.textMuted} />
+        <MaterialIcons name="person-off" size={56} color={P.dim} />
         <Text style={styles.errorText}>
           {error === 'unavailable' ? t('profile.unavailable') : t('profile.loadFailed')}
         </Text>
@@ -467,19 +585,28 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     <>
       <FlatList
         style={styles.list}
-        data={canView ? posts : []}
-        key={`grid-${cols}`}
-        numColumns={cols}
-        columnWrapperStyle={cols > 1 ? styles.gridRow : undefined}
-        keyExtractor={(item) => `pp_${item.id}`}
-        renderItem={renderPost}
+        key={onMusic ? 'music' : `grid-${cols}`}
+        {...(onMusic ? {
+          data: canView ? (tracks ?? []) : [],
+          numColumns: 1,
+          keyExtractor: (item) => `pt_${item.id}`,
+          renderItem: renderTrack,
+          ListEmptyComponent: musicEmpty,
+          ListFooterComponent: tracksLoading && tracks?.length ? <ActivityIndicator style={styles.more} color={P.muted} /> : null,
+        } : {
+          data: canView ? posts : [],
+          numColumns: cols,
+          columnWrapperStyle: cols > 1 ? styles.gridRow : undefined,
+          keyExtractor: (item) => `pp_${item.id}`,
+          renderItem: renderPost,
+          ListEmptyComponent: empty,
+          ListFooterComponent: loadingMore ? <ActivityIndicator style={styles.more} color={P.muted} /> : null,
+        })}
         ListHeaderComponent={header}
-        ListEmptyComponent={empty}
-        ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.more} color={colors.primary} /> : null}
-        onEndReached={loadMore}
+        onEndReached={onEndReached}
         onEndReachedThreshold={0.6}
         refreshControl={(
-          <RefreshControl refreshing={refreshing} onRefresh={() => load({ pull: true })} tintColor="#fff" colors={[colors.primary]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onPull} tintColor={P.text} colors={[P.gold]} progressBackgroundColor={P.raised} />
         )}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
@@ -515,117 +642,83 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
 };
 
 const styles = StyleSheet.create({
-  list: { flex: 1, backgroundColor: 'transparent' },
+  list: { flex: 1, backgroundColor: P.bg },
   listContent: { paddingBottom: spacing.xxl },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
-  errorText: { ...typography.body, color: colors.textMuted, marginTop: spacing.sm, marginBottom: spacing.md, textAlign: 'center' },
-  retryBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, ...shadows.sm },
-  retryBtnText: { ...typography.button, color: colors.white },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg, backgroundColor: P.bg },
+  errorText: { ...typography.body, color: P.muted, marginTop: spacing.sm, marginBottom: spacing.md, textAlign: 'center' },
+  retryBtn: { backgroundColor: P.gold, borderRadius: 6, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  retryBtnText: { ...typography.button, color: P.onGold },
 
-  cover: { width: '100%', height: 130 },
-  avatarRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
-    paddingHorizontal: spacing.md, marginTop: -(AVATAR_SIZE / 2),
+  head: {
+    alignItems: 'center', paddingHorizontal: spacing.lg, paddingTop: spacing.md,
+    width: '100%', maxWidth: CONTENT_MAX, alignSelf: 'center',
   },
-  avatarWrapper: {
-    borderRadius: AVATAR_SIZE / 2, borderWidth: 3,
-    borderColor: 'rgba(232,198,107,0.6)', // soft gold ring
-    ...shadows.lg,
+  // Gold ring with a dark gap between it and the photo.
+  avatarRing: {
+    width: AVATAR_SIZE + 10, height: AVATAR_SIZE + 10, borderRadius: (AVATAR_SIZE + 10) / 2,
+    borderWidth: 2, borderColor: P.gold, alignItems: 'center', justifyContent: 'center',
   },
-  avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2, backgroundColor: colors.surface },
-  actionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1, marginLeft: spacing.sm },
-  followBtn: {
-    backgroundColor: colors.primary, borderRadius: radius.full,
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.xs + 4,
-    minWidth: 96, alignItems: 'center', ...shadows.sm,
-  },
-  followingBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  // Pending request: muted, so it reads as "waiting" rather than "done".
-  requestedBtn: { backgroundColor: colors.textMuted, borderWidth: 1, borderColor: colors.border },
-  followBtnText: { ...typography.label, color: colors.white, fontWeight: '700' },
-  roundBtn: {
-    backgroundColor: colors.card, borderRadius: radius.full,
-    width: 40, height: 40, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: colors.border, ...shadows.sm,
-  },
-  editBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: colors.primary, borderRadius: radius.full,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 4, ...shadows.sm,
-  },
-  editBtnText: { ...typography.label, color: colors.white },
+  avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2, backgroundColor: P.raised },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm + 4, maxWidth: '100%' },
+  handle: { fontSize: 17, fontWeight: '600', color: P.text, flexShrink: 1 },
+  followsYou: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, backgroundColor: 'rgba(232,198,107,0.14)' },
+  followsYouText: { color: P.gold, fontSize: 11, fontWeight: '700' },
 
-  nameBlock: { paddingHorizontal: spacing.md, marginTop: spacing.sm },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  nameLock: { marginTop: 2 },
-  displayName: {
-    ...typography.h2, color: colors.textPrimary, flexShrink: 1,
-    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
-  },
-  handle: { ...typography.body, color: colors.textSecondary, marginTop: 2 },
-  followsYou: {
-    marginTop: 2, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  followsYouText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
+  statsRow: { flexDirection: 'row', alignSelf: 'stretch', marginTop: spacing.md + 2 },
+  statBox: { flex: 1, alignItems: 'center', paddingVertical: 2 },
+  statValue: { fontSize: 20, fontWeight: '700', color: P.text },
+  statLabel: { fontSize: 13, color: P.muted, marginTop: 1 },
+  statDivider: { width: 1, height: 18, backgroundColor: P.divider, marginTop: 8 },
 
-  statsRow: {
-    flexDirection: 'row', marginHorizontal: spacing.md, marginTop: spacing.md,
-    backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
-    paddingVertical: spacing.md,
+  actionRow: { flexDirection: 'row', gap: 6, marginTop: spacing.md + 2 },
+  mainBtn: {
+    minWidth: 164, height: 44, borderRadius: 6, paddingHorizontal: spacing.md,
+    backgroundColor: P.gold, alignItems: 'center', justifyContent: 'center',
   },
-  statBox: { flex: 1, alignItems: 'center' },
-  statValue: { ...typography.h3, color: colors.textPrimary },
-  statLabel: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
-  statDivider: { width: 1, backgroundColor: colors.border, marginVertical: spacing.xs },
+  // Following / Requested / Edit profile: the quiet grey button.
+  mainBtnQuiet: { backgroundColor: P.raised },
+  mainBtnText: { fontSize: 15, fontWeight: '700', color: P.onGold },
+  mainBtnTextQuiet: { color: P.text, fontWeight: '600' },
+  squareBtn: { width: 48, height: 44, borderRadius: 6, backgroundColor: P.raised, alignItems: 'center', justifyContent: 'center' },
 
-  favoritesLink: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    marginHorizontal: spacing.md, marginTop: spacing.md,
-    paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.md,
-    backgroundColor: colors.card, borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.4)',
-  },
-  favoritesLinkText: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
-  chevron: { marginLeft: 'auto' },
-  infoSection: { marginHorizontal: spacing.md, marginTop: spacing.md, gap: spacing.sm },
-  infoCard: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm,
-    backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.md, padding: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
-  },
-  infoText: { ...typography.body, color: colors.textPrimary, flex: 1 },
+  bio: { fontSize: 14, lineHeight: 20, color: P.body, textAlign: 'center', marginTop: spacing.md - 2, maxWidth: 320 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 14, marginTop: 6 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metaText: { fontSize: 13, color: P.muted },
 
-  sectionTitle: {
-    ...typography.h3, color: colors.textPrimary,
-    marginHorizontal: spacing.md, marginTop: spacing.lg, marginBottom: spacing.sm,
-    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  tabBar: {
+    flexDirection: 'row', justifyContent: 'center', marginTop: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: P.divider,
   },
-  gridRow: { paddingHorizontal: GRID_GAP, gap: GRID_GAP },
-  tile: { marginBottom: GRID_GAP, backgroundColor: colors.surface, borderRadius: 4, overflow: 'hidden' },
+  tab: {
+    flex: 1, maxWidth: CONTENT_MAX / 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, height: 46, borderBottomWidth: 2, borderBottomColor: 'transparent',
+  },
+  tabOn: { borderBottomColor: P.text },
+  tabText: { fontSize: 13, fontWeight: '600', color: P.text },
+  tabTextOff: { color: P.dim },
+  trackRow: { width: '100%', maxWidth: TRACKS_MAX, alignSelf: 'center', paddingHorizontal: spacing.sm },
+
+  gridRow: { gap: GRID_GAP },
+  tile: { marginTop: GRID_GAP, backgroundColor: P.raised, overflow: 'hidden' },
   tileFallback: { alignItems: 'center', justifyContent: 'center' },
   videoBadge: {
-    position: 'absolute', top: 6, right: 6, backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: radius.full, width: 22, height: 22, alignItems: 'center', justifyContent: 'center',
+    position: 'absolute', top: 6, right: 6, backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: radius.full, width: 20, height: 20, alignItems: 'center', justifyContent: 'center',
   },
-  lockBadge: { position: 'absolute', top: 5, left: 5, padding: 3, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.55)' },
-  viewsBadge: { position: 'absolute', bottom: 5, left: 5, flexDirection: 'row', alignItems: 'center', gap: 2 },
+  lockBadge: { position: 'absolute', top: 5, left: 5, padding: 3, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.55)' },
+  viewsBadge: { position: 'absolute', bottom: 6, left: 6, flexDirection: 'row', alignItems: 'center', gap: 3 },
   viewsBadgeText: {
-    color: colors.white, fontSize: 11, fontWeight: '700',
-    textShadowColor: 'rgba(0,0,0,0.75)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+    color: colors.white, fontSize: 12, fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
   more: { marginVertical: spacing.md },
-  postsEmpty: {
-    backgroundColor: 'rgba(16,28,46,0.85)', borderRadius: radius.lg,
-    marginHorizontal: spacing.md, paddingVertical: spacing.xxl, alignItems: 'center', gap: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
-  },
-  postsEmptyText: { ...typography.body, color: colors.textMuted },
-  postsLockedSub: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs, textAlign: 'center', paddingHorizontal: spacing.lg },
+  postsEmpty: { paddingVertical: spacing.xxl, paddingHorizontal: spacing.lg, alignItems: 'center', gap: spacing.sm },
+  postsEmptyText: { ...typography.body, color: P.muted },
+  postsLockedSub: { ...typography.caption, color: P.dim, textAlign: 'center' },
 
-  skel: { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: radius.sm },
-  skelGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.lg },
+  skel: { backgroundColor: P.raised, borderRadius: 6 },
+  skelGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md },
 });
 
 export default ProfileView;
