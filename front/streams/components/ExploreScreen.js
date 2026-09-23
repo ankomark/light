@@ -25,6 +25,9 @@ import useGridColumns from '../utils/useGridColumns';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import formatCount from '../utils/formatCount';
 import { pushRecent, mergePage, hasResults } from '../utils/exploreLogic';
+import { genreName } from '../utils/genres';
+import VerifiedBadge from './VerifiedBadge';
+import PlaylistCover from './PlaylistCover';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -265,6 +268,16 @@ const ExploreScreen = ({ navigation }) => {
   const openUser = useCallback((user) => navigation.navigate('UserProfile', { userId: user.id, username: user.username }), [navigation]);
   const openTag = useCallback((tag) => navigation.navigate('Hashtag', { tag }), [navigation]);
   const openTrack = useCallback((track) => navigation.navigate('TrackDetail', { trackId: track.id, track }), [navigation]);
+  const openAlbum = useCallback((a) => navigation.navigate('Album', { albumId: a.id, title: a.title }), [navigation]);
+  const openPlaylist = useCallback((p) => navigation.navigate('PlaylistDetail', { playlistId: p.id, name: p.name }), [navigation]);
+  const openGenre = useCallback((g) => navigation.navigate('Genre', { slug: g.slug, name: genreName(t, g) }), [navigation, t]);
+  // The top result: whatever kind it is, open it the way its section would.
+  const openTop = useCallback((top) => {
+    if (top.kind === 'track') openTrack(top.item);
+    else if (top.kind === 'artist') openUser(top.item);
+    else if (top.kind === 'album') openAlbum(top.item);
+    else if (top.kind === 'playlist') openPlaylist(top.item);
+  }, [openTrack, openUser, openAlbum, openPlaylist]);
 
   const renderTile = useCallback(({ item }) => <PostTile post={item} onPress={openPost} size={tileSize} />, [openPost, tileSize]);
 
@@ -364,7 +377,19 @@ const ExploreScreen = ({ navigation }) => {
     if (!results) {
       return searching ? <ActivityIndicator style={styles.more} color={colors.primary} /> : null;
     }
-    const { users = [], hashtags = [], posts = [], tracks = [], groups = [] } = results;
+    const {
+      users = [], hashtags = [], posts = [], tracks = [], groups = [],
+      artists = [], albums = [], playlists = [], genres = [], top = null,
+    } = results;
+    const topCover = top && (top.kind === 'artist'
+      ? top.item.profile_picture
+      : top.item.cover_small || top.item.cover || top.item.cover_image || top.item.cover_images?.[0]);
+    const topSub = top && {
+      track: `${t('search.kind.track')} · ${top.item.artist?.username || ''}`,
+      artist: t('search.kind.artist'),
+      album: `${t('search.kind.album')} · ${top.item.artist?.username || ''}`,
+      playlist: `${t('search.kind.playlist')} · ${top.item.owner || ''}`,
+    }[top.kind];
     if (!hasResults(results)) {
       return (
         <View style={styles.centered}>
@@ -375,6 +400,104 @@ const ExploreScreen = ({ navigation }) => {
     }
     const header = (
       <View>
+        {top ? (
+          <Section title={t('search.top')}>
+            <TouchableOpacity style={styles.topCard} onPress={() => openTop(top)} activeOpacity={0.85} accessibilityRole="button">
+              {top.kind === 'artist' ? (
+                <Avatar uri={topCover} size={72} />
+              ) : (
+                <View style={styles.topCover}>
+                  {topCover ? <Image source={{ uri: topCover }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" /> : <MaterialIcons name="music-note" size={30} color={colors.primary} />}
+                </View>
+              )}
+              <View style={styles.resultInfo}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.topName} numberOfLines={2}>{top.item.title || top.item.name || top.item.username}</Text>
+                  {top.kind === 'artist' && top.item.verified ? <VerifiedBadge size={16} /> : null}
+                </View>
+                <Text style={styles.resultSub} numberOfLines={1}>{topSub}</Text>
+              </View>
+              {top.kind === 'track' ? <Ionicons name="play-circle" size={36} color={colors.primary} /> : null}
+            </TouchableOpacity>
+          </Section>
+        ) : null}
+        {tracks.length > 0 && (
+          <Section title={t('explore.music')}>
+            {tracks.map((track) => (
+              <TouchableOpacity key={`t_${track.id}`} style={styles.resultRow} onPress={() => openTrack(track)} activeOpacity={0.7}>
+                <View style={styles.trackThumb}>
+                  {(track.cover_small || track.cover_image)
+                    ? <Image source={{ uri: track.cover_small || track.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" />
+                    : <MaterialIcons name="music-note" size={20} color={colors.primary} />}
+                </View>
+                <View style={styles.resultInfo}>
+                  <Text style={styles.resultName} numberOfLines={1}>{track.title}</Text>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.resultSub} numberOfLines={1}>{track.artist?.username}</Text>
+                    {track.artist?.verified ? <VerifiedBadge size={12} /> : null}
+                  </View>
+                </View>
+                <Ionicons name="play-circle" size={24} color={colors.primary} />
+              </TouchableOpacity>
+            ))}
+          </Section>
+        )}
+        {artists.length > 0 && (
+          <Section title={t('search.artists')}>
+            {artists.map((a) => (
+              <TouchableOpacity key={`a_${a.id}`} style={styles.resultRow} onPress={() => openUser(a)} activeOpacity={0.7}>
+                <Avatar uri={a.profile_picture} size={42} />
+                <View style={styles.resultInfo}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.resultName} numberOfLines={1}>{a.username}</Text>
+                    {a.verified ? <VerifiedBadge size={14} /> : null}
+                  </View>
+                  <Text style={styles.resultSub}>{t('library.songCount', { n: a.tracks_count ?? 0 })}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </Section>
+        )}
+        {albums.length > 0 && (
+          <Section title={t('artist.albums')}>
+            {albums.map((a) => (
+              <TouchableOpacity key={`al_${a.id}`} style={styles.resultRow} onPress={() => openAlbum(a)} activeOpacity={0.7}>
+                <PlaylistCover cover={a.cover} images={[]} size={42} radius={6} />
+                <View style={styles.resultInfo}>
+                  <Text style={styles.resultName} numberOfLines={1}>{a.title}</Text>
+                  <Text style={styles.resultSub} numberOfLines={1}>{`${t('search.kind.album')} · ${a.artist?.username || ''}`}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </Section>
+        )}
+        {playlists.length > 0 && (
+          <Section title={t('playlist.title')}>
+            {playlists.map((p) => (
+              <TouchableOpacity key={`pl_${p.id}`} style={styles.resultRow} onPress={() => openPlaylist(p)} activeOpacity={0.7}>
+                <PlaylistCover cover={p.cover_image} images={p.cover_images || []} size={42} radius={6} />
+                <View style={styles.resultInfo}>
+                  <Text style={styles.resultName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={styles.resultSub} numberOfLines={1}>{`${t('search.kind.playlist')} · ${p.owner || ''}`}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </Section>
+        )}
+        {genres.length > 0 && (
+          <Section title={t('music.genres')}>
+            <View style={styles.genreChips}>
+              {genres.map((g) => (
+                <TouchableOpacity key={`g_${g.slug}`} style={styles.tagChip} onPress={() => openGenre(g)} activeOpacity={0.85}>
+                  <Text style={styles.tagText}>{genreName(t, g)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Section>
+        )}
         {users.length > 0 && (
           <Section title={t('explore.people')}>
             {users.map((u) => (
@@ -399,24 +522,6 @@ const ExploreScreen = ({ navigation }) => {
                   <Text style={styles.resultSub}>{t('sound.uses', { count: formatCount(h.count) })}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </TouchableOpacity>
-            ))}
-          </Section>
-        )}
-        {tracks.length > 0 && (
-          <Section title={t('explore.music')}>
-            {tracks.map((track) => (
-              <TouchableOpacity key={`t_${track.id}`} style={styles.resultRow} onPress={() => openTrack(track)} activeOpacity={0.7}>
-                <View style={styles.trackThumb}>
-                  {track.cover_image
-                    ? <Image source={{ uri: track.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" />
-                    : <MaterialIcons name="music-note" size={20} color={colors.primary} />}
-                </View>
-                <View style={styles.resultInfo}>
-                  <Text style={styles.resultName} numberOfLines={1}>{track.title}</Text>
-                  <Text style={styles.resultSub} numberOfLines={1}>{track.artist?.username}</Text>
-                </View>
-                <Ionicons name="play-circle" size={24} color={colors.primary} />
               </TouchableOpacity>
             ))}
           </Section>
@@ -579,6 +684,17 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: HAIRLINE,
   },
   resultInfo: { flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  topCard: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md,
+    borderRadius: radius.lg, backgroundColor: colors.card, marginHorizontal: spacing.md,
+  },
+  topCover: {
+    width: 72, height: 72, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  topName: { color: colors.textPrimary, fontSize: 18, fontWeight: '800', flexShrink: 1 },
+  genreChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.md },
   resultName: { ...typography.label, color: colors.textPrimary },
   resultSub: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
   hashIcon: {

@@ -151,4 +151,7 @@ class SearchTests(APITestCase):
         self.assertEqual(self.search('#sab')['hashtags'][0]['tag'], 'sabbath')
 
     def test_short_query_is_empty(self):
-        self.assertEqual(self.search('a'), {'users': [], 'posts': [], 'tracks': [], 'groups': [], 'hashtags': []})
+        res = self.search('a')
+        self.assertIsNone(res.pop('top'))
+        self.assertEqual(res, {k: [] for k in ('users', 'artists', 'tracks', 'albums', 'playlists',
+                                               'groups', 'genres', 'hashtags', 'posts')})

@@ -1107,63 +1107,153 @@ class ExploreViewSet(viewsets.ViewSet):
             posts = posts.exclude(user_id__in=hidden)
         return Response({'tag': tag, 'posts_count': posts.distinct().count()})
 
+    # Each section's size in the all-in-one answer, and the most a "See all"
+    # (?type=) returns.
+    SEARCH_SECTION = 8
+    SEARCH_TYPED = 50
+    SEARCH_TYPES = ('users', 'artists', 'tracks', 'albums', 'playlists', 'groups', 'genres', 'hashtags', 'posts')
+
     @action(detail=False, methods=['get'])
     def search(self, request):
+        """Search everything, forgiving typos and ranked by relevance
+        (songs/search.py): people, artists, songs, albums, public playlists,
+        groups, genres, hashtags and posts, plus the single best `top` result
+        among songs / artists / albums / playlists.
+
+        ?type=<section> answers just that section, with more rows (the "See
+        all" and the Music screen's own search)."""
+        from .. import search as fz
+        from ..models import Album, Category, Playlist
+        from ..serializers import AlbumSerializer, PlaylistListSerializer
+        from .music import albums_with_counts, annotated_tracks, with_playlist_counts
+
         query = request.query_params.get('q', '').strip()
+        only = request.query_params.get('type')
+        only = only if only in self.SEARCH_TYPES else None
+        want = (lambda k: only is None or only == k)
+        n = self.SEARCH_TYPED if only else self.SEARCH_SECTION
+        empty = {k: [] for k in self.SEARCH_TYPES}
         if len(query) < 2:
-            return Response({'users': [], 'posts': [], 'tracks': [], 'groups': [], 'hashtags': []})
+            return Response({**empty, 'top': None})
         me = request.user
-        hidden_authors = explore_hidden_authors(me)
-        # People: usernames that START with the query first (that's who you're
-        # typing), then other matches, the more-followed first. Never blocked
-        # or deactivated accounts.
-        users = (
-            User.objects.filter(Q(username__icontains=query) | Q(profile__bio__icontains=query))
-            .exclude(id__in=blocked_ids_for(me)).exclude(is_deactivated=True)
-            .select_related('profile')
-            .annotate(
-                prefix=Case(When(username__istartswith=query, then=Value(0)), default=Value(1),
-                            output_field=IntegerField()),
-                followers_count=Count('followers', distinct=True),
+        ctx = {'request': request}
+        hidden = explore_hidden_authors(me)
+        blocked = blocked_ids_for(me)
+        out = dict(empty)
+        best = []   # (score, kind, payload) for the top result
+
+        # People: usernames first (bio counts less), the more-followed nudged up.
+        if want('users') or want('artists'):
+            people = list(
+                User.objects.filter(fz.candidate_q(['username', 'profile__bio'], query))
+                .exclude(id__in=blocked).exclude(is_deactivated=True)
+                .select_related('profile')
+                .annotate(followers_count=Count('followers', distinct=True),
+                          live_tracks=Count('tracks', filter=Q(tracks__is_removed=False), distinct=True))
+                .order_by('-followers_count')[:fz.CANDIDATES]
             )
-            .order_by('prefix', '-followers_count', 'username')[:10]
-        )
+            texts = lambda u: [(u.username, 1.0), (getattr(getattr(u, 'profile', None), 'bio', ''), 0.6)]  # noqa: E731
+            pop = lambda u: u.followers_count  # noqa: E731
+            if want('users'):
+                ranked = fz.rank(query, people, texts, pop, n)
+                rows = SimpleUserSerializer([u for _, u in ranked], many=True, context=ctx).data
+                for row, (_, u) in zip(rows, ranked):
+                    row['followers_count'] = u.followers_count
+                out['users'] = rows
+            if want('artists'):
+                ranked = fz.rank(query, [u for u in people if u.live_tracks], lambda u: [(u.username, 1.0)], pop, n)
+                rows = SimpleUserSerializer([u for _, u in ranked], many=True, context=ctx).data
+                for row, (sc, u) in zip(rows, ranked):
+                    row.update(followers_count=u.followers_count, tracks_count=u.live_tracks)
+                    best.append((sc, 'artist', row))
+                out['artists'] = rows
+
+        # Songs: title, then album, then the artist's name.
+        if want('tracks'):
+            cands = list(
+                annotated_tracks(me).filter(fz.candidate_q(['title', 'album', 'artist__username'], query))
+                .exclude(artist_id__in=blocked).exclude(artist__is_deactivated=True)
+                .order_by('-views', '-created_at')[:fz.CANDIDATES]
+            )
+            ranked = fz.rank(query, cands,
+                             lambda t: [(t.title, 1.0), (t.album, 0.8), (t.artist.username, 0.7)],
+                             lambda t: t.views, n)
+            rows = TrackListSerializer([t for _, t in ranked], many=True, context=ctx).data
+            best += [(sc, 'track', row) for (sc, _), row in zip(ranked, rows)]
+            out['tracks'] = rows
+
+        # Albums with songs on them.
+        if want('albums'):
+            cands = list(
+                albums_with_counts(Album.objects.filter(fz.candidate_q(['title', 'artist__username'], query)))
+                .filter(track_count__gt=0)
+                .exclude(artist_id__in=blocked).exclude(artist__is_deactivated=True)[:fz.CANDIDATES]
+            )
+            ranked = fz.rank(query, cands, lambda a: [(a.title, 1.0), (a.artist.username, 0.6)],
+                             lambda a: a.track_count, n)
+            rows = AlbumSerializer([a for _, a in ranked], many=True, context=ctx).data
+            best += [(sc, 'album', row) for (sc, _), row in zip(ranked, rows)]
+            out['albums'] = rows
+
+        # Public playlists with songs (private and unlisted are never searchable).
+        if want('playlists'):
+            cands = list(
+                with_playlist_counts(Playlist.objects.filter(fz.candidate_q(['name', 'description'], query),
+                                                             visibility=Playlist.PUBLIC))
+                .filter(tracks_total__gt=0)
+                .exclude(user_id__in=hidden).exclude(user__is_deactivated=True)
+                .select_related('user')[:fz.CANDIDATES]
+            )
+            ranked = fz.rank(query, cands, lambda pl: [(pl.name, 1.0), (pl.description, 0.6)],
+                             lambda pl: pl.tracks_total, n)
+            rows = PlaylistListSerializer([pl for _, pl in ranked], many=True, context=ctx).data
+            for row, (sc, pl) in zip(rows, ranked):
+                row['owner'] = pl.user.username
+                best.append((sc, 'playlist', row))
+            out['playlists'] = rows
+
+        # Groups you may see (private ones only to their members).
+        if want('groups'):
+            cands = list(
+                Group.objects.filter(fz.candidate_q(['name', 'description'], query))
+                .filter(Q(is_private=False) | Q(creator=me) | Q(members__user=me))
+                .filter(is_removed=False).distinct()[:fz.CANDIDATES]
+            )
+            ranked = fz.rank(query, cands, lambda g: [(g.name, 1.0), (g.description, 0.5)], limit=n)
+            out['groups'] = GroupSerializer([g for _, g in ranked], many=True, context=ctx).data
+
+        if want('genres'):
+            gs = list(Category.objects.exclude(slug__isnull=True))
+            ranked = fz.rank(query, gs, lambda g: [(g.name, 1.0), (g.slug.replace('-', ' '), 1.0)], limit=n)
+            out['genres'] = [{'slug': g.slug, 'name': g.name} for _, g in ranked]
+
+        # Hashtags: what you're typing is the start of a tag.
         tag = query.lstrip('#').lower()
-        hashtags = (
-            Hashtag.objects.filter(name__startswith=tag)
-            .annotate(n=Count('posts', filter=Q(posts__is_removed=False,
-                                                posts__visibility=SocialPost.VISIBILITY_PUBLIC),
-                              distinct=True))
-            .order_by('-n', 'name')[:8]
-        ) if tag else []
+        if want('hashtags') and tag:
+            hashtags = (
+                Hashtag.objects.filter(name__startswith=tag)
+                .annotate(n=Count('posts', filter=Q(posts__is_removed=False,
+                                                    posts__visibility=SocialPost.VISIBILITY_PUBLIC),
+                                  distinct=True))
+                .order_by('-n', 'name')[:n]
+            )
+            out['hashtags'] = [{'tag': h.name, 'count': h.n} for h in hashtags]
+
         # Posts: what this viewer can open — per-post visibility (the shared
-        # queryset) plus account privacy and blocks.
-        posts = (feed_post_queryset(me)
-                 .filter(Q(caption__icontains=query) | Q(location__icontains=query))
-                 .exclude(user_id__in=hidden_authors).exclude(user__is_deactivated=True)
-                 .order_by('-created_at')[:21])
-        tracks = Track.objects.filter(
-            Q(title__icontains=query) | Q(album__icontains=query), is_removed=False
-        ).select_related('artist__profile').order_by('-created_at')[:10]
-        # Never surface private groups the caller isn't part of — their very
-        # existence must stay hidden from non-members.
-        groups = Group.objects.filter(
-            Q(name__icontains=query) | Q(description__icontains=query)
-        ).filter(
-            Q(is_private=False) | Q(creator=request.user) | Q(members__user=request.user)
-        ).filter(is_removed=False).distinct().order_by('-created_at')[:10]
-        user_rows = SimpleUserSerializer(users, many=True, context={'request': request}).data
-        for row, u in zip(user_rows, users):
-            row['followers_count'] = u.followers_count
-        return Response({
-            'users': user_rows,
-            'hashtags': [{'tag': h.name, 'count': h.n} for h in hashtags],
+        # queryset) plus account privacy and blocks. Captions are prose, so
+        # plain matching on the words typed.
+        if want('posts'):
+            posts = (feed_post_queryset(me)
+                     .filter(Q(caption__icontains=query) | Q(location__icontains=query))
+                     .exclude(user_id__in=hidden).exclude(user__is_deactivated=True)
+                     .order_by('-created_at')[:21 if not only else self.SEARCH_TYPED])
             # Grid tiles, not full posts (the post page loads the rest).
-            'posts': ExplorePostSerializer(posts, many=True, context={'request': request}).data,
-            # List rows — without every song's full lyrics.
-            'tracks': TrackListSerializer(tracks, many=True, context={'request': request}).data,
-            'groups': GroupSerializer(groups, many=True, context={'request': request}).data,
-        })
+            out['posts'] = ExplorePostSerializer(posts, many=True, context=ctx).data
+
+        top = max(best, key=lambda b: b[0]) if best else None
+        # Only a clear winner is a "top result".
+        out['top'] = {'kind': top[1], 'item': top[2]} if top and top[0] >= 0.8 else None
+        return Response(out)
 
 
 class PublicationViewSet(viewsets.ModelViewSet):

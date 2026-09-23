@@ -296,6 +296,12 @@ export const fetchTracks = async (page = 1, search = '', genre = '') => {
   return apiRequest('get', '/tracks/', null, { params });
 };
 
+// Songs matching a search, typos forgiven, best first (up to 50; no pages).
+export const searchSongs = async (q) => {
+  const data = await apiRequest('get', '/explore/search/', null, { params: { q, type: 'tracks' } });
+  return { results: Array.isArray(data?.tracks) ? data.tracks : [], next: null };
+};
+
 // The Music home in one request (see the backend's MusicHomeView):
 // { recent, for_you, trending, new_releases, following, top_country, top_world, genres }.
 export const fetchMusicHome = (country = '') =>

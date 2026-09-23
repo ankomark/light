@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { Image } from 'expo-image';
 import { useFocusEffect , useNavigation } from '@react-navigation/native';
-import { fetchTracks, fetchShuffledTracks, fetchMusicHome } from "../services/api";
+import { fetchTracks, fetchShuffledTracks, fetchMusicHome, searchSongs } from "../services/api";
 import MusicHome from './MusicHome';
 import { deviceCountry } from '../utils/region';
 import toQueueTrack from '../utils/queueTrack';
@@ -134,7 +134,9 @@ const TrackList = () => {
     try {
       setRefreshing(true);
       setError(null);
-      const response = await fetchTracks(1, search);
+      // A search is ranked and typo-tolerant (the same search as Explore);
+      // the plain library is newest first, paged.
+      const response = search ? await searchSongs(search) : await fetchTracks(1, search);
       // Media URLs are absolute (R2) and served as-is; no client rewriting.
       const results = response?.results ?? [];
       setTracks(results);
