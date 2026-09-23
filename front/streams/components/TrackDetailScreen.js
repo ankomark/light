@@ -83,6 +83,20 @@ const TrackDetailScreen = ({ route, navigation }) => {
                 <DownloadButton track={track} size={24} />
               </View>
 
+              {/* Credits and licence, when the uploader gave them. */}
+              {(track.composer || track.producer || track.rights_holder || (track.license && track.license !== 'all_rights_reserved')) ? (
+                <View style={styles.credits}>
+                  <Text style={styles.creditsTitle}>{t('rights.credits')}</Text>
+                  {[['rights.composer', track.composer], ['rights.producer', track.producer], ['rights.owner', track.rights_holder]]
+                    .filter(([, v]) => v)
+                    .map(([label, v]) => (
+                      <Text key={label} style={styles.creditLine}><Text style={styles.creditLabel}>{`${t(label)}  `}</Text>{v}</Text>
+                    ))}
+                  {track.license && track.license !== 'all_rights_reserved'
+                    ? <Text style={styles.creditLine}>{t(`rights.license.${track.license}`)}</Text> : null}
+                </View>
+              ) : null}
+
               <TrackRail title={t('music.moreLikeThis')} tracks={similar} reasonLabel={reasonLabel} style={styles.rail} />
             </ScrollView>
 
@@ -112,6 +126,10 @@ const styles = StyleSheet.create({
   },
   title: { color: colors.textPrimary, fontSize: 24, fontWeight: '800', textAlign: 'center', marginTop: spacing.lg, paddingHorizontal: spacing.lg },
   artist: { color: colors.textSecondary, fontSize: 15, marginTop: 4, textAlign: 'center' },
+  credits: { alignSelf: 'stretch', marginHorizontal: 16, marginTop: 16, padding: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)' },
+  creditsTitle: { color: colors.textPrimary, fontWeight: '800', fontSize: 14, marginBottom: 6 },
+  creditLine: { color: colors.textPrimary, fontSize: 13.5, marginTop: 2 },
+  creditLabel: { color: colors.textSecondary },
   actions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xl, marginTop: spacing.lg, marginBottom: spacing.lg },
   play: {
     width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primary,

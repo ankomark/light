@@ -182,7 +182,8 @@ describe('track upload', () => {
   it('compresses audio, uploads audio + cover, and creates the track via apiRequest', async () => {
     compressAudio.mockResolvedValue({ uri: 'small.m4a', compressed: true });
     const track = await buildTrackJob({
-      title: 'Hymn', album: '', lyrics: 'la',
+      title: 'Hymn', album: '', lyrics: 'la', rightsConfirmed: true,
+      rights: { license: 'public_domain', composer: 'Crosby' },
       audio: { uri: 'big.wav', name: 'big.wav', mimeType: 'audio/wav' },
       cover: { uri: 'cover.jpg', mimeType: 'image/jpeg' },
     })(ctx());
@@ -193,6 +194,10 @@ describe('track upload', () => {
       cover_image: expect.stringMatching(/cover/),
       album: null,
       lyrics: 'la',
+      // The uploader's rights confirmation and credits travel with it.
+      rights_confirmed: true,
+      license: 'public_domain',
+      composer: 'Crosby',
     });
     expect(track.id).toBe(5);
   });

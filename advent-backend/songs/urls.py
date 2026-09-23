@@ -17,6 +17,8 @@ from .views import (
     MusicChartView,
     AlbumViewSet,
     StudioView,
+    TrackDisputeView,
+    RemovedSongsView,
     SocialPostViewSet,
     PostLikeViewSet,
     PostCommentViewSet,
@@ -189,6 +191,8 @@ urlpatterns = [
     path('music/home/', MusicHomeView.as_view(), name='music-home'),
     # Artist Studio: your own numbers.
     path('studio/', StudioView.as_view(), name='studio'),
+    path('studio/removed/', RemovedSongsView.as_view(), name='studio-removed'),
+    path('tracks/<int:pk>/dispute/', TrackDisputeView.as_view(), name='track-dispute'),
     path('music/charts/<str:chart>/', MusicChartView.as_view(), name='music-chart'),
     path('notifications/unread_count/', NotificationViewSet.as_view({'get': 'unread_count'}), name='notification-unread-count'),
     path('video-studios/my-studios/', VideoStudioViewSet.as_view({'get': 'my_videostudios'}), name='video-my-studios'),

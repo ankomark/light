@@ -178,6 +178,28 @@ class Track(models.Model):
     album = models.CharField(max_length=100, blank=True, null=True)
     album_ref = models.ForeignKey('Album', null=True, blank=True, on_delete=models.SET_NULL, related_name='tracks')
     track_number = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    # ── Rights (songs/rights.py) ──
+    # When the uploader confirmed they own the song or have permission to
+    # share it — required for every upload since it was introduced.
+    rights_confirmed_at = models.DateTimeField(null=True, blank=True)
+    LICENSE_ALL_RIGHTS = 'all_rights_reserved'
+    LICENSE_CHOICES = [
+        (LICENSE_ALL_RIGHTS, 'All rights reserved'),
+        ('public_domain', 'Public domain'),
+        ('creative_commons', 'Creative Commons'),
+    ]
+    license = models.CharField(max_length=20, choices=LICENSE_CHOICES, default=LICENSE_ALL_RIGHTS)
+    # Optional credits.
+    composer = models.CharField(max_length=150, blank=True, default='')
+    producer = models.CharField(max_length=150, blank=True, default='')
+    rights_holder = models.CharField(max_length=150, blank=True, default='')   # "© owner"
+    isrc = models.CharField(max_length=12, blank=True, default='')
+    # Why a moderator took it down ('copyright' | 'policy'), when, and their
+    # note — shown to the uploader, who can dispute it (Appeal kind=copyright).
+    removed_reason = models.CharField(max_length=20, blank=True, default='')
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removal_note = models.CharField(max_length=500, blank=True, default='')
     # audio_file = models.FileField(upload_to='audio/')  
     # cover_image = models.ImageField(upload_to='covers/', blank=True, null=True)
     # Media references: absolute URL (R2) or legacy Cloudinary public_id.
@@ -754,13 +776,20 @@ class AdminActionLog(models.Model):
 
 
 class Appeal(models.Model):
-    """A suspended user's request to have their moderation action reviewed."""
+    """A request to have a moderation action reviewed: a suspended user's
+    (kind 'suspension'), or an uploader disputing a song's takedown (kind
+    'copyright', with `track`) — a counter-notice."""
+    KIND_SUSPENSION = 'suspension'
+    KIND_COPYRIGHT = 'copyright'
+    KIND_CHOICES = [(KIND_SUSPENSION, 'Suspension'), (KIND_COPYRIGHT, 'Song takedown')]
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('approved', 'Approved'),
         ('rejected', 'Rejected'),
     ]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='appeals')
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=KIND_SUSPENSION)
+    track = models.ForeignKey('Track', null=True, blank=True, on_delete=models.CASCADE, related_name='appeals')
     message = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_appeals')

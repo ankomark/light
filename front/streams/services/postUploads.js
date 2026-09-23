@@ -210,6 +210,10 @@ export const buildTrackJob = (snap) => async ({ progress, stage }) => {
     album: snap.album || null,
     lyrics: snap.lyrics || null,
     ...(snap.genre ? { genre: snap.genre } : {}),
+    // The uploader's "I own this or have permission" (required by the server)
+    // and the optional licence / credits.
+    rights_confirmed: !!snap.rightsConfirmed,
+    ...(snap.rights || {}),
     // Measured on the phone when the file was picked (null when unreadable).
     ...(snap.durationMs ? { duration_ms: snap.durationMs } : {}),
     ...(snap.clientId ? { client_id: snap.clientId } : {}),

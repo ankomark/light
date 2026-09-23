@@ -225,11 +225,21 @@ class AppealSerializer(serializers.ModelSerializer):
 class AdminAppealSerializer(serializers.ModelSerializer):
     user = SimpleUserSerializer(read_only=True)
     reviewed_by = SimpleUserSerializer(read_only=True)
+    # A song dispute: which song, and why it was taken down.
+    track = serializers.SerializerMethodField()
 
     class Meta:
         model = Appeal
-        fields = ['id', 'user', 'message', 'status', 'reviewed_by', 'reviewed_at',
+        fields = ['id', 'kind', 'user', 'track', 'message', 'status', 'reviewed_by', 'reviewed_at',
                   'review_notes', 'created_at']
+
+    def get_track(self, obj):
+        t = obj.track
+        if t is None:
+            return None
+        return {'id': t.id, 'title': t.title, 'removed_reason': t.removed_reason,
+                'removal_note': t.removal_note, 'rights_holder': t.rights_holder,
+                'composer': t.composer, 'isrc': t.isrc, 'license': t.license}
 
 
 # ── Content-management list serializers ──────────────────────────────────────

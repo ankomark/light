@@ -14,6 +14,7 @@ import { createSound, measureDurationMs } from '../services/audioPlayer';
 import { compressImage } from '../services/imageProcessing';
 import { enqueueUpload } from '../services/uploadQueue';
 import GenrePicker from './GenrePicker';
+import RightsFields, { EMPTY_RIGHTS, isrcLooksValid } from './RightsFields';
 import RotatingBackground from './RotatingBackground';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { colors, spacing, radius, shadows } from '../constants/theme';
@@ -32,6 +33,9 @@ const TrackUploadForm = () => {
   const [title, setTitle] = useState('');
   const [album, setAlbum] = useState('');
   const [genre, setGenre] = useState(null);
+  // Rights: the owner-or-permission confirmation (required), licence, credits.
+  const [rightsOk, setRightsOk] = useState(false);
+  const [rights, setRights] = useState(EMPTY_RIGHTS);
   const [lyrics, setLyrics] = useState('');
   const [audioFile, setAudioFile] = useState(null);   // { uri, name, mimeType, sizeMB }
   const [coverImage, setCoverImage] = useState(null); // { uri, mimeType }
@@ -154,6 +158,14 @@ const TrackUploadForm = () => {
         title: title.trim(),
         album: album.trim(),
         genre,
+        rightsConfirmed: rightsOk,
+        rights: {
+          license: rights.license,
+          composer: rights.composer.trim(),
+          producer: rights.producer.trim(),
+          rights_holder: rights.rights_holder.trim(),
+          isrc: rights.isrc.trim(),
+        },
         lyrics: lyrics.trim(),
         durationMs: audioFile.durationMs || null,
         audio: { uri: audioFile.uri, name: audioFile.name, mimeType: audioFile.mimeType },
@@ -164,7 +176,7 @@ const TrackUploadForm = () => {
     navigation.goBack();
   };
 
-  const canUpload = !!audioFile && !!title.trim();
+  const canUpload = !!audioFile && !!title.trim() && rightsOk && isrcLooksValid(rights.isrc);
 
   return (
     <View style={styles.root}>
@@ -264,6 +276,27 @@ const TrackUploadForm = () => {
               multiline
             />
           </View>
+
+          {/* Rights: required before sharing (songs/rights.py on the server). */}
+          <View style={styles.card}>
+            <RightsFields
+              value={rights}
+              onChange={setRights}
+              inputStyle={styles.input}
+              labelStyle={[styles.label, styles.labelSpaced]}
+            />
+            <TouchableOpacity
+              style={styles.confirmRow}
+              onPress={() => setRightsOk((v) => !v)}
+              activeOpacity={0.8}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: rightsOk }}
+            >
+              <Feather name={rightsOk ? 'check-square' : 'square'} size={22} color={rightsOk ? colors.primary : colors.textSecondary} />
+              <Text style={styles.confirmText}>{t('rights.confirm')}</Text>
+            </TouchableOpacity>
+            <Text style={styles.confirmNote}>{t('rights.confirmNote')}</Text>
+          </View>
         </ScrollView>
 
         {!kbHeight && (
@@ -333,6 +366,9 @@ const styles = StyleSheet.create({
   },
   label: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', marginBottom: spacing.xs, letterSpacing: 0.3 },
   labelSpaced: { marginTop: spacing.md },
+  confirmRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginTop: spacing.md, minHeight: 44 },
+  confirmText: { flex: 1, color: colors.textPrimary, fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  confirmNote: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: spacing.xs },
   input: {
     height: 48, borderRadius: radius.md, paddingHorizontal: spacing.md, fontSize: 16,
     color: colors.textPrimary, backgroundColor: 'rgba(6,16,32,0.6)',

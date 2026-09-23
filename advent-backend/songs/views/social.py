@@ -918,6 +918,12 @@ class ReportViewSet(viewsets.ViewSet):
             return Response({'error': 'object_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not reason:
             return Response({'error': 'reason is required'}, status=status.HTTP_400_BAD_REQUEST)
+        # A copyright claim has to say what's being copied (a moderator can't
+        # judge "copyright" alone).
+        from ..rights import MIN_COPYRIGHT_REPORT_CHARS
+        if reason == 'copyright' and len((description or '').strip()) < MIN_COPYRIGHT_REPORT_CHARS:
+            return Response({'error': 'Describe the work that is being copied and who owns it.',
+                             'code': 'copyright_details'}, status=status.HTTP_400_BAD_REQUEST)
 
         _, created = Report.objects.get_or_create(
             reporter=request.user,

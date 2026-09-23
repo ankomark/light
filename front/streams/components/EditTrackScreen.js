@@ -8,6 +8,7 @@ import { apiRequest, fetchTrackLyrics, invalidateTrackLyrics } from '../services
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import GenrePicker from './GenrePicker';
+import RightsFields, { EMPTY_RIGHTS, isrcLooksValid } from './RightsFields';
 
 const EditTrackScreen = () => {
   const { t } = useI18n();
@@ -17,6 +18,16 @@ const EditTrackScreen = () => {
   const [title, setTitle] = useState(track.title || '');
   const [album, setAlbum] = useState(track.album || '');
   const [genre, setGenre] = useState(track.genre?.slug ?? null);
+  // Licence and credits. A row cached before songs had them has none: only
+  // what's changed is sent, so that can't wipe the real ones.
+  const initialRights = {
+    license: track.license || EMPTY_RIGHTS.license,
+    composer: track.composer || '',
+    producer: track.producer || '',
+    rights_holder: track.rights_holder || '',
+    isrc: track.isrc || '',
+  };
+  const [rights, setRights] = useState(initialRights);
   const [saving, setSaving] = useState(false);
 
   // `null` means "not loaded yet", which is NOT the same as "no lyrics".
@@ -65,6 +76,9 @@ const EditTrackScreen = () => {
         // Only when changed: a row cached before songs had genres has none,
         // and sending that would clear the real one.
         ...(genre !== (track.genre?.slug ?? null) ? { genre } : {}),
+        ...Object.fromEntries(Object.entries(rights)
+          .map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])
+          .filter(([k, v]) => v !== initialRights[k])),
       });
       // The sheet and Now Playing cache lyrics per track for the session; drop
       // this one so they don't keep showing the words that were just replaced.
@@ -110,6 +124,8 @@ const EditTrackScreen = () => {
         <Text style={styles.label}>{t('track.genre')}</Text>
         <GenrePicker value={genre} onChange={setGenre} />
 
+        <RightsFields value={rights} onChange={setRights} inputStyle={styles.input} labelStyle={styles.label} />
+
         <Text style={styles.label}>{t('track.lyrics')}</Text>
         <TextInput
           style={[styles.input, styles.lyrics]}
@@ -133,9 +149,9 @@ const EditTrackScreen = () => {
         )}
 
         <TouchableOpacity
-          style={[styles.button, (saving || !lyricsReady) && styles.buttonDisabled]}
+          style={[styles.button, (saving || !lyricsReady || !isrcLooksValid(rights.isrc)) && styles.buttonDisabled]}
           onPress={handleUpdate}
-          disabled={saving || !lyricsReady}
+          disabled={saving || !lyricsReady || !isrcLooksValid(rights.isrc)}
           activeOpacity={0.85}
         >
           {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>{t('track.edit.save')}</Text>}

@@ -75,7 +75,10 @@ const AdminAppeals = () => {
   const confirmApprove = async (item) => {
     if (await confirmAction({
       title: t('appeal.approveTitle'),
-      message: t('appeal.approveConfirm', { name: item.user?.username }),
+      // A song dispute upheld brings the song back; a suspension appeal lifts it.
+      message: item.kind === 'copyright'
+        ? t('appeal.approveSongConfirm', { title: item.track?.title || '' })
+        : t('appeal.approveConfirm', { name: item.user?.username }),
       confirmLabel: 'Approve',
     })) act(item.id, () => approveAppeal(item.id));
   };
@@ -95,6 +98,19 @@ const AdminAppeals = () => {
           <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
           <Text style={styles.status}>{item.status}</Text>
         </View>
+        {item.kind === 'copyright' && item.track ? (
+          <View style={styles.songBox}>
+            <Text style={styles.songKind}>{t('appeal.songDispute')}</Text>
+            <Text style={styles.songTitle}>{item.track.title}</Text>
+            <Text style={styles.songMeta}>
+              {[t(`rights.reason.${item.track.removed_reason || 'policy'}`),
+                item.track.rights_holder ? `© ${item.track.rights_holder}` : null,
+                item.track.composer ? `${t('rights.composer')}: ${item.track.composer}` : null,
+                item.track.isrc ? `ISRC ${item.track.isrc}` : null].filter(Boolean).join('  ·  ')}
+            </Text>
+            {item.track.removal_note ? <Text style={styles.songMeta}>{item.track.removal_note}</Text> : null}
+          </View>
+        ) : null}
         <Text style={styles.message}>{item.message}</Text>
         {item.review_notes ? <Text style={styles.note}>📝 {item.review_notes}</Text> : null}
 
@@ -159,6 +175,10 @@ const AdminAppeals = () => {
 };
 
 const styles = StyleSheet.create({
+  songBox: { marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: 'rgba(229,115,115,0.10)' },
+  songKind: { fontSize: 11, fontWeight: '800', color: '#E57373', letterSpacing: 0.5, textTransform: 'uppercase' },
+  songTitle: { fontSize: 15, fontWeight: '700', color: '#fff', marginTop: 2 },
+  songMeta: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   title: {

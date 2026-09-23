@@ -137,7 +137,7 @@ class GenreTests(Base):
 
     def test_a_song_gets_a_genre_on_upload_and_can_change_it(self):
         self.client.force_authenticate(self.artist)
-        res = self.client.post('/api/tracks/', {'title': 'New', 'audio_file': f'{R2}/n.mp3', 'genre': 'hymns'}, format='json')
+        res = self.client.post('/api/tracks/', {'title': 'New', 'audio_file': f'{R2}/n.mp3', 'genre': 'hymns', 'rights_confirmed': True}, format='json')
         self.assertEqual(res.status_code, 201, res.content)
         tid = res.json()['id']
         self.assertEqual(res.json()['genre'], {'slug': 'hymns', 'name': 'Hymns'})
@@ -147,7 +147,7 @@ class GenreTests(Base):
         self.assertEqual(Track.objects.get(pk=tid).categories.count(), 1)
         self.client.patch(f'/api/tracks/{tid}/', {'genre': None}, format='json')
         self.assertEqual(Track.objects.get(pk=tid).categories.count(), 0)
-        bad = self.client.post('/api/tracks/', {'title': 'X', 'audio_file': f'{R2}/x.mp3', 'genre': 'polka'}, format='json')
+        bad = self.client.post('/api/tracks/', {'title': 'X', 'audio_file': f'{R2}/x.mp3', 'genre': 'polka', 'rights_confirmed': True}, format='json')
         self.assertEqual(bad.status_code, 400)
 
     def test_genre_page_lists_its_songs(self):

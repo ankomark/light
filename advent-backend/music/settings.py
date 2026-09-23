@@ -229,6 +229,8 @@ REST_FRAMEWORK = {
         # Quiz reads are cheap; the submit is one per day anyway.
         'quiz': '60/min',
         'appeals': '5/hour',
+        # Song takedown disputes (one per takedown anyway).
+        'disputes': '10/hour',
         'reports': '20/hour',
         # Listening reports: two per song played, plus offline backlogs.
         'plays': '120/min',

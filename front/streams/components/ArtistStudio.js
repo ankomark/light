@@ -4,6 +4,7 @@
 //   Completion · Skip rate · Average listen · All-time plays
 //   Daily streams chart · Top songs · Countries · Where listens start
 //   Your albums (open, or make a new one)
+//   Removed songs, at the top when there are any (with Dispute)
 //
 // Your own listens never count here. Cache-first per period.
 import React, { useCallback, useEffect, useState } from 'react';
@@ -21,6 +22,7 @@ import formatCount from '../utils/formatCount';
 import formatDuration from '../utils/formatDuration';
 import { countryName } from '../utils/region';
 import PlaylistCover from './PlaylistCover';
+import RemovedSongs from './RemovedSongs';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -155,6 +157,10 @@ const ArtistStudio = () => {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Songs a moderator took down, first: that's what a takedown notice
+          opens this screen for (only shows when there are some). */}
+      <RemovedSongs />
 
       {!tot ? (
         failed ? (

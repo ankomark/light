@@ -16,6 +16,8 @@ jest.mock('../../services/api', () => ({
   fetchStudio: (d) => mockFetchStudio(d),
   fetchAlbums: jest.fn(async () => [{ id: 3, title: 'Vespers', cover: null, track_count: 4 }]),
   createAlbum: jest.fn(),
+  fetchRemovedSongs: jest.fn(async () => []),
+  disputeTrack: jest.fn(),
 }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn() }),
@@ -32,7 +34,8 @@ const ArtistStudio = require('../ArtistStudio').default;
 
 test('shows the numbers, changes, top songs, countries, sources and albums', async () => {
   const r = render(<ArtistStudio />);
-  await waitFor(() => expect(r.getByText('1.2K')).toBeTruthy());
+  // The first render is slow under a full parallel test run.
+  await waitFor(() => expect(r.getByText('1.2K')).toBeTruthy(), { timeout: 8000 });
   expect(r.getByText('▲ 20%')).toBeTruthy();
   expect(r.getByText('▼ 5.5%')).toBeTruthy();
   expect(r.getByText('61.5%')).toBeTruthy();

@@ -43,6 +43,12 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
 
   const handleClose = () => { reset(); onClose(); };
 
+  // A copyright claim has to say what's copied and whose it is (the server
+  // requires it too): a moderator can't judge "copyright" on its own.
+  const COPYRIGHT_MIN = 20;
+  const needsDetails = selectedReason === 'copyright';
+  const detailsOk = !needsDetails || description.trim().length >= COPYRIGHT_MIN;
+
   const handleSubmit = async () => {
     if (!selectedReason) {
       Alert.alert(t('report.selectReasonTitle'), t('report.selectReasonBody'));
@@ -56,6 +62,8 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
       const msg = err.response?.data?.message ?? err.message;
       if (msg?.includes('Already')) {
         setSubmitted(true); // treat duplicate as success
+      } else if (err.response?.data?.code === 'copyright_details') {
+        Alert.alert(t('common.error'), t('report.copyrightNeedsDetails'));
       } else {
         Alert.alert(t('common.error'), t('report.submitFailed'));
       }
@@ -114,9 +122,10 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
               </TouchableOpacity>
             ))}
 
+            {needsDetails ? <Text style={styles.copyrightHint}>{t('report.copyrightHint')}</Text> : null}
             <TextInput
               style={styles.descInput}
-              placeholder={t('report.detailsPlaceholder')}
+              placeholder={t(needsDetails ? 'report.copyrightPlaceholder' : 'report.detailsPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={description}
               onChangeText={setDescription}
@@ -125,9 +134,9 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
             />
 
             <TouchableOpacity
-              style={[styles.submitBtn, (!selectedReason || loading) && styles.submitDisabled]}
+              style={[styles.submitBtn, (!selectedReason || loading || !detailsOk) && styles.submitDisabled]}
               onPress={handleSubmit}
-              disabled={!selectedReason || loading}
+              disabled={!selectedReason || loading || !detailsOk}
               activeOpacity={0.8}
             >
               {loading
@@ -147,6 +156,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
 };
 
 const styles = StyleSheet.create({
+  copyrightHint: { fontSize: 12.5, lineHeight: 18, color: colors.textSecondary, marginTop: 8, marginBottom: 4 },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

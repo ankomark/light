@@ -3,6 +3,7 @@ from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES
+from .. import rights
 from ..signals import sync_removal_likes
 from ..serializers.admin import build_report_targets
 from ..serializers import (
@@ -330,6 +331,10 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         report.resolved_by = request.user
         report.resolved_at = timezone.now()
         report.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+        if report.content_type == 'track':
+            # Record why, and tell the uploader how to dispute it.
+            rights.track_removed([report.object_id], reason=report.reason,
+                                 note=request.data.get('reason', ''), actor=request.user)
         log_admin_action(request.user, f'remove_{report.content_type}',
                          report.content_type, report.object_id,
                          reason=request.data.get('reason', ''))
@@ -567,6 +572,10 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         oid = request.data.get('id')
         if not _soft_remove(ctype, oid, True):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if ctype == 'track':
+            # removal_reason: 'copyright' | 'policy' (the default).
+            rights.track_removed([oid], reason=request.data.get('removal_reason', 'policy'),
+                                 note=request.data.get('reason', ''), actor=request.user)
         log_admin_action(request.user, f'remove_{ctype}', ctype, oid, reason=request.data.get('reason', ''))
         return Response({'status': 'removed'})
 
@@ -576,6 +585,8 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         oid = request.data.get('id')
         if not _soft_remove(ctype, oid, False):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if ctype == 'track':
+            rights.track_restored([oid], actor=request.user)
         log_admin_action(request.user, f'restore_{ctype}', ctype, oid)
         return Response({'status': 'restored'})
 
@@ -600,7 +611,14 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         # .update() fires no signals, so the profile-total adjustment is explicit
         # here as well — and must precede the flip (it selects on the old state).
         sync_removal_likes(Model, ids, op == 'remove')
+        changing = list(Model.objects.filter(id__in=ids, is_removed=(op != 'remove')).values_list('id', flat=True))
         count = Model.objects.filter(id__in=ids).update(is_removed=(op == 'remove'))
+        if ctype == 'track' and changing:
+            if op == 'remove':
+                rights.track_removed(changing, reason=request.data.get('removal_reason', 'policy'),
+                                     note=request.data.get('reason', ''), actor=request.user)
+            else:
+                rights.track_restored(changing, actor=request.user)
         log_admin_action(request.user, f'bulk_{op}_{ctype}', ctype, None, reason=f'{count} items')
         return Response({'updated': count})
 
@@ -612,10 +630,13 @@ class AdminAppealViewSet(viewsets.GenericViewSet):
     serializer_class = AdminAppealSerializer
 
     def get_queryset(self):
-        qs = Appeal.objects.select_related('user', 'reviewed_by').order_by('-created_at')
+        qs = Appeal.objects.select_related('user', 'reviewed_by', 'track').order_by('-created_at')
         status_f = self.request.query_params.get('status')
         if status_f in dict(Appeal.STATUS_CHOICES):
             qs = qs.filter(status=status_f)
+        kind = self.request.query_params.get('kind')
+        if kind in dict(Appeal.KIND_CHOICES):
+            qs = qs.filter(kind=kind)
         return qs
 
     def list(self, request):
@@ -633,6 +654,13 @@ class AdminAppealViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         appeal = self._resolve(request, pk, 'approved')
+        if appeal.kind == Appeal.KIND_COPYRIGHT:
+            # A song takedown overturned: the song comes back (the uploader is
+            # told by track_restored).
+            if appeal.track_id and _soft_remove('track', appeal.track_id, False):
+                rights.track_restored([appeal.track_id], actor=request.user)
+            log_admin_action(request.user, 'approve_song_dispute', 'appeal', appeal.id)
+            return Response(self.get_serializer(appeal).data)
         # Approving an appeal lifts the suspension.
         u = appeal.user
         u.is_suspended = False
@@ -648,6 +676,13 @@ class AdminAppealViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         appeal = self._resolve(request, pk, 'rejected')
+        if appeal.kind == Appeal.KIND_COPYRIGHT:
+            title = appeal.track.title if appeal.track_id else 'your song'
+            notify_moderation(appeal.user, 'Dispute reviewed',
+                              f'We reviewed your dispute about "{title}" and the takedown stands.'
+                              + (f" Note: {appeal.review_notes}" if appeal.review_notes else ''))
+            log_admin_action(request.user, 'reject_song_dispute', 'appeal', appeal.id)
+            return Response(self.get_serializer(appeal).data)
         notify_moderation(appeal.user, 'Appeal reviewed',
                           'Your appeal has been reviewed and the moderation decision stands.'
                           + (f" Note: {appeal.review_notes}" if appeal.review_notes else ''))

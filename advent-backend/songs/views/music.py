@@ -10,7 +10,7 @@ from ..models import Album, PlayEvent, PlaylistTrack
 from ..serializers import AlbumSerializer
 from django.db.models import Sum
 from django.db.models import Prefetch
-from .. import discovery, audio_tags, charts, artists
+from .. import discovery, audio_tags, charts, artists, rights
 from ..comments import (
     create_comment, set_reaction, reaction_summaries, TRACK as TRACK_COMMENTS,
     REACTIONS as COMMENT_REACTIONS, LIKE as COMMENT_LIKE,
@@ -902,6 +902,34 @@ class AlbumViewSet(viewsets.ModelViewSet):
                 Track.objects.filter(pk=tid).update(album_ref=album, track_number=n, album=album.title)
             Album.objects.filter(pk=album.pk).update(updated_at=timezone.now())
         return self._respond(album)
+
+
+class TrackDisputeView(APIView):
+    """POST /tracks/<id>/dispute/ {message, good_faith}: the uploader asks for
+    their removed song to be reviewed (songs/rights.py)."""
+    permission_classes = [IsAuthenticated]
+    throttle_scope = 'disputes'
+
+    def get_throttles(self):
+        return [ScopedRateThrottle()]
+
+    def post(self, request, pk):
+        track = Track.objects.filter(pk=pk, artist=request.user).first()
+        if track is None:
+            return Response({'error': 'Song not found'}, status=status.HTTP_404_NOT_FOUND)
+        appeal, error = rights.open_dispute(request.user, track, request.data.get('message'),
+                                            bool(request.data.get('good_faith')))
+        if error:
+            return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'id': appeal.id, 'status': appeal.status}, status=status.HTTP_201_CREATED)
+
+
+class RemovedSongsView(APIView):
+    """GET /studio/removed/: your removed songs, why, and your disputes."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(rights.removed_songs(request.user))
 
 
 class StudioView(APIView):

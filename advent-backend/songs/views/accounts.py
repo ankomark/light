@@ -43,7 +43,7 @@ class AppealViewSet(viewsets.GenericViewSet):
         if not getattr(user, 'is_currently_suspended', False):
             return Response({'error': 'There is nothing to appeal — your account is not suspended.'},
                             status=status.HTTP_400_BAD_REQUEST)
-        if Appeal.objects.filter(user=user, status='pending').exists():
+        if Appeal.objects.filter(user=user, kind=Appeal.KIND_SUSPENSION, status='pending').exists():
             return Response({'error': 'You already have an appeal under review.'},
                             status=status.HTTP_400_BAD_REQUEST)
         message = (request.data.get('message') or '').strip()
@@ -56,7 +56,8 @@ class AppealViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['get'])
     def mine(self, request):
         """Most recent appeal for the current user (or null)."""
-        appeal = Appeal.objects.filter(user=request.user).order_by('-created_at').first()
+        appeal = (Appeal.objects.filter(user=request.user, kind=Appeal.KIND_SUSPENSION)
+                  .order_by('-created_at').first())
         return Response(self.get_serializer(appeal).data if appeal else None)
 
 

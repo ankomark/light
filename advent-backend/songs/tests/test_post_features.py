@@ -355,7 +355,7 @@ class TrackUploadTests(APITestCase):
 
     def upload(self, **kw):
         return self.client.post('/api/tracks/upload/', {
-            'title': 'Amazing Grace', 'audio_file': 'https://media.example.com/a.mp3', **kw,
+            'title': 'Amazing Grace', 'audio_file': 'https://media.example.com/a.mp3', 'rights_confirmed': True, **kw,
         }, format='json')
 
     def test_same_title_twice_gets_distinct_slugs(self):

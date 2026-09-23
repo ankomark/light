@@ -118,14 +118,14 @@ class RecentTests(Base):
 class UploadLengthTests(Base):
     def test_upload_keeps_a_sane_length_and_edits_cannot_change_it(self):
         self.client.force_authenticate(self.artist)
-        res = self.client.post('/api/tracks/', {'title': 'New', 'audio_file': 'https://m.x/n.mp3',
+        res = self.client.post('/api/tracks/', {'title': 'New', 'audio_file': 'https://m.x/n.mp3', 'rights_confirmed': True,
                                                 'duration_ms': 185000}, format='json')
         self.assertEqual(res.status_code, 201, res.content)
         tid = res.json()['id']
         self.assertEqual(Track.objects.get(pk=tid).duration_ms, 185000)
         self.client.patch(f'/api/tracks/{tid}/', {'duration_ms': 5000}, format='json')
         self.assertEqual(Track.objects.get(pk=tid).duration_ms, 185000)
-        res = self.client.post('/api/tracks/', {'title': 'Bad', 'audio_file': 'https://m.x/b.mp3',
+        res = self.client.post('/api/tracks/', {'title': 'Bad', 'audio_file': 'https://m.x/b.mp3', 'rights_confirmed': True,
                                                 'duration_ms': 5}, format='json')
         self.assertIsNone(Track.objects.get(pk=res.json()['id']).duration_ms)
 

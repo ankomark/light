@@ -53,6 +53,11 @@ class TrackSerializer(serializers.ModelSerializer):
      genre = GenreField()
      # The album the song is on (see AlbumViewSet.set_tracks), and its place there.
      album_id = serializers.IntegerField(source='album_ref_id', read_only=True)
+     # "I own this song or have permission to share it" — required to upload
+     # (songs/rights.py). Write-only: stored as rights_confirmed_at.
+     rights_confirmed = serializers.BooleanField(write_only=True, required=False)
+     # Accepts the dashed form people copy (KE-A1B-26-00001); stored as 12.
+     isrc = serializers.CharField(required=False, allow_blank=True, max_length=20)
      class Meta:
         model = Track
         fields = [
@@ -60,6 +65,7 @@ class TrackSerializer(serializers.ModelSerializer):
             'cover_image', 'lyrics', 'has_lyrics', 'slug', 'duration_ms',
             'audio_low', 'audio_standard', 'audio_high', 'cover_small', 'cover_medium',
             'processing_status', 'waveform', 'genre', 'album_id', 'track_number',
+            'rights_confirmed', 'license', 'composer', 'producer', 'rights_holder', 'isrc',
             'views', 'downloads','likes_count','comments_count','is_liked',
             'created_at', 'updated_at'
         ]
@@ -79,6 +85,8 @@ class TrackSerializer(serializers.ModelSerializer):
         return value
 
      def create(self, validated_data):
+        if validated_data.pop('rights_confirmed', False):
+            validated_data['rights_confirmed_at'] = timezone.now()
         genre_given = 'genre' in validated_data
         genre = validated_data.pop('genre', None)
         track = super().create(validated_data)
@@ -90,12 +98,27 @@ class TrackSerializer(serializers.ModelSerializer):
         # Set once (upload, first play or backfill), never edited after.
         if instance.duration_ms:
             validated_data.pop('duration_ms', None)
+        validated_data.pop('rights_confirmed', None)
         genre_given = 'genre' in validated_data
         genre = validated_data.pop('genre', None)
         track = super().update(instance, validated_data)
         if genre_given:
             track.categories.set([genre] if genre else [])
         return track
+
+     def validate_isrc(self, value):
+        from ..rights import clean_isrc
+        try:
+            return clean_isrc(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+
+     def validate(self, attrs):
+        # A new song needs the uploader's rights confirmation; editing one
+        # doesn't ask again.
+        if self.instance is None and not attrs.get('rights_confirmed'):
+            raise serializers.ValidationError({'rights_confirmed': 'Confirm that you own this song or have permission to share it.'})
+        return attrs
 
      def validate_title(self, value):
         if not value or not value.strip():

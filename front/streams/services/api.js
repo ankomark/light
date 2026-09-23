@@ -420,6 +420,11 @@ export const fetchAlbum = (id) => apiRequest('get', `/albums/${id}/`);
 export const createAlbum = (data) => apiRequest('post', '/albums/', data);
 export const updateAlbum = (id, changes) => apiRequest('patch', `/albums/${id}/`, changes);
 export const deleteAlbum = (id) => apiRequest('delete', `/albums/${id}/`);
+// Your removed songs: why, and where your dispute stands.
+export const fetchRemovedSongs = () => apiRequest('get', '/studio/removed/');
+// Dispute a removed song of yours (a counter-notice): why it's yours, in good faith.
+export const disputeTrack = (id, message, goodFaith) =>
+  apiRequest('post', `/tracks/${id}/dispute/`, { message, good_faith: goodFaith });
 // The album's songs in order (your own songs; left-out ones come off it).
 export const setAlbumTracks = (id, trackIds) => apiRequest('post', `/albums/${id}/set-tracks/`, { track_ids: trackIds });
 

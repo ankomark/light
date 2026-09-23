@@ -28,6 +28,9 @@ const TYPE_ICON = {
   group_join_rejected: { name: 'close-circle', color: colors.error },
   // "Your song reached 1,000 plays" (opens the song).
   milestone: { name: 'trophy', color: '#E8C66B' },
+  // A song of yours taken down / restored (opens Artist Studio).
+  takedown: { name: 'alert-circle', color: colors.error },
+  restored: { name: 'checkmark-circle', color: '#17BF63' },
 };
 
 // TikTok-style category filters across the top of the panel.
@@ -210,6 +213,10 @@ const NotificationsBell = ({ navigation }) => {
         userId: item.sender.id,
         username: item.sender.username,
       });
+    } else if (type === 'takedown' || type === 'restored') {
+      // A takedown of your song (or its return): the Studio lists your removed
+      // songs, why, and the Dispute button.
+      navigation.navigate('ArtistStudio');
     } else if (item.track) {
       // The song itself — with its comments open on the exact comment for a
       // comment / reply / mention / reaction.
