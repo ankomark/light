@@ -11,8 +11,11 @@
 import React, { useState } from 'react';
 import { TouchableOpacity, Text, View, StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
 import { useDownloadState, downloadTrack, removeDownload, cancelDownload } from '../utils/downloads';
 import { useI18n } from '../context/I18nContext';
+import { usePreferences } from '../context/PreferencesContext';
+import { PREF_KEYS } from '../utils/preferences';
 import ChoiceSheet from './ChoiceSheet';
 import { colors } from '../constants/theme';
 
@@ -20,9 +23,21 @@ const DownloadButton = ({ track, size = 20, color = colors.textSecondary, onSave
   const { t } = useI18n();
   const { status, progress } = useDownloadState(track?.id);
   const [sheet, setSheet] = useState(false);
+  const { preferences } = usePreferences();
 
-  const saveOffline = () => {
-    downloadTrack(track).catch((e) => {
+  const saveOffline = async () => {
+    // Download quality and "Wi-Fi only" come from Settings → Playback & Data.
+    const wifiOnly = !!preferences[PREF_KEYS.downloadWifiOnly];
+    const net = wifiOnly ? await NetInfo.fetch().catch(() => null) : null;
+    downloadTrack(track, {
+      quality: preferences[PREF_KEYS.downloadQuality] || 'standard',
+      wifiOnly,
+      network: net?.type === 'wifi' ? 'wifi' : (net?.type || ''),
+    }).catch((e) => {
+      if (e?.code === 'wifi_only') {
+        Alert.alert(t('downloads.wifiOnlyTitle'), t('downloads.wifiOnlyBody'));
+        return;
+      }
       Alert.alert(t('trackItem.downloadFailedTitle'), e?.message || t('trackItem.downloadFailedBody'));
     });
   };

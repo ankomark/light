@@ -36,7 +36,7 @@ import {
   registerForPushNotifications,
   unregisterPushToken,
 } from '../services/pushNotifications';
-import { PREF_KEYS, MEDIA_QUALITY_TIERS_AVAILABLE } from '../utils/preferences';
+import { PREF_KEYS, AUDIO_QUALITY_TIERS_AVAILABLE } from '../utils/preferences';
 import { usePreferences } from '../context/PreferencesContext';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
@@ -53,12 +53,16 @@ const STORE_URL =
     ? `itms-apps://itunes.apple.com/app/${PACKAGE_ID}`
     : `https://play.google.com/store/apps/details?id=${PACKAGE_ID}`;
 
+// Songs come in 64 / 128 / 256 kbps versions (utils/audioQuality.js).
 const AUDIO_QUALITY_LABELS = {
   auto: 'Automatic',
   high: 'High',
+  standard: 'Standard',
   data_saver: 'Data saver',
 };
-const AUDIO_QUALITY_CYCLE = ['auto', 'high', 'data_saver'];
+const AUDIO_QUALITY_CYCLE = ['auto', 'high', 'standard', 'data_saver'];
+const DOWNLOAD_QUALITY_LABELS = { standard: 'Standard', high: 'High' };
+const DOWNLOAD_QUALITY_CYCLE = ['standard', 'high'];
 
 const VIDEO_QUALITY_LABELS = {
   auto: 'Automatic',
@@ -294,6 +298,11 @@ const Settings = () => {
     const idx = AUDIO_QUALITY_CYCLE.indexOf(prefs[PREF_KEYS.audioQuality]);
     const next = AUDIO_QUALITY_CYCLE[(idx + 1) % AUDIO_QUALITY_CYCLE.length];
     updatePref(PREF_KEYS.audioQuality, next);
+  };
+
+  const cycleDownloadQuality = () => {
+    const idx = DOWNLOAD_QUALITY_CYCLE.indexOf(prefs[PREF_KEYS.downloadQuality]);
+    updatePref(PREF_KEYS.downloadQuality, DOWNLOAD_QUALITY_CYCLE[(idx + 1) % DOWNLOAD_QUALITY_CYCLE.length]);
   };
 
   const cycleVideoQuality = () => {
@@ -664,7 +673,7 @@ const Settings = () => {
             label={t('settings.playback.videoQuality')}
             sub={t('settings.videoQualitySub')}
             onPress={cycleVideoQuality}
-            last={!MEDIA_QUALITY_TIERS_AVAILABLE}
+            last={!AUDIO_QUALITY_TIERS_AVAILABLE}
             right={
               <View style={styles.valuePill}>
                 <Text style={styles.valuePillText}>
@@ -673,26 +682,52 @@ const Settings = () => {
               </View>
             }
           />
-          {/* Audio has no per-quality renditions to choose between while media is
-              served straight from R2, so offering a picker here would be a
-              control that does nothing. Data saver still governs whether a track
-              streams or is pulled down in full. Returns automatically once
-              MEDIA_QUALITY_TIERS_AVAILABLE flips. */}
-          {MEDIA_QUALITY_TIERS_AVAILABLE && (
-            <Row
-              icon="music-note-outline"
-              label={t('settings.playback.audioQuality')}
-              sub={AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
-              onPress={cycleAudioQuality}
-              right={
-                <View style={styles.valuePill}>
-                  <Text style={styles.valuePillText}>
-                    {AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
-                  </Text>
-                </View>
-              }
-              last
-            />
+          {/* Songs are processed into 64 / 128 / 256 kbps versions, so these
+              choices are real: streaming quality, and what offline downloads
+              save (and whether they wait for Wi-Fi). */}
+          {AUDIO_QUALITY_TIERS_AVAILABLE && (
+            <>
+              <Row
+                icon="music-note-outline"
+                label={t('settings.playback.audioQuality')}
+                sub={t('settings.audioQualitySub')}
+                onPress={cycleAudioQuality}
+                right={
+                  <View style={styles.valuePill}>
+                    <Text style={styles.valuePillText}>
+                      {AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
+                    </Text>
+                  </View>
+                }
+              />
+              <Row
+                icon="download-outline"
+                label={t('settings.playback.downloadQuality')}
+                sub={t('settings.downloadQualitySub')}
+                onPress={cycleDownloadQuality}
+                right={
+                  <View style={styles.valuePill}>
+                    <Text style={styles.valuePillText}>
+                      {DOWNLOAD_QUALITY_LABELS[prefs[PREF_KEYS.downloadQuality]] || 'Standard'}
+                    </Text>
+                  </View>
+                }
+              />
+              <Row
+                icon="wifi"
+                label={t('settings.playback.downloadWifiOnly')}
+                sub={t('settings.downloadWifiOnlySub')}
+                last
+                right={
+                  <Switch
+                    value={!!prefs[PREF_KEYS.downloadWifiOnly]}
+                    onValueChange={(v) => updatePref(PREF_KEYS.downloadWifiOnly, v)}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor={colors.white}
+                  />
+                }
+              />
+            </>
           )}
         </Section>
 

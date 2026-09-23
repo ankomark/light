@@ -16,9 +16,11 @@ import { colors, spacing, radius, shadows, typography } from '../constants/theme
 import { Image } from 'expo-image';
 import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
 import { useContentWidth, FONT_SCALE } from '../utils/layout';
-import { navigate } from '../services/navigationRef';
+import { navigate, useCurrentRouteName } from '../services/navigationRef';
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
+// About how long the full-screen player takes to slide away.
+const HIDE_FOR_MS = 320;
 
 const formatTime = (ms) => {
   const total = Math.max(0, Math.floor((ms || 0) / 1000));
@@ -59,6 +61,28 @@ const MiniPlayer = () => {
 
   const [seekValue, setSeekValue] = useState(null);
 
+  // Out of the way while Now Playing (the full-screen player) is open: it
+  // would sit on top of it, showing the same song twice. Back on screen once
+  // Now Playing has slid away — faded in after its closing animation, rather
+  // than appearing over it while it's still sliding down.
+  const route = useCurrentRouteName();
+  const fullPlayerOpen = route === 'NowPlaying';
+  const [shown, setShown] = useState(!fullPlayerOpen);
+  const fade = useRef(new Animated.Value(fullPlayerOpen ? 0 : 1)).current;
+  useEffect(() => {
+    if (fullPlayerOpen) {
+      fade.stopAnimation();
+      fade.setValue(0);
+      setShown(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setShown(true);
+      Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+    }, HIDE_FOR_MS);
+    return () => clearTimeout(timer);
+  }, [fullPlayerOpen, fade]);
+
   // Spinning "vinyl" cover while playing. Freezes on pause and resumes from the
   // same angle (we keep advancing a single value toward the next full turn
   // rather than looping/resetting, so there's no jump).
@@ -89,9 +113,10 @@ const MiniPlayer = () => {
     outputRange: ['0deg', '360deg'],
   });
 
-  if (!currentTrack) return null;
+  if (!currentTrack || !shown) return null;
 
-  const cover = currentTrack.cover_image;
+  // The 200px cover (processed songs) — the full one is a waste at this size.
+  const cover = currentTrack.cover_small || currentTrack.cover_image;
   const progress =
     seekValue != null
       ? seekValue
@@ -103,7 +128,7 @@ const MiniPlayer = () => {
   const busy = isLoading || isBuffering;
 
   return (
-    <View style={[styles.wrap, sideMargin > 0 && {
+    <Animated.View style={[styles.wrap, { opacity: fade }, sideMargin > 0 && {
       left: sideMargin + spacing.sm,
       right: sideMargin + spacing.sm,
     }]}>
@@ -204,7 +229,7 @@ const MiniPlayer = () => {
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 };
 

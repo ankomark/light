@@ -70,7 +70,8 @@ const TrackItem = React.memo(function TrackItem({
 
   // Media are R2 URLs now (served as-is); the old Cloudinary delivery
   // transforms were a no-op on them, so we use the stored URL directly.
-  const optimizedCover = track.cover_image;
+  // The 200px version once the song is processed; the upload until then.
+  const optimizedCover = track.cover_small || track.cover_image;
   const optimizedAudio = track.audio_file;
   // The artist avatar already ships with the track payload
   // (DetailedUserSerializer.profile_picture) — no per-row request needed.
@@ -94,7 +95,7 @@ const TrackItem = React.memo(function TrackItem({
       onPlay(index);
       return;
     }
-    playTrack(toQueueTrack({ ...track, cover_image: optimizedCover, audio_file: optimizedAudio, has_lyrics: hasLyrics }));
+    playTrack(toQueueTrack({ ...track, audio_file: optimizedAudio, has_lyrics: hasLyrics }));
   };
 
   // "Play next" / "Add to queue" from the menu. Android confirms with a toast;

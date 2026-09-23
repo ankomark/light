@@ -185,6 +185,33 @@ class Track(models.Model):
     # audio loads. Sent by the app on upload, learned from the first play, or
     # backfilled from the file (manage.py backfill_track_durations).
     duration_ms = models.PositiveIntegerField(null=True, blank=True)
+
+    # ── Processed versions (songs/audio_processing.py, run by the job worker) ──
+    # The upload is kept as `audio_file` and plays until processing is done;
+    # after it, the app streams one of three loudness-matched AAC versions by
+    # connection and quality setting. Covers get two small sizes for lists.
+    PROCESSING_PENDING = 'pending'
+    PROCESSING_READY = 'ready'
+    PROCESSING_FAILED = 'failed'
+    PROCESSING_CHOICES = [
+        (PROCESSING_PENDING, 'Pending'),
+        (PROCESSING_READY, 'Ready'),
+        (PROCESSING_FAILED, 'Failed'),
+    ]
+    processing_status = models.CharField(
+        max_length=10, choices=PROCESSING_CHOICES, default=PROCESSING_PENDING)
+    audio_low = models.CharField(max_length=500, blank=True, default='')        # 64 kbps
+    audio_standard = models.CharField(max_length=500, blank=True, default='')   # 128 kbps
+    audio_high = models.CharField(max_length=500, blank=True, default='')       # 256 kbps
+    # Integrated loudness of the upload before normalising (LUFS), for stats.
+    loudness_lufs = models.FloatField(null=True, blank=True)
+    # ~100 peaks in 0..1 for a waveform seek bar (only on the track detail).
+    waveform = models.JSONField(null=True, blank=True)
+    cover_small = models.CharField(max_length=500, blank=True, default='')     # 200px
+    cover_medium = models.CharField(max_length=500, blank=True, default='')    # 600px
+    # The audio_file / cover_image the versions above were made from, so an
+    # edit that replaces either is noticed and processed again.
+    processed_source = models.CharField(max_length=1100, blank=True, default='')
     downloads = models.PositiveIntegerField(default=0)
     # Soft moderation takedown — hidden from public lists, kept for admin/audit.
     is_removed = models.BooleanField(default=False)
@@ -1045,6 +1072,43 @@ class WatchEvent(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['user', '-created_at'])]
+
+
+class Job(models.Model):
+    """A unit of background work, queued in Postgres and run by
+    `manage.py run_worker` (songs/jobs.py).
+
+    Unlike songs/tasks.py's in-process thread pool, a job survives restarts
+    and deploys, is retried with backoff when it fails, and can run on a
+    worker process separate from the web server — what audio processing (a
+    minute of FFmpeg per song) needs. `key` dedupes: queuing work that's
+    already queued is a no-op."""
+    QUEUED = 'queued'
+    RUNNING = 'running'
+    DONE = 'done'
+    FAILED = 'failed'
+    STATUS_CHOICES = [(QUEUED, 'Queued'), (RUNNING, 'Running'), (DONE, 'Done'), (FAILED, 'Failed')]
+
+    kind = models.CharField(max_length=40)
+    key = models.CharField(max_length=120, blank=True, default='')
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=QUEUED)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    max_attempts = models.PositiveSmallIntegerField(default=3)
+    run_after = models.DateTimeField(default=timezone.now)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', 'run_after'], name='job_ready_idx'),
+            models.Index(fields=['kind', 'key', 'status'], name='job_dedupe_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.kind}:{self.key or self.pk} ({self.status})'
 
 
 class PlayEvent(models.Model):

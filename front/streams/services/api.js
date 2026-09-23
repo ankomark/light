@@ -324,6 +324,28 @@ export const fetchTrackLyrics = async (trackId) => {
   return p;
 };
 
+// A song's waveform (Now Playing's seek bar), fetched per song and kept for
+// the session. `null` — not processed yet — isn't cached, so it's asked again
+// next time the song plays.
+const _waveformCache = new Map();
+const _waveformInFlight = new Map();
+
+export const fetchTrackWaveform = async (trackId) => {
+  if (trackId == null) return null;
+  const key = String(trackId);
+  if (_waveformCache.has(key)) return _waveformCache.get(key);
+  if (_waveformInFlight.has(key)) return _waveformInFlight.get(key);
+  const p = apiRequest('get', `/tracks/${trackId}/waveform/`)
+    .then((data) => {
+      const peaks = Array.isArray(data?.waveform) && data.waveform.length ? data.waveform : null;
+      if (peaks) _waveformCache.set(key, peaks);
+      return peaks;
+    })
+    .finally(() => { _waveformInFlight.delete(key); });
+  _waveformInFlight.set(key, p);
+  return p;
+};
+
 /** Drop a cached copy after the owner edits the track, so the sheet doesn't
  *  keep showing the words they just replaced. */
 export const invalidateTrackLyrics = (trackId) => {

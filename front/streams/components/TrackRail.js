@@ -17,8 +17,8 @@ const REASON_ICON = { fans_also_like: 'people', from_artist: 'person', popular: 
 const Card = memo(({ track, index, onPlay, active, reasonLabel }) => (
   <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={() => onPlay(index)}>
     <View style={styles.cover}>
-      {track.cover_image ? (
-        <Image source={{ uri: track.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" transition={120} />
+      {(track.cover_medium || track.cover_image) ? (
+        <Image source={{ uri: track.cover_medium || track.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" transition={120} />
       ) : (
         <Ionicons name="musical-notes" size={36} color={colors.textMuted} />
       )}

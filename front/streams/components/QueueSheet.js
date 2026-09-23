@@ -49,7 +49,7 @@ const QueueSheet = ({ visible, onClose }) => {
           <View>
             <Text style={styles.heading}>{t('player.nowPlaying')}</Text>
             <View style={styles.row}>
-              <Cover uri={currentTrack.cover_image} />
+              <Cover uri={currentTrack.cover_small || currentTrack.cover_image} />
               <View style={styles.body}>
                 <Text style={[styles.title, styles.titleNow]} numberOfLines={1}>{currentTrack.title}</Text>
                 <Text style={styles.meta} numberOfLines={1}>{meta(currentTrack)}</Text>
@@ -69,7 +69,7 @@ const QueueSheet = ({ visible, onClose }) => {
               accessibilityRole="button"
               accessibilityLabel={`${item.track?.title}, ${t('player.playNow')}`}
             >
-              <Cover uri={item.track?.cover_image} />
+              <Cover uri={item.track?.cover_small || item.track?.cover_image} />
               <View style={styles.body}>
                 <Text style={styles.title} numberOfLines={1}>{item.track?.title}</Text>
                 <Text style={styles.meta} numberOfLines={1}>{meta(item.track || {})}</Text>

@@ -669,6 +669,11 @@ export const STRINGS = {
     'settings.autoplaySub': 'Play videos automatically in the feed',
     'settings.gameSoundsSub': 'Correct and wrong sounds in the quiz and puzzle',
     'settings.dataSaverSub': 'Reduce data usage on mobile networks',
+    'settings.audioQualitySub': 'Automatic plays High on Wi-Fi and Standard on mobile data',
+    'settings.downloadQualitySub': 'The version saved for offline listening',
+    'settings.downloadWifiOnlySub': 'Never use mobile data for offline downloads',
+    'downloads.wifiOnlyTitle': 'Waiting for Wi-Fi',
+    'downloads.wifiOnlyBody': 'Downloads only happen on Wi-Fi. Connect to Wi-Fi, or turn off "Download on Wi-Fi only" in Settings.',
     'settings.videoQualitySub': 'Higher tiers buffer further ahead; Data saver only loads what you watch',
     'settings.contactSub': 'Send a private message to the team',
 
@@ -1734,6 +1739,8 @@ export const STRINGS = {
     'settings.playback.dataSaver': 'Data saver',
     'settings.playback.videoQuality': 'Video quality',
     'settings.playback.audioQuality': 'Audio quality',
+    'settings.playback.downloadQuality': 'Download quality',
+    'settings.playback.downloadWifiOnly': 'Download on Wi-Fi only',
 
     'settings.security.logoutOthers': 'Log out other devices',
     'settings.security.export': 'Download my data',
@@ -2490,6 +2497,11 @@ export const STRINGS = {
     'settings.autoplaySub': 'Cheza video kiotomatiki kwenye mlisho',
     'settings.gameSoundsSub': 'Sauti za jibu sahihi na kosa kwenye michezo',
     'settings.dataSaverSub': 'Punguza matumizi ya data kwenye mitandao ya simu',
+    'settings.audioQualitySub': 'Kiotomatiki hucheza Juu kwenye Wi-Fi na Kawaida kwenye data ya simu',
+    'settings.downloadQualitySub': 'Toleo linalohifadhiwa kwa kusikiliza bila mtandao',
+    'settings.downloadWifiOnlySub': 'Usitumie data ya simu kupakua',
+    'downloads.wifiOnlyTitle': 'Inasubiri Wi-Fi',
+    'downloads.wifiOnlyBody': 'Upakuaji hufanyika kwenye Wi-Fi pekee. Unganisha Wi-Fi, au zima "Pakua kwenye Wi-Fi pekee" katika Mipangilio.',
     'settings.videoQualitySub': 'Viwango vya juu huhifadhi mbele zaidi; Kiokoa data hupakia tu unachotazama',
     'settings.contactSub': 'Tuma ujumbe wa faragha kwa timu',
 
@@ -3552,6 +3564,8 @@ export const STRINGS = {
     'settings.playback.dataSaver': 'Kuokoa data',
     'settings.playback.videoQuality': 'Ubora wa video',
     'settings.playback.audioQuality': 'Ubora wa sauti',
+    'settings.playback.downloadQuality': 'Ubora wa kupakua',
+    'settings.playback.downloadWifiOnly': 'Pakua kwenye Wi-Fi pekee',
 
     'settings.security.logoutOthers': 'Toka kwenye vifaa vingine',
     'settings.security.export': 'Pakua data yangu',

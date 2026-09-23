@@ -9,7 +9,8 @@ both covered.
 """
 from django.db.models import Count, F, Value
 from django.db.models.functions import Greatest
-from django.db.models.signals import post_save, post_delete, pre_delete
+from django.db import transaction
+from django.db.models.signals import post_save, post_delete, pre_delete, pre_save
 from django.dispatch import receiver
 
 from .models import (
@@ -251,3 +252,44 @@ def puzzle_played(sender, instance, raw=False, **kwargs):
     if not (instance.found or instance.bonus or instance.hints_used):
         return
     record_play(instance.user_id)
+
+
+# ── Song processing (songs/audio_processing.py) ──────────────────────────────
+# A new upload, or an edit that replaces the audio or the cover, queues the
+# song for processing. Until it's done the app plays the original: versions
+# made from the old audio are cleared at once so they can't play instead.
+@receiver(pre_save, sender=Track)
+def clear_stale_processing(sender, instance, raw=False, **kwargs):
+    if raw or not instance.pk:
+        return
+    old = Track.objects.filter(pk=instance.pk).values('audio_file', 'cover_image').first()
+    if not old:
+        return
+    if old['audio_file'] != instance.audio_file:
+        instance.audio_low = instance.audio_standard = instance.audio_high = ''
+        instance.waveform = None
+        instance.loudness_lufs = None
+        instance.processing_status = Track.PROCESSING_PENDING
+    if old['cover_image'] != instance.cover_image:
+        instance.cover_small = instance.cover_medium = ''
+        if instance.processing_status == Track.PROCESSING_READY:
+            instance.processing_status = Track.PROCESSING_PENDING
+
+
+@receiver(post_save, sender=Track)
+def queue_track_processing(sender, instance, raw=False, **kwargs):
+    from .audio_processing import queue_processing, source_of
+    if raw or not instance.audio_file or instance.is_removed:
+        return
+    if instance.processing_status == Track.PROCESSING_READY and instance.processed_source == source_of(instance):
+        return
+    transaction.on_commit(lambda: queue_processing(instance))
+
+
+@receiver(post_delete, sender=Track)
+def delete_processed_files(sender, instance, **kwargs):
+    # Only the processed versions: the original upload may still be the
+    # sound on someone's post.
+    from . import r2
+    from .tasks import run_in_background
+    run_in_background(r2.delete_prefix, f'tracks/{instance.pk}/')

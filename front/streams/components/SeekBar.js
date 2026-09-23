@@ -1,6 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { View, PanResponder, StyleSheet } from 'react-native';
 import { colors as defaultColors } from '../constants/theme';
+import waveformBars from '../utils/waveformBars';
+
+const BAR_WIDTH = 3;
+const BAR_GAP = 2;
 
 const clamp01 = (n) => {
   if (!Number.isFinite(n)) return 0;
@@ -17,6 +21,10 @@ const clamp01 = (n) => {
  * progress never advances on screen. This component renders the progress with
  * plain Views (which always re-render) and handles seeking with a PanResponder,
  * so it works regardless of architecture and ships as an OTA update.
+ *
+ * With `peaks` (a song's waveform, 0..1 each) it draws the song's shape as
+ * bars instead of a line — played bars in the fill colour — and seeks the
+ * same way.
  */
 const SeekBar = ({
   value = 0,
@@ -29,9 +37,17 @@ const SeekBar = ({
   thumbTintColor = defaultColors.white,
   trackHeight = 4,
   thumbSize = 14,
+  peaks = null,
+  waveHeight = 44,
   style,
 }) => {
   const widthRef = useRef(0);
+  const [width, setWidth] = useState(0);
+  const bars = useMemo(
+    () => (peaks && width ? waveformBars(peaks, Math.floor((width + BAR_GAP) / (BAR_WIDTH + BAR_GAP))) : []),
+    [peaks, width],
+  );
+  const wave = bars.length > 0;
   const startRatioRef = useRef(0);
   const [dragRatio, setDragRatio] = useState(null);
 
@@ -76,23 +92,41 @@ const SeekBar = ({
 
   return (
     <View
-      style={[styles.container, style]}
+      style={[styles.container, style, wave && { height: waveHeight + 8 }]}
       onLayout={(e) => {
         widthRef.current = e.nativeEvent.layout.width;
+        if (peaks) setWidth(e.nativeEvent.layout.width);
       }}
       accessible
       accessibilityRole="adjustable"
       accessibilityValue={{ min: 0, max: 100, now: Math.round(ratio * 100) }}
       {...pan.panHandlers}
     >
-      <View style={[styles.track, { height: trackHeight, backgroundColor: maximumTrackTintColor }]}>
-        <View
-          style={[
-            styles.fill,
-            { width: `${ratio * 100}%`, backgroundColor: minimumTrackTintColor },
-          ]}
-        />
-      </View>
+      {wave ? (
+        <View style={[styles.wave, { height: waveHeight }]} pointerEvents="none">
+          {bars.map((h, i) => (
+            <View
+              key={i}
+              style={[
+                styles.bar,
+                {
+                  height: `${h * 100}%`,
+                  backgroundColor: (i + 0.5) / bars.length <= ratio ? minimumTrackTintColor : maximumTrackTintColor,
+                },
+              ]}
+            />
+          ))}
+        </View>
+      ) : (
+        <View style={[styles.track, { height: trackHeight, backgroundColor: maximumTrackTintColor }]}>
+          <View
+            style={[
+              styles.fill,
+              { width: `${ratio * 100}%`, backgroundColor: minimumTrackTintColor },
+            ]}
+          />
+        </View>
+      )}
       <View
         style={[
           styles.thumb,
@@ -103,7 +137,8 @@ const SeekBar = ({
             backgroundColor: thumbTintColor,
             left: `${ratio * 100}%`,
             marginLeft: -thumbSize / 2,
-            opacity: disabled ? 0 : 1,
+            // The waveform shows progress itself; a dot on top would hide a bar.
+            opacity: disabled || wave ? 0 : 1,
           },
         ]}
       />
@@ -128,6 +163,16 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
+  },
+  wave: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: BAR_GAP,
+  },
+  bar: {
+    flex: 1,
+    borderRadius: BAR_WIDTH,
   },
 });
 

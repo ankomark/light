@@ -15,16 +15,26 @@ class TrackSerializer(serializers.ModelSerializer):
      is_owner = serializers.SerializerMethodField() 
      audio_file = MediaReferenceField()
      cover_image = MediaReferenceField(required=False)
+     # Processed versions (songs/audio_processing.py); null until ready, when
+     # the app plays `audio_file`.
+     audio_low = MediaReferenceField(read_only=True)
+     audio_standard = MediaReferenceField(read_only=True)
+     audio_high = MediaReferenceField(read_only=True)
+     cover_small = MediaReferenceField(read_only=True)
+     cover_medium = MediaReferenceField(read_only=True)
      class Meta:
         model = Track
         fields = [
             'id', 'title', 'artist', 'album', 'audio_file','is_owner',
             'cover_image', 'lyrics', 'has_lyrics', 'slug', 'duration_ms',
+            'audio_low', 'audio_standard', 'audio_high', 'cover_small', 'cover_medium',
+            'processing_status', 'waveform',
             'views', 'downloads','likes_count','comments_count','is_liked',
             'created_at', 'updated_at'
         ]
         # `views` is the play count (listens of 30s+); see PlayEvent.
-        read_only_fields = ['artist', 'slug', 'views', 'downloads', 'created_at', 'updated_at']
+        read_only_fields = ['artist', 'slug', 'views', 'downloads', 'created_at', 'updated_at',
+                            'processing_status', 'waveform']
         # extra_kwargs = {
         #     'title': {'required': True, 'max_length': 200},
         #     'lyrics': {'allow_blank': True}
@@ -93,7 +103,8 @@ class TrackListSerializer(TrackSerializer):
     """
 
     class Meta(TrackSerializer.Meta):
-        fields = [f for f in TrackSerializer.Meta.fields if f != 'lyrics']
+        # Nor the waveform (100 numbers a row): only the song's own page draws it.
+        fields = [f for f in TrackSerializer.Meta.fields if f not in ('lyrics', 'waveform')]
 
 
 class TrackQueueSerializer(serializers.ModelSerializer):
@@ -103,6 +114,11 @@ class TrackQueueSerializer(serializers.ModelSerializer):
     artist = SimpleUserSerializer(read_only=True)
     audio_file = MediaReferenceField()
     cover_image = MediaReferenceField(required=False)
+    audio_low = MediaReferenceField(read_only=True)
+    audio_standard = MediaReferenceField(read_only=True)
+    audio_high = MediaReferenceField(read_only=True)
+    cover_small = MediaReferenceField(read_only=True)
+    cover_medium = MediaReferenceField(read_only=True)
 
     class Meta:
         model = Track
@@ -110,7 +126,8 @@ class TrackQueueSerializer(serializers.ModelSerializer):
         # build a queue, and the player fetches the current track's lyrics on
         # demand anyway.
         fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image',
-                  'has_lyrics', 'slug', 'duration_ms', 'views']
+                  'has_lyrics', 'slug', 'duration_ms', 'views',
+                  'audio_low', 'audio_standard', 'audio_high', 'cover_small', 'cover_medium']
 
     has_lyrics = serializers.SerializerMethodField()
 

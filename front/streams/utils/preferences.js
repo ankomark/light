@@ -12,7 +12,9 @@ const PREFIX = 'pref:';
 export const PREF_KEYS = {
   autoplayVideo: 'autoplayVideo',
   dataSaver: 'dataSaver',
-  audioQuality: 'audioQuality', // 'auto' | 'high' | 'data_saver'
+  audioQuality: 'audioQuality', // 'auto' | 'high' | 'standard' | 'data_saver'
+  downloadQuality: 'downloadQuality', // offline downloads: 'standard' | 'high'
+  downloadWifiOnly: 'downloadWifiOnly',
   videoQuality: 'videoQuality', // 'auto' | 'hd' | 'data_saver'
   pushEnabled: 'pushEnabled',
   themeMode: 'themeMode',       // 'system' | 'light' | 'dark'
@@ -27,6 +29,8 @@ export const DEFAULT_PREFERENCES = {
   [PREF_KEYS.autoplayVideo]: true,
   [PREF_KEYS.dataSaver]: false,
   [PREF_KEYS.audioQuality]: 'auto',
+  [PREF_KEYS.downloadQuality]: 'standard',
+  [PREF_KEYS.downloadWifiOnly]: false,
   [PREF_KEYS.videoQuality]: 'auto',
   [PREF_KEYS.pushEnabled]: true,
   // Default to dark so the existing (dark-only) screens are unaffected until a
@@ -125,6 +129,12 @@ export const setPreference = async (key, value) => {
 // Flip to true once a transform tier exists (the planned custom media domain).
 // Consumers gate on this instead of silently offering choices that do nothing.
 export const MEDIA_QUALITY_TIERS_AVAILABLE = false;
+
+// Songs DO have quality versions: the backend makes 64/128/256 kbps AAC
+// versions of every upload (songs/audio_processing.py) and the player picks
+// one (utils/audioQuality.js). So audio's quality choice is real even while
+// video's isn't.
+export const AUDIO_QUALITY_TIERS_AVAILABLE = true;
 
 // Resolve the video-quality preference into knobs that work on ANY host, since
 // we can't pick a rendition. Data saver / "data_saver" suppresses autoplay and

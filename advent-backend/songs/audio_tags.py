@@ -98,10 +98,18 @@ def tag_audio(data, ext, title, artist, album=None, cover=None, cover_mime='imag
     return data
 
 
-def tagged_download(track):
+# Download qualities the app may ask for, and the processed version each is.
+DOWNLOAD_QUALITIES = {'standard': 'audio_standard', 'high': 'audio_high'}
+
+
+def tagged_download(track, quality=None):
     """(url, filename, tagged) for downloading `track` with its name and cover
-    inside the file. Cached in R2 per version of the song's details."""
-    source = media.resolve(track.audio_file)
+    inside the file. Cached in R2 per version of the song's details.
+
+    `quality` ('standard' | 'high') picks a processed version when the song has
+    one — smaller, and loudness-matched; otherwise it's the original upload."""
+    field = DOWNLOAD_QUALITIES.get(quality)
+    source = media.resolve((field and getattr(track, field, '')) or track.audio_file)
     ext = _ext(source)
     artist = track.artist.username if track.artist_id else ''
     filename = safe_filename(track.title, ext)
@@ -113,7 +121,7 @@ def tagged_download(track):
         return source, filename, False
 
     version = hashlib.sha1('|'.join(str(x) for x in (
-        track.audio_file, track.cover_image, track.title, artist, track.album,
+        source, track.cover_image, track.title, artist, track.album,
     )).encode('utf-8')).hexdigest()[:16]
     key = f'tagged/{track.id}-{version}.{ext}'
     client = r2._client()

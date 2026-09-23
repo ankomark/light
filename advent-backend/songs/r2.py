@@ -176,3 +176,50 @@ def delete(key_or_url):
         _client().delete_object(Bucket=settings.R2_BUCKET, Key=key)
     except Exception:
         logger.exception('R2 delete failed for key=%s', key)
+
+
+# Processed media (songs/audio_processing.py) lives under a per-version key
+# that never changes content, so it can be cached for good.
+IMMUTABLE = 'public, max-age=31536000, immutable'
+
+
+def put_file(key, path, content_type):
+    """Server-side upload of a local file to `key`. Returns its public URL."""
+    if not is_configured():
+        raise RuntimeError('R2 is not configured')
+    _client().upload_file(path, settings.R2_BUCKET, key,
+                          ExtraArgs={'ContentType': content_type, 'CacheControl': IMMUTABLE})
+    return public_url(key)
+
+
+def put_bytes(key, data, content_type):
+    """Server-side upload of `data` to `key`. Returns its public URL."""
+    if not is_configured():
+        raise RuntimeError('R2 is not configured')
+    _client().put_object(Bucket=settings.R2_BUCKET, Key=key, Body=data,
+                         ContentType=content_type, CacheControl=IMMUTABLE)
+    return public_url(key)
+
+
+def delete_prefix(prefix, keep=None):
+    """Best-effort delete of every object under `prefix` (must end in '/'),
+    except those under `keep`. Never raises."""
+    if not is_configured() or not prefix or not prefix.endswith('/'):
+        return
+    try:
+        client = _client()
+        token = None
+        while True:
+            kw = {'Bucket': settings.R2_BUCKET, 'Prefix': prefix}
+            if token:
+                kw['ContinuationToken'] = token
+            page = client.list_objects_v2(**kw)
+            keys = [{'Key': o['Key']} for o in page.get('Contents', [])
+                    if not (keep and o['Key'].startswith(keep))]
+            if keys:
+                client.delete_objects(Bucket=settings.R2_BUCKET, Delete={'Objects': keys, 'Quiet': True})
+            if not page.get('IsTruncated'):
+                break
+            token = page.get('NextContinuationToken')
+    except Exception:
+        logger.exception('R2 prefix delete failed for %s', prefix)

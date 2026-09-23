@@ -20,7 +20,7 @@ import { reportPlay, flushPlays, setReporterUser, currentNetwork } from '../serv
 import { readCache, writeCache, dropCache, userKey } from '../utils/screenCache';
 import { usePreferences } from './PreferencesContext';
 import { useOptionalAuth } from './useAuth';
-import { applyAudioQuality, resolveAudioQuality } from '../utils/preferences';
+import { pickAudioSource } from '../utils/audioQuality';
 import { getLocalUri, getLocalCover } from '../utils/downloads';
 
 // Two contexts, deliberately.
@@ -207,12 +207,13 @@ export const PlayerProvider = ({ children }) => {
   const streamSourceFor = useCallback((track) => {
     const local = getLocalUri(track.id);
     if (local) return { uri: local, downloadFirst: false, local: true };
+    // The processed version for the quality setting and connection (Wi-Fi /
+    // mobile data), or the original upload for a song not processed yet.
     const prefs = prefsRef.current;
-    return {
-      uri: applyAudioQuality(track.audio_file, prefs.audioQuality, prefs.dataSaver),
-      downloadFirst: resolveAudioQuality(prefs.audioQuality, prefs.dataSaver).downloadFirst,
-      local: false,
-    };
+    const { uri, downloadFirst } = pickAudioSource(track, {
+      audioQuality: prefs.audioQuality, dataSaver: prefs.dataSaver, network: currentNetwork(),
+    });
+    return { uri, downloadFirst, local: false };
   }, []);
 
   const maybePreload = useCallback((status) => {
@@ -343,7 +344,7 @@ export const PlayerProvider = ({ children }) => {
             title: track.title || '',
             artist: track.artist?.username || (typeof track.artist === 'string' ? track.artist : ''),
             albumTitle: track.album || undefined,
-            artworkUrl: getLocalCover(track.id) || track.cover_image || undefined,
+            artworkUrl: getLocalCover(track.id) || track.cover_medium || track.cover_image || undefined,
           },
           { showSeekForward: true, showSeekBackward: true },
         );

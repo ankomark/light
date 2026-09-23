@@ -63,19 +63,31 @@ export const getLocalUri = (trackId) => index[trackId]?.uri || null;
 export const getLocalCover = (trackId) => index[trackId]?.coverUri || null;
 export const isDownloaded = (trackId) => !!index[trackId];
 
-/** Save a track for offline listening. Resolves with the index entry. */
-export const downloadTrack = async (track) => {
+/**
+ * Save a track for offline listening. Resolves with the index entry.
+ *
+ * `quality` ('standard' | 'high', from Settings) picks the processed version
+ * to keep; a song not processed yet saves its original. With `wifiOnly`, a
+ * download off Wi-Fi is refused (error code 'wifi_only') — `network` is the
+ * caller's current connection type.
+ */
+export const downloadTrack = async (track, { quality = 'standard', wifiOnly = false, network = '' } = {}) => {
   const id = track?.id;
   if (id == null || index[id] || progress[id] != null) return index[id] || null;
+  if (wifiOnly && network !== 'wifi') {
+    const err = new Error('Downloads wait for Wi-Fi (Settings → Download on Wi-Fi only).');
+    err.code = 'wifi_only';
+    throw err;
+  }
   progress = { ...progress, [id]: 0 };
   publish();
   let uri = null;
   try {
     await FileSystem.makeDirectoryAsync(DIR, { intermediates: true }).catch(() => {});
     // Counts the download server-side, and hands back the canonical URL.
-    let url = track.audio_file;
+    let url = track[`audio_${quality}`] || track.audio_file;
     try {
-      const res = await apiRequest('get', `/tracks/${id}/download/`);
+      const res = await apiRequest('get', `/tracks/${id}/download/`, null, { params: { quality } });
       if (res?.download_url) url = res.download_url;
     } catch { /* offline counter failure mustn't block the save */ }
     if (!url) throw new Error('This track has no audio file.');
@@ -97,9 +109,12 @@ export const downloadTrack = async (track) => {
     if (!result || (result.status && result.status >= 400)) throw new Error('Download failed.');
 
     let coverUri = null;
-    if (track.cover_image) {
+    // The 600px cover when there is one: sharp on the lock screen, a fraction
+    // of an original photo's size.
+    const coverSrc = track.cover_medium || track.cover_image;
+    if (coverSrc) {
       try {
-        const c = await FileSystem.downloadAsync(track.cover_image, `${DIR}${id}_cover.${extOf(track.cover_image, 'jpg')}`);
+        const c = await FileSystem.downloadAsync(coverSrc, `${DIR}${id}_cover.${extOf(coverSrc, 'jpg')}`);
         coverUri = c?.uri || null;
       } catch { /* no offline art is fine */ }
     }

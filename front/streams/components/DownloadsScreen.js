@@ -22,8 +22,8 @@ const DownloadsScreen = ({ navigation }) => {
     return (
       <TouchableOpacity style={[styles.row, active && styles.rowActive]} activeOpacity={0.85} onPress={() => playQueue(tracks, index, { source: 'downloads' })}>
         <View style={styles.cover}>
-          {item.cover_image ? (
-            <Image source={{ uri: item.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          {(item.cover_small || item.cover_image) ? (
+            <Image source={{ uri: item.cover_small || item.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" />
           ) : (
             <Ionicons name="musical-notes" size={22} color={colors.textMuted} />
           )}

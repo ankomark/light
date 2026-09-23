@@ -12,7 +12,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
-import { fetchTrackLyrics, fetchSimilarTracks } from '../services/api';
+import { fetchTrackLyrics, fetchSimilarTracks, fetchTrackWaveform } from '../services/api';
 import LikeButton from './LikeButton';
 import CommentAction from './CommentAction';
 import DownloadButton from './DownloadButton';
@@ -141,6 +141,19 @@ const NowPlaying = () => {
     return () => { cancelled = true; };
   }, [showLyrics, trackId, inlineLyrics]);
 
+  // The song's waveform for the seek bar (processed songs only; the plain bar
+  // until then). Fetched per song, cached for the session.
+  const [peaks, setPeaks] = useState(null);
+  useEffect(() => {
+    if (trackId == null) return undefined;
+    let cancelled = false;
+    setPeaks(null);
+    fetchTrackWaveform(trackId)
+      .then((w) => { if (!cancelled) setPeaks(w); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [trackId]);
+
   useEffect(() => {
     if (!showSimilar || trackId == null || similarFor === trackId) return undefined;
     let cancelled = false;
@@ -263,7 +276,8 @@ const NowPlaying = () => {
           onSlidingComplete={async (v) => { await seekTo(v); setSeekValue(null); }}
           thumbTintColor={colors.white}
           minimumTrackTintColor={colors.primary}
-          maximumTrackTintColor={colors.border}
+          maximumTrackTintColor={peaks ? 'rgba(255,255,255,0.22)' : colors.border}
+          peaks={peaks}
           disabled={durationMs === 0}
         />
         <View style={styles.timeRow}>

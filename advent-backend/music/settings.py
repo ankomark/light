@@ -299,6 +299,19 @@ R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY', '')
 R2_BUCKET = os.getenv('R2_BUCKET', '')
 R2_ENDPOINT = os.getenv('R2_ENDPOINT', '')
 R2_PUBLIC_BASE = os.getenv('R2_PUBLIC_BASE', '')
+
+# FFmpeg for song processing (songs/audio_processing.py, run by the job
+# worker). On the server: `apt install ffmpeg`. In development, the
+# imageio-ffmpeg package's bundled binary is used when it's installed.
+def _default_ffmpeg():
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return 'ffmpeg'
+
+
+FFMPEG_BIN = os.getenv('FFMPEG_BIN') or _default_ffmpeg()
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 SIMPLE_JWT = {

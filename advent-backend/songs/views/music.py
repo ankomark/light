@@ -272,6 +272,19 @@ class TrackViewSet(viewsets.ModelViewSet):
         data = TrackQueueSerializer(tracks, many=True, context={'request': request}).data
         return Response({'results': data, 'count': len(data)})
 
+    @action(detail=True, methods=['get'], url_path='waveform')
+    def waveform(self, request, pk=None):
+        """The song's waveform for Now Playing's seek bar: ~100 peaks in 0..1,
+        or null until the song is processed. Tiny and cacheable, like lyrics."""
+        row = Track.objects.filter(is_removed=False, pk=pk).values('id', 'waveform', 'processing_status').first()
+        if row is None:
+            return Response({'error': 'Track not found'}, status=status.HTTP_404_NOT_FOUND)
+        resp = Response({'id': row['id'], 'waveform': row['waveform'] or None})
+        # Fixed once made; a song still processing is asked again later.
+        if row['waveform']:
+            resp['Cache-Control'] = 'private, max-age=86400'
+        return resp
+
     @action(detail=True, methods=['get'], url_path='lyrics')
     def lyrics(self, request, pk=None):
         """This track's lyrics, fetched when someone actually opens them.
@@ -538,7 +551,9 @@ class TrackViewSet(viewsets.ModelViewSet):
         Track.objects.filter(pk=track.pk).update(downloads=F('downloads') + 1)
         # A copy with the title, artist, album and cover written into the file,
         # so the phone's music player shows the song as it looks in the app.
-        url, filename, tagged = audio_tags.tagged_download(track)
+        # ?quality=standard|high: the processed version for offline listening
+        # (the phone-save path sends none and gets the original).
+        url, filename, tagged = audio_tags.tagged_download(track, request.query_params.get('quality'))
         return Response({'download_url': url, 'filename': filename, 'tagged': tagged})
     # "Favorites" == liked tracks. Toggling a favorite is just toggle_like; this
     # endpoint lists the current user's liked tracks for the Favorites screen.

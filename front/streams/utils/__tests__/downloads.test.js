@@ -49,7 +49,7 @@ beforeEach(async () => {
 
 it('downloads audio + cover, counts it, and indexes a slim row', async () => {
   const entry = await downloadTrack(track);
-  expect(apiRequest).toHaveBeenCalledWith('get', '/tracks/7/download/');
+  expect(apiRequest).toHaveBeenCalledWith('get', '/tracks/7/download/', null, { params: { quality: 'standard' } });
   expect(entry.uri).toBe('file:///docs/music/7.m4a');
   expect(entry.coverUri).toBe('file:///docs/music/7_cover.jpg');
   expect(entry.track).not.toHaveProperty('lyrics');
@@ -96,4 +96,21 @@ it('removes the file, the cover and the entry', async () => {
   expect(isDownloaded(7)).toBe(false);
   expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file:///docs/music/7.m4a', { idempotent: true });
   expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file:///docs/music/7_cover.jpg', { idempotent: true });
+});
+
+it('asks for the chosen quality and keeps the processed version', async () => {
+  const processed = { ...track, id: 9, audio_standard: 'https://cdn/t/9/128.m4a', cover_medium: 'https://cdn/t/9/cover_600.jpg' };
+  apiRequest.mockRejectedValueOnce(new Error('offline'));   // counter down: fall back to the track's own URL
+  await downloadTrack(processed, { quality: 'standard' });
+  expect(apiRequest).toHaveBeenCalledWith('get', '/tracks/9/download/', null, { params: { quality: 'standard' } });
+  expect(FileSystem.createDownloadResumable.mock.calls[0][0]).toBe('https://cdn/t/9/128.m4a');
+  expect(FileSystem.downloadAsync.mock.calls[0][0]).toBe('https://cdn/t/9/cover_600.jpg');
+});
+
+it('Wi-Fi only refuses a download on mobile data, and allows it on Wi-Fi', async () => {
+  await expect(downloadTrack(track, { wifiOnly: true, network: 'cellular' })).rejects.toMatchObject({ code: 'wifi_only' });
+  expect(isDownloaded(7)).toBe(false);
+  expect(FileSystem.createDownloadResumable).not.toHaveBeenCalled();
+  await downloadTrack(track, { wifiOnly: true, network: 'wifi' });
+  expect(isDownloaded(7)).toBe(true);
 });
