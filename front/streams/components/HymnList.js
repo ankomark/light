@@ -7,49 +7,93 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { HYMNALS, HYMNAL_ORDER } from '../utils/hymnals';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useHymnFavorites, sortFavorites, FAVORITE_SORTS } from '../services/hymnFavorites';
+import { usePreferences } from '../context/PreferencesContext';
+import { PREF_KEYS } from '../utils/preferences';
+
+// Each hymnal's hymns by number, for turning saved favourites back into hymns.
+const BY_NUMBER = Object.fromEntries(HYMNAL_ORDER.map((code) => [
+  code, new Map(HYMNALS[code].data.hymns.map((h) => [Number(h.number), h])),
+]));
+
+const matches = (h, q) => {
+  if (String(h.number).includes(q)) return true;
+  if (h.title && h.title.toLowerCase().includes(q)) return true;
+  if (h.refrain && h.refrain.toLowerCase().includes(q)) return true;
+  return h.verses?.some((v) => v.toLowerCase().includes(q));
+};
 
 const HymnList = ({ navigation }) => {
   const { t } = useI18n();
   const [lang, setLang] = useState('en');
   const [searchQuery, setSearchQuery] = useState('');
+  // The Favourites view: the hymns the user saved, from every hymnal.
+  const [showFavs, setShowFavs] = useState(false);
+  const { favorites, isFavorite, toggle } = useHymnFavorites();
+  // The Favourites order, remembered between visits.
+  const { preferences, setPreference } = usePreferences();
+  const favSort = FAVORITE_SORTS.includes(preferences[PREF_KEYS.hymnFavSort])
+    ? preferences[PREF_KEYS.hymnFavSort] : 'recent';
 
   const hymnal = HYMNALS[lang];
   const hymns = hymnal.data.hymns;
 
-  const filteredHymns = useMemo(() => {
+  // Rows: { lang, hymn }. Favourites in the chosen order; any that no longer
+  // exist in the bundled hymnal (a data update) are skipped.
+  const rows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return hymns;
-    return hymns.filter((h) => {
-      if (String(h.number).includes(q)) return true;
-      if (h.title && h.title.toLowerCase().includes(q)) return true;
-      if (h.refrain && h.refrain.toLowerCase().includes(q)) return true;
-      return h.verses?.some((v) => v.toLowerCase().includes(q));
-    });
-  }, [hymns, searchQuery]);
+    const list = showFavs
+      ? sortFavorites(
+        favorites.map((f) => ({ lang: f.lang, at: f.at, hymn: BY_NUMBER[f.lang]?.get(f.number) })).filter((r) => r.hymn),
+        favSort,
+      )
+      : hymns.map((hymn) => ({ lang, hymn }));
+    return q ? list.filter((r) => matches(r.hymn, q)) : list;
+  }, [showFavs, favorites, favSort, hymns, lang, searchQuery]);
 
-  const openHymn = useCallback((hymn) => {
+  const openHymn = useCallback((row) => {
     Keyboard.dismiss();
-    navigation.navigate('HymnDetail', { hymn, hymnalName: hymnal.name, lang });
-  }, [navigation, hymnal.name, lang]);
+    navigation.navigate('HymnDetail', { hymn: row.hymn, hymnalName: HYMNALS[row.lang].name, lang: row.lang });
+  }, [navigation]);
 
-  const renderHymnItem = useCallback(({ item }) => {
+  const renderHymnItem = useCallback(({ item: row }) => {
+    const { hymn: item } = row;
     const preview = (item.refrain || item.verses?.[0] || '').split('\n')[0];
     const numberMatch = searchQuery && String(item.number).includes(searchQuery.trim());
+    const fav = isFavorite(row.lang, item.number);
     return (
-      <TouchableOpacity style={styles.hymnItem} onPress={() => openHymn(item)} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.hymnItem} onPress={() => openHymn(row)} activeOpacity={0.8}>
         <View style={[styles.numberBadge, numberMatch && styles.numberBadgeMatch]}>
           <Text style={styles.numberText}>{item.number}</Text>
         </View>
         <View style={styles.hymnContent}>
           <Text style={styles.hymnTitle} numberOfLines={1}>{item.title}</Text>
-          {preview ? (
+          {showFavs ? (
+            <Text style={styles.bookTag} numberOfLines={1}>{HYMNALS[row.lang].name}</Text>
+          ) : preview ? (
             <Text style={styles.hymnPreview} numberOfLines={1}>{preview}</Text>
           ) : null}
         </View>
-        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        {showFavs ? (
+          // In Favourites the heart takes it off the list.
+          <TouchableOpacity
+            onPress={() => toggle(row.lang, item.number)}
+            hitSlop={10}
+            style={styles.rowHeart}
+            accessibilityRole="button"
+            accessibilityLabel={t('hymns.removeFavorite')}
+          >
+            <Ionicons name="heart" size={20} color="#FF4D6D" />
+          </TouchableOpacity>
+        ) : (
+          <>
+            {fav ? <Ionicons name="heart" size={14} color="#FF4D6D" style={styles.favDot} /> : null}
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </>
+        )}
       </TouchableOpacity>
     );
-  }, [openHymn, searchQuery]);
+  }, [openHymn, searchQuery, showFavs, isFavorite, toggle, t]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={[]}>
@@ -59,12 +103,27 @@ const HymnList = ({ navigation }) => {
           <Ionicons name="musical-notes" size={20} color={colors.primary} />
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.headerTitle}>{t('hymns.title')}</Text>
-          <Text style={styles.headerSubtitle}>{hymnal.name} · {hymns.length} hymns</Text>
+          <Text style={styles.headerTitle}>{showFavs ? t('hymns.favorites') : t('hymns.title')}</Text>
+          <Text style={styles.headerSubtitle}>
+            {showFavs ? t('hymns.favCount', { n: favorites.length }) : `${hymnal.name} · ${hymns.length} hymns`}
+          </Text>
         </View>
+        <TouchableOpacity
+          style={[styles.favBtn, showFavs && styles.favBtnOn]}
+          onPress={() => { setShowFavs((v) => !v); setSearchQuery(''); Keyboard.dismiss(); }}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityState={{ selected: showFavs }}
+          accessibilityLabel={t('hymns.favorites')}
+          testID="hymn-favorites-button"
+        >
+          <Ionicons name={showFavs ? 'heart' : 'heart-outline'} size={18} color={showFavs ? colors.white : '#FF4D6D'} />
+          <Text style={[styles.favBtnText, showFavs && styles.favBtnTextOn]}>{favorites.length}</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Language switcher — segmented control */}
+      {/* Language switcher — segmented control (not in Favourites: it holds every hymnal) */}
+      {!showFavs ? (
       <View style={styles.langRow}>
         {HYMNAL_ORDER.map((code) => {
           const active = code === lang;
@@ -87,6 +146,7 @@ const HymnList = ({ navigation }) => {
           );
         })}
       </View>
+      ) : null}
 
       {/* Search */}
       <View style={styles.searchBar}>
@@ -107,15 +167,37 @@ const HymnList = ({ navigation }) => {
         ) : null}
       </View>
 
+      {/* Favourites: how they're ordered. */}
+      {showFavs && favorites.length > 1 ? (
+        <View style={styles.sortRow} accessibilityRole="radiogroup" accessibilityLabel={t('hymns.sortBy')}>
+          <Ionicons name="swap-vertical" size={16} color={colors.textSecondary} />
+          {FAVORITE_SORTS.map((key) => {
+            const on = key === favSort;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.sortChip, on && styles.sortChipOn]}
+                onPress={() => setPreference(PREF_KEYS.hymnFavSort, key)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on }}
+                testID={`hymn-sort-${key}`}
+              >
+                <Text style={[styles.sortChipText, on && styles.sortChipTextOn]}>{t(`hymns.sort.${key}`)}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+
       {searchQuery ? (
         <Text style={styles.resultsText}>
-          {filteredHymns.length} {filteredHymns.length === 1 ? 'result' : 'results'}
+          {rows.length} {rows.length === 1 ? 'result' : 'results'}
         </Text>
       ) : null}
 
       <FlatList
-        data={filteredHymns}
-        keyExtractor={(item) => `${lang}_${item.number}`}
+        data={rows}
+        keyExtractor={(row) => `${row.lang}_${row.hymn.number}`}
         renderItem={renderHymnItem}
         contentContainerStyle={styles.listContent}
         keyboardDismissMode="on-drag"
@@ -123,11 +205,19 @@ const HymnList = ({ navigation }) => {
         initialNumToRender={15}
         windowSize={10}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="musical-notes-outline" size={44} color={colors.textMuted} />
-            <Text style={styles.emptyText}>{t('hymns.none')}</Text>
-            <Text style={styles.emptySub}>{t('hymns.tryDifferent')}</Text>
-          </View>
+          showFavs && !searchQuery ? (
+            <View style={styles.empty}>
+              <Ionicons name="heart-outline" size={44} color="#FF4D6D" />
+              <Text style={styles.emptyText}>{t('hymns.noFavorites')}</Text>
+              <Text style={[styles.emptySub, styles.emptyCentered]}>{t('hymns.noFavoritesSub')}</Text>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="musical-notes-outline" size={44} color={colors.textMuted} />
+              <Text style={styles.emptyText}>{t('hymns.none')}</Text>
+              <Text style={styles.emptySub}>{t('hymns.tryDifferent')}</Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>
@@ -157,6 +247,15 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
   headerSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
+  favBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 38,
+    paddingHorizontal: 12, borderRadius: radius.full,
+    backgroundColor: 'rgba(16,28,46,0.8)',
+    borderWidth: 1, borderColor: 'rgba(255,77,109,0.55)',
+  },
+  favBtnOn: { backgroundColor: '#FF4D6D', borderColor: '#FF4D6D' },
+  favBtnText: { color: colors.textPrimary, fontSize: 14, fontWeight: '800' },
+  favBtnTextOn: { color: colors.white },
 
   langRow: {
     flexDirection: 'row',
@@ -235,6 +334,20 @@ const styles = StyleSheet.create({
   hymnContent: { flex: 1, marginRight: spacing.sm },
   hymnTitle: { ...typography.label, color: colors.textPrimary, fontWeight: '600' },
   hymnPreview: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  sortRow: {
+    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs,
+    marginHorizontal: spacing.md, marginTop: spacing.sm,
+  },
+  sortChip: {
+    paddingHorizontal: 12, minHeight: 32, justifyContent: 'center', borderRadius: radius.full,
+    backgroundColor: 'rgba(16,28,46,0.8)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  sortChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  sortChipText: { color: colors.textSecondary, fontSize: 13, fontWeight: '700' },
+  sortChipTextOn: { color: colors.white },
+  bookTag: { ...typography.caption, color: colors.accent, fontWeight: '700', marginTop: 2 },
+  rowHeart: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  favDot: { marginRight: 6 },
 
   empty: {
     alignItems: 'center',
@@ -244,6 +357,7 @@ const styles = StyleSheet.create({
   },
   emptyText: { ...typography.body, color: colors.textSecondary, marginTop: spacing.sm },
   emptySub: { ...typography.caption, color: colors.textMuted },
+  emptyCentered: { textAlign: 'center', paddingHorizontal: spacing.xl },
 });
 
 export default HymnList;

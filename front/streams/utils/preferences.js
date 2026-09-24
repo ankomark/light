@@ -24,6 +24,7 @@ export const PREF_KEYS = {
   weatherPlace: 'weatherPlace', // the town the weather screen opens on
   calendarReminders: 'calendarReminders', // date reminders, scheduled on-device
   videoMode: 'videoMode',       // open the app in the Videos feed
+  hymnFavSort: 'hymnFavSort',   // favourite hymns: 'recent' | 'number' | 'title' | 'hymnal'
 };
 
 export const DEFAULT_PREFERENCES = {
@@ -47,6 +48,7 @@ export const DEFAULT_PREFERENCES = {
   [PREF_KEYS.calendarReminders]: true,
   // Off: the app opens on Home. On: in Videos (Home still one tap away).
   [PREF_KEYS.videoMode]: false,
+  [PREF_KEYS.hymnFavSort]: 'recent',
 };
 
 const serialize = (value) => JSON.stringify(value);

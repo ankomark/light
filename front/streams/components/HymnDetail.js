@@ -1,16 +1,34 @@
-import React from 'react';
-import { ScrollView, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, ScrollView, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useHymnFavorites } from '../services/hymnFavorites';
 
 const HymnDetail = ({ route }) => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const { hymn, hymnalName } = route.params;
+  const { hymn, hymnalName, lang = 'en' } = route.params;
   const verses = Array.isArray(hymn.verses) ? hymn.verses : [];
+
+  // Favourite: kept on the phone for quick singing and memorising.
+  const { isFavorite, toggle } = useHymnFavorites();
+  const favorite = isFavorite(lang, hymn.number);
+  const [note, setNote] = useState(null);
+  const fade = useRef(new Animated.Value(0)).current;
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const onFavorite = async () => {
+    const on = await toggle(lang, hymn.number);
+    setNote(t(on ? 'hymns.favAdded' : 'hymns.favRemoved'));
+    fade.setValue(1);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      Animated.timing(fade, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => setNote(null));
+    }, 1800);
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -20,8 +38,24 @@ const HymnDetail = ({ route }) => {
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.topBarTitle} numberOfLines={1}>{hymnalName || 'Hymnal'}</Text>
-        <View style={styles.iconBtn} />
+        <TouchableOpacity
+          onPress={onFavorite}
+          style={styles.iconBtn}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityState={{ selected: favorite }}
+          accessibilityLabel={t(favorite ? 'hymns.removeFavorite' : 'hymns.addFavorite')}
+          testID="hymn-favorite"
+        >
+          <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={24} color={favorite ? '#FF4D6D' : colors.textPrimary} />
+        </TouchableOpacity>
       </View>
+      {note ? (
+        <Animated.View style={[styles.note, { opacity: fade }]} pointerEvents="none">
+          <Ionicons name={favorite ? 'heart' : 'heart-dislike-outline'} size={14} color="#fff" />
+          <Text style={styles.noteText}>{note}</Text>
+        </Animated.View>
+      ) : null}
 
       <ScrollView
         style={styles.container}
@@ -82,6 +116,13 @@ const styles = StyleSheet.create({
   },
   topBarTitle: { ...typography.h3, color: colors.textPrimary, flex: 1, textAlign: 'center' },
   iconBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  note: {
+    position: 'absolute', top: 64, alignSelf: 'center', zIndex: 5,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full,
+    backgroundColor: 'rgba(0,0,0,0.78)',
+  },
+  noteText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 
   hymnNumber: {
     ...typography.caption,
