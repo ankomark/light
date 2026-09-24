@@ -3,11 +3,13 @@ from django.db.models import Exists, OuterRef, Subquery, IntegerField
 from django.db.models.functions import Coalesce
 from django.db import IntegrityError, transaction
 import re
+from collections import Counter
 from django.db.models import F, Max
 from django.utils.dateparse import parse_datetime
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import Album, PlayEvent, PlaylistTrack
-from ..serializers import AlbumSerializer
+from ..serializers import AlbumSerializer, TrackCardSerializer
+from django.db.models import BooleanField, Case, Value, When
 from django.db.models import Sum
 from django.db.models import Prefetch
 from .. import discovery, audio_tags, charts, artists, rights
@@ -283,6 +285,23 @@ class TrackViewSet(viewsets.ModelViewSet):
         data = TrackQueueSerializer(tracks, many=True, context={'request': request}).data
         return Response({'results': data, 'count': len(data)})
 
+    @action(detail=True, methods=['get'], url_path='state')
+    def state(self, request, pk=None):
+        """What Now Playing needs about the song playing, fresh: likes (and
+        whether you liked it), comment count, and the waveform. Songs in the
+        queue don't carry these — the heart showed "0, not liked" and a tap on
+        a song you'd liked un-liked it (the like endpoint toggles)."""
+        track = self.get_queryset().filter(pk=pk).first()
+        if track is None:
+            return Response({'error': 'Track not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'id': track.id,
+            'likes_count': track.likes_total,
+            'comments_count': track.comments_total,
+            'is_liked': bool(getattr(track, 'liked_by_me', False)),
+            'waveform': track.waveform or None,
+        })
+
     @action(detail=True, methods=['get'], url_path='waveform')
     def waveform(self, request, pk=None):
         """The song's waveform for Now Playing's seek bar: ~100 peaks in 0..1,
@@ -419,46 +438,59 @@ class TrackViewSet(viewsets.ModelViewSet):
             ev.play_id: ev for ev in
             PlayEvent.objects.filter(user=user, play_id__in=list(cleaned))
         }
+        # Everything decided in memory, then written in a few statements: a
+        # batch of 20 listens used to be ~100 queries (a count and an update
+        # per listen).
         day_ago = now - timedelta(days=1)
-        stored = 0
+        today = dict(
+            PlayEvent.objects.filter(user=user, counted=True, started_at__gte=day_ago, track_id__in=list(tracks))
+            .values('track_id').annotate(n=Count('id')).values_list('track_id', 'n'))
+        new_rows, changed, counted = [], [], Counter()
+        lengths = {}
         for play_id, c in cleaned.items():
             track = tracks.get(c['track_id'])
             if track is None:
                 continue
-            with transaction.atomic():
-                ev = existing.get(play_id)
-                if ev is None:
-                    try:
-                        with transaction.atomic():
-                            ev = PlayEvent.objects.create(
-                                user=user, track=track, play_id=play_id,
-                                source=c['source'], network=c['network'], country=c['country'],
-                                started_at=c['started'],
-                            )
-                    except IntegrityError:  # the same listen, racing itself
-                        ev = PlayEvent.objects.get(user=user, play_id=play_id)
-                elif ev.track_id != track.id:
-                    continue
-                ev.ms_played = max(ev.ms_played, c['ms'])
-                ev.completed = ev.completed or c['completed']
-                if c['ended']:
-                    ev.skipped = not ev.completed and ev.ms_played < PlayEvent.COUNT_AFTER_MS
-                length = track.duration_ms or c['duration']
-                heard_enough = ev.ms_played >= PlayEvent.COUNT_AFTER_MS or (
-                    ev.completed and length and length < PlayEvent.COUNT_AFTER_MS)
-                if (heard_enough and not ev.counted and track.artist_id != user.id
-                        and PlayEvent.objects.filter(
-                            user=user, track=track, counted=True, started_at__gte=day_ago,
-                        ).count() < self.MAX_COUNTED_PLAYS_PER_DAY):
-                    ev.counted = True
-                    Track.objects.filter(pk=track.pk).update(views=F('views') + 1)
-                    # "Your song reached 1,000 plays" — once, as it crosses.
-                    transaction.on_commit(lambda tid=track.pk: artists.check_play_milestone(tid))
-                ev.save()
+            ev = existing.get(play_id)
+            if ev is None:
+                ev = PlayEvent(user=user, track=track, play_id=play_id, source=c['source'],
+                               network=c['network'], country=c['country'], started_at=c['started'])
+                new_rows.append(ev)
+            elif ev.track_id != track.id:
+                continue
+            else:
+                changed.append(ev)
+            ev.ms_played = max(ev.ms_played, c['ms'])
+            ev.completed = ev.completed or c['completed']
+            if c['ended']:
+                ev.skipped = not ev.completed and ev.ms_played < PlayEvent.COUNT_AFTER_MS
+            length = track.duration_ms or c['duration']
+            heard_enough = ev.ms_played >= PlayEvent.COUNT_AFTER_MS or (
+                ev.completed and length and length < PlayEvent.COUNT_AFTER_MS)
+            if (heard_enough and not ev.counted and track.artist_id != user.id
+                    and today.get(track.id, 0) < self.MAX_COUNTED_PLAYS_PER_DAY):
+                ev.counted = True
+                today[track.id] = today.get(track.id, 0) + 1
+                counted[track.id] += 1
             if not track.duration_ms and 1000 <= c['duration'] <= 4 * 3600 * 1000:
-                Track.objects.filter(pk=track.pk, duration_ms__isnull=True).update(duration_ms=c['duration'])
-                track.duration_ms = c['duration']
-            stored += 1
+                lengths[track.id] = c['duration']
+        with transaction.atomic():
+            # A listen sent twice at the same moment (the same play_id racing
+            # itself) is stored once.
+            PlayEvent.objects.bulk_create(new_rows, ignore_conflicts=True)
+            PlayEvent.objects.bulk_update(changed, ['ms_played', 'completed', 'skipped', 'counted'])
+            for tid, n in counted.items():
+                Track.objects.filter(pk=tid).update(views=F('views') + n)
+                # Read back under the row lock the update holds: exactly this
+                # batch's before/after, however many listeners count at once,
+                # so a milestone is crossed once — even when a batch jumps it.
+                after = Track.objects.filter(pk=tid).values_list('views', flat=True).get()
+                crossed = [m for m in artists.MILESTONES if after - n < m <= after]
+                if crossed:
+                    transaction.on_commit(lambda tid=tid, ms=crossed: artists.notify_milestones(tid, ms))
+        for tid, ms in lengths.items():
+            Track.objects.filter(pk=tid, duration_ms__isnull=True).update(duration_ms=ms)
+        stored = len(new_rows) + len(changed)
         return Response({'stored': stored})
 
     @action(detail=False, methods=['get'])
@@ -703,11 +735,20 @@ def _country(value):
     return code if _COUNTRY.match(code) else ''
 
 
+def card_tracks():
+    """The query behind song cards: no per-row counts, and the lyrics text
+    left in the database (only whether there are any comes back)."""
+    has_lyrics = Case(When(Q(lyrics__isnull=True) | Q(lyrics=''), then=Value(False)), default=Value(True),
+                      output_field=BooleanField())
+    return (Track.objects.filter(is_removed=False).select_related('artist__profile')
+            .defer('lyrics', 'waveform').annotate(has_lyrics_flag=has_lyrics))
+
+
 def _rows(ids, user, context, extra=None):
-    """Track rows for `ids`, in that order, in one annotated query."""
-    by_id = annotated_tracks(user).filter(id__in=ids).in_bulk()
+    """Song cards for `ids`, in that order, in one query."""
+    by_id = card_tracks().filter(id__in=ids).in_bulk()
     tracks = [by_id[i] for i in ids if i in by_id]
-    data = TrackListSerializer(tracks, many=True, context=context).data
+    data = TrackCardSerializer(tracks, many=True, context=context).data
     if extra:
         for row in data:
             row.update(extra.get(row['id'], {}))
@@ -968,13 +1009,13 @@ class LibraryView(APIView):
             .values('track_id').annotate(last=Max('started_at')).order_by('-last')
             .values_list('track_id', flat=True)[:10]
         )
-        by_id = annotated_tracks(me).filter(id__in=recent_ids).in_bulk()
+        by_id = card_tracks().filter(id__in=recent_ids).in_bulk()
         recent = [by_id[i] for i in recent_ids if i in by_id]
         ctx = {'request': request}
         return Response({
             'liked': {'count': liked.count(), 'covers': covers},
             'playlists': PlaylistListSerializer(playlists, many=True, context=ctx).data,
-            'recent': TrackListSerializer(recent, many=True, context=ctx).data,
+            'recent': TrackCardSerializer(recent, many=True, context=ctx).data,
         })
 
 

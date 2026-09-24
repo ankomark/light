@@ -113,12 +113,20 @@ def run(job):
     return True
 
 
+def _tidy_connections():
+    # The worker's housekeeping between jobs: drop stale / broken connections.
+    # Never inside a transaction — there Django would close the connection
+    # mid-transaction (Postgres; SQLite's in-memory test database hides it).
+    if not connection.in_atomic_block:
+        close_old_connections()
+
+
 def run_next():
     """Claim and run one job. Returns True if there was one."""
-    close_old_connections()
+    _tidy_connections()
     job = claim()
     if job is None:
         return False
     run(job)
-    close_old_connections()
+    _tidy_connections()
     return True

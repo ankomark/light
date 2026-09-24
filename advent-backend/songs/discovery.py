@@ -151,7 +151,22 @@ def for_you(user):
     return result
 
 
+SIMILAR_TTL = 600
+
+
 def similar(track, user):
+    """Cached 10 minutes per song and viewer: it's a dozen queries, and the
+    same song page / Now Playing asks again and again."""
+    key = f'music:similar:{track.id}:{getattr(user, "pk", 0)}'
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    result = _similar(track, user)
+    cache.set(key, result, SIMILAR_TTL)
+    return result
+
+
+def _similar(track, user):
     own = set(Track.objects.filter(artist=user).values_list('id', flat=True)) if user.is_authenticated else set()
     exclude = {track.id} | own
     return _merge(

@@ -44,7 +44,7 @@ test('shows the numbers, changes, top songs, countries, sources and albums', asy
   expect(r.getByText('Kenya')).toBeTruthy();
   expect(r.getByText('profile')).toBeTruthy();              // untranslated here: the raw source
   expect(r.getByText('Vespers')).toBeTruthy();
-});
+}, 20000);   // above the render wait: this machine can be slow under a full parallel run
 
 test('switching the period asks for that period', async () => {
   const r = render(<ArtistStudio />);

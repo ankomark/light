@@ -346,6 +346,10 @@ export const fetchTrackLyrics = async (trackId) => {
   return p;
 };
 
+// What Now Playing needs about the song playing, fresh each time: likes,
+// liked-by-me, comment count and the waveform (queued songs carry none).
+export const fetchTrackState = (trackId) => apiRequest('get', `/tracks/${trackId}/state/`);
+
 // A song's waveform (Now Playing's seek bar), fetched per song and kept for
 // the session. `null` — not processed yet — isn't cached, so it's asked again
 // next time the song plays.

@@ -4,7 +4,9 @@ import { TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
 import { toggleTrackLike } from '../services/api';
 import { useI18n } from '../context/I18nContext';
 
-const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
+// `disabled` while the real like state is unknown: the server toggles, so a
+// tap on a stale "not liked" would un-like.
+const LikeButton = ({ trackId, initialLikes, initialIsLiked, disabled = false }) => {
   const { t } = useI18n();
   const [likes, setLikes] = useState(initialLikes || 0);
   const [isLiked, setIsLiked] = useState(!!initialIsLiked);
@@ -38,9 +40,13 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
     inFlight.current = true;
     try {
       const response = await toggleTrackLike(trackId);
+      const before = server.current;
       server.current = typeof response?.is_liked === 'boolean'
         ? response.is_liked
         : !server.current;
+      // A toggle that didn't flip means our idea of the server was wrong: take
+      // its word instead of toggling again (that would loop without end).
+      if (server.current === before) desired.current = server.current;
       if (typeof response?.likes_count === 'number') {
         serverLikes.current = response.likes_count;
       }
@@ -69,8 +75,9 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked }) => {
 
   return (
     <TouchableOpacity
-      style={styles.likeButton}
+      style={[styles.likeButton, disabled && { opacity: 0.4 }]}
       onPress={handleLikeClick}
+      disabled={disabled}
       testID="like-button"
       accessibilityRole="button"
       accessibilityState={{ selected: isLiked }}

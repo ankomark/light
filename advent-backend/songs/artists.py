@@ -26,16 +26,28 @@ def monthly_listeners(artist):
             .values('user_id').distinct().count())
 
 
+def notify_milestones(track_id, milestones):
+    """Tell the artist their song reached each of `milestones` plays (in the
+    app and by push). The plays endpoint works out which were crossed."""
+    row = Track.objects.filter(pk=track_id).values('artist_id', 'title').first()
+    if not row:
+        return
+    artist = None
+    for m in milestones:
+        msg = f'"{row["title"]}" reached {m:,} plays'
+        Notification.objects.create(recipient_id=row['artist_id'], sender_id=row['artist_id'], message=msg,
+                                    notification_type='milestone', track_id=track_id)
+        artist = artist or Track.objects.select_related('artist').get(pk=track_id).artist
+        notify_user(artist, 'milestone', msg)
+
+
 def check_play_milestone(track_id):
-    """After a play is counted: if the song just reached a milestone, tell its
-    artist (in-app and push). Exact match, so each milestone fires once."""
-    row = Track.objects.filter(pk=track_id).values('views', 'artist_id', 'title').first()
+    """Whether the song's play count sits exactly on a milestone now (and if
+    so, tell its artist). Kept for callers counting one play at a time."""
+    row = Track.objects.filter(pk=track_id).values('views').first()
     if not row or row['views'] not in MILESTONES:
         return False
-    msg = f'"{row["title"]}" reached {row["views"]:,} plays'
-    Notification.objects.create(recipient_id=row['artist_id'], sender_id=row['artist_id'], message=msg,
-                                notification_type='milestone', track_id=track_id)
-    notify_user(Track.objects.select_related('artist').get(pk=track_id).artist, 'milestone', msg)
+    notify_milestones(track_id, [row['views']])
     return True
 
 
@@ -46,9 +58,26 @@ def _change(now_value, before):
     return round((now_value - before) * 100.0 / before, 1)
 
 
+STUDIO_TTL = 300
+
+
 def studio(artist, days=28, now=None):
-    """The Studio overview for the last `days` days."""
+    """The Studio overview for the last `days` days — cached 5 minutes per
+    artist and period (18 queries over the listening history; artists open
+    it often and it needn't be to the second)."""
     days = days if days in STUDIO_PERIODS else 28
+    if now is None:
+        from django.core.cache import cache
+        key = f'studio:{artist.pk}:{days}'
+        data = cache.get(key)
+        if data is None:
+            data = _studio(artist, days, timezone.now())
+            cache.set(key, data, STUDIO_TTL)
+        return data
+    return _studio(artist, days, now)
+
+
+def _studio(artist, days, now):
     now = now or timezone.now()
     since = now - timedelta(days=days)
     before = since - timedelta(days=days)

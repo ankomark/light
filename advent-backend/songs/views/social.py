@@ -1123,7 +1123,8 @@ class ExploreViewSet(viewsets.ViewSet):
         ?type=<section> answers just that section, with more rows (the "See
         all" and the Music screen's own search)."""
         from .. import search as fz
-        from ..models import Album, Category, Playlist
+        from django.db.models.functions import Coalesce
+        from ..models import Album, Category, Playlist, PlaylistTrack
         from ..serializers import AlbumSerializer, PlaylistListSerializer
         from .music import albums_with_counts, annotated_tracks, with_playlist_counts
 
@@ -1142,85 +1143,108 @@ class ExploreViewSet(viewsets.ViewSet):
         out = dict(empty)
         best = []   # (score, kind, payload) for the top result
 
+        # Two phases per section, so a search stays fast however many rows a
+        # short piece of the query matches: score light rows (id, the text,
+        # popularity — counts by per-row index lookups, never joins), then load
+        # full rows only for the few that win.
+        Follow = User.followers.through
+        follower_n = Coalesce(Subquery(
+            Follow.objects.filter(from_user=OuterRef('pk')).order_by().values('from_user')
+            .annotate(n=Count('*')).values('n')[:1], output_field=IntegerField()), 0)
+        live_song_n = Coalesce(Subquery(
+            Track.objects.filter(artist=OuterRef('pk'), is_removed=False).order_by().values('artist')
+            .annotate(n=Count('*')).values('n')[:1], output_field=IntegerField()), 0)
+        has_live_song = Exists(Track.objects.filter(album_ref=OuterRef('pk'), is_removed=False))
+
         # People: usernames first (bio counts less), the more-followed nudged up.
         if want('users') or want('artists'):
             people = list(
                 User.objects.filter(fz.candidate_q(['username', 'profile__bio'], query))
                 .exclude(id__in=blocked).exclude(is_deactivated=True)
-                .select_related('profile')
-                .annotate(followers_count=Count('followers', distinct=True),
-                          live_tracks=Count('tracks', filter=Q(tracks__is_removed=False), distinct=True))
-                .order_by('-followers_count')[:fz.CANDIDATES]
+                .annotate(fc=follower_n, tc=live_song_n)
+                .order_by('-fc', 'id').values('id', 'username', 'profile__bio', 'fc', 'tc')[:fz.CANDIDATES]
             )
-            texts = lambda u: [(u.username, 1.0), (getattr(getattr(u, 'profile', None), 'bio', ''), 0.6)]  # noqa: E731
-            pop = lambda u: u.followers_count  # noqa: E731
-            if want('users'):
-                ranked = fz.rank(query, people, texts, pop, n)
-                rows = SimpleUserSerializer([u for _, u in ranked], many=True, context=ctx).data
+            texts = lambda u: [(u['username'], 1.0), (u['profile__bio'], 0.6)]  # noqa: E731
+            pop = lambda u: u['fc']  # noqa: E731
+            ranked_people = fz.rank(query, people, texts, pop, n) if want('users') else []
+            ranked_artists = (fz.rank(query, [u for u in people if u['tc']], lambda u: [(u['username'], 1.0)], pop, n)
+                              if want('artists') else [])
+            full = User.objects.select_related('profile').in_bulk(
+                [u['id'] for _, u in ranked_people + ranked_artists])
+
+            def user_rows(ranked):
+                objs = [full[u['id']] for _, u in ranked if u['id'] in full]
+                rows = SimpleUserSerializer(objs, many=True, context=ctx).data
                 for row, (_, u) in zip(rows, ranked):
-                    row['followers_count'] = u.followers_count
-                out['users'] = rows
+                    row.update(followers_count=u['fc'], tracks_count=u['tc'])
+                return rows
+            if want('users'):
+                out['users'] = user_rows(ranked_people)
             if want('artists'):
-                ranked = fz.rank(query, [u for u in people if u.live_tracks], lambda u: [(u.username, 1.0)], pop, n)
-                rows = SimpleUserSerializer([u for _, u in ranked], many=True, context=ctx).data
-                for row, (sc, u) in zip(rows, ranked):
-                    row.update(followers_count=u.followers_count, tracks_count=u.live_tracks)
-                    best.append((sc, 'artist', row))
-                out['artists'] = rows
+                out['artists'] = user_rows(ranked_artists)
+                best += [(sc, 'artist', row) for (sc, _), row in zip(ranked_artists, out['artists'])]
 
         # Songs: title, then album, then the artist's name.
         if want('tracks'):
             cands = list(
-                annotated_tracks(me).filter(fz.candidate_q(['title', 'album', 'artist__username'], query))
+                Track.objects.filter(fz.candidate_q(['title', 'album', 'artist__username'], query), is_removed=False)
                 .exclude(artist_id__in=blocked).exclude(artist__is_deactivated=True)
-                .order_by('-views', '-created_at')[:fz.CANDIDATES]
+                .order_by('-views', '-id').values('id', 'title', 'album', 'artist__username', 'views')[:fz.CANDIDATES]
             )
             ranked = fz.rank(query, cands,
-                             lambda t: [(t.title, 1.0), (t.album, 0.8), (t.artist.username, 0.7)],
-                             lambda t: t.views, n)
-            rows = TrackListSerializer([t for _, t in ranked], many=True, context=ctx).data
-            best += [(sc, 'track', row) for (sc, _), row in zip(ranked, rows)]
+                             lambda t: [(t['title'], 1.0), (t['album'], 0.8), (t['artist__username'], 0.7)],
+                             lambda t: t['views'], n)
+            by_id = annotated_tracks(me).filter(id__in=[t['id'] for _, t in ranked]).in_bulk()
+            winners = [(sc, by_id[t['id']]) for sc, t in ranked if t['id'] in by_id]
+            rows = TrackListSerializer([t for _, t in winners], many=True, context=ctx).data
+            best += [(sc, 'track', row) for (sc, _), row in zip(winners, rows)]
             out['tracks'] = rows
 
         # Albums with songs on them.
         if want('albums'):
             cands = list(
-                albums_with_counts(Album.objects.filter(fz.candidate_q(['title', 'artist__username'], query)))
-                .filter(track_count__gt=0)
-                .exclude(artist_id__in=blocked).exclude(artist__is_deactivated=True)[:fz.CANDIDATES]
+                Album.objects.filter(fz.candidate_q(['title', 'artist__username'], query))
+                .filter(has_live_song)
+                .exclude(artist_id__in=blocked).exclude(artist__is_deactivated=True)
+                .order_by('-created_at').values('id', 'title', 'artist__username')[:fz.CANDIDATES]
             )
-            ranked = fz.rank(query, cands, lambda a: [(a.title, 1.0), (a.artist.username, 0.6)],
-                             lambda a: a.track_count, n)
-            rows = AlbumSerializer([a for _, a in ranked], many=True, context=ctx).data
-            best += [(sc, 'album', row) for (sc, _), row in zip(ranked, rows)]
+            ranked = fz.rank(query, cands, lambda a: [(a['title'], 1.0), (a['artist__username'], 0.6)], limit=n)
+            by_id = albums_with_counts(Album.objects.filter(id__in=[a['id'] for _, a in ranked])).in_bulk()
+            winners = [(sc, by_id[a['id']]) for sc, a in ranked if a['id'] in by_id]
+            rows = AlbumSerializer([a for _, a in winners], many=True, context=ctx).data
+            best += [(sc, 'album', row) for (sc, _), row in zip(winners, rows)]
             out['albums'] = rows
 
         # Public playlists with songs (private and unlisted are never searchable).
         if want('playlists'):
+            live_item = Exists(PlaylistTrack.objects.filter(playlist=OuterRef('pk'), track__is_removed=False))
             cands = list(
-                with_playlist_counts(Playlist.objects.filter(fz.candidate_q(['name', 'description'], query),
-                                                             visibility=Playlist.PUBLIC))
-                .filter(tracks_total__gt=0)
+                Playlist.objects.filter(fz.candidate_q(['name', 'description'], query), visibility=Playlist.PUBLIC)
+                .filter(live_item)
                 .exclude(user_id__in=hidden).exclude(user__is_deactivated=True)
-                .select_related('user')[:fz.CANDIDATES]
+                .order_by('-updated_at').values('id', 'name', 'description')[:fz.CANDIDATES]
             )
-            ranked = fz.rank(query, cands, lambda pl: [(pl.name, 1.0), (pl.description, 0.6)],
-                             lambda pl: pl.tracks_total, n)
-            rows = PlaylistListSerializer([pl for _, pl in ranked], many=True, context=ctx).data
-            for row, (sc, pl) in zip(rows, ranked):
+            ranked = fz.rank(query, cands, lambda pl: [(pl['name'], 1.0), (pl['description'], 0.6)], limit=n)
+            by_id = (with_playlist_counts(Playlist.objects.filter(id__in=[pl['id'] for _, pl in ranked]))
+                     .select_related('user').in_bulk())
+            winners = [(sc, by_id[pl['id']]) for sc, pl in ranked if pl['id'] in by_id]
+            rows = PlaylistListSerializer([pl for _, pl in winners], many=True, context=ctx).data
+            for row, (sc, pl) in zip(rows, winners):
                 row['owner'] = pl.user.username
                 best.append((sc, 'playlist', row))
             out['playlists'] = rows
 
         # Groups you may see (private ones only to their members).
         if want('groups'):
+            mine = Q(is_private=False) | Q(creator=me) | Q(id__in=GroupMember.objects.filter(user=me).values('group_id'))
             cands = list(
-                Group.objects.filter(fz.candidate_q(['name', 'description'], query))
-                .filter(Q(is_private=False) | Q(creator=me) | Q(members__user=me))
-                .filter(is_removed=False).distinct()[:fz.CANDIDATES]
+                Group.objects.filter(fz.candidate_q(['name', 'description'], query)).filter(mine)
+                .filter(is_removed=False).order_by('-created_at').values('id', 'name', 'description')[:fz.CANDIDATES]
             )
-            ranked = fz.rank(query, cands, lambda g: [(g.name, 1.0), (g.description, 0.5)], limit=n)
-            out['groups'] = GroupSerializer([g for _, g in ranked], many=True, context=ctx).data
+            ranked = fz.rank(query, cands, lambda g: [(g['name'], 1.0), (g['description'], 0.5)], limit=n)
+            by_id = Group.objects.in_bulk([g['id'] for _, g in ranked])
+            out['groups'] = GroupSerializer([by_id[g['id']] for _, g in ranked if g['id'] in by_id],
+                                            many=True, context=ctx).data
 
         if want('genres'):
             gs = list(Category.objects.exclude(slug__isnull=True))

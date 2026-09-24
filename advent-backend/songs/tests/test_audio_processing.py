@@ -32,8 +32,9 @@ HAVE_FFMPEG = _have_ffmpeg()
 R2 = 'https://media.example.com'
 
 
-def tone(path, seconds=4, volume=0.05):
-    """A quiet 440 Hz tone, so normalisation has something to do."""
+def tone(path, seconds=4, volume=0.5):
+    """A quiet 440 Hz tone (about -24 LUFS), so normalisation has something
+    to do. FFmpeg's sine is already -18 dBFS; `volume` scales that."""
     subprocess.run([settings.FFMPEG_BIN, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
                     '-i', f'sine=frequency=440:duration={seconds}', '-af', f'volume={volume}',
                     '-ac', '2', '-y', path], check=True)
@@ -182,7 +183,7 @@ class FfmpegTests(TestCase):
 
     def test_quiet_song_is_measured_normalised_and_encoded_three_ways(self):
         before = ap.measure_loudness(self.src)
-        self.assertLess(float(before['input_i']), -25)       # it really is quiet
+        self.assertLess(float(before['input_i']), -20)       # it really is quiet
         out = ap.encode_tiers(self.src, self.tmp, ap.loudness_filter(before))
         self.assertEqual(set(out), {'audio_low', 'audio_standard', 'audio_high'})
         sizes = [os.path.getsize(out[f]) for f in ('audio_low', 'audio_standard', 'audio_high')]
@@ -194,6 +195,14 @@ class FfmpegTests(TestCase):
             head = fh.read(64)
         self.assertIn(b'ftyp', head)                          # an .m4a
         self.assertIn(b'moov', open(out['audio_low'], 'rb').read(4096))   # faststart: index up front
+
+    def test_a_near_silent_recording_is_only_boosted_so_far(self):
+        faint = os.path.join(self.tmp, 'faint.wav')
+        tone(faint, volume=0.02)                             # about -52 LUFS
+        before = float(ap.measure_loudness(faint)['input_i'])
+        out = ap.encode_tiers(faint, self.tmp, ap.loudness_filter(ap.measure_loudness(faint)))
+        after = float(ap.measure_loudness(out['audio_high'])['input_i'])
+        self.assertAlmostEqual(after - before, ap.MAX_BOOST_DB, delta=1.0)
 
     def test_waveform_is_100_points_scaled_to_the_loudest(self):
         points = ap.waveform(self.src)
@@ -214,6 +223,15 @@ class FfmpegTests(TestCase):
             fh.write(b'not audio at all' * 100)
         with self.assertRaises(ap.ProcessingError):
             ap.encode_tiers(junk, self.tmp, 'anull')
+
+
+class GainTests(TestCase):
+    def test_gain_reaches_the_target_but_respects_the_peaks_and_the_boost_cap(self):
+        self.assertAlmostEqual(ap.gain_db({'input_i': '-20', 'input_tp': '-10'}), 6.0)      # to -14
+        self.assertAlmostEqual(ap.gain_db({'input_i': '-20', 'input_tp': '-3'}), 1.0)       # peaks would clip
+        self.assertAlmostEqual(ap.gain_db({'input_i': '-55', 'input_tp': '-40'}), ap.MAX_BOOST_DB)  # near silence
+        self.assertAlmostEqual(ap.gain_db({'input_i': '-6', 'input_tp': '-0.5'}), -8.0)     # loud master comes down
+        self.assertEqual(ap.loudness_filter({'input_i': '-20', 'input_tp': '-10'}), 'volume=6.00dB')
 
 
 class CoverTests(TestCase):
@@ -281,7 +299,7 @@ class ProcessTrackTests(TestCase):
             self.assertTrue(getattr(track, f).startswith(f'{R2}/tracks/{track.pk}/'), f)
         self.assertEqual(len(track.waveform), ap.WAVEFORM_POINTS)
         self.assertAlmostEqual(track.duration_ms, 3000, delta=150)
-        self.assertLess(track.loudness_lufs, -25)
+        self.assertLess(track.loudness_lufs, -20)
         self.assertEqual(len(self.uploaded), 5)
 
         self.uploaded.clear()
@@ -415,3 +433,19 @@ class WaveformEndpointTests(APITestCase):
         self.assertIn('max-age', res['Cache-Control'])
         Track.objects.filter(pk=track.pk).update(is_removed=True)
         self.assertEqual(self.client.get(f'/api/tracks/{track.pk}/waveform/').status_code, 404)
+
+
+class TrackStateTests(APITestCase):
+    def test_now_playing_gets_likes_comments_and_waveform_fresh(self):
+        from songs.models import Comment, Like
+        track = make_track()
+        fan = User.objects.create_user('st_fan', 'stf@x.com', 'x')
+        Like.objects.create(user=fan, track=track)
+        Comment.objects.create(user=fan, track=track, content='Amen')
+        Track.objects.filter(pk=track.pk).update(waveform=[0.5, 1])
+        self.client.force_authenticate(fan)
+        data = self.client.get(f'/api/tracks/{track.pk}/state/').json()
+        self.assertEqual((data['likes_count'], data['is_liked'], data['comments_count'], data['waveform']),
+                         (1, True, 1, [0.5, 1]))
+        self.client.force_authenticate(track.artist)
+        self.assertFalse(self.client.get(f'/api/tracks/{track.pk}/state/').json()['is_liked'])

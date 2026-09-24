@@ -158,6 +158,17 @@ class MilestoneTests(Base):
             self.client.post('/api/tracks/plays/', {'events': [{'play_id': 'm2', 'track': t.id, 'ms_played': 40000}]}, format='json')
         self.assertEqual(Notification.objects.filter(notification_type='milestone').count(), 1)
 
+    def test_a_batch_that_jumps_over_a_milestone_still_reports_it_once(self):
+        t = song(self.artist, 'Jump', views=998)
+        self.client.force_authenticate(self.fan)
+        events = [{'play_id': f'j{i}', 'track': t.id, 'ms_played': 40000} for i in range(3)]
+        with mock.patch('songs.artists.notify_user'), self.captureOnCommitCallbacks(execute=True):
+            self.client.post('/api/tracks/plays/', {'events': events}, format='json')
+        t.refresh_from_db()
+        self.assertEqual(t.views, 1001)
+        notes = Notification.objects.filter(notification_type='milestone', track=t)
+        self.assertEqual([n.message for n in notes], ['"Jump" reached 1,000 plays'])
+
     def test_no_milestone_between(self):
         t = song(self.artist, 'Quiet', views=500)
         self.assertFalse(artists.check_play_milestone(t.id))

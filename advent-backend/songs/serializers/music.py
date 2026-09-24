@@ -175,6 +175,32 @@ class TrackListSerializer(TrackSerializer):
         fields = [f for f in TrackSerializer.Meta.fields if f not in ('lyrics', 'waveform')]
 
 
+class TrackCardSerializer(serializers.ModelSerializer):
+    """A song as a card in a rail or a chart row: what's drawn (cover, title,
+    artist with the tick, plays, length) and what playing it needs (the audio
+    versions) — none of a full row's counts, credits and flags. The Music home
+    was ~1 KB a song as full rows (106 KB for the page)."""
+    artist = SimpleUserSerializer(read_only=True)
+    audio_file = MediaReferenceField()
+    audio_low = MediaReferenceField(read_only=True)
+    audio_standard = MediaReferenceField(read_only=True)
+    audio_high = MediaReferenceField(read_only=True)
+    cover_image = MediaReferenceField(required=False)
+    cover_small = MediaReferenceField(read_only=True)
+    cover_medium = MediaReferenceField(read_only=True)
+    has_lyrics = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Track
+        fields = ['id', 'title', 'album', 'artist', 'audio_file', 'audio_low', 'audio_standard', 'audio_high',
+                  'cover_image', 'cover_small', 'cover_medium', 'duration_ms', 'views', 'has_lyrics']
+
+    def get_has_lyrics(self, obj):
+        # Only whether there are any: the list query defers the text itself.
+        flag = getattr(obj, 'has_lyrics_flag', None)
+        return bool(flag) if flag is not None else bool((obj.lyrics or '').strip())
+
+
 class TrackQueueSerializer(serializers.ModelSerializer):
     """Lean payload for building a playback queue (e.g. shuffle). Only the fields
     the player needs — no per-row like counts / annotations / ownership — so a

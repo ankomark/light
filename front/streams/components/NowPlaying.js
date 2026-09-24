@@ -12,7 +12,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
-import { fetchTrackLyrics, fetchSimilarTracks, fetchTrackWaveform } from '../services/api';
+import { fetchTrackLyrics, fetchSimilarTracks, fetchTrackState } from '../services/api';
 import LikeButton from './LikeButton';
 import CommentAction from './CommentAction';
 import DownloadButton from './DownloadButton';
@@ -141,15 +141,18 @@ const NowPlaying = () => {
     return () => { cancelled = true; };
   }, [showLyrics, trackId, inlineLyrics]);
 
-  // The song's waveform for the seek bar (processed songs only; the plain bar
-  // until then). Fetched per song, cached for the session.
-  const [peaks, setPeaks] = useState(null);
+  // The song's likes, comments and waveform, fresh for each song: queued
+  // songs carry none of them, and the like button toggles — showing "not
+  // liked" for a song you'd liked meant a tap un-liked it. So the heart waits
+  // for the real state (the waveform shows once the song is processed).
+  const [state, setState] = useState(null);
+  const peaks = state?.waveform || null;
   useEffect(() => {
     if (trackId == null) return undefined;
     let cancelled = false;
-    setPeaks(null);
-    fetchTrackWaveform(trackId)
-      .then((w) => { if (!cancelled) setPeaks(w); })
+    setState(null);
+    fetchTrackState(trackId)
+      .then((st) => { if (!cancelled && st?.id === trackId) setState(st); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [trackId]);
@@ -257,8 +260,14 @@ const NowPlaying = () => {
 
       {/* Like · comments · download · more like this */}
       <View style={styles.actionRow}>
-        <LikeButton trackId={currentTrack.id} initialLikes={currentTrack.likes_count} initialIsLiked={currentTrack.is_liked} />
-        <CommentAction trackId={currentTrack.id} commentCount={currentTrack.comments_count} triggerVariant="compact" />
+        <LikeButton
+          key={`like_${currentTrack.id}`}
+          trackId={currentTrack.id}
+          initialLikes={state?.likes_count ?? 0}
+          initialIsLiked={!!state?.is_liked}
+          disabled={!state}
+        />
+        <CommentAction trackId={currentTrack.id} commentCount={state?.comments_count ?? currentTrack.comments_count} triggerVariant="compact" />
         <DownloadButton track={currentTrack} size={22} />
         <TouchableOpacity style={styles.moreLike} onPress={() => setShowSimilar(true)} hitSlop={HIT}>
           <Ionicons name="sparkles" size={16} color={colors.primary} />
