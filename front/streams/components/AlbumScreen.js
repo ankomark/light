@@ -136,6 +136,13 @@ const AlbumScreen = () => {
         </TouchableOpacity>
         {album.is_owner ? (
           <View style={styles.ownerBtns}>
+            <TouchableOpacity
+              style={styles.round}
+              onPress={() => navigation.navigate('UploadTrack', { albumId: album.id })}
+              accessibilityLabel={t('album.uploadSongs')}
+            >
+              <Ionicons name="cloud-upload-outline" size={20} color={colors.textPrimary} />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.round} onPress={() => setPicking(true)} accessibilityLabel={t('album.songs')}>
               <MaterialIcons name="queue-music" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
@@ -162,6 +169,12 @@ const AlbumScreen = () => {
           <View style={styles.empty}>
             <MaterialIcons name="album" size={44} color={colors.textMuted} />
             <Text style={styles.emptyText}>{t('album.noSongsYet')}</Text>
+            {album.is_owner ? (
+              <TouchableOpacity style={styles.btn} onPress={() => navigation.navigate('UploadTrack', { albumId: album.id })}>
+                <Ionicons name="cloud-upload-outline" size={16} color={colors.white} />
+                <Text style={styles.btnText}>{t('album.uploadSongs')}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
       />

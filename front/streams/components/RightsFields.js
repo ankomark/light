@@ -17,7 +17,8 @@ export const isrcLooksValid = (v) => {
   return !code || /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(code);
 };
 
-const RightsFields = ({ value = EMPTY_RIGHTS, onChange, inputStyle, labelStyle }) => {
+// `hideIsrc`: an album upload — an ISRC names one recording, not a set.
+const RightsFields = ({ value = EMPTY_RIGHTS, onChange, inputStyle, labelStyle, hideIsrc = false }) => {
   const { t } = useI18n();
   const [open, setOpen] = useState(!!(value.composer || value.producer || value.rights_holder || value.isrc));
   const set = (k) => (v) => onChange({ ...value, [k]: v });
@@ -58,17 +59,21 @@ const RightsFields = ({ value = EMPTY_RIGHTS, onChange, inputStyle, labelStyle }
               <TextInput style={inputStyle} value={value[k]} onChangeText={set(k)} maxLength={150} placeholderTextColor={colors.placeholder} />
             </View>
           ))}
-          <Text style={labelStyle}>{t('rights.isrc')}</Text>
-          <TextInput
-            style={[inputStyle, !isrcLooksValid(value.isrc) && styles.bad]}
-            value={value.isrc}
-            onChangeText={set('isrc')}
-            autoCapitalize="characters"
-            maxLength={20}
-            placeholder="KE-A1B-26-00001"
-            placeholderTextColor={colors.placeholder}
-          />
-          {!isrcLooksValid(value.isrc) ? <Text style={styles.badText}>{t('rights.isrcFormat')}</Text> : null}
+          {!hideIsrc ? (
+            <>
+              <Text style={labelStyle}>{t('rights.isrc')}</Text>
+              <TextInput
+                style={[inputStyle, !isrcLooksValid(value.isrc) && styles.bad]}
+                value={value.isrc}
+                onChangeText={set('isrc')}
+                autoCapitalize="characters"
+                maxLength={20}
+                placeholder="KE-A1B-26-00001"
+                placeholderTextColor={colors.placeholder}
+              />
+              {!isrcLooksValid(value.isrc) ? <Text style={styles.badText}>{t('rights.isrcFormat')}</Text> : null}
+            </>
+          ) : null}
         </View>
       ) : null}
     </View>

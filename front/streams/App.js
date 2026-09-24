@@ -117,6 +117,7 @@ import PlaylistDetail from './components/PlaylistDetail';
 import ChartScreen from './components/ChartScreen';
 import GenreScreen from './components/GenreScreen';
 import AlbumScreen from './components/AlbumScreen';
+import ArtistLibraryScreen from './components/ArtistLibraryScreen';
 import ArtistStudio from './components/ArtistStudio';
 import { navigationRef, navigate } from './services/navigationRef';
 import { API_BASE, PUBLIC_BASE } from './services/api';
@@ -289,6 +290,7 @@ const App = () => {
                 <Stack.Screen name="MusicChart" component={MusicChartWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="Genre" component={GenreWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="Album" component={AlbumWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="ArtistLibrary" component={ArtistLibraryWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="ArtistStudio" component={ArtistStudioWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: false }} />
                 <Stack.Screen name="Hashtag" component={HashtagScreen} options={{ headerShown: false }} />
@@ -654,6 +656,16 @@ const AlbumWrapper = ({ navigation }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="This album couldn't load.">
       <AlbumScreen />
+    </ErrorBoundary>
+  </View>
+);
+
+const ArtistLibraryWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="This library couldn't load.">
+      <ArtistLibraryScreen />
     </ErrorBoundary>
   </View>
 );

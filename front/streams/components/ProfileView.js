@@ -681,7 +681,16 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
       ) : null}
       {artist.albums?.length ? (
         <>
-          <Text style={styles.blockTitle}>{t('artist.albums')}</Text>
+          <View style={styles.blockHead}>
+            <Text style={[styles.blockTitle, styles.blockHeadTitle]}>{t('artist.albums')}</Text>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ArtistLibrary', { userId: user?.id ?? userId, username: name })}
+              style={styles.seeAll}
+              accessibilityRole="button"
+            >
+              <Text style={styles.seeAllText}>{t('artistLibrary.open')}</Text>
+            </TouchableOpacity>
+          </View>
           <FlatList
             horizontal
             data={artist.albums}
@@ -867,6 +876,10 @@ const styles = StyleSheet.create({
   listeners: { marginTop: 6, fontSize: 13, color: P.muted },
   artistBlock: { width: '100%', maxWidth: TRACKS_MAX, alignSelf: 'center', paddingTop: spacing.sm },
   blockTitle: { fontSize: 16, fontWeight: '800', color: P.text, marginHorizontal: spacing.md, marginTop: spacing.md, marginBottom: spacing.sm },
+  blockHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginRight: spacing.md },
+  blockHeadTitle: { flexShrink: 1 },
+  seeAll: { marginTop: spacing.md, marginBottom: spacing.sm, minHeight: 32, justifyContent: 'center' },
+  seeAllText: { fontSize: 13, fontWeight: '700', color: colors.primary },
   popRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: 6 },
   popPos: { width: 20, textAlign: 'center', color: P.muted, fontWeight: '700' },
   popCover: {

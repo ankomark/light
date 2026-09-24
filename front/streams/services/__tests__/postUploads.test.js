@@ -207,4 +207,15 @@ describe('track upload', () => {
     await buildTrackJob({ title: 'T', audio: { uri: 'a.mp3' }, clientId: 'up_t' })(ctx());
     expect(apiRequest.mock.calls[0][2]).toMatchObject({ client_id: 'up_t' });
   });
+
+  it('puts the song on its album, at its place when an album upload gave one', async () => {
+    compressAudio.mockResolvedValue({ uri: 'a.m4a', compressed: false });
+    await buildTrackJob({ title: 'T', audio: { uri: 'a.mp3' }, albumId: 7, trackNumber: 3 })(ctx());
+    expect(apiRequest.mock.calls[0][2]).toMatchObject({ album_id: 7, track_number: 3 });
+    await buildTrackJob({ title: 'T', audio: { uri: 'a.mp3' }, albumId: 7, trackNumber: null })(ctx());
+    expect(apiRequest.mock.calls[1][2].album_id).toBe(7);
+    expect(apiRequest.mock.calls[1][2]).not.toHaveProperty('track_number');
+    await buildTrackJob({ title: 'T', audio: { uri: 'a.mp3' } })(ctx());
+    expect(apiRequest.mock.calls[2][2]).not.toHaveProperty('album_id');
+  });
 });

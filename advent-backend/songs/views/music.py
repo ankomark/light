@@ -343,18 +343,43 @@ class TrackViewSet(viewsets.ModelViewSet):
             existing = Track.objects.filter(artist=request.user, client_id=client_id).first()
             if existing:
                 return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
+        # Straight onto one of your albums (an album upload sends each song's
+        # place; without one it goes last).
+        album_id, number = request.data.get('album_id'), request.data.get('track_number')
+        if album_id not in (None, ''):
+            if not str(album_id).isdigit() or not Album.objects.filter(pk=album_id, artist=request.user).exists():
+                return Response({'album_id': ['Not one of your albums.']}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                number = int(number) if number not in (None, '') else None
+            except (TypeError, ValueError):
+                number = None
+            if number is not None and not 1 <= number <= 999:
+                number = None
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
-                serializer.save(artist=request.user, client_id=client_id)
+                track = serializer.save(artist=request.user, client_id=client_id)
+                if album_id not in (None, ''):
+                    self._put_on_album(track, album_id, number)
         except IntegrityError:
             existing = client_id and Track.objects.filter(artist=request.user, client_id=client_id).first()
             if not existing:
                 raise
             return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(self.get_serializer(track).data, status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def _put_on_album(track, album_id, number=None):
+        # The album row is locked so two songs uploading at once don't both
+        # take the same "next" place.
+        album = Album.objects.select_for_update().get(pk=album_id)
+        if number is None:
+            last = Track.objects.filter(album_ref=album).exclude(pk=track.pk).aggregate(n=Max('track_number'))['n']
+            number = (last or 0) + 1
+        Track.objects.filter(pk=track.pk).update(album_ref=album, track_number=number, album=album.title)
+        track.album_ref_id, track.track_number, track.album = album.id, number, album.title
 
     def _ordered_rows(self, ids, reasons):
         by_id = {t.id: t for t in self.get_queryset().filter(id__in=ids)}
@@ -768,6 +793,7 @@ class MusicHomeView(APIView):
                     first ten — null until it has enough listening
       top_world     worldwide Top 50, first ten
       genres        the genres that have songs, with a cover each
+      libraries     artists (choirs) with albums, most played first
     """
     permission_classes = [IsAuthenticated]
     RAIL = 20
@@ -832,6 +858,7 @@ class MusicHomeView(APIView):
             'top_country': chart(top_country, country),
             'top_world': chart(top_world, ''),
             'genres': genre_rows,
+            'libraries': library_artists(me),
         })
 
 
@@ -859,7 +886,69 @@ def albums_with_counts(qs):
         track_count=Count('tracks', filter=live, distinct=True),
         duration_total=Sum('tracks__duration_ms', filter=live),
         first_cover=Subquery(first_cover),
-    )
+    # Spelled out: Django drops Meta.ordering from a query with aggregates.
+    ).order_by(F('release_date').desc(nulls_last=True), '-created_at', '-id')
+
+
+def _visible_artists(me):
+    """Accounts whose music `me` may browse: not deactivated, no block either
+    way, and public — or private but followed by `me` (or `me`)."""
+    return (User.objects.filter(is_deactivated=False)
+            .exclude(pk__in=Block.objects.filter(blocker=me).values('blocked'))
+            .exclude(pk__in=Block.objects.filter(blocked=me).values('blocker'))
+            # (A subquery, not a join on followers: that would repeat each
+            # account once per follower and inflate the sums over it.)
+            .filter(Q(profile__isnull=True) | Q(profile__is_public=True) | Q(pk=me.pk)
+                    | Q(pk__in=me.followed_by.values('pk'))))
+
+
+def library_artists(me, limit=20):
+    """The Music home's Libraries: artists (choirs) with at least one album
+    that has songs, most played first. [{id, username, profile_picture,
+    verified, album_count, track_count, cover}]"""
+    live = Q(albums__tracks__is_removed=False)
+    artists_qs = (_visible_artists(me).filter(live).select_related('profile')
+                  .annotate(album_count=Count('albums', filter=live, distinct=True),
+                            track_count=Count('albums__tracks', filter=live, distinct=True),
+                            plays=Sum('albums__tracks__views', filter=live))
+                  .order_by("-plays", "-album_count", "id")[:limit])
+    rows = list(artists_qs)
+    # The newest album's cover stands in for an account without a picture.
+    covers = {}
+    for a in albums_with_counts(Album.objects.filter(artist__in=rows)).filter(track_count__gt=0):
+        covers.setdefault(a.artist_id, a.cover_image or a.first_cover)
+    out = []
+    for u in rows:
+        picture = media.resolve(u.profile.picture) if hasattr(u, 'profile') and u.profile.picture else None
+        cover = covers.get(u.id)
+        out.append({
+            'id': u.id, 'username': u.username, 'profile_picture': picture,
+            'verified': u.is_verified_artist, 'album_count': u.album_count,
+            'track_count': u.track_count, 'cover': media.resolve(cover) if cover else picture,
+        })
+    return out
+
+
+def artist_library(artist, me, context):
+    """An artist's whole library: every album (newest first) and every album
+    song in album order, for Play all / Shuffle across it."""
+    albums = albums_with_counts(Album.objects.filter(artist=artist))
+    if artist != me:
+        albums = albums.filter(track_count__gt=0)
+    albums = list(albums)
+    rank = {a.id: i for i, a in enumerate(albums)}
+    songs = sorted(
+        Track.objects.filter(album_ref__in=albums, is_removed=False).values_list('id', 'album_ref_id', 'track_number'),
+        key=lambda r: (rank[r[1]], r[2] is None, r[2] or 0, r[0]))
+    tracks = _rows([r[0] for r in songs], me, context)
+    return {
+        'artist': SimpleUserSerializer(artist, context=context).data,
+        'album_count': len(albums),
+        'track_count': len(tracks),
+        'duration_ms': sum(a.duration_total or 0 for a in albums),
+        'albums': AlbumSerializer(albums, many=True, context=context).data,
+        'tracks': tracks,
+    }
 
 
 class AlbumViewSet(viewsets.ModelViewSet):

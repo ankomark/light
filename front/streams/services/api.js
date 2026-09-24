@@ -427,6 +427,8 @@ export const fetchStudio = (days = 28) => apiRequest('get', '/studio/', null, { 
 export const fetchAlbums = (artistId) =>
   apiRequest('get', '/albums/', null, { params: artistId ? { artist: artistId } : {} });
 export const fetchAlbum = (id) => apiRequest('get', `/albums/${id}/`);
+// An artist's library: all their albums, and every album song in order.
+export const fetchArtistLibrary = (userId) => apiRequest('get', `/users/${userId}/library/`);
 export const createAlbum = (data) => apiRequest('post', '/albums/', data);
 export const updateAlbum = (id, changes) => apiRequest('patch', `/albums/${id}/`, changes);
 export const deleteAlbum = (id) => apiRequest('delete', `/albums/${id}/`);

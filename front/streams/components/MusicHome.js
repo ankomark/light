@@ -1,17 +1,19 @@
 // The top of the Music screen, from one request (GET /music/home/):
 //
 //   Recently played · Made for you · Top 50 <your country> / Top 50 Global
-//   · Trending this week · New releases · From artists you follow · Genres
+//   · Music Library (artists' and choirs' albums) · Trending this week · New releases
+//   · From artists you follow · Genres
 //
 // Sections with nothing in them are left out, so a brand-new app still
 // opens on a tidy page. Rails play as a queue from the tapped song.
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import TrackRail from './TrackRail';
 import PlaylistCover from './PlaylistCover';
+import VerifiedBadge from './VerifiedBadge';
 import { countryName } from '../utils/region';
 import { genreName } from '../utils/genres';
 import { colors, spacing, radius } from '../constants/theme';
@@ -65,6 +67,36 @@ const MusicHome = ({ home, sideMargin = 0, reasonLabel }) => {
               onPress={() => openChart('top')}
             />
           ) : null}
+        </View>
+      ) : null}
+
+      {home.libraries?.length ? (
+        <View style={styles.libraries}>
+          <Text style={styles.heading}>{t('music.libraries')}</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ marginHorizontal: -sideMargin }}
+            contentContainerStyle={[styles.libraryRail, { paddingHorizontal: sideMargin }]}
+          >
+            {home.libraries.map((lib) => (
+              <TouchableOpacity
+                key={`lib_${lib.id}`}
+                style={styles.library}
+                onPress={() => navigation.navigate('ArtistLibrary', { userId: lib.id, username: lib.username })}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={lib.username}
+              >
+                <PlaylistCover cover={lib.cover} images={[]} size={132} radius={10} />
+                <View style={styles.libraryName}>
+                  <Text style={styles.libraryTitle} numberOfLines={1}>{lib.username}</Text>
+                  {lib.verified ? <VerifiedBadge size={13} /> : null}
+                </View>
+                <Text style={styles.libraryMeta} numberOfLines={1}>{t('music.albumCount', { n: lib.album_count })}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
       ) : null}
 
@@ -122,6 +154,12 @@ const styles = StyleSheet.create({
   chartTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '800' },
   chartSub: { color: colors.textSecondary, fontSize: 11.5, marginTop: 2 },
   genres: { marginTop: spacing.md },
+  libraries: { marginTop: spacing.md },
+  libraryRail: { gap: spacing.md },
+  library: { width: 132 },
+  libraryName: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  libraryTitle: { color: colors.textPrimary, fontSize: 13.5, fontWeight: '700', flexShrink: 1 },
+  libraryMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 1 },
   genreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   genre: {
     flexGrow: 1, flexBasis: '30%', minWidth: 100, height: 72, borderRadius: radius.md,

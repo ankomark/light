@@ -166,6 +166,16 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         })
 
     @action(detail=True, methods=['get'])
+    def library(self, request, pk=None):
+        """The artist's library page: all albums and their songs."""
+        from .music import artist_library
+        user = self.get_object()
+        denied = self._require_can_view(user)
+        if denied:
+            return denied
+        return Response(artist_library(user, request.user, self.get_serializer_context()))
+
+    @action(detail=True, methods=['get'])
     def playlists(self, request, pk=None):
         """A profile's Playlists tab: the account's public playlists (all of
         them on your own profile). This used to list every playlist anyone

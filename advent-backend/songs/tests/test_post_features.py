@@ -370,6 +370,26 @@ class TrackUploadTests(APITestCase):
         self.assertEqual(a.json()['id'], b.json()['id'])
         self.assertEqual(Track.objects.filter(artist=self.user).count(), 1)
 
+    def test_uploading_onto_your_album_adds_it_last_or_at_its_place(self):
+        from songs.models import Album
+        album = Album.objects.create(artist=self.user, title='Tenzi Vol 1')
+        Track.objects.create(title='Old', artist=self.user, audio_file='https://m.x/o.mp3', album_ref=album, track_number=1)
+        row = self.upload(title='Next', album_id=album.id).json()
+        self.assertEqual((row['album_id'], row['track_number'], row['album']), (album.id, 2, 'Tenzi Vol 1'))
+        # An album upload says where each song goes, whatever order they land in.
+        self.assertEqual(self.upload(title='Eighth', album_id=album.id, track_number=8).json()['track_number'], 8)
+        self.assertEqual(self.upload(title='Silly', album_id=album.id, track_number='x').json()['track_number'], 9)
+        detail = self.client.get(f'/api/albums/{album.id}/').json()
+        self.assertEqual([t['title'] for t in detail['tracks']], ['Old', 'Next', 'Eighth', 'Silly'])
+
+    def test_not_onto_someone_elses_album(self):
+        from songs.models import Album
+        theirs = Album.objects.create(artist=User.objects.create_user('tr_o', 'tro@x.com', 'x'), title='Theirs')
+        for bad in (theirs.id, 'abc', 999999):
+            res = self.upload(album_id=bad)
+            self.assertEqual(res.status_code, 400, bad)
+        self.assertFalse(Track.objects.filter(artist=self.user).exists())
+
 
 class TrendingSoundsTests(APITestCase):
     def setUp(self):

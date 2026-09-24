@@ -182,7 +182,8 @@ export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => 
 };
 
 /**
- * Snapshot: { title, album, lyrics, audio: {uri,name,mimeType}, cover?: {uri,...} }
+ * Snapshot: { title, album, albumId?, trackNumber?, lyrics, audio: {uri,name,mimeType}, cover?: {uri,...} }
+ * With albumId the song goes straight onto that album (at trackNumber, or last).
  */
 export const buildTrackJob = (snap) => async ({ progress, stage }) => {
   stage('processing');
@@ -208,6 +209,8 @@ export const buildTrackJob = (snap) => async ({ progress, stage }) => {
     audio_file: audioUpload.publicId,
     cover_image: coverUpload?.publicId || null,
     album: snap.album || null,
+    ...(snap.albumId != null ? { album_id: snap.albumId } : {}),
+    ...(snap.albumId != null && snap.trackNumber ? { track_number: snap.trackNumber } : {}),
     lyrics: snap.lyrics || null,
     ...(snap.genre ? { genre: snap.genre } : {}),
     // The uploader's "I own this or have permission" (required by the server)

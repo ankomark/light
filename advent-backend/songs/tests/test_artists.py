@@ -174,6 +174,67 @@ class MilestoneTests(Base):
         self.assertFalse(artists.check_play_milestone(t.id))
 
 
+class LibraryTests(Base):
+    """A choir's library: its albums as covers, each album's songs inside."""
+
+    def _choir(self, albums=3, songs=4):
+        made = []
+        for i in range(albums):
+            al = Album.objects.create(artist=self.artist, title=f'Vol {i + 1}', cover_image=f'{R2}/c/{i}.jpg',
+                                      release_date=f'202{i}-01-01')
+            for n in range(songs):
+                song(self.artist, f'V{i + 1}-{n + 1}', album_ref=al, track_number=songs - n, views=10)
+            made.append(al)
+        return made
+
+    def test_the_page_has_every_album_newest_first_and_every_song_in_album_order(self):
+        self._choir()
+        Album.objects.create(artist=self.artist, title='Empty')     # others don't see an empty one
+        self.client.force_authenticate(self.fan)
+        data = self.client.get(f'/api/users/{self.artist.id}/library/').json()
+        self.assertEqual([a['title'] for a in data['albums']], ['Vol 3', 'Vol 2', 'Vol 1'])
+        self.assertEqual(data['albums'][0]['cover'], f'{R2}/c/2.jpg')
+        self.assertEqual((data['album_count'], data['track_count']), (3, 12))
+        # Vol 3's songs by track number (created in reverse), then Vol 2's...
+        self.assertEqual([t['title'] for t in data['tracks'][:5]], ['V3-4', 'V3-3', 'V3-2', 'V3-1', 'V2-4'])
+        self.assertTrue(data['tracks'][0]['audio_file'])
+        self.assertEqual(data['artist']['username'], 'ar_artist')
+
+    def test_the_owner_sees_empty_albums_and_privacy_holds(self):
+        self._choir(albums=1)
+        Album.objects.create(artist=self.artist, title='Empty')
+        self.assertEqual(self.client.get(f'/api/users/{self.artist.id}/library/').json()['album_count'], 2)
+        Profile.objects.create(user=self.artist, is_public=False)
+        self.client.force_authenticate(self.fan)
+        self.assertEqual(self.client.get(f'/api/users/{self.artist.id}/library/').status_code, 403)
+
+    def test_music_home_lists_libraries_most_played_first(self):
+        self._choir(albums=2, songs=2)
+        small = user('ar_small')
+        al = Album.objects.create(artist=small, title='One')
+        song(small, 'S', album_ref=al, views=1)
+        song(user('ar_loose'), 'No album', views=999)               # songs but no album: not a library
+        # Followers don't multiply the play totals.
+        for i in range(3):
+            user(f'ar_follower{i}').followed_by.add(small)
+        self.client.force_authenticate(self.fan)
+        libs = self.client.get('/api/music/home/').json()['libraries']
+        self.assertEqual([(r['username'], r['album_count'], r['track_count']) for r in libs],
+                         [('ar_artist', 2, 4), ('ar_small', 1, 1)])
+        self.assertEqual(libs[0]['cover'], f'{R2}/c/1.jpg')          # newest album's, no picture
+
+    def test_blocked_and_private_choirs_stay_out_of_the_home(self):
+        self._choir(albums=1, songs=1)
+        Block.objects.create(blocker=self.artist, blocked=self.fan)
+        self.client.force_authenticate(self.fan)
+        self.assertEqual(self.client.get('/api/music/home/').json()['libraries'], [])
+        Block.objects.all().delete()
+        Profile.objects.create(user=self.artist, is_public=False)
+        self.assertEqual(self.client.get('/api/music/home/').json()['libraries'], [])
+        self.artist.followers.add(self.fan)                           # an approved follower sees it
+        self.assertEqual(len(self.client.get('/api/music/home/').json()['libraries']), 1)
+
+
 class MigrationTests(Base):
     def test_album_names_on_songs_became_albums(self):
         # Mirrors 0129: run its function on rows made the old way.

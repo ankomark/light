@@ -9,7 +9,7 @@ jest.mock('../TrackRail', () => {
 });
 jest.mock('../PlaylistCover', () => () => null);
 jest.mock('expo-image', () => ({ Image: () => null }));
-jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null }));
 jest.mock('../../context/I18nContext', () => ({
   useI18n: () => ({ t: (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k) }),
 }));
@@ -44,4 +44,20 @@ test('chart cards and genres open their screens', () => {
   expect(mockNavigate).toHaveBeenLastCalledWith('MusicChart', { chart: 'top', country: '' });
   fireEvent.press(r.getByText('Hymns'));   // no translation: the server's name
   expect(mockNavigate).toHaveBeenLastCalledWith('Genre', { slug: 'hymns', name: 'Hymns' });
+});
+
+test('choirs and artists with albums show as libraries and open theirs', () => {
+  const home = {
+    recent: [], for_you: [], trending: [], new_releases: [], following: [],
+    top_country: null, top_world: null, genres: [],
+  };
+  expect(render(<MusicHome home={home} />).queryByText('music.libraries')).toBeNull();
+  const r = render(<MusicHome home={{
+    ...home,
+    libraries: [{ id: 9, username: 'Kwaya ya Vijana', verified: true, album_count: 10, track_count: 80, cover: null }],
+  }} />);
+  expect(r.getByText('music.libraries')).toBeTruthy();
+  expect(r.getByText('music.albumCount:10')).toBeTruthy();
+  fireEvent.press(r.getByText('Kwaya ya Vijana'));
+  expect(mockNavigate).toHaveBeenLastCalledWith('ArtistLibrary', { userId: 9, username: 'Kwaya ya Vijana' });
 });
