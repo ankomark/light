@@ -23,6 +23,7 @@ python-dotenv==1.0.0
 redis==5.2.1
 requests==2.32.4
 mutagen==1.47.0
+numpy==2.2.6
 six==1.17.0
 sqlparse==0.5.3
 tzdata==2025.2

@@ -16,6 +16,16 @@ test('with peaks it draws the waveform, played bars in the fill colour', () => {
   expect(colours.filter((c) => c === '#0f0')).toHaveLength(25);   // half played
 });
 
+test('a waveform that arrives after the bar was laid out still draws (Now Playing)', () => {
+  const peaks = Array.from({ length: 100 }, () => 0.5);
+  const bars = (root) => root.findAll((n) => n.type === 'View' && n.props.style?.[1]?.height?.endsWith?.('%'));
+  const r = render(<SeekBar value={0} />);
+  fireEvent(r.getByRole('adjustable'), 'layout', layout);   // laid out while the waveform loads
+  expect(bars(r.UNSAFE_root)).toHaveLength(0);
+  r.rerender(<SeekBar value={0} peaks={peaks} />);          // it arrives; no new layout event
+  expect(bars(r.UNSAFE_root)).toHaveLength(50);
+});
+
 test('without peaks it is the plain bar', () => {
   const { getByRole, UNSAFE_root } = render(<SeekBar value={0.5} />);
   fireEvent(getByRole('adjustable'), 'layout', layout);

@@ -95,7 +95,10 @@ const SeekBar = ({
       style={[styles.container, style, wave && { height: waveHeight + 8 }]}
       onLayout={(e) => {
         widthRef.current = e.nativeEvent.layout.width;
-        if (peaks) setWidth(e.nativeEvent.layout.width);
+        // Always, not only once there are peaks: Now Playing lays the bar out
+        // before the song's waveform arrives, and nothing re-lays it out after
+        // — so a width kept only "if peaks" stayed 0 and no bars ever drew.
+        setWidth(e.nativeEvent.layout.width);
       }}
       accessible
       accessibilityRole="adjustable"

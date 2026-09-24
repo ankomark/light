@@ -236,6 +236,9 @@ class Track(models.Model):
     loudness_lufs = models.FloatField(null=True, blank=True)
     # ~100 peaks in 0..1 for a waveform seek bar (only on the track detail).
     waveform = models.JSONField(null=True, blank=True)
+    # The spectrum visualizer's data file (bass → treble, 10 times a second),
+    # next to the audio versions in R2; see audio_processing.spectrum.
+    spectrum = models.CharField(max_length=500, blank=True, default='')
     cover_small = models.CharField(max_length=500, blank=True, default='')     # 200px
     cover_medium = models.CharField(max_length=500, blank=True, default='')    # 600px
     # The audio_file / cover_image the versions above were made from, so an

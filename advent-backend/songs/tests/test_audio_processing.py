@@ -210,6 +210,39 @@ class FfmpegTests(TestCase):
         self.assertEqual(max(points), 1.0)
         self.assertTrue(all(0 <= p <= 1 for p in points))
 
+    def _spectrum_of(self, frequency, seconds=3):
+        import base64
+        path = os.path.join(self.tmp, f'{frequency}.wav')
+        subprocess.run([settings.FFMPEG_BIN, '-loglevel', 'error', '-f', 'lavfi', '-i',
+                        f'sine=frequency={frequency}:duration={seconds}', '-y', path], check=True)
+        spec = ap.spectrum(path)
+        data = base64.b64decode(spec['data'])
+        rows = [data[i:i + spec['bands']] for i in range(0, len(data), spec['bands'])]
+        middle = rows[len(rows) // 2]
+        return spec, rows, max(range(spec['bands']), key=lambda b: middle[b])
+
+    def test_spectrum_puts_a_note_in_its_band_ten_times_a_second(self):
+        spec, rows, loudest = self._spectrum_of(440)
+        self.assertEqual((spec['v'], spec['fps'], spec['bands']), (1, ap.SPECTRUM_FPS, ap.SPECTRUM_BANDS))
+        self.assertEqual(spec['frames'], 30)                                    # 3 s × 10
+        self.assertEqual(len(rows), spec['frames'])
+        edges = [ap.SPECTRUM_LOW_HZ * (ap.SPECTRUM_HIGH_HZ / ap.SPECTRUM_LOW_HZ) ** (b / ap.SPECTRUM_BANDS)
+                 for b in range(ap.SPECTRUM_BANDS + 1)]
+        self.assertTrue(edges[loudest] <= 440 < edges[loudest + 1], (loudest, edges))
+        self.assertGreater(rows[15][loudest], 200)                             # near the top of its bar
+        # Bass sits left, treble right.
+        self.assertLess(self._spectrum_of(60)[2], loudest)
+        self.assertGreater(self._spectrum_of(3000)[2], loudest)
+
+    def test_no_spectrum_for_silence_or_a_blip(self):
+        silent = os.path.join(self.tmp, 'silent.wav')
+        subprocess.run([settings.FFMPEG_BIN, '-loglevel', 'error', '-f', 'lavfi', '-i',
+                        'anullsrc=r=44100:cl=mono', '-t', '3', '-y', silent], check=True)
+        self.assertIsNone(ap.spectrum(silent))
+        blip = os.path.join(self.tmp, 'blip.wav')
+        tone(blip, seconds=0.5)
+        self.assertIsNone(ap.spectrum(blip))
+
     def test_silence_is_left_alone(self):
         silent = os.path.join(self.tmp, 'silent.wav')
         subprocess.run([settings.FFMPEG_BIN, '-loglevel', 'error', '-f', 'lavfi', '-i',
@@ -300,11 +333,36 @@ class ProcessTrackTests(TestCase):
         self.assertEqual(len(track.waveform), ap.WAVEFORM_POINTS)
         self.assertAlmostEqual(track.duration_ms, 3000, delta=150)
         self.assertLess(track.loudness_lufs, -20)
-        self.assertEqual(len(self.uploaded), 5)
+        self.assertEqual(track.spectrum, f'{track.audio_low.rsplit("/", 1)[0]}/spectrum.json')
+        self.assertEqual(len(self.uploaded), 6)       # 3 versions, 2 covers, the spectrum
 
         self.uploaded.clear()
         ap.process_track(track.pk)                          # already done: nothing
         self.assertEqual(self.uploaded, {})
+
+    def test_a_song_processed_before_the_visualizer_gets_its_spectrum_later(self):
+        from django.core.management import call_command
+        track = make_track()
+        ap.process_track(track.pk)
+        low = Track.objects.get(pk=track.pk).audio_low
+        Track.objects.filter(pk=track.pk).update(spectrum='')            # as it was before
+        done = make_track(processing_status=Track.PROCESSING_READY, audio_low=low, spectrum=f'{R2}/x/spectrum.json')
+        Job.objects.all().delete()
+        call_command('backfill_spectrum', stdout=io.StringIO())
+        self.assertEqual(list(Job.objects.values_list('key', flat=True)), [f'spectrum:{track.pk}'])  # not `done`
+        self.uploaded.clear()
+        jobs.run_next()
+        track.refresh_from_db()
+        self.assertEqual(track.spectrum, f'{low.rsplit("/", 1)[0]}/spectrum.json')
+        self.assertEqual(list(self.uploaded), [track.spectrum[len(R2) + 1:]])   # nothing re-encoded
+        self.assertEqual(Track.objects.get(pk=done.pk).spectrum, f'{R2}/x/spectrum.json')
+
+    def test_a_broken_spectrum_never_fails_the_song(self):
+        track = make_track()
+        with mock.patch('songs.audio_processing.spectrum', side_effect=RuntimeError('boom')):
+            ap.process_track(track.pk)
+        track.refresh_from_db()
+        self.assertEqual((track.processing_status, track.spectrum), (Track.PROCESSING_READY, ''))
 
     def test_reprocessing_after_a_new_upload_deletes_the_old_version(self):
         track = make_track()
@@ -447,5 +505,9 @@ class TrackStateTests(APITestCase):
         data = self.client.get(f'/api/tracks/{track.pk}/state/').json()
         self.assertEqual((data['likes_count'], data['is_liked'], data['comments_count'], data['waveform']),
                          (1, True, 1, [0.5, 1]))
+        self.assertIsNone(data['spectrum'])                                  # not processed yet
+        Track.objects.filter(pk=track.pk).update(spectrum=f'{R2}/tracks/1/v/spectrum.json')
+        self.assertEqual(self.client.get(f'/api/tracks/{track.pk}/state/').json()['spectrum'],
+                         f'{R2}/tracks/1/v/spectrum.json')
         self.client.force_authenticate(track.artist)
         self.assertFalse(self.client.get(f'/api/tracks/{track.pk}/state/').json()['is_liked'])

@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as SecureStore from './secureStorage'; // web-safe shim (expo-secure-store stubs web)
 import Constants from 'expo-constants';
 import { extractYoutubeId } from '../utils/youtubeUtils';
+import { parseSpectrum } from '../utils/spectrum';
 
 const PROD_API_BASE = 'https://web-production-f266.up.railway.app';
 
@@ -369,6 +370,41 @@ export const fetchTrackWaveform = async (trackId) => {
     })
     .finally(() => { _waveformInFlight.delete(key); });
   _waveformInFlight.set(key, p);
+  return p;
+};
+
+// A song's spectrum visualizer file (a public, never-changing R2 file — the
+// URL changes if the song does). Kept for the last few songs, so going back
+// and forth in a queue doesn't download it again. Failures are just `null`:
+// the visualizer is decoration.
+const SPECTRUM_KEEP = 6;
+const _spectrumCache = new Map();
+const _spectrumInFlight = new Map();
+
+export const fetchSpectrum = async (url) => {
+  if (!url) return null;
+  if (_spectrumCache.has(url)) {
+    const hit = _spectrumCache.get(url);
+    _spectrumCache.delete(url);           // most recent last
+    _spectrumCache.set(url, hit);
+    return hit;
+  }
+  if (_spectrumInFlight.has(url)) return _spectrumInFlight.get(url);
+  // Plain fetch, not axios: no app headers or token interceptors on a public
+  // file (on the web, extra headers would also cost a CORS preflight).
+  const p = fetch(url)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      const spec = parseSpectrum(data);
+      if (spec) {
+        _spectrumCache.set(url, spec);
+        while (_spectrumCache.size > SPECTRUM_KEEP) _spectrumCache.delete(_spectrumCache.keys().next().value);
+      }
+      return spec;
+    })
+    .catch(() => null)
+    .finally(() => { _spectrumInFlight.delete(url); });
+  _spectrumInFlight.set(url, p);
   return p;
 };
 

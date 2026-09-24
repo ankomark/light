@@ -47,6 +47,16 @@ TIERS = [('audio_low', 64), ('audio_standard', 128), ('audio_high', 256)]
 # where there are bits to spare.
 AAC_CODER = {64: 'twoloop', 128: 'fast', 256: 'fast'}
 WAVEFORM_POINTS = 100
+# The spectrum visualizer (see spectrum()): 16 bands, 10 times a second —
+# about 50 KB for a 4-minute song, fetched once when Now Playing opens it.
+SPECTRUM_FPS = 10
+SPECTRUM_BANDS = 16
+SPECTRUM_RATE = 11025          # enough for the top band (5 kHz)
+SPECTRUM_WINDOW = 2048         # ~0.19 s: fine enough for the lowest band
+SPECTRUM_LOW_HZ = 40
+SPECTRUM_HIGH_HZ = 5000
+SPECTRUM_RANGE_DB = 40         # a band's bar spans its loudest 40 dB
+SPECTRUM_BOOST_DB = 30         # at most this much lift for a faint band
 COVER_SIZES = [('cover_small', 200), ('cover_medium', 600)]
 FFMPEG_TIMEOUT = 15 * 60
 
@@ -147,6 +157,58 @@ def waveform(src, points=WAVEFORM_POINTS):
     return [round(p / top, 3) for p in peaks]
 
 
+def spectrum(src, fps=SPECTRUM_FPS, bands=SPECTRUM_BANDS):
+    """The spectrum visualizer's data: how strong each of `bands` frequency
+    bands (40 Hz bass → 5 kHz treble, spaced as the ear hears them) is,
+    `fps` times a second, each 0..255. None for silence or a tiny clip.
+
+    Each band is measured against its own loud moments, so the treble bars
+    move too (music has far less energy up there than in the bass), but never
+    boosted more than SPECTRUM_BOOST_DB past the song as a whole — so a
+    quiet band stays quiet and a hushed passage looks hushed.
+
+    {'v': 1, 'fps', 'bands', 'frames', 'data': base64 of frames×bands bytes}"""
+    import base64
+
+    import numpy as np
+
+    pcm, _ = _ffmpeg(['-i', src, '-vn', '-ac', '1', '-ar', str(SPECTRUM_RATE), '-f', 's16le',
+                      '-acodec', 'pcm_s16le', '-'], want_stdout=True)
+    x = np.frombuffer(pcm[: len(pcm) - (len(pcm) % 2)], dtype='<i2').astype(np.float32) / 32768.0
+    hop = SPECTRUM_RATE // fps
+    frames = x.size // hop
+    if frames < fps:                                   # under a second
+        return None
+    win = SPECTRUM_WINDOW
+    x = np.concatenate([np.zeros(win // 2, np.float32), x, np.zeros(win, np.float32)])  # centred frames
+    window = np.hanning(win).astype(np.float32)
+    freqs = np.fft.rfftfreq(win, 1.0 / SPECTRUM_RATE)
+    edges = np.geomspace(SPECTRUM_LOW_HZ, SPECTRUM_HIGH_HZ, bands + 1)
+    # Each band's bins (at least one, so the narrow bass bands aren't empty).
+    bins = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        sel = np.where((freqs >= lo) & (freqs < hi))[0]
+        bins.append(sel if sel.size else np.array([int(np.argmin(np.abs(freqs - (lo + hi) / 2)))]))
+
+    energy = np.empty((frames, bands), np.float32)
+    offsets = np.arange(win)
+    for start in range(0, frames, 512):                # in chunks: a long song stays small in memory
+        idx = (np.arange(start, min(frames, start + 512)) * hop)[:, None] + offsets[None, :]
+        power = np.abs(np.fft.rfft(x[idx] * window, axis=1)) ** 2
+        for b, sel in enumerate(bins):
+            energy[start:start + len(idx), b] = power[:, sel].mean(axis=1)
+
+    db = 10 * np.log10(energy + 1e-12)
+    overall = float(np.percentile(db, 98))
+    if overall < -60:                                  # silence (normalised music sits far above)
+        return None
+    ref = np.maximum(np.percentile(db, 98, axis=0), overall - SPECTRUM_BOOST_DB)
+    level = np.clip((db - ref + SPECTRUM_RANGE_DB) / SPECTRUM_RANGE_DB, 0, 1)
+    data = np.round(level * 255).astype(np.uint8)
+    return {'v': 1, 'fps': fps, 'bands': bands, 'frames': frames,
+            'data': base64.b64encode(data.tobytes()).decode('ascii')}
+
+
 def duration_ms(path):
     import mutagen
     try:
@@ -208,6 +270,7 @@ def process_track(track_id):
         for field, path in tiers.items():
             fields[field] = r2.put_file(f'{prefix}{os.path.basename(path)}', path, 'audio/mp4')
         fields['waveform'] = waveform(tiers['audio_low'])
+        fields['spectrum'] = _put_spectrum(prefix, tiers['audio_low'])
         length = duration_ms(tiers['audio_high'])
         if length:
             fields['duration_ms'] = length
@@ -233,6 +296,45 @@ def process_track(track_id):
     # Earlier versions of this song (a replaced upload or cover). Found by
     # folder, not from the old URLs: replacing the audio clears those at once.
     r2.delete_prefix(f'tracks/{track.id}/', keep=prefix)
+
+
+def _put_spectrum(prefix, path):
+    """Upload the song's spectrum next to its audio; '' when it has none. The
+    visualizer is decoration: a failure here never fails the song."""
+    try:
+        spec = spectrum(path)
+    except Exception as exc:
+        logger.warning('spectrum failed for %s: %s', prefix, exc)
+        return ''
+    if not spec:
+        return ''
+    return r2.put_bytes(f'{prefix}spectrum.json', json.dumps(spec, separators=(',', ':')).encode('ascii'),
+                        'application/json')
+
+
+@handler('track_spectrum')
+def track_spectrum(track_id):
+    """The spectrum for a song processed before the visualizer existed: from
+    its 64 kbps version, into the same folder. (manage.py backfill_spectrum)"""
+    track = Track.objects.filter(pk=track_id, processing_status=Track.PROCESSING_READY).first()
+    if track is None or track.is_removed or track.spectrum or not track.audio_low:
+        return
+    low = media.resolve(track.audio_low)
+    if not low or not r2.is_r2_url(low):
+        return
+    key = r2.key_from_url(low)
+    if not key:
+        return
+    prefix = key.rsplit('/', 1)[0] + '/'
+    with tempfile.TemporaryDirectory(prefix='spectrum-') as tmp:
+        data, _ = _fetch(low, MAX_AUDIO_BYTES)
+        path = os.path.join(tmp, 'low.m4a')
+        with open(path, 'wb') as fh:
+            fh.write(data)
+        url = _put_spectrum(prefix, path)
+    # Only if the song wasn't reprocessed meanwhile (that makes its own).
+    if url:
+        Track.objects.filter(pk=track.id, audio_low=track.audio_low, spectrum='').update(spectrum=url)
 
 
 def queue_processing(track):

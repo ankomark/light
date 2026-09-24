@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // shared memory+disk cache means opening Now Playing shows it instantly.
 import { Image } from 'expo-image';
 import SeekBar from './SeekBar';
+import SpectrumVisualizer from './SpectrumVisualizer';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -249,8 +250,9 @@ const NowPlaying = () => {
         )}
       </View>
 
-      {/* Title / artist */}
+      {/* Title / artist, over the spectrum visualizer (once the song is processed) */}
       <View style={styles.metaBlock}>
+        <SpectrumVisualizer url={state?.spectrum} height={72} style={styles.visualizer} />
         <Text style={styles.title} numberOfLines={1}>{currentTrack.title}</Text>
         <Text style={styles.artist} numberOfLines={1}>
           {currentTrack.artist?.username || 'Unknown artist'}
@@ -425,8 +427,13 @@ const styles = StyleSheet.create({
     lineHeight: 32,
     textAlign: 'center',
   },
-  metaBlock: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
-  title: { ...typography.h2, color: colors.textPrimary, textAlign: 'center' },
+  metaBlock: { paddingHorizontal: spacing.lg, marginTop: spacing.md, minHeight: 72, justifyContent: 'center' },
+  // Behind the title, like a stage light bar; dimmed so the words stay clear.
+  visualizer: { position: 'absolute', left: spacing.sm, right: spacing.sm, top: 0, bottom: 0, opacity: 0.55 },
+  title: {
+    ...typography.h2, color: colors.textPrimary, textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
   artist: {
     ...typography.body,
     color: colors.textSecondary,

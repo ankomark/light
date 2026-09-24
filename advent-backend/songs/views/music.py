@@ -288,7 +288,8 @@ class TrackViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='state')
     def state(self, request, pk=None):
         """What Now Playing needs about the song playing, fresh: likes (and
-        whether you liked it), comment count, and the waveform. Songs in the
+        whether you liked it), comment count, the waveform and the spectrum
+        visualizer's file. Songs in the
         queue don't carry these — the heart showed "0, not liked" and a tap on
         a song you'd liked un-liked it (the like endpoint toggles)."""
         track = self.get_queryset().filter(pk=pk).first()
@@ -300,6 +301,8 @@ class TrackViewSet(viewsets.ModelViewSet):
             'comments_count': track.comments_total,
             'is_liked': bool(getattr(track, 'liked_by_me', False)),
             'waveform': track.waveform or None,
+            # The spectrum visualizer's data file (null until processed).
+            'spectrum': media.resolve(track.spectrum) if track.spectrum else None,
         })
 
     @action(detail=True, methods=['get'], url_path='waveform')
