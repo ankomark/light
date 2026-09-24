@@ -23,6 +23,7 @@ export const PREF_KEYS = {
   quizMusic: 'quizMusic',       // the background music, muted separately
   weatherPlace: 'weatherPlace', // the town the weather screen opens on
   calendarReminders: 'calendarReminders', // date reminders, scheduled on-device
+  videoMode: 'videoMode',       // open the app in the Videos feed
 };
 
 export const DEFAULT_PREFERENCES = {
@@ -44,6 +45,8 @@ export const DEFAULT_PREFERENCES = {
   // No default place: the weather screen asks once, then remembers.
   [PREF_KEYS.weatherPlace]: null,
   [PREF_KEYS.calendarReminders]: true,
+  // Off: the app opens on Home. On: in Videos (Home still one tap away).
+  [PREF_KEYS.videoMode]: false,
 };
 
 const serialize = (value) => JSON.stringify(value);

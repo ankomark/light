@@ -627,6 +627,21 @@ const Settings = () => {
 
         {/* ── Playback & Data ───────────────────────────────────── */}
         <Section title={t('settings.section.playback')}>
+          {/* Also on the Videos screen (the phone icon in its top bar). */}
+          <Row
+            icon="cellphone-play"
+            label={t('video.mode.label')}
+            sub={t('settings.videoModeSub')}
+            right={
+              <Switch
+                value={!!prefs[PREF_KEYS.videoMode]}
+                onValueChange={(v) => updatePref(PREF_KEYS.videoMode, v)}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.white}
+                accessibilityLabel={t('video.mode.label')}
+              />
+            }
+          />
           <Row
             icon="play-circle-outline"
             label={t('settings.playback.autoplay')}

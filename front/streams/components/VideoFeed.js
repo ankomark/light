@@ -11,6 +11,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import VideoModeToggle from './VideoModeToggle';
 import { fetchSocialPosts, cursorFromUrl, followUser, likePost, markPostsViewed } from '../services/api';
 import formatCount from '../utils/formatCount';
 import { usePlayer } from '../context/PlayerContext';
@@ -487,6 +488,8 @@ const VideoFeed = () => {
           </TouchableOpacity>
         </View>
         <View style={[styles.topSide, { justifyContent: 'flex-end' }]}>
+          {/* Video mode: open the app here next time. */}
+          <VideoModeToggle />
           <TouchableOpacity onPress={() => navigation.navigate('Explore')} hitSlop={8}>
             <Ionicons name="search" size={24} color="#fff" />
           </TouchableOpacity>

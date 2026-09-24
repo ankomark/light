@@ -95,6 +95,7 @@ import AppealScreen from './components/admin/AppealScreen';
 import AdminRoles from './components/admin/AdminRoles';
 import AdminWallpapers from './components/admin/AdminWallpapers';
 import VideoFeed from './components/VideoFeed';
+import VideoModeStart from './components/VideoModeStart';
 import LiveHub from './components/Live/LiveHub';
 import GoLive from './components/Live/GoLive';
 import LiveRoom from './components/Live/LiveRoom';
@@ -373,6 +374,8 @@ const App = () => {
               
 
             </Stack.Navigator>
+            {/* Video mode: open in the Videos feed when the user chose it. */}
+            <VideoModeStart />
             <MiniPlayer />
             {/* Background uploads: progress pill on every screen. */}
             <UploadStatus />
