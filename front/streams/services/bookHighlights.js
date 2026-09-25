@@ -97,7 +97,7 @@ export const loadBookHighlights = async (pubId, { remote = true } = {}) => {
     if (pending.has(r.client_id) || r.deleted) return;
     next[r.client_id] = {
       client_id: r.client_id, publication: pubId, chapter_id: r.chapter_id, block: r.block,
-      quote: r.quote, color: r.color, note: r.note, at: Date.parse(r.updated_at) || Date.now(),
+      quote: r.quote, color: r.color, note: r.note, collection: r.collection || '', at: Date.parse(r.updated_at) || Date.now(),
     };
   });
   books.set(pubId, next);
@@ -105,13 +105,14 @@ export const loadBookHighlights = async (pubId, { remote = true } = {}) => {
   publish(pubId);
 };
 
-/** Make or change a highlight (colour and/or note). Neither left → removed. */
-export const saveHighlight = async (pubId, { client_id, chapter_id, block, quote, color = '', note = '' }) => {
+/** Make or change a highlight (colour and/or note, and the reader's own
+ *  collection for it). Neither colour nor note left → removed. */
+export const saveHighlight = async (pubId, { client_id, chapter_id, block, quote, color = '', note = '', collection = '' }) => {
   if (!books.has(pubId)) await loadBookHighlights(pubId, { remote: false });
   const cid = client_id || newId();
   const at = Date.now();
   if (!color && !String(note).trim()) return removeHighlight(pubId, cid);
-  const h = { client_id: cid, publication: pubId, chapter_id, block, quote, color, note, at };
+  const h = { client_id: cid, publication: pubId, chapter_id, block, quote, color, note, collection, at };
   books.set(pubId, { ...books.get(pubId), [cid]: h });
   saveBook(pubId);
   publish(pubId);

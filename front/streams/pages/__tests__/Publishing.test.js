@@ -46,6 +46,12 @@ const mockApi = {
   createBookClub: jest.fn(),
   fetchBookClub: jest.fn(),
   fetchClubOfGroup: jest.fn(),
+  fetchAiStatus: jest.fn(),
+  askBookAi: jest.fn(),
+  askWriterAi: jest.fn(),
+  startManuscriptCheck: jest.fn(),
+  fetchManuscriptCheck: jest.fn(),
+  fetchHighlightCollections: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -153,6 +159,9 @@ beforeEach(async () => {
   mockApi.fetchBookReviews.mockRejectedValue(new Error('not in this test'));
   mockApi.fetchBookInvitations.mockResolvedValue({ results: [] });
   mockApi.fetchBookClubs.mockResolvedValue({ results: [] });
+  mockApi.fetchAiStatus.mockResolvedValue({ enabled: false });
+  mockApi.fetchHighlightCollections.mockResolvedValue({ results: [] });
+  require('../../services/bookAi').__resetBookAi();
   require('../../services/bookHighlights').__resetBookHighlights();
   require('../../utils/readerSettings').__resetReaderSettings();
   require('../../services/readingTracker').__resetReadingTracker();
@@ -1164,6 +1173,9 @@ describe('Phase 5', () => {
   test('start a club from the book page', async () => {
     mockApi.fetchPublication.mockResolvedValue(book());
     mockApi.fetchBookClubs.mockResolvedValue({ results: [] });
+  mockApi.fetchAiStatus.mockResolvedValue({ enabled: false });
+  mockApi.fetchHighlightCollections.mockResolvedValue({ results: [] });
+  require('../../services/bookAi').__resetBookAi();
     mockApi.createBookClub.mockResolvedValue({ id: 3 });
     const n = nav();
     const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={n} />);
@@ -1189,5 +1201,214 @@ describe('Phase 5', () => {
     const none = render(<BookClubBanner groupSlug="plain" navigation={nav()} />);
     await act(async () => {});
     expect(none.queryByTestId('group-book-club')).toBeNull();
+  });
+});
+
+// ── Phase 6: AI in books, collections, "because you highlighted" ────────────
+describe('Phase 6', () => {
+  const WriterAssistant = require('../WriterAssistant').default;
+  const BookLibrary = require('../../components/BookLibrary').default;
+  const BooksHome = require('../../components/BooksHome').default;
+  const params = { id: 5, index: 0, book: { id: 5, title: 'B', theme: {}, chapters: [
+    { id: 51, version: 1, title: 'One', word_count: 100 }, { id: 52, version: 1, title: 'Two', word_count: 100 },
+  ] } };
+  const openReader = async () => {
+    mockApi.fetchPublicationChapter.mockImplementation(async (id, i) => ({ chapter: {
+      id: 51 + i, version: 1, title: 'One', word_count: 100, body: 'First paragraph.\n\nSecond paragraph.' } }));
+    const r = render(<ChapterReader route={{ params }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByText('Second paragraph.')).toBeTruthy());
+    return r;
+  };
+  const select = async (r, i) => { await act(async () => { fireEvent(r.getByTestId(`reader-block-${i}`), 'longPress'); }); };
+  const aiErr = (status, code) => Object.assign(new Error('x'), status ? { status, data: { code } } : {});
+
+  test('explain a paragraph: answered from the book, marked as AI, asked once', async () => {
+    mockApi.fetchAiStatus.mockResolvedValue({ enabled: true, used: 0, limit: 40 });
+    mockApi.askBookAi.mockResolvedValue({ kind: 'explain', text: 'It means the story goes on.', cached: false });
+    const r = await openReader();
+    await select(r, 1);
+    await waitFor(() => expect(r.getByTestId('book-action-explain')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-explain')); });
+    await waitFor(() => expect(r.getByText('It means the story goes on.')).toBeTruthy());
+    expect(mockApi.askBookAi).toHaveBeenCalledWith(5, { kind: 'explain', chapter: 0, passage: 'Second paragraph.', lang: 'en' });
+    expect(r.getByText('ai.badge')).toBeTruthy();
+    expect(r.getByText('ai.disclaimer')).toBeTruthy();
+    // The same paragraph again: the answer at once, not asked again.
+    await select(r, 1);
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-explain')); });
+    expect(r.getByText('It means the story goes on.')).toBeTruthy();
+    expect(mockApi.askBookAi).toHaveBeenCalledTimes(1);
+  });
+
+  test('no AI on the server: no AI buttons', async () => {
+    const r = await openReader();
+    await flush();
+    await select(r, 0);
+    expect(r.getByTestId('book-action-collect')).toBeTruthy();
+    expect(r.queryByTestId('book-action-explain')).toBeNull();
+    expect(r.queryByTestId('reader-summary')).toBeNull();
+  });
+
+  test('chapter summary and hard words; when no answer comes it says why', async () => {
+    mockApi.fetchAiStatus.mockResolvedValue({ enabled: true });
+    mockApi.askBookAi.mockImplementation(async (id, spec) => (spec.kind === 'summary'
+      ? { text: '- A beginning.' }
+      : { terms: [{ term: 'paragraph', meaning: 'a block of writing' }] }));
+    const r = await openReader();
+    await waitFor(() => expect(r.getByTestId('reader-summary')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('reader-summary')); });
+    await waitFor(() => expect(r.getByText('- A beginning.')).toBeTruthy());
+    expect(mockApi.askBookAi).toHaveBeenLastCalledWith(5, { kind: 'summary', chapter: 0, passage: '', lang: 'en' });
+
+    await select(r, 0);
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-define')); });
+    await waitFor(() => expect(r.getByText('a block of writing')).toBeTruthy());
+    expect(r.getByText('paragraph')).toBeTruthy();
+
+    mockApi.askBookAi.mockRejectedValueOnce(aiErr(429, 'ai_limit'));
+    await select(r, 1);
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-define')); });
+    await waitFor(() => expect(r.getByText('ai.limit')).toBeTruthy());
+    expect(r.queryByTestId('ai-retry')).toBeNull();                   // waiting won't help today
+
+    mockApi.askBookAi.mockRejectedValueOnce(aiErr());                  // no signal
+    await select(r, 1);
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-explain')); });
+    await waitFor(() => expect(r.getByText('ai.offline')).toBeTruthy());
+    mockApi.askBookAi.mockResolvedValueOnce({ text: 'Now it came.' });
+    await act(async () => { fireEvent.press(r.getByTestId('ai-retry')); });
+    await waitFor(() => expect(r.getByText('Now it came.')).toBeTruthy());
+  });
+
+  test('a paragraph goes into a collection (marked, if it wasn\'t) and syncs', async () => {
+    mockApi.fetchHighlightCollections.mockResolvedValue({ results: [{ name: 'Prayer', count: 2 }] });
+    const r = await openReader();
+    await select(r, 0);
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-collect')); });
+    await waitFor(() => expect(r.getByTestId('collection-Prayer')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('collection-Prayer')); });
+    await flush();
+    const ops = mockApi.syncBookHighlights.mock.calls.flatMap((c) => c[0]);
+    expect(ops[0]).toMatchObject({ op: 'upsert', block: 0, color: 'yellow', collection: 'Prayer' });
+
+    // A new one, typed.
+    await select(r, 1);
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-collect')); });
+    fireEvent.changeText(r.getByTestId('collection-new'), '  Sermon   ideas ');
+    await act(async () => { fireEvent.press(r.getByTestId('collection-add')); });
+    await flush();
+    const all = mockApi.syncBookHighlights.mock.calls.flatMap((c) => c[0]);
+    expect(all[all.length - 1]).toMatchObject({ block: 1, collection: 'Sermon ideas' });
+  });
+
+  test('the library: highlights by collection', async () => {
+    mockApi.fetchHighlightCollections.mockResolvedValue({ results: [{ name: 'Prayer', count: 1 }] });
+    mockApi.fetchBookHighlights.mockImplementation(async (p) => ({ results: [
+      { client_id: p.collection ? 'p1' : 'a1', publication: 5, publication_title: 'B', chapter_title: 'One', block: 0,
+        quote: p.collection ? 'In Prayer' : 'Anything', color: 'yellow', note: '', collection: p.collection || '' },
+    ] }));
+    mockApi.fetchPublications.mockResolvedValue({ results: [] });
+    const r = render(<BookLibrary navigation={nav()} />);
+    await act(async () => { fireEvent.press(r.getByTestId('library-shelf-highlights')); });
+    await waitFor(() => expect(r.getByTestId('library-collection-Prayer')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('library-collection-Prayer')); });
+    await waitFor(() => expect(r.getByText('“In Prayer”')).toBeTruthy());
+    expect(mockApi.fetchBookHighlights).toHaveBeenLastCalledWith({ collection: 'Prayer' });
+    expect(r.getAllByText('Prayer').length).toBeGreaterThan(1);                 // the chip and the row's tag
+  });
+
+  test('Discover: books because of the passage last highlighted', async () => {
+    mockApi.fetchBooksHome.mockResolvedValue({
+      continue: [], picks: [], trending: [], following: [], new: [], rising: [],
+      because: { quote: 'A sower went out', publication: 5, title: 'Parables', books: [pubRow(7, { title: 'More parables' })] },
+    });
+    const n = nav();
+    const r = render(<BooksHome navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('home-because')).toBeTruthy());
+    expect(r.getByText('home.because:Parables')).toBeTruthy();
+    expect(r.getByText('“A sower went out”')).toBeTruthy();
+    expect(within(r.getByTestId('home-because')).getAllByText('More parables').length).toBeGreaterThan(0);
+  });
+
+  test('the writing helper: the whole chapter shortened, used, and undone', async () => {
+    mockApi.fetchAiStatus.mockResolvedValue({ enabled: true });
+    mockApi.fetchPublication.mockResolvedValue({ ...book(), chapters: [{ id: 51, title: 'One', body: 'A long long text.' }] });
+    mockApi.askWriterAi.mockResolvedValue({ kind: 'shorten', text: 'A text.' });
+    const n = nav();
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('editor-ai-0')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('editor-ai-0')); });
+    expect(r.getByText('ai.scopeChapter')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('ai-choice-shorten')); });
+    await waitFor(() => expect(r.getByTestId('ai-use')).toBeTruthy());
+    expect(mockApi.askWriterAi).toHaveBeenCalledWith(5, { kind: 'shorten', text: 'A long long text.', lang: 'en' });
+    await act(async () => { fireEvent.press(r.getByTestId('ai-use')); });
+    expect(r.getByDisplayValue('A text.')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('editor-ai-undo-0')); });
+    expect(r.getByDisplayValue('A long long text.')).toBeTruthy();
+    expect(r.queryByTestId('editor-ai-undo-0')).toBeNull();
+    fireEvent.press(r.getByTestId('editor-assistant'));
+    expect(n.navigate).toHaveBeenCalledWith('WriterAssistant', { id: 5, title: 'Book 5' });
+  });
+
+  test('the writing helper works on the selected words only', async () => {
+    mockApi.fetchAiStatus.mockResolvedValue({ enabled: true });
+    mockApi.fetchPublication.mockResolvedValue({ ...book(), chapters: [{ id: 51, title: 'One', body: 'Keep this. Fix teh this.' }] });
+    mockApi.askWriterAi.mockResolvedValue({ text: 'Fix the this.' });
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('editor-ai-0')).toBeTruthy());
+    fireEvent(r.getByDisplayValue('Keep this. Fix teh this.'), 'selectionChange', { nativeEvent: { selection: { start: 11, end: 24 } } });
+    await act(async () => { fireEvent.press(r.getByTestId('editor-ai-0')); });
+    expect(r.getByText('ai.scopeSelection')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('ai-choice-grammar')); });
+    await waitFor(() => expect(r.getByTestId('ai-use')).toBeTruthy());
+    expect(mockApi.askWriterAi).toHaveBeenCalledWith(5, { kind: 'grammar', text: 'Fix teh this.', lang: 'en' });
+    await act(async () => { fireEvent.press(r.getByTestId('ai-use')); });
+    expect(r.getByDisplayValue('Keep this. Fix the this.')).toBeTruthy();
+  });
+
+  test('no AI, or a book not saved yet: no helper', async () => {
+    mockApi.fetchPublication.mockResolvedValue({ ...book(), chapters: [{ id: 51, title: 'One', body: 'Text' }] });
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByDisplayValue('Book 5')).toBeTruthy());
+    await flush();
+    expect(r.queryByTestId('editor-ai-0')).toBeNull();
+    mockApi.fetchAiStatus.mockResolvedValue({ enabled: true });
+    require('../../utils/screenCache').dropCache('ai:status');
+    const fresh = render(<PublicationEditor route={{ params: {} }} navigation={nav()} />);
+    await flush();
+    expect(fresh.queryByTestId('editor-ai-0')).toBeNull();
+    expect(fresh.queryByTestId('editor-assistant')).toBeNull();
+  });
+
+  test('the assistant: a structure, and the manuscript check picked up where it is', async () => {
+    mockApi.askWriterAi.mockResolvedValue({ text: '## Shape' });
+    mockApi.fetchManuscriptCheck.mockResolvedValue({ status: 'done', truncated: false, issues: [
+      { chapter: 2, quote: 'Tom', problem: 'Called Tim in chapter 1', suggestion: 'Pick one name' },
+    ] });
+    mockApi.startManuscriptCheck.mockResolvedValue({ status: 'queued', issues: [] });
+    const r = render(<WriterAssistant route={{ params: { id: 5, title: 'B' } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('check-done')).toBeTruthy());
+    expect(r.getByText('assistant.found:1')).toBeTruthy();
+    expect(r.getByText('Called Tim in chapter 1')).toBeTruthy();
+    expect(r.getByText('pubDetail.chapterN:2')).toBeTruthy();
+
+    await act(async () => { fireEvent.press(r.getByTestId('structure-run')); });
+    await waitFor(() => expect(r.getByText('## Shape')).toBeTruthy());
+    expect(mockApi.askWriterAi).toHaveBeenCalledWith(5, { kind: 'structure', lang: 'en' });
+
+    await act(async () => { fireEvent.press(r.getByTestId('check-run')); });
+    expect(r.getByTestId('check-working')).toBeTruthy();
+    expect(r.queryByTestId('check-run')).toBeNull();
+    r.unmount();                                                      // leaving stops the asking, not the check
+  });
+
+  test('a check that can\'t start says why', async () => {
+    mockApi.fetchManuscriptCheck.mockResolvedValue({ status: null });
+    mockApi.startManuscriptCheck.mockRejectedValue(aiErr(429, 'ai_limit'));
+    const r = render(<WriterAssistant route={{ params: { id: 5 } }} navigation={nav()} />);
+    await flush();
+    await act(async () => { fireEvent.press(r.getByTestId('check-run')); });
+    expect(r.getByText('ai.limit')).toBeTruthy();
   });
 });

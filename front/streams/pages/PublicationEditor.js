@@ -12,8 +12,10 @@ import { compressImage } from '../services/imageProcessing';
 import Markdown from 'react-native-markdown-display';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  fetchPublication, createPublication, updatePublication,
+  fetchPublication, createPublication, updatePublication, askWriterAi,
 } from '../services/api';
+import { useAiEnabled } from '../services/bookAi';
+import AiAnswerSheet from '../components/AiAnswerSheet';
 import { forgetBook, notePublicationsChanged } from '../services/publicationStore';
 import {
   CATEGORIES, categoryLabel, markdownTheme, markdownImageRule, WRITING_BGS, WRITING_TEXT_COLORS, WRITING_FONTS,
@@ -150,8 +152,8 @@ export const formatBody = (body = '', sel, kind) => {
 // One chapter's card. Memoised: typing in one chapter no longer redraws every
 // other chapter (and their markdown previews) on each keystroke.
 const ChapterCard = memo(({
-  ch, idx, count, theme, selection, uploading, t, words = 0,
-  onChange, onFormat, onSelect, onImage, onMove, onRemove, onHistory, onSchedule, onLayout,
+  ch, idx, count, theme, selection, uploading, t, words = 0, aiOn = false, canUndo = false,
+  onChange, onFormat, onSelect, onImage, onMove, onRemove, onHistory, onSchedule, onLayout, onAi, onUndo,
 }) => (
   <View style={[styles.chapterCard, ch.status === 'draft' && styles.chapterCardDraft]}
     onLayout={(e) => onLayout?.(ch.key, e.nativeEvent.layout.y)}>
@@ -249,6 +251,14 @@ const ChapterCard = memo(({
             testID={`editor-image-${idx}`}>
             <MaterialCommunityIcons name="image-plus" size={18} color={colors.accent} />
           </TouchableOpacity>
+          {/* The writing helper: the selection, or the whole chapter. */}
+          {aiOn ? (
+            <TouchableOpacity style={[styles.toolBtnFmt, styles.aiTool]} onPress={() => onAi(ch.key)} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityLabel={t('ai.writeTools')} testID={`editor-ai-${idx}`}>
+              <Ionicons name="sparkles" size={15} color={colors.accent} />
+              <Text style={styles.aiToolText}>{t('ai.badge')}</Text>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
         {uploading ? <Text style={styles.uploadingText}>{t('pub.uploading')}</Text> : null}
         <TextInput
@@ -262,6 +272,12 @@ const ChapterCard = memo(({
           multiline
           textAlignVertical="top"
         />
+        {canUndo ? (
+          <TouchableOpacity style={styles.undoAi} onPress={() => onUndo(ch.key)} testID={`editor-ai-undo-${idx}`}>
+            <Ionicons name="arrow-undo-outline" size={14} color={colors.accent} />
+            <Text style={styles.undoAiText}>{t('ai.undo')}</Text>
+          </TouchableOpacity>
+        ) : null}
       </>
     )}
     <Text style={styles.wordCount} testID={`editor-words-${idx}`}>
@@ -279,7 +295,7 @@ const previewOf = (md, t) => {
 };
 
 const PublicationEditor = ({ route, navigation }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { isAuthenticated, currentUser } = useAuth();
   const editId = route.params?.id || null;
   const [loading, setLoading] = useState(!!editId);
@@ -467,6 +483,47 @@ const PublicationEditor = ({ route, navigation }) => {
       setPendingSel({ key, start: out.caret[0], end: out.caret[1] });
     }
   }, [updateChapter]);
+
+  // ── The writing helper (AI): the selected words, or the whole chapter ──
+  // A saved book only (the server reads it as the book's writer).
+  const aiEnabled = useAiEnabled();
+  const aiOn = aiEnabled && !!editId;
+  const aiLang = resolvedLanguage === 'sw' ? 'sw' : 'en';
+  const [aiFor, setAiFor] = useState(null);       // { key, start, end, text, whole, kind }
+  const [aiUndo, setAiUndo] = useState({});       // chapter key → its words before the change
+  const openAi = useCallback((key) => {
+    const c = chaptersRef.current.find((x) => x.key === key);
+    const body = c?.body || '';
+    const sel = selRef.current[key];
+    const picked = sel && sel.end > sel.start;
+    const range = picked ? [sel.start, sel.end] : [0, body.length];
+    const text = body.slice(range[0], range[1]);
+    if (!text.trim()) { notify(t('ai.writeTools'), t('ai.nothingToWork')); return; }
+    setAiFor({ key, start: range[0], end: range[1], text, whole: !picked, kind: null });
+  }, [t]);
+  const takeAiText = (next) => {
+    const a = aiFor;
+    const c = chaptersRef.current.find((x) => x.key === a?.key);
+    if (!c) { setAiFor(null); return; }
+    // Changed meanwhile (typing under the sheet, a restore): don't overwrite.
+    if ((c.body || '').slice(a.start, a.end) !== a.text) { notify(t('ai.writeTools'), t('ai.changed')); setAiFor(null); return; }
+    setAiUndo((u) => ({ ...u, [a.key]: c.body }));
+    updateChapter(a.key, { body: `${c.body.slice(0, a.start)}${next}${c.body.slice(a.end)}` });
+    setAiFor(null);
+  };
+  const aiUndoRef = useRef(aiUndo);
+  aiUndoRef.current = aiUndo;
+  const undoAi = useCallback((key) => {
+    const before = aiUndoRef.current[key];
+    if (before == null) return;
+    updateChapter(key, { body: before });
+    setAiUndo(({ [key]: _gone, ...rest }) => rest);
+  }, [updateChapter]);
+  const AI_CHOICES = [
+    { kind: 'improve', icon: 'color-wand-outline', label: t('ai.improve'), hint: t('ai.improveHint') },
+    { kind: 'shorten', icon: 'contract-outline', label: t('ai.shorten'), hint: t('ai.shortenHint') },
+    { kind: 'grammar', icon: 'checkmark-done-outline', label: t('ai.grammar'), hint: t('ai.grammarHint') },
+  ];
 
   // Pick + crop a picture, upload it, and put it in the chapter where the
   // reader and the preview both show it.
@@ -719,6 +776,13 @@ const PublicationEditor = ({ route, navigation }) => {
           <Ionicons name="close" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.topTitle}>{editId ? t('pub.editTitle') : t('pub.newTitle')}</Text>
+        {aiOn ? (
+          <TouchableOpacity style={styles.iconBtn} hitSlop={8}
+            onPress={() => navigation.navigate('WriterAssistant', { id: editId, title })}
+            accessibilityRole="button" accessibilityLabel={t('assistant.title')} testID="editor-assistant">
+            <Ionicons name="sparkles-outline" size={21} color={colors.textPrimary} />
+          </TouchableOpacity>
+        ) : null}
         {editId ? (
           <TouchableOpacity style={styles.iconBtn} hitSlop={8}
             onPress={() => navigation.navigate('BookCollaborators', { id: editId, title })}
@@ -946,6 +1010,10 @@ const PublicationEditor = ({ route, navigation }) => {
               onSchedule={setScheduling}
               onLayout={onCardLayout}
               words={wordsByKey[ch.key]}
+              aiOn={aiOn}
+              onAi={openAi}
+              canUndo={aiUndo[ch.key] != null}
+              onUndo={undoAi}
             />
           ))}
 
@@ -998,6 +1066,28 @@ const PublicationEditor = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
 
+      <AiAnswerSheet
+        visible={!!aiFor}
+        onClose={() => setAiFor(null)}
+        title={t('ai.writeTools')}
+        note={aiFor ? t(aiFor.whole ? 'ai.scopeChapter' : 'ai.scopeSelection') : ''}
+        quote={aiFor?.text?.length > 240 ? `${aiFor.text.slice(0, 240)}…` : aiFor?.text}
+        choices={AI_CHOICES}
+        onChoose={(kind) => setAiFor((a) => (a ? { ...a, kind } : a))}
+        requestKey={aiFor?.kind ? `write:${editId}:${aiFor.kind}:${aiLang}:${aiFor.text}` : null}
+        ask={() => askWriterAi(editId, { kind: aiFor.kind, text: aiFor.text, lang: aiLang })}
+        renderActions={(result) => (
+          <View style={styles.aiActions}>
+            <TouchableOpacity style={[styles.saveBtn, styles.draftBtn]} onPress={() => setAiFor(null)} testID="ai-discard">
+              <Text style={styles.draftBtnText}>{t('ai.keepMine')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.saveBtn, styles.publishBtn]} onPress={() => takeAiText(result.text || '')} testID="ai-use">
+              <Text style={styles.publishBtnText}>{t('ai.useThis')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      />
+
       <PublishSheet
         visible={publishOpen}
         onClose={() => setPublishOpen(false)}
@@ -1030,7 +1120,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
   },
-  topTitle: { ...typography.h3, color: colors.textPrimary },
+  topTitle: { ...typography.h3, color: colors.textPrimary, flex: 1, marginHorizontal: spacing.sm },
+  aiTool: { flexDirection: 'row', gap: 4, paddingHorizontal: 10, width: 'auto', borderWidth: 1, borderColor: colors.accent },
+  aiToolText: { color: colors.accent, fontSize: 12, fontWeight: '800' },
+  aiActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  undoAi: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingVertical: spacing.xs },
+  undoAiText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
 
   content: { padding: spacing.md },

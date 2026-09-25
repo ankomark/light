@@ -1,5 +1,6 @@
 // What to do with a paragraph a reader has long-pressed in a book: highlight
-// it (five colours, or clear), write a note, share it — a bar over the
+// it (five colours, or clear), write a note, put it in a collection, ask the
+// AI to explain it or its harder words (when offered), share it — a bar over the
 // bottom of the page, the same look as the Bible's verse tools.
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
@@ -17,7 +18,9 @@ const Action = ({ icon, label, onPress, testID }) => (
   </TouchableOpacity>
 );
 
-const BookPassageActions = ({ quote, color, hasNote, onColor, onNote, onShare, onClose, bottom = 0 }) => {
+const BookPassageActions = ({
+  quote, color, hasNote, collection = '', onColor, onNote, onShare, onClose, onCollect, onExplain, onDefine, bottom = 0,
+}) => {
   const { t } = useI18n();
   return (
     <View style={[styles.bar, { paddingBottom: spacing.sm + bottom }]} testID="book-passage-actions">
@@ -51,6 +54,12 @@ const BookPassageActions = ({ quote, color, hasNote, onColor, onNote, onShare, o
       <View style={styles.actions}>
         <Action icon={hasNote ? 'document-text' : 'document-text-outline'}
           label={t(hasNote ? 'bible.editNote' : 'bible.addNote')} onPress={onNote} testID="book-action-note" />
+        {onCollect ? (
+          <Action icon={collection ? 'folder' : 'folder-outline'} label={collection || t('collections.action')}
+            onPress={onCollect} testID="book-action-collect" />
+        ) : null}
+        {onExplain ? <Action icon="sparkles-outline" label={t('ai.explain')} onPress={onExplain} testID="book-action-explain" /> : null}
+        {onDefine ? <Action icon="book-outline" label={t('ai.define')} onPress={onDefine} testID="book-action-define" /> : null}
         <Action icon="share-social-outline" label={t('bible.shareCopy')} onPress={onShare} testID="book-action-share" />
       </View>
     </View>
@@ -70,9 +79,9 @@ const styles = StyleSheet.create({
   swatch: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   swatchOn: { borderWidth: 2, borderColor: colors.white },
   clear: { marginLeft: 'auto' },
-  actions: { flexDirection: 'row', justifyContent: 'space-around', marginTop: spacing.sm },
-  action: { alignItems: 'center', gap: 2, minWidth: 90, paddingVertical: spacing.xs },
-  actionText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  actions: { flexDirection: 'row', maxWidth: 560, width: '100%', alignSelf: 'center', marginTop: spacing.sm },
+  action: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: spacing.xs, paddingHorizontal: 2 },
+  actionText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', maxWidth: '100%' },
 });
 
 export default BookPassageActions;

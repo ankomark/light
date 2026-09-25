@@ -57,9 +57,10 @@ const AuthorChip = memo(({ item, onOpen, t }) => (
   </TouchableOpacity>
 ));
 
-const Shelf = ({ title, data, renderItem, keyOf }) => (data?.length ? (
-  <View style={styles.shelf}>
+const Shelf = ({ title, subtitle, data, renderItem, keyOf, testID }) => (data?.length ? (
+  <View style={styles.shelf} testID={testID}>
     <Text style={styles.shelfTitle}>{title}</Text>
+    {subtitle ? <Text style={styles.shelfSub} numberOfLines={2}>{subtitle}</Text> : null}
     <FlatList
       horizontal
       data={data}
@@ -105,13 +106,25 @@ const BooksHome = ({ navigation }) => {
   return (
     <View testID="books-home">
       {SHELVES.map((s) => (
-        <Shelf
-          key={s}
-          title={t(`home.${s}`)}
-          data={home[s]}
-          keyOf={(b) => `${s}_${b.id}`}
-          renderItem={({ item }) => <BookTile item={item} onOpen={openBook} t={t} showProgress={s === 'continue'} />}
-        />
+        <React.Fragment key={s}>
+          <Shelf
+            title={t(`home.${s}`)}
+            data={home[s]}
+            keyOf={(b) => `${s}_${b.id}`}
+            renderItem={({ item }) => <BookTile item={item} onOpen={openBook} t={t} showProgress={s === 'continue'} />}
+          />
+          {/* Right after what they're reading: books near the passage they last marked. */}
+          {s === 'continue' && home.because ? (
+            <Shelf
+              testID="home-because"
+              title={t('home.because', { title: home.because.title })}
+              subtitle={`“${home.because.quote}”`}
+              data={home.because.books}
+              keyOf={(b) => `because_${b.id}`}
+              renderItem={({ item }) => <BookTile item={item} onOpen={openBook} t={t} />}
+            />
+          ) : null}
+        </React.Fragment>
       ))}
       <Shelf
         title={t('home.rising')}
@@ -127,6 +140,7 @@ const BooksHome = ({ navigation }) => {
 const styles = StyleSheet.create({
   shelf: { marginBottom: spacing.md },
   shelfTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
+  shelfSub: { ...typography.caption, color: colors.textSecondary, fontStyle: 'italic', marginTop: -spacing.xs, marginBottom: spacing.sm },
   rail: { gap: spacing.md, paddingRight: spacing.md },
   tile: { width: 112 },
   cover: { width: 112, height: 160, borderRadius: radius.md, backgroundColor: colors.surface },

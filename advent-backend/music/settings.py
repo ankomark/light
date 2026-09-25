@@ -231,6 +231,8 @@ REST_FRAMEWORK = {
         'appeals': '5/hour',
         # Song takedown disputes (one per takedown anyway).
         'disputes': '10/hour',
+        # AI answers in books (each also counts toward AI_DAILY_LIMIT).
+        'ai': '20/min',
         'reports': '20/hour',
         # Listening reports: two per song played, plus offline backlogs.
         'plays': '120/min',
@@ -282,6 +284,15 @@ APP_STORE_URL = os.environ.get('APP_STORE_URL', '')  # set once the iOS app is l
 SHARE_FALLBACK_IMAGE = os.environ.get('SHARE_FALLBACK_IMAGE', '')
 
 AUTH_USER_MODEL = 'songs.User'
+
+# ── AI for books (songs/book_ai.py) ─────────────────────────────────────────
+# Claude, through the Messages API. No key: the AI tools say they're off.
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
+# Writers' tools and the manuscript check; readers' quick answers.
+AI_MODEL = os.getenv('AI_MODEL', 'claude-sonnet-5')
+AI_FAST_MODEL = os.getenv('AI_FAST_MODEL', 'claude-haiku-4-5-20251001')
+# New answers per person per day (answers already kept are free).
+AI_DAILY_LIMIT = int(os.getenv('AI_DAILY_LIMIT', '40'))
 
 # ── LiveKit (live broadcasting) ───────────────────────────────────────────────
 # Cloud now; self-hosting later is just changing these env vars (no code change).

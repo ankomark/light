@@ -902,6 +902,18 @@ export const fetchBookClubs = async (id) => apiRequest('get', `/publications/${i
 export const createBookClub = async (id, spec) => apiRequest('post', `/publications/${id}/clubs/`, spec);
 export const fetchBookClub = async (clubId) => apiRequest('get', `/publications/clubs/${clubId}/`);
 export const fetchClubOfGroup = async (slug) => apiRequest('get', `/publications/clubs/by-group/${slug}/`);
+// ── AI in books ──
+// { enabled, used, limit } — whether to offer the AI tools.
+export const fetchAiStatus = async () => apiRequest('get', '/publications/ai-status/');
+// A reader's question: { kind: 'explain' | 'define' | 'summary', chapter, passage?, lang } → { text? , terms?, cached }.
+export const askBookAi = async (id, spec) => apiRequest('post', `/publications/${id}/ai/`, spec);
+// A writer's helper: { kind: 'improve' | 'shorten' | 'grammar' | 'structure', text?, lang } → { text }.
+export const askWriterAi = async (id, spec) => apiRequest('post', `/publications/${id}/ai/write/`, spec);
+// The manuscript check: { status, issues: [{ chapter, quote, problem, suggestion }] }.
+export const startManuscriptCheck = async (id) => apiRequest('post', `/publications/${id}/ai/check/`);
+export const fetchManuscriptCheck = async (id) => apiRequest('get', `/publications/${id}/ai/check/`);
+// The reader's highlight collections: { results: [{ name, count }] }.
+export const fetchHighlightCollections = async () => apiRequest('get', '/book-highlights/collections/');
 
 // ── Writer Studio ──
 // Who works on a book: { results: [{ id, user, role, accepted }], my_role }.

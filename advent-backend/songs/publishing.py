@@ -436,7 +436,7 @@ def _clean_color(c):
 
 def apply_highlight_ops(user, ops):
     """Apply a phone's changes: [{op: 'upsert', client_id, publication,
-    chapter_id, block, quote, color, note, at} | {op: 'delete', client_id,
+    chapter_id, block, quote, color, note, collection?, at} | {op: 'delete', client_id,
     at}]. The later change wins (by when it was made on the phone), so two
     phones editing offline settle on the newest. A highlight with neither
     colour nor note left is a deletion. Returns the client_ids applied."""
@@ -475,6 +475,9 @@ def apply_highlight_ops(user, ops):
         fields = {'publication': pub, 'chapter': chapter, 'block': block,
                   'quote': str(op.get('quote') or '')[:2000], 'color': color, 'note': note,
                   'deleted': False, 'updated_at': at}
+        # An older app doesn't send the collection: the one it had stays.
+        if 'collection' in op:
+            fields['collection'] = ' '.join(str(op.get('collection') or '').split())[:60]
         if existing:
             for k, v in fields.items():
                 setattr(existing, k, v)

@@ -6,7 +6,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { saveReadingProgress, fetchPublication } from '../services/api';
+import { saveReadingProgress, fetchPublication, askBookAi } from '../services/api';
 import { loadChapter, peekBook, readBook, fetchBook } from '../services/publicationStore';
 import { noteReading, flushReading } from '../services/readingTracker';
 import { useBookHighlights, saveHighlight } from '../services/bookHighlights';
@@ -15,6 +15,9 @@ import ReportModal from '../components/ReportModal';
 import ReaderSettingsSheet from '../components/ReaderSettingsSheet';
 import BookPassageActions from '../components/BookPassageActions';
 import BibleNoteSheet from '../components/BibleNoteSheet';
+import AiAnswerSheet from '../components/AiAnswerSheet';
+import HighlightCollectionSheet from '../components/HighlightCollectionSheet';
+import { useAiEnabled } from '../services/bookAi';
 import { HIGHLIGHT_WASH } from '../components/BibleVerseActions';
 import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
 import { useReaderSettings, resolveReadingLook, SPEECH_RATES } from '../utils/readerSettings';
@@ -111,8 +114,9 @@ const Block = memo(({ md, index, mdStyle, wash, selected, speaking, hasNote, onP
 ));
 
 const ChapterReader = ({ route, navigation }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { currentUser, isAuthenticated } = useAuth();
+  const aiOn = useAiEnabled();
   const insets = useSafeAreaInsets();
   const uid = currentUser?.id;
   const params = route.params || {};
@@ -145,6 +149,8 @@ const ChapterReader = ({ route, navigation }) => {
   const [reportOpen, setReportOpen] = useState(false);
   const [selected, setSelected] = useState(null);   // a long-pressed paragraph
   const [noteOpen, setNoteOpen] = useState(false);
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [aiAsk, setAiAsk] = useState(null);                 // { key, title, quote, ask } — the AI sheet
 
   const scrollRef = useRef(null);
   const request = useRef(0);
@@ -514,10 +520,31 @@ const ChapterReader = ({ route, navigation }) => {
       quote: selectedQuote,
       color: selectedMark?.color || '',
       note: selectedMark?.note || '',
+      collection: selectedMark?.collection || '',
       ...patch,
     });
   };
   const onColor = (c) => { saveMark({ color: c }); setSelected(null); };
+  // A collection needs a highlight to hold: an unmarked paragraph is marked too.
+  const onCollection = (name) => {
+    saveMark({ collection: name, ...(name && !selectedMark?.color && !selectedMark?.note ? { color: 'yellow' } : {}) });
+    setCollectOpen(false);
+    setSelected(null);
+  };
+
+  // ── AI: explain / define a paragraph, summarise the chapter ──
+  const lang = resolvedLanguage === 'sw' ? 'sw' : 'en';
+  const aiAvailable = aiOn && isAuthenticated && !previewing && view.status === 'ready';
+  const askAi = (kind, passage = '') => {
+    const spec = { kind, chapter: index, passage, lang };
+    setAiAsk({
+      key: `book:${pubId}:${view.chapter?.id}:${view.chapter?.version ?? ''}:${kind}:${lang}:${passage}`,
+      title: t(`ai.${kind}`),
+      quote: kind === 'summary' ? '' : quoteOf(passage),
+      ask: () => askBookAi(pubId, spec),
+    });
+    setSelected(null);
+  };
   const onShare = () => {
     const where = [book?.title, view.chapter?.title].filter(Boolean).join(' · ');
     Share.share({ message: `“${selectedQuote}”\n— ${where}` }).catch(() => {});
@@ -681,6 +708,12 @@ const ChapterReader = ({ route, navigation }) => {
                   color={speakingBlock != null ? colors.accent : chrome} />
               </TouchableOpacity>
             )}
+            {aiAvailable ? (
+              <TouchableOpacity onPress={() => askAi('summary')} style={styles.iconBtn} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel={t('ai.summary')} testID="reader-summary">
+                <Ionicons name="sparkles-outline" size={20} color={chrome} />
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity onPress={() => setSettingsOpen(true)} style={styles.iconBtn} hitSlop={8}
               accessibilityRole="button" accessibilityLabel={t('reader.settings')} testID="reader-font">
               <Text style={[styles.aa, { color: chrome }]}>Aa</Text>
@@ -718,6 +751,10 @@ const ChapterReader = ({ route, navigation }) => {
           onColor={onColor}
           onNote={() => setNoteOpen(true)}
           onShare={onShare}
+          collection={selectedMark?.collection || ''}
+          onCollect={() => setCollectOpen(true)}
+          onExplain={aiAvailable ? () => askAi('explain', plainBlocks[selected] || '') : undefined}
+          onDefine={aiAvailable ? () => askAi('define', plainBlocks[selected] || '') : undefined}
           onClose={() => setSelected(null)}
           bottom={insets.bottom}
         />
@@ -733,6 +770,22 @@ const ChapterReader = ({ route, navigation }) => {
           onClose={() => setNoteOpen(false)}
         />
       ) : null}
+      {selected != null ? (
+        <HighlightCollectionSheet
+          visible={collectOpen}
+          current={selectedMark?.collection || ''}
+          onPick={onCollection}
+          onClose={() => setCollectOpen(false)}
+        />
+      ) : null}
+      <AiAnswerSheet
+        visible={!!aiAsk}
+        onClose={() => setAiAsk(null)}
+        title={aiAsk?.title}
+        quote={aiAsk?.quote}
+        requestKey={aiAsk?.key}
+        ask={aiAsk?.ask}
+      />
 
       <ReaderSettingsSheet
         visible={settingsOpen}

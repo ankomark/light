@@ -7,7 +7,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ScrollView } from '
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchPublications, fetchReadingStats, fetchBookHighlights } from '../services/api';
+import { fetchPublications, fetchReadingStats, fetchBookHighlights, fetchHighlightCollections } from '../services/api';
 import { keptBookIds, readBook } from '../services/publicationStore';
 import { localDay } from '../services/readingTracker';
 import { HIGHLIGHT_SWATCH } from './BibleVerseActions';
@@ -69,9 +69,17 @@ const HighlightRow = memo(({ item, onOpen, t }) => (
           <Text style={styles.hlNote} numberOfLines={3}>{item.note}</Text>
         </View>
       ) : null}
-      <Text style={styles.hlWhere} numberOfLines={1}>
-        {[item.publication_title, item.chapter_title].filter(Boolean).join(' · ') || t('articles.unknownAuthor')}
-      </Text>
+      <View style={styles.hlFoot}>
+        <Text style={[styles.hlWhere, styles.flex]} numberOfLines={1}>
+          {[item.publication_title, item.chapter_title].filter(Boolean).join(' · ') || t('articles.unknownAuthor')}
+        </Text>
+        {item.collection ? (
+          <View style={styles.hlTag}>
+            <Ionicons name="folder-outline" size={11} color={colors.textSecondary} />
+            <Text style={styles.hlTagText} numberOfLines={1}>{item.collection}</Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   </TouchableOpacity>
 ));
@@ -122,7 +130,10 @@ const BookLibrary = ({ navigation }) => {
   const { currentUser, isAuthenticated } = useAuth();
   const uid = currentUser?.id;
   const [shelf, setShelf] = useState('reading');
-  const key = (s) => userKey(uid, `library:${s}`);
+  // Highlights: all, or one of the reader's collections.
+  const [collection, setCollection] = useState('');
+  const [collections, setCollections] = useState(() => peekCache(userKey(uid, 'library:collections')) || []);
+  const key = (s) => userKey(uid, `library:${s}${s === 'highlights' && collection ? `:${collection}` : ''}`);
   const [rows, setRows] = useState(() => peekCache(key('reading')) || null);
   const [failed, setFailed] = useState(false);
   const [stats, setStats] = useState(() => peekCache(userKey(uid, 'library:stats')));
@@ -142,7 +153,7 @@ const BookLibrary = ({ navigation }) => {
         const ids = await keptBookIds();
         next = (await Promise.all(ids.map((id) => readBook(uid, id)))).filter(Boolean);
       } else if (s === 'highlights') {
-        next = (await fetchBookHighlights({}))?.results || [];
+        next = (await fetchBookHighlights(collection ? { collection } : {}))?.results || [];
       } else {
         const res = await fetchPublications(s === 'saved' ? { saved: 1 } : { shelf: s });
         next = res?.results ?? (Array.isArray(res) ? res : []);
@@ -154,7 +165,16 @@ const BookLibrary = ({ navigation }) => {
       if (mine !== request.current) return;
       if (!Array.isArray(kept)) { setRows([]); setFailed(true); }
     }
-  }, [shelf, isAuthenticated, uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shelf, collection, isAuthenticated, uid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadCollections = useCallback(async () => {
+    try {
+      const names = ((await fetchHighlightCollections())?.results || []).map((r) => r.name);
+      setCollections(names);
+      writeCache(userKey(uid, 'library:collections'), names);
+      setCollection((c) => (c && !names.includes(c) ? '' : c));
+    } catch { /* the kept names stand */ }
+  }, [uid]);
 
   const loadStats = useCallback(async () => {
     if (!isAuthenticated) { setStats(null); return; }
@@ -167,7 +187,8 @@ const BookLibrary = ({ navigation }) => {
     }
   }, [isAuthenticated, uid]);
 
-  useEffect(() => { load(shelf); }, [shelf, uid, isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(shelf); }, [shelf, collection, uid, isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (shelf === 'highlights' && isAuthenticated) loadCollections(); }, [shelf, isAuthenticated, loadCollections]);
   useEffect(() => { loadStats(); }, [loadStats]);
   // Back from a book: progress and highlights moved on. (Not on the first
   // focus — the loads above already ran.)
@@ -200,6 +221,20 @@ const BookLibrary = ({ navigation }) => {
           );
         })}
       </ScrollView>
+      {shelf === 'highlights' && isAuthenticated && collections.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colls} testID="library-collections">
+          {['', ...collections].map((c) => {
+            const on = c === collection;
+            return (
+              <TouchableOpacity key={c || '_all'} style={[styles.coll, on && styles.collOn]} onPress={() => setCollection(c)}
+                accessibilityRole="tab" accessibilityState={{ selected: on }} testID={`library-collection-${c || 'all'}`}>
+                {c ? <Ionicons name={on ? 'folder' : 'folder-outline'} size={13} color={on ? colors.textPrimary : colors.textSecondary} /> : null}
+                <Text style={[styles.collText, on && styles.collTextOn]} numberOfLines={1}>{c || t('collections.all')}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      ) : null}
     </View>
   );
 
@@ -281,6 +316,14 @@ const styles = StyleSheet.create({
   shelfOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   shelfText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   shelfTextOn: { color: colors.white },
+  colls: { gap: spacing.xs, paddingBottom: spacing.md },
+  coll: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 200, paddingHorizontal: spacing.sm, paddingVertical: 5,
+    borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+  },
+  collOn: { backgroundColor: colors.surface, borderColor: colors.textSecondary },
+  collText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', flexShrink: 1 },
+  collTextOn: { color: colors.textPrimary },
 
   row: {
     flexDirection: 'row', gap: spacing.md, padding: spacing.sm, marginBottom: spacing.sm,
@@ -305,7 +348,14 @@ const styles = StyleSheet.create({
   hlQuote: { ...typography.body, color: colors.textPrimary, fontStyle: 'italic', lineHeight: 21 },
   hlNoteRow: { flexDirection: 'row', gap: 6, marginTop: spacing.xs },
   hlNote: { ...typography.caption, color: colors.textSecondary, flex: 1 },
-  hlWhere: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs },
+  hlWhere: { ...typography.caption, color: colors.textMuted },
+  hlFoot: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
+  flex: { flex: 1 },
+  hlTag: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: '45%', paddingHorizontal: 7, paddingVertical: 2,
+    borderRadius: radius.full, backgroundColor: colors.surface,
+  },
+  hlTagText: { ...typography.caption, color: colors.textSecondary, flexShrink: 1 },
 
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, paddingHorizontal: spacing.lg, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textMuted, textAlign: 'center' },

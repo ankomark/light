@@ -5,7 +5,8 @@
 - Discover's sections: continue reading, editor's picks, trending (readers
   who finish count double — completion, not clicks), from authors you
   follow, new releases, rising authors (readers growing fastest, so new
-  voices surface rather than the same few forever).
+  voices surface rather than the same few forever), and "because you
+  highlighted…" — books near the one a reader last marked.
 - Telling followers, savers and readers about a new book or chapter.
 """
 from datetime import timedelta
@@ -15,7 +16,7 @@ from django.db.models import Count, F, Max, Q
 from django.utils import timezone
 
 from .models import (
-    BookReview, Chapter, Publication, PublicationBookmark, ReadingActivity, ReadingProgress, User,
+    BookHighlight, BookReview, Chapter, Publication, PublicationBookmark, ReadingActivity, ReadingProgress, User,
     blocked_ids_for,
 )
 
@@ -113,6 +114,30 @@ def rising_author_rows():
     return rows
 
 
+def because_highlighted(user, visible):
+    """Books near the one this reader last highlighted in: the same author's
+    first, then the same kind of book (most read this week, then newest) —
+    none they've started or wrote. → {quote, publication, title, ids} or None."""
+    h = (BookHighlight.objects.filter(user=user, deleted=False, publication__in=visible)
+         .exclude(publication__author=user).select_related('publication').order_by('-updated_at').first())
+    if h is None:
+        return None
+    src = h.publication
+    started = ReadingProgress.objects.filter(user=user).values('publication')
+    near = visible.exclude(pk=src.pk).exclude(author=user).exclude(pk__in=started)
+    same_kind = near.filter(category=src.category)
+    trending = trending_ids()
+    ranked = (
+        list(near.filter(author_id=src.author_id).order_by('-published_at', '-id').values_list('id', flat=True)[:SECTION])
+        + sorted(same_kind.filter(id__in=trending).values_list('id', flat=True), key=trending.index)
+        + list(same_kind.order_by('-published_at', '-id').values_list('id', flat=True)[:SECTION])
+    )
+    ids = list(dict.fromkeys(ranked))[:SECTION]
+    if not ids:
+        return None
+    return {'quote': h.quote[:160], 'publication': src.pk, 'title': src.title, 'ids': ids}
+
+
 def home_sections(user):
     """Discover's sections as publication ids (and rising authors as rows);
     the view turns ids into cards in one query per section."""
@@ -135,8 +160,9 @@ def home_sections(user):
             .order_by('-progresses__updated_at'), 6)
         follows = User.followers.through.objects.filter(to_user_id=user.id).values('from_user_id')
         out['following'] = ids(visible.filter(author_id__in=follows).order_by('-published_at', '-id'))
+        out['because'] = because_highlighted(user, visible)
     else:
-        out['continue'], out['following'] = [], []
+        out['continue'], out['following'], out['because'] = [], [], None
     rising = [r for r in rising_author_rows() if r['user_id'] not in blocked and r['user_id'] != getattr(user, 'id', None)]
     out['rising'] = rising[:SECTION]
     return out

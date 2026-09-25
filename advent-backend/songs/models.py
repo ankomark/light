@@ -2191,6 +2191,8 @@ class BookHighlight(models.Model):
     quote = models.TextField(max_length=2000)
     color = models.CharField(max_length=10, blank=True, default='')
     note = models.TextField(max_length=4000, blank=True, default='')
+    # The reader's own shelf for it ("Prayer", "Sermon ideas"); blank = none.
+    collection = models.CharField(max_length=60, blank=True, default='')
     deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()
@@ -2276,6 +2278,45 @@ class BookClubMilestone(models.Model):
 
     class Meta:
         ordering = ['due', 'through_chapter']
+
+
+class AiAnswer(models.Model):
+    """An AI answer kept so the same question is asked of the model once:
+    keyed by what it was about (the chapter's version, the passage, the
+    language), so any reader asking it again gets it at once."""
+    key = models.CharField(max_length=64, unique=True)
+    kind = models.CharField(max_length=20)
+    publication = models.ForeignKey(Publication, null=True, blank=True, on_delete=models.CASCADE, related_name='+')
+    result = models.JSONField(default=dict)
+    model = models.CharField(max_length=60, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AiUsage(models.Model):
+    """How many AI answers a person has had made today (answers already
+    kept don't count) — the daily limit."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+')
+    day = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ('user', 'day')
+
+
+class ManuscriptCheck(models.Model):
+    """The whole book read for inconsistencies (names, dates, facts that
+    change between chapters) by the worker, for its writers."""
+    QUEUED, RUNNING, DONE, FAILED = 'queued', 'running', 'done', 'failed'
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='checks')
+    requested_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    status = models.CharField(max_length=10, default=QUEUED)
+    result = models.JSONField(default=dict, blank=True)
+    error = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class ChapterComment(models.Model):

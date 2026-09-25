@@ -8,11 +8,11 @@ from ..models import (
     ChapterRevision, BookHighlight, BookReview, ChapterComment, ReadingActivity, PublicationCollaborator,
     PublicationExport,
 )
-from .. import writer_studio, author_studio
+from .. import writer_studio, author_studio, book_ai
 from ..models import BookClub
 from ..publishing import collaborating
 from ..serializers.publications import ChaptersChangedElsewhere
-from django.db.models import Avg
+from django.db.models import Avg, Max
 from .. import book_community
 from ..publishing import (
     visible_chapters_q, reader_chapters, record_reading, revision_list, diff_paragraphs,
@@ -1378,7 +1378,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         # Engagement actions only need the row; the list and the page need counts.
         if self.action in ('like', 'bookmark', 'progress', 'chapter', 'reading', 'revisions', 'revision',
                            'reviews', 'discussion', 'delete_comment', 'collaborators', 'collaborator', 'export',
-                           'analytics', 'clubs'):
+                           'analytics', 'clubs', 'ai', 'ai_write', 'ai_check'):
             return qs
         qs = self._counted(qs, user)
         if self.action == 'retrieve':
@@ -1454,12 +1454,20 @@ class PublicationViewSet(viewsets.ModelViewSet):
         user = request.user
         sections = book_community.home_sections(user)
         keys = ('continue', 'picks', 'trending', 'following', 'new')
-        ids = {i for k in keys for i in sections[k]}
+        because = sections.get('because')
+        ids = {i for k in keys for i in sections[k]} | set(because['ids'] if because else [])
         rows = (self._counted(Publication.objects.filter(id__in=ids), user)
                 .select_related('author', 'author__profile').in_bulk())
         ctx = self.get_serializer_context()
         out = {k: PublicationListSerializer([rows[i] for i in sections[k] if i in rows], many=True, context=ctx).data
                for k in keys}
+        # "Because you highlighted…": the passage, its book, and books near it.
+        out['because'] = None
+        if because:
+            books = PublicationListSerializer([rows[i] for i in because['ids'] if i in rows], many=True, context=ctx).data
+            if books:
+                out['because'] = {'quote': because['quote'], 'publication': because['publication'],
+                                  'title': because['title'], 'books': books}
         people = User.objects.select_related('profile').in_bulk([r['user_id'] for r in sections['rising']])
         out['rising'] = []
         for r in sections['rising']:
@@ -1960,6 +1968,87 @@ class PublicationViewSet(viewsets.ModelViewSet):
         club = BookClub.objects.filter(group__slug=slug).values_list('pk', flat=True).first()
         return Response({'club': club})
 
+    # ── AI in books (songs/book_ai.py) ──
+
+    def get_throttles(self):
+        if self.action in ('ai', 'ai_write', 'ai_check') and self.request.method == 'POST':
+            self.throttle_scope = 'ai'
+        return super().get_throttles()
+
+    @staticmethod
+    def _ai_error(e):
+        if isinstance(e, book_ai.AiOff):
+            return Response({'error': 'AI is not available.', 'code': 'ai_off'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        if isinstance(e, book_ai.AiLimit):
+            return Response({'error': "You've used today's AI answers.", 'code': 'ai_limit'},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+        return Response({'error': 'AI could not answer just now.', 'code': 'ai_failed'}, status=status.HTTP_502_BAD_GATEWAY)
+
+    @action(detail=False, methods=['get'], url_path='ai-status')
+    def ai_status(self, request):
+        """{enabled, used, limit} — whether to offer the AI tools at all."""
+        user = request.user
+        return Response({'enabled': book_ai.enabled(), 'limit': settings.AI_DAILY_LIMIT,
+                         'used': book_ai.used_today(user) if user.is_authenticated else 0})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def ai(self, request, pk=None):
+        """A reader's question about what they're reading: {kind: explain |
+        define | summary, chapter: index, passage?, lang?}. Answered from the
+        chapter's own text, kept for the next reader who asks."""
+        pub = self.get_object()
+        kind = str(request.data.get('kind') or '')
+        if kind not in book_ai.READER_KINDS:
+            return Response({'error': 'kind is explain, define or summary.'}, status=status.HTTP_400_BAD_REQUEST)
+        chapters = list(reader_chapters(pub, request.user).values_list('pk', flat=True))
+        try:
+            i = int(request.data.get('chapter'))
+        except (TypeError, ValueError):
+            i = -1
+        if not 0 <= i < len(chapters):
+            raise Http404('No such chapter.')
+        chapter = Chapter.objects.get(pk=chapters[i])
+        try:
+            return Response(book_ai.reader_answer(request.user, pub, chapter, kind,
+                                                  str(request.data.get('passage') or ''),
+                                                  str(request.data.get('lang') or 'en')))
+        except ValueError:
+            return Response({'error': 'Choose a passage first.'}, status=status.HTTP_400_BAD_REQUEST)
+        except (book_ai.AiOff, book_ai.AiLimit, book_ai.AiFailed) as e:
+            return self._ai_error(e)
+
+    @action(detail=True, methods=['post'], url_path='ai/write', permission_classes=[permissions.IsAuthenticated])
+    def ai_write(self, request, pk=None):
+        """A writer's helper: {kind: improve | shorten | grammar, text} → a
+        rewrite; {kind: structure} → advice on the book's shape."""
+        pub = self.get_object()
+        if not writer_studio.can_edit(request.user, pub):
+            raise PermissionDenied("Only the book's writers can use its writing tools.")
+        kind = str(request.data.get('kind') or '')
+        if kind not in book_ai.WRITER_KINDS:
+            return Response({'error': 'kind is improve, shorten, grammar or structure.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            return Response(book_ai.writer_answer(request.user, pub, kind, str(request.data.get('text') or ''),
+                                                  str(request.data.get('lang') or 'en')))
+        except ValueError:
+            return Response({'error': 'There is no text to work on.'}, status=status.HTTP_400_BAD_REQUEST)
+        except (book_ai.AiOff, book_ai.AiLimit, book_ai.AiFailed) as e:
+            return self._ai_error(e)
+
+    @action(detail=True, methods=['get', 'post'], url_path='ai/check', permission_classes=[permissions.IsAuthenticated])
+    def ai_check(self, request, pk=None):
+        """The manuscript read for things that disagree between chapters.
+        POST: start one (the worker does it); GET: the latest."""
+        pub = self.get_object()
+        if not writer_studio.can_edit(request.user, pub):
+            raise PermissionDenied("Only the book's writers can check it.")
+        if request.method == 'POST':
+            try:
+                check = book_ai.request_check(pub, request.user)
+            except (book_ai.AiOff, book_ai.AiLimit) as e:
+                return self._ai_error(e)
+            return Response(book_ai.check_json(check), status=status.HTTP_202_ACCEPTED)
+        return Response(book_ai.check_json(pub.checks.first()))
     @action(detail=False, methods=['post'], url_path='cover-render', permission_classes=[permissions.IsAuthenticated])
     def cover_render(self, request):
         """Draw a cover from a template: {template, title, subtitle?, author?,
@@ -1984,6 +2073,8 @@ class BookHighlightViewSet(viewsets.GenericViewSet):
     """A reader's own highlights and notes in books.
 
         GET  /book-highlights/?publication=<id>   one book's (for the reader)
+        GET  /book-highlights/?collection=<name>  one of the reader's collections
+        GET  /book-highlights/collections/        [{name, count}]
         GET  /book-highlights/                    all, newest first (the library)
              &since=<iso>                         only what changed since, deletions included
         POST /book-highlights/sync/ {ops: [...]}  the phone's changes (songs/publishing.py)
@@ -2002,6 +2093,9 @@ class BookHighlightViewSet(viewsets.GenericViewSet):
         pub = request.query_params.get('publication')
         if pub:
             qs = qs.filter(publication_id=pub)
+        coll = request.query_params.get('collection')
+        if coll:
+            qs = qs.filter(collection=coll)
         since = request.query_params.get('since')
         if since:
             try:
@@ -2014,6 +2108,12 @@ class BookHighlightViewSet(viewsets.GenericViewSet):
             return Response({'results': self.get_serializer(qs[:2000], many=True).data})
         page = self.paginate_queryset(qs)
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
+
+    @action(detail=False, methods=['get'])
+    def collections(self, request):
+        rows = (self.get_queryset().filter(deleted=False).exclude(collection='').values('collection')
+                .annotate(n=Count('pk'), last=Max('updated_at')).order_by('-last'))
+        return Response({'results': [{'name': r['collection'], 'count': r['n']} for r in rows]})
 
     @action(detail=False, methods=['post'])
     def sync(self, request):

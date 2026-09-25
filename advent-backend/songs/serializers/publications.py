@@ -188,7 +188,7 @@ class BookHighlightSerializer(serializers.ModelSerializer):
         model = BookHighlight
         fields = [
             'client_id', 'publication', 'publication_title', 'publication_cover', 'chapter_id', 'chapter_title',
-            'block', 'quote', 'color', 'note', 'deleted', 'created_at', 'updated_at',
+            'block', 'quote', 'color', 'note', 'collection', 'deleted', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
 
