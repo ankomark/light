@@ -91,6 +91,43 @@ export const PersonListSkeleton = ({ count = 8, ...row }) => (
   </View>
 );
 
+// Mirrors a publication card (cover left, category, title, summary, byline).
+export const PublicationSkeleton = () => (
+  <View style={styles.pubCard}>
+    <SkeletonBox width={92} height={124} borderRadius={0} />
+    <View style={styles.pubBody}>
+      <SkeletonBox width={70} height={10} style={{ marginBottom: 10 }} />
+      <SkeletonBox width="85%" height={15} style={{ marginBottom: 8 }} />
+      <SkeletonBox width="65%" height={11} style={{ marginBottom: 12 }} />
+      <SkeletonBox width="45%" height={10} />
+    </View>
+  </View>
+);
+
+export const PublicationListSkeleton = ({ count = 5 }) => (
+  <View>
+    {Array.from({ length: count }, (_, i) => <PublicationSkeleton key={i} />)}
+  </View>
+);
+
+// The table of contents while a book page loads.
+export const ChapterListSkeleton = ({ count = 5 }) => (
+  <View>
+    {Array.from({ length: count }, (_, i) => (
+      <SkeletonBox key={i} width="100%" height={44} borderRadius={radius.md} style={{ marginBottom: spacing.sm }} />
+    ))}
+  </View>
+);
+
+// A chapter's text while it loads: lines of prose, not a spinner.
+export const ProseSkeleton = ({ lines = 10 }) => (
+  <View>
+    {Array.from({ length: lines }, (_, i) => (
+      <SkeletonBox key={i} width={i % 4 === 3 ? '60%' : '100%'} height={13} style={{ marginBottom: 12 }} />
+    ))}
+  </View>
+);
+
 export const ProfileSkeleton = () => (
   <View style={styles.profileCard}>
     <SkeletonBox width="100%" height={140} borderRadius={0} />
@@ -157,6 +194,16 @@ const styles = StyleSheet.create({
   profileCard: {
     backgroundColor: colors.card,
   },
+  pubCard: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pubBody: { flex: 1, padding: spacing.md, justifyContent: 'center' },
   profileAvatarRow: {
     paddingHorizontal: spacing.md,
   },

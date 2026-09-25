@@ -56,6 +56,7 @@ from ..serializers import (
     MediaStationSerializer,
     PublicationListSerializer,
     PublicationDetailSerializer,
+    ChapterReadSerializer,
     ChapterSerializer,
     VideoStudioSerializer,
     VideoStudioListSerializer,

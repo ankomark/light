@@ -2,7 +2,8 @@ from .common import *  # noqa: F401,F403
 import base64
 import os
 from django.http import HttpResponse, Http404, HttpResponseNotFound
-from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F, Case, When, Value
+from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F, Case, When, Value, Sum
+from django.db.models.functions import Coalesce
 from django.db import IntegrityError, transaction
 import re
 from ..post_links import sync_post_links
@@ -1291,35 +1292,81 @@ class PublicationViewSet(viewsets.ModelViewSet):
             return PublicationListSerializer
         return PublicationDetailSerializer
 
-    def get_queryset(self):
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        # ?toc=1: the book page — chapters without their bodies.
+        ctx['toc'] = self.action == 'retrieve' and self._toc()
+        return ctx
+
+    def _toc(self):
+        return self.request.query_params.get('toc') in ('1', 'true')
+
+    def _visible(self):
+        """What this user may open, nothing more: no moderator takedowns
+        (author included), published work plus their own drafts, and nothing
+        by people blocked either way or who deactivated their account."""
         user = self.request.user
-        qs = (
-            Publication.objects
-            .filter(is_removed=False)  # hide moderator takedowns (author included)
-            .select_related('author', 'author__profile')
-            .annotate(
-                chapter_count_anno=Count('chapters', distinct=True),
-                likes_total=Count('likes', distinct=True),
-            )
-        )
-        # Chapters (whose bodies carry heavy base64 inline images) are only
-        # serialized on detail — prefetching them for the LIST would pull
-        # megabytes per row that are never rendered.
-        if self.action != 'list':
-            qs = qs.prefetch_related('chapters')
+        qs = Publication.objects.filter(is_removed=False)
+        if user.is_authenticated:
+            qs = (qs.filter(Q(status='published') | Q(author=user))
+                  .exclude(Q(author__is_deactivated=True) & ~Q(author=user)))
+            blocked = blocked_ids_for(user)
+            if blocked:
+                qs = qs.exclude(author_id__in=blocked)
+        else:
+            qs = qs.filter(status='published').exclude(author__is_deactivated=True)
+        return qs
+
+    @staticmethod
+    def _counted(qs, user):
+        """Counts and the viewer's own marks as subqueries: one query for a
+        page, and no chapters × likes join multiplying rows."""
+        def count(model):
+            return Coalesce(Subquery(
+                model.objects.filter(publication=OuterRef('pk')).order_by()
+                .values('publication').annotate(n=Count('pk')).values('n')[:1],
+                output_field=IntegerField()), 0)
+        qs = qs.annotate(chapter_count_anno=count(Chapter), likes_total=count(PublicationLike))
         if user.is_authenticated:
             qs = qs.annotate(
                 liked_by_me=Exists(PublicationLike.objects.filter(publication=OuterRef('pk'), user=user)),
                 bookmarked_by_me=Exists(PublicationBookmark.objects.filter(publication=OuterRef('pk'), user=user)),
             )
+        return qs
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = self._visible().select_related('author', 'author__profile')
+        # Engagement actions only need the row; the list and the page need counts.
+        if self.action in ('like', 'bookmark', 'progress', 'chapter'):
+            return qs
+        qs = self._counted(qs, user)
+        if self.action == 'retrieve':
+            chapters = Chapter.objects.all()
+            if self._toc():
+                chapters = chapters.defer('body')
+            qs = qs.prefetch_related(Prefetch('chapters', queryset=chapters)).annotate(
+                words_total=Coalesce(Subquery(
+                    Chapter.objects.filter(publication=OuterRef('pk')).order_by()
+                    .values('publication').annotate(n=Sum('word_count')).values('n')[:1],
+                    output_field=IntegerField()), 0),
+            )
+            if user.is_authenticated:
+                follows = User.followers.through.objects.filter(
+                    from_user_id=OuterRef('author_id'), to_user_id=user.id)
+                qs = qs.annotate(
+                    my_last_chapter=Subquery(
+                        ReadingProgress.objects.filter(publication=OuterRef('pk'), user=user)
+                        .values('last_chapter')[:1], output_field=IntegerField()),
+                    following_author=Exists(follows),
+                )
+        # Chapters (whose bodies can carry heavy base64 inline images) are
+        # never prefetched for the list: megabytes per row never rendered.
+        elif self.action not in ('list',):
+            qs = qs.prefetch_related('chapters')
 
         if self.request.query_params.get('mine') and user.is_authenticated:
             qs = qs.filter(author=user)
-        elif user.is_authenticated:
-            # Everyone sees published; authors also see their own drafts.
-            qs = qs.filter(Q(status='published') | Q(author=user))
-        else:
-            qs = qs.filter(status='published')
 
         if self.request.query_params.get('saved') and user.is_authenticated:
             qs = qs.filter(bookmarks__user=user)
@@ -1345,7 +1392,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
     def cover(self, request, pk=None):
         """Stream the stored base64 cover as a real, cacheable image so the list
         doesn't have to ship the blob inline."""
-        pub = get_object_or_404(Publication, pk=pk)
+        pub = get_object_or_404(self._visible(), pk=pk)   # not a draft's or a takedown's
         data_uri = pub.cover or ''
         if ',' not in data_uri:
             raise Http404('No cover.')
@@ -1387,6 +1434,21 @@ class PublicationViewSet(viewsets.ModelViewSet):
         )
         return Response({'last_read_chapter': max(0, chapter)})
 
+    @action(detail=True, methods=['get'], url_path=r'chapters/(?P<index>\d+)')
+    def chapter(self, request, pk=None, index=None):
+        """One chapter (0-based, in reading order) — the reader loads chapters
+        one at a time instead of the whole book with all its images."""
+        pub = self.get_object()
+        chapters = list(pub.chapters.order_by('order', 'id').values_list('pk', flat=True))
+        i = int(index)
+        if i >= len(chapters):
+            raise Http404('No such chapter.')
+        ch = Chapter.objects.get(pk=chapters[i])
+        return Response({
+            'index': i, 'count': len(chapters), 'updated_at': pub.updated_at,
+            'chapter': ChapterReadSerializer(ch).data,
+        })
+
     def update(self, request, *args, **kwargs):
         if self.get_object().author_id != request.user.id:
             return Response({"error": "You can only edit your own publications."},
@@ -1401,14 +1463,14 @@ class PublicationViewSet(viewsets.ModelViewSet):
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def mine(self, request):
-        qs = self.filter_queryset(
-            Publication.objects.filter(author=request.user)
-            .select_related('author', 'author__profile')
-            .annotate(chapter_count_anno=Count('chapters', distinct=True))
-            .order_by('-created_at')
-        )
+        # Counted like the list (it used to count likes and marks row by row).
+        qs = self.filter_queryset(self._counted(
+            Publication.objects.filter(author=request.user, is_removed=False)
+            .select_related('author', 'author__profile'),
+            request.user,
+        ).order_by('-created_at'))
         page = self.paginate_queryset(qs)
         ser = PublicationListSerializer(page if page is not None else qs, many=True,
                                         context=self.get_serializer_context())

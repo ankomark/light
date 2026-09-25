@@ -1,20 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Platform, View, Image } from 'react-native';
+import React, { useState } from 'react';
+import { Platform, View } from 'react-native';
+import { Image } from 'expo-image';
 import { colors, spacing } from '../constants/theme';
 
-// react-native-markdown-display renders <Image> with no intrinsic size, so a
-// data-URI image collapses to 0×0 (invisible). This rule measures the available
-// width and derives the height from the image's real aspect ratio.
+// react-native-markdown-display renders <Image> with no intrinsic size, so an
+// image collapses to 0×0 (invisible). This rule measures the available width
+// and takes the height from the image's own aspect ratio once it loads.
+// expo-image keeps images on disk, so a chapter read once shows its pictures
+// with no signal too (and the size comes from that one load, not a second
+// request just to measure).
 const MarkdownImage = ({ uri }) => {
   const [w, setW] = useState(0);
   const [aspect, setAspect] = useState(1.6);
-  useEffect(() => {
-    let alive = true;
-    if (uri) {
-      Image.getSize(uri, (iw, ih) => { if (alive && iw && ih) setAspect(iw / ih); }, () => {});
-    }
-    return () => { alive = false; };
-  }, [uri]);
   if (!uri) return null;
   return (
     <View style={{ width: '100%' }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
@@ -22,7 +19,13 @@ const MarkdownImage = ({ uri }) => {
         <Image
           source={{ uri }}
           style={{ width: w, height: w / aspect, borderRadius: 10, marginVertical: spacing.sm, backgroundColor: 'rgba(127,127,127,0.12)' }}
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="disk"
+          transition={120}
+          onLoad={(e) => {
+            const { width: iw, height: ih } = e?.source || {};
+            if (iw && ih) setAspect(iw / ih);
+          }}
         />
       )}
     </View>
@@ -119,8 +122,13 @@ export const CATEGORIES = [
   { key: 'other', label: 'Other' },
 ];
 
-export const categoryLabel = (key) =>
-  CATEGORIES.find((c) => c.key === key)?.label || 'Other';
+/** A category's name — in the reader's language when `t` is given. */
+export const categoryLabel = (key, t) => {
+  const known = CATEGORIES.find((c) => c.key === key);
+  const k = known ? known.key : 'other';
+  const translated = t ? t(`pubCat.${k}`) : null;
+  return translated && translated !== `pubCat.${k}` ? translated : (known?.label || 'Other');
+};
 
 // Themed style map for react-native-markdown-display. `fontSize` scales the
 // reading body; `opts.color` / `opts.fontFamily` apply the author's writing

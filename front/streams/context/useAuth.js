@@ -11,6 +11,7 @@ import * as SecureStore from '../services/secureStorage'; // web-safe shim (expo
 import axios from 'axios';
 import { API_URL, storeTokens, clearTokens } from '../services/api';
 import { clearAllCaches } from '../utils/screenCache';
+import { forgetKeptChapters } from '../services/publicationStore';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 
 const AuthContext = createContext(null);
@@ -66,6 +67,7 @@ export const AuthProvider = ({ children }) => {
     // per account, but dropping them on the way out means a shared phone can't
     // flash the previous user's feed even for a frame.
     await clearAllCaches();
+    await forgetKeptChapters();   // publications kept for offline (can be drafts)
     setCurrentUser(null);
     setIsAuthenticated(false);
     setIsEmailVerified(false);

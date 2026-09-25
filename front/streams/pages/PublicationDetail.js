@@ -1,54 +1,109 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { deletePublication, togglePublicationLike, togglePublicationBookmark } from '../services/api';
 import {
-  fetchPublication, deletePublication, togglePublicationLike, togglePublicationBookmark,
-} from '../services/api';
+  peekBook, readBook, fetchBook, forgetBook, patchBook, notePublicationsChanged,
+  keptChapterCount, downloadBook,
+} from '../services/publicationStore';
 import FollowButton from '../components/FollowButton';
 import ReportModal from '../components/ReportModal';
+import { ChapterListSkeleton } from '../components/SkeletonLoader';
 import { categoryLabel } from '../utils/publications';
+import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
 
 const PublicationDetail = ({ route, navigation }) => {
-  const [reportVisible, setReportVisible] = useState(false);
   const { t } = useI18n();
-  const { id } = route.params;
-  const [pub, setPub] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const { currentUser, isAuthenticated } = useAuth();
+  const uid = currentUser?.id;
+  const { id, preview = null } = route.params;
+  const [reportVisible, setReportVisible] = useState(false);
+
+  // Opened again: the page as it was, at once. Opened from the list: its top
+  // (title, cover, author) from the row while the contents load.
+  const [pub, setPub] = useState(() => peekBook(uid, id));
+  const [loading, setLoading] = useState(() => !peekBook(uid, id));
+  const [failed, setFailed] = useState(false);     // nothing to show, and it didn't load
+  const [gone, setGone] = useState(false);         // deleted, taken down, or not yours to see
+  const [offline, setOffline] = useState(false);   // showing the kept page; the refresh failed
 
   // Engagement state (optimistic).
-  const [liked, setLiked] = useState(false);
-  const [likes, setLikes] = useState(0);
-  const [bookmarked, setBookmarked] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [liked, setLiked] = useState(!!pub?.is_liked);
+  const [likes, setLikes] = useState(pub?.likes_count || 0);
+  const [bookmarked, setBookmarked] = useState(!!pub?.is_bookmarked);
+  const busy = useRef({ like: false, save: false });
 
+  // Offline copy of the whole book: 'idle' | 'running' | 'done' | 'failed'.
+  const [download, setDownload] = useState({ state: 'idle', done: 0, total: 0 });
+
+  const apply = useCallback((data) => {
+    setPub(data);
+    setLiked(!!data.is_liked);
+    setLikes(data.likes_count || 0);
+    setBookmarked(!!data.is_bookmarked);
+  }, []);
+
+  const request = useRef(0);
   const load = useCallback(async () => {
-    try {
-      setError(false);
-      const data = await fetchPublication(id);
-      setPub(data);
-      setLiked(!!data.is_liked);
-      setLikes(data.likes_count || 0);
-      setBookmarked(!!data.is_bookmarked);
-    } catch (err) {
-      console.error('Error loading publication:', err);
-      setError(true);
-    } finally {
-      setLoading(false);
+    const mine = ++request.current;
+    setFailed(false);
+    let shown = !!peekBook(uid, id);
+    if (!shown) {
+      const kept = await readBook(uid, id);
+      if (mine !== request.current) return;
+      if (kept) { apply(kept); setLoading(false); shown = true; }
     }
-  }, [id]);
+    try {
+      const data = await fetchBook(uid, id);
+      if (mine !== request.current) return;
+      apply(data);
+      setOffline(false);
+      setGone(false);
+    } catch (err) {
+      if (mine !== request.current) return;
+      if (err?.status === 404 || err?.status === 403) {
+        forgetBook(uid, id);
+        setGone(true);
+      } else if (shown) setOffline(true);
+      else setFailed(true);
+    } finally {
+      if (mine === request.current) setLoading(false);
+    }
+  }, [uid, id, apply]);
 
+  // Every return (from the reader: "Continue" moves on) — the page is small now.
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const chapters = pub?.chapters || [];
+  const chapterIds = chapters.map((c) => c.id).join(',');
+  useEffect(() => {
+    let alive = true;
+    if (!chapters.length) return undefined;
+    keptChapterCount(id, chapters).then((n) => {
+      if (alive && n === chapters.length) setDownload({ state: 'done', done: n, total: n });
+    });
+    return () => { alive = false; };
+  }, [id, chapterIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const askToSignIn = async () => {
+    const ok = await confirmAction({
+      title: t('pubDetail.signInToEngage'), confirmLabel: t('auth.login'), cancelLabel: t('common.cancel'),
+    });
+    if (ok) navigation.navigate('Login');
+  };
+
   const handleLike = async () => {
-    if (busy) return;
-    setBusy(true);
+    if (!isAuthenticated) { askToSignIn(); return; }
+    if (busy.current.like) return;
+    busy.current.like = true;
     const prevLiked = liked, prevLikes = likes;
     setLiked(!prevLiked);
     setLikes(prevLiked ? Math.max(0, prevLikes - 1) : prevLikes + 1);
@@ -56,177 +111,245 @@ const PublicationDetail = ({ route, navigation }) => {
       const res = await togglePublicationLike(id);
       setLiked(res.is_liked);
       setLikes(res.likes_count);
+      patchBook(uid, id, { is_liked: res.is_liked, likes_count: res.likes_count });
+      notePublicationsChanged();
     } catch {
       setLiked(prevLiked); setLikes(prevLikes);
     } finally {
-      setBusy(false);
+      busy.current.like = false;
     }
   };
 
   const handleBookmark = async () => {
+    if (!isAuthenticated) { askToSignIn(); return; }
+    if (busy.current.save) return;
+    busy.current.save = true;
     const prev = bookmarked;
     setBookmarked(!prev);
     try {
       const res = await togglePublicationBookmark(id);
       setBookmarked(res.is_bookmarked);
+      patchBook(uid, id, { is_bookmarked: res.is_bookmarked });
+      notePublicationsChanged();                  // the Saved tab changes
     } catch {
       setBookmarked(prev);
+    } finally {
+      busy.current.save = false;
     }
   };
 
-  const onDelete = () => {
-    Alert.alert(t('pubDetail.deleteTitle'), t('pubDetail.deleteConfirm', { title: pub.title }), [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await deletePublication(id);
-            navigation.goBack();
-          } catch {
-            Alert.alert(t('common.error'), t('pubDetail.deleteFailed'));
-          }
-        },
-      },
-    ]);
+  // confirmAction, not Alert: on web Alert.alert shows nothing and never fires.
+  const onDelete = async () => {
+    const ok = await confirmAction({
+      title: t('pubDetail.deleteTitle'), message: t('pubDetail.deleteConfirm', { title: pub.title }),
+      confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deletePublication(id);
+      forgetBook(uid, id);
+      notePublicationsChanged();
+      navigation.goBack();
+    } catch {
+      notify(t('common.error'), t('pubDetail.deleteFailed'));
+    }
   };
 
-  if (loading) {
-    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.primary} /></View>;
-  }
-  if (error || !pub) {
+  const onDownload = async () => {
+    setDownload({ state: 'running', done: 0, total: chapters.length });
+    try {
+      await downloadBook(id, chapters, (done, total) => setDownload({ state: 'running', done, total }));
+      setDownload({ state: 'done', done: chapters.length, total: chapters.length });
+    } catch {
+      setDownload((d) => ({ ...d, state: 'failed' }));
+    }
+  };
+
+  // The reader gets the contents, not the book: it loads each chapter itself.
+  const read = (index) => navigation.navigate('ChapterReader', {
+    id: pub.id,
+    index,
+    book: {
+      id: pub.id, title: pub.title, theme: pub.theme, updated_at: pub.updated_at,
+      chapters: chapters.map(({ id: cid, order, title }) => ({ id: cid, order, title })),
+    },
+  });
+
+  // ── Nothing to show ──
+  const head = pub || preview;
+  if (gone || (!head && (failed || !loading))) {
     return (
       <View style={styles.centered}>
-        <MaterialIcons name="error-outline" size={46} color={colors.textMuted} />
-        <Text style={styles.errorText}>{t('pubDetail.unavailable')}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.retryBtnText}>{t('common.goBack')}</Text>
-        </TouchableOpacity>
+        <MaterialIcons name={gone ? 'error-outline' : 'cloud-off'} size={46} color={colors.textMuted} />
+        <Text style={styles.errorText}>{gone ? t('pubDetail.unavailable') : t('pubDetail.loadFailed')}</Text>
+        <View style={styles.errorActions}>
+          {!gone ? (
+            <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); load(); }} testID="pub-retry">
+              <Text style={styles.retryBtnText}>{t('common.retry')}</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity style={[styles.retryBtn, styles.secondaryBtn]} onPress={() => navigation.goBack()}>
+            <Text style={styles.retryBtnText}>{t('common.goBack')}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
+  if (!head) {
+    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  }
 
-  const chapters = pub.chapters || [];
+  const chapterTotal = pub ? chapters.length : (head.chapter_count || 0);
+  const lastRead = Math.min(pub?.last_read_chapter || 0, Math.max(0, chapters.length - 1));
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
+          accessibilityRole="button" accessibilityLabel={t('common.back')}>
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
-        {pub.is_owner && (
+        {pub?.is_owner && (
           <View style={styles.ownerActions}>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('PublicationEditor', { id: pub.id })} hitSlop={8}>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('PublicationEditor', { id: pub.id })} hitSlop={8}
+              accessibilityRole="button" accessibilityLabel={t('pub.editTitle')} testID="pub-edit">
               <MaterialIcons name="edit" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={onDelete} hitSlop={8}>
+            <TouchableOpacity style={styles.iconBtn} onPress={onDelete} hitSlop={8}
+              accessibilityRole="button" accessibilityLabel={t('pubDetail.deleteTitle')} testID="pub-delete">
               <MaterialIcons name="delete-outline" size={21} color={colors.error} />
             </TouchableOpacity>
           </View>
         )}
       </View>
 
+      {offline ? (
+        <View style={styles.offlineBar} testID="pub-offline">
+          <Ionicons name="cloud-offline-outline" size={14} color={colors.textSecondary} />
+          <Text style={styles.offlineText}>{t('pubDetail.offline')}</Text>
+        </View>
+      ) : null}
+
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
-          {pub.cover ? (
-            <Image source={{ uri: pub.cover }} style={styles.cover} />
-          ) : (
-            <View style={[styles.cover, styles.coverFallback]}>
-              <MaterialIcons name="menu-book" size={40} color={colors.textMuted} />
-            </View>
-          )}
-          <View style={styles.heroInfo}>
-            <View style={styles.badgeRow}>
-              <Text style={styles.catBadge}>{categoryLabel(pub.category)}</Text>
-              {pub.status === 'draft' && <Text style={styles.draftBadge}>{t('pubDetail.draft')}</Text>}
-            </View>
-            <Text style={styles.title}>{pub.title}</Text>
-            <Text style={styles.author}>by {pub.author?.username || 'Unknown'}</Text>
-            <Text style={styles.meta}>
-              {chapters.length} {chapters.length === 1 ? 'chapter' : 'chapters'}
-              {pub.reading_minutes ? ` · ${pub.reading_minutes} min read` : ''}
-            </Text>
-            {!pub.is_owner && pub.author?.id ? (
-              <View style={styles.followWrap}>
-                <FollowButton
-                  userId={pub.author.id}
-                  initialFollowing={pub.author_is_following}
-                />
+        <View style={styles.page}>
+          <View style={styles.hero}>
+            {head.cover ? (
+              <Image source={{ uri: head.cover }} style={styles.cover} contentFit="cover" transition={150} />
+            ) : (
+              <View style={[styles.cover, styles.coverFallback]}>
+                <MaterialIcons name="menu-book" size={40} color={colors.textMuted} />
               </View>
-            ) : null}
+            )}
+            <View style={styles.heroInfo}>
+              <View style={styles.badgeRow}>
+                <Text style={styles.catBadge}>{categoryLabel(head.category, t)}</Text>
+                {head.status === 'draft' && <Text style={styles.draftBadge}>{t('pubDetail.draft')}</Text>}
+              </View>
+              <Text style={styles.title}>{head.title}</Text>
+              <Text style={styles.author}>{t('pubDetail.by', { name: head.author?.username || t('articles.unknownAuthor') })}</Text>
+              <Text style={styles.meta}>
+                {chapterTotal === 1 ? t('pubDetail.chapterCountOne') : t('pubDetail.chapterCount', { n: chapterTotal })}
+                {pub?.reading_minutes ? ` · ${t('pubDetail.minRead', { n: pub.reading_minutes })}` : ''}
+              </Text>
+              {pub && !pub.is_owner && pub.author?.id && isAuthenticated ? (
+                <View style={styles.followWrap}>
+                  <FollowButton userId={pub.author.id} initialFollowing={pub.author_is_following} />
+                </View>
+              ) : null}
+            </View>
           </View>
-        </View>
 
-        {/* Engagement actions */}
-        <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.actionBtn} onPress={handleLike} activeOpacity={0.8}>
-            <Ionicons
-              name={liked ? 'heart' : 'heart-outline'}
-              size={20}
-              color={liked ? colors.error : colors.textSecondary}
-            />
-            <Text style={styles.actionText}>{likes > 0 ? likes : 'Like'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={handleBookmark} activeOpacity={0.8}>
-            <Ionicons
-              name={bookmarked ? 'bookmark' : 'bookmark-outline'}
-              size={19}
-              color={bookmarked ? colors.primary : colors.textSecondary}
-            />
-            <Text style={styles.actionText}>{bookmarked ? 'Saved' : 'Save'}</Text>
-          </TouchableOpacity>
-          {!pub.is_owner && (
-            <TouchableOpacity style={styles.actionBtn} onPress={() => setReportVisible(true)} activeOpacity={0.8}>
-              <Ionicons name="flag-outline" size={19} color={colors.error} />
-              <Text style={[styles.actionText, { color: colors.error }]}>{t('common.report')}</Text>
+          {/* Engagement actions */}
+          <View style={styles.actionsRow}>
+            <TouchableOpacity style={styles.actionBtn} onPress={handleLike} activeOpacity={0.8} disabled={!pub}
+              accessibilityRole="button" accessibilityState={{ selected: liked }} testID="pub-like">
+              <Ionicons name={liked ? 'heart' : 'heart-outline'} size={20} color={liked ? colors.error : colors.textSecondary} />
+              <Text style={styles.actionText}>{likes > 0 ? likes : t('pubDetail.like')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn} onPress={handleBookmark} activeOpacity={0.8} disabled={!pub}
+              accessibilityRole="button" accessibilityState={{ selected: bookmarked }} testID="pub-save">
+              <Ionicons name={bookmarked ? 'bookmark' : 'bookmark-outline'} size={19} color={bookmarked ? colors.primary : colors.textSecondary} />
+              <Text style={styles.actionText}>{bookmarked ? t('pubDetail.saved') : t('pubDetail.save')}</Text>
+            </TouchableOpacity>
+            {pub && !pub.is_owner && isAuthenticated && (
+              <TouchableOpacity style={styles.actionBtn} onPress={() => setReportVisible(true)} activeOpacity={0.8}
+                accessibilityRole="button">
+                <Ionicons name="flag-outline" size={19} color={colors.error} />
+                <Text style={[styles.actionText, { color: colors.error }]}>{t('common.report')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {head.summary ? <Text style={styles.summary}>{head.summary}</Text> : null}
+
+          {chapters.length > 0 && (
+            <TouchableOpacity style={styles.readBtn} onPress={() => read(lastRead)} activeOpacity={0.9}
+              accessibilityRole="button" testID="pub-read">
+              <Ionicons name="book-outline" size={18} color={colors.white} />
+              <Text style={styles.readBtnText}>
+                {lastRead > 0 ? t('pubDetail.continue', { n: lastRead + 1 }) : t('pubDetail.startReading')}
+              </Text>
             </TouchableOpacity>
           )}
-        </View>
 
-        {pub.summary ? <Text style={styles.summary}>{pub.summary}</Text> : null}
-
-        {chapters.length > 0 && (
-          <TouchableOpacity
-            style={styles.readBtn}
-            onPress={() => navigation.navigate('ChapterReader', {
-              publication: pub,
-              index: Math.min(pub.last_read_chapter || 0, chapters.length - 1),
-            })}
-            activeOpacity={0.9}
-          >
-            <Ionicons name="book-outline" size={18} color={colors.white} />
-            <Text style={styles.readBtnText}>
-              {pub.last_read_chapter > 0 ? `Continue · Chapter ${pub.last_read_chapter + 1}` : 'Start Reading'}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        <Text style={styles.tocTitle}>{t('common.contents')}</Text>
-        {chapters.length === 0 ? (
-          <Text style={styles.emptyToc}>{t('pubDetail.noChapters')}</Text>
-        ) : (
-          chapters.map((ch, idx) => (
+          {chapters.length > 0 && (
             <TouchableOpacity
-              key={ch.id ?? idx}
-              style={styles.tocRow}
-              activeOpacity={0.8}
-              onPress={() => navigation.navigate('ChapterReader', { publication: pub, index: idx })}
+              style={styles.downloadBtn}
+              onPress={onDownload}
+              disabled={download.state === 'running' || download.state === 'done'}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              testID="pub-download"
             >
-              <Text style={styles.tocNum}>{idx + 1}</Text>
-              <Text style={styles.tocChapter} numberOfLines={1}>{ch.title || `Chapter ${idx + 1}`}</Text>
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              {download.state === 'running'
+                ? <ActivityIndicator size="small" color={colors.textSecondary} />
+                : <Ionicons
+                    name={download.state === 'done' ? 'checkmark-circle' : download.state === 'failed' ? 'alert-circle-outline' : 'download-outline'}
+                    size={18}
+                    color={download.state === 'done' ? colors.success || colors.accent : download.state === 'failed' ? colors.error : colors.textSecondary}
+                  />}
+              <Text style={[styles.downloadText, download.state === 'failed' && { color: colors.error }]}>
+                {download.state === 'running'
+                  ? t('pubDetail.downloading', { done: download.done, total: download.total })
+                  : download.state === 'done' ? t('pubDetail.downloaded')
+                    : download.state === 'failed' ? t('pubDetail.downloadFailed') : t('pubDetail.download')}
+              </Text>
             </TouchableOpacity>
-          ))
-        )}
-        <View style={{ height: spacing.xxl }} />
+          )}
+
+          <Text style={styles.tocTitle}>{t('common.contents')}</Text>
+          {!pub ? (
+            <ChapterListSkeleton count={Math.min(6, Math.max(2, head.chapter_count || 4))} />
+          ) : chapters.length === 0 ? (
+            <Text style={styles.emptyToc}>{t('pubDetail.noChapters')}</Text>
+          ) : (
+            chapters.map((ch, idx) => (
+              <TouchableOpacity
+                key={ch.id ?? idx}
+                style={styles.tocRow}
+                activeOpacity={0.8}
+                onPress={() => read(idx)}
+                accessibilityRole="button"
+              >
+                <Text style={styles.tocNum}>{idx + 1}</Text>
+                <Text style={styles.tocChapter} numberOfLines={1}>{ch.title || t('pubDetail.chapterN', { n: idx + 1 })}</Text>
+                {idx === lastRead && lastRead > 0 ? <Ionicons name="bookmark" size={14} color={colors.accent} /> : null}
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))
+          )}
+          <View style={{ height: spacing.xxl }} />
+        </View>
       </ScrollView>
 
-      <ReportModal
-        visible={reportVisible}
-        onClose={() => setReportVisible(false)}
-        contentType="publication"
-        objectId={pub.id}
-      />
+      {pub ? (
+        <ReportModal
+          visible={reportVisible}
+          onClose={() => setReportVisible(false)}
+          contentType="publication"
+          objectId={pub.id}
+        />
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -234,8 +357,10 @@ const PublicationDetail = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, gap: spacing.sm, padding: spacing.lg },
-  errorText: { ...typography.body, color: colors.textSecondary },
-  retryBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, marginTop: spacing.xs },
+  errorText: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
+  errorActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
+  retryBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  secondaryBtn: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   retryBtnText: { ...typography.label, color: colors.white, fontWeight: '600' },
 
   topBar: {
@@ -246,7 +371,15 @@ const styles = StyleSheet.create({
   ownerActions: { flexDirection: 'row', alignItems: 'center' },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
 
+  offlineBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 6, backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  offlineText: { ...typography.caption, color: colors.textSecondary },
+
   content: { padding: spacing.md },
+  // A readable column on tablets rather than a stretched phone layout.
+  page: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   hero: { flexDirection: 'row', gap: spacing.md },
   cover: { width: 110, height: 150, borderRadius: radius.md, backgroundColor: colors.surface },
   coverFallback: { alignItems: 'center', justifyContent: 'center' },
@@ -254,7 +387,7 @@ const styles = StyleSheet.create({
   badgeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },
   catBadge: { ...typography.caption, color: colors.accent, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
   draftBadge: {
-    ...typography.caption, color: colors.warning, fontWeight: '700',
+    ...typography.caption, color: colors.warning, fontWeight: '700', textTransform: 'uppercase',
     borderWidth: 1, borderColor: colors.warning, borderRadius: radius.sm, paddingHorizontal: 6, fontSize: 10,
   },
   title: { ...typography.h2, color: colors.textPrimary },
@@ -280,6 +413,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 4, marginTop: spacing.lg, ...shadows.sm,
   },
   readBtnText: { ...typography.button, color: colors.white },
+  downloadBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    paddingVertical: spacing.sm, marginTop: spacing.sm,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+  },
+  downloadText: { ...typography.label, color: colors.textSecondary, fontWeight: '600', flexShrink: 1, textAlign: 'center' },
 
   tocTitle: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.xl, marginBottom: spacing.sm },
   emptyToc: { ...typography.body, color: colors.textMuted },

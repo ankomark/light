@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image,
-  ActivityIndicator, Alert, Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
+  ActivityIndicator, Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -13,18 +14,182 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   fetchPublication, createPublication, updatePublication,
 } from '../services/api';
+import { forgetBook, notePublicationsChanged } from '../services/publicationStore';
 import {
-  CATEGORIES, markdownTheme, markdownImageRule, WRITING_BGS, WRITING_TEXT_COLORS, WRITING_FONTS,
-  DEFAULT_WRITING_THEME, fontFamilyFor, extractInlineImages, appendInlineImage, expandInlineImages,
+  CATEGORIES, categoryLabel, markdownTheme, markdownImageRule, WRITING_BGS, WRITING_TEXT_COLORS, WRITING_FONTS,
+  DEFAULT_WRITING_THEME, fontFamilyFor, extractInlineImages, expandInlineImages,
 } from '../utils/publications';
 import { uploadMedia } from '../services/cloudinary';
+import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
 
 const blankChapter = () => ({ key: `${Date.now()}_${Math.random()}`, title: '', body: '', images: {}, preview: false });
 
+// A picture goes into the chapter as a plain markdown image of its R2 address:
+// a few dozen characters instead of hundreds of KB of base64 in the chapter —
+// which the reader used to download for every chapter, pictures and all.
+// (Older chapters' base64 pictures still work: they're kept as short tokens
+// while editing, as before.)
+const addImageMarkdown = (body, url) =>
+  `${body}${body && !body.endsWith('\n') ? '\n\n' : ''}![image](${url})\n\n`;
+
+// Legacy base64 tokens aren't worth keeping in the crash-recovery snapshot.
+const stripTokens = (body) => (body || '').replace(/!\[[^\]]*\]\(img:\/\/[^)\s]+\)/g, '').trim();
+
+const FORMAT_TOOLS = [
+  { kind: 'h1', icon: 'format-header-1' },
+  { kind: 'h2', icon: 'format-header-2' },
+  { kind: 'bold', icon: 'format-bold' },
+  { kind: 'italic', icon: 'format-italic' },
+  { kind: 'quote', icon: 'format-quote-close' },
+  { kind: 'list', icon: 'format-list-bulleted' },
+  { kind: 'numbered', icon: 'format-list-numbered' },
+  { kind: 'link', icon: 'link-variant' },
+  { kind: 'divider', icon: 'minus' },
+];
+
+/** The markdown for a format tapped on `body` with `sel` selected →
+ *  { body, caret: [start, end] }. It wraps the SELECTED text (real formatting)
+ *  and moves the caret — it never injects placeholder words, so nothing like
+ *  "bold text" can end up in the published reading. */
+export const formatBody = (body = '', sel, kind) => {
+  const s = sel || { start: body.length, end: body.length };
+  const start = Math.min(s.start, s.end);
+  const end = Math.max(s.start, s.end);
+  const picked = body.slice(start, end);
+  let before = body.slice(0, start);
+  let after = body.slice(end);
+  let insert = '';
+  let caret = null;
+
+  const wrap = (mk) => {
+    insert = `${mk}${picked}${mk}`;
+    const base = before.length;
+    // selection → cursor after the wrap; no selection → cursor between markers.
+    caret = picked ? [base + insert.length, base + insert.length] : [base + mk.length, base + mk.length];
+  };
+  const prefixLine = (pfx) => {
+    const lineStart = before.lastIndexOf('\n') + 1;
+    before = body.slice(0, lineStart);
+    insert = `${pfx}${body.slice(lineStart, end)}`;
+    after = body.slice(end);
+    const pos = before.length + insert.length;
+    caret = [pos, pos];
+  };
+
+  switch (kind) {
+    case 'bold': wrap('**'); break;
+    case 'italic': wrap('*'); break; // '*' renders intraword; '_' does not
+    case 'h1': prefixLine('# '); break;
+    case 'h2': prefixLine('## '); break;
+    case 'quote': prefixLine('> '); break;
+    case 'list': prefixLine('- '); break;
+    case 'numbered': prefixLine('1. '); break;
+    case 'link': {
+      const text = picked || 'link';
+      insert = `[${text}](url)`;
+      const base = before.length;
+      // Highlight the part the author should replace next (text or the url).
+      caret = picked ? [base + text.length + 3, base + text.length + 6] : [base + 1, base + 1 + text.length];
+      break;
+    }
+    case 'divider': {
+      before = body.slice(0, end); after = body.slice(end); insert = '\n\n---\n\n';
+      const pos = before.length + insert.length;
+      caret = [pos, pos];
+      break;
+    }
+    default: return null;
+  }
+  return { body: `${before}${insert}${after}`, caret };
+};
+
+// One chapter's card. Memoised: typing in one chapter no longer redraws every
+// other chapter (and their markdown previews) on each keystroke.
+const ChapterCard = memo(({
+  ch, idx, count, theme, selection, uploading, t,
+  onChange, onFormat, onSelect, onImage, onMove, onRemove,
+}) => (
+  <View style={styles.chapterCard}>
+    <View style={styles.chapterTop}>
+      <Text style={styles.chapterNum}>{t('pubDetail.chapterN', { n: idx + 1 })}</Text>
+      <View style={styles.chapterTools}>
+        <TouchableOpacity onPress={() => onMove(idx, -1)} disabled={idx === 0} hitSlop={6} style={styles.toolBtn}>
+          <Ionicons name="arrow-up" size={17} color={idx === 0 ? colors.textMuted : colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => onMove(idx, 1)} disabled={idx === count - 1} hitSlop={6} style={styles.toolBtn}>
+          <Ionicons name="arrow-down" size={17} color={idx === count - 1 ? colors.textMuted : colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => onImage(ch.key)} hitSlop={6} style={styles.toolBtn} disabled={uploading}>
+          {uploading ? <ActivityIndicator size="small" color={colors.accent} /> : <Ionicons name="image-outline" size={18} color={colors.accent} />}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => onChange(ch.key, { preview: !ch.preview })} hitSlop={6} style={styles.toolBtn}>
+          <Ionicons name={ch.preview ? 'create-outline' : 'eye-outline'} size={18} color={colors.primary} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => onRemove(ch.key)} hitSlop={6} style={styles.toolBtn}>
+          <MaterialIcons name="delete-outline" size={19} color={colors.error} />
+        </TouchableOpacity>
+      </View>
+    </View>
+
+    <TextInput
+      style={styles.chapterTitleInput}
+      placeholder={t('pub.chapterTitlePlaceholder')}
+      placeholderTextColor={colors.placeholder}
+      value={ch.title}
+      onChangeText={(v) => onChange(ch.key, { title: v })}
+    />
+
+    {ch.preview ? (
+      <View style={[styles.previewBox, { backgroundColor: theme.bg }]}>
+        <Markdown
+          style={markdownTheme(16 + theme.scale, { color: theme.text, fontFamily: fontFamilyFor(theme.font) })}
+          rules={markdownImageRule}
+        >
+          {expandInlineImages(ch.body, ch.images) || `_${t('pub.previewEmpty')}_`}
+        </Markdown>
+      </View>
+    ) : (
+      <>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          style={styles.toolbar}
+          contentContainerStyle={styles.toolbarRow}
+        >
+          {FORMAT_TOOLS.map((tool) => (
+            <TouchableOpacity key={tool.kind} style={styles.toolBtnFmt} onPress={() => onFormat(ch.key, tool.kind)} activeOpacity={0.7}>
+              <MaterialCommunityIcons name={tool.icon} size={18} color={colors.textPrimary} />
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={styles.toolBtnFmt} onPress={() => onImage(ch.key)} activeOpacity={0.7} disabled={uploading}
+            testID={`editor-image-${idx}`}>
+            <MaterialCommunityIcons name="image-plus" size={18} color={colors.accent} />
+          </TouchableOpacity>
+        </ScrollView>
+        {uploading ? <Text style={styles.uploadingText}>{t('pub.uploading')}</Text> : null}
+        <TextInput
+          style={[styles.bodyInput, { backgroundColor: theme.bg, color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}
+          placeholder={t('pub.chapterBodyPlaceholder')}
+          placeholderTextColor={`${theme.text}80`}
+          value={ch.body}
+          onChangeText={(v) => onChange(ch.key, { body: v })}
+          onSelectionChange={(e) => onSelect(ch.key, e)}
+          selection={selection || undefined}
+          multiline
+          textAlignVertical="top"
+        />
+      </>
+    )}
+  </View>
+));
+
 const PublicationEditor = ({ route, navigation }) => {
   const { t } = useI18n();
+  const { isAuthenticated, currentUser } = useAuth();
   const editId = route.params?.id || null;
   const [loading, setLoading] = useState(!!editId);
   const [saving, setSaving] = useState(false);
@@ -32,111 +197,140 @@ const PublicationEditor = ({ route, navigation }) => {
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [cover, setCover] = useState('');
+  const [coverUploading, setCoverUploading] = useState(false);
   const [category, setCategory] = useState('devotional');
   const [status, setStatus] = useState('draft');
   const [chapters, setChapters] = useState([blankChapter()]);
   const [theme, setTheme] = useState(DEFAULT_WRITING_THEME); // reading look (bg/text/font/scale)
   const [showDesign, setShowDesign] = useState(false);
+  const [uploadingKeys, setUploadingKeys] = useState({});   // chapter key → pictures on their way
+  const serverUpdatedAt = useRef(null);
 
-  // Load existing publication when editing.
+  // ── Unsaved changes ────────────────────────────────────────────────────────
+  // Anything changed after the form is filled (from the server or a restore)
+  // makes leaving ask first — the close button, a swipe, the phone's back.
+  const dirty = useRef(false);
+  const settled = useRef(false);
+  const leaving = useRef(false);
   useEffect(() => {
-    if (!editId) return;
-    (async () => {
-      try {
-        const p = await fetchPublication(editId);
-        setTitle(p.title || '');
-        setSummary(p.summary || '');
-        setCover(p.cover || '');
-        setCategory(p.category || 'other');
-        setStatus(p.status || 'draft');
-        setTheme({ ...DEFAULT_WRITING_THEME, ...(p.theme || {}) });
-        setChapters(
-          (p.chapters || []).length
-            ? p.chapters.map((c, i) => {
-                // Pull stored data-URI images out of the editable text into tokens.
-                const { body, images } = extractInlineImages(c.body || '');
-                return { key: `e${c.id ?? i}`, title: c.title || '', body, images, preview: false };
-              })
-            : [blankChapter()]
-        );
-      } catch {
-        Alert.alert(t('common.error'), t('pub.loadFailed'));
-        navigation.goBack();
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [editId, navigation, t]);
+    if (loading) return;
+    if (!settled.current) { settled.current = true; return; }
+    dirty.current = true;
+  }, [title, summary, cover, category, theme, chapters, loading]);
+
+  useEffect(() => navigation.addListener('beforeRemove', (e) => {
+    if (!dirty.current || leaving.current) return;
+    e.preventDefault();
+    confirmAction({
+      title: t('pub.leaveTitle'), message: t('pub.leaveBody'),
+      confirmLabel: t('pub.discard'), cancelLabel: t('pub.keepEditing'), destructive: true,
+    }).then((ok) => {
+      if (!ok) return;
+      leaving.current = true;
+      AsyncStorage.removeItem(draftKey).catch(() => {});
+      navigation.dispatch(e.data.action);
+    });
+  }), [navigation, t]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fill = useCallback((d, { fromServer = false } = {}) => {
+    setTitle(d.title || '');
+    setSummary(d.summary || '');
+    if (fromServer || d.cover) setCover(d.cover || '');
+    setCategory(d.category || (fromServer ? 'other' : 'devotional'));
+    if (d.status) setStatus(d.status);
+    setTheme({ ...DEFAULT_WRITING_THEME, ...(d.theme || {}) });
+    setChapters(
+      (d.chapters || []).length
+        ? d.chapters.map((c, i) => {
+            // Stored data-URI images out of the editable text into short tokens.
+            const { body, images } = extractInlineImages(c.body || '');
+            return { key: `${fromServer ? 'e' : 'r'}${c.id ?? i}`, title: c.title || '', body, images, preview: false };
+          })
+        : [blankChapter()],
+    );
+  }, []);
 
   // ── Local autosave / crash recovery ──────────────────────────────────────
   const draftKey = `pubdraft:${editId || 'new'}`;
 
-  // Offer to restore a previous unsaved draft for a brand-new publication.
-  useEffect(() => {
-    if (editId) return; // edits load from the server
-    AsyncStorage.getItem(draftKey).then((raw) => {
-      if (!raw) return;
-      let d;
-      try { d = JSON.parse(raw); } catch { return; }
-      const hasContent = d?.title?.trim() || (d?.chapters || []).some((c) => c.title || c.body);
-      if (!hasContent) return;
-      Alert.alert(t('pub.unsavedTitle'), t('pub.unsavedBody'), [
-        { text: 'Discard', style: 'destructive', onPress: () => AsyncStorage.removeItem(draftKey).catch(() => {}) },
-        { text: 'Restore', onPress: () => {
-          setTitle(d.title || '');
-          setSummary(d.summary || '');
-          setCategory(d.category || 'devotional');
-          setTheme({ ...DEFAULT_WRITING_THEME, ...(d.theme || {}) });
-          setChapters((d.chapters || []).length
-            ? d.chapters.map((c, i) => ({ key: `r${i}`, title: c.title || '', body: c.body || '', images: {}, preview: false }))
-            : [blankChapter()]);
-        } },
-      ]);
-    }).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // A snapshot left by a crash (or a closed app) — offered back once. For an
+  // edit, only when it's newer than what the server has.
+  const offerRestore = useCallback(async (serverAt) => {
+    let d;
+    try { d = JSON.parse(await AsyncStorage.getItem(draftKey)); } catch { return; }
+    const hasContent = d?.title?.trim() || (d?.chapters || []).some((c) => c.title || c.body);
+    if (!hasContent) return;
+    if (serverAt && !(d.at > Date.parse(serverAt))) return;
+    const ok = await confirmAction({
+      title: t('pub.unsavedTitle'), message: t('pub.unsavedBody'),
+      confirmLabel: t('pub.restore'), cancelLabel: t('pub.discard'),
+    });
+    // Restored work is unsaved work: leaving still asks.
+    if (ok) { fill(d); dirty.current = true; } else AsyncStorage.removeItem(draftKey).catch(() => {});
+  }, [draftKey, fill, t]);
 
-  // Debounced text-only autosave (no base64 — keeps the snapshot small so the
-  // typed work survives a crash; images are re-added on restore).
+  // Load the publication when editing (bodies included — it's the editor).
   useEffect(() => {
-    if (loading) return undefined;
-    const t = setTimeout(() => {
+    if (!editId) { offerRestore(null); return; }
+    (async () => {
+      try {
+        const p = await fetchPublication(editId);
+        serverUpdatedAt.current = p.updated_at;
+        fill(p, { fromServer: true });
+        setLoading(false);
+        offerRestore(p.updated_at);
+      } catch {
+        notify(t('common.error'), t('pub.loadFailed'));
+        leaving.current = true;
+        navigation.goBack();
+      }
+    })();
+  }, [editId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced autosave. Pictures are addresses now, so they're kept too; only
+  // older base64 pictures (tokens) are left out.
+  useEffect(() => {
+    if (loading || !dirty.current) return undefined;
+    const h = setTimeout(() => {
       const snapshot = {
-        title, summary, category, theme,
-        chapters: chapters.map((c) => ({
-          title: c.title,
-          body: (c.body || '').replace(/!\[[^\]]*\]\(img:\/\/[^)\s]+\)/g, '').trim(),
-        })),
+        title, summary, cover, category, theme,
+        chapters: chapters.map((c) => ({ title: c.title, body: stripTokens(c.body) })),
         at: Date.now(),
       };
       AsyncStorage.setItem(draftKey, JSON.stringify(snapshot)).catch(() => {});
     }, 1200);
-    return () => clearTimeout(t);
-  }, [title, summary, category, theme, chapters, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => clearTimeout(h);
+  }, [title, summary, cover, category, theme, chapters, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pickImage = async (aspect) => {
+    const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (perm !== 'granted') return { denied: true };
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true, // gives the crop UI
+      ...(aspect ? { aspect } : {}),
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.length) return null;
+    return result.assets[0];
+  };
 
   const pickCover = async () => {
     try {
-      const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm !== 'granted') {
-        Alert.alert(t('chat.permissionRequired'), t('pub.permissionCover'));
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [3, 4],
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets?.length) {
-        const processed = await compressImage(result.assets[0].uri, { width: 600, quality: 0.6 });
-        const uploaded = await uploadMedia(
-          { uri: processed.uri, name: `cover_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
-          'cover',
-        );
-        setCover(uploaded.url);
-      }
-    } catch (err) {
-      console.error('Cover picker error:', err);
-      Alert.alert(t('common.error'), t('pub.uploadFailed'));
+      const asset = await pickImage([3, 4]);
+      if (asset?.denied) { notify(t('chat.permissionRequired'), t('pub.permissionCover')); return; }
+      if (!asset) return;
+      setCoverUploading(true);
+      const processed = await compressImage(asset.uri, { width: 600, quality: 0.6 });
+      const uploaded = await uploadMedia(
+        { uri: processed.uri, name: `cover_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+        'cover',
+      );
+      setCover(uploaded.url);
+    } catch {
+      notify(t('common.error'), t('pub.uploadFailed'));
+    } finally {
+      setCoverUploading(false);
     }
   };
 
@@ -147,140 +341,89 @@ const PublicationEditor = ({ route, navigation }) => {
   // Track each chapter's cursor/selection so the toolbar inserts at the caret.
   const selRef = useRef({});
   const [pendingSel, setPendingSel] = useState(null); // {key,start,end} applied once
-  const onBodySelect = (key, e) => {
+  const onBodySelect = useCallback((key, e) => {
     selRef.current[key] = e.nativeEvent.selection;
     setPendingSel((p) => (p && p.key === key ? null : p)); // release control after it lands
-  };
+  }, []);
 
-  // Insert markdown for the tapped format. It wraps the SELECTED text (real
-  // formatting) and moves the caret — it never injects placeholder words, so
-  // nothing like "bold text" can end up in the published reading.
-  const applyFormat = (key, kind) => {
-    const c = chapters.find((x) => x.key === key);
+  const chaptersRef = useRef(chapters);
+  chaptersRef.current = chapters;
+  const applyFormat = useCallback((key, kind) => {
+    const c = chaptersRef.current.find((x) => x.key === key);
     if (!c) return;
-    const body = c.body || '';
-    const sel = selRef.current[key] || { start: body.length, end: body.length };
-    const start = Math.min(sel.start, sel.end);
-    const end = Math.max(sel.start, sel.end);
-    const picked = body.slice(start, end);
-    let before = body.slice(0, start);
-    let after = body.slice(end);
-    let insert = '';
-    let caret = null; // [start, end] in the new body
-
-    const wrap = (mk) => {
-      insert = `${mk}${picked}${mk}`;
-      const base = before.length;
-      // selection → cursor after the wrap; no selection → cursor between markers.
-      caret = picked ? [base + insert.length, base + insert.length] : [base + mk.length, base + mk.length];
-    };
-    const prefixLine = (pfx) => {
-      const lineStart = before.lastIndexOf('\n') + 1;
-      before = body.slice(0, lineStart);
-      insert = `${pfx}${body.slice(lineStart, end)}`;
-      after = body.slice(end);
-      const pos = before.length + insert.length;
-      caret = [pos, pos];
-    };
-
-    switch (kind) {
-      case 'bold': wrap('**'); break;
-      case 'italic': wrap('*'); break; // '*' renders intraword; '_' does not
-      case 'h1': prefixLine('# '); break;
-      case 'h2': prefixLine('## '); break;
-      case 'quote': prefixLine('> '); break;
-      case 'list': prefixLine('- '); break;
-      case 'numbered': prefixLine('1. '); break;
-      case 'link': {
-        const text = picked || 'link';
-        insert = `[${text}](url)`;
-        const base = before.length;
-        // Highlight the part the author should replace next (text or the url).
-        caret = picked ? [base + text.length + 3, base + text.length + 6] : [base + 1, base + 1 + text.length];
-        break;
-      }
-      case 'divider': before = body.slice(0, end); after = body.slice(end); insert = '\n\n---\n\n'; { const pos = before.length + insert.length; caret = [pos, pos]; } break;
-      default: return;
+    const out = formatBody(c.body || '', selRef.current[key], kind);
+    if (!out) return;
+    updateChapter(key, { body: out.body });
+    if (out.caret) {
+      selRef.current[key] = { start: out.caret[0], end: out.caret[1] };
+      setPendingSel({ key, start: out.caret[0], end: out.caret[1] });
     }
+  }, [updateChapter]);
 
-    updateChapter(key, { body: `${before}${insert}${after}` });
-    if (caret) {
-      selRef.current[key] = { start: caret[0], end: caret[1] };
-      setPendingSel({ key, start: caret[0], end: caret[1] });
-    }
-  };
-
-  const FORMAT_TOOLS = [
-    { kind: 'h1', icon: 'format-header-1', set: 'mci' },
-    { kind: 'h2', icon: 'format-header-2', set: 'mci' },
-    { kind: 'bold', icon: 'format-bold', set: 'mci' },
-    { kind: 'italic', icon: 'format-italic', set: 'mci' },
-    { kind: 'quote', icon: 'format-quote-close', set: 'mci' },
-    { kind: 'list', icon: 'format-list-bulleted', set: 'mci' },
-    { kind: 'numbered', icon: 'format-list-numbered', set: 'mci' },
-    { kind: 'link', icon: 'link-variant', set: 'mci' },
-    { kind: 'divider', icon: 'minus', set: 'mci' },
-  ];
-
-  // Pick + crop an image and drop it into the chapter as a markdown image, so it
-  // renders inline both in the live preview and in the reader.
-  const insertImage = async (key) => {
+  // Pick + crop a picture, upload it, and put it in the chapter where the
+  // reader and the preview both show it.
+  const insertImage = useCallback(async (key) => {
     try {
-      const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm !== 'granted') { Alert.alert(t('chat.permissionRequired'), t('pub.permissionImages')); return; }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true, // gives the crop UI
-        quality: 0.8,
-      });
-      if (result.canceled || !result.assets?.length) return;
-      const processed = await compressImage(result.assets[0].uri, {
-        width: 1000, quality: 0.6, base64: true,
-      });
-      const dataUri = `data:image/jpeg;base64,${processed.base64}`;
-      // Insert only a short token into the text; keep the heavy data URI in the
-      // side map so the TextInput never holds the giant base64 string.
-      setChapters((prev) => prev.map((c) => {
-        if (c.key !== key) return c;
-        const next = appendInlineImage(c.body || '', c.images || {}, dataUri);
-        return { ...c, body: next.body, images: next.images, preview: false };
-      }));
+      const asset = await pickImage();
+      if (asset?.denied) { notify(t('chat.permissionRequired'), t('pub.permissionImages')); return; }
+      if (!asset) return;
+      setUploadingKeys((u) => ({ ...u, [key]: (u[key] || 0) + 1 }));
+      const processed = await compressImage(asset.uri, { width: 1000, quality: 0.6 });
+      const uploaded = await uploadMedia(
+        { uri: processed.uri, name: `pubimg_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+        'cover',
+      );
+      setChapters((prev) => prev.map((c) => (c.key === key
+        ? { ...c, body: addImageMarkdown(c.body || '', uploaded.url), preview: false } : c)));
     } catch {
-      Alert.alert(t('common.error'), t('pub.addImageFailed'));
+      notify(t('common.error'), t('pub.addImageFailed'));
+    } finally {
+      setUploadingKeys((u) => {
+        const n = (u[key] || 1) - 1;
+        const next = { ...u };
+        if (n > 0) next[key] = n; else delete next[key];
+        return next;
+      });
     }
-  };
+  }, [t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addChapter = () => setChapters((prev) => [...prev, blankChapter()]);
 
-  const removeChapter = (key) => {
-    if (chapters.length === 1) {
-      Alert.alert(t('pub.keepChapterTitle'), t('pub.keepChapterBody'));
+  const removeChapter = useCallback((key) => {
+    if (chaptersRef.current.length === 1) {
+      notify(t('pub.keepChapterTitle'), t('pub.keepChapterBody'));
       return;
     }
-    setChapters((prev) => prev.filter((c) => c.key !== key));
-  };
+    setChapters((prev) => (prev.length === 1 ? prev : prev.filter((c) => c.key !== key)));
+  }, [t]);
 
-  const moveChapter = (idx, dir) => {
-    const target = idx + dir;
-    if (target < 0 || target >= chapters.length) return;
+  const moveChapter = useCallback((idx, dir) => {
     setChapters((prev) => {
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
       const next = [...prev];
       [next[idx], next[target]] = [next[target], next[idx]];
       return next;
     });
-  };
+  }, []);
+
+  const uploadsPending = coverUploading || Object.keys(uploadingKeys).length > 0;
 
   const save = async (publish) => {
+    if (uploadsPending) {
+      notify(t('pub.uploading'), t('pub.waitUploads'));
+      return;
+    }
     if (!title.trim()) {
-      Alert.alert(t('pub.missingTitleTitle'), t('pub.missingTitleBody'));
+      notify(t('pub.missingTitleTitle'), t('pub.missingTitleBody'));
       return;
     }
     const cleaned = chapters
-      // Expand image tokens back to real data URIs for storage / the reader.
+      // Expand older base64 tokens back for storage.
       .map((c, i) => ({ order: i + 1, title: c.title.trim(), body: expandInlineImages(c.body, c.images).trim() }))
       .filter((c) => c.title || c.body);
     if (cleaned.length === 0) {
-      Alert.alert(t('pub.addContentTitle'), t('pub.addContentBody'));
+      notify(t('pub.addContentTitle'), t('pub.addContentBody'));
       return;
     }
     const payload = {
@@ -298,14 +441,35 @@ const PublicationEditor = ({ route, navigation }) => {
         ? await updatePublication(editId, payload)
         : await createPublication(payload);
       AsyncStorage.removeItem(draftKey).catch(() => {}); // work is safely on the server now
-      navigation.navigate('PublicationDetail', { id: saved.id });
+      forgetBook(currentUser?.id, saved.id);   // its page reloads with the new contents
+      notePublicationsChanged();
+      leaving.current = true;
+      // Editing: back to the book page (it reloads). New: the book page takes
+      // the editor's place — back from it goes to the list, not the editor.
+      if (editId) navigation.goBack();
+      else navigation.replace('PublicationDetail', { id: saved.id });
     } catch (err) {
       const msg = err?.response?.data?.error || t('pub.saveFailed');
-      Alert.alert(t('common.error'), msg);
+      notify(t('common.error'), msg);
     } finally {
       setSaving(false);
     }
   };
+
+  if (!isAuthenticated) {
+    return (
+      <SafeAreaView style={styles.centered} edges={['top']}>
+        <Ionicons name="create-outline" size={46} color={colors.textMuted} />
+        <Text style={styles.signInText}>{t('articles.signInMine')}</Text>
+        <TouchableOpacity style={styles.signInBtn} onPress={() => navigation.replace('Login')}>
+          <Text style={styles.publishBtnText}>{t('auth.login')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: spacing.sm }}>
+          <Text style={styles.hint}>{t('common.goBack')}</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   if (loading) {
     return <View style={styles.centered}><ActivityIndicator size="large" color={colors.primary} /></View>;
@@ -314,10 +478,11 @@ const PublicationEditor = ({ route, navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
+          accessibilityRole="button" accessibilityLabel={t('common.back')} testID="editor-close">
           <Ionicons name="close" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.topTitle}>{editId ? 'Edit' : 'New publication'}</Text>
+        <Text style={styles.topTitle}>{editId ? t('pub.editTitle') : t('pub.newTitle')}</Text>
         <View style={styles.iconBtn} />
       </View>
 
@@ -331,220 +496,175 @@ const PublicationEditor = ({ route, navigation }) => {
         extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
         keyboardOpeningTime={0}
       >
-        {/* Cover */}
-        <View style={styles.coverRow}>
-          <TouchableOpacity style={styles.coverPicker} onPress={pickCover} activeOpacity={0.85}>
-            {cover ? (
-              <Image source={{ uri: cover }} style={styles.coverImg} />
-            ) : (
-              <>
-                <Ionicons name="image-outline" size={26} color={colors.textMuted} />
-                <Text style={styles.coverHint}>{t('pub.cover')}</Text>
-              </>
-            )}
+        <View style={styles.page}>
+          {/* Cover */}
+          <View style={styles.coverRow}>
+            <TouchableOpacity style={styles.coverPicker} onPress={pickCover} activeOpacity={0.85} disabled={coverUploading}>
+              {coverUploading ? (
+                <ActivityIndicator color={colors.accent} />
+              ) : cover ? (
+                <Image source={{ uri: cover }} style={styles.coverImg} contentFit="cover" />
+              ) : (
+                <>
+                  <Ionicons name="image-outline" size={26} color={colors.textMuted} />
+                  <Text style={styles.coverHint}>{t('pub.cover')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <View style={styles.coverSide}>
+              <Text style={styles.label}>{t('pub.coverImage')}</Text>
+              <Text style={styles.hint}>{t('pub.coverHint')}</Text>
+              {cover && !coverUploading ? (
+                <TouchableOpacity onPress={() => setCover('')}><Text style={styles.removeLink}>{t('common.remove')}</Text></TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+
+          <Text style={styles.label}>{t('pub.title')}</Text>
+          <TextInput
+            style={styles.input}
+            placeholder={t('pub.titlePlaceholder')}
+            placeholderTextColor={colors.placeholder}
+            value={title}
+            onChangeText={setTitle}
+            maxLength={200}
+            testID="editor-title"
+          />
+
+          <Text style={styles.label}>{t('pub.summary')}</Text>
+          <TextInput
+            style={[styles.input, styles.multiline]}
+            placeholder={t('pub.summaryPlaceholder')}
+            placeholderTextColor={colors.placeholder}
+            value={summary}
+            onChangeText={setSummary}
+            multiline
+          />
+
+          <Text style={styles.label}>{t('pub.category')}</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.catScroll}
+            contentContainerStyle={styles.catRow}
+            keyboardShouldPersistTaps="handled"
+          >
+            {CATEGORIES.map((c) => {
+              const active = c.key === category;
+              return (
+                <TouchableOpacity
+                  key={c.key}
+                  style={[styles.catChip, active && styles.catChipActive]}
+                  onPress={() => setCategory(c.key)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.catChipText, active && styles.catChipTextActive]}>{categoryLabel(c.key, t)}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Reading design: background, font, text colour */}
+          <TouchableOpacity style={styles.designToggle} onPress={() => setShowDesign((s) => !s)} activeOpacity={0.85}>
+            <MaterialIcons name="palette" size={18} color={colors.accent} />
+            <Text style={styles.designToggleText}>{t('pub.readingDesign')}</Text>
+            <View style={[styles.designPeek, { backgroundColor: theme.bg }]}>
+              <Text style={[styles.designPeekText, { color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}>Aa</Text>
+            </View>
+            <Ionicons name={showDesign ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
           </TouchableOpacity>
-          <View style={styles.coverSide}>
-            <Text style={styles.label}>{t('pub.coverImage')}</Text>
-            <Text style={styles.hint}>{t('pub.coverHint')}</Text>
-            {cover ? (
-              <TouchableOpacity onPress={() => setCover('')}><Text style={styles.removeLink}>{t('common.remove')}</Text></TouchableOpacity>
-            ) : null}
-          </View>
-        </View>
 
-        <Text style={styles.label}>{t('pub.title')}</Text>
-        <TextInput
-          style={styles.input}
-          placeholder={t('pub.titlePlaceholder')}
-          placeholderTextColor={colors.placeholder}
-          value={title}
-          onChangeText={setTitle}
-        />
+          {showDesign && (
+            <View style={styles.designPanel}>
+              <View style={[styles.designPreview, { backgroundColor: theme.bg }]}>
+                <Text style={[styles.designPreviewText, { color: theme.text, fontFamily: fontFamilyFor(theme.font), fontSize: 17 + theme.scale }]}>
+                  {t('pub.designSample')}
+                </Text>
+              </View>
 
-        <Text style={styles.label}>{t('pub.summary')}</Text>
-        <TextInput
-          style={[styles.input, styles.multiline]}
-          placeholder={t('pub.summaryPlaceholder')}
-          placeholderTextColor={colors.placeholder}
-          value={summary}
-          onChangeText={setSummary}
-          multiline
-        />
-
-        <Text style={styles.label}>{t('pub.category')}</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.catScroll}
-          contentContainerStyle={styles.catRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {CATEGORIES.map((c) => {
-            const active = c.key === category;
-            return (
-              <TouchableOpacity
-                key={c.key}
-                style={[styles.catChip, active && styles.catChipActive]}
-                onPress={() => setCategory(c.key)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.catChipText, active && styles.catChipTextActive]}>{c.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        {/* Reading design: background, font, text colour */}
-        <TouchableOpacity style={styles.designToggle} onPress={() => setShowDesign((s) => !s)} activeOpacity={0.85}>
-          <MaterialIcons name="palette" size={18} color={colors.accent} />
-          <Text style={styles.designToggleText}>{t('pub.readingDesign')}</Text>
-          <View style={[styles.designPeek, { backgroundColor: theme.bg }]}>
-            <Text style={[styles.designPeekText, { color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}>Aa</Text>
-          </View>
-          <Ionicons name={showDesign ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
-        </TouchableOpacity>
-
-        {showDesign && (
-          <View style={styles.designPanel}>
-            <View style={[styles.designPreview, { backgroundColor: theme.bg }]}>
-              <Text style={[styles.designPreviewText, { color: theme.text, fontFamily: fontFamilyFor(theme.font), fontSize: 17 + theme.scale }]}>
-                The heavens declare the glory of God.
-              </Text>
-            </View>
-
-            <Text style={styles.designLabel}>{t('pub.background')}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
-              {WRITING_BGS.map((b) => (
-                <TouchableOpacity
-                  key={b.key}
-                  onPress={() => setTheme((t) => ({ ...t, bg: b.bg, text: b.text }))}
-                  style={[styles.bgSwatch, { backgroundColor: b.bg }, theme.bg === b.bg && styles.swatchActive]}
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.bgSwatchText, { color: b.text }]}>Aa</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.designLabel}>{t('pub.textColour')}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
-              {WRITING_TEXT_COLORS.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  onPress={() => setTheme((t) => ({ ...t, text: c }))}
-                  style={[styles.colorDot, { backgroundColor: c }, theme.text === c && styles.colorDotActive]}
-                  activeOpacity={0.85}
-                />
-              ))}
-            </ScrollView>
-
-            <Text style={styles.designLabel}>{t('pub.font')}</Text>
-            <View style={styles.fontRow}>
-              {WRITING_FONTS.map((f) => {
-                const active = theme.font === f.key;
-                return (
-                  <TouchableOpacity key={f.key} onPress={() => setTheme((t) => ({ ...t, font: f.key }))} style={[styles.fontChip, active && styles.fontChipActive]} activeOpacity={0.85}>
-                    <Text style={[styles.fontChipText, { fontFamily: f.family }, active && styles.fontChipTextActive]}>{f.label}</Text>
+              <Text style={styles.designLabel}>{t('pub.background')}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
+                {WRITING_BGS.map((b) => (
+                  <TouchableOpacity
+                    key={b.key}
+                    onPress={() => setTheme((th) => ({ ...th, bg: b.bg, text: b.text }))}
+                    style={[styles.bgSwatch, { backgroundColor: b.bg }, theme.bg === b.bg && styles.swatchActive]}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel={b.label}
+                  >
+                    <Text style={[styles.bgSwatchText, { color: b.text }]}>Aa</Text>
                   </TouchableOpacity>
-                );
-              })}
-            </View>
+                ))}
+              </ScrollView>
 
-            <Text style={styles.designLabel}>{t('pub.readingSize')}</Text>
-            <View style={styles.sizeRow}>
-              <TouchableOpacity style={styles.sizeBtn} onPress={() => setTheme((t) => ({ ...t, scale: Math.max(-2, t.scale - 1) }))}><Text style={styles.sizeBtnText}>A−</Text></TouchableOpacity>
-              <Text style={styles.sizeValue}>{theme.scale > 0 ? `+${theme.scale}` : theme.scale}</Text>
-              <TouchableOpacity style={styles.sizeBtn} onPress={() => setTheme((t) => ({ ...t, scale: Math.min(4, t.scale + 1) }))}><Text style={styles.sizeBtnText}>A+</Text></TouchableOpacity>
-            </View>
-          </View>
-        )}
+              <Text style={styles.designLabel}>{t('pub.textColour')}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.swatchRow}>
+                {WRITING_TEXT_COLORS.map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => setTheme((th) => ({ ...th, text: c }))}
+                    style={[styles.colorDot, { backgroundColor: c }, theme.text === c && styles.colorDotActive]}
+                    activeOpacity={0.85}
+                  />
+                ))}
+              </ScrollView>
 
-        {/* Chapters */}
-        <View style={styles.chaptersHeader}>
-          <Text style={styles.sectionTitle}>{t('pub.chapters')}</Text>
-          <Text style={styles.hint}>{t('pub.markdownHint')}</Text>
-        </View>
-
-        {chapters.map((ch, idx) => (
-          <View key={ch.key} style={styles.chapterCard}>
-            <View style={styles.chapterTop}>
-              <Text style={styles.chapterNum}>Chapter {idx + 1}</Text>
-              <View style={styles.chapterTools}>
-                <TouchableOpacity onPress={() => moveChapter(idx, -1)} disabled={idx === 0} hitSlop={6} style={styles.toolBtn}>
-                  <Ionicons name="arrow-up" size={17} color={idx === 0 ? colors.textMuted : colors.textSecondary} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => moveChapter(idx, 1)} disabled={idx === chapters.length - 1} hitSlop={6} style={styles.toolBtn}>
-                  <Ionicons name="arrow-down" size={17} color={idx === chapters.length - 1 ? colors.textMuted : colors.textSecondary} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => insertImage(ch.key)} hitSlop={6} style={styles.toolBtn}>
-                  <Ionicons name="image-outline" size={18} color={colors.accent} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => updateChapter(ch.key, { preview: !ch.preview })} hitSlop={6} style={styles.toolBtn}>
-                  <Ionicons name={ch.preview ? 'create-outline' : 'eye-outline'} size={18} color={colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => removeChapter(ch.key)} hitSlop={6} style={styles.toolBtn}>
-                  <MaterialIcons name="delete-outline" size={19} color={colors.error} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <TextInput
-              style={styles.chapterTitleInput}
-              placeholder={t('pub.chapterTitlePlaceholder')}
-              placeholderTextColor={colors.placeholder}
-              value={ch.title}
-              onChangeText={(t) => updateChapter(ch.key, { title: t })}
-            />
-
-            {ch.preview ? (
-              <View style={[styles.previewBox, { backgroundColor: theme.bg }]}>
-                <Markdown
-                  style={markdownTheme(16 + theme.scale, { color: theme.text, fontFamily: fontFamilyFor(theme.font) })}
-                  rules={markdownImageRule}
-                >
-                  {expandInlineImages(ch.body, ch.images) || '_Nothing to preview yet._'}
-                </Markdown>
-              </View>
-            ) : (
-              <>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyboardShouldPersistTaps="always"
-                  style={styles.toolbar}
-                  contentContainerStyle={styles.toolbarRow}
-                >
-                  {FORMAT_TOOLS.map((tool) => (
-                    <TouchableOpacity key={tool.kind} style={styles.toolBtnFmt} onPress={() => applyFormat(ch.key, tool.kind)} activeOpacity={0.7}>
-                      <MaterialCommunityIcons name={tool.icon} size={18} color={colors.textPrimary} />
+              <Text style={styles.designLabel}>{t('pub.font')}</Text>
+              <View style={styles.fontRow}>
+                {WRITING_FONTS.map((f) => {
+                  const active = theme.font === f.key;
+                  return (
+                    <TouchableOpacity key={f.key} onPress={() => setTheme((th) => ({ ...th, font: f.key }))} style={[styles.fontChip, active && styles.fontChipActive]} activeOpacity={0.85}>
+                      <Text style={[styles.fontChipText, { fontFamily: f.family }, active && styles.fontChipTextActive]}>{f.label}</Text>
                     </TouchableOpacity>
-                  ))}
-                  <TouchableOpacity style={styles.toolBtnFmt} onPress={() => insertImage(ch.key)} activeOpacity={0.7}>
-                    <MaterialCommunityIcons name="image-plus" size={18} color={colors.accent} />
-                  </TouchableOpacity>
-                </ScrollView>
-                <TextInput
-                  style={[styles.bodyInput, { backgroundColor: theme.bg, color: theme.text, fontFamily: fontFamilyFor(theme.font) }]}
-                  placeholder={t('pub.chapterBodyPlaceholder')}
-                  placeholderTextColor={`${theme.text}80`}
-                  value={ch.body}
-                  onChangeText={(t) => updateChapter(ch.key, { body: t })}
-                  onSelectionChange={(e) => onBodySelect(ch.key, e)}
-                  selection={pendingSel?.key === ch.key ? { start: pendingSel.start, end: pendingSel.end } : undefined}
-                  multiline
-                  textAlignVertical="top"
-                />
-              </>
-            )}
+                  );
+                })}
+              </View>
+
+              <Text style={styles.designLabel}>{t('pub.readingSize')}</Text>
+              <View style={styles.sizeRow}>
+                <TouchableOpacity style={styles.sizeBtn} onPress={() => setTheme((th) => ({ ...th, scale: Math.max(-2, th.scale - 1) }))}><Text style={styles.sizeBtnText}>A−</Text></TouchableOpacity>
+                <Text style={styles.sizeValue}>{theme.scale > 0 ? `+${theme.scale}` : theme.scale}</Text>
+                <TouchableOpacity style={styles.sizeBtn} onPress={() => setTheme((th) => ({ ...th, scale: Math.min(4, th.scale + 1) }))}><Text style={styles.sizeBtnText}>A+</Text></TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Chapters */}
+          <View style={styles.chaptersHeader}>
+            <Text style={styles.sectionTitle}>{t('pub.chapters')}</Text>
+            <Text style={styles.hint}>{t('pub.markdownHint')}</Text>
           </View>
-        ))}
 
-        <TouchableOpacity style={styles.addChapterBtn} onPress={addChapter} activeOpacity={0.85}>
-          <Ionicons name="add" size={20} color={colors.primary} />
-          <Text style={styles.addChapterText}>{t('pub.addChapter')}</Text>
-        </TouchableOpacity>
+          {chapters.map((ch, idx) => (
+            <ChapterCard
+              key={ch.key}
+              ch={ch}
+              idx={idx}
+              count={chapters.length}
+              theme={theme}
+              selection={pendingSel?.key === ch.key ? { start: pendingSel.start, end: pendingSel.end } : null}
+              uploading={!!uploadingKeys[ch.key]}
+              t={t}
+              onChange={updateChapter}
+              onFormat={applyFormat}
+              onSelect={onBodySelect}
+              onImage={insertImage}
+              onMove={moveChapter}
+              onRemove={removeChapter}
+            />
+          ))}
 
-        <View style={{ height: spacing.xxl }} />
+          <TouchableOpacity style={styles.addChapterBtn} onPress={addChapter} activeOpacity={0.85}>
+            <Ionicons name="add" size={20} color={colors.primary} />
+            <Text style={styles.addChapterText}>{t('pub.addChapter')}</Text>
+          </TouchableOpacity>
+
+          <View style={{ height: spacing.xxl }} />
+        </View>
       </KeyboardAwareScrollView>
 
       {/* Save bar */}
@@ -554,6 +674,7 @@ const PublicationEditor = ({ route, navigation }) => {
           onPress={() => save(false)}
           disabled={saving}
           activeOpacity={0.85}
+          testID="editor-save-draft"
         >
           {saving ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.draftBtnText}>{t('pub.saveDraft')}</Text>}
         </TouchableOpacity>
@@ -562,8 +683,11 @@ const PublicationEditor = ({ route, navigation }) => {
           onPress={() => save(true)}
           disabled={saving}
           activeOpacity={0.85}
+          testID="editor-publish"
         >
-          {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishBtnText}>{t('pub.publish')}</Text>}
+          {saving ? <ActivityIndicator color={colors.white} /> : (
+            <Text style={styles.publishBtnText}>{status === 'published' && editId ? t('common.save') : t('pub.publish')}</Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -573,7 +697,9 @@ const PublicationEditor = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, padding: spacing.lg, gap: spacing.sm },
+  signInText: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
+  signInBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, marginTop: spacing.xs },
 
   topBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -584,6 +710,8 @@ const styles = StyleSheet.create({
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
 
   content: { padding: spacing.md },
+  // A writing column on tablets, not a stretched phone form.
+  page: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   label: { ...typography.label, color: colors.textSecondary, fontWeight: '700', marginBottom: spacing.xs, marginTop: spacing.sm },
   hint: { ...typography.caption, color: colors.textMuted },
   input: {
@@ -656,7 +784,7 @@ const styles = StyleSheet.create({
   chapterTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   chapterNum: { ...typography.label, color: colors.primary, fontWeight: '800' },
   chapterTools: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  toolBtn: { padding: 4 },
+  toolBtn: { padding: 4, minWidth: 26, alignItems: 'center' },
   chapterTitleInput: {
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
@@ -668,6 +796,7 @@ const styles = StyleSheet.create({
     width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
   },
+  uploadingText: { ...typography.caption, color: colors.accent, marginBottom: spacing.xs },
   bodyInput: {
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,

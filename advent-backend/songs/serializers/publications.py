@@ -20,6 +20,23 @@ class ChapterSerializer(serializers.ModelSerializer):
         extra_kwargs = {'id': {'read_only': True}}
 
 
+class ChapterTocSerializer(serializers.ModelSerializer):
+    """A chapter in the table of contents: no body (bodies can carry large
+    inline images; the reader fetches one chapter at a time)."""
+    class Meta:
+        model = Chapter
+        fields = ['id', 'order', 'title', 'word_count']
+        read_only_fields = fields
+
+
+class ChapterReadSerializer(serializers.ModelSerializer):
+    """One chapter for the reader."""
+    class Meta:
+        model = Chapter
+        fields = ['id', 'order', 'title', 'body', 'word_count']
+        read_only_fields = fields
+
+
 class PublicationListSerializer(serializers.ModelSerializer):
     """Lightweight row for the list — no chapter bodies. cover is an R2 URL."""
     author = SimpleUserSerializer(read_only=True)
@@ -45,7 +62,8 @@ class PublicationListSerializer(serializers.ModelSerializer):
         return bool(request and request.user.is_authenticated and obj.author_id == request.user.id)
 
     def get_chapter_count(self, obj):
-        return getattr(obj, 'chapter_count_anno', None) or obj.chapters.count()
+        anno = getattr(obj, 'chapter_count_anno', None)   # 0 is an answer too
+        return anno if anno is not None else obj.chapters.count()
 
     def get_likes_count(self, obj):
         anno = getattr(obj, 'likes_total', None)
@@ -65,7 +83,11 @@ class PublicationListSerializer(serializers.ModelSerializer):
 
 
 class PublicationDetailSerializer(serializers.ModelSerializer):
-    """Full publication with nested chapters — used for reading and editing."""
+    """Full publication with nested chapters — used for editing (and by app
+    builds from before the reader loaded chapters one at a time).
+
+    With context['toc'] the chapters come without their bodies: what the
+    book page needs, a small fraction of the bytes."""
     author = SimpleUserSerializer(read_only=True)
     chapters = ChapterSerializer(many=True)
     is_owner = serializers.SerializerMethodField()
@@ -86,26 +108,44 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['author', 'created_at', 'updated_at', 'published_at']
 
+    def get_fields(self):
+        fields = super().get_fields()
+        if self.context.get('toc'):
+            # Swapped, not filtered after: a body must never even be read.
+            fields['chapters'] = ChapterTocSerializer(many=True, read_only=True)
+        return fields
+
     def get_is_owner(self, obj):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.author_id == request.user.id)
 
+    # The view annotates what it can (one query for the lot); these fall back
+    # to a query each for an object that didn't come through it.
     def get_reading_minutes(self, obj):
-        words = sum(len((c.body or '').split()) for c in obj.chapters.all())
+        words = getattr(obj, 'words_total', None)
+        if words is None:
+            words = sum(c.word_count for c in obj.chapters.all())
         return max(1, round(words / WORDS_PER_MIN)) if words else 0
 
     def get_likes_count(self, obj):
-        return obj.likes.count()
+        anno = getattr(obj, 'likes_total', None)
+        return anno if anno is not None else obj.likes.count()
 
     def get_is_liked(self, obj):
+        if hasattr(obj, 'liked_by_me'):
+            return obj.liked_by_me
         user = _request_user(self)
         return bool(user and obj.likes.filter(user=user).exists())
 
     def get_is_bookmarked(self, obj):
+        if hasattr(obj, 'bookmarked_by_me'):
+            return obj.bookmarked_by_me
         user = _request_user(self)
         return bool(user and obj.bookmarks.filter(user=user).exists())
 
     def get_last_read_chapter(self, obj):
+        if hasattr(obj, 'my_last_chapter'):
+            return obj.my_last_chapter or 0
         user = _request_user(self)
         if not user:
             return 0
@@ -114,19 +154,24 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
 
     def get_author_is_following(self, obj):
         user = _request_user(self)
-        if user and user.id != obj.author_id:
-            return obj.author.followers.filter(id=user.id).exists()
-        return False
+        if not user or user.id == obj.author_id:
+            return False
+        if hasattr(obj, 'following_author'):
+            return obj.following_author
+        return obj.author.followers.filter(id=user.id).exists()
 
     def _sync_chapters(self, publication, chapters):
         publication.chapters.all().delete()
-        for i, ch in enumerate(chapters, start=1):
-            Chapter.objects.create(
+        Chapter.objects.bulk_create([
+            Chapter(
                 publication=publication,
                 order=ch.get('order', i),
                 title=ch.get('title', ''),
                 body=ch.get('body', ''),
+                word_count=Chapter.count_words(ch.get('body', '')),
             )
+            for i, ch in enumerate(chapters, start=1)
+        ])
 
     def create(self, validated_data):
         chapters = validated_data.pop('chapters', [])

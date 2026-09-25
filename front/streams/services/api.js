@@ -852,9 +852,15 @@ export const fetchMyPublications = async () => {
   return apiRequest('get', '/publications/mine/', null, { params: { page_size: 50 } });
 };
 
-export const fetchPublication = async (id) => {
-  return apiRequest('get', `/publications/${id}/`);
+// `toc`: the book page — chapters without their bodies (a fraction of the
+// bytes). Without it the bodies come too, which the editor needs.
+export const fetchPublication = async (id, { toc = false } = {}) => {
+  return apiRequest('get', `/publications/${id}/`, null, toc ? { params: { toc: 1 } } : undefined);
 };
+
+// One chapter by its place in the book (0-based): { index, count, chapter }.
+export const fetchPublicationChapter = async (id, index) =>
+  apiRequest('get', `/publications/${id}/chapters/${index}/`);
 
 export const createPublication = async (data) => {
   return apiRequest('post', '/publications/', data);

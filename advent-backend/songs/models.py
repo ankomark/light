@@ -2061,14 +2061,30 @@ class Publication(models.Model):
         return self.title
 
 
+_MD_IMAGE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
+_MD_LINK = re.compile(r'\[([^\]]*)\]\([^)]*\)')
+_MD_WORD = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*")
+
+
 class Chapter(models.Model):
     publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='chapters')
     order = models.PositiveIntegerField(default=1)
     title = models.CharField(max_length=200, blank=True)
     body = models.TextField(blank=True)  # markdown
+    # Words of prose (images and markdown left out), kept at save so the book
+    # page can show "N min read" without loading every chapter's body.
+    word_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ['order', 'id']
+
+    @staticmethod
+    def count_words(body):
+        """Words a reader reads: inline images (often long base64 data URIs)
+        and link targets don't count."""
+        text = _MD_IMAGE.sub(' ', body or '')
+        text = _MD_LINK.sub(r'\1', text)
+        return len(_MD_WORD.findall(text))
 
     def __str__(self):
         return f"{self.publication_id} · {self.order}. {self.title}"
