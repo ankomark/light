@@ -14,11 +14,22 @@ import { compressImage } from '../services/imageProcessing';
 import { uploadMedia } from '../services/cloudinary';
 import { createVideoStudio, updateVideoStudio } from '../services/api';
 import {
-  CATEGORIES, SERVICE_TYPES_BY_CATEGORY, SOCIAL_LINKS, CURRENCIES, serviceLabel, withScheme, noteServicesChanged,
+  CATEGORIES, SERVICE_TYPES_BY_CATEGORY, SOCIAL_LINKS, CURRENCIES, DAYS, serviceLabel, withScheme, noteServicesChanged,
 } from '../services/servicesCatalog';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+
+const GALLERY_MAX = 12;
+const HHMM = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
+const WEEKDAYS = ['tue', 'wed', 'thu', 'fri'];
+// 8:00 → 08:00, 830 → 08:30: forgiving about how a time is typed.
+export const tidyTime = (v) => {
+  const d = String(v || '').replace(/[^\d]/g, '');
+  if (!d) return '';
+  const [h, m] = d.length <= 2 ? [d, '00'] : [d.slice(0, d.length - 2), d.slice(-2)];
+  return `${h.padStart(2, '0')}:${m}`;
+};
 
 const EMPTY = {
   name: '', description: '', location: '', contact_phone: '', contact_email: '', whatsapp_number: '',
@@ -60,14 +71,16 @@ const ServiceForm = ({ route, navigation }) => {
     : { ...EMPTY, category: route.params?.category || 'media' }));
   const [logo, setLogo] = useState(existing?.logo || '');
   const [cover, setCover] = useState(existing?.cover_image || '');
+  const [gallery, setGallery] = useState(() => existing?.gallery || []);
+  const [hours, setHours] = useState(() => existing?.opening_hours || {});
   const [uploading, setUploading] = useState(null);           // 'logo' | 'cover'
   const [saving, setSaving] = useState(false);
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
 
   // Leaving with changes asks first (a swipe, the back button, the X).
-  const start = useRef(JSON.stringify({ form, logo, cover }));
+  const start = useRef(JSON.stringify({ form, logo, cover, gallery, hours }));
   const leaving = useRef(false);
-  const dirty = JSON.stringify({ form, logo, cover }) !== start.current;
+  const dirty = JSON.stringify({ form, logo, cover, gallery, hours }) !== start.current;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   useEffect(() => navigation.addListener('beforeRemove', (e) => {
@@ -84,14 +97,15 @@ const ServiceForm = ({ route, navigation }) => {
     if (status !== 'granted') { notify(t('chat.permissionRequired'), t('dir.permissionPhotos')); return; }
     const r = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true,
-      aspect: which === 'logo' ? [1, 1] : [16, 9], quality: 0.8,
+      aspect: which === 'logo' ? [1, 1] : which === 'gallery' ? [1, 1] : [16, 9], quality: 0.8,
     });
     if (r.canceled || !r.assets?.length) return;
     setUploading(which);
     try {
-      const small = await compressImage(r.assets[0].uri, { width: which === 'logo' ? 400 : 1000, quality: 0.65 });
+      const small = await compressImage(r.assets[0].uri, { width: which === 'logo' ? 400 : which === 'gallery' ? 1200 : 1000, quality: 0.65 });
       const up = await uploadMedia({ uri: small.uri, name: `service_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'cover');
-      (which === 'logo' ? setLogo : setCover)(up.url);
+      if (which === 'gallery') setGallery((g) => [...g, up.url].slice(0, GALLERY_MAX));
+      else (which === 'logo' ? setLogo : setCover)(up.url);
     } catch (e) {
       notify(t('common.uploadFailedTitle'), e?.message || t('common.uploadImageFailed'));
     } finally {
@@ -121,6 +135,14 @@ const ServiceForm = ({ route, navigation }) => {
       rate_description: form.rate_description.trim(), currency: form.currency,
       service_rates: form.service_rates.trim() || null,
     };
+    // Opening hours: every open day needs both times, closing after opening.
+    const badDay = Object.entries(hours).find(([, [a, b]]) => !HHMM.test(a) || !HHMM.test(b) || a >= b);
+    if (badDay) {
+      notify(t('services.hours'), t('services.hoursInvalid', { day: t(`services.day.${badDay[0]}`) }));
+      return;
+    }
+    payload.opening_hours = hours;
+    payload.gallery = gallery.filter((u) => u.startsWith('http'));
     // Links: filled in ones as real addresses ("instagram.com/x" → https://…).
     LINK_KEYS.forEach((k) => { const v = form[k].trim(); payload[k] = v ? withScheme(v) : ''; });
     // Pictures: only new uploads (addresses); an old base64 one stays as it is.
@@ -205,6 +227,69 @@ const ServiceForm = ({ route, navigation }) => {
             );
           })}
         </View>
+
+        <View style={styles.divider} />
+        <View style={styles.sectionHead}>
+          <Text style={styles.section}>{t('services.gallery')}</Text>
+          <Text style={styles.optional}>{t('services.optional')}</Text>
+        </View>
+        <Text style={styles.hint}>{t('services.galleryHint', { n: GALLERY_MAX })}</Text>
+        <View style={styles.galleryGrid}>
+          {gallery.map((u, i) => (
+            <View key={`${i}_${u}`} style={styles.galleryItem}>
+              <Image source={{ uri: u }} style={StyleSheet.absoluteFill} contentFit="cover" />
+              <TouchableOpacity style={styles.galleryRemove} onPress={() => setGallery((g) => g.filter((_, j) => j !== i))}
+                hitSlop={6} accessibilityLabel={t('common.remove')} testID={`service-gallery-remove-${i}`}>
+                <Ionicons name="close" size={14} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+          ))}
+          {gallery.length < GALLERY_MAX ? (
+            <TouchableOpacity style={[styles.galleryItem, styles.galleryAdd]} onPress={() => pick('gallery')} disabled={!!uploading}
+              testID="service-gallery-add">
+              {uploading === 'gallery' ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="add" size={26} color={colors.textMuted} />}
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <View style={styles.divider} />
+        <View style={styles.sectionHead}>
+          <Text style={styles.section}>{t('services.hours')}</Text>
+          <Text style={styles.optional}>{t('services.optional')}</Text>
+        </View>
+        <Text style={styles.hint}>{t('services.hoursHint')}</Text>
+        {DAYS.map((d) => {
+          const span = hours[d];
+          return (
+            <View key={d} style={styles.dayRow} testID={`service-day-${d}`}>
+              <TouchableOpacity style={styles.dayToggle} onPress={() => setHours((h) => {
+                const next = { ...h };
+                if (next[d]) delete next[d]; else next[d] = ['08:00', '17:00'];
+                return next;
+              })} accessibilityRole="switch" accessibilityState={{ checked: !!span }} testID={`service-day-toggle-${d}`}>
+                <Ionicons name={span ? 'checkbox' : 'square-outline'} size={20} color={span ? colors.primary : colors.textSecondary} />
+                <Text style={styles.dayName}>{t(`services.day.${d}`)}</Text>
+              </TouchableOpacity>
+              {span ? (
+                <View style={styles.dayTimes}>
+                  {[0, 1].map((k) => (
+                    <TextInput key={k} style={styles.time} value={span[k]} keyboardType="numbers-and-punctuation" maxLength={5}
+                      onChangeText={(v) => setHours((h) => ({ ...h, [d]: k ? [h[d][0], v] : [v, h[d][1]] }))}
+                      onEndEditing={(e) => setHours((h) => (h[d] ? { ...h, [d]: k ? [h[d][0], tidyTime(e.nativeEvent.text)] : [tidyTime(e.nativeEvent.text), h[d][1]] } : h))}
+                      placeholder={k ? '17:00' : '08:00'} placeholderTextColor={colors.placeholder} testID={`service-day-${d}-${k ? 'close' : 'open'}`} />
+                  ))}
+                </View>
+              ) : <Text style={styles.closedText}>{t('services.closed')}</Text>}
+            </View>
+          );
+        })}
+        {hours.mon ? (
+          <TouchableOpacity style={styles.copyDays} onPress={() => setHours((h) => ({ ...h, ...Object.fromEntries(WEEKDAYS.map((d) => [d, [...h.mon]])) }))}
+            testID="service-hours-copy">
+            <Ionicons name="copy-outline" size={15} color={colors.primary} />
+            <Text style={styles.copyText}>{t('services.copyMonday')}</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={styles.divider} />
         <View style={styles.sectionHead}>
@@ -313,6 +398,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs, borderRadius: radius.sm,
     backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
   },
+  galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  galleryItem: { width: 84, height: 84, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.inputBg },
+  galleryAdd: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed' },
+  galleryRemove: {
+    position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
+  },
+  dayRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4, minHeight: 44 },
+  dayToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
+  dayName: { ...typography.body, color: colors.textPrimary },
+  dayTimes: { flexDirection: 'row', gap: spacing.sm },
+  time: {
+    width: 72, textAlign: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingVertical: 6,
+    color: colors.textPrimary, backgroundColor: colors.inputBg, fontSize: 15,
+  },
+  closedText: { ...typography.caption, color: colors.textMuted },
+  copyDays: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: spacing.xs },
+  copyText: { ...typography.caption, color: colors.primary, fontWeight: '700' },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   linkIcon: { width: 38, height: 38, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   saveBar: {

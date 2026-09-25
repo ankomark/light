@@ -105,7 +105,25 @@ admin.site.register(PostLike)
 admin.site.register(PostComment)
 admin.site.register(PostSave)
 admin.site.register(Notification)
-admin.site.register(Videostudio)
+@admin.register(Videostudio)
+class ServiceAdmin(admin.ModelAdmin):
+    """Services. The verified tick and the Services home's featured row are
+    set here: select listings and run "Feature on Services home"."""
+    list_display = ('id', 'name', 'category', 'location', 'is_verified', 'featured_at', 'is_removed', 'created_at')
+    list_filter = ('category', 'is_verified', 'is_removed')
+    list_editable = ('is_verified',)
+    search_fields = ('name', 'location', 'created_by__username')
+    raw_id_fields = ('created_by',)
+    actions = ['feature', 'unfeature']
+
+    @admin.action(description='Feature on Services home')
+    def feature(self, request, queryset):
+        from django.utils import timezone
+        queryset.update(featured_at=timezone.now())
+
+    @admin.action(description='Stop featuring')
+    def unfeature(self, request, queryset):
+        queryset.update(featured_at=None)
 admin.site.register(CommunityCategory)
 admin.site.register(Group)
 admin.site.register(GroupMember)

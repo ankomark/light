@@ -1,3 +1,5 @@
+import re
+
 from .common import *  # noqa: F401,F403
 
 
@@ -69,6 +71,11 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         read_only_fields = ['updated_at']
 
 
+DAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
+GALLERY_MAX = 12
+_HHMM = re.compile(r'^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$')
+
+
 class VideoStudioSerializer(serializers.ModelSerializer):
     created_by = SimpleUserSerializer(read_only=True)
     is_owner = serializers.SerializerMethodField()
@@ -81,11 +88,36 @@ class VideoStudioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Videostudio
         fields = '__all__'
-        read_only_fields = ('created_by', 'is_verified')
+        read_only_fields = ('created_by', 'is_verified', 'featured_at')
 
     def get_is_owner(self, obj):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
+
+    def validate_gallery(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError('A list of pictures.')
+        if len(value) > GALLERY_MAX:
+            raise serializers.ValidationError(f'Up to {GALLERY_MAX} pictures.')
+        return [self._ours(str(u)) for u in value if u]
+
+    def validate_opening_hours(self, value):
+        """{day: [open, close]}: days mon to sun, times HH:MM, closing after
+        opening (24:00 for until midnight). A day left out is closed."""
+        if value in (None, ''):
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Opening hours are {day: [open, close]}.')
+        out = {}
+        for day, span in value.items():
+            if day not in DAYS:
+                raise serializers.ValidationError(f'Unknown day: {day}.')
+            ok = (isinstance(span, (list, tuple)) and len(span) == 2
+                  and all(isinstance(x, str) and _HHMM.match(x) for x in span) and span[0] < span[1])
+            if not ok:
+                raise serializers.ValidationError(f'{day}: opening and closing times as HH:MM, closing after opening.')
+            out[day] = [span[0], span[1]]
+        return out
 
     # Pictures are our own uploads — not any address on the internet (which
     # would let a listing see who looks at it).
@@ -108,11 +140,15 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
     is_owner = serializers.SerializerMethodField()
     logo = serializers.SerializerMethodField()
     cover_image = serializers.SerializerMethodField()
+    gallery = serializers.SerializerMethodField()
 
     class Meta:
         model = Videostudio
         fields = '__all__'
-        read_only_fields = ('created_by', 'is_verified')
+        read_only_fields = ('created_by', 'is_verified', 'featured_at')
+
+    def get_gallery(self, obj):
+        return [u for u in (media.resolve(x) for x in (obj.gallery or [])) if u]
 
     def get_is_owner(self, obj):
         request = self.context.get('request')

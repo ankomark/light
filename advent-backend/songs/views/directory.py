@@ -90,6 +90,9 @@ class AdminNoteViewSet(viewsets.ModelViewSet):
         serializer.save(sender=self.request.user, is_read=False)
 
 
+HOME_ROW = 10
+
+
 class VideoStudioViewSet(viewsets.ModelViewSet):
     # select_related avoids an N+1 on created_by (+ its profile) during listing.
     queryset = Videostudio.objects.filter(is_removed=False).select_related('created_by', 'created_by__profile').order_by('-created_at')
@@ -99,7 +102,8 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         # The list ships image URLs (small); detail/create/update keep base64.
-        if self.action == 'list':
+        # Reading one or many: pictures as addresses (never old base64).
+        if self.action in ('list', 'retrieve', 'home'):
             return VideoStudioListSerializer
         return VideoStudioSerializer
 
@@ -129,6 +133,23 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
             # Verified first, then newest: a directory people can trust.
             qs = qs.order_by('-is_verified', '-created_at', '-id')
         return qs
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def home(self, request):
+        """The Services home: how many in each category, and rows of the
+        featured (picked by staff), the verified and the newest."""
+        qs = self.get_queryset()
+        ctx = self.get_serializer_context()
+
+        def row(q):
+            return VideoStudioListSerializer(q[:HOME_ROW], many=True, context=ctx).data
+        counts = dict(qs.order_by().values('category').annotate(n=Count('pk')).values_list('category', 'n'))
+        return Response({
+            'counts': counts,
+            'featured': row(qs.filter(featured_at__isnull=False).order_by('-featured_at')),
+            'verified': row(qs.filter(is_verified=True).order_by('-updated_at')),
+            'new': row(qs.order_by('-created_at', '-id')),
+        })
 
     def _search(self, qs):
         """?search= over the name, place, description and service tags — on
@@ -406,3 +427,39 @@ class WallpaperViewSet(viewsets.ModelViewSet):
                     continue
                 Wallpaper.objects.filter(pk=entry['id']).update(sort_order=order)
         return Response({'status': 'reordered'})
+
+def service_share_page(request, service_id):
+    """A service's public page for a shared link: a rich card (its cover, name,
+    what and where) and a hand-off into the app at that service."""
+    from django.conf import settings as dj_settings
+    from django.http import HttpResponseNotFound
+    from django.utils.html import escape
+    from .social import _SHARE_PAGE
+    s = (Videostudio.objects.filter(pk=service_id, is_removed=False, created_by__is_deactivated=False)
+         .select_related('created_by').first())
+    if s is None:
+        return HttpResponseNotFound('Service not found')
+    label = dict(Videostudio.SERVICE_CATEGORIES).get(s.category, '')
+    about = (s.description or '').strip()
+    desc = ' · '.join(x for x in (label, s.location) if x) + (f' — {about}' if about else '')
+    image = media.resolve(s.cover_image) or media.resolve(s.logo) or (
+        getattr(dj_settings, 'SHARE_FALLBACK_IMAGE', '') or request.build_absolute_uri('/share-og.png'))
+    deep = f'streams://service/{s.id}'
+    html = (
+        _SHARE_PAGE
+        .replace('__OGTYPE__', 'business.business')
+        .replace('__VIDEO_TAGS__', '')
+        .replace('__IMG_BLOCK__', f'<img src="{escape(image)}" alt="">')
+        .replace('__PLAY_BLOCK__', '')
+        .replace('__CAPTION_BLOCK__', f'\n      <p class="caption">{escape(desc[:300])}</p>')
+        .replace('__STORE_BLOCK__', '')
+        .replace('__USER__', escape(s.name))
+        .replace('__TITLE__', escape(f'{s.name} on Adventist Life'))
+        .replace('__DESC__', escape(desc[:200]))
+        .replace('__IMAGE__', escape(image))
+        .replace('__URL__', escape(request.build_absolute_uri()))
+        .replace('__DEEP__', escape(deep))
+    )
+    resp = HttpResponse(html)
+    resp['Cache-Control'] = 'public, max-age=300'
+    return resp

@@ -1370,6 +1370,14 @@ class Videostudio(models.Model):
     twitter_link = models.URLField(blank=True, null=True)
     service_rates = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
     is_verified = models.BooleanField(default=False)
+    # Photos of their work (R2 URLs, up to 12) — the service page's gallery.
+    gallery = models.JSONField(default=list, blank=True)
+    # When they're open, the week through: {"mon": ["08:00", "17:00"], …};
+    # a day left out is closed. Empty = hours not given.
+    opening_hours = models.JSONField(default=dict, blank=True)
+    # Featured on the Services home since this time (set by staff in the
+    # Django admin); null = not featured.
+    featured_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videostudios')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

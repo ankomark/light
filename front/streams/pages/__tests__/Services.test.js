@@ -10,6 +10,10 @@ const mockApi = {
   deleteVideoStudio: jest.fn(),
   createVideoStudio: jest.fn(),
   updateVideoStudio: jest.fn(),
+  fetchServicesHome: jest.fn(),
+  fetchVideoStudioById: jest.fn(),
+  getOrCreateConversation: jest.fn(),
+  serviceShareUrl: jest.fn((id) => `https://app.test/service/${id}/`),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 let mockAuth = { isAuthenticated: true, currentUser: { id: 1, username: 'me' } };
@@ -81,6 +85,8 @@ beforeEach(async () => {
   await clearAllCaches();
   catalog.__resetServicesCatalog();
   Object.values(mockApi).forEach((f) => f.mockReset());
+  mockApi.serviceShareUrl.mockImplementation((id) => `https://app.test/service/${id}/`);
+  mockApi.fetchServicesHome.mockResolvedValue({ counts: {}, featured: [], verified: [], new: [] });
   mockAuth = { isAuthenticated: true, currentUser: { id: 1, username: 'me' } };
   mockConfirm.mockReset();
   mockNotify.mockReset();
@@ -233,5 +239,137 @@ describe('Service form', () => {
     await act(async () => { n.fire('beforeRemove', e2); });
     expect(e2.preventDefault).toHaveBeenCalled();
     expect(n.dispatch).toHaveBeenCalledWith({ type: 'GO_BACK' });
+  });
+});
+
+// ── Phase 2: the service page, the home, the look ───────────────────────────
+describe('Phase 2', () => {
+  const RN = require('react-native');
+  const ServiceDetail = require('../ServiceDetail').default;
+  const { tidyTime } = require('../ServiceForm');
+  const { openState, openLabel } = catalog;
+  const tt = (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k);
+  const at = (day, hh, mm = 0) => { const d = new Date(2026, 8, 21 + day, hh, mm); return d; };   // 21 Sep 2026 is a Monday
+  const hours = { mon: ['08:00', '17:00'], tue: ['08:00', '17:00'], sat: ['09:00', '13:00'] };
+
+  test('open now or not, and when it opens next', () => {
+    expect(openState({})).toEqual({ state: 'unknown' });
+    expect(openLabel(openState(hours, at(0, 10)), tt)).toBe('services.openUntil:17:00');
+    expect(openLabel(openState(hours, at(0, 7)), tt)).toBe('services.opensAt:08:00');
+    expect(openLabel(openState(hours, at(0, 18)), tt)).toBe('services.opensTomorrow:08:00');
+    expect(openLabel(openState(hours, at(1, 18)), tt)).toBe('services.opensOn:services.day.sat,09:00');
+    expect(openLabel(openState(hours, at(5, 13)), tt)).toBe('services.opensOn:services.day.mon,08:00');   // 13:00 is closing time
+    expect(tidyTime('8')).toBe('08:00');
+    expect(tidyTime('830')).toBe('08:30');
+    expect(tidyTime('17.30')).toBe('17:30');
+  });
+
+  test('a card opens its page, carrying what the page needs to draw at once', async () => {
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [svc(1)], next: null });
+    const n = nav();
+    const r = render(<Studios navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('service-1')).toBeTruthy());
+    fireEvent.press(r.getByTestId('service-1'));
+    expect(n.navigate).toHaveBeenCalledWith('ServiceDetail', { id: 1, preview: expect.objectContaining({ name: 'Service 1' }) });
+  });
+
+  test('the home: categories with counts, featured to open; a tile picks the category', async () => {
+    mockApi.fetchServicesHome.mockResolvedValue({ counts: { health: 4 }, featured: [svc(8, { name: 'Picked' })], verified: [], new: [] });
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [], next: null });
+    const n = nav();
+    const r = render(<Studios navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('services-featured')).toBeTruthy());
+    expect(r.getByText('services.countN:4')).toBeTruthy();
+    expect(r.queryByTestId('services-verified')).toBeNull();               // an empty row isn't drawn
+    fireEvent.press(r.getByTestId('service-tile-8'));
+    expect(n.navigate).toHaveBeenCalledWith('ServiceDetail', expect.objectContaining({ id: 8 }));
+    await act(async () => { fireEvent.press(r.getByTestId('services-tile-health')); });
+    expect(mockApi.fetchServicesPage).toHaveBeenLastCalledWith({ category: 'health' });
+    expect(r.queryByTestId('services-home')).toBeNull();                   // the home is for "all"
+  });
+
+  test('the page: at once from the row, then the gallery and the week\'s hours', async () => {
+    let answer;
+    mockApi.fetchVideoStudioById.mockImplementation(() => new Promise((res) => { answer = res; }));
+    const r = render(<ServiceDetail route={{ params: { id: 5, preview: svc(5, { name: 'Hope Clinic' }) } }} navigation={nav()} />);
+    expect(r.getByText('Hope Clinic')).toBeTruthy();                       // the first frame
+    expect(r.queryByTestId('service-gallery')).toBeNull();
+    await waitFor(() => expect(mockApi.fetchVideoStudioById).toHaveBeenCalledWith(5));
+    await act(async () => { answer(svc(5, { name: 'Hope Clinic', gallery: ['https://r2.test/a.jpg'], opening_hours: hours })); });
+    expect(r.getByTestId('service-gallery')).toBeTruthy();
+    expect(r.getByTestId('service-hours')).toBeTruthy();
+    expect(r.getByText('services.day.sat')).toBeTruthy();
+    fireEvent.press(r.getByTestId('service-photo-0'));
+    expect(r.getByTestId('service-photo-close')).toBeTruthy();
+  });
+
+  test('reaching them: directions, a message in the app, share', async () => {
+    const openURL = jest.spyOn(RN.Linking, 'openURL').mockResolvedValue(true);
+    const share = jest.spyOn(RN.Share, 'share').mockResolvedValue({});
+    const s = svc(5, { name: 'Hope Clinic', location: 'Kisumu, Kenya', contact_phone: '+254700', created_by: { id: 9, username: 'dr' } });
+    mockApi.fetchVideoStudioById.mockResolvedValue(s);
+    mockApi.getOrCreateConversation.mockResolvedValue({ id: 44, other_participant: { id: 9 } });
+    const n = nav();
+    const r = render(<ServiceDetail route={{ params: { id: 5, preview: s } }} navigation={n} />);
+    await flush();
+    fireEvent.press(r.getByTestId('service-directions'));
+    expect(openURL).toHaveBeenCalledWith('https://www.google.com/maps/search/?api=1&query=Kisumu%2C%20Kenya');
+    fireEvent.press(r.getByTestId('service-action-call'));
+    expect(openURL).toHaveBeenLastCalledWith('tel:+254700');
+    await act(async () => { fireEvent.press(r.getByTestId('service-action-message')); });
+    expect(mockApi.getOrCreateConversation).toHaveBeenCalledWith(9);
+    expect(n.navigate).toHaveBeenCalledWith('Chat', { conversationId: 44, otherUser: { id: 9 } });
+    fireEvent.press(r.getByTestId('service-action-share'));
+    expect(share.mock.calls[0][0].message).toContain('https://app.test/service/5/');
+    openURL.mockRestore(); share.mockRestore();
+  });
+
+  test('its owner sees it as everyone does, with Edit — and no Message to themselves', async () => {
+    const s = svc(5, { is_owner: true, created_by: { id: 1, username: 'me' } });
+    mockApi.fetchVideoStudioById.mockResolvedValue(s);
+    const n = nav();
+    const r = render(<ServiceDetail route={{ params: { id: 5, preview: s } }} navigation={n} />);
+    await flush();
+    expect(r.getByTestId('service-owner-bar')).toBeTruthy();
+    expect(r.queryByTestId('service-action-message')).toBeNull();
+    fireEvent.press(r.getByTestId('service-page-edit'));
+    expect(n.navigate).toHaveBeenCalledWith('ServiceForm', { service: expect.objectContaining({ id: 5 }) });
+  });
+
+  test('a shared link with no signal and nothing kept: say so, and Retry', async () => {
+    mockApi.fetchVideoStudioById.mockRejectedValueOnce(new Error('offline'));
+    const r = render(<ServiceDetail route={{ params: { id: '5' } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-retry')).toBeTruthy());
+    mockApi.fetchVideoStudioById.mockResolvedValue(svc(5, { name: 'Back again' }));
+    await act(async () => { fireEvent.press(r.getByTestId('service-retry')); });
+    expect(r.getByText('Back again')).toBeTruthy();
+    expect(mockApi.fetchVideoStudioById).toHaveBeenLastCalledWith(5);      // the link's id, as a number
+  });
+
+  test('the form: photos of the work and the week\'s hours', async () => {
+    mockApi.createVideoStudio.mockResolvedValue(svc(6));
+    const r = render(<ServiceForm route={{ params: { category: 'home' } }} navigation={nav()} />);
+    fireEvent.changeText(r.getByTestId('service-name'), 'Hope Plumbers');
+    fireEvent.changeText(r.getByTestId('service-location'), 'Kisumu');
+    fireEvent.press(r.getByTestId('service-tag-plumbing'));
+    await act(async () => { fireEvent.press(r.getByTestId('service-gallery-add')); });
+    await act(async () => { fireEvent.press(r.getByTestId('service-gallery-add')); });
+    fireEvent.press(r.getByTestId('service-gallery-remove-1'));
+    fireEvent.press(r.getByTestId('service-day-toggle-mon'));
+    fireEvent.changeText(r.getByTestId('service-day-mon-close'), '18:30');
+    fireEvent.press(r.getByTestId('service-hours-copy'));
+    fireEvent.press(r.getByTestId('service-day-toggle-sat'));
+    fireEvent.changeText(r.getByTestId('service-day-sat-open'), '14:00');
+    fireEvent.changeText(r.getByTestId('service-day-sat-close'), '12:00');   // closes before it opens
+    await act(async () => { fireEvent.press(r.getByTestId('service-save')); });
+    expect(mockNotify).toHaveBeenCalledWith('services.hours', 'services.hoursInvalid:services.day.sat');
+    expect(mockApi.createVideoStudio).not.toHaveBeenCalled();
+    fireEvent.press(r.getByTestId('service-day-toggle-sat'));               // not open Saturdays after all
+    await act(async () => { fireEvent.press(r.getByTestId('service-save')); });
+    const body = mockApi.createVideoStudio.mock.calls[0][0];
+    expect(body.gallery).toEqual(['https://r2.test/cover/x.jpg']);
+    expect(body.opening_hours).toEqual({
+      mon: ['08:00', '18:30'], tue: ['08:00', '18:30'], wed: ['08:00', '18:30'], thu: ['08:00', '18:30'], fri: ['08:00', '18:30'],
+    });
   });
 });

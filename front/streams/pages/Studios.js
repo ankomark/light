@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchServicesPage, fetchServicesByUrl, deleteVideoStudio } from '../services/api';
 import { CATEGORIES, tagsMatching, servicesChangedSince, noteServicesChanged } from '../services/servicesCatalog';
 import ServiceCard, { ServiceCardSkeleton } from '../components/services/ServiceCard';
+import ServicesHome from '../components/services/ServicesHome';
 import ReportModal from '../components/ReportModal';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import useGridColumns from '../utils/useGridColumns';
@@ -157,6 +158,8 @@ const Studios = ({ navigation }) => {
     ? navigation.navigate('ServiceForm', { category: category !== 'all' ? category : 'media' })
     : navigation.navigate('Login'));
   const edit = useCallback((s) => navigation.navigate('ServiceForm', { service: s }), [navigation]);
+  // The row carries what the page needs to draw its top at once.
+  const openService = useCallback((s) => navigation.navigate('ServiceDetail', { id: s.id, preview: s }), [navigation]);
   const remove = useCallback(async (s) => {
     const ok = await confirmAction({
       title: t('studios.deleteTitle'), message: t('common.deleteConfirm', { name: s.name }),
@@ -178,9 +181,9 @@ const Studios = ({ navigation }) => {
   const report = useCallback((s) => (isAuthenticated ? setReporting(s) : navigation.navigate('Login')), [isAuthenticated, navigation]);
 
   const renderItem = useCallback(({ item }) => (
-    <ServiceCard item={item} t={t} onEdit={edit} onDelete={remove} onReport={report}
+    <ServiceCard item={item} t={t} onOpen={openService} onEdit={edit} onDelete={remove} onReport={report}
       style={cols > 1 ? styles.inGrid : null} />
-  ), [t, edit, remove, report, cols]);
+  ), [t, openService, edit, remove, report, cols]);
 
   const empty = () => {
     if (items == null) {
@@ -268,6 +271,9 @@ const Studios = ({ navigation }) => {
         onEndReachedThreshold={0.5}
         initialNumToRender={4}
         windowSize={7}
+        ListHeaderComponent={category === 'all' && !searching ? (
+          <ServicesHome uid={uid} t={t} onCategory={setCategory} onOpen={openService} />
+        ) : null}
         ListEmptyComponent={empty()}
         ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.md }} /> : null}
       />

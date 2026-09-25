@@ -1004,6 +1004,11 @@ export const fetchServicesPage = async (params = {}) => apiRequest('get', '/vide
 // The next page (the server's own link carries the filters).
 export const fetchServicesByUrl = async (nextUrl) => fetchPublicationsByUrl(nextUrl);
 
+// The Services home: { counts: {category: n}, featured, verified, new }.
+export const fetchServicesHome = async () => apiRequest('get', '/video-studios/home/');
+// A service's link to share (a rich card that opens it in the app).
+export const serviceShareUrl = (id) => `${PUBLIC_BASE}/service/${id}/`;
+
 export const fetchVideoStudioById = async (id) => {
   return apiRequest('get', `/video-studios/${id}/`);
 };

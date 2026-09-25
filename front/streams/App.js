@@ -62,6 +62,7 @@ import OrganizationPage from './pages/OrganizationPage';
 import OrganizationEdit from './pages/OrganizationEdit';
 import OrganizationMembers from './pages/OrganizationMembers';
 import ServiceForm from './pages/ServiceForm';
+import ServiceDetail from './pages/ServiceDetail';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -166,13 +167,15 @@ try {
   console.warn('[LiveKit] WebRTC native module unavailable — live disabled in this build.', e?.message);
 }
 
-// Deep linking: a shared post URL (streams://post/123, or the web page
+// Deep linking: a shared post or service URL (streams://post/123,
+// streams://service/12, or the web page
 // https://<public-host>/post/123) opens the app straight to that post.
 const linking = {
   prefixes: ['streams://', PUBLIC_BASE, API_BASE],
   config: {
     screens: {
       PostDetail: 'post/:postId',
+      ServiceDetail: 'service/:id',
     },
   },
 };
@@ -352,6 +355,7 @@ const App = () => {
                 <Stack.Screen name="OrganizationEdit" component={OrganizationEdit} />
                 <Stack.Screen name="OrganizationMembers" component={OrganizationMembers} />
                 <Stack.Screen name="ServiceForm" component={ServiceForm} />
+                <Stack.Screen name="ServiceDetail" component={ServiceDetail} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />
