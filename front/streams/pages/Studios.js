@@ -13,10 +13,13 @@ import {
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchServicesPage, fetchServicesByUrl, deleteVideoStudio } from '../services/api';
+import { fetchServicesPage, fetchServicesByUrl, deleteVideoStudio, saveService } from '../services/api';
 import { CATEGORIES, tagsMatching, servicesChangedSince, noteServicesChanged } from '../services/servicesCatalog';
 import ServiceCard, { ServiceCardSkeleton } from '../components/services/ServiceCard';
 import ServicesHome from '../components/services/ServicesHome';
+import ServiceFilters, { NO_FILTERS, activeCount, filterParams } from '../components/services/ServiceFilters';
+import PlaceSheet from '../components/services/PlaceSheet';
+import { keptPlace, keepPlace, peekPlace, pointParam } from '../services/serviceLocation';
 import ReportModal from '../components/ReportModal';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import useGridColumns from '../utils/useGridColumns';
@@ -32,15 +35,24 @@ const rowsOf = (res) => (Array.isArray(res) ? res : res?.results || [])
   .map((s) => ({ ...s, service_types: Array.isArray(s.service_types) ? s.service_types : [] }));
 
 const Studios = ({ navigation }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { currentUser, isAuthenticated } = useAuth();
   const uid = currentUser?.id;
+  // Filters and sort, and where the viewer is (for near me).
+  const [filters, setFilters] = useState(NO_FILTERS);
+  const [place, setPlace] = useState(() => peekPlace());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [placeOpen, setPlaceOpen] = useState(false);
+  useEffect(() => { keptPlace().then((p) => { if (p) setPlace((cur) => cur || p); }); }, []);
+  const narrowed = activeCount(filters) > 0 || !!filters.sort;
   const insets = useSafeAreaInsets();
   const side = { left: insets.left || 0, right: insets.right || 0, bottom: insets.bottom || 0 };
   const [category, setCategory] = useState('all');
   const [query, setQuery] = useState('');
   const searching = !!query.trim();
-  const cacheKey = searching ? null : userKey(uid, `services:${category}`);
+  // One kept list per view (category, filters, place); a typed search isn't kept.
+  const sig = narrowed || place ? `:${JSON.stringify({ ...filters, at: pointParam(place) })}` : '';
+  const cacheKey = searching ? null : userKey(uid, `services:${category}${sig}`);
 
   const [items, setItems] = useState(() => peekCache(cacheKey)?.items || null);   // null: nothing yet
   const [next, setNext] = useState(() => peekCache(cacheKey)?.next || null);
@@ -72,7 +84,7 @@ const Studios = ({ navigation }) => {
     else if (searching && itemsRef.current?.length) setBusy(true);
     else if (!kept?.items) setItems(null);
     try {
-      const params = {};
+      const params = { ...filterParams(filters, place) };
       if (category !== 'all') params.category = category;
       if (searching) {
         params.search = query.trim();
@@ -97,7 +109,7 @@ const Studios = ({ navigation }) => {
         lastLoad.current = Date.now();
       }
     }
-  }, [cacheKey, category, query, searching, t]);
+  }, [cacheKey, category, query, searching, t, filters, place]);
   const loadRef = useRef(load);
   loadRef.current = load;
   const keyRef = useRef(cacheKey);
@@ -112,7 +124,7 @@ const Studios = ({ navigation }) => {
     if (cacheKey) { const kept = peekCache(cacheKey); if (kept?.items) { setItems(kept.items); setNext(kept.next || null); } }
     loadRef.current();
     return undefined;
-  }, [category, query, uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [category, query, uid, filters, place]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Back from the form (or anywhere): a listing saved or deleted shows at
   // once; an old list is refreshed.
@@ -179,11 +191,27 @@ const Studios = ({ navigation }) => {
     }
   }, [t, cacheKey, next]);
   const report = useCallback((s) => (isAuthenticated ? setReporting(s) : navigation.navigate('Login')), [isAuthenticated, navigation]);
+  // Keep a service to come back to: at once on the card, then the server.
+  const toggleSave = useCallback(async (s) => {
+    if (!isAuthenticated) { navigation.navigate('Login'); return; }
+    const flip = (on) => setItems((list) => (list || []).map((x) => (x.id === s.id ? { ...x, is_saved: on } : x)));
+    flip(!s.is_saved);
+    try { await saveService(s.id, !s.is_saved); } catch { flip(!!s.is_saved); notify(t('common.error'), t('services.saveFailed')); }
+  }, [isAuthenticated, navigation, t]);
+  const pickPlace = useCallback(async (p) => {
+    setPlaceOpen(false);
+    await keepPlace(p);
+    setPlace(p);
+    setFilters((f) => ({ ...f, sort: 'near' }));
+  }, []);
+  const nearMe = () => (place && filters.sort === 'near'
+    ? setFilters((f) => ({ ...f, sort: '' }))            // tapped again: back to recommended
+    : place ? setFilters((f) => ({ ...f, sort: 'near' })) : setPlaceOpen(true));
 
   const renderItem = useCallback(({ item }) => (
-    <ServiceCard item={item} t={t} onOpen={openService} onEdit={edit} onDelete={remove} onReport={report}
+    <ServiceCard item={item} t={t} onOpen={openService} onEdit={edit} onDelete={remove} onReport={report} onSave={toggleSave}
       style={cols > 1 ? styles.inGrid : null} />
-  ), [t, openService, edit, remove, report, cols]);
+  ), [t, openService, edit, remove, report, toggleSave, cols]);
 
   const empty = () => {
     if (items == null) {
@@ -220,9 +248,17 @@ const Studios = ({ navigation }) => {
   return (
     <View style={[styles.screen, { paddingLeft: side.left, paddingRight: side.right }]}>
       <View style={styles.controls}>
-        <View style={styles.header}>
-          <Text style={styles.title}>{t('studios.title')}</Text>
-          <Text style={styles.subtitle}>{t('studios.subtitle')}</Text>
+        <View style={[styles.header, styles.headerRow]}>
+          <View style={styles.flex}>
+            <Text style={styles.title}>{t('studios.title')}</Text>
+            <Text style={styles.subtitle}>{t('studios.subtitle')}</Text>
+          </View>
+          {isAuthenticated ? (
+            <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('ServiceBookings')}
+              accessibilityRole="button" accessibilityLabel={t('bookings.title')} testID="services-requests">
+              <Ionicons name="calendar-outline" size={20} color={colors.textPrimary} />
+            </TouchableOpacity>
+          ) : null}
         </View>
         <View style={styles.searchBar}>
           <Ionicons name="search" size={18} color={colors.placeholder} />
@@ -246,6 +282,35 @@ const Studios = ({ navigation }) => {
               </TouchableOpacity>
             );
           })}
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.quick}>
+          <TouchableOpacity style={[styles.qChip, filters.sort === 'near' && place && styles.qChipOn]} onPress={nearMe}
+            onLongPress={() => setPlaceOpen(true)} testID="services-near">
+            <Ionicons name="navigate" size={13} color={filters.sort === 'near' && place ? colors.white : colors.primary} />
+            <Text style={[styles.qText, filters.sort === 'near' && place && styles.qTextOn]} numberOfLines={1}>
+              {place && filters.sort === 'near' ? (place.mine ? t('services.nearMe') : place.label?.split(',')[0]) : t('services.nearMe')}
+            </Text>
+          </TouchableOpacity>
+          {place && filters.sort === 'near' ? (
+            <TouchableOpacity style={styles.qChip} onPress={() => setPlaceOpen(true)} testID="services-change-place">
+              <Text style={styles.qText}>{t('services.changePlace')}</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity style={[styles.qChip, filters.openNow && styles.qChipOn]} testID="services-open-now"
+            onPress={() => setFilters((f) => ({ ...f, openNow: !f.openNow }))}>
+            <Text style={[styles.qText, filters.openNow && styles.qTextOn]}>{t('services.filters.openNow')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.qChip, filters.verified && styles.qChipOn]} testID="services-verified-only"
+            onPress={() => setFilters((f) => ({ ...f, verified: !f.verified }))}>
+            <Text style={[styles.qText, filters.verified && styles.qTextOn]}>{t('services.filters.verified')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.qChip, activeCount(filters) > 0 && styles.qChipOn]} onPress={() => setFiltersOpen(true)}
+            testID="services-filters">
+            <Ionicons name="options-outline" size={14} color={activeCount(filters) > 0 ? colors.white : colors.textSecondary} />
+            <Text style={[styles.qText, activeCount(filters) > 0 && styles.qTextOn]}>
+              {activeCount(filters) ? t('services.filters.withCount', { n: activeCount(filters) }) : t('services.filters.title')}
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
         {offline ? (
           <View style={styles.offlineBar} testID="services-offline">
@@ -271,7 +336,7 @@ const Studios = ({ navigation }) => {
         onEndReachedThreshold={0.5}
         initialNumToRender={4}
         windowSize={7}
-        ListHeaderComponent={category === 'all' && !searching ? (
+        ListHeaderComponent={category === 'all' && !searching && !narrowed ? (
           <ServicesHome uid={uid} t={t} onCategory={setCategory} onOpen={openService} />
         ) : null}
         ListEmptyComponent={empty()}
@@ -287,6 +352,10 @@ const Studios = ({ navigation }) => {
       {reporting ? (
         <ReportModal visible onClose={() => setReporting(null)} contentType="videostudio" objectId={reporting.id} />
       ) : null}
+      <ServiceFilters visible={filtersOpen} onClose={() => setFiltersOpen(false)} value={filters} onApply={setFilters}
+        hasPlace={!!place} t={t} />
+      <PlaceSheet visible={placeOpen} onClose={() => setPlaceOpen(false)} onPick={pickPlace} t={t}
+        title={t('services.whereAreYou')} lang={resolvedLanguage === 'sw' ? 'sw' : 'en'} />
     </View>
   );
 };
@@ -295,6 +364,20 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   controls: { width: '100%', maxWidth: MAX_W, alignSelf: 'center' },
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  flex: { flex: 1 },
+  headerBtn: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+  },
+  quick: { gap: spacing.xs, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, flexDirection: 'row' },
+  qChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: spacing.sm + 2, paddingVertical: 6, maxWidth: 200,
+    borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+  },
+  qChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  qText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', flexShrink: 1 },
+  qTextOn: { color: colors.white },
   title: { ...typography.h1, color: colors.textPrimary },
   subtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
   searchBar: {

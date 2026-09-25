@@ -1378,6 +1378,10 @@ class Videostudio(models.Model):
     # Featured on the Services home since this time (set by staff in the
     # Django admin); null = not featured.
     featured_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Where it is on the map (the owner pins it: their phone's location, or a
+    # place found by name) — for "near me" and the distance on a card.
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     # Run by an organisation (a church clinic, a school): its name and tick
     # on the listing, the listing on its page. Null = the person's own.
     organization = models.ForeignKey('Organization', null=True, blank=True, on_delete=models.SET_NULL,
@@ -1463,6 +1467,55 @@ class ServiceVerification(models.Model):
 
     def __str__(self):
         return f'{self.service_id} · {self.legal_name} · {self.status}'
+
+
+class SavedService(models.Model):
+    """A service someone kept to come back to."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='saved_services')
+    service = models.ForeignKey(Videostudio, on_delete=models.CASCADE, related_name='saves')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'service')
+        ordering = ['-created_at']
+
+
+class ServiceBooking(models.Model):
+    """A request to a service: a booking (a day, perhaps a time) or a quote —
+    with a note. The provider accepts or declines (with a word); the one who
+    asked can cancel while it waits or after it's accepted."""
+    BOOKING, QUOTE = 'booking', 'quote'
+    KINDS = [(BOOKING, 'Booking'), (QUOTE, 'Quote')]
+    PENDING, ACCEPTED, DECLINED, CANCELLED = 'pending', 'accepted', 'declined', 'cancelled'
+    STATUSES = [(PENDING, 'Waiting'), (ACCEPTED, 'Accepted'), (DECLINED, 'Declined'), (CANCELLED, 'Cancelled')]
+    service = models.ForeignKey(Videostudio, on_delete=models.CASCADE, related_name='bookings')
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='service_bookings')
+    kind = models.CharField(max_length=10, choices=KINDS, default=BOOKING)
+    date = models.DateField(null=True, blank=True)
+    time = models.CharField(max_length=5, blank=True, default='')           # HH:MM
+    note = models.TextField(max_length=1000, blank=True, default='')
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING, db_index=True)
+    reply_note = models.CharField(max_length=500, blank=True, default='')
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['service', '-created_at'], name='svcbook_svc_created_idx')]
+
+
+class ServiceEvent(models.Model):
+    """How a service is found and reached, counted per day: page views,
+    calls, WhatsApp, messages, directions, shares. Totals only — never who."""
+    KINDS = ('view', 'call', 'whatsapp', 'message', 'directions', 'share')
+    service = models.ForeignKey(Videostudio, on_delete=models.CASCADE, related_name='events')
+    kind = models.CharField(max_length=12)
+    day = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ('service', 'kind', 'day')
 
 class CommunityCategory(models.Model):
     """A kind of community — Church, Choir, News, Youth, and whatever people

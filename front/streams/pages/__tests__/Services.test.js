@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act, within } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.setTimeout(20000);
@@ -21,6 +21,13 @@ const mockApi = {
   fetchServiceVerification: jest.fn(),
   requestServiceVerification: jest.fn(),
   fetchOrganizations: jest.fn(),
+  saveService: jest.fn(),
+  recordServiceEvent: jest.fn(),
+  fetchServiceInsights: jest.fn(),
+  requestServiceBooking: jest.fn(),
+  fetchServiceBookings: jest.fn(),
+  respondServiceBooking: jest.fn(),
+  cancelServiceBooking: jest.fn(),
   serviceShareUrl: jest.fn((id) => `https://app.test/service/${id}/`),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
@@ -64,6 +71,14 @@ jest.mock('expo-image-picker', () => ({
 }));
 jest.mock('../../services/imageProcessing', () => ({ compressImage: jest.fn(async (uri) => ({ uri })) }));
 jest.mock('../../services/cloudinary', () => ({ uploadMedia: jest.fn(async () => ({ url: 'https://r2.test/cover/x.jpg' })) }));
+let mockLocation = { status: 'granted', coords: { latitude: -1.2921, longitude: 36.8219 } };
+jest.mock('expo-location', () => ({
+  requestForegroundPermissionsAsync: jest.fn(async () => ({ status: mockLocation.status })),
+  getCurrentPositionAsync: jest.fn(async () => ({ coords: mockLocation.coords })),
+  Accuracy: { Balanced: 3 },
+}));
+const mockPlaces = jest.fn(async () => []);
+jest.mock('../../services/weather', () => ({ searchPlaces: (...a) => mockPlaces(...a) }));
 jest.mock('../../components/ReportModal', () => {
   const { View } = require('react-native');
   return (p) => (p.visible ? <View testID={`report-${p.contentType}-${p.objectId}`} /> : null);
@@ -96,11 +111,16 @@ beforeEach(async () => {
   await AsyncStorage.clear();
   await clearAllCaches();
   catalog.__resetServicesCatalog();
+  require('../../services/serviceLocation').__resetServiceLocation();
+  mockLocation = { status: 'granted', coords: { latitude: -1.2921, longitude: 36.8219 } };
+  mockPlaces.mockReset();
+  mockPlaces.mockResolvedValue([]);
   Object.values(mockApi).forEach((f) => f.mockReset());
   mockApi.serviceShareUrl.mockImplementation((id) => `https://app.test/service/${id}/`);
   mockApi.fetchServicesHome.mockResolvedValue({ counts: {}, featured: [], verified: [], new: [] });
   mockApi.fetchServiceReviews.mockResolvedValue(noReviews());
   mockApi.fetchOrganizations.mockResolvedValue({ results: [] });
+  mockApi.recordServiceEvent.mockResolvedValue({ counted: true });
   mockAuth = { isAuthenticated: true, currentUser: { id: 1, username: 'me' } };
   mockConfirm.mockReset();
   mockNotify.mockReset();
@@ -332,7 +352,7 @@ describe('Phase 2', () => {
     expect(openURL).toHaveBeenLastCalledWith('tel:+254700');
     await act(async () => { fireEvent.press(r.getByTestId('service-action-message')); });
     expect(mockApi.getOrCreateConversation).toHaveBeenCalledWith(9);
-    expect(n.navigate).toHaveBeenCalledWith('Chat', { conversationId: 44, otherUser: { id: 9 } });
+    expect(n.navigate).toHaveBeenCalledWith('Chat', { conversationId: 44, otherUser: { id: 9 }, draft: 'services.messageDraft:Hope Clinic' });
     fireEvent.press(r.getByTestId('service-action-share'));
     expect(share.mock.calls[0][0].message).toContain('https://app.test/service/5/');
     openURL.mockRestore(); share.mockRestore();
@@ -503,5 +523,180 @@ describe('Phase 3', () => {
     await waitFor(() => expect(r.getByTestId('service-stars-1')).toBeTruthy());
     expect(r.getByText('4.8 (20)')).toBeTruthy();
     expect(r.queryByTestId('service-stars-2')).toBeNull();
+  });
+});
+
+// ── Phases 4 and 5: finding the right one; bookings and the provider's side ─
+describe('Phases 4 and 5', () => {
+  const ServiceDetail = require('../ServiceDetail').default;
+  const ServiceBookings = require('../ServiceBookings').default;
+  const ServiceInsights = require('../ServiceInsights').default;
+  const { respondsLabel } = require('../ServiceDetail');
+  const { nextDays } = require('../../components/services/BookingSheet');
+  const { filterParams, openAtNow } = require('../../components/services/ServiceFilters');
+  const tt = (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k);
+  const booking = (id, extra = {}) => ({
+    id, service: 5, service_info: { id: 5, name: 'Hope Plumbers', logo: '' }, customer: { id: 2, username: 'ann' },
+    kind: 'booking', date: '2026-10-02', time: '10:00', note: 'Kitchen sink', status: 'pending', reply_note: '', ...extra,
+  });
+
+  test('what the filters ask the server for', () => {
+    expect(openAtNow(new Date(2026, 8, 21, 9, 5))).toBe('mon,09:05');
+    expect(filterParams({ sort: 'near', openNow: false, verified: true, minRating: 4, minPrice: '', maxPrice: '5000', saved: true },
+      { lat: -1.29211, lng: 36.82194 })).toEqual({ near: '-1.2921,36.8219', sort: 'near', verified: 1, min_rating: 4, max_price: '5000', saved: 1 });
+    expect(filterParams({ sort: 'near' }, null)).toEqual({});                // nearest needs a place
+    expect(respondsLabel(0.5, tt)).toBe('services.respondsHour');
+    expect(respondsLabel(5.2, tt)).toBe('services.respondsHours:6');
+    expect(respondsLabel(30, tt)).toBe('services.respondsDay');
+  });
+
+  test('near me: the phone\'s location, nearest first, distance on the card, remembered', async () => {
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [svc(1, { distance_km: 265.4 })], next: null });
+    const r = render(<Studios navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-1')).toBeTruthy());
+    fireEvent.press(r.getByTestId('services-near'));
+    await waitFor(() => expect(r.getByTestId('place-sheet')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('place-mine')); });
+    await waitFor(() => expect(mockApi.fetchServicesPage).toHaveBeenLastCalledWith({ near: '-1.2921,36.8219', sort: 'near' }));
+    expect(r.getByText('Nairobi · 265 km')).toBeTruthy();
+    expect(r.queryByTestId('services-home')).toBeNull();
+    expect(JSON.parse(await AsyncStorage.getItem('services:near:v1'))).toMatchObject({ lat: -1.2921, mine: true });
+  });
+
+  test('location off: say so, and a town found by name will do', async () => {
+    mockLocation.status = 'denied';
+    mockPlaces.mockResolvedValue([{ name: 'Kisumu', region: 'Kisumu', country: 'Kenya', latitude: -0.0917, longitude: 34.768 }]);
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [], next: null });
+    const r = render(<Studios navigation={nav()} />);
+    fireEvent.press(r.getByTestId('services-near'));
+    await act(async () => { fireEvent.press(r.getByTestId('place-mine')); });
+    expect(r.getByText('places.denied')).toBeTruthy();
+    fireEvent.changeText(r.getByTestId('place-search'), 'Kisu');
+    await waitFor(() => expect(r.getByTestId('place-0')).toBeTruthy());
+    expect(r.getByText('Kisumu, Kenya')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('place-0')); });
+    await waitFor(() => expect(mockApi.fetchServicesPage).toHaveBeenLastCalledWith({ near: '-0.0917,34.7680', sort: 'near' }));
+  });
+
+  test('filters: open now, a rating; the chip shows how many', async () => {
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [], next: null });
+    const r = render(<Studios navigation={nav()} />);
+    fireEvent.press(r.getByTestId('services-filters'));
+    fireEvent.press(r.getByTestId('filters-open'));
+    fireEvent.press(r.getByTestId('filters-rating-4'));
+    await act(async () => { fireEvent.press(r.getByTestId('filters-apply')); });
+    const params = mockApi.fetchServicesPage.mock.calls.at(-1)[0];
+    expect(params).toMatchObject({ min_rating: 4 });
+    expect(params.open_at).toMatch(/^(mon|tue|wed|thu|fri|sat|sun),\d\d:\d\d$/);
+    expect(r.getByText('services.filters.withCount:2')).toBeTruthy();
+  });
+
+  test('keep a service: the heart on the card and on its page', async () => {
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [svc(1)], next: null });
+    mockApi.saveService.mockResolvedValue({ is_saved: true });
+    const r = render(<Studios navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-save-1')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('service-save-1')); });
+    expect(mockApi.saveService).toHaveBeenCalledWith(1, true);
+    expect(r.getByTestId('service-save-1').props.accessibilityState).toEqual({ selected: true });
+
+    mockApi.fetchVideoStudioById.mockResolvedValue(svc(5, { is_saved: true }));
+    const page = render(<ServiceDetail route={{ params: { id: 5, preview: svc(5, { is_saved: true }) } }} navigation={nav()} />);
+    await act(async () => { fireEvent.press(page.getByTestId('service-page-save')); });
+    expect(mockApi.saveService).toHaveBeenLastCalledWith(5, false);
+  });
+
+  test('the page counts a view and how they reached them (for the owner, never who)', async () => {
+    const openURL = jest.spyOn(require('react-native').Linking, 'openURL').mockResolvedValue(true);
+    const s = svc(5, { contact_phone: '+254700', responds_in_hours: 3 });
+    mockApi.fetchVideoStudioById.mockResolvedValue(s);
+    const r = render(<ServiceDetail route={{ params: { id: 5, preview: s } }} navigation={nav()} />);
+    await flush();
+    expect(mockApi.recordServiceEvent).toHaveBeenCalledWith(5, 'view');
+    fireEvent.press(r.getByTestId('service-action-call'));
+    await flush();
+    expect(mockApi.recordServiceEvent).toHaveBeenLastCalledWith(5, 'call');
+    expect(r.getByText('services.respondsHours:3')).toBeTruthy();
+    openURL.mockRestore();
+  });
+
+  test('book a day and a time; a quote needs what for', async () => {
+    mockApi.requestServiceBooking.mockResolvedValue(booking(1));
+    const s = svc(5, { name: 'Hope Plumbers' });
+    mockApi.fetchVideoStudioById.mockResolvedValue(s);
+    const r = render(<ServiceDetail route={{ params: { id: 5, preview: s } }} navigation={nav()} />);
+    fireEvent.press(r.getByTestId('service-book'));
+    expect(r.getByTestId('booking-sheet')).toBeTruthy();
+    expect(r.getByTestId('booking-send').props.accessibilityState?.disabled ?? true).toBeTruthy();   // no day yet
+    const tomorrow = nextDays()[1].iso;
+    fireEvent.press(r.getByTestId(`booking-day-${tomorrow}`));
+    fireEvent.press(r.getByTestId('booking-time-12:00'));
+    fireEvent.changeText(r.getByTestId('booking-note'), 'Kitchen sink ');
+    await act(async () => { fireEvent.press(r.getByTestId('booking-send')); });
+    expect(mockApi.requestServiceBooking).toHaveBeenCalledWith(5, { kind: 'booking', date: tomorrow, time: '12:00', note: 'Kitchen sink' });
+    expect(mockNotify).toHaveBeenCalledWith('bookings.sentTitle', 'bookings.sentBody:Hope Plumbers');
+
+    fireEvent.press(r.getByTestId('service-quote'));
+    fireEvent.changeText(r.getByTestId('booking-note'), 'Rewire a house');
+    await act(async () => { fireEvent.press(r.getByTestId('booking-send')); });
+    expect(mockApi.requestServiceBooking).toHaveBeenLastCalledWith(5, { kind: 'quote', date: null, time: '', note: 'Rewire a house' });
+  });
+
+  test('requests: mine to cancel; asked of me to accept with a word', async () => {
+    mockApi.fetchServiceBookings.mockImplementation(async (role) => ({
+      results: role === 'incoming' ? [booking(2, { is_provider: true })] : [booking(1)], next: null,
+    }));
+    mockApi.cancelServiceBooking.mockResolvedValue(booking(1, { status: 'cancelled' }));
+    mockApi.respondServiceBooking.mockResolvedValue(booking(2, { status: 'accepted', reply_note: 'Bring the parts' }));
+    const n = nav();
+    const r = render(<ServiceBookings route={{ params: {} }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('booking-1')).toBeTruthy());
+    mockConfirm.mockResolvedValueOnce(true);
+    await act(async () => { fireEvent.press(r.getByTestId('booking-cancel-1')); });
+    expect(mockApi.cancelServiceBooking).toHaveBeenCalledWith(1);
+    expect(r.getByText('bookings.status.cancelled')).toBeTruthy();
+    expect(r.queryByTestId('booking-cancel-1')).toBeNull();
+
+    await act(async () => { fireEvent.press(r.getByTestId('bookings-tab-incoming')); });
+    await waitFor(() => expect(r.getByTestId('booking-2')).toBeTruthy());
+    expect(r.getByText('ann → Hope Plumbers')).toBeTruthy();
+    fireEvent.press(r.getByTestId('booking-accept-2'));
+    fireEvent.changeText(r.getByTestId('booking-answer-note'), 'Bring the parts');
+    await act(async () => { fireEvent.press(r.getByTestId('booking-answer-send')); });
+    expect(mockApi.respondServiceBooking).toHaveBeenCalledWith(2, true, 'Bring the parts');
+    expect(r.getByText('bookings.status.accepted')).toBeTruthy();
+    expect(r.getByText('Bring the parts')).toBeTruthy();
+  });
+
+  test('insights: views, getting in touch, requests waiting', async () => {
+    mockApi.fetchServiceInsights.mockImplementation(async (id, days) => ({
+      days, totals: { view: 120, call: 8, whatsapp: 12, message: 3, directions: 5, share: 2 }, requests: 6, accepted: 4, waiting: 2,
+      responds_in_hours: 2, daily: Array.from({ length: days }, (_, i) => ({ day: `2026-09-${String(i + 1).padStart(2, '0')}`, readers: i })),
+    }));
+    const n = nav();
+    const r = render(<ServiceInsights route={{ params: { id: 5, name: 'Hope Plumbers' } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('service-insights')).toBeTruthy());
+    expect(r.getByText('120')).toBeTruthy();
+    expect(r.getByText('30')).toBeTruthy();                                   // calls + WhatsApp + … got in touch
+    expect(r.getByText('insights.waiting:2')).toBeTruthy();
+    fireEvent.press(r.getByTestId('insights-waiting'));
+    expect(n.navigate).toHaveBeenCalledWith('ServiceBookings', { role: 'incoming' });
+    await act(async () => { fireEvent.press(r.getByTestId('range-7')); });
+    await waitFor(() => expect(mockApi.fetchServiceInsights).toHaveBeenLastCalledWith(5, 7));
+  });
+
+  test('the form pins the service on the map', async () => {
+    mockPlaces.mockResolvedValue([{ name: 'Kisumu', region: 'Kisumu', country: 'Kenya', latitude: -0.091702, longitude: 34.768 }]);
+    mockApi.createVideoStudio.mockResolvedValue(svc(6));
+    const r = render(<ServiceForm route={{ params: { category: 'home' } }} navigation={nav()} />);
+    fireEvent.changeText(r.getByTestId('service-name'), 'Hope Plumbers');
+    fireEvent.changeText(r.getByTestId('service-location'), 'Kisumu');
+    fireEvent.press(r.getByTestId('service-tag-plumbing'));
+    fireEvent.press(r.getByTestId('service-pin'));
+    await waitFor(() => expect(r.getByTestId('place-0')).toBeTruthy());        // searched for what was typed
+    fireEvent.press(r.getByTestId('place-0'));
+    expect(within(r.getByTestId('service-pin')).getByText('Kisumu, Kenya')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('service-save')); });
+    expect(mockApi.createVideoStudio).toHaveBeenCalledWith(expect.objectContaining({ latitude: -0.091702, longitude: 34.768 }));
   });
 });

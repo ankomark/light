@@ -154,4 +154,5 @@ class SearchTests(APITestCase):
         res = self.search('a')
         self.assertIsNone(res.pop('top'))
         self.assertEqual(res, {k: [] for k in ('users', 'artists', 'tracks', 'albums', 'playlists',
-                                               'groups', 'genres', 'hashtags', 'posts', 'books')})
+                                               'groups', 'genres', 'hashtags', 'posts', 'books',
+                                               'services')})

@@ -121,7 +121,7 @@ const MessageRow = memo(({ item, isOwn, showAvatar, isPlaying, imgSide, onOpenIm
 MessageRow.displayName = 'MessageRow';
 
 const ChatScreen = ({ route, navigation }) => {
-  const { conversationId, otherUser } = route.params;
+  const { conversationId, otherUser, draft = '' } = route.params;
   const { currentUser } = useAuth();
   const { t } = useI18n();
   const { width: winW } = useWindowDimensions();
@@ -136,7 +136,8 @@ const ChatScreen = ({ route, navigation }) => {
   const [messages, setMessages] = useState(() => peekCache(cacheKey) ?? []);
   const [loading, setLoading] = useState(() => !peekCache(cacheKey));
   const [sending, setSending] = useState(false);
-  const [text, setText] = useState('');
+  // A message started elsewhere (e.g. from a service's page), ready to edit — never sent for them.
+  const [text, setText] = useState(draft);
   const [showEmoji, setShowEmoji] = useState(false);
   const [viewer, setViewer] = useState(null); // full-screen image uri
   const [attachSheet, setAttachSheet] = useState(false); // luxury "what to send" sheet

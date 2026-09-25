@@ -15,6 +15,7 @@ import { uploadMedia } from '../services/cloudinary';
 import { createVideoStudio, updateVideoStudio, fetchOrganizations } from '../services/api';
 import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { useAuth } from '../context/useAuth';
+import PlaceSheet from '../components/services/PlaceSheet';
 import {
   CATEGORIES, SERVICE_TYPES_BY_CATEGORY, SOCIAL_LINKS, CURRENCIES, DAYS, serviceLabel, withScheme, noteServicesChanged,
 } from '../services/servicesCatalog';
@@ -67,7 +68,7 @@ const Field = ({ label, value, onChange, placeholder, multiline, keyboardType, t
 );
 
 const ServiceForm = ({ route, navigation }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const existing = route.params?.service || null;
   const [form, setForm] = useState(() => (existing ? fromService(existing)
     : { ...EMPTY, category: route.params?.category || 'media' }));
@@ -80,6 +81,9 @@ const ServiceForm = ({ route, navigation }) => {
   const { currentUser } = useAuth();
   const orgsKey = userKey(currentUser?.id, 'orgs:mine');
   const [orgSlug, setOrgSlug] = useState(existing?.organization?.slug || '');
+  // Its pin on the map (for near me and distances): the phone's location or a place found by name.
+  const [pin, setPin] = useState(() => (existing?.latitude != null ? { lat: existing.latitude, lng: existing.longitude } : null));
+  const [pinning, setPinning] = useState(false);
   const [myOrgs, setMyOrgs] = useState(() => peekCache(orgsKey) || []);
   useEffect(() => {
     fetchOrganizations({ mine: 1 }).then((r) => { const rows = r?.results || []; setMyOrgs(rows); writeCache(orgsKey, rows); }).catch(() => {});
@@ -89,9 +93,9 @@ const ServiceForm = ({ route, navigation }) => {
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
 
   // Leaving with changes asks first (a swipe, the back button, the X).
-  const start = useRef(JSON.stringify({ form, logo, cover, gallery, hours, orgSlug }));
+  const start = useRef(JSON.stringify({ form, logo, cover, gallery, hours, orgSlug, pin }));
   const leaving = useRef(false);
-  const dirty = JSON.stringify({ form, logo, cover, gallery, hours, orgSlug }) !== start.current;
+  const dirty = JSON.stringify({ form, logo, cover, gallery, hours, orgSlug, pin }) !== start.current;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   useEffect(() => navigation.addListener('beforeRemove', (e) => {
@@ -154,6 +158,8 @@ const ServiceForm = ({ route, navigation }) => {
     }
     payload.opening_hours = hours;
     payload.organization_slug = orgSlug;
+    payload.latitude = pin ? Number(pin.lat.toFixed(6)) : null;
+    payload.longitude = pin ? Number(pin.lng.toFixed(6)) : null;
     payload.gallery = gallery.filter((u) => u.startsWith('http'));
     // Links: filled in ones as real addresses ("instagram.com/x" → https://…).
     LINK_KEYS.forEach((k) => { const v = form[k].trim(); payload[k] = v ? withScheme(v) : ''; });
@@ -211,6 +217,18 @@ const ServiceForm = ({ route, navigation }) => {
         <Field label={t('services.nameLabel')} value={form.name} onChange={set('name')} placeholder={t('studios.namePlaceholder')} testID="service-name" />
         <Field label={t('services.descLabel')} value={form.description} onChange={set('description')} placeholder={t('studios.aboutPlaceholder')} multiline />
         <Field label={t('services.locationLabel')} value={form.location} onChange={set('location')} placeholder={t('dir.cityCountry')} testID="service-location" />
+        <View style={styles.pinRow}>
+          <TouchableOpacity style={styles.pinBtn} onPress={() => setPinning(true)} testID="service-pin">
+            <Ionicons name={pin ? 'location' : 'location-outline'} size={16} color={colors.primary} />
+            <Text style={styles.pinText} numberOfLines={1}>{pin ? (pin.label || t('services.pinned')) : t('services.pinOnMap')}</Text>
+          </TouchableOpacity>
+          {pin ? (
+            <TouchableOpacity onPress={() => setPin(null)} hitSlop={8} accessibilityLabel={t('common.remove')} testID="service-unpin">
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <Text style={styles.hint}>{t('services.pinHint')}</Text>
 
         {myOrgs.length || orgSlug ? (
           <>
@@ -366,6 +384,10 @@ const ServiceForm = ({ route, navigation }) => {
         <View style={{ height: spacing.xl }} />
       </KeyboardAwareScrollView>
 
+      <PlaceSheet visible={pinning} onClose={() => setPinning(false)} t={t} title={t('services.pinOnMap')}
+        lang={resolvedLanguage === 'sw' ? 'sw' : 'en'} initialQuery={form.location}
+        onPick={(p) => { setPin(p); setPinning(false); }} />
+
       <View style={styles.saveBar}>
         <TouchableOpacity style={[styles.saveBtn, styles.cancel]} onPress={() => navigation.goBack()} disabled={saving}>
           <Text style={styles.cancelText}>{t('common.cancel')}</Text>
@@ -446,6 +468,12 @@ const styles = StyleSheet.create({
   closedText: { ...typography.caption, color: colors.textMuted },
   copyDays: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: spacing.xs },
   copyText: { ...typography.caption, color: colors.primary, fontWeight: '700' },
+  pinRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  pinBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, paddingHorizontal: spacing.md, paddingVertical: 7,
+    borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary,
+  },
+  pinText: { ...typography.label, color: colors.primary, fontWeight: '700', flexShrink: 1 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   linkIcon: { width: 38, height: 38, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   saveBar: {

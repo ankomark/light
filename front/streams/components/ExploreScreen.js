@@ -274,6 +274,7 @@ const ExploreScreen = ({ navigation }) => {
   const openGenre = useCallback((g) => navigation.navigate('Genre', { slug: g.slug, name: genreName(t, g) }), [navigation, t]);
   // A book's row doubles as its page's top while the contents load.
   const openBook = useCallback((b) => navigation.navigate('PublicationDetail', { id: b.id, preview: b }), [navigation]);
+  const openService = useCallback((s) => navigation.navigate('ServiceDetail', { id: s.id, preview: s }), [navigation]);
   // The top result: whatever kind it is, open it the way its section would.
   const openTop = useCallback((top) => {
     if (top.kind === 'track') openTrack(top.item);
@@ -382,7 +383,7 @@ const ExploreScreen = ({ navigation }) => {
     }
     const {
       users = [], hashtags = [], posts = [], tracks = [], groups = [],
-      artists = [], albums = [], playlists = [], genres = [], books = [], top = null,
+      artists = [], albums = [], playlists = [], genres = [], books = [], services = [], top = null,
     } = results;
     const topCover = top && (top.kind === 'artist'
       ? top.item.profile_picture
@@ -505,6 +506,28 @@ const ExploreScreen = ({ navigation }) => {
                   <Text style={styles.resultSub} numberOfLines={1}>
                     {`${categoryLabel(b.category, t)} · ${b.author?.username || ''}`}
                   </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </Section>
+        )}
+        {services.length > 0 && (
+          <Section title={t('explore.services')}>
+            {services.map((s) => (
+              <TouchableOpacity key={`sv_${s.id}`} style={styles.resultRow} onPress={() => openService(s)} activeOpacity={0.7}
+                accessibilityRole="button" testID={`search-service-${s.id}`}>
+                <View style={styles.trackThumb}>
+                  {s.logo
+                    ? <Image source={{ uri: s.logo }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" />
+                    : <MaterialIcons name="storefront" size={20} color={colors.primary} />}
+                </View>
+                <View style={styles.resultInfo}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.resultName} numberOfLines={1}>{s.name}</Text>
+                    {s.is_verified ? <VerifiedBadge size={13} /> : null}
+                  </View>
+                  <Text style={styles.resultSub} numberOfLines={1}>{`${t(`services.cat.${s.category || 'media'}`)} · ${s.location || ''}`}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>

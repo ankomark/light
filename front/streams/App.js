@@ -64,6 +64,8 @@ import OrganizationMembers from './pages/OrganizationMembers';
 import ServiceForm from './pages/ServiceForm';
 import ServiceDetail from './pages/ServiceDetail';
 import ServiceVerification from './pages/ServiceVerification';
+import ServiceBookings from './pages/ServiceBookings';
+import ServiceInsights from './pages/ServiceInsights';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -254,6 +256,9 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.type === 'service_booking') {
+        // A request to your service, or the answer to yours: that tab.
+        navigate('ServiceBookings', { role: data.role === 'incoming' ? 'incoming' : 'mine' });
       } else if (data?.type === 'service' && data.service_id) {
         // A review of your service, a reply to yours, a verification decision.
         navigate('ServiceDetail', { id: data.service_id });
@@ -361,6 +366,8 @@ const App = () => {
                 <Stack.Screen name="ServiceForm" component={ServiceForm} />
                 <Stack.Screen name="ServiceDetail" component={ServiceDetail} />
                 <Stack.Screen name="ServiceVerification" component={ServiceVerification} />
+                <Stack.Screen name="ServiceBookings" component={ServiceBookings} />
+                <Stack.Screen name="ServiceInsights" component={ServiceInsights} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />

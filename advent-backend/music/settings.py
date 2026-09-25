@@ -235,6 +235,9 @@ REST_FRAMEWORK = {
         'ai': '20/min',
         # Books and passages shared to the feed (a post each).
         'book_share': '30/hour',
+        # Services: requests to providers, and how they're found and reached.
+        'service_booking': '20/hour',
+        'service_event': '120/min',
         'reports': '20/hour',
         # Listening reports: two per song played, plus offline backlogs.
         'plays': '120/min',

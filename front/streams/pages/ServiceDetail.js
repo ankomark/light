@@ -5,7 +5,7 @@
 // Its owner sees it as everyone does, with Edit.
 //
 // Draws at once from the list's row (or the last copy), then fresh.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Share, Modal, FlatList, useWindowDimensions,
   ActivityIndicator,
@@ -14,7 +14,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { fetchVideoStudioById, getOrCreateConversation, serviceShareUrl } from '../services/api';
+import {
+  fetchVideoStudioById, getOrCreateConversation, serviceShareUrl, saveService, recordServiceEvent,
+} from '../services/api';
+import BookingSheet from '../components/services/BookingSheet';
 import {
   CATEGORY_ICON, DAYS, SOCIAL_LINKS, serviceLabel, rateText, withScheme, directionsUrl,
 } from '../services/servicesCatalog';
@@ -31,6 +34,9 @@ import { useAuth } from '../context/useAuth';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const todayKey = () => DAYS[(new Date().getDay() + 6) % 7];
+// "Usually answers within an hour / 3 hours / a day".
+export const respondsLabel = (h, t) => (h <= 1 ? t('services.respondsHour') : h < 24
+  ? t('services.respondsHours', { n: Math.ceil(h) }) : h < 48 ? t('services.respondsDay') : t('services.respondsDays', { n: Math.ceil(h / 24) }));
 
 const Section = ({ title, children, testID }) => (
   <View style={styles.section} testID={testID}>
@@ -50,17 +56,28 @@ const ServiceDetail = ({ route, navigation }) => {
   const [viewer, setViewer] = useState(null);           // gallery index being viewed
   const [reporting, setReporting] = useState(false);
   const [messaging, setMessaging] = useState(false);
+  const [booking, setBooking] = useState(null);         // 'booking' | 'quote' — the sheet open
+  const [saved, setSaved] = useState(null);             // null: as the listing says
+
+  // How it's found and reached, for its owner's numbers (never who). A
+  // failure is silent — it's only counting.
+  const track = useCallback((kind) => { Promise.resolve().then(() => recordServiceEvent(id, kind)).catch(() => {}); }, [id]);
+  useEffect(() => { if (id) track('view'); }, [id, track]);
 
   const open = useCallback((url) => Linking.openURL(url).catch(() => notify(t('common.error'), t('dir.openLinkFailed'))), [t]);
-  const share = () => Share.share({
+  const share = () => track('share') || Share.share({
     message: `${s.name} — ${t(`services.cat.${s.category || 'media'}`)} · ${s.location}\n${serviceShareUrl(s.id)}`,
   }).catch(() => {});
   const message = async () => {
     if (!isAuthenticated) { navigation.navigate('Login'); return; }
     setMessaging(true);
+    track('message');
     try {
       const c = await getOrCreateConversation(s.created_by.id);
-      navigation.navigate('Chat', { conversationId: c.id, otherUser: c.other_participant ?? s.created_by });
+      // Started for them — theirs to change or send.
+      navigation.navigate('Chat', {
+        conversationId: c.id, otherUser: c.other_participant ?? s.created_by, draft: t('services.messageDraft', { name: s.name }),
+      });
     } catch {
       notify(t('common.error'), t('services.messageFailed'));
     } finally {
@@ -88,6 +105,13 @@ const ServiceDetail = ({ route, navigation }) => {
   }
 
   const owner = !!s.is_owner;
+  const isSaved = saved ?? !!s.is_saved;
+  const toggleSave = async () => {
+    if (!isAuthenticated) { navigation.navigate('Login'); return; }
+    const next = !isSaved;
+    setSaved(next);
+    try { await saveService(s.id, next); } catch { setSaved(!next); notify(t('common.error'), t('services.saveFailed')); }
+  };
   const cat = s.category || 'media';
   const hours = s.opening_hours || {};
   const hasHours = Object.keys(hours).length > 0;
@@ -96,10 +120,10 @@ const ServiceDetail = ({ route, navigation }) => {
   const price = rateText(s);
   const coverH = Math.min(260, Math.round(Math.min(width, 760) * 0.5));
   const actions = [
-    s.contact_phone && { key: 'call', icon: 'call', label: t('studios.call'), onPress: () => open(`tel:${s.contact_phone}`) },
+    s.contact_phone && { key: 'call', icon: 'call', label: t('studios.call'), onPress: () => { track('call'); open(`tel:${s.contact_phone}`); } },
     s.whatsapp_number && {
       key: 'whatsapp', icon: 'logo-whatsapp', label: t('studios.whatsapp'), tint: '#25D366',
-      onPress: () => open(`https://wa.me/${s.whatsapp_number.replace(/[^\d]/g, '')}`),
+      onPress: () => { track('whatsapp'); open(`https://wa.me/${s.whatsapp_number.replace(/[^\d]/g, '')}`); },
     },
     !owner && s.created_by?.id && { key: 'message', icon: 'chatbubble-ellipses', label: t('services.message'), onPress: message, busy: messaging },
     { key: 'share', icon: 'share-social', label: t('services.share'), onPress: share, quiet: true },
@@ -143,7 +167,8 @@ const ServiceDetail = ({ route, navigation }) => {
             ) : null}
             <OpenChip hours={hours} t={t} style={styles.openChip} />
             <View style={styles.quickRow}>
-              <TouchableOpacity style={styles.pill} onPress={() => open(directionsUrl(s.location))} testID="service-directions">
+              <TouchableOpacity style={styles.pill} testID="service-directions"
+                onPress={() => { track('directions'); open(s.latitude != null ? directionsUrl(`${s.latitude},${s.longitude}`) : directionsUrl(s.location)); }}>
                 <Ionicons name="navigate" size={15} color={colors.primary} />
                 <Text style={styles.pillText}>{t('services.directions')}</Text>
               </TouchableOpacity>
@@ -154,12 +179,45 @@ const ServiceDetail = ({ route, navigation }) => {
                 </View>
               ) : null}
             </View>
+            {s.responds_in_hours != null ? (
+              <View style={styles.responds} testID="service-responds">
+                <Ionicons name="flash-outline" size={14} color={colors.success} />
+                <Text style={styles.respondsText}>{respondsLabel(s.responds_in_hours, t)}</Text>
+              </View>
+            ) : null}
+            {!owner ? (
+              <View style={styles.bookRow}>
+                <TouchableOpacity style={styles.bookBtn} onPress={() => (isAuthenticated ? setBooking('booking') : navigation.navigate('Login'))}
+                  testID="service-book">
+                  <Ionicons name="calendar" size={17} color={colors.white} />
+                  <Text style={styles.bookText}>{t('bookings.book')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.bookBtn, styles.quoteBtn]} testID="service-quote"
+                  onPress={() => (isAuthenticated ? setBooking('quote') : navigation.navigate('Login'))}>
+                  <Ionicons name="pricetag-outline" size={17} color={colors.primary} />
+                  <Text style={[styles.bookText, styles.quoteText]}>{t('bookings.askQuote')}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
 
           {owner ? (
             <View style={styles.ownerBar} testID="service-owner-bar">
-              <Ionicons name="eye-outline" size={18} color={colors.accent} />
-              <Text style={styles.ownerText}>{t('services.ownerView')}</Text>
+              <View style={styles.ownerHead}>
+                <Ionicons name="eye-outline" size={18} color={colors.accent} />
+                <Text style={styles.ownerText}>{t('services.ownerView')}</Text>
+              </View>
+              <View style={styles.ownerActions}>
+              <TouchableOpacity style={[styles.editBtn, styles.verifyBtn]} testID="service-insights"
+                onPress={() => navigation.navigate('ServiceInsights', { id: s.id, name: s.name })}>
+                <Ionicons name="stats-chart" size={14} color={colors.primary} />
+                <Text style={[styles.editText, styles.verifyText]}>{t('services.insights')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.editBtn, styles.verifyBtn]} testID="service-requests"
+                onPress={() => navigation.navigate('ServiceBookings', { role: 'incoming' })}>
+                <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+                <Text style={[styles.editText, styles.verifyText]}>{t('bookings.requests')}</Text>
+              </TouchableOpacity>
               {!s.is_verified ? (
                 <TouchableOpacity style={[styles.editBtn, styles.verifyBtn]} testID="service-get-verified"
                   onPress={() => navigation.navigate('ServiceVerification', { id: s.id, name: s.name })}>
@@ -171,6 +229,7 @@ const ServiceDetail = ({ route, navigation }) => {
                 <MaterialIcons name="edit" size={16} color={colors.white} />
                 <Text style={styles.editText}>{t('common.edit')}</Text>
               </TouchableOpacity>
+              </View>
             </View>
           ) : null}
 
@@ -267,6 +326,12 @@ const ServiceDetail = ({ route, navigation }) => {
           accessibilityLabel={t('common.back')} testID="service-back">
           <Ionicons name="arrow-back" size={22} color={colors.white} />
         </TouchableOpacity>
+        {!owner ? (
+          <TouchableOpacity style={styles.roundBtn} onPress={toggleSave} accessibilityRole="button"
+            accessibilityState={{ selected: isSaved }} accessibilityLabel={t(isSaved ? 'services.unsave' : 'services.save')} testID="service-page-save">
+            <Ionicons name={isSaved ? 'heart' : 'heart-outline'} size={21} color={isSaved ? '#FF5A6E' : colors.white} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {/* Reaching them: always at hand. */}
@@ -301,6 +366,7 @@ const ServiceDetail = ({ route, navigation }) => {
       </Modal>
 
       {reporting ? <ReportModal visible onClose={() => setReporting(false)} contentType="videostudio" objectId={s.id} /> : null}
+      <BookingSheet visible={!!booking} initialKind={booking || 'booking'} onClose={() => setBooking(null)} service={s} t={t} />
     </View>
   );
 };
@@ -331,9 +397,21 @@ const styles = StyleSheet.create({
   pricePill: { borderColor: 'transparent', backgroundColor: `${colors.primary}14`, flexShrink: 1 },
   pillText: { ...typography.label, color: colors.primary, fontWeight: '700', flexShrink: 1 },
   ownerBar: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, margin: spacing.md, marginBottom: 0, padding: spacing.sm + 2,
+    gap: spacing.sm, margin: spacing.md, marginBottom: 0, padding: spacing.sm + 2,
     borderRadius: radius.md, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.accent,
   },
+  ownerHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  ownerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  responds: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.sm },
+  respondsText: { ...typography.caption, color: colors.success, fontWeight: '700' },
+  bookRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  bookBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 46,
+    borderRadius: radius.md, backgroundColor: colors.primary,
+  },
+  quoteBtn: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.primary },
+  bookText: { ...typography.label, color: colors.white, fontWeight: '800' },
+  quoteText: { color: colors.primary },
   ownerText: { ...typography.caption, color: colors.textPrimary, flex: 1 },
   editBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.primary, borderRadius: radius.full,

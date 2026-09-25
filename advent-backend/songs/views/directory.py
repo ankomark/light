@@ -2,12 +2,13 @@ from .common import *  # noqa: F401,F403
 import base64
 from django.http import HttpResponse
 from django.utils import timezone
-from django.db.models import Avg, Count, Q, TextField
+from django.db.models import Avg, Count, Exists, F, OuterRef, Q, TextField
 from rest_framework.exceptions import PermissionDenied
 from django.http import Http404
 from django.db.models.functions import Cast
-from ..models import blocked_ids_for
-from ..serializers.directory import ServiceReviewSerializer
+from ..models import blocked_ids_for, SavedService, ServiceBooking
+from .. import services_directory as svc_dir
+from ..serializers.directory import ServiceReviewSerializer, ServiceBookingSerializer
 
 
 
@@ -147,11 +148,185 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
             live = Q(reviews__is_removed=False)
             qs = qs.annotate(rating_avg_anno=Avg('reviews__rating', filter=live),
                              rating_count_anno=Count('reviews', filter=live, distinct=True))
+            if user.is_authenticated:
+                qs = qs.annotate(saved_by_me=Exists(SavedService.objects.filter(service=OuterRef('pk'), user=user)))
         if self.action == 'list':
             qs = self._search(qs)
-            # Verified first, then newest: a directory people can trust.
-            qs = qs.order_by('-is_verified', '-created_at', '-id')
+            qs = self._filter(qs)
+            qs = self._sort(qs)
         return qs
+
+    def _filter(self, qs):
+        """?saved=1 (yours) · ?verified=1 · ?min_rating=4 · ?min_price= /
+        ?max_price= · ?open_at=mon,14:30 (the viewer's own day and time)."""
+        p = self.request.query_params
+        user = self.request.user
+        if p.get('saved') and user.is_authenticated:
+            qs = qs.filter(saves__user=user)
+        if p.get('verified') in ('1', 'true'):
+            qs = qs.filter(is_verified=True)
+        try:
+            if p.get('min_rating'):
+                qs = qs.filter(rating_avg_anno__gte=float(p['min_rating']))
+            if p.get('min_price'):
+                qs = qs.filter(service_rates__gte=float(p['min_price']))
+            if p.get('max_price'):
+                qs = qs.filter(service_rates__lte=float(p['max_price']))
+        except ValueError:
+            pass
+        if p.get('open_at'):
+            q = svc_dir.open_at_q(p['open_at'])
+            if q is not None:
+                qs = qs.filter(q)
+        return qs
+
+    def _sort(self, qs):
+        """?sort=near (with ?near=lat,lng) · rating · new · (default) verified
+        first, then newest. ?near= alone adds each card's distance."""
+        p = self.request.query_params
+        point = svc_dir.parse_point(p.get('near'))
+        if point:
+            qs = svc_dir.with_distance(qs, point)
+        sort = p.get('sort')
+        if sort == 'near' and point:
+            return qs.order_by(F('dist2').asc(nulls_last=True), '-id')
+        if sort == 'rating':
+            return qs.order_by(F('rating_avg_anno').desc(nulls_last=True), '-rating_count_anno', '-id')
+        if sort == 'new':
+            return qs.order_by('-created_at', '-id')
+        # Verified first, then newest: a directory people can trust.
+        return qs.order_by('-is_verified', '-created_at', '-id')
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx['near'] = svc_dir.parse_point(self.request.query_params.get('near'))
+        return ctx
+
+    def retrieve(self, request, *args, **kwargs):
+        resp = super().retrieve(request, *args, **kwargs)
+        # How quickly they usually answer a request (once there are a few).
+        resp.data['responds_in_hours'] = svc_dir.responds_in_hours(self.get_object())
+        return resp
+
+    # ── Saved (yours to come back to) ──
+
+    @action(detail=True, methods=['post', 'delete'], permission_classes=[permissions.IsAuthenticated])
+    def save(self, request, pk=None):
+        s = self.get_object()
+        if request.method == 'POST':
+            SavedService.objects.get_or_create(user=request.user, service=s)
+        else:
+            SavedService.objects.filter(user=request.user, service=s).delete()
+        return Response({'is_saved': request.method == 'POST'})
+
+    # ── How it's found and reached (totals for its owner) ──
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.AllowAny])
+    def events(self, request, pk=None):
+        """{kind: view | call | whatsapp | message | directions | share}. An
+        owner looking at their own listing isn't counted."""
+        s = self.get_object()
+        if request.user.is_authenticated and s.created_by_id == request.user.id:
+            return Response({'counted': False})
+        who = request.user.id if request.user.is_authenticated else (
+            request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() or request.META.get('REMOTE_ADDR', ''))
+        return Response({'counted': svc_dir.record(s, str(request.data.get('kind') or ''), who)})
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def insights(self, request, pk=None):
+        s = self.get_object()
+        if s.created_by_id != request.user.id:
+            raise PermissionDenied('Only the listing’s owner sees its numbers.')
+        try:
+            days = int(request.query_params.get('days', 30))
+        except ValueError:
+            days = 30
+        return Response(svc_dir.insights(s, days))
+
+    # ── Bookings and quotes ──
+
+    @action(detail=True, methods=['post'], url_path='bookings', permission_classes=[permissions.IsAuthenticated])
+    def request_booking(self, request, pk=None):
+        """Ask the provider: {kind: booking | quote, date?, time?, note}."""
+        s = self.get_object()
+        if s.created_by_id == request.user.id:
+            return Response({'error': 'This is your own listing.'}, status=status.HTTP_400_BAD_REQUEST)
+        if getattr(request.user, 'is_suspended', False):
+            return Response({'error': 'Your account is suspended.'}, status=status.HTTP_403_FORBIDDEN)
+        ser = ServiceBookingSerializer(data=request.data, context=self.get_serializer_context())
+        ser.is_valid(raise_exception=True)
+        b = ser.save(service=s, customer=request.user)
+        from ..push import notify_user
+        what = 'a quote' if b.kind == ServiceBooking.QUOTE else 'a booking'
+        notify_user(s.created_by, 'service_booking', f'{request.user.username} asked {s.name} for {what}',
+                    data={'type': 'service_booking', 'service_id': s.id, 'booking_id': b.id, 'role': 'incoming'})
+        return Response(ServiceBookingSerializer(b, context=self.get_serializer_context()).data,
+                        status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='bookings', permission_classes=[permissions.IsAuthenticated])
+    def bookings(self, request):
+        """?role=mine (what you asked for) · incoming (asked of your services)."""
+        qs = ServiceBooking.objects.select_related('service', 'customer', 'customer__profile')
+        if request.query_params.get('role') == 'incoming':
+            qs = qs.filter(service__created_by=request.user)
+        else:
+            qs = qs.filter(customer=request.user)
+        status_ = request.query_params.get('status')
+        if status_ in dict(ServiceBooking.STATUSES):
+            qs = qs.filter(status=status_)
+        page = self.paginate_queryset(qs)
+        return self.get_paginated_response(ServiceBookingSerializer(page, many=True, context=self.get_serializer_context()).data)
+
+    def _booking(self, bid):
+        b = ServiceBooking.objects.select_related('service', 'customer').filter(pk=bid).first()
+        if b is None:
+            raise Http404('No such request.')
+        return b
+
+    @action(detail=False, methods=['post'], url_path=r'bookings/(?P<bid>\d+)/respond',
+            permission_classes=[permissions.IsAuthenticated])
+    def respond_booking(self, request, bid=None):
+        """The provider: {accept: bool, note?}."""
+        b = self._booking(bid)
+        if b.service.created_by_id != request.user.id:
+            raise PermissionDenied('Only the provider answers.')
+        if b.status != ServiceBooking.PENDING:
+            return Response({'error': 'Already answered.', 'code': b.status}, status=status.HTTP_400_BAD_REQUEST)
+        accept = str(request.data.get('accept', '')).lower() in ('1', 'true')
+        b.status = ServiceBooking.ACCEPTED if accept else ServiceBooking.DECLINED
+        b.reply_note = str(request.data.get('note') or '').strip()[:500]
+        b.responded_at = timezone.now()
+        b.save(update_fields=['status', 'reply_note', 'responded_at', 'updated_at'])
+        from ..push import notify_user
+        notify_user(b.customer, 'service_booking',
+                    f'{b.service.name} {"accepted" if accept else "declined"} your request',
+                    data={'type': 'service_booking', 'service_id': b.service_id, 'booking_id': b.id, 'role': 'mine'})
+        return Response(ServiceBookingSerializer(b, context=self.get_serializer_context()).data)
+
+    @action(detail=False, methods=['post'], url_path=r'bookings/(?P<bid>\d+)/cancel',
+            permission_classes=[permissions.IsAuthenticated])
+    def cancel_booking(self, request, bid=None):
+        """The one who asked, while it waits or once accepted."""
+        b = self._booking(bid)
+        if b.customer_id != request.user.id:
+            raise PermissionDenied('Only the one who asked cancels.')
+        if b.status not in (ServiceBooking.PENDING, ServiceBooking.ACCEPTED):
+            return Response({'error': 'Nothing to cancel.'}, status=status.HTTP_400_BAD_REQUEST)
+        was = b.status
+        b.status = ServiceBooking.CANCELLED
+        b.save(update_fields=['status', 'updated_at'])
+        if was == ServiceBooking.ACCEPTED:
+            from ..push import notify_user
+            notify_user(b.service.created_by, 'service_booking', f'{request.user.username} cancelled their booking',
+                        data={'type': 'service_booking', 'service_id': b.service_id, 'booking_id': b.id, 'role': 'incoming'})
+        return Response(ServiceBookingSerializer(b, context=self.get_serializer_context()).data)
+
+    def get_throttles(self):
+        if self.action == 'request_booking':
+            self.throttle_scope = 'service_booking'
+        elif self.action == 'events':
+            self.throttle_scope = 'service_event'
+        return super().get_throttles()
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
     def home(self, request):

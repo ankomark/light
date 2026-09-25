@@ -1,6 +1,6 @@
 import re
 
-from ..models import ServiceReview
+from ..models import ServiceReview, ServiceBooking
 
 from .common import *  # noqa: F401,F403
 
@@ -191,7 +191,62 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
         data['member_since'] = joined.year if joined else None
         from ..organizations import mini
         data['organization'] = mini(obj.organization) if obj.organization_id else None
+        data['is_saved'] = bool(getattr(obj, 'saved_by_me', False))
+        # How far from the viewer (when they said where they are).
+        near = self.context.get('near')
+        if near and obj.latitude is not None and obj.longitude is not None:
+            from ..services_directory import km_between
+            data['distance_km'] = round(km_between(near, (obj.latitude, obj.longitude)), 1)
+        else:
+            data['distance_km'] = None
         return data
+
+
+class ServiceBookingSerializer(serializers.ModelSerializer):
+    """A request to a service (booking or quote), for either side."""
+    customer = SimpleUserSerializer(read_only=True)
+    service_info = serializers.SerializerMethodField()
+    is_provider = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServiceBooking
+        fields = ['id', 'service', 'service_info', 'customer', 'kind', 'date', 'time', 'note', 'status', 'reply_note',
+                  'responded_at', 'is_provider', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'service', 'service_info', 'customer', 'status', 'reply_note', 'responded_at',
+                            'is_provider', 'created_at', 'updated_at']
+
+    def to_internal_value(self, data):
+        # No day (a quote): '' as well as null.
+        if hasattr(data, 'get') and data.get('date') == '':
+            data = {**data, 'date': None}
+        return super().to_internal_value(data)
+
+    def get_service_info(self, obj):
+        s = obj.service
+        return {'id': s.id, 'name': s.name, 'logo': media.resolve(s.logo) or '', 'category': s.category,
+                'location': s.location}
+
+    def get_is_provider(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.service.created_by_id == request.user.id)
+
+    def validate_time(self, v):
+        if v and not _HHMM.match(v):
+            raise serializers.ValidationError('A time as HH:MM.')
+        return v
+
+    def validate_date(self, v):
+        from django.utils import timezone
+        if v and v < timezone.localdate():
+            raise serializers.ValidationError('That day has passed.')
+        return v
+
+    def validate(self, attrs):
+        if attrs.get('kind', ServiceBooking.BOOKING) == ServiceBooking.BOOKING and not attrs.get('date'):
+            raise serializers.ValidationError({'date': 'A booking needs a day.'})
+        if not (attrs.get('note') or '').strip() and attrs.get('kind') == ServiceBooking.QUOTE:
+            raise serializers.ValidationError({'note': 'Say what you need a quote for.'})
+        return attrs
 
 
 class ServiceReviewSerializer(serializers.ModelSerializer):

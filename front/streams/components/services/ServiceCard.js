@@ -29,7 +29,9 @@ export const OpenChip = ({ hours, t, style }) => {
   );
 };
 
-const ServiceCard = memo(({ item, t, onOpen, onEdit, onDelete, onReport, style }) => {
+export const distanceText = (km) => (km == null ? null : km < 1 ? `${Math.round(km * 1000)} m` : `${km < 10 ? km.toFixed(1) : Math.round(km)} km`);
+
+const ServiceCard = memo(({ item, t, onOpen, onEdit, onDelete, onReport, onSave, style }) => {
   const [menu, setMenu] = useState(false);
   const call = (url) => Linking.openURL(url).catch(() => notify(t('common.error'), t('dir.openLinkFailed')));
   const price = priceHint(item);
@@ -53,6 +55,13 @@ const ServiceCard = memo(({ item, t, onOpen, onEdit, onDelete, onReport, style }
           <MaterialIcons name={CATEGORY_ICON[cat] || 'storefront'} size={12} color={colors.white} />
           <Text style={styles.categoryPillText}>{t(`services.cat.${cat}`)}</Text>
         </View>
+        {onSave && !item.is_owner ? (
+          <TouchableOpacity style={[styles.menuBtn, styles.saveBtn]} onPress={() => onSave(item)} hitSlop={6}
+            accessibilityRole="button" accessibilityState={{ selected: !!item.is_saved }}
+            accessibilityLabel={t(item.is_saved ? 'services.unsave' : 'services.save')} testID={`service-save-${item.id}`}>
+            <Ionicons name={item.is_saved ? 'heart' : 'heart-outline'} size={18} color={item.is_saved ? '#FF5A6E' : colors.white} />
+          </TouchableOpacity>
+        ) : null}
         {(item.is_owner && (onEdit || onDelete)) || onReport ? (
           <View style={styles.menu}>
             {menu ? (
@@ -98,7 +107,9 @@ const ServiceCard = memo(({ item, t, onOpen, onEdit, onDelete, onReport, style }
           </View>
           <View style={styles.metaRow}>
             <Ionicons name="location-outline" size={13} color={colors.textMuted} />
-            <Text style={styles.meta} numberOfLines={1}>{item.location}</Text>
+            <Text style={styles.meta} numberOfLines={1}>
+              {[item.location, distanceText(item.distance_km)].filter(Boolean).join(' · ')}
+            </Text>
           </View>
         </View>
       </View>
@@ -174,6 +185,7 @@ const styles = StyleSheet.create({
   categoryPillText: { ...typography.caption, color: colors.white, fontWeight: '700', fontSize: 11 },
   menu: { position: 'absolute', top: spacing.sm, right: spacing.sm, flexDirection: 'row', gap: spacing.xs },
   menuBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+  saveBtn: { position: 'absolute', top: spacing.sm, right: spacing.sm + 40 },
   head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, marginTop: -22 },
   avatar: { width: 54, height: 54, borderRadius: radius.md, borderWidth: 3, borderColor: colors.card, backgroundColor: colors.surface },
   headInfo: { flex: 1, marginLeft: spacing.sm, paddingTop: 22, gap: 2 },

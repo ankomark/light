@@ -1020,6 +1020,20 @@ export const deleteServiceReply = async (id, rid) => apiRequest('delete', `/vide
 export const fetchServiceVerification = async (id) => apiRequest('get', `/video-studios/${id}/verification/`);
 export const requestServiceVerification = async (id, data) => apiRequest('post', `/video-studios/${id}/verification/`, data);
 
+// Keep a service to come back to (on / off) → { is_saved }.
+export const saveService = async (id, on) => apiRequest(on ? 'post' : 'delete', `/video-studios/${id}/save/`);
+// How a service is found and reached (its owner's numbers): view | call | whatsapp | message | directions | share.
+export const recordServiceEvent = async (id, kind) => apiRequest('post', `/video-studios/${id}/events/`, { kind });
+// The owner's numbers over 7 / 30 / 90 days.
+export const fetchServiceInsights = async (id, days = 30) => apiRequest('get', `/video-studios/${id}/insights/`, null, { params: { days } });
+// Bookings and quotes: { kind: 'booking' | 'quote', date?, time?, note }.
+export const requestServiceBooking = async (id, spec) => apiRequest('post', `/video-studios/${id}/bookings/`, spec);
+// ?role=mine (what you asked for) | incoming (asked of your services).
+export const fetchServiceBookings = async (role = 'mine') => apiRequest('get', '/video-studios/bookings/', null, { params: { role } });
+export const respondServiceBooking = async (bid, accept, note = '') =>
+  apiRequest('post', `/video-studios/bookings/${bid}/respond/`, { accept, note });
+export const cancelServiceBooking = async (bid) => apiRequest('post', `/video-studios/bookings/${bid}/cancel/`);
+
 export const fetchVideoStudioById = async (id) => {
   return apiRequest('get', `/video-studios/${id}/`);
 };

@@ -63,6 +63,12 @@
         }
       ],
       "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Adventist Life uses your location to show services near you, and to pin your own service on the map."
+        }
+      ],
       "expo-web-browser",
       "expo-sqlite",
       "expo-asset",

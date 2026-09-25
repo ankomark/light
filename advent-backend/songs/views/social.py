@@ -1131,7 +1131,7 @@ class ExploreViewSet(viewsets.ViewSet):
     SEARCH_SECTION = 8
     SEARCH_TYPED = 50
     SEARCH_TYPES = ('users', 'artists', 'tracks', 'albums', 'playlists', 'groups', 'genres', 'hashtags', 'posts',
-                    'books')
+                    'books', 'services')
 
     @action(detail=False, methods=['get'])
     def search(self, request):
@@ -1286,6 +1286,24 @@ class ExploreViewSet(viewsets.ViewSet):
                      .select_related('author', 'author__profile').in_bulk())
             out['books'] = PublicationListSerializer(
                 [by_id[b['id']] for _, b in ranked if b['id'] in by_id], many=True, context=ctx).data
+
+        # Services: listed, not taken down, by people you can see — the name
+        # first, then the place, then what they say they do. Verified lead a tie.
+        if want('services'):
+            from ..models import Videostudio
+            from ..serializers.directory import VideoStudioListSerializer
+            cands = list(
+                Videostudio.objects.filter(fz.candidate_q(['name', 'location', 'description'], query), is_removed=False)
+                .exclude(created_by_id__in=blocked).exclude(created_by__is_deactivated=True)
+                .order_by('-is_verified', '-id').values('id', 'name', 'location', 'description', 'is_verified')[:fz.CANDIDATES]
+            )
+            ranked = fz.rank(query, cands,
+                             lambda s: [(s['name'], 1.0), (s['location'], 0.6), (s['description'] or '', 0.4)],
+                             lambda s: 1 if s['is_verified'] else 0, n)
+            by_id = (Videostudio.objects.filter(id__in=[s['id'] for _, s in ranked])
+                     .select_related('created_by', 'organization').in_bulk())
+            out['services'] = VideoStudioListSerializer(
+                [by_id[s['id']] for _, s in ranked if s['id'] in by_id], many=True, context=ctx).data
 
         if want('genres'):
             gs = list(Category.objects.exclude(slug__isnull=True))
