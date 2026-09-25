@@ -2,7 +2,7 @@
 // a soft wash of the cover's colours, the title and who it's by — and, when
 // a passage was shared, the passage in the book's own voice. Tap: the book
 // (or the chapter, at that passage). Double-tap likes, like any post.
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -19,6 +19,9 @@ const BookPostMedia = ({ item, width, onDoubleTapLike }) => {
   const book = item.book || {};
   const quote = (book.quote || '').trim();
   const tap = useRef({ at: 0, timer: null });
+  // Scrolled away (or the feed refreshed) between the tap and the open: no
+  // book suddenly opening from a card no longer there.
+  useEffect(() => () => clearTimeout(tap.current.timer), []);
 
   const open = useCallback(() => {
     if (quote && book.chapter_id) {

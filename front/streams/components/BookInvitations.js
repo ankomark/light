@@ -1,21 +1,23 @@
 // Books you've been invited to work on — at the top of My Work, to accept or
 // decline. Nothing shows when there are none.
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchBookInvitations, answerBookInvitation } from '../services/api';
 import { notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
 
 const BookInvitations = ({ onAccepted }) => {
   const { t } = useI18n();
-  const [rows, setRows] = useState([]);
-
-  const load = useCallback(async () => {
-    try { setRows((await fetchBookInvitations())?.results || []); } catch { /* offline: none shown */ }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { currentUser } = useAuth();
+  const { data, setData } = useCachedData(userKey(currentUser?.id, 'book-invites'),
+    async () => (await fetchBookInvitations())?.results || []);
+  const rows = data || [];
+  const setRows = setData;
 
   const answer = async (row, accept) => {
     try {

@@ -21,7 +21,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from .. import organizations as orgs
+from .. import organizations as orgs, r2
 from ..models import Organization, OrganizationMember as M, User, blocked_ids_for
 from .common import StandardPagination
 
@@ -44,6 +44,9 @@ def _clean(data, partial):
     for f, n in (('description', 2000), ('location', 120), ('logo', 500)):
         if f in data:
             out[f] = str(data.get(f) or '').strip()[:n]
+    # A logo is one of our uploads — not any address on the internet.
+    if out.get('logo') and not r2.is_r2_url(out['logo']):
+        return None, 'Upload the logo from the app.'
     if 'website' in data:
         site = str(data.get('website') or '').strip()[:300]
         if site and not site.lower().startswith(('http://', 'https://')):
@@ -87,6 +90,10 @@ class OrganizationViewSet(viewsets.GenericViewSet):
         fields, err = _clean(request.data, partial=False)
         if err:
             return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+        # A verified organisation's name isn't anyone else's to take.
+        if Organization.objects.filter(is_verified=True, name__iexact=fields['name']).exists():
+            return Response({'error': 'An organisation with this name is already verified.', 'code': 'name_taken'},
+                            status=status.HTTP_400_BAD_REQUEST)
         if M.objects.filter(user=request.user, role=M.OWNER).count() >= orgs.MAX_ORGS_PER_USER:
             return Response({'error': 'You run as many organisations as one person may.'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -105,6 +112,10 @@ class OrganizationViewSet(viewsets.GenericViewSet):
         fields, err = _clean(request.data, partial=True)
         if err:
             return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+        if ('name' in fields and not org.is_verified and Organization.objects.filter(
+                is_verified=True, name__iexact=fields['name']).exclude(pk=org.pk).exists()):
+            return Response({'error': 'An organisation with this name is already verified.', 'code': 'name_taken'},
+                            status=status.HTTP_400_BAD_REQUEST)
         for k, v in fields.items():
             setattr(org, k, v)
         org.save()

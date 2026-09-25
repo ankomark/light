@@ -1276,10 +1276,13 @@ const SocialFeed = ({ showBackground = true }) => {
             caption={item.caption}
             username={item.user?.username}
           />
-          <DownloadButton
-            mediaUrl={item.mediaUrl}
-            contentType={item.content_type}
-          />
+          {/* A book post's picture is its cover: nothing of the poster's to save. */}
+          {item.content_type !== 'book' ? (
+            <DownloadButton
+              mediaUrl={item.mediaUrl}
+              contentType={item.content_type}
+            />
+          ) : null}
         </View>
         <SaveButton
           postId={item.id}

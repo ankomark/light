@@ -284,7 +284,7 @@ const ChapterReader = ({ route, navigation }) => {
       }
       throw err;
     }
-  }, [chapters, pubId, fallbackFor]);
+  }, [chapters, pubId, fallbackFor, previewing]);
 
   // An edit changes a chapter's version, not its id: both decide a reload.
   const chapterIds = chapters.map((c) => `${c.id}:${c.version ?? ''}`).join(',');

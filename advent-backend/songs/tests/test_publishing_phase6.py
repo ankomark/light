@@ -227,3 +227,17 @@ class BecauseYouHighlightedTests(Base):
         because = r.data['because']
         self.assertEqual((because['quote'], because['title']), ('A sower went out', 'Book'))
         self.assertEqual([b['title'] for b in because['books']], [same_author.title, same_kind.title])
+
+@KEY
+class RewriteCutOffTests(Base):
+    @mock.patch('songs.book_ai.requests.post')
+    def test_a_rewrite_that_ran_out_of_room_is_not_offered(self, post):
+        r = answer('Half of the wri')
+        r.json.return_value['stop_reason'] = 'max_tokens'
+        post.return_value = r
+        self.client.force_authenticate(self.author)
+        res = self.client.post(f'/api/publications/{self.pub.id}/ai/write/', {'kind': 'improve', 'text': 'x' * 3000},
+                               format='json')
+        self.assertEqual((res.status_code, res.data['code']), (502, 'ai_failed'))
+        self.assertGreaterEqual(post.call_args.kwargs['json']['max_tokens'], 2500)
+        self.assertFalse(AiAnswer.objects.exists())                  # nothing kept to hand out later

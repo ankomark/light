@@ -13,7 +13,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { fetchAuthorAnalytics, fetchBookAnalytics } from '../services/api';
 import { StatTile, DailyColumns, ReaderFunnel, compact } from '../components/BookCharts';
 import { formatDuration } from '../components/BookLibrary';
-import { peekCache, writeCache, userKey } from '../utils/screenCache';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
@@ -41,12 +41,13 @@ const useStats = (key, fetcher, days) => {
   const load = useCallback(async () => {
     setLoading(true);
     setFailed(false);
-    const kept = peekCache(`${key}:${days}`);
+    // Kept on the phone too: the numbers show at once after a restart.
+    const kept = peekCache(`${key}:${days}`) ?? await readCache(`${key}:${days}`, 7 * 24 * 3600e3);
     if (kept) setData(kept);
     try {
       const fresh = await fetchRef.current(days);
       setData(fresh);
-      writeCache(`${key}:${days}`, fresh, { persist: false });
+      writeCache(`${key}:${days}`, fresh);
     } catch {
       setFailed(true);
     } finally {

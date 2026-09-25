@@ -1,7 +1,7 @@
 // Who works on a book: the author invites people by username as co-author,
 // editor or viewer, changes their role, or removes them; a collaborator sees
 // the list and can leave.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -13,6 +13,8 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 export const ROLES = ['coauthor', 'editor', 'viewer'];
@@ -21,17 +23,12 @@ const BookCollaborators = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const { id, title = '' } = route.params || {};
-  const [data, setData] = useState(null);
-  const [failed, setFailed] = useState(false);
+  const { data, setData, failed, reload: load } = useCachedData(userKey(currentUser?.id, `book-people:${id}`),
+    () => fetchCollaborators(id));
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('editor');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setFailed(false);
-    try { setData(await fetchCollaborators(id)); } catch { setFailed(true); }
-  }, [id]);
-  useEffect(() => { load(); }, [load]);
 
   const isOwner = data?.my_role === 'owner';
 

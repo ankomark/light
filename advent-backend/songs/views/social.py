@@ -1023,7 +1023,9 @@ class ExploreViewSet(viewsets.ViewSet):
         hidden_authors = explore_hidden_authors(request.user)
         not_interested = feedrank.not_interested_ids(request.user.id)
         ranked = _trending_ids()
-        candidates = (SocialPost.objects.filter(id__in=ranked)
+        # The ranking is cached: what was taken down (or whose book was pulled)
+        # since is dropped here, with every post's own visibility.
+        candidates = (SocialPost.objects.filter(id__in=ranked, is_removed=False).filter(visible_posts_q(request.user))
                       .exclude(user_id__in=hidden_authors).exclude(id__in=not_interested)
                       .values_list('id', flat=True))
         allowed = set(candidates)
@@ -1463,7 +1465,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         because = sections.get('because')
         ids = {i for k in keys for i in sections[k]} | set(because['ids'] if because else [])
         rows = (self._counted(Publication.objects.filter(id__in=ids), user)
-                .select_related('author', 'author__profile').in_bulk())
+                .select_related('author', 'author__profile', 'organization').in_bulk())
         ctx = self.get_serializer_context()
         out = {k: PublicationListSerializer([rows[i] for i in sections[k] if i in rows], many=True, context=ctx).data
                for k in keys}
@@ -1477,11 +1479,16 @@ class PublicationViewSet(viewsets.ModelViewSet):
         # Publishers: verified organisations with books out, the busiest first.
         from ..models import Organization
         from ..organizations import mini
-        pubs = (Organization.objects.filter(is_verified=True)
-                .annotate(n=Count('publications', filter=Q(publications__status='published',
-                                                           publications__is_removed=False)))
-                .filter(n__gt=0).order_by('-n', 'name')[:12])
-        out['publishers'] = [{**mini(o), 'books_count': o.n} for o in pubs]
+        # The same for everyone: counted once every few minutes, not per visit.
+        publishers = cache.get('books:publishers')
+        if publishers is None:
+            pubs = (Organization.objects.filter(is_verified=True)
+                    .annotate(n=Count('publications', filter=Q(publications__status='published',
+                                                               publications__is_removed=False)))
+                    .filter(n__gt=0).order_by('-n', 'name')[:12])
+            publishers = [{**mini(o), 'books_count': o.n} for o in pubs]
+            cache.set('books:publishers', publishers, 10 * 60)
+        out['publishers'] = publishers
         people = User.objects.select_related('profile').in_bulk([r['user_id'] for r in sections['rising']])
         out['rising'] = []
         for r in sections['rising']:
@@ -1800,7 +1807,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         qs = self.filter_queryset(self._counted(
             Publication.objects.filter(Q(author=request.user) | Q(id__in=collaborating(request.user)),
                                        is_removed=False)
-            .select_related('author', 'author__profile'),
+            .select_related('author', 'author__profile', 'organization'),
             request.user, all_chapters=True,
         ).order_by('-created_at'))
         page = self.paginate_queryset(qs)
@@ -1987,6 +1994,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
     def get_throttles(self):
         if self.action in ('ai', 'ai_write', 'ai_check') and self.request.method == 'POST':
             self.throttle_scope = 'ai'
+        elif self.action == 'share_to_feed':
+            self.throttle_scope = 'book_share'
         return super().get_throttles()
 
     @staticmethod

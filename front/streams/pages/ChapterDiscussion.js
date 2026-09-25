@@ -2,12 +2,14 @@
 // so before anything is shown ("you're on chapter 3 — this may spoil it"),
 // and can choose to read on. One level of replies; the book's author is
 // marked; people remove their own comments, and the author their book's.
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchChapterDiscussion, postChapterComment, deleteChapterComment } from '../services/api';
@@ -63,9 +65,12 @@ const ChapterDiscussion = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser, isAuthenticated } = useAuth();
   const { id, index, chapterTitle = '', isBookAuthor = false } = route.params || {};
-  const [data, setData] = useState(null);         // { locked, reached, count, results }
-  const [failed, setFailed] = useState(false);
   const [reveal, setReveal] = useState(false);
+  // { locked, reached, count, results } — the last copy at once, then fresh.
+  const { data, setData, failed, reload: load } = useCachedData(
+    userKey(currentUser?.id, `discuss:${id}:${index}:${reveal ? 1 : 0}`),
+    () => fetchChapterDiscussion(id, index, { reveal }),
+  );
   const [text, setText] = useState('');
   const [replyTo, setReplyTo] = useState(null);
   const kbHeight = useKeyboardHeight();
@@ -76,16 +81,7 @@ const ChapterDiscussion = ({ route, navigation }) => {
   const [sending, setSending] = useState(false);
   const [reporting, setReporting] = useState(null);
 
-  // Runs again when the reader chooses to see past a spoiler warning.
-  const load = useCallback(async () => {
-    setFailed(false);
-    try {
-      setData(await fetchChapterDiscussion(id, index, { reveal }));
-    } catch {
-      setFailed(true);
-    }
-  }, [id, index, reveal]);
-  useEffect(() => { load(); }, [load]);
+  // Choosing to see past a spoiler warning is its own copy (and load).
 
   const send = async () => {
     const body = text.trim();

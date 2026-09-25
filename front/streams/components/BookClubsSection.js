@@ -1,11 +1,14 @@
 // On a book's page: the clubs reading it (yours, and public ones), and
 // "Start a book club" — a name, a pace, public or private — which makes the
 // group and its reading plan.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
+import { useAuth } from '../context/useAuth';
 import { fetchBookClubs, createBookClub } from '../services/api';
 import { notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
@@ -20,17 +23,17 @@ export const PACES = [
 const BookClubsSection = ({ pub, navigation, isAuthenticated }) => {
   const { t } = useI18n();
   const kbHeight = useKeyboardHeight();       // the sheet rises with the keyboard
-  const [clubs, setClubs] = useState([]);
+  const { currentUser } = useAuth();
+  // The clubs reading it: the last copy at once, then fresh.
+  const { data } = useCachedData(userKey(currentUser?.id, `clubs:${pub.id}`),
+    async () => (await fetchBookClubs(pub.id))?.results || []);
+  const clubs = data || [];
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [pace, setPace] = useState('week1');
   const [isPublic, setIsPublic] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    try { setClubs((await fetchBookClubs(pub.id))?.results || []); } catch { /* offline: none shown */ }
-  }, [pub.id]);
-  useEffect(() => { load(); }, [load]);
 
   const start = async () => {
     const p = PACES.find((x) => x.key === pace);

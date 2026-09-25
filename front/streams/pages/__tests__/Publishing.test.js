@@ -1733,3 +1733,68 @@ describe('Publishing as', () => {
     expect(within(r.getByTestId('publish-go')).getByText('publish.goAsMe')).toBeTruthy();
   });
 });
+
+describe('Deep scan fixes', () => {
+  test('a rewrite that dropped a picture or a footnote is not used', async () => {
+    mockApi.fetchAiStatus.mockResolvedValue({ enabled: true });
+    mockApi.fetchPublication.mockResolvedValue({ ...book(), chapters: [{ id: 51, title: 'One',
+      body: 'Before.\n\n![map](https://r2.test/cover_images/m.jpg)\n\nAfter.[^1]\n\n[^1]: A note.' }] });
+    mockApi.askWriterAi.mockResolvedValue({ text: 'Before and after, tighter.' });
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('editor-ai-0')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('editor-ai-0')); });
+    await act(async () => { fireEvent.press(r.getByTestId('ai-choice-shorten')); });
+    await waitFor(() => expect(r.getByTestId('ai-use')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('ai-use')); });
+    expect(mockNotify).toHaveBeenCalledWith('ai.writeTools', 'ai.lostPictures');
+    expect(r.getByDisplayValue(/!\[map\]/)).toBeTruthy();                 // the writer's words stand
+    expect(r.queryByTestId('editor-ai-undo-0')).toBeNull();
+  });
+});
+
+describe('Instant opens', () => {
+  const ChapterDiscussion = require('../ChapterDiscussion').default;
+  const BookClubsSection = require('../../components/BookClubsSection').default;
+  const disc = { locked: false, reached: 0, count: 1, results: [{ id: 1, user: { id: 2, username: 'ann' }, body: 'Lovely chapter', replies: [] }] };
+
+  test('a discussion opened again is there at once, and offline too', async () => {
+    mockApi.fetchChapterDiscussion.mockResolvedValue(disc);
+    const first = render(<ChapterDiscussion route={{ params: { id: 5, index: 0 } }} navigation={nav()} />);
+    await waitFor(() => expect(first.getByText('Lovely chapter')).toBeTruthy());
+    first.unmount();
+    let answer;
+    mockApi.fetchChapterDiscussion.mockImplementation(() => new Promise((res) => { answer = res; }));
+    const again = render(<ChapterDiscussion route={{ params: { id: 5, index: 0 } }} navigation={nav()} />);
+    expect(again.getByText('Lovely chapter')).toBeTruthy();                // first frame, before the network
+    await act(async () => { answer({ ...disc, results: [...disc.results, { id: 2, user: { id: 3, username: 'bo' }, body: 'Agreed', replies: [] }] }); });
+    expect(again.getByText('Agreed')).toBeTruthy();                        // then refreshed behind it
+    again.unmount();
+    mockApi.fetchChapterDiscussion.mockRejectedValue(new Error('offline'));
+    const offline = render(<ChapterDiscussion route={{ params: { id: 5, index: 0 } }} navigation={nav()} />);
+    await flush();
+    expect(offline.getByText('Agreed')).toBeTruthy();                      // the kept copy, not an error
+  });
+
+  test('a comment just posted is kept with the discussion', async () => {
+    mockApi.fetchChapterDiscussion.mockResolvedValue(disc);
+    mockApi.postChapterComment.mockResolvedValue({ id: 9, user: { id: 1, username: 'me' }, body: 'Mine', parent: null });
+    const r = render(<ChapterDiscussion route={{ params: { id: 5, index: 0 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByText('Lovely chapter')).toBeTruthy());
+    fireEvent.changeText(r.getByTestId('discussion-input'), 'Mine');
+    await act(async () => { fireEvent.press(r.getByTestId('discussion-send')); });
+    r.unmount();
+    mockApi.fetchChapterDiscussion.mockRejectedValue(new Error('offline'));
+    const again = render(<ChapterDiscussion route={{ params: { id: 5, index: 0 } }} navigation={nav()} />);
+    expect(again.getByText('Mine')).toBeTruthy();
+  });
+
+  test('a book page\'s clubs are there at once the second time', async () => {
+    mockApi.fetchBookClubs.mockResolvedValue({ results: [{ id: 3, name: 'Sabbath readers', members: 4 }] });
+    const first = render(<BookClubsSection pub={{ id: 5, title: 'B' }} navigation={nav()} isAuthenticated />);
+    await waitFor(() => expect(first.getByTestId('book-club-3')).toBeTruthy());
+    first.unmount();
+    mockApi.fetchBookClubs.mockImplementation(() => new Promise(() => {}));   // slow network
+    const again = render(<BookClubsSection pub={{ id: 5, title: 'B' }} navigation={nav()} isAuthenticated />);
+    expect(again.getByTestId('book-club-3')).toBeTruthy();
+  });
+});

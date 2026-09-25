@@ -1,11 +1,14 @@
 // A book's reviews on its page: the average, how the stars fall, the reader's
 // own review (to write once they've read some of the book, or change), and
 // others' reviews, more on request.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
+import { useAuth } from '../context/useAuth';
 import { fetchBookReviews, saveBookReview, deleteMyBookReview } from '../services/api';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { notePublicationsChanged } from '../services/publicationStore';
@@ -38,24 +41,20 @@ const Review = ({ r, t }) => (
 const BookReviews = ({ pubId, navigation, onChanged }) => {
   const { t } = useI18n();
   const kbHeight = useKeyboardHeight();       // the sheet rises with the keyboard
-  const [data, setData] = useState(null);
+  const { currentUser } = useAuth();
   const [more, setMore] = useState([]);
   const [page, setPage] = useState(1);
+  // The book page's reviews: the last copy at once (not popping in after
+  // the rest of the page), then fresh. Offline, nothing kept: no section.
+  const { data, setData, reload: load } = useCachedData(userKey(currentUser?.id, `reviews:${pubId}`), async () => {
+    const res = await fetchBookReviews(pubId, 1);
+    setMore([]);
+    setPage(1);
+    return res;
+  });
   const [sheet, setSheet] = useState(false);
   const [draft, setDraft] = useState({ rating: 0, body: '' });
   const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetchBookReviews(pubId, 1);
-      setData(res);
-      setMore([]);
-      setPage(1);
-    } catch {
-      // offline: the section just doesn't show
-    }
-  }, [pubId]);
-  useEffect(() => { load(); }, [load]);
 
   const loadMore = async () => {
     try {

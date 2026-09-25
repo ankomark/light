@@ -141,7 +141,8 @@ class OrganizationTests(Base):
         book(self.owner, org=org)
         r = self.client.get('/api/publications/home/')
         self.assertEqual(r.data['publishers'], [])                         # not verified yet
-        Organization.objects.update(is_verified=True)
+        org.is_verified = True
+        org.save()                                                        # as the Django admin does
         r = self.client.get('/api/publications/home/')
         self.assertEqual([(p['slug'], p['books_count']) for p in r.data['publishers']], [(org.slug, 1)])
         r = self.client.get('/api/organizations/', {'q': 'kenya'})
@@ -200,3 +201,47 @@ class BookPostTests(Base):
         self.assertEqual(self.client.get(f'/api/social-posts/{post.id}/').status_code, 404)
         Publication.objects.filter(pk=pub.pk).update(is_removed=False)
         self.assertEqual(self.client.get(f'/api/social-posts/{post.id}/').status_code, 200)
+
+class OrganizationGuardTests(Base):
+    def test_a_verified_name_is_not_anyones_to_take(self):
+        self.make_org()
+        Organization.objects.update(is_verified=True)
+        self.client.force_authenticate(self.ann)
+        r = self.client.post('/api/organizations/', {'name': 'east kenya UNION', 'kind': 'union'}, format='json')
+        self.assertEqual((r.status_code, r.data['code']), (400, 'name_taken'))
+        self.assertEqual(self.client.post('/api/organizations/', {'name': 'Another', 'kind': 'church'}, format='json').status_code, 201)
+        r = self.client.patch('/api/organizations/another/', {'name': 'East Kenya Union'}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_a_logo_is_one_of_our_uploads(self):
+        r = self.client.post('/api/organizations/', {'name': 'Logo Test', 'logo': 'https://tracker.example/pixel.png'},
+                             format='json')
+        self.assertEqual(r.status_code, 400)
+        from unittest import mock
+        with mock.patch('songs.r2.is_r2_url', return_value=True):
+            r = self.client.post('/api/organizations/', {'name': 'Logo Test', 'logo': 'https://r2.test/cover/l.jpg'},
+                                 format='json')
+        self.assertEqual(r.status_code, 201)
+
+    def test_sharing_to_the_feed_is_rate_limited(self):
+        from unittest import mock
+        from rest_framework.throttling import ScopedRateThrottle
+        pub = book(self.ann)
+        rates = {**ScopedRateThrottle.THROTTLE_RATES, 'book_share': '2/hour'}
+        with mock.patch.object(ScopedRateThrottle, 'THROTTLE_RATES', rates):
+            codes = [self.client.post(f'/api/publications/{pub.id}/share-to-feed/').status_code for _ in range(3)]
+        self.assertEqual(codes, [201, 201, 429])
+
+    def test_explore_drops_a_pulled_books_post(self):
+        pub = book(self.ann)
+        self.client.force_authenticate(self.ann)
+        post_id = self.client.post(f'/api/publications/{pub.id}/share-to-feed/').data['id']
+        from songs import feed as feedrank
+        feedrank.compute_trending()                                   # cached with the post in it
+        self.client.force_authenticate(self.bob)
+        def ids():
+            data = self.client.get('/api/explore/trending_posts/').data
+            return [p['id'] for p in (data.get('results', []) if isinstance(data, dict) else data)]
+        self.assertIn(post_id, ids())
+        Publication.objects.filter(pk=pub.pk).update(status='draft')
+        self.assertNotIn(post_id, ids())

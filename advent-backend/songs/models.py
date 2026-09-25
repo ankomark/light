@@ -2067,6 +2067,13 @@ class Organization(models.Model):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Discover's Publishers row is kept a few minutes: a tick given (or a
+        # name or logo changed) shows at once.
+        from django.core.cache import cache
+        cache.delete('books:publishers')
+
 
 class OrganizationMember(models.Model):
     """Someone in an organisation — invited, and counting once accepted."""

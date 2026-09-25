@@ -1,7 +1,7 @@
 // Who is in an organisation. Those who run it invite people by username as
 // admin (the owner only), editor or author, change their role or remove
 // them; anyone in it sees the list and can leave.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -11,6 +11,8 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 export const ORG_ROLES = ['admin', 'editor', 'author'];
@@ -19,17 +21,12 @@ const OrganizationMembers = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const { slug, name = '' } = route.params || {};
-  const [data, setData] = useState(null);
-  const [failed, setFailed] = useState(false);
+  const { data, setData, failed, reload: load } = useCachedData(userKey(currentUser?.id, `org-people:${slug}`),
+    () => fetchOrgMembers(slug));
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('author');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setFailed(false);
-    try { setData(await fetchOrgMembers(slug)); } catch { setFailed(true); }
-  }, [slug]);
-  useEffect(() => { load(); }, [load]);
 
   const mine = data?.my_role;
   const manages = mine === 'owner' || mine === 'admin';

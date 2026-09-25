@@ -233,6 +233,8 @@ REST_FRAMEWORK = {
         'disputes': '10/hour',
         # AI answers in books (each also counts toward AI_DAILY_LIMIT).
         'ai': '20/min',
+        # Books and passages shared to the feed (a post each).
+        'book_share': '30/hour',
         'reports': '20/hour',
         # Listening reports: two per song played, plus offline backlogs.
         'plays': '120/min',

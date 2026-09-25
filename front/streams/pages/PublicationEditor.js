@@ -522,6 +522,11 @@ const PublicationEditor = ({ route, navigation }) => {
     if (!c) { setAiFor(null); return; }
     // Changed meanwhile (typing under the sheet, a restore): don't overwrite.
     if ((c.body || '').slice(a.start, a.end) !== a.text) { notify(t('ai.writeTools'), t('ai.changed')); setAiFor(null); return; }
+    // Every picture (and footnote mark) in the words must still be there: a
+    // rewrite that dropped one would lose it with no way to notice.
+    const kept = (s) => [...(s.match(/!\[[^\]]*\]\([^)\s]+\)|\[\^[\w-]+\]/g) || [])];
+    const missing = kept(a.text).filter((m) => !next.includes(m));
+    if (missing.length) { notify(t('ai.writeTools'), t('ai.lostPictures')); return; }
     setAiUndo((u) => ({ ...u, [a.key]: c.body }));
     updateChapter(a.key, { body: `${c.body.slice(0, a.start)}${next}${c.body.slice(a.end)}` });
     setAiFor(null);

@@ -1,20 +1,22 @@
 // On a group's page: when the group is a book club, a line to its book and
 // reading plan. Nothing otherwise (and nothing if it can't be known offline).
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchClubOfGroup } from '../services/api';
 import { colors, typography, spacing } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
 
 const BookClubBanner = ({ groupSlug, navigation }) => {
   const { t } = useI18n();
-  const [club, setClub] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    if (groupSlug) fetchClubOfGroup(groupSlug).then((r) => { if (alive) setClub(r?.club || null); }).catch(() => {});
-    return () => { alive = false; };
-  }, [groupSlug]);
+  const { currentUser } = useAuth();
+  // Known from last time at once (the banner no longer pops in under the chat).
+  const { data } = useCachedData(groupSlug ? userKey(currentUser?.id, `groupclub:${groupSlug}`) : null,
+    async () => ({ club: (await fetchClubOfGroup(groupSlug))?.club || null }));
+  const club = data?.club || null;
   if (!club) return null;
   return (
     <TouchableOpacity style={styles.bar} onPress={() => navigation.navigate('BookClub', { clubId: club })}
