@@ -39,6 +39,7 @@ LogBox.ignoreLogs([
   "An event listener wasn't added because it has been added already",
 ]);
 import BibleReader from './components/BibleReader';
+import BibleLibraryScreen from './components/BibleLibraryScreen';
 import HymnList from './components/HymnList';
 import HymnDetail from './components/HymnDetail';
 import HamburgerMenu from './components/HamburgerMenu';
@@ -302,6 +303,7 @@ const App = () => {
                 <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>
                 <Stack.Screen name="HymnDetail" component={HymnDetail}  options={({ route }) => ({ headerShown: false, title: route.params?.hymn?.title || 'Hymn Details' })}/>
                 <Stack.Screen name="bible" component={BibleWrapper} />
+                <Stack.Screen name="BibleLibrary" component={BibleLibraryWrapper} />
                 <Stack.Screen name="HamburgerMenu" component={HamburgerMenu} />
                 <Stack.Screen name="NoticeBoard" component={NoticeBoard} options={{ headerShown: true, title: 'Notice Board', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
                 <Stack.Screen name="AdventistMedia" component={ AdventistMedia} />
@@ -513,6 +515,17 @@ const BibleWrapper = ({ navigation }) => (
     <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
     <Header navigation={navigation} transparentBg />
     <BibleReader navigation={navigation} />
+  </View>
+);
+
+// My Bible: favourites, highlights, notes, bookmarks, history.
+const BibleLibraryWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="My Bible couldn't load.">
+      <BibleLibraryScreen />
+    </ErrorBoundary>
   </View>
 );
 

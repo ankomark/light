@@ -25,6 +25,8 @@ export const PREF_KEYS = {
   calendarReminders: 'calendarReminders', // date reminders, scheduled on-device
   videoMode: 'videoMode',       // open the app in the Videos feed
   hymnFavSort: 'hymnFavSort',   // favourite hymns: 'recent' | 'number' | 'title' | 'hymnal'
+  bibleVersion: 'bibleVersion', // the Bible version the reader opens in (utils/bibleVersions.js)
+  bibleTextSize: 'bibleTextSize', // the Bible's reading size (px)
 };
 
 export const DEFAULT_PREFERENCES = {
@@ -49,6 +51,8 @@ export const DEFAULT_PREFERENCES = {
   // Off: the app opens on Home. On: in Videos (Home still one tap away).
   [PREF_KEYS.videoMode]: false,
   [PREF_KEYS.hymnFavSort]: 'recent',
+  [PREF_KEYS.bibleVersion]: 'eng_kjv',
+  [PREF_KEYS.bibleTextSize]: 18,
 };
 
 const serialize = (value) => JSON.stringify(value);
