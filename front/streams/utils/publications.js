@@ -136,7 +136,7 @@ export const categoryLabel = (key, t) => {
 export const markdownTheme = (fontSize = 17, opts = {}) => {
   const color = opts.color || colors.textPrimary;
   const fam = opts.fontFamily ? { fontFamily: opts.fontFamily } : {};
-  const line = Math.round(fontSize * 1.7);
+  const line = opts.lineHeight || Math.round(fontSize * 1.7);   // the reader's spacing, when chosen
   const subtle = `${color}99`; // translucent variant for quote/code chrome
   return {
     body: { color, fontSize, lineHeight: line, ...fam },

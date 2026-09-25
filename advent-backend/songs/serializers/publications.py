@@ -1,7 +1,7 @@
 from django.utils import timezone
 
 from .common import *  # noqa: F401,F403
-from ..models import Publication, Chapter, PublicationLike, PublicationBookmark, ReadingProgress
+from ..models import Publication, Chapter, PublicationLike, PublicationBookmark, ReadingProgress, BookHighlight
 
 WORDS_PER_MIN = 200
 
@@ -52,13 +52,23 @@ class PublicationListSerializer(serializers.ModelSerializer):
     is_liked = serializers.SerializerMethodField()
     is_bookmarked = serializers.SerializerMethodField()
     cover = serializers.SerializerMethodField()
+    # The reader's own place in it (null when never opened / not signed in).
+    my_percent = serializers.SerializerMethodField()
+    my_finished = serializers.SerializerMethodField()
 
     class Meta:
         model = Publication
         fields = [
             'id', 'title', 'summary', 'cover', 'category', 'status', 'author', 'is_owner',
             'chapter_count', 'likes_count', 'is_liked', 'is_bookmarked', 'created_at', 'updated_at',
+            'my_percent', 'my_finished',
         ]
+
+    def get_my_percent(self, obj):
+        return getattr(obj, 'my_percent', None)
+
+    def get_my_finished(self, obj):
+        return getattr(obj, 'my_finished_at', None) is not None
 
     def get_cover(self, obj):
         return media.resolve(obj.cover) or ''
@@ -88,6 +98,29 @@ class PublicationListSerializer(serializers.ModelSerializer):
         return bool(user and obj.bookmarks.filter(user=user).exists())
 
 
+class BookHighlightSerializer(serializers.ModelSerializer):
+    """A reader's highlight or note, with enough of its book to list it in
+    the library (title, cover, the chapter's title) without another request."""
+    publication_title = serializers.CharField(source='publication.title', read_only=True)
+    publication_cover = serializers.SerializerMethodField()
+    chapter_id = serializers.IntegerField(read_only=True)
+    chapter_title = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BookHighlight
+        fields = [
+            'client_id', 'publication', 'publication_title', 'publication_cover', 'chapter_id', 'chapter_title',
+            'block', 'quote', 'color', 'note', 'deleted', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_publication_cover(self, obj):
+        return media.resolve(obj.publication.cover) or ''
+
+    def get_chapter_title(self, obj):
+        return obj.chapter.title if obj.chapter_id and obj.chapter else ''
+
+
 class PublicationDetailSerializer(serializers.ModelSerializer):
     """Full publication with nested chapters — used for editing (and by app
     builds from before the reader loaded chapters one at a time).
@@ -103,6 +136,8 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     is_bookmarked = serializers.SerializerMethodField()
     last_read_chapter = serializers.SerializerMethodField()
     last_read_position = serializers.SerializerMethodField()
+    my_percent = serializers.SerializerMethodField()
+    my_finished = serializers.SerializerMethodField()
     author_is_following = serializers.SerializerMethodField()
 
     class Meta:
@@ -111,7 +146,7 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
             'id', 'title', 'summary', 'cover', 'theme', 'category', 'status',
             'author', 'chapters', 'is_owner', 'reading_minutes',
             'likes_count', 'is_liked', 'is_bookmarked', 'last_read_chapter', 'last_read_position',
-            'author_is_following',
+            'my_percent', 'my_finished', 'author_is_following',
             'created_at', 'updated_at', 'published_at',
         ]
         read_only_fields = ['author', 'created_at', 'updated_at', 'published_at']
@@ -166,6 +201,12 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         user = _request_user(self)
         rp = obj.progresses.filter(user=user).first() if user else None
         return rp.position if rp else 0
+
+    def get_my_percent(self, obj):
+        return getattr(obj, 'my_percent', None)
+
+    def get_my_finished(self, obj):
+        return getattr(obj, 'my_finished_at', None) is not None
 
     def get_author_is_following(self, obj):
         user = _request_user(self)

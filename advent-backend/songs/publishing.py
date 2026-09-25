@@ -17,13 +17,31 @@ import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F, Q, Sum
 from django.utils import timezone
 
 from .jobs import enqueue, handler
-from .models import Chapter, ChapterRevision, Publication, ReadingActivity, ReadingProgress
+from .models import (
+    BookHighlight, Chapter, ChapterRevision, Publication, ReadingActivity, ReadingProgress, blocked_ids_for,
+)
 
 STATUSES = {Chapter.DRAFT, Chapter.PUBLISHED}
+
+
+def visible_publications(user):
+    """Books this user may open: no moderator takedowns (author included),
+    published work plus their own drafts, and nothing by people blocked
+    either way or who deactivated their account (their own excepted)."""
+    qs = Publication.objects.filter(is_removed=False)
+    if getattr(user, 'is_authenticated', False):
+        qs = (qs.filter(Q(status='published') | Q(author=user))
+              .exclude(Q(author__is_deactivated=True) & ~Q(author=user)))
+        blocked = blocked_ids_for(user)
+        if blocked:
+            qs = qs.exclude(author_id__in=blocked)
+    else:
+        qs = qs.filter(status='published').exclude(author__is_deactivated=True)
+    return qs
 
 
 # ── Who sees which chapters ──────────────────────────────────────────────────
@@ -196,17 +214,42 @@ def _fraction(value):
     return 0.0 if f != f else min(1.0, max(0.0, f))   # NaN → 0
 
 
+def _day(ev, at):
+    """The reader's own calendar day for a report: the phone sends it (the
+    server's day is UTC, which splits an evening in Nairobi); trusted when
+    it's within a day of when the reading happened."""
+    raw = ev.get('day')
+    if isinstance(raw, str):
+        try:
+            d = datetime.strptime(raw, '%Y-%m-%d').date()
+        except ValueError:
+            d = None
+        if d and abs((d - at.astimezone(dt_timezone.utc).date()).days) <= 1:
+            return d
+    return timezone.localdate(at)
+
+
+def book_percent(words, index, position):
+    """How far through a book (0–1, by words) chapter `index` at `position` is."""
+    total = sum(words)
+    if not total or not 0 <= index < len(words):
+        return 0.0
+    return min(1.0, (sum(words[:index]) + position * words[index]) / total)
+
+
 def record_reading(user, publication, events):
-    """Add a batch of reading reports: [{index, chapter_id?, seconds,
-    furthest, position?, at}]. Returns how many were taken.
+    """Add a batch of reading reports: [{index, seconds, furthest,
+    position?, at, day?}]. Returns how many were taken.
 
     Each adds its time to that chapter's row for that day; the furthest
     point only moves forward. The newest report (by when it happened, not
     when it arrived — a phone offline for a day reports late) sets where
-    the reader is."""
+    the reader is. Reading the last chapter to its end finishes the book."""
     now = timezone.now()
-    chapters = list(reader_chapters(publication, user).values_list('pk', flat=True))
-    taken, latest = 0, None
+    rows = list(reader_chapters(publication, user).values_list('pk', 'word_count'))
+    chapters = [pk for pk, _ in rows]
+    words = [max(1, w) for _, w in rows]          # an empty chapter still counts as a step
+    taken, latest, finished_at = 0, None, None
     with transaction.atomic():
         for ev in (events or [])[:MAX_EVENTS]:
             if not isinstance(ev, dict):
@@ -224,7 +267,7 @@ def record_reading(user, publication, events):
                 seconds = 0
             furthest = _fraction(ev.get('furthest'))
             row, _ = ReadingActivity.objects.select_for_update().get_or_create(
-                user=user, publication=publication, chapter_index=index, day=timezone.localdate(at),
+                user=user, publication=publication, chapter_index=index, day=_day(ev, at),
                 defaults={'chapter_id': chapters[index]},
             )
             row.seconds += seconds
@@ -233,6 +276,8 @@ def record_reading(user, publication, events):
             row.chapter_id = chapters[index]
             row.save()
             taken += 1
+            if row.finished and index == len(chapters) - 1 and (finished_at is None or at < finished_at):
+                finished_at = at
             if latest is None or at >= latest[0]:
                 latest = (at, index, _fraction(ev.get('position', furthest)))
 
@@ -240,14 +285,117 @@ def record_reading(user, publication, events):
             at, index, position = latest
             rp, created = ReadingProgress.objects.get_or_create(
                 publication=publication, user=user, defaults={'last_chapter': index, 'position': position})
-            if not created and at >= rp.updated_at:
+            changes = {}
+            if created or at >= rp.updated_at:
                 # update(): auto_now would stamp the arrival time, and a late
                 # report must not look newer than reading done since.
-                ReadingProgress.objects.filter(pk=rp.pk).update(
-                    last_chapter=index, position=position, updated_at=at)
-            elif created:
-                ReadingProgress.objects.filter(pk=rp.pk).update(updated_at=at)
+                changes = {'last_chapter': index, 'position': position, 'updated_at': at,
+                           'percent': book_percent(words, index, position)}
+            if finished_at and not rp.finished_at:
+                changes.update(finished_at=finished_at, percent=1.0)
+            elif rp.finished_at and 'percent' in changes:
+                changes['percent'] = 1.0                   # a re-read doesn't un-finish a book
+            if changes:
+                ReadingProgress.objects.filter(pk=rp.pk).update(**changes)
     return taken
+
+
+def reading_stats(user, today):
+    """The reader's own numbers: the current streak (days in a row with a
+    minute or more of reading, counting from today — or yesterday, so a
+    streak isn't lost before today's reading), the best streak, time this
+    week (from Monday) and this month, the last 7 days, and books finished
+    this year. `today` is the reader's own date."""
+    since = today - timedelta(days=400)
+    per_day = dict(
+        ReadingActivity.objects.filter(user=user, day__gte=since).values('day')
+        .annotate(s=Sum('seconds')).values_list('day', 's')
+    )
+    read = {d for d, s in per_day.items() if s >= 60}
+
+    start = today if today in read else today - timedelta(days=1)
+    streak = 0
+    while start - timedelta(days=streak) in read:
+        streak += 1
+
+    best = run = 0
+    prev = None
+    for d in sorted(read):
+        run = run + 1 if prev and d - prev == timedelta(days=1) else 1
+        best = max(best, run)
+        prev = d
+
+    week_start = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+    return {
+        'streak': streak,
+        'best_streak': best,
+        'read_today': today in read,
+        'today_seconds': per_day.get(today, 0),
+        'week_seconds': sum(s for d, s in per_day.items() if week_start <= d <= today),
+        'month_seconds': sum(s for d, s in per_day.items() if month_start <= d <= today),
+        'last7': [{'day': (today - timedelta(days=i)).isoformat(), 'seconds': per_day.get(today - timedelta(days=i), 0)}
+                  for i in range(6, -1, -1)],
+        'finished_this_year': ReadingProgress.objects.filter(
+            user=user, finished_at__year=today.year).count(),
+    }
+
+
+# ── Highlights and notes ─────────────────────────────────────────────────────
+
+def _clean_color(c):
+    return c if c in BookHighlight.COLORS else ''
+
+
+def apply_highlight_ops(user, ops):
+    """Apply a phone's changes: [{op: 'upsert', client_id, publication,
+    chapter_id, block, quote, color, note, at} | {op: 'delete', client_id,
+    at}]. The later change wins (by when it was made on the phone), so two
+    phones editing offline settle on the newest. A highlight with neither
+    colour nor note left is a deletion. Returns the client_ids applied."""
+    now = timezone.now()
+    applied = []
+    visible = visible_publications(user)
+    for op in (ops or [])[:MAX_EVENTS * 4]:
+        if not isinstance(op, dict):
+            continue
+        cid = str(op.get('client_id') or '')[:40]
+        if not cid:
+            continue
+        at = _when(op.get('at')) or now
+        at = min(at, now)
+        existing = BookHighlight.objects.filter(user=user, client_id=cid).first()
+        if existing and existing.updated_at > at:
+            applied.append(cid)                        # a newer change is already here
+            continue
+        color, note = _clean_color(op.get('color')), str(op.get('note') or '')[:4000]
+        if op.get('op') == 'delete' or (op.get('op') == 'upsert' and not color and not note.strip()):
+            if existing:
+                existing.deleted, existing.updated_at = True, at
+                existing.save(update_fields=['deleted', 'updated_at'])
+            applied.append(cid)
+            continue
+        if op.get('op') != 'upsert':
+            continue
+        pub = visible.filter(pk=op.get('publication')).first()
+        if pub is None:
+            continue
+        chapter = pub.chapters.filter(pk=op.get('chapter_id')).first()
+        try:
+            block = max(0, int(op.get('block') or 0))
+        except (TypeError, ValueError):
+            block = 0
+        fields = {'publication': pub, 'chapter': chapter, 'block': block,
+                  'quote': str(op.get('quote') or '')[:2000], 'color': color, 'note': note,
+                  'deleted': False, 'updated_at': at}
+        if existing:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+            existing.save()
+        else:
+            BookHighlight.objects.create(user=user, client_id=cid, created_at=at, **fields)
+        applied.append(cid)
+    return applied
 
 
 # ── Old inline pictures → R2 ─────────────────────────────────────────────────

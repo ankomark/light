@@ -19,7 +19,13 @@ let flushing = null;
 // would vanish with them once sent), it starts a note of its own.
 const sending = new Set();
 
-const dayOf = (ms) => new Date(ms).toDateString();
+/** The phone's own date for a moment: 'YYYY-MM-DD' (the server's is UTC,
+ *  which would split a Nairobi evening across two days). */
+export const localDay = (ms = Date.now()) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const dayOf = localDay;
 
 const load = () => {
   if (!loading) {
@@ -58,7 +64,7 @@ export const flushReading = () => {
       const batch = queue.filter((e) => e.pubId === pubId).slice(0, BATCH);
       batch.forEach((e) => sending.add(e));
       try {
-        await sendReadingActivity(pubId, batch.map(({ pubId: _p, ...ev }) => ev));
+        await sendReadingActivity(pubId, batch.map(({ pubId: _p, ...ev }) => ({ ...ev, day: localDay(ev.at) })));
       } catch (err) {
         batch.forEach((e) => sending.delete(e));
         // The book is gone or the notes are refused: drop them, don't retry

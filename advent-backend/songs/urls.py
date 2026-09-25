@@ -28,6 +28,7 @@ from .views import (
     ConversationViewSet,
     ExploreViewSet,
     PublicationViewSet,
+    BookHighlightViewSet,
     VerifyEmailView,
     ResendVerificationView,
     ForgotPasswordView,
@@ -104,6 +105,7 @@ router.register(r'notices', NoticeViewSet, basename='notices')
 router.register(r'admin-notes', AdminNoteViewSet, basename='admin-notes')
 router.register(r'media-stations', MediaStationViewSet, basename='media-stations')
 router.register(r'publications', PublicationViewSet, basename='publications')
+router.register(r'book-highlights', BookHighlightViewSet, basename='book-highlights')
 router.register(r'video-studios', VideoStudioViewSet, basename='video-studios')
 # Groups and communities are separate features on one shared engine, so they
 # get separate list endpoints. Detail and action routes on either path resolve

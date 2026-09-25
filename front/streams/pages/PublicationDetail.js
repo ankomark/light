@@ -20,6 +20,13 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 
+const WORDS_PER_MIN = 200;
+
+/** 45 → "45 min", 130 → "2 h 10 min". */
+export const formatMinutes = (m, t) => (m < 60
+  ? t('time.minutes', { n: m })
+  : t('time.hoursMinutes', { h: Math.floor(m / 60), m: m % 60 }));
+
 const PublicationDetail = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser, isAuthenticated } = useAuth();
@@ -174,7 +181,9 @@ const PublicationDetail = ({ route, navigation }) => {
     ...(index === lastRead && pub.last_read_position > 0 ? { position: pub.last_read_position } : {}),
     book: {
       id: pub.id, title: pub.title, theme: pub.theme, updated_at: pub.updated_at, is_owner: !!pub.is_owner,
-      chapters: chapters.map(({ id: cid, order, title, version, status }) => ({ id: cid, order, title, version, status })),
+      chapters: chapters.map(({ id: cid, order, title, version, status, word_count }) => ({
+        id: cid, order, title, version, status, word_count,
+      })),
     },
   });
 
@@ -204,6 +213,9 @@ const PublicationDetail = ({ route, navigation }) => {
 
   const chapterTotal = pub ? chapters.length : (head.chapter_count || 0);
   const lastRead = Math.min(pub?.last_read_chapter || 0, Math.max(0, chapters.length - 1));
+  const totalWords = chapters.reduce((n, c) => n + (c.word_count || 0), 0);
+  const minutesLeft = pub && !pub.my_finished && totalWords
+    ? Math.max(1, Math.round((totalWords * (1 - (pub.my_percent || 0))) / WORDS_PER_MIN)) : 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -284,6 +296,21 @@ const PublicationDetail = ({ route, navigation }) => {
           </View>
 
           {head.summary ? <Text style={styles.summary}>{head.summary}</Text> : null}
+
+          {/* The reader's own progress: how far, and how long is left. */}
+          {pub && (pub.my_finished || pub.my_percent > 0) ? (
+            <View style={styles.progressWrap} testID="pub-progress">
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.round((pub.my_finished ? 1 : pub.my_percent) * 100)}%` }]} />
+              </View>
+              <Text style={styles.progressText}>
+                {pub.my_finished ? t('pubDetail.finished') : [
+                  t('pubDetail.percentRead', { n: Math.max(1, Math.round(pub.my_percent * 100)) }),
+                  minutesLeft ? t('pubDetail.timeLeft', { time: formatMinutes(minutesLeft, t) }) : null,
+                ].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+          ) : null}
 
           {chapters.length > 0 && (
             <TouchableOpacity style={styles.readBtn} onPress={() => read(lastRead)} activeOpacity={0.9}
@@ -413,6 +440,10 @@ const styles = StyleSheet.create({
 
   summary: { ...typography.body, color: colors.textSecondary, marginTop: spacing.lg, lineHeight: 22 },
 
+  progressWrap: { marginTop: spacing.lg, gap: 6 },
+  progressTrack: { height: 6, borderRadius: 3, backgroundColor: colors.surface, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 3, backgroundColor: colors.accent },
+  progressText: { ...typography.caption, color: colors.textSecondary },
   readBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
     backgroundColor: colors.primary, borderRadius: radius.md,

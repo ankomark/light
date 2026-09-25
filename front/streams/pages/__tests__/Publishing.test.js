@@ -20,6 +20,9 @@ const mockApi = {
   sendReadingActivity: jest.fn(),
   fetchChapterRevisions: jest.fn(),
   fetchChapterRevision: jest.fn(),
+  fetchReadingStats: jest.fn(),
+  fetchBookHighlights: jest.fn(),
+  syncBookHighlights: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -70,6 +73,13 @@ jest.mock('expo-image-picker', () => ({
 jest.mock('../../services/imageProcessing', () => ({ compressImage: jest.fn(async (uri) => ({ uri })) }));
 const mockUpload = jest.fn(async () => ({ url: 'https://r2.test/cover_images/p.jpg' }));
 jest.mock('../../services/cloudinary', () => ({ uploadMedia: (...a) => mockUpload(...a) }));
+// Reading aloud: what was said, and the "done" callbacks to finish each piece.
+let mockSpoken = [];
+jest.mock('expo-speech', () => ({
+  speak: jest.fn((text, opts) => { mockSpoken.push({ text, opts }); }),
+  stop: jest.fn(),
+}));
+jest.mock('expo-font', () => ({ loadAsync: jest.fn(async () => {}), isLoaded: jest.fn(() => true) }));
 jest.mock('../../components/FollowButton', () => () => null);
 jest.mock('../../components/ReportModal', () => () => null);
 
@@ -113,6 +123,11 @@ beforeEach(async () => {
   Object.values(mockApi).forEach((f) => f.mockReset());
   mockApi.saveReadingProgress.mockResolvedValue({});
   mockApi.sendReadingActivity.mockResolvedValue({ accepted: 1 });
+  mockApi.fetchBookHighlights.mockResolvedValue({ results: [] });
+  mockApi.syncBookHighlights.mockResolvedValue({ applied: [] });
+  mockApi.fetchReadingStats.mockResolvedValue(null);
+  require('../../services/bookHighlights').__resetBookHighlights();
+  require('../../utils/readerSettings').__resetReaderSettings();
   require('../../services/readingTracker').__resetReadingTracker();
   mockAuth = { isAuthenticated: true, currentUser: { id: 1, username: 'me' } };
   mockConfirm.mockReset();
@@ -160,12 +175,11 @@ describe('Publishing list', () => {
 
   test('a slow answer for an old tab never replaces the new tab', async () => {
     let answerDiscover;
-    mockApi.fetchPublications
-      .mockImplementationOnce(() => new Promise((res) => { answerDiscover = res; }))
-      .mockResolvedValueOnce({ results: [pubRow(9, { title: 'Saved one' })], next: null });
+    mockApi.fetchPublications.mockImplementationOnce(() => new Promise((res) => { answerDiscover = res; }));
+    mockApi.fetchMyPublications.mockResolvedValueOnce({ results: [pubRow(9, { title: 'Saved one' })], next: null });
     const r = render(<Articles navigation={nav()} />);
     await flush();
-    await act(async () => { fireEvent.press(r.getByTestId('articles-tab-saved')); });
+    await act(async () => { fireEvent.press(r.getByTestId('articles-tab-mine')); });
     await flush();
     await waitFor(() => expect(r.getByText('Saved one')).toBeTruthy());
     await act(async () => { answerDiscover({ results: [pubRow(1)], next: null }); });
@@ -173,15 +187,18 @@ describe('Publishing list', () => {
     expect(r.getByText('Saved one')).toBeTruthy();
   });
 
-  test('guests: Saved and My Work ask to sign in (Saved used to list everything); Write opens Login', async () => {
+  test('guests: Library and My Work ask to sign in (Saved used to list everything); Write opens Login', async () => {
     mockAuth = { isAuthenticated: false, currentUser: null };
     mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(1)], next: null });
     const n = nav();
     const r = render(<Articles navigation={n} />);
     await waitFor(() => expect(r.getByText('Book 1')).toBeTruthy());
-    await act(async () => { fireEvent.press(r.getByTestId('articles-tab-saved')); });
-    expect(r.getByText('articles.signInSaved')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('articles-tab-library')); });
+    await waitFor(() => expect(r.getByText('library.signIn')).toBeTruthy());
     expect(mockApi.fetchPublications).toHaveBeenCalledTimes(1);
+    expect(mockApi.fetchReadingStats).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.press(r.getByTestId('articles-tab-mine')); });
+    expect(r.getByText('articles.signInMine')).toBeTruthy();
     fireEvent.press(r.getByTestId('articles-write'));
     expect(n.navigate).toHaveBeenCalledWith('Login');
   });
@@ -208,7 +225,10 @@ describe('Book page', () => {
     fireEvent.press(r.getByTestId('pub-read'));
     const [, params] = n.navigate.mock.calls[0];
     expect(params.index).toBe(1);
-    expect(params.book.chapters).toEqual([{ id: 51, order: 1, title: 'One' }, { id: 52, order: 2, title: 'Two' }]);
+    expect(params.book.chapters).toEqual([
+      { id: 51, order: 1, title: 'One', word_count: 300 }, { id: 52, order: 2, title: 'Two', word_count: 300 },
+    ]);
+    expect(params.book.chapters.some((c) => 'body' in c)).toBe(false);
     expect(params.publication).toBeUndefined();
   });
 
@@ -557,5 +577,162 @@ describe('Phase 1', () => {
     const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={nav()} />);
     await waitFor(() => expect(r.getByText('pubDetail.removedChapter')).toBeTruthy());
     expect(r.getAllByText('pubDetail.draft').length).toBeGreaterThan(0);
+  });
+});
+
+// ── Phase 2: the reading experience ─────────────────────────────────────────
+describe('Phase 2', () => {
+  const params = (extra = {}) => ({
+    id: 5, index: 0,
+    book: { id: 5, title: 'B', theme: {}, chapters: [
+      { id: 51, version: 1, title: 'One', word_count: 100 }, { id: 52, version: 1, title: 'Two', word_count: 100 },
+    ] },
+    ...extra,
+  });
+  const chapterOf = (i) => ({ chapter: { id: 51 + i, version: 1, title: i ? 'Two' : 'One', word_count: 100,
+    body: i ? 'Second chapter.' : 'First paragraph.\n\nSecond paragraph.' } });
+  beforeEach(() => {
+    mockSpoken = [];
+    mockApi.fetchPublicationChapter.mockImplementation(async (id, i) => chapterOf(i));
+  });
+  const open = async (p = params()) => {
+    const n = nav();
+    const r = render(<ChapterReader route={{ params: p }} navigation={n} />);
+    await waitFor(() => expect(r.getByText('Second paragraph.')).toBeTruthy());
+    return { r, n };
+  };
+
+  test('the text is in paragraphs; a tap hides and brings back the tools', async () => {
+    const { r } = await open();
+    expect(r.getByTestId('reader-block-1')).toBeTruthy();
+    expect(r.getByTestId('reader-chrome')).toBeTruthy();
+    fireEvent.press(r.getByTestId('reader-block-0'));
+    expect(r.queryByTestId('reader-chrome')).toBeNull();
+    fireEvent.press(r.getByTestId('reader-block-0'));
+    expect(r.getByTestId('reader-chrome')).toBeTruthy();
+    expect(r.getByTestId('reader-footer')).toBeTruthy();
+  });
+
+  test('long-press a paragraph → highlight it: shown, kept, and synced', async () => {
+    const { r } = await open();
+    await act(async () => { fireEvent(r.getByTestId('reader-block-1'), 'longPress'); });
+    expect(r.getByTestId('book-passage-actions')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('book-highlight-green')); });
+    expect(r.queryByTestId('book-passage-actions')).toBeNull();
+    const style = [].concat(r.getByTestId('reader-block-1').props.style).flat(Infinity).filter(Boolean)
+      .reduce((a, x) => ({ ...a, ...x }), {});
+    expect(style.backgroundColor).toBe('rgba(52,199,89,0.24)');
+    await flush();
+    const ops = mockApi.syncBookHighlights.mock.calls.flatMap((c) => c[0]);
+    expect(ops[0]).toMatchObject({ op: 'upsert', publication: 5, chapter_id: 51, block: 1, quote: 'Second paragraph.', color: 'green' });
+  });
+
+  test('guests are asked to sign in instead', async () => {
+    mockAuth = { isAuthenticated: false, currentUser: null };
+    mockConfirm.mockResolvedValue(false);
+    const { r } = await open();
+    await act(async () => { fireEvent(r.getByTestId('reader-block-0'), 'longPress'); });
+    expect(mockConfirm).toHaveBeenCalled();
+    expect(r.queryByTestId('book-passage-actions')).toBeNull();
+  });
+
+  test('a highlight made on another phone shows on its paragraph', async () => {
+    mockApi.fetchBookHighlights.mockResolvedValue({ results: [
+      { client_id: 'x', chapter_id: 51, block: 0, quote: 'Second paragraph.', color: 'pink', note: 'Mine', updated_at: '2026-09-25T10:00:00Z' },
+    ] });
+    const { r } = await open();
+    await waitFor(() => {
+      const style = [].concat(r.getByTestId('reader-block-1').props.style).flat(Infinity).filter(Boolean)
+        .reduce((a, x) => ({ ...a, ...x }), {});
+      expect(style.backgroundColor).toBe('rgba(255,77,109,0.24)');         // found by its words, not its old place
+    });
+  });
+
+  test('the reader\'s theme is applied over the author\'s and kept', async () => {
+    const { r } = await open();
+    fireEvent.press(r.getByTestId('reader-font'));
+    await act(async () => { fireEvent.press(r.getByTestId('reader-theme-sepia')); });
+    const bg = [].concat(r.UNSAFE_root.findAll((n) => n.props?.edges?.[0] === 'top')[0].props.style).flat()
+      .reduce((a, x) => ({ ...a, ...(x || {}) }), {}).backgroundColor;
+    expect(bg).toBe('#F1E4CB');
+  });
+
+  test('listen reads paragraph by paragraph, then carries on into the next chapter', async () => {
+    const { r } = await open();
+    await act(async () => { fireEvent.press(r.getByTestId('reader-listen')); });
+    expect(mockSpoken.map((s) => s.text)).toEqual(['First paragraph.']);
+    await act(async () => { mockSpoken[0].opts.onDone(); });
+    expect(mockSpoken[1].text).toBe('Second paragraph.');
+    await act(async () => { mockSpoken[1].opts.onDone(); });                 // end of chapter 1
+    await waitFor(() => expect(mockSpoken.map((s) => s.text)).toContain('Second chapter.'));
+  });
+
+  test('opened at a highlight from the library, by chapter', async () => {
+    const n = nav();
+    const r = render(<ChapterReader route={{ params: params({ index: undefined, chapterId: 52, block: 0 }) }} navigation={n} />);
+    await waitFor(() => expect(r.getByText('Second chapter.')).toBeTruthy());
+  });
+
+  test('the book page shows how far, how long is left, or finished', async () => {
+    mockApi.fetchPublication.mockResolvedValueOnce(book({ my_percent: 0.25, my_finished: false }));
+    const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByText('pubDetail.percentRead:25 · pubDetail.timeLeft:time.minutes:2')).toBeTruthy());
+    r.unmount();
+    await clearAllCaches();
+    mockApi.fetchPublication.mockResolvedValueOnce(book({ my_percent: 1, my_finished: true }));
+    const done = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(done.getByText('pubDetail.finished')).toBeTruthy());
+  });
+
+  describe('Library', () => {
+    const openLibrary = async () => {
+      mockApi.fetchPublications.mockImplementation(async (p) => (p?.shelf === 'reading'
+        ? { results: [pubRow(7, { title: 'Half read', my_percent: 0.4 })] }
+        : { results: [pubRow(1)] }));
+      mockApi.fetchReadingStats.mockResolvedValue({
+        streak: 6, best_streak: 9, read_today: true, today_seconds: 600, week_seconds: 13320, month_seconds: 51660,
+        finished_this_year: 3,
+        last7: ['2026-09-19', '2026-09-20', '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25']
+          .map((day, i) => ({ day, seconds: i ? 600 : 0 })),
+      });
+      const n = nav();
+      const r = render(<Articles navigation={n} />);
+      await act(async () => { fireEvent.press(r.getByTestId('articles-tab-library')); });
+      await waitFor(() => expect(r.getByText('Half read')).toBeTruthy());
+      return { r, n };
+    };
+
+    test('the reader\'s numbers and the Reading shelf', async () => {
+      const { r } = await openLibrary();
+      await waitFor(() => expect(r.getByTestId('library-stats')).toBeTruthy());
+      expect(r.getByText('6')).toBeTruthy();
+      expect(r.getByText('time.hoursMinutes:3,42')).toBeTruthy();              // this week
+      expect(r.getByText('40%')).toBeTruthy();
+      expect(mockApi.fetchReadingStats.mock.calls[0][0]).toMatch(/^\d{4}-\d{2}-\d{2}$/);   // the phone's date
+    });
+
+    test('shelves: Finished asks for it; Highlights open the reader at the paragraph', async () => {
+      const { r, n } = await openLibrary();
+      await act(async () => { fireEvent.press(r.getByTestId('library-shelf-finished')); });
+      expect(mockApi.fetchPublications).toHaveBeenLastCalledWith({ shelf: 'finished' });
+      mockApi.fetchBookHighlights.mockResolvedValue({ results: [
+        { client_id: 'h1', publication: 5, publication_title: 'B', chapter_id: 52, chapter_title: 'Two', block: 3, quote: 'Grace', color: 'yellow', note: 'Remember' },
+      ] });
+      await act(async () => { fireEvent.press(r.getByTestId('library-shelf-highlights')); });
+      await waitFor(() => expect(r.getByText('“Grace”')).toBeTruthy());
+      fireEvent.press(r.getByTestId('library-highlight-h1'));
+      expect(n.navigate).toHaveBeenCalledWith('ChapterReader', { id: 5, chapterId: 52, block: 3 });
+    });
+
+    test('Downloaded works with no signal: the books kept on the phone', async () => {
+      mockApi.fetchPublication.mockResolvedValue(book());
+      mockApi.fetchPublicationChapter.mockImplementation(async (id, i) => ({ chapter: { id: 51 + i, title: 'x', body: 'y' } }));
+      await store.fetchBook(1, 5);
+      await store.downloadBook(5, [{ id: 51 }, { id: 52 }]);
+      const { r } = await openLibrary();
+      mockApi.fetchPublications.mockRejectedValue(new Error('Network Error'));
+      await act(async () => { fireEvent.press(r.getByTestId('library-shelf-downloaded')); });
+      await waitFor(() => expect(r.getByTestId('library-book-5')).toBeTruthy());
+    });
   });
 });

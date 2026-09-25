@@ -2151,10 +2151,43 @@ class ReadingProgress(models.Model):
     last_chapter = models.PositiveIntegerField(default=0)  # chapter index
     # How far into that chapter (0–1), so another phone opens at the same place.
     position = models.FloatField(default=0)
+    # How far through the book (0–1, by words), kept as reading is recorded —
+    # shelves and cards show it without adding up chapters per row.
+    percent = models.FloatField(default=0)
+    # When the last chapter was read to its end (the "Finished" shelf).
+    finished_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ('publication', 'user')
+
+
+class BookHighlight(models.Model):
+    """A passage a reader marked in a book — a colour, a note, or both.
+
+    Anchored to a paragraph (its place in the chapter) and its words, so it
+    can be found again after the author edits: by place when the words still
+    match, else by the words. Created on the phone with its own id
+    (`client_id`), so it works offline and syncs later; a deletion is kept
+    (`deleted`) until every phone has heard of it."""
+    COLORS = ('yellow', 'green', 'blue', 'pink', 'orange')
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='book_highlights')
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='highlights')
+    chapter = models.ForeignKey(Chapter, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    client_id = models.CharField(max_length=40)
+    block = models.PositiveIntegerField(default=0)         # the paragraph's place in the chapter
+    quote = models.TextField(max_length=2000)
+    color = models.CharField(max_length=10, blank=True, default='')
+    note = models.TextField(max_length=4000, blank=True, default='')
+    deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        unique_together = ('user', 'client_id')
+        ordering = ['-updated_at', '-id']
+        indexes = [models.Index(fields=['user', 'publication', '-updated_at'], name='bookhl_user_pub_idx')]
 
 
 class ReadingActivity(models.Model):

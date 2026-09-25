@@ -872,6 +872,20 @@ export const fetchChapterRevisions = async (id, chapterId) =>
   apiRequest('get', `/publications/${id}/revisions/`, null,
     chapterId != null ? { params: { chapter: chapterId } } : undefined);
 
+// The reader's own numbers: streak, this week / month, last 7 days.
+// `today` is the phone's date (YYYY-MM-DD) — the server's day is UTC.
+export const fetchReadingStats = async (today) =>
+  apiRequest('get', '/publications/reading-stats/', null, { params: { today } });
+
+// Highlights and notes in books: one book's ({ publication }), everything
+// (the library, paged), or what changed ({ since }).
+export const fetchBookHighlights = async (params = {}) =>
+  apiRequest('get', '/book-highlights/', null, { params });
+
+// The phone's highlight changes: [{ op: 'upsert' | 'delete', client_id, ... }].
+export const syncBookHighlights = async (ops) =>
+  apiRequest('post', '/book-highlights/sync/', { ops });
+
 // One kept copy with its text, and what's changed since.
 export const fetchChapterRevision = async (id, revisionId) =>
   apiRequest('get', `/publications/${id}/revisions/${revisionId}/`);

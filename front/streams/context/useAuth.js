@@ -13,6 +13,7 @@ import { API_URL, storeTokens, clearTokens } from '../services/api';
 import { clearAllCaches } from '../utils/screenCache';
 import { forgetKeptChapters } from '../services/publicationStore';
 import { clearReadingQueue } from '../services/readingTracker';
+import { clearBookHighlights } from '../services/bookHighlights';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 
 const AuthContext = createContext(null);
@@ -70,6 +71,7 @@ export const AuthProvider = ({ children }) => {
     await clearAllCaches();
     await forgetKeptChapters();   // publications kept for offline (can be drafts)
     await clearReadingQueue();    // reading not yet sent is the leaving account's
+    await clearBookHighlights();  // so are their highlights and notes in books
     setCurrentUser(null);
     setIsAuthenticated(false);
     setIsEmailVerified(false);

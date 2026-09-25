@@ -13,13 +13,16 @@ import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache'
 import { CATEGORIES, categoryLabel } from '../utils/publications';
 import useGridColumns from '../utils/useGridColumns';
 import { PublicationListSkeleton } from '../components/SkeletonLoader';
+import BookLibrary from '../components/BookLibrary';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
-const TABS = ['discover', 'saved', 'mine'];
+// Library: the reader's shelves (Reading, Saved, Finished, Downloaded,
+// Highlights) and their reading numbers — components/BookLibrary.
+const TABS = ['discover', 'library', 'mine'];
 const REFRESH_AFTER_MS = 60000;
 
 // One cached list per view (a search isn't kept: it's typed, not returned to).
@@ -107,6 +110,7 @@ const Articles = ({ navigation }) => {
   const load = useCallback(async ({ refresh = false } = {}) => {
     const mine = ++request.current;
     setFailed(false);
+    if (tab === 'library') return;             // the library loads its own shelves
     if (needsAccount) {
       setItems([]); setNextUrl(null); setLoading(false); setOffline(false);
       return;
@@ -359,14 +363,16 @@ const Articles = ({ navigation }) => {
         </>
       )}
 
-      {offline ? (
+      {offline && tab !== 'library' ? (
         <View style={styles.offlineBar} testID="articles-offline">
           <Ionicons name="cloud-offline-outline" size={14} color={colors.textSecondary} />
           <Text style={styles.offlineText}>{t('articles.offline')}</Text>
         </View>
       ) : null}
 
-      {loading ? (
+      {tab === 'library' ? (
+        <BookLibrary navigation={navigation} />
+      ) : loading ? (
         // Nothing kept yet: cards about to fill in, not a spinner.
         <View style={styles.listContent}><PublicationListSkeleton count={5} /></View>
       ) : (

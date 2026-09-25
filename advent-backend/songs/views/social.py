@@ -4,8 +4,12 @@ import os
 from django.http import HttpResponse, Http404, HttpResponseNotFound
 from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, FloatField, F, Case, When, Value, Sum
 from django.db.models.functions import Coalesce
-from ..models import ChapterRevision
-from ..publishing import visible_chapters_q, reader_chapters, record_reading, revision_list, diff_paragraphs
+from ..models import ChapterRevision, BookHighlight
+from ..publishing import (
+    visible_chapters_q, reader_chapters, record_reading, revision_list, diff_paragraphs,
+    visible_publications, book_percent, reading_stats, apply_highlight_ops,
+)
+from datetime import datetime
 from django.db import IntegrityError, transaction
 import re
 from ..post_links import sync_post_links
@@ -1326,20 +1330,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
         return self.request.query_params.get('toc') in ('1', 'true')
 
     def _visible(self):
-        """What this user may open, nothing more: no moderator takedowns
-        (author included), published work plus their own drafts, and nothing
-        by people blocked either way or who deactivated their account."""
-        user = self.request.user
-        qs = Publication.objects.filter(is_removed=False)
-        if user.is_authenticated:
-            qs = (qs.filter(Q(status='published') | Q(author=user))
-                  .exclude(Q(author__is_deactivated=True) & ~Q(author=user)))
-            blocked = blocked_ids_for(user)
-            if blocked:
-                qs = qs.exclude(author_id__in=blocked)
-        else:
-            qs = qs.filter(status='published').exclude(author__is_deactivated=True)
-        return qs
+        """What this user may open, nothing more (songs/publishing.py)."""
+        return visible_publications(self.request.user)
 
     @staticmethod
     def _counted(qs, user, all_chapters=False):
@@ -1355,9 +1347,13 @@ class PublicationViewSet(viewsets.ModelViewSet):
         chapter_where = {} if all_chapters else {'status': Chapter.PUBLISHED, 'is_removed': False}
         qs = qs.annotate(chapter_count_anno=count(Chapter, **chapter_where), likes_total=count(PublicationLike))
         if user.is_authenticated:
+            mine = ReadingProgress.objects.filter(publication=OuterRef('pk'), user=user)
             qs = qs.annotate(
                 liked_by_me=Exists(PublicationLike.objects.filter(publication=OuterRef('pk'), user=user)),
                 bookmarked_by_me=Exists(PublicationBookmark.objects.filter(publication=OuterRef('pk'), user=user)),
+                my_percent=Subquery(mine.values('percent')[:1], output_field=FloatField()),
+                my_finished_at=Subquery(mine.values('finished_at')[:1]),
+                my_read_at=Subquery(mine.values('updated_at')[:1]),
             )
         return qs
 
@@ -1412,7 +1408,31 @@ class PublicationViewSet(viewsets.ModelViewSet):
         if search:
             qs = qs.filter(Q(title__icontains=search) | Q(summary__icontains=search))
 
+        # The reader's shelves: books started and not finished (most recently
+        # read first), and books finished (most recently finished first).
+        shelf = self.request.query_params.get('shelf')
+        if shelf in ('reading', 'finished') and user.is_authenticated:
+            if shelf == 'reading':
+                return qs.filter(progresses__user=user, progresses__finished_at__isnull=True).order_by('-my_read_at', '-id')
+            return qs.filter(progresses__user=user, progresses__finished_at__isnull=False).order_by('-my_finished_at', '-id')
+
         return qs.order_by('-created_at')
+
+    @action(detail=False, methods=['get'], url_path='reading-stats', permission_classes=[permissions.IsAuthenticated])
+    def reading_stats(self, request):
+        """Streak, time this week / month, the last 7 days, books finished
+        this year. ?today=YYYY-MM-DD is the reader's own date (the server's
+        day is UTC)."""
+        today = timezone.localdate()
+        raw = request.query_params.get('today')
+        if raw:
+            try:
+                d = datetime.strptime(raw, '%Y-%m-%d').date()
+                if abs((d - today).days) <= 1:
+                    today = d
+            except ValueError:
+                pass
+        return Response(reading_stats(request.user, today))
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
@@ -1458,10 +1478,17 @@ class PublicationViewSet(viewsets.ModelViewSet):
             chapter = int(request.data.get('chapter', 0))
         except (TypeError, ValueError):
             chapter = 0
-        ReadingProgress.objects.update_or_create(
-            publication=pub, user=request.user, defaults={'last_chapter': max(0, chapter)}
-        )
-        return Response({'last_read_chapter': max(0, chapter)})
+        chapter = max(0, chapter)
+        rp, created = ReadingProgress.objects.get_or_create(
+            publication=pub, user=request.user, defaults={'last_chapter': chapter})
+        if created or rp.last_chapter != chapter:
+            # A different chapter starts at its top: the place kept was in
+            # the one before (resuming there would open part-way into this).
+            words = [max(1, w) for w in reader_chapters(pub, request.user).values_list('word_count', flat=True)]
+            rp.last_chapter, rp.position = chapter, 0
+            rp.percent = 1.0 if rp.finished_at else book_percent(words, chapter, 0)
+            rp.save()
+        return Response({'last_read_chapter': chapter})
 
     @action(detail=True, methods=['get'], url_path=r'chapters/(?P<index>\d+)')
     def chapter(self, request, pk=None, index=None):
@@ -1549,6 +1576,49 @@ class PublicationViewSet(viewsets.ModelViewSet):
         ser = PublicationListSerializer(page if page is not None else qs, many=True,
                                         context=self.get_serializer_context())
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
+
+
+class BookHighlightViewSet(viewsets.GenericViewSet):
+    """A reader's own highlights and notes in books.
+
+        GET  /book-highlights/?publication=<id>   one book's (for the reader)
+        GET  /book-highlights/                    all, newest first (the library)
+             &since=<iso>                         only what changed since, deletions included
+        POST /book-highlights/sync/ {ops: [...]}  the phone's changes (songs/publishing.py)
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardPagination
+    serializer_class = BookHighlightSerializer
+
+    def get_queryset(self):
+        return (BookHighlight.objects.filter(user=self.request.user)
+                .filter(publication__in=visible_publications(self.request.user))
+                .select_related('publication', 'chapter'))
+
+    def list(self, request):
+        qs = self.get_queryset()
+        pub = request.query_params.get('publication')
+        if pub:
+            qs = qs.filter(publication_id=pub)
+        since = request.query_params.get('since')
+        if since:
+            try:
+                qs = qs.filter(updated_at__gt=datetime.fromisoformat(since.replace('Z', '+00:00')))
+            except ValueError:
+                return Response({'error': 'since must be an ISO time'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            qs = qs.filter(deleted=False)
+        if pub:            # one book's: all of them, no pages (a book has tens, not thousands)
+            return Response({'results': self.get_serializer(qs[:2000], many=True).data})
+        page = self.paginate_queryset(qs)
+        return self.get_paginated_response(self.get_serializer(page, many=True).data)
+
+    @action(detail=False, methods=['post'])
+    def sync(self, request):
+        ops = request.data.get('ops')
+        if not isinstance(ops, list):
+            return Response({'error': 'ops must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'applied': apply_highlight_ops(request.user, ops)})
 
 
 # --- Public share / link-preview page -----------------------------------------

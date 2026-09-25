@@ -146,6 +146,17 @@ export const loadChapter = async (pubId, i, entry, fallback = null) => {
   }
 };
 
+/** Books with chapters kept on the phone, most recently read first. */
+export const keptBookIds = async () => {
+  await loadIndex();
+  const ids = new Set();
+  index.forEach((k) => {
+    const id = Number(k.slice(CH_PREFIX.length).split(':')[0]);
+    if (Number.isFinite(id)) ids.add(id);
+  });
+  return [...ids];
+};
+
 /** Which of a book's chapters are on the phone and current. */
 export const keptChapterCount = async (pubId, chapters = []) => {
   let n = 0;
