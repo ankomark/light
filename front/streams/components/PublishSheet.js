@@ -1,6 +1,8 @@
 // Before a book goes out: a checklist (what's needed, what's recommended), a
-// preview as readers will see it, and — the first time — the author's
-// confirmation that the words are theirs to publish.
+// preview as readers will see it, whose name it goes out under (the author,
+// or an organisation they're in — chosen here, so no one publishes as the
+// wrong one), and — the first time — the author's confirmation that the
+// words are theirs to publish.
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,8 +22,13 @@ export const publishChecks = ({ title, cover, summary, chapters }) => {
   ];
 };
 
-const PublishSheet = ({ visible, onClose, book, needsRights, onPreview, onPublish, publishing }) => {
+const PublishSheet = ({
+  visible, onClose, book, needsRights, onPreview, onPublish, publishing,
+  me = '', orgs = [], publishAs = '', onPublishAs,
+}) => {
   const { t } = useI18n();
+  const as = orgs.find((o) => o.slug === publishAs) || null;
+  const asName = as ? as.name : me;
   const [agreed, setAgreed] = useState(false);
   const checks = publishChecks(book);
   const blocked = checks.some((c) => c.required && !c.ok) || (needsRights && !agreed);
@@ -59,6 +66,30 @@ const PublishSheet = ({ visible, onClose, book, needsRights, onPreview, onPublis
           <Text style={styles.previewText}>{t('publish.preview')}</Text>
         </TouchableOpacity>
 
+        {/* Whose name it carries: said plainly, and changeable here. */}
+        <View style={styles.as} testID="publish-as">
+          <Text style={styles.asLabel}>{t('publish.asTitle')}</Text>
+          {orgs.length ? [{ slug: '', name: me, me: true }, ...orgs].map((o) => {
+            const on = o.slug === (as ? as.slug : '');
+            return (
+              <TouchableOpacity key={o.slug || '_me'} style={[styles.asRow, on && styles.asRowOn]} onPress={() => onPublishAs?.(o.slug)}
+                accessibilityRole="radio" accessibilityState={{ checked: on }} testID={`publish-as-${o.slug || 'me'}`}>
+                <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={20} color={on ? colors.primary : colors.textSecondary} />
+                <Ionicons name={o.me ? 'person-outline' : 'business-outline'} size={16} color={colors.textSecondary} />
+                <View style={styles.checkText}>
+                  <Text style={styles.checkLabel} numberOfLines={1}>{o.me ? `@${o.name}` : o.name}</Text>
+                  <Text style={styles.checkHint}>{o.me ? t('publish.asMeHint') : t('publish.asOrgHint')}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }) : (
+            <View style={styles.asRow}>
+              <Ionicons name="person-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.checkLabel, styles.checkText]} numberOfLines={1}>{`@${me}`}</Text>
+            </View>
+          )}
+        </View>
+
         {needsRights ? (
           <TouchableOpacity style={styles.rights} onPress={() => setAgreed((a) => !a)}
             accessibilityRole="checkbox" accessibilityState={{ checked: agreed }} testID="publish-rights">
@@ -74,7 +105,11 @@ const PublishSheet = ({ visible, onClose, book, needsRights, onPreview, onPublis
           accessibilityRole="button"
           testID="publish-go"
         >
-          {publishing ? <ActivityIndicator color={colors.white} /> : <Text style={styles.goText}>{t('pub.publish')}</Text>}
+          {publishing ? <ActivityIndicator color={colors.white} /> : (
+            <Text style={styles.goText} numberOfLines={1}>
+              {as ? t('publish.goAs', { name: asName }) : t('publish.goAsMe')}
+            </Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </BottomSheet>
@@ -95,6 +130,13 @@ const styles = StyleSheet.create({
     padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primary, marginTop: spacing.sm,
   },
   previewText: { ...typography.label, color: colors.primary, fontWeight: '700' },
+  as: {
+    gap: spacing.xs, padding: spacing.sm, marginTop: spacing.sm, borderRadius: radius.md,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+  },
+  asLabel: { ...typography.caption, color: colors.textSecondary, fontWeight: '800', textTransform: 'uppercase', paddingHorizontal: 4 },
+  asRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: radius.sm },
+  asRowOn: { backgroundColor: 'rgba(57,135,229,0.12)' },
   rights: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', padding: spacing.md,
     backgroundColor: colors.card, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,

@@ -41,7 +41,7 @@ const BookClub = ({ route, navigation }) => {
   const current = club?.plan?.find((s) => s.state === 'current');
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
           accessibilityRole="button" accessibilityLabel={t('common.back')}>

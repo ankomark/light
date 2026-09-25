@@ -451,6 +451,9 @@ class SocialPost(models.Model):
     CONTENT_TYPES = (
         ('video', 'Video'),
         ('image', 'Image'),
+        # A book (or a passage from one) shared to the feed: drawn as a book
+        # card; media_file / thumbnail carry its cover for grids.
+        ('book', 'Book'),
     )
     # Who can see the post. Enforced by visible_posts_q() on every read path.
     VISIBILITY_PUBLIC = 'public'
@@ -487,6 +490,13 @@ class SocialPost(models.Model):
     # compressed via Cloudinary URL transforms; capped at 30s by the serializer.
     video_start_time = models.FloatField(null=True, blank=True)
     video_end_time = models.FloatField(null=True, blank=True)
+    # Book posts: the book, and a passage from it when one was shared (with
+    # where it is, to open the book there).
+    publication = models.ForeignKey('Publication', null=True, blank=True, on_delete=models.CASCADE,
+                                    related_name='feed_posts')
+    book_quote = models.TextField(max_length=2000, blank=True, default='')
+    book_chapter = models.ForeignKey('Chapter', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    book_block = models.PositiveIntegerField(null=True, blank=True)
 
     caption = models.TextField(blank=True)
     tags = models.CharField(max_length=200, blank=True)
@@ -1086,14 +1096,17 @@ def visible_posts_q(user, prefix=''):
 
     This is the per-POST rule. The per-ACCOUNT rules (blocks, private
     accounts, deactivation) are separate and still apply on top of it."""
-    public = models.Q(**{f'{prefix}visibility': SocialPost.VISIBILITY_PUBLIC})
+    # A book post lives while its book is out (unpublished or taken down: gone).
+    book_ok = ~models.Q(**{f'{prefix}content_type': 'book'}) | models.Q(**{
+        f'{prefix}publication__status': 'published', f'{prefix}publication__is_removed': False})
+    public = models.Q(**{f'{prefix}visibility': SocialPost.VISIBILITY_PUBLIC}) & book_ok
     if not getattr(user, 'is_authenticated', False):
         return public
     Follow = User.followers.through
     follows_author = models.Exists(Follow.objects.filter(
         from_user_id=models.OuterRef(f'{prefix}user_id'), to_user_id=user.pk,
     ))
-    return (
+    return book_ok & (
         public
         | models.Q(**{f'{prefix}user_id': user.pk})
         | (models.Q(**{f'{prefix}visibility': SocialPost.VISIBILITY_FOLLOWERS}) & models.Q(follows_author))
@@ -2023,6 +2036,56 @@ class LiveEvent(models.Model):
             return False
 
 
+class Organization(models.Model):
+    """A conference, union, church, school, publishing house or ministry — an
+    account people run together, under whose name books are published.
+
+    Members (OrganizationMember): the owner and admins run it (profile,
+    members); editors also edit every book published under it; authors may
+    publish their own books under its name. The verified tick is set by
+    staff in the Django admin once it's confirmed who runs it."""
+    KINDS = [
+        ('conference', 'Conference'), ('union', 'Union'), ('church', 'Church'), ('school', 'School'),
+        ('publisher', 'Publishing house'), ('ministry', 'Ministry'), ('other', 'Other'),
+    ]
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=80, unique=True)
+    kind = models.CharField(max_length=20, choices=KINDS, default='other')
+    description = models.TextField(max_length=2000, blank=True, default='')
+    logo = models.CharField(max_length=500, blank=True, default='')        # R2 URL
+    website = models.URLField(max_length=300, blank=True, default='')
+    location = models.CharField(max_length=120, blank=True, default='')
+    is_verified = models.BooleanField(default=False)
+    followers = models.ManyToManyField(User, related_name='followed_organizations', blank=True)
+    created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class OrganizationMember(models.Model):
+    """Someone in an organisation — invited, and counting once accepted."""
+    OWNER, ADMIN, EDITOR, AUTHOR = 'owner', 'admin', 'editor', 'author'
+    ROLES = [(OWNER, 'Owner'), (ADMIN, 'Admin'), (EDITOR, 'Editor'), (AUTHOR, 'Author')]
+    MANAGE_ROLES = (OWNER, ADMIN)
+    EDIT_ROLES = (OWNER, ADMIN, EDITOR)          # edit every book under its name
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='organization_memberships')
+    role = models.CharField(max_length=10, choices=ROLES, default=AUTHOR)
+    invited_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('organization', 'user')
+
+
 class Publication(models.Model):
     """A long-form article / book that a user publishes. Content lives in
     ordered Chapters (markdown). Drafts are visible only to the author."""
@@ -2061,6 +2124,9 @@ class Publication(models.Model):
     # When the author confirmed, on publishing, that the words are theirs to
     # publish (or they have permission). Publishing needs it once.
     rights_confirmed_at = models.DateTimeField(null=True, blank=True)
+    # Published under an organisation's name (its imprint); null = the author's own.
+    organization = models.ForeignKey(Organization, null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name='publications')
 
     class Meta:
         ordering = ['-created_at']

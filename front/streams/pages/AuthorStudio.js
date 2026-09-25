@@ -58,7 +58,7 @@ const useStats = (key, fetcher, days) => {
 };
 
 const Shell = ({ title, navigation, children, t }) => (
-  <SafeAreaView style={styles.container} edges={['top']}>
+  <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
     <View style={styles.topBar}>
       <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
         accessibilityRole="button" accessibilityLabel={t('common.back')}>

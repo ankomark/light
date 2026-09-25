@@ -30,6 +30,8 @@ class SocialPostSerializer(serializers.ModelSerializer):
     # Video poster: written as an R2 URL on create, read back resolved.
     thumbnail = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
     thumbnail_url = serializers.SerializerMethodField()
+    # A book post: the book's card (and the passage shared from it).
+    book = serializers.SerializerMethodField()
     song_id = serializers.PrimaryKeyRelatedField(
         queryset=Track.objects.all(),
         source='song',
@@ -50,7 +52,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
             'caption', 'tags', 'location', 'duration', 'width', 'height',
             'created_at', 'updated_at', 'likes_count', 'comments_count',
             'view_count', 'is_liked', 'is_saved', 'can_edit','optimized_url',
-            'visibility', 'comments_enabled', 'client_id',
+            'visibility', 'comments_enabled', 'client_id', 'book',
         ]
         read_only_fields = ['user', 'created_at', 'updated_at', 'view_count']
         extra_kwargs = {
@@ -84,6 +86,21 @@ class SocialPostSerializer(serializers.ModelSerializer):
             return None  # or safe fallback
 
    
+    def get_book(self, obj):
+        if obj.content_type != 'book' or not obj.publication_id:
+            return None
+        from ..organizations import mini
+        pub = obj.publication
+        ch = obj.book_chapter
+        return {
+            'id': pub.id, 'title': pub.title, 'summary': (pub.summary or '')[:240], 'category': pub.category,
+            'cover': media.resolve(pub.cover) or '',
+            'author': {'id': pub.author_id, 'username': pub.author.username},
+            'organization': mini(pub.organization) if pub.organization_id else None,
+            'quote': obj.book_quote, 'chapter_id': ch.id if ch else None, 'chapter_title': ch.title if ch else '',
+            'block': obj.book_block,
+        }
+
     def get_media_url(self, obj):
         # Stored references are absolute R2 URLs; new uploads arrive already
         # trimmed/compressed client-side, so there are no URL transforms.
@@ -93,7 +110,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
         # Video poster frame (R2). For image posts, fall back to the image
         # itself so grids/explore always have a still to show.
         return media.resolve(obj.thumbnail) or (
-            media.resolve(obj.media_file) if obj.content_type == 'image' else None
+            media.resolve(obj.media_file) if obj.content_type in ('image', 'book') else None
         )
 
     def get_optimized_url(self, obj):
@@ -283,6 +300,21 @@ class ProfilePostThumbSerializer(serializers.ModelSerializer):
         # extra query on top of the thumbnail payload.
         fields = ['id', 'content_type', 'media_url', 'optimized_url', 'thumbnail_url',
                   'width', 'height', 'view_count', 'visibility']
+
+    def get_book(self, obj):
+        if obj.content_type != 'book' or not obj.publication_id:
+            return None
+        from ..organizations import mini
+        pub = obj.publication
+        ch = obj.book_chapter
+        return {
+            'id': pub.id, 'title': pub.title, 'summary': (pub.summary or '')[:240], 'category': pub.category,
+            'cover': media.resolve(pub.cover) or '',
+            'author': {'id': pub.author_id, 'username': pub.author.username},
+            'organization': mini(pub.organization) if pub.organization_id else None,
+            'quote': obj.book_quote, 'chapter_id': ch.id if ch else None, 'chapter_title': ch.title if ch else '',
+            'block': obj.book_block,
+        }
 
     def get_media_url(self, obj):
         return _thumb_helper.get_media_url(obj)

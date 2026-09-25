@@ -914,6 +914,23 @@ export const startManuscriptCheck = async (id) => apiRequest('post', `/publicati
 export const fetchManuscriptCheck = async (id) => apiRequest('get', `/publications/${id}/ai/check/`);
 // The reader's highlight collections: { results: [{ name, count }] }.
 export const fetchHighlightCollections = async () => apiRequest('get', '/book-highlights/collections/');
+// ── Organisations (conferences, schools, publishing houses…) ──
+export const fetchOrganizations = async (params = {}) => apiRequest('get', '/organizations/', null, { params });
+export const createOrganization = async (data) => apiRequest('post', '/organizations/', data);
+export const fetchOrganization = async (slug) => apiRequest('get', `/organizations/${slug}/`);
+export const updateOrganization = async (slug, data) => apiRequest('patch', `/organizations/${slug}/`, data);
+export const deleteOrganization = async (slug) => apiRequest('delete', `/organizations/${slug}/`);
+export const followOrganization = async (slug, on) => apiRequest(on ? 'post' : 'delete', `/organizations/${slug}/follow/`);
+export const fetchOrgMembers = async (slug) => apiRequest('get', `/organizations/${slug}/members/`);
+export const inviteOrgMember = async (slug, username, role) =>
+  apiRequest('post', `/organizations/${slug}/members/`, { username, role });
+export const setOrgMemberRole = async (slug, id, role) =>
+  apiRequest('patch', `/organizations/${slug}/members/${id}/`, { role });
+export const removeOrgMember = async (slug, id) => apiRequest('delete', `/organizations/${slug}/members/${id}/`);
+export const respondOrgInvite = async (slug, accept) => apiRequest('post', `/organizations/${slug}/respond/`, { accept });
+export const fetchOrgInvitations = async () => apiRequest('get', '/organizations/invitations/');
+// A book (or a passage from it) posted to the social feed: { caption?, quote?, chapter_id?, block? } → the post.
+export const shareBookToFeed = async (id, spec = {}) => apiRequest('post', `/publications/${id}/share-to-feed/`, spec);
 
 // ── Writer Studio ──
 // Who works on a book: { results: [{ id, user, role, accepted }], my_role }.

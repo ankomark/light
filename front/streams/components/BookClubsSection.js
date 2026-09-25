@@ -2,9 +2,10 @@
 // "Start a book club" — a name, a pace, public or private — which makes the
 // group and its reading plan.
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { fetchBookClubs, createBookClub } from '../services/api';
 import { notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
@@ -18,6 +19,7 @@ export const PACES = [
 
 const BookClubsSection = ({ pub, navigation, isAuthenticated }) => {
   const { t } = useI18n();
+  const kbHeight = useKeyboardHeight();       // the sheet rises with the keyboard
   const [clubs, setClubs] = useState([]);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
@@ -68,6 +70,8 @@ const BookClubsSection = ({ pub, navigation, isAuthenticated }) => {
       </TouchableOpacity>
 
       <BottomSheet
+
+        keyboardHeight={kbHeight}
         visible={open}
         onClose={() => setOpen(false)}
         heightRatio={0.6}
@@ -78,7 +82,7 @@ const BookClubsSection = ({ pub, navigation, isAuthenticated }) => {
           </View>
         )}
       >
-        <View style={styles.sheetBody}>
+        <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={100}
             placeholder={t('club.defaultName', { title: pub.title })} placeholderTextColor={colors.placeholder} testID="club-name" />
           <Text style={styles.label}>{t('club.pace')}</Text>
@@ -97,7 +101,7 @@ const BookClubsSection = ({ pub, navigation, isAuthenticated }) => {
           <TouchableOpacity style={styles.go} onPress={start} disabled={busy} testID="club-create">
             {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.goText}>{t('club.create')}</Text>}
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </BottomSheet>
     </View>
   );

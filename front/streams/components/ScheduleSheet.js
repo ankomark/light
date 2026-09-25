@@ -3,7 +3,7 @@
 // date and time of the author's choosing. The worker publishes it then and
 // readers are told.
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import { colors, spacing, radius, typography } from '../constants/theme';
@@ -90,7 +90,7 @@ const ScheduleSheet = ({ visible, value, onPick, onClear, onClose }) => {
         </View>
       )}
     >
-      <View style={styles.body}>
+      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={styles.hint}>{t('schedule.hint')}</Text>
         {schedulePresets().map((p) => (
           <TouchableOpacity key={p.key} style={styles.row} onPress={() => onPick(p.date.toISOString())}
@@ -120,7 +120,7 @@ const ScheduleSheet = ({ visible, value, onPick, onClear, onClose }) => {
             <Text style={styles.clearText}>{t('schedule.clear')}</Text>
           </TouchableOpacity>
         ) : null}
-      </View>
+      </ScrollView>
     </BottomSheet>
   );
 };

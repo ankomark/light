@@ -89,7 +89,7 @@ const ChapterHistory = ({ route, navigation }) => {
     const rows = foldChanges(open.changes || []);
     const unchanged = open.changes && open.changes.every((c) => c.op === 'equal');
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
         <View style={styles.topBar}>
           <TouchableOpacity onPress={() => setOpen(null)} style={styles.iconBtn} hitSlop={10}
             accessibilityRole="button" accessibilityLabel={t('common.back')}>
@@ -151,7 +151,7 @@ const ChapterHistory = ({ route, navigation }) => {
 
   // ── The list ──
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
           accessibilityRole="button" accessibilityLabel={t('common.back')}>

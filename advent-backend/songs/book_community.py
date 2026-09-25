@@ -178,6 +178,9 @@ def _audience(publication, include_readers):
     book or are reading it. Never the author; never anyone blocked either way."""
     author = publication.author
     ids = set(User.followers.through.objects.filter(from_user_id=author.id).values_list('to_user_id', flat=True))
+    if publication.organization_id:
+        # Published under an organisation: its followers hear of it too.
+        ids |= set(publication.organization.followers.values_list('id', flat=True))
     if include_readers:
         ids |= set(PublicationBookmark.objects.filter(publication=publication).values_list('user_id', flat=True))
         ids |= set(ReadingProgress.objects.filter(publication=publication).values_list('user_id', flat=True))
@@ -188,8 +191,9 @@ def _audience(publication, include_readers):
 
 def notify_new_book(publication):
     from .push import notify_user
+    who = publication.organization.name if publication.organization_id else publication.author.username
     for u in _audience(publication, include_readers=False):
-        notify_user(u, 'new_book', f'{publication.author.username} published “{publication.title}”',
+        notify_user(u, 'new_book', f'{who} published “{publication.title}”',
                     data={'type': 'publication', 'publication_id': publication.id})
 
 

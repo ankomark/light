@@ -80,6 +80,9 @@ const PostTile = memo(({ post, size, isSelf, onPress }) => {
           <Feather name="image" size={22} color={P.dim} />
         </View>
       )}
+      {post.content_type === 'book' && (
+        <View style={styles.videoBadge}><Ionicons name="book" size={10} color={colors.white} /></View>
+      )}
       {post.content_type === 'video' && (
         <View style={styles.videoBadge}><Ionicons name="play" size={10} color={colors.white} /></View>
       )}

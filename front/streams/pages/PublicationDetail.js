@@ -19,6 +19,7 @@ import ReportModal from '../components/ReportModal';
 import { ChapterListSkeleton } from '../components/SkeletonLoader';
 import BookReviews from '../components/BookReviews';
 import BookClubsSection from '../components/BookClubsSection';
+import ShareBookSheet from '../components/ShareBookSheet';
 import { Stars } from '../components/BooksHome';
 import { categoryLabel } from '../utils/publications';
 import { confirmAction, notify } from '../utils/adminConfirm';
@@ -39,6 +40,7 @@ const PublicationDetail = ({ route, navigation }) => {
   const uid = currentUser?.id;
   const { id, preview = null } = route.params;
   const [reportVisible, setReportVisible] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Opened again: the page as it was, at once. Opened from the list: its top
   // (title, cover, author) from the row while the contents load.
@@ -252,7 +254,7 @@ const PublicationDetail = ({ route, navigation }) => {
     ? Math.max(1, Math.round((totalWords * (1 - (pub.my_percent || 0))) / WORDS_PER_MIN)) : 0;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
           accessibilityRole="button" accessibilityLabel={t('common.back')}>
@@ -315,6 +317,16 @@ const PublicationDetail = ({ route, navigation }) => {
               >
                 <Text style={styles.author}>{t('pubDetail.by', { name: head.author?.username || t('articles.unknownAuthor') })}</Text>
               </TouchableOpacity>
+              {head.organization ? (
+                <TouchableOpacity style={styles.orgRow} testID="pub-org"
+                  onPress={() => navigation.navigate('OrganizationPage', { slug: head.organization.slug, name: head.organization.name })}>
+                  {head.organization.logo ? <Image source={{ uri: head.organization.logo }} style={styles.orgLogo} contentFit="cover" /> : (
+                    <Ionicons name="business-outline" size={14} color={colors.textSecondary} />
+                  )}
+                  <Text style={styles.orgName} numberOfLines={1}>{t('org.publishedBy', { name: head.organization.name })}</Text>
+                  {head.organization.is_verified ? <Ionicons name="checkmark-circle" size={14} color={colors.primary} /> : null}
+                </TouchableOpacity>
+              ) : null}
               {pub?.rating_avg ? <View style={{ marginTop: 2 }}><Stars avg={pub.rating_avg} count={pub.rating_count} size={13} /></View> : null}
               <Text style={styles.meta}>
                 {chapterTotal === 1 ? t('pubDetail.chapterCountOne') : t('pubDetail.chapterCount', { n: chapterTotal })}
@@ -340,6 +352,13 @@ const PublicationDetail = ({ route, navigation }) => {
               <Ionicons name={bookmarked ? 'bookmark' : 'bookmark-outline'} size={19} color={bookmarked ? colors.primary : colors.textSecondary} />
               <Text style={styles.actionText}>{bookmarked ? t('pubDetail.saved') : t('pubDetail.save')}</Text>
             </TouchableOpacity>
+            {pub && pub.status === 'published' && isAuthenticated ? (
+              <TouchableOpacity style={styles.actionBtn} onPress={() => setShareOpen(true)} activeOpacity={0.8}
+                accessibilityRole="button" testID="pub-share">
+                <Ionicons name="paper-plane-outline" size={19} color={colors.textSecondary} />
+                <Text style={styles.actionText}>{t('shareBook.short')}</Text>
+              </TouchableOpacity>
+            ) : null}
             {pub && !pub.is_owner && isAuthenticated && (
               <TouchableOpacity style={styles.actionBtn} onPress={() => setReportVisible(true)} activeOpacity={0.8}
                 accessibilityRole="button">
@@ -454,7 +473,10 @@ const PublicationDetail = ({ route, navigation }) => {
           ) : null}
           {pub && pub.status === 'published' ? <BookReviews pubId={pub.id} navigation={navigation} onChanged={load} /> : null}
           {pub && pub.status === 'published' ? (
-            <BookClubsSection pub={pub} navigation={navigation} isAuthenticated={isAuthenticated} />
+            <>
+              <BookClubsSection pub={pub} navigation={navigation} isAuthenticated={isAuthenticated} />
+              <ShareBookSheet visible={shareOpen} onClose={() => setShareOpen(false)} book={pub} />
+            </>
           ) : null}
           <View style={{ height: spacing.xxl }} />
         </View>
@@ -509,16 +531,21 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.warning, borderRadius: radius.sm, paddingHorizontal: 6, fontSize: 10,
   },
   title: { ...typography.h2, color: colors.textPrimary },
+  orgRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3, alignSelf: 'flex-start', maxWidth: '100%' },
+  orgLogo: { width: 18, height: 18, borderRadius: 4, backgroundColor: colors.surface },
+  orgName: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', flexShrink: 1 },
   author: { ...typography.body, color: colors.textSecondary, marginTop: 2 },
   meta: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs },
 
   followWrap: { flexDirection: 'row', marginTop: spacing.sm },
+  // Wraps to a second row on a narrow phone rather than squeezing four
+  // buttons (Like, Save, Share, Report) into 320px.
   actionsRow: {
-    flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg,
+    flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg,
   },
   actionBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
-    flex: 1, paddingVertical: spacing.sm, borderRadius: radius.md,
+    flexGrow: 1, flexBasis: 84, paddingVertical: spacing.sm, borderRadius: radius.md,
     backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
   },
   actionText: { ...typography.label, color: colors.textSecondary, fontWeight: '600' },

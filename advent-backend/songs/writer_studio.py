@@ -40,6 +40,13 @@ def role_of(user, publication):
         return OWNER
     c = (PublicationCollaborator.objects.filter(publication=publication, user=user, accepted_at__isnull=False)
          .values_list('role', flat=True).first())
+    if c is None and publication.organization_id:
+        # An organisation's editors (and those who run it) edit its books.
+        from .models import OrganizationMember
+        if OrganizationMember.objects.filter(organization_id=publication.organization_id, user=user,
+                                             accepted_at__isnull=False,
+                                             role__in=OrganizationMember.EDIT_ROLES).exists():
+            return PublicationCollaborator.EDITOR
     return c
 
 

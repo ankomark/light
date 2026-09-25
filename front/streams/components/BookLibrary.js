@@ -7,6 +7,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ScrollView } from '
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchPublications, fetchReadingStats, fetchBookHighlights, fetchHighlightCollections } from '../services/api';
 import { keptBookIds, readBook } from '../services/publicationStore';
 import { localDay } from '../services/readingTracker';
@@ -128,6 +129,7 @@ const Stats = ({ stats, t }) => {
 const BookLibrary = ({ navigation }) => {
   const { t } = useI18n();
   const { currentUser, isAuthenticated } = useAuth();
+  const bottomInset = useSafeAreaInsets().bottom || 0;      // the gesture bar (edge-to-edge)
   const uid = currentUser?.id;
   const [shelf, setShelf] = useState('reading');
   // Highlights: all, or one of the reader's collections.
@@ -280,7 +282,7 @@ const BookLibrary = ({ navigation }) => {
         : <BookRow item={item} onOpen={openBook} t={t} />)}
       ListHeaderComponent={header}
       ListEmptyComponent={empty()}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingBottom: 96 + bottomInset }]}
       showsVerticalScrollIndicator={false}
     />
   );

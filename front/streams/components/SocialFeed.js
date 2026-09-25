@@ -15,6 +15,7 @@ import {
 import { Image } from 'expo-image';
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
+import BookPostMedia from './BookPostMedia';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import GlassView from './GlassView';
@@ -588,16 +589,20 @@ const PostCard = React.memo(function PostCard({
   return (
     <View style={[styles.postContainer, { width: cardW }]}>
       {renderHeader({ item })}
-      <PostMedia
-        item={item}
-        isFocused={isFocused}
-        isMuted={isMuted}
-        onToggleMute={onToggleMute}
-        isAudioActive={isAudioActive}
-        isAudioPlaying={isAudioPlaying}
-        onToggleAudio={onToggleAudio}
-        onDoubleTapLike={onDoubleTapLike}
-      />
+      {item.content_type === 'book' ? (
+        <BookPostMedia item={item} width={cardW} onDoubleTapLike={onDoubleTapLike} />
+      ) : (
+        <PostMedia
+          item={item}
+          isFocused={isFocused}
+          isMuted={isMuted}
+          onToggleMute={onToggleMute}
+          isAudioActive={isAudioActive}
+          isAudioPlaying={isAudioPlaying}
+          onToggleAudio={onToggleAudio}
+          onDoubleTapLike={onDoubleTapLike}
+        />
+      )}
       {renderFooter({ item })}
     </View>
   );

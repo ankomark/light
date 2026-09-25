@@ -12,8 +12,9 @@ import { compressImage } from '../services/imageProcessing';
 import Markdown from 'react-native-markdown-display';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  fetchPublication, createPublication, updatePublication, askWriterAi,
+  fetchPublication, createPublication, updatePublication, askWriterAi, fetchOrganizations,
 } from '../services/api';
+import { peekCache as peekKept, writeCache as keep, userKey as keyFor } from '../utils/screenCache';
 import { useAiEnabled } from '../services/bookAi';
 import AiAnswerSheet from '../components/AiAnswerSheet';
 import { forgetBook, notePublicationsChanged } from '../services/publicationStore';
@@ -306,6 +307,9 @@ const PublicationEditor = ({ route, navigation }) => {
   const [cover, setCover] = useState('');
   const [coverUploading, setCoverUploading] = useState(false);
   const [category, setCategory] = useState('devotional');
+  // Whose name it carries: the author's own, or an organisation they're in.
+  const [orgSlug, setOrgSlug] = useState('');
+  const [myOrgs, setMyOrgs] = useState(() => peekKept(keyFor(currentUser?.id, 'orgs:mine')) || []);
   const [status, setStatus] = useState('draft');
   const [chapters, setChapters] = useState([blankChapter()]);
   const [theme, setTheme] = useState(DEFAULT_WRITING_THEME); // reading look (bg/text/font/scale)
@@ -332,7 +336,17 @@ const PublicationEditor = ({ route, navigation }) => {
     if (loading) return;
     if (!settled.current) { settled.current = true; return; }
     dirty.current = true;
-  }, [title, summary, cover, category, theme, chapters, loading]);
+  }, [title, summary, cover, category, theme, chapters, loading, orgSlug]);
+
+  // The organisations one can publish under (kept, so it shows offline).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchOrganizations({ mine: 1 }).then((r) => {
+      const rows = r?.results || [];
+      setMyOrgs(rows);
+      keep(keyFor(currentUser?.id, 'orgs:mine'), rows);
+    }).catch(() => {});
+  }, [isAuthenticated, currentUser?.id]);
 
   useEffect(() => navigation.addListener('beforeRemove', (e) => {
     if (!dirty.current || leaving.current) return;
@@ -353,6 +367,7 @@ const PublicationEditor = ({ route, navigation }) => {
     setSummary(d.summary || '');
     if (fromServer || d.cover) setCover(d.cover || '');
     setCategory(d.category || (fromServer ? 'other' : 'devotional'));
+    setOrgSlug(d.organization?.slug ?? d.organization_slug ?? '');
     if (d.status) setStatus(d.status);
     setTheme({ ...DEFAULT_WRITING_THEME, ...(d.theme || {}) });
     setChapters(
@@ -415,7 +430,7 @@ const PublicationEditor = ({ route, navigation }) => {
     if (loading || !dirty.current) return undefined;
     const h = setTimeout(() => {
       const snapshot = {
-        title, summary, cover, category, theme,
+        title, summary, cover, category, theme, organization_slug: orgSlug,
         chapters: chapters.map((c) => ({
           id: c.id, version: c.version, status: c.status, publish_at: c.publishAt, title: c.title, body: stripTokens(c.body),
         })),
@@ -639,7 +654,7 @@ const PublicationEditor = ({ route, navigation }) => {
       cover: cover || '',
       theme,
       category,
-      ...(isOwner ? { status: nextStatus } : {}),
+      ...(isOwner ? { status: nextStatus, organization_slug: orgSlug } : {}),
       chapters: cleaned,
       ...(confirmed ? { rights_confirmed: true } : {}),
       ...(force ? { force: true } : {}),
@@ -751,7 +766,7 @@ const PublicationEditor = ({ route, navigation }) => {
 
   if (!isAuthenticated) {
     return (
-      <SafeAreaView style={styles.centered} edges={['top']}>
+      <SafeAreaView style={styles.centered} edges={['top', 'left', 'right', 'bottom']}>
         <Ionicons name="create-outline" size={46} color={colors.textMuted} />
         <Text style={styles.signInText}>{t('articles.signInMine')}</Text>
         <TouchableOpacity style={styles.signInBtn} onPress={() => navigation.replace('Login')}>
@@ -769,7 +784,7 @@ const PublicationEditor = ({ route, navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
           accessibilityRole="button" accessibilityLabel={t('common.back')} testID="editor-close">
@@ -913,6 +928,25 @@ const PublicationEditor = ({ route, navigation }) => {
               );
             })}
           </ScrollView>
+
+          {isOwner && (myOrgs.length || orgSlug) ? (
+            <>
+              <Text style={styles.label}>{t('org.publishAs')}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catScroll}
+                contentContainerStyle={styles.catRow} keyboardShouldPersistTaps="handled">
+                {[{ slug: '', name: currentUser?.username || t('org.myself') }, ...myOrgs].map((o) => {
+                  const active = o.slug === orgSlug;
+                  return (
+                    <TouchableOpacity key={o.slug || '_me'} style={[styles.catChip, active && styles.catChipActive]}
+                      onPress={() => setOrgSlug(o.slug)} accessibilityRole="radio" accessibilityState={{ checked: active }}
+                      testID={`editor-org-${o.slug || 'me'}`}>
+                      <Text style={[styles.catChipText, active && styles.catChipTextActive]}>{o.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </>
+          ) : null}
 
           {/* Reading design: background, font, text colour */}
           <TouchableOpacity style={styles.designToggle} onPress={() => setShowDesign((s) => !s)} activeOpacity={0.85}>
@@ -1096,6 +1130,10 @@ const PublicationEditor = ({ route, navigation }) => {
         onPreview={preview}
         onPublish={({ rightsConfirmed: ok }) => save('publish', { rightsConfirmed: ok })}
         publishing={saving}
+        me={currentUser?.username || ''}
+        orgs={myOrgs}
+        publishAs={orgSlug}
+        onPublishAs={setOrgSlug}
       />
       <ScheduleSheet
         visible={!!scheduling}

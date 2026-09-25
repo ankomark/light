@@ -57,6 +57,21 @@ const AuthorChip = memo(({ item, onOpen, t }) => (
   </TouchableOpacity>
 ));
 
+// A publisher (a verified organisation) on Discover: its logo and name.
+const PublisherChip = memo(({ item, navigation, t }) => (
+  <TouchableOpacity style={styles.author_} testID={`publisher-${item.slug}`}
+    onPress={() => navigation.navigate('OrganizationPage', { slug: item.slug, name: item.name })}>
+    {item.logo ? <Image source={{ uri: item.logo }} style={styles.orgLogo} contentFit="cover" /> : (
+      <View style={[styles.orgLogo, styles.orgLogoFallback]}><Ionicons name="business" size={26} color={colors.accent} /></View>
+    )}
+    <View style={styles.orgNameRow}>
+      <Text style={styles.authorName} numberOfLines={1}>{item.name}</Text>
+      <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
+    </View>
+    <Text style={styles.growth}>{t('home.booksN', { n: item.books_count })}</Text>
+  </TouchableOpacity>
+));
+
 const Shelf = ({ title, subtitle, data, renderItem, keyOf, testID }) => (data?.length ? (
   <View style={styles.shelf} testID={testID}>
     <Text style={styles.shelfTitle}>{title}</Text>
@@ -126,6 +141,24 @@ const BooksHome = ({ navigation }) => {
           ) : null}
         </React.Fragment>
       ))}
+      {home.publishers?.length ? (
+        <View style={styles.shelf} testID="home-publishers">
+          <View style={styles.shelfHead}>
+            <Text style={[styles.shelfTitle, styles.flex]}>{t('home.publishers')}</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Organizations')} hitSlop={8} testID="home-publishers-all">
+              <Text style={styles.seeAll}>{t('home.seeAll')}</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            horizontal
+            data={home.publishers}
+            keyExtractor={(o) => `org_${o.slug}`}
+            renderItem={({ item }) => <PublisherChip item={item} navigation={navigation} t={t} />}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+          />
+        </View>
+      ) : null}
       <Shelf
         title={t('home.rising')}
         data={home.rising}
@@ -156,6 +189,12 @@ const styles = StyleSheet.create({
   avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.surface },
   authorName: { ...typography.caption, color: colors.textPrimary, fontWeight: '700', marginTop: 6 },
   growth: { ...typography.caption, color: colors.accent, fontSize: 11 },
+  flex: { flex: 1 },
+  shelfHead: { flexDirection: 'row', alignItems: 'baseline' },
+  seeAll: { ...typography.caption, color: colors.primary, fontWeight: '800' },
+  orgLogo: { width: 64, height: 64, borderRadius: 14, backgroundColor: colors.surface },
+  orgLogoFallback: { alignItems: 'center', justifyContent: 'center' },
+  orgNameRow: { flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: 96 },
   allTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm, marginTop: spacing.xs },
 });
 

@@ -19,6 +19,7 @@ NOTIFICATION_TITLES = {
     'book_discussion': '\U0001f4ac Book discussion',
     'book_review': '⭐ New review',
     'book_invite': '✍️ Invitation to write',
+    'org_invite': '\U0001f3db Invitation to an organisation',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.
@@ -51,6 +52,7 @@ NOTIFICATION_CATEGORIES = {
     'book_discussion': 'comments',
     'book_review': 'comments',
     'book_invite': 'books',
+    'org_invite': 'books',
 }
 
 

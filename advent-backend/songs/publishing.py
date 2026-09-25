@@ -48,10 +48,16 @@ def visible_publications(user):
 # ── Who sees which chapters ──────────────────────────────────────────────────
 
 def collaborating(user):
-    """Ids of the books this user was invited to and accepted (a subquery)."""
-    from .models import PublicationCollaborator
-    return (PublicationCollaborator.objects.filter(user_id=getattr(user, 'id', None), accepted_at__isnull=False)
-            .values('publication_id'))
+    """Ids of the books this user works on without being their author: the
+    ones they were invited to (and accepted), and those published under an
+    organisation they edit for (a subquery)."""
+    from .models import OrganizationMember
+    uid = getattr(user, 'id', None)
+    return Publication.objects.filter(
+        Q(collaborators__user_id=uid, collaborators__accepted_at__isnull=False)
+        | Q(organization__members__user_id=uid, organization__members__accepted_at__isnull=False,
+            organization__members__role__in=OrganizationMember.EDIT_ROLES)
+    ).values('pk')
 
 
 def visible_chapters_q(user, prefix=''):

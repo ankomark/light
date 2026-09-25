@@ -83,14 +83,19 @@ class PublicationListSerializer(serializers.ModelSerializer):
     my_finished = serializers.SerializerMethodField()
     rating_avg = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
+    organization = serializers.SerializerMethodField()
 
     class Meta:
         model = Publication
         fields = [
             'id', 'title', 'summary', 'cover', 'category', 'status', 'author', 'is_owner',
             'chapter_count', 'likes_count', 'is_liked', 'is_bookmarked', 'created_at', 'updated_at',
-            'my_percent', 'my_finished', 'rating_avg', 'rating_count',
+            'my_percent', 'my_finished', 'rating_avg', 'rating_count', 'organization',
         ]
+
+    def get_organization(self, obj):
+        from ..organizations import mini
+        return mini(obj.organization) if obj.organization_id else None
 
     def get_rating_avg(self, obj):
         v = getattr(obj, 'rating_avg_anno', None)
@@ -222,6 +227,10 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     upcoming = serializers.SerializerMethodField()
     my_role = serializers.SerializerMethodField()
     collaborators_count = serializers.SerializerMethodField()
+    organization = serializers.SerializerMethodField()
+    # Written by the author: the organisation to publish under (its slug), or
+    # '' for their own name. They must be a member of it.
+    organization_slug = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Publication
@@ -230,7 +239,7 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
             'author', 'chapters', 'is_owner', 'reading_minutes',
             'likes_count', 'is_liked', 'is_bookmarked', 'last_read_chapter', 'last_read_position',
             'my_percent', 'my_finished', 'rating_avg', 'rating_count', 'author_is_following',
-            'upcoming', 'my_role', 'collaborators_count', 'rights_confirmed_at',
+            'upcoming', 'my_role', 'collaborators_count', 'rights_confirmed_at', 'organization', 'organization_slug',
             'created_at', 'updated_at', 'published_at',
         ]
         read_only_fields = ['author', 'created_at', 'updated_at', 'published_at', 'rights_confirmed_at']
@@ -245,6 +254,20 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     def get_is_owner(self, obj):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.author_id == request.user.id)
+
+    def get_organization(self, obj):
+        from ..organizations import mini
+        return mini(obj.organization) if obj.organization_id else None
+
+    def validate_organization_slug(self, slug):
+        from ..models import Organization
+        from ..organizations import can_publish_under
+        if not slug:
+            return None
+        org = Organization.objects.filter(slug=slug).first()
+        if org is None or not can_publish_under(_request_user(self), org):
+            raise serializers.ValidationError('You can publish only under an organisation you belong to.')
+        return org
 
     # The view annotates what it can (one query for the lot); these fall back
     # to a query each for an object that didn't come through it.
@@ -315,7 +338,9 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         user = _request_user(self)
         if user and obj.author_id == user.id:
             return 'owner'
-        if hasattr(obj, 'my_collab_role'):
+        # Invited to it: that role. Otherwise an organisation's editors may
+        # have one through it (writer_studio.role_of).
+        if hasattr(obj, 'my_collab_role') and (obj.my_collab_role or not obj.organization_id):
             return obj.my_collab_role
         from ..writer_studio import role_of
         return role_of(user, obj)
@@ -364,6 +389,8 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         from ..book_community import announce
         chapters = validated_data.pop('chapters', [])
+        if 'organization_slug' in validated_data:
+            validated_data['organization'] = validated_data.pop('organization_slug')
         self._confirm_rights(None, validated_data)
         if validated_data.get('status') == 'published':
             validated_data['published_at'] = timezone.now()
@@ -382,6 +409,11 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     def _update(self, instance, validated_data):
         from ..book_community import announce
         chapters = validated_data.pop('chapters', None)
+        if 'organization_slug' in validated_data:
+            org = validated_data.pop('organization_slug')
+            # Whose name a book carries is its author's to choose.
+            if instance.author_id == getattr(_request_user(self), 'id', None):
+                validated_data['organization'] = org
         self._confirm_rights(instance, validated_data)
         was_published = bool(instance.published_at)
         new_status = validated_data.get('status', instance.status)

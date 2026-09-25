@@ -26,10 +26,13 @@ const BottomSheet = ({
   // A Modal sits outside the navigator's safe-area context: read the device.
   const insets = initialWindowMetrics?.insets || { top: 24, bottom: 0 };
   const maxH = winH - insets.top - 8;
+  // A short window (a phone on its side, a split screen): nearly all of it,
+  // or the sheet's contents don't fit.
+  const ratio = winH < 520 ? Math.max(heightRatio, 0.92) : heightRatio;
   // Taller when the keyboard is up, so the list keeps some room above the box.
   const sheetH = Math.min(maxH, keyboardHeight > 0
-    ? Math.max(winH * heightRatio, keyboardHeight + 360)
-    : winH * heightRatio);
+    ? Math.max(winH * ratio, keyboardHeight + 360)
+    : winH * ratio);
 
   const [mounted, setMounted] = useState(visible);
   const progress = useRef(new Animated.Value(0)).current; // 0 hidden → 1 open
@@ -101,6 +104,9 @@ const styles = StyleSheet.create({
   backdrop: { backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: {
     width: '100%',
+    // A tablet or the web: a sheet, not a full-width slab (phones: all of it).
+    maxWidth: 720,
+    alignSelf: 'center',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',

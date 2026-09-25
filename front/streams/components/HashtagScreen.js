@@ -76,6 +76,9 @@ const HashtagScreen = ({ route, navigation }) => {
       onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
     >
       <Image source={{ uri: thumbOf(item) }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" transition={120} />
+      {item.content_type === 'book' && (
+        <View style={styles.videoBadge}><Ionicons name="book" size={12} color="#fff" /></View>
+      )}
       {item.content_type === 'video' && (
         <View style={styles.videoBadge}><Ionicons name="play" size={12} color="#fff" /></View>
       )}

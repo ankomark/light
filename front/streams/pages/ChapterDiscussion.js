@@ -2,11 +2,12 @@
 // so before anything is shown ("you're on chapter 3 — this may spoil it"),
 // and can choose to read on. One level of replies; the book's author is
 // marked; people remove their own comments, and the author their book's.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, Platform, KeyboardAvoidingView,
+  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchChapterDiscussion, postChapterComment, deleteChapterComment } from '../services/api';
@@ -67,6 +68,11 @@ const ChapterDiscussion = ({ route, navigation }) => {
   const [reveal, setReveal] = useState(false);
   const [text, setText] = useState('');
   const [replyTo, setReplyTo] = useState(null);
+  const kbHeight = useKeyboardHeight();
+  const insets = useSafeAreaInsets();
+  const inputRef = useRef(null);
+  // Reply: straight to typing it.
+  useEffect(() => { if (replyTo) inputRef.current?.focus?.(); }, [replyTo]);
   const [sending, setSending] = useState(false);
   const [reporting, setReporting] = useState(null);
 
@@ -186,7 +192,7 @@ const ChapterDiscussion = ({ route, navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
           accessibilityRole="button" accessibilityLabel={t('common.back')}>
@@ -196,11 +202,13 @@ const ChapterDiscussion = ({ route, navigation }) => {
         <View style={styles.iconBtn} />
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* The composer rides on the keyboard (its own height, not a window
+          resize — edge-to-edge Android doesn't resize), like chat and comments. */}
+      <View style={[styles.flex, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
         <View style={styles.flex}>{body}</View>
 
         {data && !data.locked ? (
-          <View style={styles.composer}>
+          <View style={[styles.composer, { paddingBottom: spacing.sm + (kbHeight > 0 ? 0 : insets.bottom) }]}>
             {replyTo ? (
               <View style={styles.replying}>
                 <Text style={styles.replyingText} numberOfLines={1}>{t('discussion.replyingTo', { name: replyTo.user?.username })}</Text>
@@ -219,6 +227,7 @@ const ChapterDiscussion = ({ route, navigation }) => {
                   placeholderTextColor={colors.placeholder}
                   multiline
                   maxLength={MAX}
+                  ref={inputRef}
                   testID="discussion-input"
                 />
                 <TouchableOpacity onPress={send} disabled={!text.trim() || sending} style={styles.sendBtn}
@@ -234,7 +243,7 @@ const ChapterDiscussion = ({ route, navigation }) => {
             )}
           </View>
         ) : null}
-      </KeyboardAvoidingView>
+      </View>
 
       {reporting ? (
         <ReportModal visible onClose={() => setReporting(null)} contentType="chaptercomment" objectId={reporting.id} />

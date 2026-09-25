@@ -52,6 +52,19 @@ const mockApi = {
   startManuscriptCheck: jest.fn(),
   fetchManuscriptCheck: jest.fn(),
   fetchHighlightCollections: jest.fn(),
+  fetchOrganizations: jest.fn(),
+  createOrganization: jest.fn(),
+  fetchOrganization: jest.fn(),
+  updateOrganization: jest.fn(),
+  deleteOrganization: jest.fn(),
+  followOrganization: jest.fn(),
+  fetchOrgMembers: jest.fn(),
+  inviteOrgMember: jest.fn(),
+  setOrgMemberRole: jest.fn(),
+  removeOrgMember: jest.fn(),
+  respondOrgInvite: jest.fn(),
+  fetchOrgInvitations: jest.fn(),
+  shareBookToFeed: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -67,10 +80,12 @@ jest.mock('../../utils/adminConfirm', () => ({
   notify: (...a) => mockNotify(...a),
 }));
 let mockFocus = [];
+let mockNavigation = null;
 jest.mock('@react-navigation/native', () => {
   const R = require('react');
   return {
     useFocusEffect: (cb) => { R.useEffect(() => { mockFocus.push(cb); return cb(); }, [cb]); },
+    useNavigation: () => mockNavigation,
   };
 });
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null, MaterialCommunityIcons: () => null }));
@@ -82,9 +97,10 @@ jest.mock('expo-linear-gradient', () => {
   const { View } = require('react-native');
   return { LinearGradient: ({ children }) => <View>{children}</View> };
 });
+let mockInsets = { top: 0, bottom: 0, left: 0, right: 0 };
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
-  return { SafeAreaView: View, useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) };
+  return { SafeAreaView: View, useSafeAreaInsets: () => mockInsets };
 });
 jest.mock('react-native-markdown-display', () => {
   const { Text: T } = require('react-native');
@@ -161,6 +177,8 @@ beforeEach(async () => {
   mockApi.fetchBookClubs.mockResolvedValue({ results: [] });
   mockApi.fetchAiStatus.mockResolvedValue({ enabled: false });
   mockApi.fetchHighlightCollections.mockResolvedValue({ results: [] });
+  mockApi.fetchOrganizations.mockResolvedValue({ results: [] });
+  mockApi.fetchOrgInvitations.mockResolvedValue({ results: [] });
   require('../../services/bookAi').__resetBookAi();
   require('../../services/bookHighlights').__resetBookHighlights();
   require('../../utils/readerSettings').__resetReaderSettings();
@@ -170,6 +188,7 @@ beforeEach(async () => {
   mockNotify.mockReset();
   mockUpload.mockClear();
   mockFocus = [];
+  mockInsets = { top: 0, bottom: 0, left: 0, right: 0 };
 });
 
 // ── The list ─────────────────────────────────────────────────────────────────
@@ -178,14 +197,14 @@ describe('Publishing list', () => {
     mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(1), pubRow(2)], next: null });
     const n = nav();
     const r = render(<Articles navigation={n} />);
-    await waitFor(() => expect(r.getByText('Book 2')).toBeTruthy());
+    await waitFor(() => expect(r.getByTestId('book-tile-2')).toBeTruthy());
     await act(async () => { await new Promise((res) => setTimeout(res, 400)); });   // past the search debounce
     expect(mockApi.fetchPublications).toHaveBeenCalledTimes(1);
     r.unmount();
 
     mockApi.fetchPublications.mockImplementation(() => new Promise(() => {}));     // the network hangs
     const again = render(<Articles navigation={n} />);
-    expect(again.getByText('Book 2')).toBeTruthy();                               // painted at once
+    expect(again.getByTestId('book-tile-2')).toBeTruthy();                               // painted at once
   });
 
   test('offline with nothing kept: a message and Retry, not an empty "no publications"', async () => {
@@ -194,13 +213,13 @@ describe('Publishing list', () => {
     await waitFor(() => expect(r.getByText('articles.loadFailed')).toBeTruthy());
     mockApi.fetchPublications.mockResolvedValueOnce({ results: [pubRow(1)], next: null });
     await act(async () => { fireEvent.press(r.getByTestId('articles-retry')); });
-    await waitFor(() => expect(r.getByText('Book 1')).toBeTruthy());
+    await waitFor(() => expect(r.getByTestId('book-tile-1')).toBeTruthy());
   });
 
   test('a refresh that fails keeps the rows and says it is offline', async () => {
     mockApi.fetchPublications.mockResolvedValueOnce({ results: [pubRow(1)], next: null });
     const r = render(<Articles navigation={nav()} />);
-    await waitFor(() => expect(r.getByText('Book 1')).toBeTruthy());
+    await waitFor(() => expect(r.getByTestId('book-tile-1')).toBeTruthy());
     mockApi.fetchPublications.mockRejectedValueOnce(new Error('Network Error'));
     // Focus reaches every screen part that listens (the list and its shelves).
     const focusAll = () => act(async () => { [...new Set(mockFocus)].forEach((cb) => cb()); });
@@ -208,7 +227,7 @@ describe('Publishing list', () => {
     store.notePublicationsChanged();
     await focusAll();                                                  // … a change since forces a reload
     await waitFor(() => expect(r.getByTestId('articles-offline')).toBeTruthy());
-    expect(r.getByText('Book 1')).toBeTruthy();
+    expect(r.getByTestId('book-tile-1')).toBeTruthy();
   });
 
   test('a slow answer for an old tab never replaces the new tab', async () => {
@@ -219,10 +238,10 @@ describe('Publishing list', () => {
     await flush();
     await act(async () => { fireEvent.press(r.getByTestId('articles-tab-mine')); });
     await flush();
-    await waitFor(() => expect(r.getByText('Saved one')).toBeTruthy());
+    await waitFor(() => expect(r.getByTestId('book-tile-9')).toBeTruthy());
     await act(async () => { answerDiscover({ results: [pubRow(1)], next: null }); });
-    expect(r.queryByText('Book 1')).toBeNull();
-    expect(r.getByText('Saved one')).toBeTruthy();
+    expect(r.queryByTestId('book-tile-1')).toBeNull();
+    expect(r.getByTestId('book-tile-9')).toBeTruthy();
   });
 
   test('guests: Library and My Work ask to sign in (Saved used to list everything); Write opens Login', async () => {
@@ -230,7 +249,7 @@ describe('Publishing list', () => {
     mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(1)], next: null });
     const n = nav();
     const r = render(<Articles navigation={n} />);
-    await waitFor(() => expect(r.getByText('Book 1')).toBeTruthy());
+    await waitFor(() => expect(r.getByTestId('book-tile-1')).toBeTruthy());
     await act(async () => { fireEvent.press(r.getByTestId('articles-tab-library')); });
     await waitFor(() => expect(r.getByText('library.signIn')).toBeTruthy());
     expect(mockApi.fetchPublications).toHaveBeenCalledTimes(1);
@@ -696,7 +715,7 @@ describe('Phase 2', () => {
     const { r } = await open();
     fireEvent.press(r.getByTestId('reader-font'));
     await act(async () => { fireEvent.press(r.getByTestId('reader-theme-sepia')); });
-    const bg = [].concat(r.UNSAFE_root.findAll((n) => n.props?.edges?.[0] === 'top')[0].props.style).flat()
+    const bg = [].concat(r.UNSAFE_root.findAll((n) => Array.isArray(n.props?.edges) && n.props.edges.length === 0)[0].props.style).flat()
       .reduce((a, x) => ({ ...a, ...(x || {}) }), {}).backgroundColor;
     expect(bg).toBe('#F1E4CB');
   });
@@ -1175,6 +1194,8 @@ describe('Phase 5', () => {
     mockApi.fetchBookClubs.mockResolvedValue({ results: [] });
   mockApi.fetchAiStatus.mockResolvedValue({ enabled: false });
   mockApi.fetchHighlightCollections.mockResolvedValue({ results: [] });
+  mockApi.fetchOrganizations.mockResolvedValue({ results: [] });
+  mockApi.fetchOrgInvitations.mockResolvedValue({ results: [] });
   require('../../services/bookAi').__resetBookAi();
     mockApi.createBookClub.mockResolvedValue({ id: 3 });
     const n = nav();
@@ -1410,5 +1431,305 @@ describe('Phase 6', () => {
     await flush();
     await act(async () => { fireEvent.press(r.getByTestId('check-run')); });
     expect(r.getByText('ai.limit')).toBeTruthy();
+  });
+});
+
+// ── Phase 7: organisations, books in the feed, the cover grid ───────────────
+describe('Phase 7', () => {
+  const OrganizationPage = require('../OrganizationPage').default;
+  const OrganizationEdit = require('../OrganizationEdit').default;
+  const OrganizationMembers = require('../OrganizationMembers').default;
+  const Organizations = require('../Organizations').default;
+  const BookPostMedia = require('../../components/BookPostMedia').default;
+  const BooksHome = require('../../components/BooksHome').default;
+  const org = (extra = {}) => ({
+    id: 3, slug: 'cku', name: 'Central Kenya Union', kind: 'union', logo: '', is_verified: true, location: 'Nairobi',
+    website: 'https://cku.org', description: 'Books for the field', members_count: 4, followers_count: 10,
+    books_count: 1, my_role: null, invited_as: null, is_following: false, ...extra,
+  });
+
+  test('the list is a shelf of covers; large, small or the list, remembered', async () => {
+    mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(1), pubRow(2, { organization: { name: 'CKU', is_verified: true } })], next: null });
+    const r = render(<Articles navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('book-tile-2')).toBeTruthy());
+    expect(within(r.getByTestId('book-tile-2')).getByText('CKU')).toBeTruthy();       // published under it
+    await act(async () => { fireEvent.press(r.getByTestId('articles-layout-list')); });
+    expect(r.queryByTestId('book-tile-1')).toBeNull();
+    expect(r.getByText('Book 1')).toBeTruthy();
+    expect(await AsyncStorage.getItem('pubs:layout')).toBe('list');
+    await act(async () => { fireEvent.press(r.getByTestId('articles-layout-compact')); });
+    expect(r.getByTestId('book-tile-1')).toBeTruthy();
+    expect(r.getByTestId('articles-layout-compact').props.accessibilityState).toEqual({ checked: true });
+  });
+
+  test('a book in the feed: the card opens the book, a passage opens at its place, double-tap likes', async () => {
+    jest.useFakeTimers();
+    try {
+      mockNavigation = nav();
+      const like = jest.fn();
+      const post = { id: 70, content_type: 'book', book: {
+        id: 5, title: 'The Silent Path', cover: '', category: 'devotional', author: { id: 2, username: 'writer' },
+        organization: { name: 'CKU', is_verified: true }, quote: '', chapter_id: null } };
+      const r = render(<BookPostMedia item={post} width={360} onDoubleTapLike={like} />);
+      expect(r.getByText('The Silent Path')).toBeTruthy();
+      expect(r.getByText('bookPost.read')).toBeTruthy();
+      fireEvent.press(r.getByTestId('book-post-70'));
+      act(() => { jest.advanceTimersByTime(400); });
+      expect(mockNavigation.navigate).toHaveBeenCalledWith('PublicationDetail', expect.objectContaining({ id: 5 }));
+      fireEvent.press(r.getByTestId('book-post-70'));
+      fireEvent.press(r.getByTestId('book-post-70'));
+      act(() => { jest.advanceTimersByTime(400); });
+      expect(like).toHaveBeenCalledWith(post);
+      expect(mockNavigation.navigate).toHaveBeenCalledTimes(1);
+
+      const passage = { ...post, id: 71, book: { ...post.book, quote: 'A sower went out.', chapter_id: 51, chapter_title: 'One', block: 2 } };
+      const q = render(<BookPostMedia item={passage} width={360} />);
+      expect(q.getByTestId('book-post-quote')).toBeTruthy();
+      fireEvent.press(q.getByTestId('book-post-71'));
+      act(() => { jest.advanceTimersByTime(400); });
+      expect(mockNavigation.navigate).toHaveBeenLastCalledWith('ChapterReader', { id: 5, chapterId: 51, block: 2 });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('share a passage from the reader to the feed', async () => {
+    mockApi.fetchPublicationChapter.mockImplementation(async (id, i) => ({ chapter: {
+      id: 51 + i, version: 1, title: 'One', word_count: 100, body: 'First paragraph.\n\nSecond paragraph.' } }));
+    mockApi.shareBookToFeed.mockResolvedValue({ id: 80 });
+    const params = { id: 5, index: 0, book: { id: 5, title: 'B', status: 'published', theme: {}, chapters: [{ id: 51, version: 1, title: 'One' }] } };
+    const r = render(<ChapterReader route={{ params }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByText('Second paragraph.')).toBeTruthy());
+    await act(async () => { fireEvent(r.getByTestId('reader-block-1'), 'longPress'); });
+    await act(async () => { fireEvent.press(r.getByTestId('book-action-share')); });
+    expect(r.getByTestId('share-book-sheet')).toBeTruthy();
+    fireEvent.changeText(r.getByTestId('share-book-caption'), 'This one ');
+    await act(async () => { fireEvent.press(r.getByTestId('share-book-post')); });
+    expect(mockApi.shareBookToFeed).toHaveBeenCalledWith(5, {
+      caption: 'This one', quote: 'Second paragraph.', chapter_id: 51, block: 1,
+    });
+    expect(mockNotify).toHaveBeenCalledWith('shareBook.postedTitle', 'shareBook.postedBody');
+  });
+
+  test('the book page: published by an organisation; share it to the feed', async () => {
+    mockApi.fetchPublication.mockResolvedValue(book({ organization: { slug: 'cku', name: 'CKU', is_verified: true, logo: '' } }));
+    mockApi.shareBookToFeed.mockResolvedValue({ id: 81 });
+    const n = nav();
+    const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('pub-org')).toBeTruthy());
+    expect(r.getByText('org.publishedBy:CKU')).toBeTruthy();
+    fireEvent.press(r.getByTestId('pub-org'));
+    expect(n.navigate).toHaveBeenCalledWith('OrganizationPage', { slug: 'cku', name: 'CKU' });
+    await act(async () => { fireEvent.press(r.getByTestId('pub-share')); });
+    await act(async () => { fireEvent.press(r.getByTestId('share-book-post')); });
+    expect(mockApi.shareBookToFeed).toHaveBeenCalledWith(5, { caption: '' });
+  });
+
+  test('start an organisation', async () => {
+    mockApi.createOrganization.mockResolvedValue(org({ my_role: 'owner' }));
+    const n = nav();
+    const r = render(<OrganizationEdit route={{ params: {} }} navigation={n} />);
+    fireEvent.changeText(r.getByTestId('org-name'), 'Central Kenya Union');
+    fireEvent.press(r.getByTestId('org-kind-union'));
+    fireEvent.changeText(r.getByTestId('org-website'), 'cku.org');
+    await act(async () => { fireEvent.press(r.getByTestId('org-save')); });
+    expect(mockApi.createOrganization).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Central Kenya Union', kind: 'union', website: 'cku.org' }));
+    expect(n.replace).toHaveBeenCalledWith('OrganizationPage', { slug: 'cku', name: 'Central Kenya Union' });
+
+    const empty = render(<OrganizationEdit route={{ params: {} }} navigation={nav()} />);
+    await act(async () => { fireEvent.press(empty.getByTestId('org-save')); });
+    expect(mockNotify).toHaveBeenCalledWith('org.nameNeeded', 'org.nameNeededBody');
+  });
+
+  test('an organisation\'s page: who it is, its books, follow; kept for offline', async () => {
+    mockApi.fetchOrganization.mockResolvedValue(org());
+    mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(7, { title: 'Health Message' })] });
+    mockApi.followOrganization.mockResolvedValue({ is_following: true, followers_count: 11 });
+    const n = nav();
+    const r = render(<OrganizationPage route={{ params: { slug: 'cku' } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('book-tile-7')).toBeTruthy());
+    expect(mockApi.fetchPublications).toHaveBeenCalledWith({ organization: 'cku' });
+    expect(r.getByText('org.kind.union · Nairobi')).toBeTruthy();
+    expect(r.queryByTestId('org-edit')).toBeNull();                              // not theirs to run
+    await act(async () => { fireEvent.press(r.getByTestId('org-follow')); });
+    expect(mockApi.followOrganization).toHaveBeenCalledWith('cku', true);
+    expect(r.getByText('11')).toBeTruthy();
+    fireEvent.press(r.getByTestId('book-tile-7'));
+    expect(n.navigate).toHaveBeenCalledWith('PublicationDetail', expect.objectContaining({ id: 7 }));
+
+    // Offline next time: the kept page.
+    mockApi.fetchOrganization.mockRejectedValue(new Error('offline'));
+    const again = render(<OrganizationPage route={{ params: { slug: 'cku' } }} navigation={nav()} />);
+    expect(again.getByText('Books for the field')).toBeTruthy();
+  });
+
+  test('an invitation is answered on the page; those who run it manage it', async () => {
+    mockApi.fetchOrganization.mockResolvedValue(org({ invited_as: 'editor' }));
+    mockApi.fetchPublications.mockResolvedValue({ results: [] });
+    mockApi.respondOrgInvite.mockResolvedValue(org({ my_role: 'editor' }));
+    const n = nav();
+    const r = render(<OrganizationPage route={{ params: { slug: 'cku' } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('org-invite')).toBeTruthy());
+    expect(r.getByText('org.invitedAs:org.role.editor')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('org-accept')); });
+    expect(mockApi.respondOrgInvite).toHaveBeenCalledWith('cku', true);
+    expect(r.queryByTestId('org-invite')).toBeNull();
+    expect(r.getByTestId('org-people')).toBeTruthy();
+    expect(r.queryByTestId('org-edit')).toBeNull();                              // an editor doesn't run it
+
+    mockApi.fetchOrganization.mockResolvedValue(org({ my_role: 'admin' }));
+    const admin = render(<OrganizationPage route={{ params: { slug: 'cku' } }} navigation={n} />);
+    await waitFor(() => expect(admin.getByTestId('org-edit')).toBeTruthy());
+    fireEvent.press(admin.getByTestId('org-edit'));
+    expect(n.navigate).toHaveBeenCalledWith('OrganizationEdit', { slug: 'cku' });
+  });
+
+  test('people: invite as editor; an admin can\'t make admins', async () => {
+    mockApi.fetchOrgMembers.mockResolvedValue({ my_role: 'admin', results: [
+      { id: 1, user: { id: 9, username: 'boss' }, role: 'owner', accepted: true },
+      { id: 2, user: { id: 1, username: 'me' }, role: 'admin', accepted: true },
+    ] });
+    mockApi.inviteOrgMember.mockResolvedValue({ id: 3, user: { id: 4, username: 'ann' }, role: 'editor', accepted: false });
+    const r = render(<OrganizationMembers route={{ params: { slug: 'cku', name: 'CKU' } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('org-member-username')).toBeTruthy());
+    expect(r.queryByTestId('org-member-role-admin')).toBeNull();
+    expect(r.queryByTestId('org-member-remove-1')).toBeNull();                   // the owner stays
+    fireEvent.changeText(r.getByTestId('org-member-username'), 'ann');
+    fireEvent.press(r.getByTestId('org-member-role-editor'));
+    await act(async () => { fireEvent.press(r.getByTestId('org-member-invite')); });
+    expect(mockApi.inviteOrgMember).toHaveBeenCalledWith('cku', 'ann', 'editor');
+    expect(r.getByText('org.role.editor · studio.invited')).toBeTruthy();
+  });
+
+  test('organisations: mine and invitations; find by name or kind', async () => {
+    mockApi.fetchOrganizations.mockImplementation(async (p) => ({ results: p.mine
+      ? [{ slug: 'cku', name: 'Central Kenya Union', kind: 'union', books_count: 1 }]
+      : [{ slug: p.kind === 'school' ? 'uea' : 'any', name: p.kind === 'school' ? 'UEA Baraton' : 'Any', kind: p.kind || 'other' }] }));
+    mockApi.fetchOrgInvitations.mockResolvedValue({ results: [
+      { organization: { slug: 'pub', name: 'Africa Herald', kind: 'publisher' }, role: 'author', invited_by: 'boss' }] });
+    const n = nav();
+    const r = render(<Organizations navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('org-row-cku')).toBeTruthy());
+    expect(r.getByText('org.invitedBy:boss,org.role.author')).toBeTruthy();
+    fireEvent.press(r.getByTestId('org-row-pub'));
+    expect(n.navigate).toHaveBeenCalledWith('OrganizationPage', { slug: 'pub', name: 'Africa Herald' });
+    await act(async () => { fireEvent.press(r.getByTestId('orgs-tab-find')); });
+    await act(async () => { fireEvent.press(r.getByTestId('orgs-kind-school')); });
+    await waitFor(() => expect(r.getByTestId('org-row-uea')).toBeTruthy());
+    expect(mockApi.fetchOrganizations).toHaveBeenLastCalledWith({ kind: 'school' });
+  });
+
+  test('the editor: publish under an organisation you\'re in', async () => {
+    mockApi.fetchOrganizations.mockResolvedValue({ results: [{ slug: 'cku', name: 'CKU' }] });
+    mockApi.fetchPublication.mockResolvedValue({ ...book(), status: 'draft', chapters: [{ id: 51, title: 'One', body: 'Text' }] });
+    mockApi.updatePublication.mockResolvedValue({ id: 5 });
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('editor-org-cku')).toBeTruthy());
+    expect(r.getByTestId('editor-org-me').props.accessibilityState).toEqual({ checked: true });
+    fireEvent.press(r.getByTestId('editor-org-cku'));
+    await act(async () => { fireEvent.press(r.getByTestId('editor-save-draft')); });
+    expect(mockApi.updatePublication).toHaveBeenCalledWith(5, expect.objectContaining({ organization_slug: 'cku' }));
+  });
+
+  test('Discover: publishers', async () => {
+    mockApi.fetchBooksHome.mockResolvedValue({
+      continue: [], picks: [], trending: [], following: [], new: [], rising: [],
+      publishers: [{ slug: 'cku', name: 'CKU', kind: 'union', logo: '', is_verified: true, books_count: 4 }],
+    });
+    const n = nav();
+    const r = render(<BooksHome navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('home-publishers')).toBeTruthy());
+    expect(r.getByText('home.booksN:4')).toBeTruthy();
+    fireEvent.press(r.getByTestId('publisher-cku'));
+    expect(n.navigate).toHaveBeenCalledWith('OrganizationPage', { slug: 'cku', name: 'CKU' });
+    fireEvent.press(r.getByTestId('home-publishers-all'));
+    expect(n.navigate).toHaveBeenLastCalledWith('Organizations');
+  });
+});
+
+// ── Safe areas and screen sizes ─────────────────────────────────────────────
+describe('Safe areas and sizes', () => {
+  const RN = require('react-native');
+  const { useBookGrid, SHELF_MAX } = require('../../components/BookGrid');
+  const flat = (el) => [].concat(el.props.style).flat(Infinity).filter(Boolean).reduce((a, x) => ({ ...a, ...x }), {});
+  afterEach(() => jest.restoreAllMocks());
+
+  test('the reader\'s tools sit below the status bar and clear of a notch', async () => {
+    mockInsets = { top: 30, bottom: 20, left: 44, right: 44 };
+    mockApi.fetchPublicationChapter.mockResolvedValue({ chapter: { id: 51, version: 1, title: 'One', body: 'Words.' } });
+    const r = render(<ChapterReader route={{ params: { id: 5, index: 0, book: { id: 5, title: 'B', theme: {}, chapters: [{ id: 51, title: 'One' }] } } }}
+      navigation={nav()} />);
+    await waitFor(() => expect(r.getByText('Words.')).toBeTruthy());
+    const bar = flat(r.getByTestId('reader-chrome'));
+    expect(bar.top).toBe(32.5);                                   // below the status bar and the progress line
+    expect(bar.paddingLeft).toBeGreaterThanOrEqual(44);
+    expect(flat(r.getByTestId('reader-footer')).paddingBottom).toBeGreaterThanOrEqual(20);
+  });
+
+  test('the list\'s Write button and last rows clear the gesture bar', async () => {
+    mockInsets = { top: 0, bottom: 24, left: 0, right: 0 };
+    mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(1)], next: null });
+    const r = render(<Articles navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('book-tile-1')).toBeTruthy());
+    expect(flat(r.getByTestId('articles-write')).bottom).toBe(24 + 24);   // spacing.lg + the inset
+  });
+
+  test('a narrow phone: the reader bar keeps its buttons, not a squeezed title', async () => {
+    jest.spyOn(RN, 'useWindowDimensions').mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 1 });
+    mockApi.fetchPublicationChapter.mockResolvedValue({ chapter: { id: 51, version: 1, title: 'One', body: 'Words.' } });
+    const r = render(<ChapterReader route={{ params: { id: 5, index: 0, book: { id: 5, title: 'Long Book Title', theme: {}, chapters: [{ id: 51, title: 'One' }] } } }}
+      navigation={nav()} />);
+    await waitFor(() => expect(r.getByText('Words.')).toBeTruthy());
+    expect(within(r.getByTestId('reader-chrome')).queryByText('Long Book Title')).toBeNull();
+  });
+
+  test('covers: 2 or 3 across a phone, and book-sized on a wide screen', () => {
+    const grid = (w, layout) => {
+      jest.spyOn(RN, 'useWindowDimensions').mockReturnValue({ width: w, height: 800, scale: 2, fontScale: 1 });
+      let out;
+      const Probe = () => { out = useBookGrid(layout); return null; };
+      render(<Probe />);
+      jest.restoreAllMocks();
+      return out;
+    };
+    expect(grid(360, 'large').cols).toBe(2);
+    expect(grid(360, 'compact').cols).toBe(3);
+    expect(grid(320, 'compact').cols).toBe(3);
+    const wide = grid(1920, 'large');
+    expect(wide.tileW).toBeLessThan(220);                               // capped at the shelf's width
+    expect(wide.cols * wide.tileW).toBeLessThanOrEqual(SHELF_MAX);
+  });
+});
+
+describe('Publishing as', () => {
+  test('the publish step says whose name it goes out under, and changes it there', async () => {
+    mockApi.fetchOrganizations.mockResolvedValue({ results: [{ slug: 'cku', name: 'CKU' }] });
+    mockApi.createPublication.mockResolvedValue({ id: 78 });
+    const r = render(<PublicationEditor route={{ params: {} }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('editor-org-cku')).toBeTruthy());
+    fireEvent.press(r.getByTestId('editor-org-cku'));                    // chosen in the form…
+    fireEvent.changeText(r.getByTestId('editor-title'), 'Health Message');
+    fireEvent.changeText(r.getByPlaceholderText('pub.chapterBodyPlaceholder'), 'Words');
+    await act(async () => { fireEvent.press(r.getByTestId('editor-publish')); });
+    // …and said again where it matters, on the button itself.
+    expect(r.getByTestId('publish-as-cku').props.accessibilityState).toEqual({ checked: true });
+    expect(within(r.getByTestId('publish-go')).getByText('publish.goAs:CKU')).toBeTruthy();
+    fireEvent.press(r.getByTestId('publish-as-me'));                      // changed their mind, right there
+    expect(within(r.getByTestId('publish-go')).getByText('publish.goAsMe')).toBeTruthy();
+    expect(r.getByTestId('editor-org-me').props.accessibilityState).toEqual({ checked: true });
+    fireEvent.press(r.getByTestId('publish-rights'));
+    await act(async () => { fireEvent.press(r.getByTestId('publish-go')); });
+    expect(mockApi.createPublication).toHaveBeenCalledWith(expect.objectContaining({ organization_slug: '' }));
+  });
+
+  test('no organisations: it still says it\'s you', async () => {
+    const r = render(<PublicationEditor route={{ params: {} }} navigation={nav()} />);
+    fireEvent.changeText(r.getByTestId('editor-title'), 'Mine');
+    fireEvent.changeText(r.getByPlaceholderText('pub.chapterBodyPlaceholder'), 'Words');
+    await act(async () => { fireEvent.press(r.getByTestId('editor-publish')); });
+    expect(within(r.getByTestId('publish-as')).getByText('@me')).toBeTruthy();
+    expect(r.queryByTestId('publish-as-me')).toBeNull();                 // nothing to choose between
+    expect(within(r.getByTestId('publish-go')).getByText('publish.goAsMe')).toBeTruthy();
   });
 });

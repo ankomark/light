@@ -2,9 +2,10 @@
 // ideas"), or start a new one. The names come from the account (kept on the
 // phone for offline) and from the collections used this session.
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { fetchHighlightCollections } from '../services/api';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { colors, spacing, radius, typography } from '../constants/theme';
@@ -15,6 +16,7 @@ export const cleanName = (s) => String(s || '').split(/\s+/).filter(Boolean).joi
 
 const HighlightCollectionSheet = ({ visible, onClose, current = '', onPick }) => {
   const { t } = useI18n();
+  const kbHeight = useKeyboardHeight();       // the sheet rises with the keyboard
   const { currentUser } = useAuth();
   const key = userKey(currentUser?.id, 'hl:collections');
   const [names, setNames] = useState(() => peekCache(key) || []);
@@ -46,6 +48,7 @@ const HighlightCollectionSheet = ({ visible, onClose, current = '', onPick }) =>
   const all = current && !names.includes(current) ? [current, ...names] : names;
   return (
     <BottomSheet
+      keyboardHeight={kbHeight}
       visible={visible}
       onClose={onClose}
       heightRatio={0.55}
@@ -56,7 +59,7 @@ const HighlightCollectionSheet = ({ visible, onClose, current = '', onPick }) =>
         </View>
       )}
     >
-      <View style={styles.body} testID="collection-sheet">
+      <ScrollView contentContainerStyle={styles.body} testID="collection-sheet" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.newRow}>
           <TextInput style={styles.input} value={draft} onChangeText={setDraft} maxLength={60}
             placeholder={t('collections.new')} placeholderTextColor={colors.placeholder} testID="collection-new"
@@ -82,7 +85,7 @@ const HighlightCollectionSheet = ({ visible, onClose, current = '', onPick }) =>
             <Text style={styles.noneText}>{t('collections.remove')}</Text>
           </TouchableOpacity>
         ) : null}
-      </View>
+      </ScrollView>
     </BottomSheet>
   );
 };

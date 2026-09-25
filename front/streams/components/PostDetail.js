@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
+import BookPostMedia from './BookPostMedia';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -251,7 +252,12 @@ const PostDetail = ({ route, navigation }) => {
           />
         </View>
 
-        {/* Media */}
+        {/* Media — a book post is the book's card, not a picture. */}
+        {post.content_type === 'book' ? (
+          <View style={[styles.bookFrame, { width: mediaFrameW }]}>
+            <BookPostMedia item={post} width={mediaFrameW} />
+          </View>
+        ) : (
         <View style={[styles.mediaFrame, { aspectRatio, width: mediaFrameW }]}>
           {mediaError ? (
             <View style={styles.errorMediaContainer}>
@@ -281,6 +287,7 @@ const PostDetail = ({ route, navigation }) => {
             />
           )}
         </View>
+        )}
 
         {/* Stats */}
         <View style={styles.statsRow}>
@@ -430,6 +437,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
+  bookFrame: { alignSelf: 'center', borderRadius: radius.md, overflow: 'hidden' },
   mediaFrame: {
     // Cap + center on wide screens (tablets) so the media doesn't stretch huge.
     // width applied inline via useWindowDimensions() so it reflows on resize.

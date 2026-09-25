@@ -111,7 +111,8 @@ def feed_post_queryset(user):
         .filter(is_removed=False)  # hide moderator takedowns from all public surfaces
         # Each post's own "who can see this" (everyone / followers / only me).
         .filter(visible_posts_q(user))
-        .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile')
+        .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile',
+                        'publication', 'publication__author', 'publication__organization', 'book_chapter')
         .annotate(author_followers_count=Subquery(author_followers, output_field=IntegerField()))
     )
     if getattr(user, 'is_authenticated', False):
@@ -1374,11 +1375,11 @@ class PublicationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = self._visible().select_related('author', 'author__profile')
+        qs = self._visible().select_related('author', 'author__profile', 'organization')
         # Engagement actions only need the row; the list and the page need counts.
         if self.action in ('like', 'bookmark', 'progress', 'chapter', 'reading', 'revisions', 'revision',
                            'reviews', 'discussion', 'delete_comment', 'collaborators', 'collaborator', 'export',
-                           'analytics', 'clubs', 'ai', 'ai_write', 'ai_check'):
+                           'analytics', 'clubs', 'ai', 'ai_write', 'ai_check', 'share_to_feed'):
             return qs
         qs = self._counted(qs, user)
         if self.action == 'retrieve':
@@ -1426,6 +1427,11 @@ class PublicationViewSet(viewsets.ModelViewSet):
         if author_id:
             qs = qs.filter(author_id=author_id)
 
+        # An organisation's page: the books under its name.
+        org = self.request.query_params.get('organization')
+        if org:
+            qs = qs.filter(organization__slug=org, status='published')
+
         category = self.request.query_params.get('category')
         if category and category != 'all':
             qs = qs.filter(category=category)
@@ -1468,6 +1474,14 @@ class PublicationViewSet(viewsets.ModelViewSet):
             if books:
                 out['because'] = {'quote': because['quote'], 'publication': because['publication'],
                                   'title': because['title'], 'books': books}
+        # Publishers: verified organisations with books out, the busiest first.
+        from ..models import Organization
+        from ..organizations import mini
+        pubs = (Organization.objects.filter(is_verified=True)
+                .annotate(n=Count('publications', filter=Q(publications__status='published',
+                                                           publications__is_removed=False)))
+                .filter(n__gt=0).order_by('-n', 'name')[:12])
+        out['publishers'] = [{**mini(o), 'books_count': o.n} for o in pubs]
         people = User.objects.select_related('profile').in_bulk([r['user_id'] for r in sections['rising']])
         out['rising'] = []
         for r in sections['rising']:
@@ -2049,6 +2063,38 @@ class PublicationViewSet(viewsets.ModelViewSet):
                 return self._ai_error(e)
             return Response(book_ai.check_json(check), status=status.HTTP_202_ACCEPTED)
         return Response(book_ai.check_json(pub.checks.first()))
+    # ── A book (or a passage from it) as a post in the social feed ──
+
+    @action(detail=True, methods=['post'], url_path='share-to-feed',
+            permission_classes=[permissions.IsAuthenticated, IsNotSuspended])
+    def share_to_feed(self, request, pk=None):
+        """{caption?, quote?, chapter_id?, block?, visibility?} → the post, drawn
+        in the feed as the book's card (with the passage, when one is given)."""
+        pub = self.get_object()
+        if pub.status != 'published' or pub.is_removed:
+            return Response({'error': 'Only a published book can be shared.'}, status=status.HTTP_400_BAD_REQUEST)
+        quote = str(request.data.get('quote') or '').strip()[:2000]
+        chapter, block = None, None
+        if quote and request.data.get('chapter_id'):
+            chapter = reader_chapters(pub, request.user).filter(pk=request.data.get('chapter_id')).first()
+            try:
+                block = max(0, int(request.data.get('block'))) if chapter else None
+            except (TypeError, ValueError):
+                block = None
+        visibility = request.data.get('visibility') or SocialPost.VISIBILITY_PUBLIC
+        if visibility not in dict(SocialPost.VISIBILITY_CHOICES):
+            visibility = SocialPost.VISIBILITY_PUBLIC
+        post = SocialPost.objects.create(
+            user=request.user, content_type='book', publication=pub,
+            media_file=pub.cover or '', thumbnail=pub.cover or '', width=600, height=900,
+            caption=str(request.data.get('caption') or '').strip()[:2200],
+            book_quote=quote, book_chapter=chapter, book_block=block, visibility=visibility,
+        )
+        sync_post_links(post)
+        _bump_feed_version(request.user.id)
+        row = feed_post_queryset(request.user).get(pk=post.pk)
+        return Response(SocialPostSerializer(row, context=self.get_serializer_context()).data,
+                        status=status.HTTP_201_CREATED)
     @action(detail=False, methods=['post'], url_path='cover-render', permission_classes=[permissions.IsAuthenticated])
     def cover_render(self, request):
         """Draw a cover from a template: {template, title, subtitle?, author?,

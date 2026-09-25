@@ -6,10 +6,22 @@ from .models import (
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
     Report, AdminActionLog, Appeal, Role, LiveBroadcast, CoHostRequest, Publication,
+    Organization,
 )
 
 admin.site.register(LiveBroadcast)
 admin.site.register(CoHostRequest)
+
+
+@admin.register(Organization)
+class OrganizationAdmin(admin.ModelAdmin):
+    """Organisation accounts. The verified tick is set here once it's
+    confirmed who runs the organisation."""
+    list_display = ('id', 'name', 'kind', 'location', 'is_verified', 'created_by', 'created_at')
+    list_filter = ('kind', 'is_verified')
+    list_editable = ('is_verified',)
+    search_fields = ('name', 'slug', 'location')
+    raw_id_fields = ('created_by', 'followers')
 
 
 @admin.register(Publication)

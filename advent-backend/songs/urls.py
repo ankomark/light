@@ -1,6 +1,7 @@
-﻿from rest_framework.routers import DefaultRouter
+from rest_framework.routers import DefaultRouter
 from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
+from .views.organizations import OrganizationViewSet
 from .views import (
     UserViewSet,
     AppealViewSet,
@@ -106,6 +107,7 @@ router.register(r'admin-notes', AdminNoteViewSet, basename='admin-notes')
 router.register(r'media-stations', MediaStationViewSet, basename='media-stations')
 router.register(r'publications', PublicationViewSet, basename='publications')
 router.register(r'book-highlights', BookHighlightViewSet, basename='book-highlights')
+router.register(r'organizations', OrganizationViewSet, basename='organizations')
 router.register(r'video-studios', VideoStudioViewSet, basename='video-studios')
 # Groups and communities are separate features on one shared engine, so they
 # get separate list endpoints. Detail and action routes on either path resolve

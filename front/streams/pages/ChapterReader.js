@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Modal, Pressable, AppState, Share,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Modal, Pressable, AppState, Share, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { setStatusBarStyle } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,6 +18,7 @@ import BookPassageActions from '../components/BookPassageActions';
 import BibleNoteSheet from '../components/BibleNoteSheet';
 import AiAnswerSheet from '../components/AiAnswerSheet';
 import HighlightCollectionSheet from '../components/HighlightCollectionSheet';
+import ShareBookSheet from '../components/ShareBookSheet';
 import { useAiEnabled } from '../services/bookAi';
 import { HIGHLIGHT_WASH } from '../components/BibleVerseActions';
 import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
@@ -38,6 +40,7 @@ const SAVE_SCROLL_MS = 400;
 const SAVE_PROGRESS_MS = 1500;
 const WORDS_PER_MIN = 200;
 const TOP_BAR_H = 54;
+const PROGRESS_H = 2.5;
 // Reading time: counted in ticks, noted every half minute, and not counted
 // once the reader has neither scrolled nor tapped for a few minutes.
 export const TICK_MS = 5000;
@@ -118,6 +121,8 @@ const ChapterReader = ({ route, navigation }) => {
   const { currentUser, isAuthenticated } = useAuth();
   const aiOn = useAiEnabled();
   const insets = useSafeAreaInsets();
+  // A narrow phone: the bar is all buttons (the chapter's title is on the page).
+  const narrowBar = useWindowDimensions().width < 380;
   const uid = currentUser?.id;
   const params = route.params || {};
   const pubId = params.id ?? params.publication?.id;
@@ -150,6 +155,7 @@ const ChapterReader = ({ route, navigation }) => {
   const [selected, setSelected] = useState(null);   // a long-pressed paragraph
   const [noteOpen, setNoteOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
+  const [shareFor, setShareFor] = useState(null);           // a passage going to the feed
   const [aiAsk, setAiAsk] = useState(null);                 // { key, title, quote, ask } — the AI sheet
 
   const scrollRef = useRef(null);
@@ -243,6 +249,12 @@ const ChapterReader = ({ route, navigation }) => {
   const wt = resolveWritingTheme(book?.theme);
   const look = resolveReadingLook(settings, { bg: wt.bg, text: wt.text, fontFamily: fontFamilyFor(wt.font), scale: wt.scale });
   const light = isLightBg(look.bg);
+  // The status bar reads on the page's colour (dark icons on Day / Sepia);
+  // the app's light icons come back on leaving.
+  useEffect(() => {
+    setStatusBarStyle(light ? 'dark' : 'light');
+    return () => setStatusBarStyle('light');
+  }, [light]);
   const chrome = light ? '#1A1A1A' : colors.textPrimary;       // top-bar icons/title
   const subtleBorder = look.subtle || (light ? 'rgba(0,0,0,0.12)' : colors.border);
 
@@ -546,6 +558,12 @@ const ChapterReader = ({ route, navigation }) => {
     setSelected(null);
   };
   const onShare = () => {
+    // A published book: to the feed as its card (or elsewhere from there).
+    if (isAuthenticated && !previewing && book?.status !== 'draft' && view.chapter?.status !== 'draft' && view.chapter?.id) {
+      setShareFor({ quote: selectedQuote, chapterId: view.chapter.id, chapterTitle: view.chapter.title || '', block: selected });
+      setSelected(null);
+      return;
+    }
     const where = [book?.title, view.chapter?.title].filter(Boolean).join(' · ');
     Share.share({ message: `“${selectedQuote}”\n— ${where}` }).catch(() => {});
     setSelected(null);
@@ -585,15 +603,21 @@ const ChapterReader = ({ route, navigation }) => {
   const bookPct = chapters.length ? Math.round(bookFraction(chapters, index, progress) * 100) : 0;
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: look.bg }]} edges={['top']}>
+    // Insets by hand: the tools float over the page (absolute), and absolute
+    // children don't get a SafeAreaView's padding — they'd sit under the
+    // status bar and the notch. The status bar reads on the page's colour.
+    <SafeAreaView style={[styles.container, { backgroundColor: look.bg }]} edges={[]}>
       {/* Reading progress bar: always there, thin. */}
-      <View style={[styles.progressTrack, { backgroundColor: subtleBorder }]}>
+      <View style={[styles.progressTrack, { backgroundColor: subtleBorder, marginTop: insets.top }]}>
         <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
       </View>
 
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={[styles.content, { paddingHorizontal: look.margin, paddingTop: TOP_BAR_H + spacing.sm }]}
+        contentContainerStyle={[styles.content, {
+          paddingLeft: look.margin + (insets.left || 0), paddingRight: look.margin + (insets.right || 0),
+          paddingTop: TOP_BAR_H + spacing.sm,
+        }]}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={64}
         onScroll={onScroll}
@@ -694,12 +718,17 @@ const ChapterReader = ({ route, navigation }) => {
       {/* The tools: over the page, gone while reading, back with a tap. */}
       {chromeOn ? (
         <>
-          <View style={[styles.topBar, { backgroundColor: look.bg, borderBottomColor: subtleBorder }]} testID="reader-chrome">
+          <View style={[styles.topBar, {
+            top: insets.top + PROGRESS_H, backgroundColor: look.bg, borderBottomColor: subtleBorder,
+            paddingLeft: spacing.md + (insets.left || 0), paddingRight: spacing.md + (insets.right || 0),
+          }]} testID="reader-chrome">
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
               accessibilityRole="button" accessibilityLabel={t('common.back')}>
               <Ionicons name="arrow-back" size={22} color={chrome} />
             </TouchableOpacity>
-            <Text style={[styles.topTitle, { color: chrome }]} numberOfLines={1}>{book?.title}</Text>
+            {narrowBar ? <View style={styles.flex} /> : (
+              <Text style={[styles.topTitle, { color: chrome }]} numberOfLines={1}>{book?.title}</Text>
+            )}
             {SPEECH_OK && (
               <TouchableOpacity onPress={toggleListen} style={styles.iconBtn} hitSlop={8} disabled={view.status !== 'ready'}
                 accessibilityRole="button" accessibilityLabel={t(speakingBlock != null ? 'reader.stopListening' : 'reader.listen')}
@@ -778,6 +807,15 @@ const ChapterReader = ({ route, navigation }) => {
           onClose={() => setCollectOpen(false)}
         />
       ) : null}
+      <ShareBookSheet
+        visible={!!shareFor}
+        onClose={() => setShareFor(null)}
+        book={{ id: pubId, title: book?.title }}
+        quote={shareFor?.quote}
+        chapterId={shareFor?.chapterId}
+        chapterTitle={shareFor?.chapterTitle}
+        block={shareFor?.block}
+      />
       <AiAnswerSheet
         visible={!!aiAsk}
         onClose={() => setAiAsk(null)}
@@ -829,6 +867,7 @@ const ChapterReader = ({ route, navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   topBar: {
     position: 'absolute', top: 0, left: 0, right: 0, height: TOP_BAR_H,
     flexDirection: 'row', alignItems: 'center',
@@ -839,7 +878,7 @@ const styles = StyleSheet.create({
   iconBtn: { width: 36, height: 40, alignItems: 'center', justifyContent: 'center' },
   aa: { fontSize: 17, fontWeight: '700' },
 
-  progressTrack: { height: 2.5, width: '100%' },
+  progressTrack: { height: PROGRESS_H, width: '100%' },
   progressFill: { height: '100%', backgroundColor: colors.accent },
   staleBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 5, opacity: 0.8 },
   staleText: { ...typography.caption },

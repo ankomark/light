@@ -57,6 +57,10 @@ import BookCollaborators from './pages/BookCollaborators';
 import AuthorStudio, { BookInsights } from './pages/AuthorStudio';
 import BookClub from './pages/BookClub';
 import WriterAssistant from './pages/WriterAssistant';
+import Organizations from './pages/Organizations';
+import OrganizationPage from './pages/OrganizationPage';
+import OrganizationEdit from './pages/OrganizationEdit';
+import OrganizationMembers from './pages/OrganizationMembers';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -245,6 +249,9 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.type === 'org_invite' && data.organization) {
+        // An invitation to an organisation: answered on its page.
+        navigate('OrganizationPage', { slug: data.organization });
       } else if (data?.publication_id) {
         // Books: a discussion opens at its chapter; a new book, chapter or
         // review opens the book's page.
@@ -339,6 +346,10 @@ const App = () => {
                 <Stack.Screen name="BookInsights" component={BookInsights} />
                 <Stack.Screen name="BookClub" component={BookClub} />
                 <Stack.Screen name="WriterAssistant" component={WriterAssistant} />
+                <Stack.Screen name="Organizations" component={Organizations} />
+                <Stack.Screen name="OrganizationPage" component={OrganizationPage} />
+                <Stack.Screen name="OrganizationEdit" component={OrganizationEdit} />
+                <Stack.Screen name="OrganizationMembers" component={OrganizationMembers} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />

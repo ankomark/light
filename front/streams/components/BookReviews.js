@@ -2,9 +2,10 @@
 // own review (to write once they've read some of the book, or change), and
 // others' reviews, more on request.
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { fetchBookReviews, saveBookReview, deleteMyBookReview } from '../services/api';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { notePublicationsChanged } from '../services/publicationStore';
@@ -36,6 +37,7 @@ const Review = ({ r, t }) => (
 
 const BookReviews = ({ pubId, navigation, onChanged }) => {
   const { t } = useI18n();
+  const kbHeight = useKeyboardHeight();       // the sheet rises with the keyboard
   const [data, setData] = useState(null);
   const [more, setMore] = useState([]);
   const [page, setPage] = useState(1);
@@ -155,6 +157,8 @@ const BookReviews = ({ pubId, navigation, onChanged }) => {
       ) : null}
 
       <BottomSheet
+
+        keyboardHeight={kbHeight}
         visible={sheet}
         onClose={() => setSheet(false)}
         heightRatio={0.55}
@@ -169,7 +173,7 @@ const BookReviews = ({ pubId, navigation, onChanged }) => {
           </View>
         )}
       >
-        <View style={styles.sheetBody}>
+        <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <StarRow value={draft.rating} size={34} onPick={(n) => setDraft((d) => ({ ...d, rating: n }))} testPrefix="reviews-star" />
           <TextInput
             style={styles.input}
@@ -185,7 +189,7 @@ const BookReviews = ({ pubId, navigation, onChanged }) => {
           {data.mine ? (
             <TouchableOpacity onPress={remove} style={styles.removeBtn}><Text style={styles.removeText}>{t('reviews.remove')}</Text></TouchableOpacity>
           ) : null}
-        </View>
+        </ScrollView>
       </BottomSheet>
     </View>
   );

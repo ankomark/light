@@ -15,6 +15,9 @@ import { PublicationListSkeleton } from '../components/SkeletonLoader';
 import BookLibrary from '../components/BookLibrary';
 import BooksHome, { Stars } from '../components/BooksHome';
 import BookInvitations from '../components/BookInvitations';
+import { BookGridTile, BookGridSkeleton, useBookGrid, LAYOUTS, GRID_GAP, SHELF_MAX } from '../components/BookGrid';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
@@ -25,6 +28,9 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 // Highlights) and their reading numbers — components/BookLibrary.
 const TABS = ['discover', 'library', 'mine'];
 const REFRESH_AFTER_MS = 60000;
+const LAYOUT_KEY = 'pubs:layout';
+const LAYOUT_ICON = { large: 'grid-outline', compact: 'apps-outline', list: 'list-outline' };
+let keptLayout = null;              // this session's choice, before storage answers
 
 // One cached list per view (a search isn't kept: it's typed, not returned to).
 const listKey = (uid, tab, category) => userKey(uid, `pubs:${tab}${tab === 'discover' ? `:${category}` : ''}`);
@@ -102,7 +108,21 @@ const Articles = ({ navigation }) => {
   const [failed, setFailed] = useState(false);        // nothing to show, and it didn't load
   const [offline, setOffline] = useState(false);      // showing kept rows; the refresh failed
 
-  const { cols } = useGridColumns({ target: 380, min: 1, max: 2, horizontalPadding: spacing.md * 2, gap: spacing.sm });
+  // Covers in a grid (2 large or 3 compact on a phone) or the list of cards.
+  const [layout, setLayout] = useState(() => keptLayout || 'large');
+  useEffect(() => {
+    if (keptLayout) return;
+    AsyncStorage.getItem(LAYOUT_KEY).then((v) => { if (LAYOUTS.includes(v)) { keptLayout = v; setLayout(v); } }).catch(() => {});
+  }, []);
+  const chooseLayout = (l) => { keptLayout = l; setLayout(l); AsyncStorage.setItem(LAYOUT_KEY, l).catch(() => {}); };
+  const listCols = useGridColumns({ target: 380, min: 1, max: 2, horizontalPadding: spacing.md * 2, gap: spacing.sm }).cols;
+  // Under the header (it has the top); the sides (landscape) and the bottom
+  // (the gesture bar, edge-to-edge) are ours.
+  const insets = useSafeAreaInsets();
+  const side = { left: insets.left || 0, right: insets.right || 0, bottom: insets.bottom || 0 };
+  const grid = useBookGrid(layout, { insets: side.left + side.right });
+  const isGrid = layout !== 'list';
+  const cols = isGrid ? grid.cols : listCols;
 
   const request = useRef(0);                          // only the latest load may land
   const itemsRef = useRef(items);
@@ -211,9 +231,10 @@ const Articles = ({ navigation }) => {
   const open = useCallback((item) => navigation.navigate('PublicationDetail', { id: item.id, preview: item }), [navigation]);
   const write = () => (isAuthenticated ? navigation.navigate('PublicationEditor', {}) : navigation.navigate('Login'));
 
-  const renderItem = useCallback(({ item }) => (
-    <PublicationCard item={item} onOpen={open} t={t} style={cols > 1 ? styles.cardInGrid : null} />
-  ), [open, t, cols]);
+  const renderItem = useCallback(({ item }) => (isGrid
+    ? <BookGridTile item={item} onOpen={open} t={t} width={grid.tileW} compact={layout === 'compact'} />
+    : <PublicationCard item={item} onOpen={open} t={t} style={cols > 1 ? styles.cardInGrid : null} />
+  ), [open, t, cols, isGrid, grid.tileW, layout]);
 
   // Discover, unfiltered: the shelves (picks, trending, …) over every book.
   const showHome = tab === 'discover' && category === 'all' && !searching;
@@ -258,10 +279,24 @@ const Articles = ({ navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{t('articles.title')}</Text>
-        <Text style={styles.headerSub}>{t('articles.subtitle')}</Text>
+    <View style={[styles.container, { paddingLeft: side.left, paddingRight: side.right }]}>
+      <View style={styles.controls}>
+      <View style={[styles.header, styles.headerRow]}>
+        <View style={styles.flex}>
+          <Text style={styles.headerTitle}>{t('articles.title')}</Text>
+          <Text style={styles.headerSub}>{t('articles.subtitle')}</Text>
+        </View>
+        {tab !== 'library' ? (
+          <View style={styles.layouts} accessibilityRole="radiogroup" accessibilityLabel={t('articles.layout')}>
+            {LAYOUTS.map((l) => (
+              <TouchableOpacity key={l} style={[styles.layoutBtn, layout === l && styles.layoutBtnOn]} onPress={() => chooseLayout(l)}
+                accessibilityRole="radio" accessibilityState={{ checked: layout === l }}
+                accessibilityLabel={t(`articles.layout.${l}`)} testID={`articles-layout-${l}`} hitSlop={4}>
+                <Ionicons name={LAYOUT_ICON[l]} size={17} color={layout === l ? colors.textPrimary : colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       {/* Segmented tabs */}
@@ -335,21 +370,24 @@ const Articles = ({ navigation }) => {
           <Text style={styles.offlineText}>{t('articles.offline')}</Text>
         </View>
       ) : null}
+      </View>
 
       {tab === 'library' ? (
         <BookLibrary navigation={navigation} />
       ) : loading ? (
         // Nothing kept yet: cards about to fill in, not a spinner.
-        <View style={styles.listContent}><PublicationListSkeleton count={5} /></View>
+        <View style={styles.listContent}>
+          {isGrid ? <BookGridSkeleton cols={grid.cols} width={grid.tileW} /> : <PublicationListSkeleton count={5} />}
+        </View>
       ) : (
         <FlatList
-          key={`cols-${cols}`}
+          key={`cols-${layout}-${cols}`}
           data={listData}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
           numColumns={cols}
-          columnWrapperStyle={cols > 1 ? styles.gridRow : undefined}
-          contentContainerStyle={styles.listContent}
+          columnWrapperStyle={cols > 1 ? (isGrid ? styles.coverRow : styles.gridRow) : undefined}
+          contentContainerStyle={[styles.listContent, { paddingBottom: 96 + side.bottom }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           refreshing={refreshing}
@@ -372,6 +410,12 @@ const Articles = ({ navigation }) => {
                   <Text style={styles.studioLinkText}>{t('studioStats.title')}</Text>
                   <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
                 </TouchableOpacity>
+                <TouchableOpacity style={styles.studioLink} onPress={() => navigation.navigate('Organizations')}
+                  accessibilityRole="button" testID="articles-orgs">
+                  <Ionicons name="business" size={18} color={colors.accent} />
+                  <Text style={styles.studioLinkText}>{t('org.title')}</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
                 <BookInvitations onAccepted={() => load({ refresh: true })} />
               </View>
             ) : null}
@@ -380,7 +424,7 @@ const Articles = ({ navigation }) => {
       )}
 
       <TouchableOpacity
-        style={styles.fab}
+        style={[styles.fab, { bottom: spacing.lg + side.bottom, right: spacing.md + side.right }]}
         onPress={write}
         activeOpacity={0.9}
         accessibilityRole="button"
@@ -437,8 +481,18 @@ const styles = StyleSheet.create({
   },
   offlineText: { ...typography.caption, color: colors.textSecondary },
 
-  listContent: { padding: spacing.md, paddingBottom: 96 },
+  listContent: { padding: spacing.md, paddingBottom: 96, width: '100%', maxWidth: SHELF_MAX, alignSelf: 'center' },
+  controls: { width: '100%', maxWidth: SHELF_MAX, alignSelf: 'center' },
   gridRow: { gap: spacing.sm },
+  coverRow: { gap: GRID_GAP },
+  flex: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  layouts: {
+    flexDirection: 'row', padding: 3, gap: 2, marginTop: spacing.xs, borderRadius: radius.md,
+    backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+  },
+  layoutBtn: { width: 32, height: 30, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  layoutBtnOn: { backgroundColor: colors.surface },
   studioLink: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, marginBottom: spacing.md,
     borderRadius: radius.lg, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,

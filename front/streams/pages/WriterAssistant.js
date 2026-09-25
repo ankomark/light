@@ -148,7 +148,7 @@ const WriterAssistant = ({ route, navigation }) => {
   const { id, title } = route.params || {};
   const lang = resolvedLanguage === 'sw' ? 'sw' : 'en';
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
           accessibilityRole="button" accessibilityLabel={t('common.back')}>
