@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Image, Modal,
+  View, Text, TouchableOpacity, StyleSheet, Image,
   ScrollView, Pressable, Platform, StatusBar, AppState,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -164,42 +164,81 @@ const Glyph = ({ set, name, art, color, size }) => {
     : <Ionicons name={name} size={size} color={color} />;
 };
 
+// The menu is a screen of its own ('Menu'), as each step of the Bible is: a
+// page opened from it sits on top of it, so back — the swipe, the phone's
+// button, a page's own arrow — returns to the menu, and back again to the
+// page it was opened over. (It used to be a pop-up, so back skipped it.)
+export const MENU_ROUTE = 'Menu';
+
+/** Open the menu. From a page the menu led to, it goes back to that menu
+ *  rather than stacking another one on top. */
+export const openMenu = (navigation) => {
+  const routes = navigation.getState?.()?.routes || [];
+  if (routes.some((r) => r.name === MENU_ROUTE)) navigation.popTo(MENU_ROUTE);
+  else navigation.push(MENU_ROUTE);
+};
+
+// An item is the page under the menu when its route matches and so do the
+// params it names (the three legal pages share one route).
+const isPage = (route, item) => !!route && route.name === item.route
+  && Object.entries(item.params || {}).every(([k, v]) => route.params?.[k] === v);
+
+// Unread messages, for the badges. `poll`: keep it fresh (the header's
+// button); otherwise it's read once (the menu, open for a moment).
+const useUnreadMessages = ({ poll }) => {
+  const { isAuthenticated } = useAuth();
+  const [unread, setUnread] = useState(0);
+  const refresh = useCallback(() => {
+    if (!isAuthenticated) { setUnread(0); return; }
+    fetchUnreadMessageCount()
+      .then((r) => setUnread(r?.unread_count || 0))
+      .catch(() => {});
+  }, [isAuthenticated]);
+  useEffect(() => {
+    refresh();
+    if (!poll) return undefined;
+    const interval = setInterval(refresh, 30000);
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refresh(); });
+    return () => { clearInterval(interval); sub.remove(); };
+  }, [refresh, poll]);
+  return unread;
+};
+
+/** The header's menu button (with a dot for unread messages). */
 function HamburgerMenu() {
+  const navigation = useNavigation();
+  const unreadMessages = useUnreadMessages({ poll: true });
+  return (
+    <TouchableOpacity onPress={() => openMenu(navigation)} style={styles.menuButton} accessibilityRole="button" accessibilityLabel="Open menu">
+      <Ionicons name="menu" size={26} color={colors.white} />
+      {unreadMessages > 0 && <View style={styles.menuDot} />}
+    </TouchableOpacity>
+  );
+}
+
+/** The menu itself: the 'Menu' screen. */
+export function MenuScreen() {
   const navigation = useNavigation();
   const { isAuthenticated, currentUser, logout } = useAuth();
   const { t } = useI18n();
-  const [menuVisible, setMenuVisible] = useState(false);
-  const [unreadMessages, setUnreadMessages] = useState(0);
+  const unreadMessages = useUnreadMessages({ poll: false });
 
-  const activeRoute = useNavigationState((s) => s?.routes?.[s.index]?.name);
+  // The page the menu was opened over: marked as where you are.
+  const below = useNavigationState((s) => s?.routes?.[s.index - 1]);
 
-  const refreshUnread = useCallback(() => {
-    if (!isAuthenticated) { setUnreadMessages(0); return; }
-    fetchUnreadMessageCount()
-      .then((r) => setUnreadMessages(r?.unread_count || 0))
-      .catch(() => {});
-  }, [isAuthenticated]);
+  const close = () => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('Home');
+  };
 
-  // Poll the unread message count so the menu icon shows a badge, and refresh
-  // whenever the app returns to the foreground or the menu is opened.
-  useEffect(() => {
-    refreshUnread();
-    const interval = setInterval(refreshUnread, 30000);
-    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refreshUnread(); });
-    return () => { clearInterval(interval); sub.remove(); };
-  }, [refreshUnread]);
-
-  useEffect(() => { if (menuVisible) refreshUnread(); }, [menuVisible, refreshUnread]);
-
-  const close = () => setMenuVisible(false);
-
+  // A page opens on top of the menu, so back comes here. The page the menu
+  // was opened over just closes the menu — not a second copy of it.
   const go = (route, params) => {
-    setMenuVisible(false);
-    navigation.navigate(route, params);
+    if (isPage(below, { route, params })) close();
+    else navigation.push(route, params);
   };
 
   const handleLogout = async () => {
-    setMenuVisible(false);
     try {
       await logout();
     } finally {
@@ -208,141 +247,132 @@ function HamburgerMenu() {
   };
 
   return (
-    <View>
-      <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton} accessibilityRole="button" accessibilityLabel="Open menu">
-        <Ionicons name="menu" size={26} color={colors.white} />
-        {unreadMessages > 0 && <View style={styles.menuDot} />}
-      </TouchableOpacity>
+    <View style={[styles.container, { paddingTop: TOP_PAD }]}>
+      {/* Shared luxury backdrop — rotating wallpaper + navy edge vignette. */}
+      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.62)" />
+      <ScreenVignette tintRgb="6,16,34" zIndex={1} />
 
-      <Modal visible={menuVisible} animationType="slide" onRequestClose={close} statusBarTranslucent>
-        <View style={[styles.container, { paddingTop: TOP_PAD }]}>
-          {/* Shared luxury backdrop — rotating wallpaper + navy edge vignette. */}
-          <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.62)" />
-          <ScreenVignette tintRgb="6,16,34" zIndex={1} />
-
-          <View style={styles.menuContent}>
-          {/* Header: profile (or welcome) + close */}
-          <View style={styles.header}>
-            {isAuthenticated ? (
-              <TouchableOpacity
-                style={styles.profile}
-                activeOpacity={0.8}
-                onPress={() => go('Profile')}
-              >
-                <Image
-                  source={currentUser?.profile_picture ? { uri: currentUser.profile_picture } : DEFAULT_AVATAR}
-                  defaultSource={DEFAULT_AVATAR}
-                  style={styles.avatar}
-                />
-                <View style={styles.profileText}>
-                  <Text style={styles.username} numberOfLines={1}>
-                    {currentUser?.username || t('menu.yourProfile')}
-                  </Text>
-                  <Text style={styles.profileHint}>{t('menu.viewProfile')}</Text>
-                </View>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.profile}>
-                <View style={styles.brandBadge}>
-                  <Ionicons name="sparkles" size={20} color={colors.accent} />
-                </View>
-                <View style={styles.profileText}>
-                  <Text style={styles.username}>{t('menu.welcome')}</Text>
-                  <Text style={styles.profileHint}>{t('menu.signInPrompt')}</Text>
-                </View>
-              </View>
-            )}
-
-            <TouchableOpacity onPress={close} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close menu">
-              <Ionicons name="close" size={24} color={colors.textSecondary} />
-            </TouchableOpacity>
+      <View style={styles.menuContent}>
+      {/* Header: profile (or welcome) + close */}
+      <View style={styles.header}>
+        {isAuthenticated ? (
+          <TouchableOpacity
+            style={styles.profile}
+            activeOpacity={0.8}
+            onPress={() => go('Profile')}
+          >
+            <Image
+              source={currentUser?.profile_picture ? { uri: currentUser.profile_picture } : DEFAULT_AVATAR}
+              defaultSource={DEFAULT_AVATAR}
+              style={styles.avatar}
+            />
+            <View style={styles.profileText}>
+              <Text style={styles.username} numberOfLines={1}>
+                {currentUser?.username || t('menu.yourProfile')}
+              </Text>
+              <Text style={styles.profileHint}>{t('menu.viewProfile')}</Text>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.profile}>
+            <View style={styles.brandBadge}>
+              <Ionicons name="sparkles" size={20} color={colors.accent} />
+            </View>
+            <View style={styles.profileText}>
+              <Text style={styles.username}>{t('menu.welcome')}</Text>
+              <Text style={styles.profileHint}>{t('menu.signInPrompt')}</Text>
+            </View>
           </View>
+        )}
 
-          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-            {(() => {
-              // Show only the admin items the user's capabilities allow.
-              const adminItems = isAdmin(currentUser)
-                ? ADMIN_ITEMS.filter((it) => {
-                    if (it.superOnly) return isSuperAdmin(currentUser);
-                    if (it.cap) return hasCapability(currentUser, it.cap);
-                    if (it.anyCap) return it.anyCap.some((c) => hasCapability(currentUser, c));
-                    return true; // dashboard — any admin
-                  })
-                : [];
-              return [
-                ...SECTIONS,
-                ...(currentUser?.is_suspended ? [APPEAL_SECTION] : []),
-                ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
-              ];
-            })().map((section) => (
-              <View key={section.title} style={styles.section}>
-                <Text style={styles.sectionTitle}>{section.title.toUpperCase()}</Text>
-                <View style={styles.group}>
-                  {section.items.map((item, i) => {
-                    const active = activeRoute === item.route;
-                    return (
-                      <Pressable
-                        key={item.label}
-                        onPress={() => go(item.route, item.params)}
-                        android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
-                        accessibilityRole="button"
-                        accessibilityLabel={item.label}
-                        accessibilityState={{ selected: active }}
-                        style={({ pressed }) => [
-                          styles.row,
-                          i < section.items.length - 1 && styles.rowDivider,
-                          pressed && styles.rowPressed,
-                        ]}
-                      >
-                        <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
-                          <Glyph
-                            set={item.set}
-                            name={item.icon}
-                            art={item.art}
-                            size={20}
-                            color={active ? colors.accent
-                              : item.tint ? item.tint
-                              : item.danger ? colors.error
-                              : colors.textSecondary}
-                          />
-                        </View>
-                        <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
-                          {item.label}
-                        </Text>
-                        {item.route === 'Inbox' && unreadMessages > 0 ? (
-                          <View style={styles.countBadge}>
-                            <Text style={styles.countBadgeText}>{unreadMessages > 99 ? '99+' : unreadMessages}</Text>
-                          </View>
-                        ) : active ? (
-                          <View style={styles.activeDot} />
-                        ) : (
-                          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
-            ))}
+        <TouchableOpacity onPress={close} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close menu">
+          <Ionicons name="close" size={24} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
 
-            {isAuthenticated && (
-              <Pressable
-                onPress={handleLogout}
-                android_ripple={{ color: 'rgba(229,57,53,0.15)' }}
-                style={({ pressed }) => [styles.logout, pressed && styles.rowPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Log out"
-              >
-                <MaterialCommunityIcons name="logout" size={20} color={colors.error} />
-                <Text style={styles.logoutText}>{t('menu.logout')}</Text>
-              </Pressable>
-            )}
-
-            <View style={{ height: spacing.xl }} />
-          </ScrollView>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {(() => {
+          // Show only the admin items the user's capabilities allow.
+          const adminItems = isAdmin(currentUser)
+            ? ADMIN_ITEMS.filter((it) => {
+                if (it.superOnly) return isSuperAdmin(currentUser);
+                if (it.cap) return hasCapability(currentUser, it.cap);
+                if (it.anyCap) return it.anyCap.some((c) => hasCapability(currentUser, c));
+                return true; // dashboard — any admin
+              })
+            : [];
+          return [
+            ...SECTIONS,
+            ...(currentUser?.is_suspended ? [APPEAL_SECTION] : []),
+            ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
+          ];
+        })().map((section) => (
+          <View key={section.title} style={styles.section}>
+            <Text style={styles.sectionTitle}>{section.title.toUpperCase()}</Text>
+            <View style={styles.group}>
+              {section.items.map((item, i) => {
+                const active = isPage(below, item);
+                return (
+                  <Pressable
+                    key={item.label}
+                    onPress={() => go(item.route, item.params)}
+                    android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.label}
+                    accessibilityState={{ selected: active }}
+                    style={({ pressed }) => [
+                      styles.row,
+                      i < section.items.length - 1 && styles.rowDivider,
+                      pressed && styles.rowPressed,
+                    ]}
+                  >
+                    <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
+                      <Glyph
+                        set={item.set}
+                        name={item.icon}
+                        art={item.art}
+                        size={20}
+                        color={active ? colors.accent
+                          : item.tint ? item.tint
+                          : item.danger ? colors.error
+                          : colors.textSecondary}
+                      />
+                    </View>
+                    <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
+                      {item.label}
+                    </Text>
+                    {item.route === 'Inbox' && unreadMessages > 0 ? (
+                      <View style={styles.countBadge}>
+                        <Text style={styles.countBadgeText}>{unreadMessages > 99 ? '99+' : unreadMessages}</Text>
+                      </View>
+                    ) : active ? (
+                      <View style={styles.activeDot} />
+                    ) : (
+                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-        </View>
-      </Modal>
+        ))}
+
+        {isAuthenticated && (
+          <Pressable
+            onPress={handleLogout}
+            android_ripple={{ color: 'rgba(229,57,53,0.15)' }}
+            style={({ pressed }) => [styles.logout, pressed && styles.rowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+          >
+            <MaterialCommunityIcons name="logout" size={20} color={colors.error} />
+            <Text style={styles.logoutText}>{t('menu.logout')}</Text>
+          </Pressable>
+        )}
+
+        <View style={{ height: spacing.xl }} />
+      </ScrollView>
+      </View>
     </View>
   );
 }

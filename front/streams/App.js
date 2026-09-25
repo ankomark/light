@@ -42,7 +42,7 @@ import BibleReader from './components/BibleReader';
 import BibleLibraryScreen from './components/BibleLibraryScreen';
 import HymnList from './components/HymnList';
 import HymnDetail from './components/HymnDetail';
-import HamburgerMenu from './components/HamburgerMenu';
+import { MenuScreen } from './components/HamburgerMenu';
 import NoticeBoard from './pages/NoticeBoard';
 import AdventistMedia from './pages/AdventistMedia';
 import Articles from './pages/Articles';
@@ -304,7 +304,8 @@ const App = () => {
                 <Stack.Screen name="HymnDetail" component={HymnDetail}  options={({ route }) => ({ headerShown: false, title: route.params?.hymn?.title || 'Hymn Details' })}/>
                 <Stack.Screen name="bible" component={BibleWrapper} />
                 <Stack.Screen name="BibleLibrary" component={BibleLibraryWrapper} />
-                <Stack.Screen name="HamburgerMenu" component={HamburgerMenu} />
+                {/* The menu: a screen, so back from a page it opened returns to it. */}
+                <Stack.Screen name="Menu" component={MenuScreen} />
                 <Stack.Screen name="NoticeBoard" component={NoticeBoard} options={{ headerShown: true, title: 'Notice Board', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
                 <Stack.Screen name="AdventistMedia" component={ AdventistMedia} />
                 <Stack.Screen name="Publishing" component={PublishingWrapper} />
