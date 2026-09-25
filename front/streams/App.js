@@ -61,6 +61,7 @@ import Organizations from './pages/Organizations';
 import OrganizationPage from './pages/OrganizationPage';
 import OrganizationEdit from './pages/OrganizationEdit';
 import OrganizationMembers from './pages/OrganizationMembers';
+import ServiceForm from './pages/ServiceForm';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -350,6 +351,7 @@ const App = () => {
                 <Stack.Screen name="OrganizationPage" component={OrganizationPage} />
                 <Stack.Screen name="OrganizationEdit" component={OrganizationEdit} />
                 <Stack.Screen name="OrganizationMembers" component={OrganizationMembers} />
+                <Stack.Screen name="ServiceForm" component={ServiceForm} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />

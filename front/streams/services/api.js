@@ -999,6 +999,11 @@ export const fetchVideoStudios = async (params = {}) => {
   return res?.results ?? res;
 };
 
+// Services, a page at a time: { results, next } — search / category / tags on the server.
+export const fetchServicesPage = async (params = {}) => apiRequest('get', '/video-studios/', null, { params });
+// The next page (the server's own link carries the filters).
+export const fetchServicesByUrl = async (nextUrl) => fetchPublicationsByUrl(nextUrl);
+
 export const fetchVideoStudioById = async (id) => {
   return apiRequest('get', `/video-studios/${id}/`);
 };

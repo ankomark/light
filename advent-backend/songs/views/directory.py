@@ -2,6 +2,9 @@ from .common import *  # noqa: F401,F403
 import base64
 from django.http import HttpResponse
 from django.utils import timezone
+from django.db.models import Q, TextField
+from django.db.models.functions import Cast
+from ..models import blocked_ids_for
 
 
 
@@ -113,7 +116,37 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         user_id = self.request.query_params.get('user_id')
         if user_id:
             qs = qs.filter(created_by=user_id)
+        # Nobody the viewer blocked (or who blocked them), and no one who
+        # deactivated their account — their own listings excepted.
+        user = self.request.user
+        qs = qs.exclude(Q(created_by__is_deactivated=True) & ~Q(created_by_id=getattr(user, 'id', None)))
+        if user.is_authenticated:
+            blocked = blocked_ids_for(user)
+            if blocked:
+                qs = qs.exclude(created_by_id__in=blocked)
+        if self.action == 'list':
+            qs = self._search(qs)
+            # Verified first, then newest: a directory people can trust.
+            qs = qs.order_by('-is_verified', '-created_at', '-id')
         return qs
+
+    def _search(self, qs):
+        """?search= over the name, place, description and service tags — on
+        the server, so every listing can be found, not just a first page.
+        ?tags=a,b: listings offering any of these (the app sends the tags
+        whose names match what was typed, in the reader's language)."""
+        q = (self.request.query_params.get('search') or '').strip()[:100]
+        tags = [x for x in (self.request.query_params.get('tags') or '').split(',') if x][:20]
+        if not q and not tags:
+            return qs
+        qs = qs.annotate(tags_text=Cast('service_types', TextField()))
+        match = Q()
+        if q:
+            match |= (Q(name__icontains=q) | Q(location__icontains=q) | Q(description__icontains=q)
+                      | Q(tags_text__icontains=q))
+        for tag in tags:
+            match |= Q(tags_text__icontains=f'"{tag}"')
+        return qs.filter(match)
 
     # ── Image serving: stream the stored base64 as a real, cacheable image ────
     def _serve_data_uri(self, data_uri):

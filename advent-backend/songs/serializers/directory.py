@@ -87,6 +87,20 @@ class VideoStudioSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
 
+    # Pictures are our own uploads — not any address on the internet (which
+    # would let a listing see who looks at it).
+    def _ours(self, value):
+        from .. import r2
+        if value and not r2.is_r2_url(value):
+            raise serializers.ValidationError('Upload the picture from the app.')
+        return value
+
+    def validate_logo(self, value):
+        return self._ours(value)
+
+    def validate_cover_image(self, value):
+        return self._ours(value)
+
 
 class VideoStudioListSerializer(serializers.ModelSerializer):
     """Lightweight list payload. logo/cover_image are R2 URLs served directly."""

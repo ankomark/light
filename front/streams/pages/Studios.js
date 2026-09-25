@@ -1,824 +1,328 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+// Services: a directory of what people in the community offer — media
+// studios, hospitality, health, professional, home & trades.
+//
+// Opens at once on the last list it showed (kept per category, offline
+// too), then refreshes behind it. Search runs on the server — by name,
+// place, description and service (in the reader's language) — so every
+// listing can be found, not only the first page; more load as you scroll.
+// Listing, editing and reporting are a tap away; the form is its own page.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert,
-  ActivityIndicator, Image, Linking, Modal, Platform, ScrollView,
+  View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import * as ImagePicker from 'expo-image-picker';
-import { compressImage } from '../services/imageProcessing';
-import {
-  fetchVideoStudios, createVideoStudio, updateVideoStudio, deleteVideoStudio,
-} from '../services/api';
-import { useAuth } from '../context/useAuth';
-import { uploadMedia } from '../services/cloudinary';
+import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { fetchServicesPage, fetchServicesByUrl, deleteVideoStudio } from '../services/api';
+import { CATEGORIES, tagsMatching, servicesChangedSince, noteServicesChanged } from '../services/servicesCatalog';
+import ServiceCard, { ServiceCardSkeleton } from '../components/services/ServiceCard';
+import ReportModal from '../components/ReportModal';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import useGridColumns from '../utils/useGridColumns';
+import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
 
-// Top-level Services buckets. `key` is stored in Videostudio.category.
-const CATEGORIES = [
-  { key: 'media', labelKey: 'services.cat.media' },
-  { key: 'hospitality', labelKey: 'services.cat.hospitality' },
-  { key: 'health', labelKey: 'services.cat.health' },
-  { key: 'professional', labelKey: 'services.cat.professional' },
-  { key: 'home', labelKey: 'services.cat.home' },
-];
+const MAX_W = 1200;
+const REFRESH_AFTER_MS = 60 * 1000;
+const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+const rowsOf = (res) => (Array.isArray(res) ? res : res?.results || [])
+  .map((s) => ({ ...s, service_types: Array.isArray(s.service_types) ? s.service_types : [] }));
 
-// Per-category service-type tags. Keys are stored (free-form) in
-// Videostudio.service_types; labels are localised via i18n keys.
-const SERVICE_TYPES_BY_CATEGORY = {
-  media: [
-    ['music_video', 'services.type.music_video'],
-    ['live_event', 'services.type.live_event'],
-    ['editing', 'services.type.editing'],
-    ['recording', 'services.type.recording'],
-    ['mixing', 'services.type.mixing'],
-    ['voice_over', 'services.type.voice_over'],
-    ['podcast', 'services.type.podcast'],
-    ['documentary', 'services.type.documentary'],
-    ['other', 'services.type.other'],
-  ],
-  hospitality: [
-    ['hotel', 'services.type.hotel'],
-    ['lodge', 'services.type.lodge'],
-    ['restaurant', 'services.type.restaurant'],
-    ['catering', 'services.type.catering'],
-    ['event_venue', 'services.type.event_venue'],
-    ['tours', 'services.type.tours'],
-    ['transport', 'services.type.transport'],
-    ['other', 'services.type.other'],
-  ],
-  health: [
-    ['clinic', 'services.type.clinic'],
-    ['counseling', 'services.type.counseling'],
-    ['dental', 'services.type.dental'],
-    ['pharmacy', 'services.type.pharmacy'],
-    ['fitness', 'services.type.fitness'],
-    ['nutrition', 'services.type.nutrition'],
-    ['home_care', 'services.type.home_care'],
-    ['other', 'services.type.other'],
-  ],
-  professional: [
-    ['legal', 'services.type.legal'],
-    ['accounting', 'services.type.accounting'],
-    ['consulting', 'services.type.consulting'],
-    ['it_services', 'services.type.it_services'],
-    ['design', 'services.type.design'],
-    ['tutoring', 'services.type.tutoring'],
-    ['translation', 'services.type.translation'],
-    ['other', 'services.type.other'],
-  ],
-  home: [
-    ['plumbing', 'services.type.plumbing'],
-    ['electrical', 'services.type.electrical'],
-    ['cleaning', 'services.type.cleaning'],
-    ['carpentry', 'services.type.carpentry'],
-    ['painting', 'services.type.painting'],
-    ['gardening', 'services.type.gardening'],
-    ['moving', 'services.type.moving'],
-    ['other', 'services.type.other'],
-  ],
-};
-// Flat key -> i18n label-key map across every category (for card tags / search).
-const SERVICE_LABEL_KEY = Object.fromEntries(
-  Object.values(SERVICE_TYPES_BY_CATEGORY).flat(),
-);
-const serviceLabel = (key, t) => (SERVICE_LABEL_KEY[key] ? t(SERVICE_LABEL_KEY[key]) : key);
-
-// Web + social presence. `key` maps to a Videostudio field; brand colour tints
-// the icon on both the form and the card.
-const SOCIAL_LINKS = [
-  { key: 'website_link', icon: 'globe-outline', color: '#0EA5E9', labelKey: 'services.link.website' },
-  { key: 'whatsapp_number', icon: 'logo-whatsapp', color: '#25D366', labelKey: 'services.link.whatsapp', phone: true },
-  { key: 'facebook_link', icon: 'logo-facebook', color: '#1877F2', labelKey: 'services.link.facebook' },
-  { key: 'instagram_link', icon: 'logo-instagram', color: '#E4405F', labelKey: 'services.link.instagram' },
-  { key: 'tiktok_link', icon: 'logo-tiktok', color: '#111111', labelKey: 'services.link.tiktok' },
-  { key: 'twitter_link', icon: 'logo-twitter', color: '#111111', labelKey: 'services.link.twitter' },
-  { key: 'youtube_link', icon: 'logo-youtube', color: '#FF0000', labelKey: 'services.link.youtube' },
-];
-// Links shown as circular icon buttons on the card (whatsapp keeps its own text
-// button in the primary row, so it's excluded here).
-const CARD_SOCIALS = SOCIAL_LINKS.filter((s) => s.key !== 'whatsapp_number');
-
-// Banner fallback + pill icon per category.
-const CATEGORY_ICON = {
-  media: 'movie', hospitality: 'hotel', health: 'favorite',
-  professional: 'work', home: 'handyman',
-};
-
-// Users often type "instagram.com/foo" without a scheme; make it openable.
-const withScheme = (url) => (/^[a-z]+:\/\//i.test(url) ? url : `https://${url}`);
-
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN', 'GHS', 'ZAR', 'TZS', 'UGX'];
-const CURRENCY_SYMBOL = {
-  USD: '$', EUR: '€', GBP: '£', KES: 'KSh', NGN: '₦', GHS: 'GH₵', ZAR: 'R', TZS: 'TSh', UGX: 'USh',
-};
-
-const EMPTY = {
-  name: '', description: '', location: '', contact_phone: '', contact_email: '',
-  whatsapp_number: '', category: 'media', service_types: [], youtube_link: '', service_rates: '',
-  rate_description: '', currency: 'USD',
-  website_link: '', facebook_link: '', instagram_link: '', tiktok_link: '', twitter_link: '',
-};
-
-const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
-
-async function pickAndUpload(aspect, width, type, t) {
-  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (status !== 'granted') {
-    Alert.alert(t('chat.permissionRequired'), t('dir.permissionPhotos'));
-    return null;
-  }
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect, quality: 0.8,
-  });
-  if (result.canceled || !result.assets?.length) return null;
-  const processed = await compressImage(result.assets[0].uri, { width, quality: 0.6 });
-  try {
-    const uploaded = await uploadMedia(
-      { uri: processed.uri, name: `studio_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
-      type,
-    );
-    return uploaded.url;
-  } catch (e) {
-    Alert.alert(t('common.uploadFailedTitle'), e?.message ?? t('common.uploadImageFailed'));
-    return null;
-  }
-}
-
-const Studios = () => {
+const Studios = ({ navigation }) => {
   const { t } = useI18n();
-  const { currentUser } = useAuth();
-  const [studios, setStudios] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser, isAuthenticated } = useAuth();
+  const uid = currentUser?.id;
+  const insets = useSafeAreaInsets();
+  const side = { left: insets.left || 0, right: insets.right || 0, bottom: insets.bottom || 0 };
+  const [category, setCategory] = useState('all');
+  const [query, setQuery] = useState('');
+  const searching = !!query.trim();
+  const cacheKey = searching ? null : userKey(uid, `services:${category}`);
+
+  const [items, setItems] = useState(() => peekCache(cacheKey)?.items || null);   // null: nothing yet
+  const [next, setNext] = useState(() => peekCache(cacheKey)?.next || null);
+  const [failed, setFailed] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const [busy, setBusy] = useState(false);            // a search on its way (rows stay)
   const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [reporting, setReporting] = useState(null);
+  const request = useRef(0);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const lastLoad = useRef(0);
 
-  const [actionsOpenId, setActionsOpenId] = useState(null); // card whose edit/delete is revealed
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState(EMPTY);
-  const [logo, setLogo] = useState('');
-  const [coverImage, setCoverImage] = useState('');
-  const [saving, setSaving] = useState(false);
+  const { cols } = useGridColumns({
+    target: 380, min: 1, max: 3, horizontalPadding: spacing.md * 2 + side.left + side.right, gap: spacing.md,
+  });
 
-  const load = useCallback(async (isRefresh = false) => {
-    try {
-      if (isRefresh) setRefreshing(true); else setLoading(true);
-      const res = await fetchVideoStudios();
-      const list = Array.isArray(res) ? res : (res?.results ?? []);
-      setStudios(list.map((s) => ({ ...s, service_types: Array.isArray(s.service_types) ? s.service_types : [] })));
-    } catch (err) {
-      console.error('fetchVideoStudios error:', err);
-      Alert.alert(t('common.error'), t('studios.loadFailed'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  const load = useCallback(async ({ refresh = false } = {}) => {
+    const mine = ++request.current;
+    setFailed(false);
+    let kept = null;
+    if (cacheKey && !refresh) {
+      kept = peekCache(cacheKey) ?? await readCache(cacheKey, KEEP_MS);
+      if (mine !== request.current) return;
+      if (kept?.items) { setItems(kept.items); setNext(kept.next || null); }
     }
-  }, [t]);
+    if (refresh) setRefreshing(true);
+    else if (searching && itemsRef.current?.length) setBusy(true);
+    else if (!kept?.items) setItems(null);
+    try {
+      const params = {};
+      if (category !== 'all') params.category = category;
+      if (searching) {
+        params.search = query.trim();
+        const tags = tagsMatching(query, t);
+        if (tags.length) params.tags = tags.join(',');
+      }
+      const res = await fetchServicesPage(params);
+      if (mine !== request.current) return;
+      const rows = rowsOf(res);
+      setItems(rows);
+      setNext(res?.next || null);
+      setOffline(false);
+      if (cacheKey) writeCache(cacheKey, { items: rows, next: res?.next || null });
+    } catch {
+      if (mine !== request.current) return;
+      if (itemsRef.current?.length) setOffline(true);        // keep what's on screen
+      else { setItems([]); setFailed(true); }
+    } finally {
+      if (mine === request.current) {
+        setBusy(false);
+        setRefreshing(false);
+        lastLoad.current = Date.now();
+      }
+    }
+  }, [cacheKey, category, query, searching, t]);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const keyRef = useRef(cacheKey);
+  keyRef.current = cacheKey;
 
-  useEffect(() => { load(); }, [load]);
+  // A category or the account: at once. Typing: once it pauses.
+  useEffect(() => {
+    if (searching) {
+      const h = setTimeout(() => loadRef.current(), 350);
+      return () => clearTimeout(h);
+    }
+    if (cacheKey) { const kept = peekCache(cacheKey); if (kept?.items) { setItems(kept.items); setNext(kept.next || null); } }
+    loadRef.current();
+    return undefined;
+  }, [category, query, uid]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = useMemo(() => {
-    let list = studios;
-    if (categoryFilter !== 'all') list = list.filter((s) => (s.category || 'media') === categoryFilter);
-    const q = search.trim().toLowerCase();
-    if (q) {
-      list = list.filter((s) =>
-        s.name?.toLowerCase().includes(q) ||
-        s.location?.toLowerCase().includes(q) ||
-        s.service_types?.some((k) => serviceLabel(k, t).toLowerCase().includes(q))
+  // Back from the form (or anywhere): a listing saved or deleted shows at
+  // once; an old list is refreshed.
+  const mounted = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (!mounted.current) { mounted.current = true; return; }
+    const change = servicesChangedSince(lastLoad.current);
+    if (change?.item || change?.deletedId) {
+      // Into the list AND its kept copy — the refresh paints the kept copy
+      // first, and must not take the new listing away again.
+      const list = itemsRef.current || [];
+      const id = change.item?.id ?? change.deletedId;
+      const had = list.some((s) => s.id === id);
+      const merged = change.deletedId ? list.filter((s) => s.id !== id)
+        : had ? list.map((s) => (s.id === id ? { ...s, ...change.item } : s)) : [change.item, ...list];
+      setItems(merged);
+      const key = keyRef.current;
+      if (key) writeCache(key, { items: merged, next: peekCache(key)?.next || null });
+    }
+    if (change || Date.now() - lastLoad.current > REFRESH_AFTER_MS) loadRef.current();
+  }, []));
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !next) return;
+    const mine = request.current;
+    setLoadingMore(true);
+    try {
+      const res = await fetchServicesByUrl(next);
+      if (mine !== request.current) return;
+      setItems((prev) => {
+        const seen = new Set((prev || []).map((s) => s.id));
+        return [...(prev || []), ...rowsOf(res).filter((s) => !seen.has(s.id))];
+      });
+      setNext(res?.next || null);
+    } catch {
+      // pull to refresh recovers
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, next]);
+
+  const create = () => (isAuthenticated
+    ? navigation.navigate('ServiceForm', { category: category !== 'all' ? category : 'media' })
+    : navigation.navigate('Login'));
+  const edit = useCallback((s) => navigation.navigate('ServiceForm', { service: s }), [navigation]);
+  const remove = useCallback(async (s) => {
+    const ok = await confirmAction({
+      title: t('studios.deleteTitle'), message: t('common.deleteConfirm', { name: s.name }),
+      confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), destructive: true,
+    });
+    if (!ok) return;
+    const before = itemsRef.current;
+    const after = (before || []).filter((x) => x.id !== s.id);
+    setItems(after);
+    try {
+      await deleteVideoStudio(s.id);
+      noteServicesChanged({ deletedId: s.id });
+      if (cacheKey) writeCache(cacheKey, { items: after, next });
+    } catch {
+      setItems(before);
+      notify(t('common.error'), t('studios.deleteFailed'));
+    }
+  }, [t, cacheKey, next]);
+  const report = useCallback((s) => (isAuthenticated ? setReporting(s) : navigation.navigate('Login')), [isAuthenticated, navigation]);
+
+  const renderItem = useCallback(({ item }) => (
+    <ServiceCard item={item} t={t} onEdit={edit} onDelete={remove} onReport={report}
+      style={cols > 1 ? styles.inGrid : null} />
+  ), [t, edit, remove, report, cols]);
+
+  const empty = () => {
+    if (items == null) {
+      return (
+        <View style={cols > 1 ? styles.skeletonGrid : null}>
+          {Array.from({ length: cols > 1 ? cols * 2 : 3 }, (_, i) => (
+            <ServiceCardSkeleton key={i} style={cols > 1 ? { width: `${Math.floor(100 / cols) - 2}%` } : null} />
+          ))}
+        </View>
       );
     }
-    return list;
-  }, [studios, categoryFilter, search, t]);
-
-  const openCreate = () => {
-    setEditingId(null);
-    // Pre-select the category the user is currently browsing.
-    const cat = categoryFilter !== 'all' ? categoryFilter : 'media';
-    setForm({ ...EMPTY, category: cat });
-    setLogo(''); setCoverImage(''); setShowForm(true);
-  };
-  const openEdit = (s) => {
-    setEditingId(s.id);
-    setForm({
-      name: s.name || '', description: s.description || '', location: s.location || '',
-      contact_phone: s.contact_phone || '', contact_email: s.contact_email || '',
-      whatsapp_number: s.whatsapp_number || '', category: s.category || 'media',
-      service_types: s.service_types || [],
-      youtube_link: s.youtube_link || '', service_rates: s.service_rates ? String(s.service_rates) : '',
-      rate_description: s.rate_description || '', currency: s.currency || 'USD',
-      website_link: s.website_link || '', facebook_link: s.facebook_link || '',
-      instagram_link: s.instagram_link || '', tiktok_link: s.tiktok_link || '',
-      twitter_link: s.twitter_link || '',
-    });
-    setLogo(s.logo || ''); setCoverImage(s.cover_image || ''); setShowForm(true);
-  };
-  const closeForm = () => { setShowForm(false); setEditingId(null); setForm(EMPTY); setLogo(''); setCoverImage(''); };
-
-  const toggleService = (key) => {
-    setForm((p) => ({
-      ...p,
-      service_types: p.service_types.includes(key)
-        ? p.service_types.filter((k) => k !== key)
-        : [...p.service_types, key],
-    }));
-  };
-
-  const selectCategory = (cat) => {
-    // Switching category clears tags that don't belong to the new one.
-    const allowed = new Set(SERVICE_TYPES_BY_CATEGORY[cat].map(([k]) => k));
-    setForm((p) => ({
-      ...p,
-      category: cat,
-      service_types: p.service_types.filter((k) => allowed.has(k)),
-    }));
-  };
-
-  const submit = async () => {
-    if (!form.name.trim() || !form.location.trim() || form.service_types.length === 0) {
-      Alert.alert(t('dir.missingInfo'), t('studios.missingInfo'));
-      return;
+    if (failed) {
+      return (
+        <View style={styles.empty} testID="services-failed">
+          <Ionicons name="cloud-offline-outline" size={44} color={colors.textMuted} />
+          <Text style={styles.emptyText}>{t('studios.loadFailed')}</Text>
+          <TouchableOpacity style={styles.btn} onPress={() => load()} testID="services-retry">
+            <Text style={styles.btnText}>{t('common.retry')}</Text>
+          </TouchableOpacity>
+        </View>
+      );
     }
-    const payload = {
-      name: form.name.trim(), description: form.description.trim(), location: form.location.trim(),
-      contact_phone: form.contact_phone.trim(), contact_email: form.contact_email.trim(),
-      whatsapp_number: form.whatsapp_number.trim(), category: form.category,
-      service_types: form.service_types,
-      rate_description: form.rate_description.trim(),
-      currency: form.currency,
-    };
-    // Links are optional; only send those filled in, normalised to a real URL so
-    // the backend URLField accepts a pasted "instagram.com/…" without a scheme.
-    ['youtube_link', 'website_link', 'facebook_link', 'instagram_link', 'tiktok_link', 'twitter_link'].forEach((k) => {
-      const v = form[k].trim();
-      payload[k] = v ? withScheme(v) : '';
-    });
-    const rate = form.service_rates.trim();
-    payload.service_rates = rate ? rate : null;
-    // Only send an image when it's a freshly-picked data URI. On edit the field
-    // holds a server URL (the list no longer ships base64), so omitting it leaves
-    // the stored image untouched instead of overwriting it with the URL string.
-    if (logo.startsWith('http')) payload.logo = logo;
-    if (coverImage.startsWith('http')) payload.cover_image = coverImage;
-
-    try {
-      setSaving(true);
-      if (editingId) {
-        const updated = await updateVideoStudio(editingId, payload);
-        setStudios((prev) => prev.map((s) => (s.id === editingId ? updated : s)));
-      } else {
-        const created = await createVideoStudio(payload);
-        setStudios((prev) => [created, ...prev]);
-      }
-      closeForm();
-    } catch (err) {
-      const msg = err?.response?.data?.error || t('studios.saveFailed');
-      Alert.alert(t('common.error'), msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const onDelete = (s) => {
-    Alert.alert(t('studios.deleteTitle'), t('common.deleteConfirm', { name: s.name }), [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          const prev = studios;
-          setStudios((cur) => cur.filter((x) => x.id !== s.id));
-          try { await deleteVideoStudio(s.id); }
-          catch { setStudios(prev); Alert.alert(t('common.error'), t('studios.deleteFailed')); }
-        },
-      },
-    ]);
-  };
-
-  const openLink = (url) => Linking.openURL(url).catch(() => Alert.alert(t('common.error'), t('dir.openLinkFailed')));
-  const openWhatsApp = (num) => openLink(`https://wa.me/${num.replace(/[^\d]/g, '')}`);
-
-  const rateText = (s) => {
-    if (!s.service_rates) return null;
-    const sym = CURRENCY_SYMBOL[s.currency] || '';
-    return `${sym}${s.service_rates}${s.rate_description ? ` · ${s.rate_description}` : ''}`;
-  };
-
-  const renderItem = ({ item }) => {
-    const owner = item.is_owner;
     return (
-      <View style={styles.card}>
-        <View style={styles.banner}>
-          {item.cover_image ? (
-            <Image source={{ uri: item.cover_image }} style={styles.cover} />
-          ) : (
-            <View style={[styles.cover, styles.coverFallback]}>
-              <MaterialIcons name={CATEGORY_ICON[item.category] || 'storefront'} size={36} color={colors.textMuted} />
-            </View>
-          )}
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.35)']}
-            style={styles.bannerScrim}
-            pointerEvents="none"
-          />
-          <View style={styles.categoryPill}>
-            <MaterialIcons name={CATEGORY_ICON[item.category] || 'storefront'} size={12} color={colors.white} />
-            <Text style={styles.categoryPillText}>{t(`services.cat.${item.category || 'media'}`)}</Text>
-          </View>
-          {owner && (
-            <View style={styles.ownerActions}>
-              {actionsOpenId === item.id ? (
-                <>
-                  <TouchableOpacity style={styles.ownerBtn} onPress={() => { setActionsOpenId(null); openEdit(item); }} hitSlop={6}>
-                    <MaterialIcons name="edit" size={18} color={colors.white} />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.ownerBtn} onPress={() => { setActionsOpenId(null); onDelete(item); }} hitSlop={6}>
-                    <MaterialIcons name="delete-outline" size={19} color={colors.white} />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.ownerBtn} onPress={() => setActionsOpenId(null)} hitSlop={6}>
-                    <MaterialIcons name="close" size={18} color={colors.white} />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity style={styles.ownerBtn} onPress={() => setActionsOpenId(item.id)} hitSlop={6}>
-                  <MaterialIcons name="more-horiz" size={20} color={colors.white} />
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-        </View>
-
-        <View style={styles.cardHeader}>
-          <Image
-            source={item.logo ? { uri: item.logo } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR}
-            style={styles.avatar}
-          />
-          <View style={styles.headerInfo}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-              {item.is_verified && <MaterialIcons name="verified" size={16} color={colors.primary} />}
-            </View>
-            <View style={styles.headerMeta}>
-              <Ionicons name="location-outline" size={13} color={colors.textMuted} />
-              <Text style={styles.metaText} numberOfLines={1}> {item.location}</Text>
-            </View>
-          </View>
-        </View>
-
-        {item.description ? <Text style={styles.description} numberOfLines={3}>{item.description}</Text> : null}
-
-        {item.service_types?.length > 0 && (
-          <View style={styles.serviceTags}>
-            {item.service_types.map((k) => (
-              <View key={k} style={styles.serviceTag}>
-                <Text style={styles.serviceTagText}>{serviceLabel(k, t)}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {rateText(item) ? (
-          <View style={styles.ratePill}>
-            <MaterialIcons name="payments" size={15} color={colors.primary} />
-            <Text style={styles.rateText}>{rateText(item)}</Text>
-          </View>
+      <View style={styles.empty}>
+        <MaterialIcons name={searching ? 'search-off' : 'storefront'} size={46} color={colors.textMuted} />
+        <Text style={styles.emptyText}>{searching ? t('services.noMatch') : t('studios.none')}</Text>
+        {!searching ? (
+          <TouchableOpacity style={styles.btn} onPress={create}><Text style={styles.btnText}>{t('studios.create')}</Text></TouchableOpacity>
         ) : null}
-
-        {(item.contact_phone || item.whatsapp_number || item.contact_email) ? (
-          <View style={styles.contactRow}>
-            {item.contact_phone ? (
-              <TouchableOpacity style={styles.contactBtn} onPress={() => openLink(`tel:${item.contact_phone}`)} activeOpacity={0.85}>
-                <Ionicons name="call" size={15} color={colors.white} />
-                <Text style={styles.contactText}>{t('studios.call')}</Text>
-              </TouchableOpacity>
-            ) : null}
-            {item.whatsapp_number ? (
-              <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtn]} onPress={() => openWhatsApp(item.whatsapp_number)} activeOpacity={0.85}>
-                <Ionicons name="logo-whatsapp" size={15} color={colors.white} />
-                <Text style={styles.contactText}>{t('studios.whatsapp')}</Text>
-              </TouchableOpacity>
-            ) : null}
-            {item.contact_email ? (
-              <TouchableOpacity style={[styles.contactBtn, styles.emailBtn]} onPress={() => openLink(`mailto:${item.contact_email}`)} activeOpacity={0.85}>
-                <Ionicons name="mail" size={15} color={colors.textPrimary} />
-                <Text style={[styles.contactText, styles.emailText]}>{t('services.link.email')}</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        ) : null}
-
-        {CARD_SOCIALS.some((s) => item[s.key]) ? (
-          <View style={styles.socialRow}>
-            {CARD_SOCIALS.filter((s) => item[s.key]).map((s) => (
-              <TouchableOpacity
-                key={s.key}
-                style={styles.socialBtn}
-                onPress={() => openLink(withScheme(item[s.key]))}
-                activeOpacity={0.8}
-              >
-                <Ionicons name={s.icon} size={18} color={s.color} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        ) : null}
-
-        <View style={{ height: spacing.md }} />
       </View>
     );
   };
 
-  if (loading) {
-    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.primary} /></View>;
-  }
-
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
-        <Text style={styles.title}>{t('studios.title')}</Text>
-        <Text style={styles.subtitle}>{t('studios.subtitle')}</Text>
-      </View>
-
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={18} color={colors.placeholder} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder={t('studios.searchPlaceholder')}
-          placeholderTextColor={colors.placeholder}
-          value={search}
-          onChangeText={setSearch}
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
+    <View style={[styles.screen, { paddingLeft: side.left, paddingRight: side.right }]}>
+      <View style={styles.controls}>
+        <View style={styles.header}>
+          <Text style={styles.title}>{t('studios.title')}</Text>
+          <Text style={styles.subtitle}>{t('studios.subtitle')}</Text>
+        </View>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color={colors.placeholder} />
+          <TextInput style={styles.searchInput} placeholder={t('studios.searchPlaceholder')} placeholderTextColor={colors.placeholder}
+            value={query} onChangeText={setQuery} returnKeyType="search" autoCorrect={false} testID="services-search" />
+          {busy ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+          {query ? (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={8} accessibilityLabel={t('common.clear')}>
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
+          {[{ key: 'all', labelKey: 'services.cat.all' }, ...CATEGORIES].map((c) => {
+            const on = c.key === category;
+            return (
+              <TouchableOpacity key={c.key} style={[styles.chip, on && styles.chipOn]} onPress={() => setCategory(c.key)}
+                accessibilityRole="tab" accessibilityState={{ selected: on }} testID={`services-cat-${c.key}`}>
+                {c.icon ? <MaterialIcons name={c.icon} size={14} color={on ? colors.white : colors.textSecondary} /> : null}
+                <Text style={[styles.chipText, on && styles.chipTextOn]}>{t(c.labelKey)}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        {offline ? (
+          <View style={styles.offlineBar} testID="services-offline">
+            <Ionicons name="cloud-offline-outline" size={14} color={colors.textSecondary} />
+            <Text style={styles.offlineText}>{t('articles.offline')}</Text>
+          </View>
+        ) : null}
       </View>
 
       <FlatList
-        data={filtered}
-        keyExtractor={(item) => String(item.id)}
+        key={`cols-${cols}`}
+        data={items || []}
+        keyExtractor={(s) => String(s.id)}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
+        numColumns={cols}
+        columnWrapperStyle={cols > 1 ? styles.row : undefined}
+        contentContainerStyle={[styles.list, { paddingBottom: 96 + side.bottom }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         refreshing={refreshing}
-        onRefresh={() => load(true)}
-        ListHeaderComponent={
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.filterRow}>
-            {[{ key: 'all', labelKey: 'services.cat.all' }, ...CATEGORIES].map((c) => {
-              const active = c.key === categoryFilter;
-              return (
-                <TouchableOpacity
-                  key={c.key}
-                  style={[styles.filterChip, active && styles.filterChipActive]}
-                  onPress={() => setCategoryFilter(c.key)}
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{t(c.labelKey)}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <MaterialIcons name="movie-filter" size={46} color={colors.textMuted} />
-            <Text style={styles.emptyText}>{t('studios.none')}</Text>
-          </View>
-        }
+        onRefresh={() => load({ refresh: true })}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        initialNumToRender={4}
+        windowSize={7}
+        ListEmptyComponent={empty()}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.md }} /> : null}
       />
 
-      {currentUser && (
-        <TouchableOpacity style={styles.fab} onPress={openCreate} activeOpacity={0.9}>
-          <Ionicons name="add" size={20} color={colors.white} />
-          <Text style={styles.fabText}>{t('studios.create')}</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={[styles.fab, { bottom: spacing.lg + side.bottom, right: spacing.md + side.right }]}
+        onPress={create} activeOpacity={0.9} accessibilityRole="button" testID="services-create">
+        <Ionicons name="add" size={20} color={colors.white} />
+        <Text style={styles.fabText}>{t('studios.create')}</Text>
+      </TouchableOpacity>
 
-      <Modal visible={showForm} animationType="slide" onRequestClose={closeForm} statusBarTranslucent>
-        <SafeAreaView style={styles.container} edges={['top']}>
-          <View style={styles.topBar}>
-            <TouchableOpacity onPress={closeForm} style={styles.iconBtn} hitSlop={10}>
-              <Ionicons name="close" size={24} color={colors.textPrimary} />
-            </TouchableOpacity>
-            <Text style={styles.topTitle}>{editingId ? t('services.editTitle') : t('services.newTitle')}</Text>
-            <View style={styles.iconBtn} />
-          </View>
-
-          <KeyboardAwareScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.formContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            enableOnAndroid
-            enableResetScrollToCoords={false}
-            extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
-          >
-            <TouchableOpacity style={styles.coverPicker} onPress={async () => { const u = await pickAndUpload([16, 9], 800, 'cover', t); if (u) setCoverImage(u); }} activeOpacity={0.85}>
-              {coverImage ? <Image source={{ uri: coverImage }} style={styles.coverPreview} /> : (
-                <View style={styles.coverPlaceholder}>
-                  <Ionicons name="image-outline" size={26} color={colors.textMuted} />
-                  <Text style={styles.pickerHint}>{t('dir.addCover')}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            <View style={styles.profileRow}>
-              <TouchableOpacity style={styles.profilePicker} onPress={async () => { const u = await pickAndUpload([1, 1], 400, 'cover', t); if (u) setLogo(u); }} activeOpacity={0.85}>
-                {logo ? <Image source={{ uri: logo }} style={styles.profilePreview} /> : <Ionicons name="camera-outline" size={24} color={colors.textMuted} />}
-              </TouchableOpacity>
-              <Text style={styles.profileHint}>{t('studios.logo')}</Text>
-            </View>
-
-            <Field label={t('services.nameLabel')} value={form.name} onChange={(t) => setForm({ ...form, name: t })} placeholder={t('studios.namePlaceholder')} />
-            <Field label={t('services.descLabel')} value={form.description} onChange={(t) => setForm({ ...form, description: t })} placeholder={t('studios.aboutPlaceholder')} multiline />
-            <Field label={t('services.locationLabel')} value={form.location} onChange={(t) => setForm({ ...form, location: t })} placeholder={t('dir.cityCountry')} />
-
-            <Text style={styles.fieldLabel}>{t('services.category')}</Text>
-            <View style={styles.serviceWrap}>
-              {CATEGORIES.map((c) => {
-                const active = form.category === c.key;
-                return (
-                  <TouchableOpacity key={c.key} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => selectCategory(c.key)} activeOpacity={0.85}>
-                    {active && <Ionicons name="checkmark" size={13} color={colors.white} />}
-                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{t(c.labelKey)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={styles.fieldLabel}>{t('studios.services')}</Text>
-            <View style={styles.serviceWrap}>
-              {(SERVICE_TYPES_BY_CATEGORY[form.category] || []).map(([key, labelKey]) => {
-                const active = form.service_types.includes(key);
-                return (
-                  <TouchableOpacity key={key} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => toggleService(key)} activeOpacity={0.85}>
-                    {active && <Ionicons name="checkmark" size={13} color={colors.white} />}
-                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{t(labelKey)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View style={styles.sectionDivider} />
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>{t('services.pricingSection')}</Text>
-              <Text style={styles.sectionOptional}>{t('services.optional')}</Text>
-            </View>
-            <Text style={styles.fieldHint}>{t('services.pricingHint')}</Text>
-            <View style={styles.rateInputRow}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.currencyScroll} contentContainerStyle={styles.currencyRow}>
-                {CURRENCIES.map((c) => {
-                  const active = form.currency === c;
-                  return (
-                    <TouchableOpacity key={c} style={[styles.currencyChip, active && styles.currencyChipActive]} onPress={() => setForm({ ...form, currency: c })}>
-                      <Text style={[styles.currencyText, active && styles.currencyTextActive]}>{c}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
-            <TextInput
-              style={styles.input}
-              value={form.service_rates}
-              onChangeText={(t) => setForm({ ...form, service_rates: t })}
-              placeholder={t('studios.amountPlaceholder')}
-              placeholderTextColor={colors.placeholder}
-              keyboardType="numeric"
-            />
-            <Field label="" value={form.rate_description} onChange={(t) => setForm({ ...form, rate_description: t })} placeholder={t('studios.rateNotePlaceholder')} />
-
-            <View style={styles.sectionDivider} />
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>{t('services.contactSection')}</Text>
-              <Text style={styles.sectionOptional}>{t('services.optional')}</Text>
-            </View>
-            <Field label={t('services.whatsappLabel')} value={form.whatsapp_number} onChange={(t) => setForm({ ...form, whatsapp_number: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
-            <Field label={t('services.phoneLabel')} value={form.contact_phone} onChange={(t) => setForm({ ...form, contact_phone: t })} placeholder={t('dir.phonePlaceholder')} keyboardType="phone-pad" />
-            <Field label={t('services.emailLabel')} value={form.contact_email} onChange={(t) => setForm({ ...form, contact_email: t })} placeholder={t('studios.emailPlaceholder')} keyboardType="email-address" />
-
-            <View style={styles.sectionDivider} />
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>{t('services.linksSection')}</Text>
-              <Text style={styles.sectionOptional}>{t('services.optional')}</Text>
-            </View>
-            {SOCIAL_LINKS.filter((s) => s.key !== 'whatsapp_number').map((s) => (
-              <View key={s.key} style={styles.linkRow}>
-                <View style={[styles.linkIcon, { backgroundColor: `${s.color}1A` }]}>
-                  <Ionicons name={s.icon} size={18} color={s.color} />
-                </View>
-                <TextInput
-                  style={styles.linkInput}
-                  value={form[s.key]}
-                  onChangeText={(v) => setForm({ ...form, [s.key]: v })}
-                  placeholder={t(s.labelKey)}
-                  placeholderTextColor={colors.placeholder}
-                  keyboardType="url"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-            ))}
-
-            <View style={{ height: spacing.xl }} />
-          </KeyboardAwareScrollView>
-
-          <View style={styles.saveBar}>
-            <TouchableOpacity style={[styles.saveBtn, styles.cancelBtn]} onPress={closeForm} disabled={saving}>
-              <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.saveBtn, styles.submitBtn]} onPress={submit} disabled={saving}>
-              {saving ? <ActivityIndicator color={colors.white} /> : (
-                <Text style={styles.submitBtnText}>{editingId ? t('services.saveChanges') : t('studios.create')}</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </Modal>
+      {reporting ? (
+        <ReportModal visible onClose={() => setReporting(null)} contentType="videostudio" objectId={reporting.id} />
+      ) : null}
     </View>
   );
 };
 
-const Field = ({ label, value, onChange, placeholder, multiline, keyboardType }) => (
-  <>
-    {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
-    <TextInput
-      style={[styles.input, multiline && styles.multiline, !label && { marginTop: spacing.sm }]}
-      value={value}
-      onChangeText={onChange}
-      placeholder={placeholder}
-      placeholderTextColor={colors.placeholder}
-      multiline={multiline}
-      keyboardType={keyboardType}
-      autoCapitalize={keyboardType === 'email-address' || keyboardType === 'url' ? 'none' : 'sentences'}
-      autoCorrect={false}
-    />
-  </>
-);
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
   screen: { flex: 1, backgroundColor: 'transparent' },
-  flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
-
+  controls: { width: '100%', maxWidth: MAX_W, alignSelf: 'center' },
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { ...typography.h1, color: colors.textPrimary },
   subtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
-
   searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    backgroundColor: colors.card, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border,
-    marginHorizontal: spacing.md, paddingHorizontal: spacing.md, height: 44,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.card, borderRadius: radius.full,
+    borderWidth: 1, borderColor: colors.border, marginHorizontal: spacing.md, paddingHorizontal: spacing.md, height: 44,
   },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
-
   chipScroll: { flexGrow: 0 },
-  filterRow: { gap: spacing.sm, paddingVertical: spacing.sm, flexDirection: 'row' },
-  filterChip: {
-    paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full,
-    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+  chips: { gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, flexDirection: 'row' },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
   },
-  filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  filterText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
-  filterTextActive: { color: colors.white },
-
-  listContent: { paddingHorizontal: spacing.md, paddingBottom: 96 },
-
-  card: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadows.md },
-  banner: { height: 130, backgroundColor: colors.surface },
-  cover: { width: '100%', height: '100%' },
-  coverFallback: { alignItems: 'center', justifyContent: 'center' },
-  bannerScrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 56 },
-  categoryPill: {
-    position: 'absolute', top: spacing.sm, left: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 3,
+  chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
+  chipTextOn: { color: colors.white },
+  offlineBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: spacing.md,
+    marginBottom: spacing.xs, paddingVertical: 6, borderRadius: radius.full, backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  categoryPillText: { ...typography.caption, color: colors.white, fontWeight: '700', fontSize: 11 },
-  ownerActions: { position: 'absolute', top: spacing.sm, right: spacing.sm, flexDirection: 'row', gap: spacing.xs },
-  ownerBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
-
-  cardHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, marginTop: -22 },
-  avatar: { width: 56, height: 56, borderRadius: radius.md, borderWidth: 3, borderColor: colors.card, backgroundColor: colors.surface },
-  headerInfo: { flex: 1, marginLeft: spacing.sm, paddingTop: 22 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  name: { ...typography.h3, color: colors.textPrimary, flexShrink: 1 },
-  headerMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  metaText: { ...typography.caption, color: colors.textMuted, flex: 1 },
-
-  description: { ...typography.body, color: colors.textSecondary, paddingHorizontal: spacing.md, marginTop: spacing.sm, lineHeight: 20 },
-
-  serviceTags: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, paddingHorizontal: spacing.md, marginTop: spacing.sm },
-  serviceTag: { backgroundColor: colors.surface, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 3 },
-  serviceTagText: { ...typography.caption, color: colors.textSecondary, fontSize: 11 },
-
-  ratePill: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs, alignSelf: 'flex-start',
-    marginHorizontal: spacing.md, marginTop: spacing.sm,
-    backgroundColor: colors.primarySoft || `${colors.primary}14`, borderRadius: radius.full,
-    paddingHorizontal: spacing.sm + 2, paddingVertical: 5,
-  },
-  rateText: { ...typography.label, color: colors.primary, fontWeight: '800', fontSize: 13 },
-
-  contactRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: spacing.md },
-  contactBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.full, paddingVertical: spacing.xs + 3, paddingHorizontal: spacing.md },
-  whatsappBtn: { backgroundColor: '#25D366' },
-  emailBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  contactText: { ...typography.caption, color: colors.white, fontWeight: '700' },
-  emailText: { color: colors.textPrimary },
-
-  socialRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: spacing.sm },
-  socialBtn: {
-    width: 40, height: 40, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-  },
-
-  empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, gap: spacing.sm },
-  emptyText: { ...typography.body, color: colors.textMuted },
-
+  offlineText: { ...typography.caption, color: colors.textSecondary },
+  list: { paddingHorizontal: spacing.md, paddingTop: spacing.xs, width: '100%', maxWidth: MAX_W, alignSelf: 'center' },
+  row: { gap: spacing.md },
+  inGrid: { flex: 1 },
+  skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, paddingHorizontal: spacing.lg, gap: spacing.sm },
+  emptyText: { ...typography.body, color: colors.textMuted, textAlign: 'center' },
+  btn: { backgroundColor: colors.primary, borderRadius: radius.full, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, marginTop: spacing.xs },
+  btnText: { ...typography.label, color: colors.white, fontWeight: '700' },
   fab: {
-    position: 'absolute', bottom: spacing.lg, right: spacing.md,
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2,
-    borderRadius: radius.full, ...shadows.lg,
+    position: 'absolute', flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.primary,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2, borderRadius: radius.full, ...shadows.lg,
   },
   fabText: { ...typography.button, color: colors.white },
-
-  topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
-  },
-  topTitle: { ...typography.h3, color: colors.textPrimary },
-  iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
-  formContent: { padding: spacing.md },
-
-  coverPicker: { height: 150, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border },
-  coverPreview: { width: '100%', height: '100%' },
-  coverPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
-  pickerHint: { ...typography.caption, color: colors.textMuted },
-  profileRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.md },
-  profilePicker: { width: 64, height: 64, borderRadius: radius.md, backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  profilePreview: { width: '100%', height: '100%' },
-  profileHint: { ...typography.caption, color: colors.textMuted, flex: 1 },
-
-  fieldLabel: { ...typography.label, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.md, marginBottom: spacing.xs },
-  input: {
-    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    color: colors.textPrimary, backgroundColor: colors.inputBg, fontSize: 15,
-  },
-  multiline: { minHeight: 80, textAlignVertical: 'top' },
-
-  sectionDivider: { height: 1, backgroundColor: colors.border, marginTop: spacing.lg },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.md },
-  sectionTitle: { ...typography.label, color: colors.textPrimary, fontWeight: '800', fontSize: 15 },
-  sectionOptional: {
-    ...typography.caption, color: colors.textMuted, fontWeight: '600', fontSize: 11,
-    backgroundColor: colors.surface, borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2,
-  },
-  fieldHint: { ...typography.caption, color: colors.textMuted, marginTop: 2, marginBottom: spacing.xs },
-
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
-  linkIcon: { width: 38, height: 38, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  linkInput: {
-    flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    color: colors.textPrimary, backgroundColor: colors.inputBg, fontSize: 15,
-  },
-
-  serviceWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  serviceChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full,
-    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
-  },
-  serviceChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  serviceChipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
-  serviceChipTextActive: { color: colors.white },
-
-  rateInputRow: { marginBottom: spacing.sm },
-  currencyScroll: { flexGrow: 0 },
-  currencyRow: { gap: spacing.xs, flexDirection: 'row' },
-  currencyChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs, borderRadius: radius.sm, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  currencyChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  currencyText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
-  currencyTextActive: { color: colors.white },
-
-  saveBar: {
-    flexDirection: 'row', gap: spacing.sm,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface,
-  },
-  saveBtn: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.md, alignItems: 'center' },
-  cancelBtn: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  cancelBtnText: { ...typography.button, color: colors.textSecondary },
-  submitBtn: { backgroundColor: colors.primary },
-  submitBtnText: { ...typography.button, color: colors.white },
 });
 
 export default Studios;
