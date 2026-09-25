@@ -35,3 +35,4 @@ stripe==11.3.0
 livekit-api==1.1.0
 
 boto3==1.43.50
+markdown==3.7

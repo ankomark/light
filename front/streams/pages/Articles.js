@@ -14,6 +14,7 @@ import useGridColumns from '../utils/useGridColumns';
 import { PublicationListSkeleton } from '../components/SkeletonLoader';
 import BookLibrary from '../components/BookLibrary';
 import BooksHome, { Stars } from '../components/BooksHome';
+import BookInvitations from '../components/BookInvitations';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
@@ -362,7 +363,8 @@ const Articles = ({ navigation }) => {
               ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 16 }} />
               : null
           }
-          ListHeaderComponent={showHome ? <BooksHome navigation={navigation} /> : null}
+          ListHeaderComponent={showHome ? <BooksHome navigation={navigation} />
+            : tab === 'mine' && isAuthenticated ? <BookInvitations onAccepted={() => load({ refresh: true })} /> : null}
           ListEmptyComponent={renderEmpty()}
         />
       )}

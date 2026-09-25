@@ -34,7 +34,8 @@ def visible_publications(user):
     either way or who deactivated their account (their own excepted)."""
     qs = Publication.objects.filter(is_removed=False)
     if getattr(user, 'is_authenticated', False):
-        qs = (qs.filter(Q(status='published') | Q(author=user))
+        # A collaborator (accepted) sees the book's drafts like its author.
+        qs = (qs.filter(Q(status='published') | Q(author=user) | Q(id__in=collaborating(user)))
               .exclude(Q(author__is_deactivated=True) & ~Q(author=user)))
         blocked = blocked_ids_for(user)
         if blocked:
@@ -46,12 +47,22 @@ def visible_publications(user):
 
 # ── Who sees which chapters ──────────────────────────────────────────────────
 
+def collaborating(user):
+    """Ids of the books this user was invited to and accepted (a subquery)."""
+    from .models import PublicationCollaborator
+    return (PublicationCollaborator.objects.filter(user_id=getattr(user, 'id', None), accepted_at__isnull=False)
+            .values('publication_id'))
+
+
 def visible_chapters_q(user, prefix=''):
     """Chapters a user may read: published and not taken down — and all of
-    their own book's (drafts, takedowns marked) for the author."""
+    their own book's (drafts, takedowns marked) for the author and the
+    book's collaborators."""
     q = Q(**{f'{prefix}status': Chapter.PUBLISHED, f'{prefix}is_removed': False})
     if getattr(user, 'is_authenticated', False):
         q |= Q(**{f'{prefix}publication__author_id': user.id})
+        # A subquery, not a join: a join on collaborators would repeat rows.
+        q |= Q(**{f'{prefix}publication_id__in': collaborating(user)})
     return q
 
 
@@ -78,31 +89,63 @@ def _prune(publication, refs):
             ChapterRevision.objects.filter(pk__in=old).delete()
 
 
+class ChapterConflict(Exception):
+    """Chapters changed by someone else (another phone, a co-author) since
+    this save's writer opened them. `chapters`: [{id, title, version}]."""
+    def __init__(self, chapters):
+        super().__init__('chapters changed elsewhere')
+        self.chapters = chapters
+
+
 @transaction.atomic
-def sync_chapters(publication, chapters, user=None):
+def sync_chapters(publication, chapters, user=None, force=False):
     """Make the book's chapters match `chapters` (a list of dicts: id?,
-    title, body, status?, in reading order).
+    version?, title, body, status?, publish_at?, in reading order).
 
     A chapter sent with its id is updated in place; without one it's new;
     one no longer sent is deleted (its last words kept). A moderator's
     takedown stays whatever the author sends. Apps from before chapter ids
     send none at all: then chapters are matched by their place in the book,
     so their saves don't churn every chapter's id and history.
+
+    `version` is the version the writer started from: if the chapter has
+    moved on since (a co-author, another phone) and this save would change
+    its words, nothing is saved and ChapterConflict says which — unless
+    `force` (the writer chose to keep theirs; what it replaces is kept in
+    the chapter's history as always).
+
+    A draft chapter with `publish_at` is scheduled: the worker publishes it
+    then (publish_chapter).
     """
     existing = list(publication.chapters.order_by('order', 'id'))
     by_id = {c.pk: c for c in existing}
     if chapters and not any(ch.get('id') for ch in chapters):
         chapters = [dict(ch, id=existing[i].pk) if i < len(existing) else ch for i, ch in enumerate(chapters)]
 
+    if not force:
+        conflicts = []
+        for ch in chapters:
+            c = by_id.get(ch.get('id'))
+            base = ch.get('version')
+            if c is None or base is None or c.version == base:
+                continue
+            if c.title != (ch.get('title') or '')[:200] or c.body != (ch.get('body') or ''):
+                conflicts.append({'id': c.pk, 'title': c.title, 'version': c.version})
+        if conflicts:
+            raise ChapterConflict(conflicts)
+
     kept_ids, revisions, touched, new, appeared = set(), [], set(), [], []
     for i, ch in enumerate(chapters, start=1):
         title = (ch.get('title') or '')[:200]
         body = ch.get('body') or ''
         status = ch.get('status') if ch.get('status') in STATUSES else None
+        raw_publish_at = ch.get('publish_at')
+        publish_at = raw_publish_at if (status or Chapter.PUBLISHED) == Chapter.DRAFT else None
         c = by_id.get(ch.get('id'))
         if c is None or c.pk in kept_ids:
             new.append(Chapter(publication=publication, order=i, title=title, body=body,
-                               word_count=Chapter.count_words(body), status=status or Chapter.PUBLISHED))
+                               word_count=Chapter.count_words(body), status=status or Chapter.PUBLISHED,
+                               publish_at=publish_at))
             continue
         kept_ids.add(c.pk)
         fields = []
@@ -120,6 +163,12 @@ def sync_chapters(publication, chapters, user=None):
                 appeared.append(c.pk)            # a draft chapter going out
             c.status = status
             fields.append('status')
+        # Only a draft waits for a time; one going out now has none.
+        wanted = raw_publish_at if c.status == Chapter.DRAFT else None
+        if 'publish_at' in ch or c.status != Chapter.DRAFT:
+            if c.publish_at != wanted:
+                c.publish_at = wanted
+                fields.append('publish_at')
         if fields:
             c.save(update_fields=fields + ['updated_at'])
 
@@ -139,8 +188,41 @@ def sync_chapters(publication, chapters, user=None):
     # Pictures sent the old way (base64 in the text) go to R2 behind the save.
     for c in publication.chapters.filter(body__contains='data:image/').only('pk'):
         enqueue('pub_inline_images', key=f'chapter:{c.pk}', chapter_id=c.pk)
+    # Scheduled chapters: the worker publishes each at its time.
+    for c in publication.chapters.filter(status=Chapter.DRAFT, publish_at__isnull=False).only('pk', 'publish_at'):
+        schedule_chapter(c)
     # The chapters readers can now see that they couldn't before.
     return appeared
+
+
+def schedule_chapter(chapter):
+    """(Re)queue the job that publishes a scheduled chapter at its time. A
+    job already waiting is moved to the new time (enqueue alone would keep
+    the old one)."""
+    from .models import Job
+    key = f'chapter:{chapter.pk}'
+    moved = Job.objects.filter(kind='publish_chapter', key=key, status=Job.QUEUED).update(
+        run_after=chapter.publish_at, payload={'chapter_id': chapter.pk})
+    if not moved:
+        enqueue('publish_chapter', key=key, run_after=chapter.publish_at, chapter_id=chapter.pk)
+
+
+@handler('publish_chapter')
+def publish_chapter(chapter_id):
+    """A scheduled chapter's time has come: it goes out, and readers are
+    told. Rescheduled later meanwhile: waits again. Unscheduled or already
+    out: nothing to do."""
+    c = Chapter.objects.select_related('publication', 'publication__author').filter(pk=chapter_id).first()
+    if c is None or c.status != Chapter.DRAFT or c.publish_at is None:
+        return
+    if c.publish_at > timezone.now() + timedelta(seconds=5):
+        schedule_chapter(c)
+        return
+    Chapter.objects.filter(pk=c.pk).update(status=Chapter.PUBLISHED, publish_at=None, updated_at=timezone.now())
+    pub = c.publication
+    if pub.status == 'published' and not pub.is_removed and not c.is_removed:
+        from .book_community import notify_new_chapters
+        notify_new_chapters(pub, [c.pk])
 
 
 # ── History ──────────────────────────────────────────────────────────────────

@@ -206,7 +206,7 @@ class AnnounceTests(Base):
         with mock.patch('songs.book_community.notify_new_book') as told, \
                 mock.patch('songs.tasks.run_in_background', side_effect=lambda fn, *a: fn(*a)):
             res = self.client.post('/api/publications/', {
-                'title': 'New', 'category': 'other', 'status': 'published',
+                'title': 'New', 'category': 'other', 'status': 'published', 'rights_confirmed': True,
                 'chapters': [{'title': 'a', 'body': 'b'}]}, format='json')
             self.assertEqual(res.status_code, 201)
             told.assert_called_once()

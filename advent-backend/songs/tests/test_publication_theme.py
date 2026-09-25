@@ -45,7 +45,7 @@ class PublicationThemeTests(APITestCase):
     def test_cover_is_r2_url_in_list_and_detail(self):
         # The cover moved off base64 to an R2 URL; inline body images stay base64.
         res = self.client.post('/api/publications/', {
-            'title': 'Cover Work', 'category': 'other', 'status': 'published',
+            'title': 'Cover Work', 'category': 'other', 'status': 'published', 'rights_confirmed': True,
             'cover': self.COVER, 'chapters': [{'order': 1, 'title': 'a', 'body': 'b'}],
         }, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
@@ -61,7 +61,7 @@ class PublicationThemeTests(APITestCase):
         from django.test.utils import CaptureQueriesContext
         # A publication with a heavy chapter body (base64-image-like payload).
         self.client.post('/api/publications/', {
-            'title': 'Heavy', 'category': 'other', 'status': 'published',
+            'title': 'Heavy', 'category': 'other', 'status': 'published', 'rights_confirmed': True,
             'chapters': [{'order': 1, 'title': 'a', 'body': 'x' * 5000}],
         }, format='json')
 

@@ -97,7 +97,7 @@ class BookPageTests(APITestCase):
                 self.client.get(f'/api/publications/{pub.id}/?toc=1')
             counts.append(len(ctx.captured_queries))
         self.assertEqual(counts[0], counts[1])
-        self.assertLessEqual(counts[1], 5)
+        self.assertLessEqual(counts[1], 6)   # + chapters coming soon (serial publishing)
 
 
 class ChapterEndpointTests(APITestCase):

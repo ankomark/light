@@ -31,6 +31,15 @@ const mockApi = {
   postChapterComment: jest.fn(),
   deleteChapterComment: jest.fn(),
   fetchAuthorPage: jest.fn(),
+  fetchCollaborators: jest.fn(),
+  inviteCollaborator: jest.fn(),
+  setCollaboratorRole: jest.fn(),
+  removeCollaborator: jest.fn(),
+  fetchBookInvitations: jest.fn(),
+  answerBookInvitation: jest.fn(),
+  requestBookExport: jest.fn(),
+  fetchBookExport: jest.fn(),
+  renderBookCover: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -136,6 +145,7 @@ beforeEach(async () => {
   mockApi.fetchReadingStats.mockResolvedValue(null);
   mockApi.fetchBooksHome.mockRejectedValue(new Error('not in this test'));
   mockApi.fetchBookReviews.mockRejectedValue(new Error('not in this test'));
+  mockApi.fetchBookInvitations.mockResolvedValue({ results: [] });
   require('../../services/bookHighlights').__resetBookHighlights();
   require('../../utils/readerSettings').__resetReaderSettings();
   require('../../services/readingTracker').__resetReadingTracker();
@@ -397,10 +407,14 @@ describe('Editor', () => {
     const r = render(<PublicationEditor route={{ params: {} }} navigation={n} />);
     fireEvent.changeText(r.getByTestId('editor-title'), 'My Book');
     fireEvent.changeText(r.getByPlaceholderText('pub.chapterBodyPlaceholder'), 'Once upon a time');
+    // Publish opens the checklist; the rights are confirmed there, then out.
     await act(async () => { fireEvent.press(r.getByTestId('editor-publish')); });
+    expect(mockApi.createPublication).not.toHaveBeenCalled();
+    fireEvent.press(r.getByTestId('publish-rights'));
+    await act(async () => { fireEvent.press(r.getByTestId('publish-go')); });
     expect(mockApi.createPublication).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'My Book', status: 'published',
-      chapters: [{ order: 1, title: '', body: 'Once upon a time', status: 'published' }],   // new: no id yet
+      title: 'My Book', status: 'published', rights_confirmed: true,
+      chapters: [{ order: 1, title: '', body: 'Once upon a time', status: 'published', publish_at: null }],   // new: no id yet
     }));
     expect(n.replace).toHaveBeenCalledWith('PublicationDetail', { id: 77 });
     expect(n.navigate).not.toHaveBeenCalled();
@@ -413,8 +427,10 @@ describe('Editor', () => {
     const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={n} />);
     await waitFor(() => expect(r.getByDisplayValue('Book 5')).toBeTruthy());
     expect(mockApi.fetchPublication).toHaveBeenCalledWith(5);          // bodies: it's the editor
-    await act(async () => { fireEvent.press(r.getByTestId('editor-save-draft')); });
-    expect(mockApi.updatePublication).toHaveBeenCalledWith(5, expect.objectContaining({ status: 'draft' }));
+    // A published book: Save keeps it out (it used to unpublish it, as "Save Draft").
+    expect(r.getByTestId('editor-unpublish')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('editor-publish')); });
+    expect(mockApi.updatePublication).toHaveBeenCalledWith(5, expect.objectContaining({ status: 'published' }));
     expect(n.goBack).toHaveBeenCalled();
   });
 
@@ -473,7 +489,7 @@ describe('Phase 1', () => {
     await waitFor(() => expect(r.getByDisplayValue('First')).toBeTruthy());
     expect(r.getByText('pub.removedByModerator')).toBeTruthy();                // the author sees the takedown
     await act(async () => { fireEvent.press(r.getByTestId('editor-draft-0')); }); // chapter 1 → draft
-    await act(async () => { fireEvent.press(r.getByTestId('editor-save-draft')); });
+    await act(async () => { fireEvent.press(r.getByTestId('editor-publish')); });   // Save (the book stays out)
     const { chapters } = mockApi.updatePublication.mock.calls[0][1];
     expect(chapters.map((c) => [c.id, c.status])).toEqual([[51, 'draft'], [52, 'draft'], [53, 'published']]);
   });
@@ -893,5 +909,167 @@ describe('Phase 3', () => {
     expect(r.getByText('reader.discussCount:4')).toBeTruthy();
     fireEvent.press(r.getByTestId('reader-discuss'));
     expect(n.navigate).toHaveBeenCalledWith('ChapterDiscussion', expect.objectContaining({ id: 5, index: 0 }));
+  });
+});
+
+// ── Phase 4: the Writer Studio ──────────────────────────────────────────────
+describe('Phase 4', () => {
+  const CoverStudio = require('../CoverStudio').default;
+  const BookCollaborators = require('../BookCollaborators').default;
+  const { splitFootnotes, countWords } = require('../../utils/chapterBlocks');
+  const { schedulePresets } = require('../../components/ScheduleSheet');
+  const { publishChecks } = require('../../components/PublishSheet');
+  const { Linking } = require('react-native');
+
+  const serverBook = (extra = {}) => ({
+    ...book(), my_role: 'owner', rights_confirmed_at: null, status: 'draft', ...extra,
+    chapters: [
+      { id: 51, title: 'One', body: 'Grace and peace to you', status: 'published', version: 3 },
+      { id: 52, title: 'Two', body: 'More words here', status: 'draft', version: 1, publish_at: null },
+    ],
+  });
+  const openEditor = async (extra) => {
+    mockApi.fetchPublication.mockResolvedValue(serverBook(extra));
+    const n = nav();
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByDisplayValue('Grace and peace to you')).toBeTruthy());
+    return { r, n };
+  };
+
+  test('footnotes, tables and word counts', () => {
+    const f = formatBody('Grace', { start: 5, end: 5 }, 'footnote');
+    expect(f.body).toBe('Grace[^1]\n[^1]: ');
+    expect(formatBody(f.body + 'A note', { start: 5, end: 5 }, 'footnote').body).toContain('[^2]');
+    expect(formatBody('Text', null, 'table').body).toBe('Text\n\n|  |  |\n| --- | --- |\n|  |  |\n\n');
+    expect(splitFootnotes('Grace[^a] and peace[^b].\n[^a]: First.\n[^b]: Second.')).toEqual({
+      body: 'Grace¹ and peace².\n\n', notes: [{ n: 1, text: 'First.' }, { n: 2, text: 'Second.' }],
+    });
+    expect(countWords("It's a [link](http://x.y/z) ![p](http://img) — well-known, 2 ways")).toBe(6);
+  });
+
+  test('schedule presets are in the future; the checklist needs a title and words', () => {
+    const now = new Date(2026, 8, 25, 12, 0);                          // a Friday, noon
+    const p = Object.fromEntries(schedulePresets(now).map((x) => [x.key, x.date]));
+    expect(p.friday.getDay()).toBe(5);
+    expect(p.friday > now).toBe(true);
+    expect(p.sabbath.getDay()).toBe(6);
+    expect(p.tomorrow.getDate()).toBe(26);
+    const checks = publishChecks({ title: '', cover: '', summary: '', chapters: [{ title: 'x', body: '', status: 'published' }] });
+    expect(checks.filter((c) => c.required && !c.ok).map((c) => c.key)).toEqual(['title', 'content']);
+  });
+
+  test('the editor counts words and sends versions and a scheduled time', async () => {
+    mockApi.updatePublication.mockResolvedValue({ id: 5 });
+    const { r } = await openEditor();
+    expect(r.getByTestId('editor-totals').props.children).toBe('studio.totals:5,1,2');   // drafts don't count
+    fireEvent.press(r.getByTestId('editor-schedule-1'));
+    fireEvent.press(r.getByTestId('schedule-sabbath'));
+    expect(r.getByText(/schedule\.goesOut/)).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('editor-save-draft')); });
+    const { chapters } = mockApi.updatePublication.mock.calls[0][1];
+    expect(chapters[0]).toMatchObject({ id: 51, version: 3, publish_at: null });
+    expect(new Date(chapters[1].publish_at).getDay()).toBe(6);
+  });
+
+  test('changed elsewhere: keep mine resends with force', async () => {
+    mockApi.updatePublication
+      .mockRejectedValueOnce(Object.assign(new Error('conflict'), { status: 409, data: { code: 'conflict', chapters: [{ id: 51, title: 'One', version: 4 }] } }))
+      .mockResolvedValueOnce({ id: 5 });
+    mockConfirm.mockResolvedValueOnce(true);
+    const { r, n } = await openEditor();
+    fireEvent.changeText(r.getByDisplayValue('Grace and peace to you'), 'My edit');
+    await act(async () => { fireEvent.press(r.getByTestId('editor-save-draft')); });
+    await waitFor(() => expect(mockApi.updatePublication).toHaveBeenCalledTimes(2));
+    expect(mockApi.updatePublication.mock.calls[1][1]).toMatchObject({ force: true });
+    await waitFor(() => expect(n.goBack).toHaveBeenCalled());
+  });
+
+  test('changed elsewhere: load theirs brings in just those chapters', async () => {
+    mockApi.updatePublication.mockRejectedValueOnce(Object.assign(new Error('conflict'),
+      { status: 409, data: { code: 'conflict', chapters: [{ id: 51, title: 'One', version: 4 }] } }));
+    mockConfirm.mockResolvedValueOnce(false);
+    const { r } = await openEditor();
+    fireEvent.changeText(r.getByDisplayValue('More words here'), 'My second-chapter edit');
+    mockApi.fetchPublication.mockResolvedValue({ ...serverBook(), chapters: [
+      { id: 51, title: 'One', body: 'Their newer words', status: 'published', version: 4 },
+      { id: 52, title: 'Two', body: 'More words here', status: 'draft', version: 1 },
+    ] });
+    await act(async () => { fireEvent.press(r.getByTestId('editor-save-draft')); });
+    await waitFor(() => expect(r.getByDisplayValue('Their newer words')).toBeTruthy());
+    expect(r.getByDisplayValue('My second-chapter edit')).toBeTruthy();     // mine elsewhere kept
+  });
+
+  test('a co-author saves without touching publishing', async () => {
+    mockApi.updatePublication.mockResolvedValue({ id: 5 });
+    const { r } = await openEditor({ my_role: 'coauthor', status: 'published' });
+    expect(r.getByText('studio.youAre:studio.role.coauthor')).toBeTruthy();
+    expect(r.queryByTestId('editor-unpublish')).toBeNull();
+    await act(async () => { fireEvent.press(r.getByTestId('editor-publish')); });
+    expect('status' in mockApi.updatePublication.mock.calls[0][1]).toBe(false);
+  });
+
+  test('preview shows the book as readers will, from the editor, recording nothing', async () => {
+    const { r, n } = await openEditor();
+    fireEvent.press(r.getByTestId('editor-publish'));
+    fireEvent.press(r.getByTestId('publish-preview'));
+    const [screen, params] = n.navigate.mock.calls.find((c) => c[0] === 'ChapterReader');
+    expect(screen).toBe('ChapterReader');
+    expect(params.preview).toBe(true);
+    expect(params.publication.chapters.map((c) => c.title)).toEqual(['One']);        // the draft isn't in
+    const reader = render(<ChapterReader route={{ params }} navigation={nav()} />);
+    await waitFor(() => expect(reader.getByText('Grace and peace to you')).toBeTruthy());
+    expect(reader.getByTestId('reader-preview')).toBeTruthy();
+    expect(mockApi.fetchPublicationChapter).not.toHaveBeenCalled();
+    expect(reader.queryByTestId('reader-discuss')).toBeNull();
+  });
+
+  test('the Cover studio makes a cover and hands it to the editor', async () => {
+    mockApi.renderBookCover.mockResolvedValue({ url: 'https://r2.test/cover_images/c.jpg' });
+    const n = nav();
+    const r = render(<CoverStudio route={{ params: { title: 'Steps', author: 'me' } }} navigation={n} />);
+    fireEvent.press(r.getByTestId('cover-template-classic'));
+    fireEvent.press(r.getByTestId('cover-palette-wine'));
+    fireEvent.changeText(r.getByTestId('cover-subtitle'), 'A devotional');
+    await act(async () => { fireEvent.press(r.getByTestId('cover-make')); });
+    expect(mockApi.renderBookCover).toHaveBeenCalledWith({ template: 'classic', palette: 'wine', title: 'Steps', subtitle: 'A devotional', author: 'me' });
+    expect(n.popTo).toHaveBeenCalledWith('PublicationEditor', { cover: 'https://r2.test/cover_images/c.jpg' }, { merge: true });
+  });
+
+  test('people: invite by username with a role', async () => {
+    mockApi.fetchCollaborators.mockResolvedValue({ results: [], my_role: 'owner' });
+    mockApi.inviteCollaborator.mockResolvedValue({ id: 3, user: { id: 9, username: 'ann' }, role: 'coauthor', accepted: false });
+    const r = render(<BookCollaborators route={{ params: { id: 5, title: 'Book' } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('collab-username')).toBeTruthy());
+    fireEvent.changeText(r.getByTestId('collab-username'), 'ann');
+    fireEvent.press(r.getByTestId('collab-role-coauthor'));
+    await act(async () => { fireEvent.press(r.getByTestId('collab-invite')); });
+    expect(mockApi.inviteCollaborator).toHaveBeenCalledWith(5, 'ann', 'coauthor');
+    expect(r.getByTestId('collab-row-3')).toBeTruthy();
+  });
+
+  test('the book page: what\'s coming, and an EPUB for its writers', async () => {
+    jest.useFakeTimers();
+    try {
+      const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+      mockApi.fetchPublication.mockResolvedValue(book({
+        is_owner: true, my_role: 'owner',
+        upcoming: [{ id: 60, title: 'Chapter three', publish_at: '2026-10-03T06:00:00Z' }],
+      }));
+      mockApi.requestBookExport.mockResolvedValue({ status: 'queued' });
+      mockApi.fetchBookExport.mockResolvedValueOnce({ status: 'running' })
+        .mockResolvedValueOnce({ status: 'done', url: 'https://r2.test/exports/5/b.epub' });
+      const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={nav()} />);
+      await act(async () => {});
+      await waitFor(() => expect(r.getByTestId('pub-upcoming')).toBeTruthy());
+      expect(r.getByText('Chapter three')).toBeTruthy();
+      await act(async () => { fireEvent.press(r.getByTestId('pub-export')); });
+      await act(async () => { jest.advanceTimersByTime(3000); });
+      await act(async () => { jest.advanceTimersByTime(3000); });
+      await act(async () => {});
+      expect(open).toHaveBeenCalledWith('https://r2.test/exports/5/b.epub');
+      open.mockRestore();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

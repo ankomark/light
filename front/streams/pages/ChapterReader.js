@@ -18,7 +18,7 @@ import BibleNoteSheet from '../components/BibleNoteSheet';
 import { HIGHLIGHT_WASH } from '../components/BibleVerseActions';
 import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
 import { useReaderSettings, resolveReadingLook, SPEECH_RATES } from '../utils/readerSettings';
-import { splitBlocks, plainText, quoteOf, findBlock } from '../utils/chapterBlocks';
+import { splitBlocks, splitFootnotes, plainText, quoteOf, findBlock } from '../utils/chapterBlocks';
 import { confirmAction } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -118,6 +118,10 @@ const ChapterReader = ({ route, navigation }) => {
   const params = route.params || {};
   const pubId = params.id ?? params.publication?.id;
   const settings = useReaderSettings();
+  // A preview from the editor: the text passed in, nothing kept on the phone,
+  // no reading time, progress or highlights recorded.
+  const previewing = !!params.preview;
+  const tracking = isAuthenticated && !previewing;
 
   const [book, setBook] = useState(() => bookFrom(params) || peekBook(uid, pubId));
   const chapters = book?.chapters || [];
@@ -203,13 +207,13 @@ const ChapterReader = ({ route, navigation }) => {
   const touch = () => { clock.current.lastTouch = Date.now(); };
   const commitReading = useCallback((i, send = true) => {
     const c = clock.current;
-    if (!isAuthenticated || pubId == null) return;
+    if (!tracking || pubId == null) return;
     if (c.seconds > 0 || c.furthest > 0) {
       noteReading(pubId, { index: i, seconds: c.seconds, furthest: c.furthest, position: c.position });
     }
     c.seconds = 0;
     if (send) flushReading().catch(() => {});
-  }, [isAuthenticated, pubId]);
+  }, [tracking, pubId]);
 
   // Opened with only an id (a link, a restored screen): the contents first.
   useEffect(() => {
@@ -250,6 +254,7 @@ const ChapterReader = ({ route, navigation }) => {
 
   const fetchInto = useCallback(async (i) => {
     const ch = chapters[i];
+    if (previewing) return { chapter: { ...ch, body: ch?.body || '' }, stale: false };
     try {
       return await loadChapter(pubId, i, ch, fallbackFor(i));
     } catch (err) {
@@ -301,10 +306,10 @@ const ChapterReader = ({ route, navigation }) => {
 
   // Remember the chapter reached (signed in only), once the reader settles on it.
   useEffect(() => {
-    if (!isAuthenticated || pubId == null || !book) return undefined;
+    if (!tracking || pubId == null || !book) return undefined;
     const h = setTimeout(() => saveReadingProgress(pubId, index).catch(() => {}), SAVE_PROGRESS_MS);
     return () => clearTimeout(h);
-  }, [isAuthenticated, pubId, index, book]);
+  }, [tracking, pubId, index, book]);
 
   // A new chapter: what was read of the last one is noted; this one starts fresh.
   useEffect(() => {
@@ -315,7 +320,7 @@ const ChapterReader = ({ route, navigation }) => {
 
   // The clock itself, and the half-minute / background notes.
   useEffect(() => {
-    if (!isAuthenticated || pubId == null) return undefined;
+    if (!tracking || pubId == null) return undefined;
     flushReading().catch(() => {});     // anything read while offline, now
     let sinceCommit = 0;
     const tick = setInterval(() => {
@@ -332,13 +337,21 @@ const ChapterReader = ({ route, navigation }) => {
       else touch();
     });
     return () => { clearInterval(tick); sub.remove(); };
-  }, [isAuthenticated, pubId, commitReading]);
+  }, [tracking, pubId, commitReading]);
 
   // ── The chapter as paragraphs, and the reader's marks on them ──
   const body = view.chapter?.body;
-  const blocks = useMemo(() => (body ? splitBlocks(body) : []), [body]);
+  // Footnotes: raised numbers in the text, the notes as a last paragraph —
+  // after the others, so highlights keep their places.
+  const blocks = useMemo(() => {
+    if (!body) return [];
+    const { body: text, notes } = splitFootnotes(body);
+    const out = splitBlocks(text);
+    if (notes.length) out.push(`---\n**${t('reader.notes')}**\n\n${notes.map((f) => `${f.n}. ${f.text}`).join('\n')}`);
+    return out;
+  }, [body, t]);
   const plainBlocks = useMemo(() => blocks.map(plainText), [blocks]);
-  const allMarks = useBookHighlights(isAuthenticated ? pubId : null);
+  const allMarks = useBookHighlights(tracking ? pubId : null);
   const marks = useMemo(() => {
     const byBlock = {};
     const chId = view.chapter?.id;
@@ -477,6 +490,7 @@ const ChapterReader = ({ route, navigation }) => {
   // ── Highlights and notes ──
   const onLongPress = useCallback(async (i) => {
     touch();
+    if (previewing) return;                  // a preview: nothing to mark
     if (!isAuthenticated) {
       const ok = await confirmAction({
         title: t('reader.signInToHighlight'), confirmLabel: t('auth.login'), cancelLabel: t('common.cancel'),
@@ -486,7 +500,7 @@ const ChapterReader = ({ route, navigation }) => {
     }
     setSelected(i);
     setChromeOn(false);
-  }, [isAuthenticated, navigation, t]);
+  }, [isAuthenticated, previewing, navigation, t]);
 
   const selectedMark = selected != null ? marks[selected] : null;
   const selectedQuote = selected != null ? quoteOf(blocks[selected] || '') : '';
@@ -566,6 +580,12 @@ const ChapterReader = ({ route, navigation }) => {
         onLayout={(e) => { viewportH.current = e.nativeEvent.layout.height; }}
       >
         <View style={styles.page} onLayout={(e) => { pageY.current = e.nativeEvent.layout.y; }}>
+          {previewing ? (
+            <View style={styles.staleBar} testID="reader-preview">
+              <Ionicons name="eye-outline" size={14} color={chrome} />
+              <Text style={[styles.staleText, { color: chrome }]}>{t('reader.previewing')}</Text>
+            </View>
+          ) : null}
           {view.stale ? (
             <View style={styles.staleBar} testID="reader-stale">
               <Ionicons name="cloud-offline-outline" size={14} color={chrome} />
@@ -599,7 +619,7 @@ const ChapterReader = ({ route, navigation }) => {
           ) : <ProseSkeleton lines={12} />}
 
           {/* The end of a chapter: what others made of it. */}
-          {view.status === 'ready' && view.chapter?.status !== 'draft' ? (
+          {view.status === 'ready' && view.chapter?.status !== 'draft' && !previewing ? (
             <TouchableOpacity
               style={[styles.discussBtn, { borderColor: subtleBorder }]}
               onPress={() => navigation.navigate('ChapterDiscussion', {
@@ -669,7 +689,7 @@ const ChapterReader = ({ route, navigation }) => {
               accessibilityRole="button" accessibilityLabel={t('common.contents')}>
               <Ionicons name="list" size={22} color={chrome} />
             </TouchableOpacity>
-            {isAuthenticated && !book?.is_owner && view.chapter?.id ? (
+            {tracking && !book?.is_owner && view.chapter?.id ? (
               <TouchableOpacity onPress={() => setReportOpen(true)} style={styles.iconBtn} hitSlop={8}
                 accessibilityRole="button" accessibilityLabel={t('reader.reportChapter')} testID="reader-report">
                 <Ionicons name="flag-outline" size={19} color={chrome} />

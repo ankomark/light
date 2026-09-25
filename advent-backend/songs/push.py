@@ -18,6 +18,7 @@ NOTIFICATION_TITLES = {
     'new_chapter': '\U0001f4d6 New chapter',
     'book_discussion': '\U0001f4ac Book discussion',
     'book_review': '⭐ New review',
+    'book_invite': '✍️ Invitation to write',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.
@@ -49,6 +50,7 @@ NOTIFICATION_CATEGORIES = {
     # talking to you, like a comment.
     'book_discussion': 'comments',
     'book_review': 'comments',
+    'book_invite': 'books',
 }
 
 

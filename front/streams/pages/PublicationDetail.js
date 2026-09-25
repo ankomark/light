@@ -1,12 +1,15 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { deletePublication, togglePublicationLike, togglePublicationBookmark } from '../services/api';
+import {
+  deletePublication, togglePublicationLike, togglePublicationBookmark, requestBookExport, fetchBookExport,
+} from '../services/api';
+import { formatWhen } from '../components/ScheduleSheet';
 import {
   peekBook, readBook, fetchBook, forgetBook, patchBook, notePublicationsChanged,
   keptChapterCount, downloadBook,
@@ -175,6 +178,30 @@ const PublicationDetail = ({ route, navigation }) => {
   };
 
   // The reader gets the contents, not the book: it loads each chapter itself.
+  // The book's writers: the author, and co-authors / editors invited to it.
+  const canWrite = !!pub && (pub.is_owner || ['coauthor', 'editor'].includes(pub.my_role));
+
+  // EPUB: made by the worker; asked for, then checked every few seconds, and
+  // opened when it's ready (the phone downloads it or opens it in a reader).
+  const [exporting, setExporting] = useState(false);
+  const onExport = async () => {
+    setExporting(true);
+    try {
+      await requestBookExport(id);
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const res = await fetchBookExport(id);
+        if (res.status === 'done' && res.url) { Linking.openURL(res.url).catch(() => {}); return; }
+        if (res.status === 'failed') throw new Error(res.error || 'failed');
+      }
+      notify(t('studio.export'), t('studio.exportSlow'));
+    } catch {
+      notify(t('common.error'), t('studio.exportFailed'));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const openDiscussion = (index, ch) => navigation.navigate('ChapterDiscussion', {
     id: pub.id, index, chapterTitle: ch?.title || '', isBookAuthor: !!pub.is_owner,
   });
@@ -230,16 +257,23 @@ const PublicationDetail = ({ route, navigation }) => {
           accessibilityRole="button" accessibilityLabel={t('common.back')}>
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
-        {pub?.is_owner && (
+        {canWrite && (
           <View style={styles.ownerActions}>
+            <TouchableOpacity style={styles.iconBtn} onPress={onExport} hitSlop={8} disabled={exporting}
+              accessibilityRole="button" accessibilityLabel={t('studio.export')} testID="pub-export">
+              {exporting ? <ActivityIndicator size="small" color={colors.textSecondary} />
+                : <MaterialIcons name="file-download" size={21} color={colors.textSecondary} />}
+            </TouchableOpacity>
             <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('PublicationEditor', { id: pub.id })} hitSlop={8}
               accessibilityRole="button" accessibilityLabel={t('pub.editTitle')} testID="pub-edit">
               <MaterialIcons name="edit" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={onDelete} hitSlop={8}
-              accessibilityRole="button" accessibilityLabel={t('pubDetail.deleteTitle')} testID="pub-delete">
-              <MaterialIcons name="delete-outline" size={21} color={colors.error} />
-            </TouchableOpacity>
+            {pub.is_owner ? (
+              <TouchableOpacity style={styles.iconBtn} onPress={onDelete} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel={t('pubDetail.deleteTitle')} testID="pub-delete">
+                <MaterialIcons name="delete-outline" size={21} color={colors.error} />
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
       </View>
@@ -398,6 +432,20 @@ const PublicationDetail = ({ route, navigation }) => {
               </TouchableOpacity>
             ))
           )}
+          {/* Serial publishing: what's coming, and when. */}
+          {pub?.upcoming?.length ? (
+            <View style={styles.upcoming} testID="pub-upcoming">
+              <Text style={styles.upcomingTitle}>{t('studio.comingSoon')}</Text>
+              {pub.upcoming.map((u) => (
+                <View key={u.id} style={styles.upcomingRow}>
+                  <Ionicons name="time-outline" size={16} color={colors.accent} />
+                  <Text style={styles.upcomingName} numberOfLines={1}>{u.title || t('studio.newChapter')}</Text>
+                  <Text style={styles.upcomingWhen}>{formatWhen(u.publish_at)}</Text>
+                </View>
+              ))}
+              {!bookmarked ? <Text style={styles.upcomingHint}>{t('studio.saveToHear')}</Text> : null}
+            </View>
+          ) : null}
           {pub && pub.status === 'published' ? <BookReviews pubId={pub.id} navigation={navigation} onChanged={load} /> : null}
           <View style={{ height: spacing.xxl }} />
         </View>
@@ -495,6 +543,15 @@ const styles = StyleSheet.create({
   },
   tocNum: { ...typography.label, color: colors.primary, fontWeight: '800', width: 24 },
   tocChapter: { ...typography.label, color: colors.textPrimary, flex: 1 },
+  upcoming: {
+    marginTop: spacing.md, padding: spacing.md, gap: spacing.sm, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.accent, borderStyle: 'dashed',
+  },
+  upcomingTitle: { ...typography.label, color: colors.accent, fontWeight: '800' },
+  upcomingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  upcomingName: { ...typography.label, color: colors.textPrimary, flex: 1 },
+  upcomingWhen: { ...typography.caption, color: colors.textSecondary },
+  upcomingHint: { ...typography.caption, color: colors.textMuted },
   talk: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 4 },
   talkN: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   tocMark: {

@@ -4,7 +4,13 @@ import os
 from django.http import HttpResponse, Http404, HttpResponseNotFound
 from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, FloatField, F, Case, When, Value, Sum
 from django.db.models.functions import Coalesce
-from ..models import ChapterRevision, BookHighlight, BookReview, ChapterComment, ReadingActivity
+from ..models import (
+    ChapterRevision, BookHighlight, BookReview, ChapterComment, ReadingActivity, PublicationCollaborator,
+    PublicationExport,
+)
+from .. import writer_studio
+from ..publishing import collaborating
+from ..serializers.publications import ChaptersChangedElsewhere
 from django.db.models import Avg
 from .. import book_community
 from ..publishing import (
@@ -1370,7 +1376,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         qs = self._visible().select_related('author', 'author__profile')
         # Engagement actions only need the row; the list and the page need counts.
         if self.action in ('like', 'bookmark', 'progress', 'chapter', 'reading', 'revisions', 'revision',
-                           'reviews', 'discussion', 'delete_comment'):
+                           'reviews', 'discussion', 'delete_comment', 'collaborators', 'collaborator', 'export'):
             return qs
         qs = self._counted(qs, user)
         if self.action == 'retrieve':
@@ -1389,10 +1395,15 @@ class PublicationViewSet(viewsets.ModelViewSet):
                     .values('publication').annotate(n=Sum('word_count')).values('n')[:1],
                     output_field=IntegerField()), 0),
             )
+            collab = PublicationCollaborator.objects.filter(publication=OuterRef('pk'), accepted_at__isnull=False)
+            qs = qs.annotate(collab_count=Coalesce(Subquery(
+                collab.order_by().values('publication').annotate(n=Count('pk')).values('n')[:1],
+                output_field=IntegerField()), 0))
             if user.is_authenticated:
                 follows = User.followers.through.objects.filter(
                     from_user_id=OuterRef('author_id'), to_user_id=user.id)
                 mine = ReadingProgress.objects.filter(publication=OuterRef('pk'), user=user)
+                qs = qs.annotate(my_collab_role=Subquery(collab.filter(user=user).values('role')[:1]))
                 qs = qs.annotate(
                     my_last_chapter=Subquery(mine.values('last_chapter')[:1], output_field=IntegerField()),
                     my_last_position=Subquery(mine.values('position')[:1], output_field=FloatField()),
@@ -1701,7 +1712,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
 
     def _own(self, request):
         pub = self.get_object()
-        if pub.author_id != request.user.id:
+        # The book's writers (author, co-authors, editors) see its history.
+        if not writer_studio.can_edit(request.user, pub):
             raise Http404('No such publication.')   # someone else's history isn't there to see
         return pub
 
@@ -1734,10 +1746,20 @@ class PublicationViewSet(viewsets.ModelViewSet):
         })
 
     def update(self, request, *args, **kwargs):
-        if self.get_object().author_id != request.user.id:
+        pub = self.get_object()
+        role = writer_studio.role_of(request.user, pub)
+        if role not in ('owner', *PublicationCollaborator.EDIT_ROLES):
             return Response({"error": "You can only edit your own publications."},
                             status=status.HTTP_403_FORBIDDEN)
-        return super().update(request, *args, **kwargs)
+        # Co-authors and editors write; publishing (or taking it down) stays
+        # the author's.
+        if role != 'owner' and 'status' in request.data and request.data.get('status') != pub.status:
+            return Response({"error": "Only the author can publish or unpublish this book.", 'code': 'owner_only'},
+                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            return super().update(request, *args, **kwargs)
+        except ChaptersChangedElsewhere as e:
+            return Response(e.payload, status=status.HTTP_409_CONFLICT)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -1750,8 +1772,10 @@ class PublicationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def mine(self, request):
         # Counted like the list (it used to count likes and marks row by row).
+        # Books shared with you (accepted) are your work too.
         qs = self.filter_queryset(self._counted(
-            Publication.objects.filter(author=request.user, is_removed=False)
+            Publication.objects.filter(Q(author=request.user) | Q(id__in=collaborating(request.user)),
+                                       is_removed=False)
             .select_related('author', 'author__profile'),
             request.user, all_chapters=True,
         ).order_by('-created_at'))
@@ -1759,6 +1783,129 @@ class PublicationViewSet(viewsets.ModelViewSet):
         ser = PublicationListSerializer(page if page is not None else qs, many=True,
                                         context=self.get_serializer_context())
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
+
+    # ── Writer Studio (songs/writer_studio.py) ──
+
+    def _owned(self, request):
+        pub = self.get_object()
+        if pub.author_id != request.user.id:
+            raise PermissionDenied('Only the author can do this.')
+        return pub
+
+    @staticmethod
+    def _collab_row(c):
+        return {'id': c.id, 'user': SimpleUserSerializer(c.user).data, 'role': c.role,
+                'accepted': c.accepted_at is not None, 'created_at': c.created_at}
+
+    @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAuthenticated])
+    def collaborators(self, request, pk=None):
+        """GET: who works on the book (anyone who does may see). POST
+        {username, role}: the author invites someone (they're told)."""
+        pub = self.get_object()
+        role = writer_studio.role_of(request.user, pub)
+        if role is None:
+            raise PermissionDenied('Not your book.')
+        if request.method == 'GET':
+            rows = pub.collaborators.select_related('user', 'user__profile')
+            return Response({'results': [self._collab_row(c) for c in rows], 'my_role': role})
+        if role != 'owner':
+            raise PermissionDenied('Only the author invites.')
+        who = User.objects.filter(username__iexact=str(request.data.get('username') or '').strip().lstrip('@'),
+                                  is_deactivated=False).first()
+        new_role = request.data.get('role') or PublicationCollaborator.EDITOR
+        if who is None or who.id == pub.author_id or who.id in blocked_ids_for(request.user):
+            return Response({'error': 'No one by that name can be invited.', 'code': 'no_user'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if new_role not in dict(PublicationCollaborator.ROLES):
+            return Response({'error': 'Unknown role.'}, status=status.HTTP_400_BAD_REQUEST)
+        c, created = PublicationCollaborator.objects.get_or_create(
+            publication=pub, user=who, defaults={'role': new_role, 'invited_by': request.user})
+        if not created:
+            c.role = new_role
+            c.save(update_fields=['role'])
+        else:
+            from ..push import notify_user
+            notify_user(who, 'book_invite', f'{request.user.username} invited you to work on “{pub.title}”',
+                        data={'type': 'book_invite', 'publication_id': pub.id})
+        return Response(self._collab_row(c), status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=['patch', 'delete'], url_path=r'collaborators/(?P<cid>\d+)',
+            permission_classes=[permissions.IsAuthenticated])
+    def collaborator(self, request, pk=None, cid=None):
+        """The author changes a role (PATCH {role}) or removes someone; a
+        collaborator may remove themselves (leave)."""
+        pub = self.get_object()
+        c = get_object_or_404(PublicationCollaborator, pk=cid, publication=pub)
+        if request.method == 'DELETE':
+            if request.user.id not in (pub.author_id, c.user_id):
+                raise PermissionDenied('Not yours to remove.')
+            c.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if pub.author_id != request.user.id:
+            raise PermissionDenied('Only the author changes roles.')
+        if request.data.get('role') not in dict(PublicationCollaborator.ROLES):
+            return Response({'error': 'Unknown role.'}, status=status.HTTP_400_BAD_REQUEST)
+        c.role = request.data['role']
+        c.save(update_fields=['role'])
+        return Response(self._collab_row(c))
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def invitations(self, request):
+        """Books you've been invited to work on, not yet answered."""
+        rows = (PublicationCollaborator.objects.filter(user=request.user, accepted_at__isnull=True,
+                                                       publication__is_removed=False)
+                .select_related('publication', 'invited_by'))
+        return Response({'results': [{
+            'id': c.id, 'role': c.role, 'publication_id': c.publication_id, 'title': c.publication.title,
+            'cover': media.resolve(c.publication.cover) or '',
+            'invited_by': c.invited_by.username if c.invited_by else '', 'created_at': c.created_at,
+        } for c in rows]})
+
+    @action(detail=False, methods=['post'], url_path=r'invitations/(?P<cid>\d+)/(?P<answer>accept|decline)',
+            permission_classes=[permissions.IsAuthenticated])
+    def answer_invitation(self, request, cid=None, answer=None):
+        c = get_object_or_404(PublicationCollaborator, pk=cid, user=request.user, accepted_at__isnull=True)
+        if answer == 'decline':
+            c.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        c.accepted_at = timezone.now()
+        c.save(update_fields=['accepted_at'])
+        return Response({'publication_id': c.publication_id, 'role': c.role})
+
+    @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAuthenticated])
+    def export(self, request, pk=None):
+        """The author's book as an EPUB. POST: make one (the worker does it);
+        GET: the latest — {status, url}."""
+        pub = self.get_object()
+        if not writer_studio.can_edit(request.user, pub):
+            raise PermissionDenied('Only the book\'s writers can export it.')
+        if request.method == 'POST':
+            exp = writer_studio.request_export(pub, request.user, 'epub')
+            return Response({'id': exp.id, 'status': exp.status, 'url': ''}, status=status.HTTP_202_ACCEPTED)
+        exp = pub.exports.first()
+        if exp is None:
+            return Response({'status': None, 'url': ''})
+        return Response({'id': exp.id, 'status': exp.status, 'url': exp.url, 'error': exp.error,
+                         'created_at': exp.created_at, 'finished_at': exp.finished_at})
+
+    @action(detail=False, methods=['post'], url_path='cover-render', permission_classes=[permissions.IsAuthenticated])
+    def cover_render(self, request):
+        """Draw a cover from a template: {template, title, subtitle?, author?,
+        palette?, image_url? (an upload of ours, for 'photo')} → {url}."""
+        title = str(request.data.get('title') or '').strip()
+        if not title:
+            return Response({'error': 'A cover needs the title.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            url = writer_studio.make_cover(
+                request.user, str(request.data.get('template') or 'minimal'), title[:200],
+                subtitle=str(request.data.get('subtitle') or '')[:120],
+                author=str(request.data.get('author') or request.user.username)[:80],
+                palette=str(request.data.get('palette') or 'navy'),
+                image_url=str(request.data.get('image_url') or ''),
+            )
+        except RuntimeError:
+            return Response({'error': 'Covers can’t be made right now.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'url': url}, status=status.HTTP_201_CREATED)
 
 
 class BookHighlightViewSet(viewsets.GenericViewSet):

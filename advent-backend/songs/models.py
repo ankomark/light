@@ -2058,6 +2058,9 @@ class Publication(models.Model):
     # An editor's pick since this time (set by staff in the Django admin);
     # null = not a pick. The most recent picks lead Discover.
     featured_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # When the author confirmed, on publishing, that the words are theirs to
+    # publish (or they have permission). Publishing needs it once.
+    rights_confirmed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -2091,6 +2094,9 @@ class Chapter(models.Model):
     # Taken down by a moderator: hidden from readers, kept (and marked) for
     # the author, and never brought back by the author's own saves.
     is_removed = models.BooleanField(default=False)
+    # Serial publishing: a draft chapter set to go out at this time (the
+    # worker publishes it and tells readers). Readers see it as "coming".
+    publish_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['order', 'id']
@@ -2209,6 +2215,44 @@ class BookReview(models.Model):
     class Meta:
         unique_together = ('publication', 'user')
         ordering = ['-updated_at', '-id']
+
+
+class PublicationCollaborator(models.Model):
+    """Someone the author invited to work on a book.
+
+    co-author: writes and edits everything but publishing, deleting and who
+    is invited; editor: the same (the difference is how they're credited);
+    viewer: reads the drafts. The invitation counts once accepted."""
+    COAUTHOR, EDITOR, VIEWER = 'coauthor', 'editor', 'viewer'
+    ROLES = [(COAUTHOR, 'Co-author'), (EDITOR, 'Editor'), (VIEWER, 'Viewer')]
+    EDIT_ROLES = (COAUTHOR, EDITOR)
+
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='collaborators')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='book_collaborations')
+    role = models.CharField(max_length=10, choices=ROLES, default=EDITOR)
+    invited_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('publication', 'user')
+        ordering = ['created_at']
+
+
+class PublicationExport(models.Model):
+    """A book made into a file (EPUB) by the worker, for its author."""
+    QUEUED, RUNNING, DONE, FAILED = 'queued', 'running', 'done', 'failed'
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='exports')
+    requested_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    format = models.CharField(max_length=10, default='epub')
+    status = models.CharField(max_length=10, default=QUEUED)
+    url = models.CharField(max_length=500, blank=True, default='')
+    error = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class ChapterComment(models.Model):

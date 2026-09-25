@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, Platform,
+  ActivityIndicator, Platform, useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +20,9 @@ import {
   DEFAULT_WRITING_THEME, fontFamilyFor, extractInlineImages, expandInlineImages,
 } from '../utils/publications';
 import { uploadMedia } from '../services/cloudinary';
+import { countWords, splitFootnotes } from '../utils/chapterBlocks';
+import ScheduleSheet, { formatWhen } from '../components/ScheduleSheet';
+import PublishSheet from '../components/PublishSheet';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -27,10 +30,16 @@ import { useAuth } from '../context/useAuth';
 
 // `id` is the saved chapter's (none until first saved): sent back so the save
 // updates it in place — its history and readers' places kept.
+// `version` is the one it was opened at: the save says so, and a chapter
+// changed elsewhere since (a co-author, another phone) isn't overwritten
+// without asking. `publishAt`: a draft's scheduled time (serial publishing).
 const blankChapter = (extra = {}) => ({
   key: `${Date.now()}_${Math.random()}`, id: null, title: '', body: '', images: {}, preview: false,
-  status: 'published', isRemoved: false, ...extra,
+  status: 'published', isRemoved: false, version: null, publishAt: null, ...extra,
 });
+
+const WORDS_PER_MIN = 200;
+const minutesFor = (words) => (words ? Math.max(1, Math.round(words / WORDS_PER_MIN)) : 0);
 
 // A picture goes into the chapter as a plain markdown image of its R2 address:
 // a few dozen characters instead of hundreds of KB of base64 in the chapter —
@@ -52,8 +61,16 @@ const FORMAT_TOOLS = [
   { kind: 'list', icon: 'format-list-bulleted' },
   { kind: 'numbered', icon: 'format-list-numbered' },
   { kind: 'link', icon: 'link-variant' },
+  { kind: 'footnote', icon: 'format-superscript' },
+  { kind: 'table', icon: 'table-large' },
   { kind: 'divider', icon: 'minus' },
 ];
+
+// The next footnote number in a chapter: one past the highest used.
+const nextFootnote = (body) => {
+  const used = [...String(body).matchAll(/\[\^(\d+)\]/g)].map((m) => Number(m[1]));
+  return used.length ? Math.max(...used) + 1 : 1;
+};
 
 /** The markdown for a format tapped on `body` with `sel` selected →
  *  { body, caret: [start, end] }. It wraps the SELECTED text (real formatting)
@@ -106,6 +123,25 @@ export const formatBody = (body = '', sel, kind) => {
       caret = [pos, pos];
       break;
     }
+    case 'footnote': {
+      // A number at the caret, and its note line at the chapter's end — the
+      // caret goes there, to write the note.
+      const n = nextFootnote(body);
+      before = body.slice(0, end); after = body.slice(end);
+      insert = `[^${n}]`;
+      const tail = `${after}${after.endsWith('\n') || !after ? '' : '\n'}\n[^${n}]: `;
+      const result = `${before}${insert}${tail}`;
+      return { body: result, caret: [result.length, result.length] };
+    }
+    case 'table': {
+      // Two columns, two rows, empty cells: the shape, not placeholder words.
+      before = body.slice(0, end); after = body.slice(end);
+      const lead = before && !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+      insert = `${lead}|  |  |\n| --- | --- |\n|  |  |\n\n`;
+      const pos = before.length + lead.length + 2;
+      caret = [pos, pos];
+      break;
+    }
     default: return null;
   }
   return { body: `${before}${insert}${after}`, caret };
@@ -114,10 +150,11 @@ export const formatBody = (body = '', sel, kind) => {
 // One chapter's card. Memoised: typing in one chapter no longer redraws every
 // other chapter (and their markdown previews) on each keystroke.
 const ChapterCard = memo(({
-  ch, idx, count, theme, selection, uploading, t,
-  onChange, onFormat, onSelect, onImage, onMove, onRemove, onHistory,
+  ch, idx, count, theme, selection, uploading, t, words = 0,
+  onChange, onFormat, onSelect, onImage, onMove, onRemove, onHistory, onSchedule, onLayout,
 }) => (
-  <View style={[styles.chapterCard, ch.status === 'draft' && styles.chapterCardDraft]}>
+  <View style={[styles.chapterCard, ch.status === 'draft' && styles.chapterCardDraft]}
+    onLayout={(e) => onLayout?.(ch.key, e.nativeEvent.layout.y)}>
     <View style={styles.chapterTop}>
       <Text style={styles.chapterNum}>{t('pubDetail.chapterN', { n: idx + 1 })}</Text>
       <View style={styles.chapterTools}>
@@ -164,7 +201,17 @@ const ChapterCard = memo(({
         <Text style={styles.removedText}>{t('pub.removedByModerator')}</Text>
       </View>
     ) : ch.status === 'draft' ? (
-      <Text style={styles.draftNote}>{t('pub.chapterDraft')}</Text>
+      <View style={styles.draftRow}>
+        <Text style={[styles.draftNote, styles.flex]}>
+          {ch.publishAt ? t('schedule.goesOut', { when: formatWhen(ch.publishAt) }) : t('pub.chapterDraft')}
+        </Text>
+        {/* Serial publishing: this chapter goes out on its own at a time. */}
+        <TouchableOpacity onPress={() => onSchedule(ch)} style={styles.scheduleChip} hitSlop={6}
+          accessibilityRole="button" testID={`editor-schedule-${idx}`}>
+          <Ionicons name="time-outline" size={13} color={colors.accent} />
+          <Text style={styles.scheduleText}>{ch.publishAt ? t('schedule.change') : t('schedule.button')}</Text>
+        </TouchableOpacity>
+      </View>
     ) : null}
 
     <TextInput
@@ -181,7 +228,7 @@ const ChapterCard = memo(({
           style={markdownTheme(16 + theme.scale, { color: theme.text, fontFamily: fontFamilyFor(theme.font) })}
           rules={markdownImageRule}
         >
-          {expandInlineImages(ch.body, ch.images) || `_${t('pub.previewEmpty')}_`}
+          {previewOf(expandInlineImages(ch.body, ch.images), t) || `_${t('pub.previewEmpty')}_`}
         </Markdown>
       </View>
     ) : (
@@ -217,8 +264,19 @@ const ChapterCard = memo(({
         />
       </>
     )}
+    <Text style={styles.wordCount} testID={`editor-words-${idx}`}>
+      {t('studio.words', { n: words, m: minutesFor(words) })}
+    </Text>
   </View>
 ));
+
+// The preview draws footnotes as the reader does.
+const previewOf = (md, t) => {
+  const { body, notes } = splitFootnotes(md || '');
+  return notes.length
+    ? `${body}\n\n---\n**${t('reader.notes')}**\n\n${notes.map((f) => `${f.n}. ${f.text}`).join('\n')}`
+    : body;
+};
 
 const PublicationEditor = ({ route, navigation }) => {
   const { t } = useI18n();
@@ -238,6 +296,15 @@ const PublicationEditor = ({ route, navigation }) => {
   const [showDesign, setShowDesign] = useState(false);
   const [uploadingKeys, setUploadingKeys] = useState({});   // chapter key → pictures on their way
   const serverUpdatedAt = useRef(null);
+  // The writer's place on this book: the author publishes; co-authors and
+  // editors save (the book stays as it is — published or not).
+  const [role, setRole] = useState('owner');
+  const isOwner = role === 'owner';
+  const [rightsConfirmed, setRightsConfirmed] = useState(false);
+  const [scheduling, setScheduling] = useState(null);       // the chapter being scheduled
+  const [publishOpen, setPublishOpen] = useState(false);
+  const { width } = useWindowDimensions();
+  const wide = width >= 900;                                // the chapter outline beside the writing
 
   // ── Unsaved changes ────────────────────────────────────────────────────────
   // Anything changed after the form is filled (from the server or a restore)
@@ -280,6 +347,7 @@ const PublicationEditor = ({ route, navigation }) => {
             return blankChapter({
               key: `${fromServer ? 'e' : 'r'}${c.id ?? i}`, id: c.id ?? null, title: c.title || '', body, images,
               status: c.status === 'draft' ? 'draft' : 'published', isRemoved: !!(c.is_removed ?? c.isRemoved),
+              version: c.version ?? null, publishAt: c.publish_at ?? c.publishAt ?? null,
             });
           })
         : [blankChapter()],
@@ -313,6 +381,8 @@ const PublicationEditor = ({ route, navigation }) => {
         const p = await fetchPublication(editId);
         serverUpdatedAt.current = p.updated_at;
         fill(p, { fromServer: true });
+        setRole(p.my_role || 'owner');
+        setRightsConfirmed(!!p.rights_confirmed_at);
         setLoading(false);
         offerRestore(p.updated_at);
       } catch {
@@ -330,7 +400,9 @@ const PublicationEditor = ({ route, navigation }) => {
     const h = setTimeout(() => {
       const snapshot = {
         title, summary, cover, category, theme,
-        chapters: chapters.map((c) => ({ id: c.id, status: c.status, title: c.title, body: stripTokens(c.body) })),
+        chapters: chapters.map((c) => ({
+          id: c.id, version: c.version, status: c.status, publish_at: c.publishAt, title: c.title, body: stripTokens(c.body),
+        })),
         at: Date.now(),
       };
       AsyncStorage.setItem(draftKey, JSON.stringify(snapshot)).catch(() => {});
@@ -471,7 +543,25 @@ const PublicationEditor = ({ route, navigation }) => {
 
   const uploadsPending = coverUploading || Object.keys(uploadingKeys).length > 0;
 
-  const save = async (publish) => {
+  // The chapters as the server takes them: ids and the versions they were
+  // opened at (so another writer's newer work isn't overwritten unasked),
+  // draft state and scheduled times.
+  const chapterPayload = () => chapters
+    // Expand older base64 tokens back for storage.
+    .map((c, i) => ({
+      ...(c.id ? { id: c.id } : {}),
+      ...(c.id && c.version != null ? { version: c.version } : {}),
+      order: i + 1, title: c.title.trim(), body: expandInlineImages(c.body, c.images).trim(), status: c.status,
+      publish_at: c.status === 'draft' ? c.publishAt || null : null,
+    }))
+    .filter((c) => c.title || c.body);
+
+  /**
+   * Save. mode: 'draft' (a new or draft book stays a draft), 'publish' (out,
+   * from the publish sheet), 'keep' (as it is — a published book stays out;
+   * co-authors and editors only ever keep), 'unpublish' (back to a draft).
+   */
+  const save = async (mode, { rightsConfirmed: confirmed = false, force = false } = {}) => {
     if (uploadsPending) {
       notify(t('pub.uploading'), t('pub.waitUploads'));
       return;
@@ -480,25 +570,22 @@ const PublicationEditor = ({ route, navigation }) => {
       notify(t('pub.missingTitleTitle'), t('pub.missingTitleBody'));
       return;
     }
-    const cleaned = chapters
-      // Expand older base64 tokens back for storage.
-      .map((c, i) => ({
-        ...(c.id ? { id: c.id } : {}),
-        order: i + 1, title: c.title.trim(), body: expandInlineImages(c.body, c.images).trim(), status: c.status,
-      }))
-      .filter((c) => c.title || c.body);
+    const cleaned = chapterPayload();
     if (cleaned.length === 0) {
       notify(t('pub.addContentTitle'), t('pub.addContentBody'));
       return;
     }
+    const nextStatus = mode === 'publish' ? 'published' : mode === 'keep' ? status : 'draft';
     const payload = {
       title: title.trim(),
       summary: summary.trim(),
       cover: cover || '',
       theme,
       category,
-      status: publish ? 'published' : 'draft',
+      ...(isOwner ? { status: nextStatus } : {}),
       chapters: cleaned,
+      ...(confirmed ? { rights_confirmed: true } : {}),
+      ...(force ? { force: true } : {}),
     };
     try {
       setSaving(true);
@@ -509,16 +596,100 @@ const PublicationEditor = ({ route, navigation }) => {
       forgetBook(currentUser?.id, saved.id);   // its page reloads with the new contents
       notePublicationsChanged();
       leaving.current = true;
+      setPublishOpen(false);
       // Editing: back to the book page (it reloads). New: the book page takes
       // the editor's place — back from it goes to the list, not the editor.
       if (editId) navigation.goBack();
       else navigation.replace('PublicationDetail', { id: saved.id });
     } catch (err) {
-      const msg = err?.response?.data?.error || t('pub.saveFailed');
+      if (err?.status === 409 && err?.data?.code === 'conflict') {
+        await resolveConflict(err.data.chapters || [], mode, confirmed);
+        return;
+      }
+      const data = err?.response?.data || {};
+      const msg = data.code === 'rights_required' ? t('publish.rightsNeeded') : data.error || t('pub.saveFailed');
       notify(t('common.error'), msg);
     } finally {
       setSaving(false);
     }
+  };
+
+  // Someone else changed chapters since they were opened here. Keep mine:
+  // save anyway (theirs stays in each chapter's history). Load theirs: those
+  // chapters come in as they are now; everything else here stays.
+  const resolveConflict = async (changed, mode, confirmed) => {
+    const names = changed.map((c) => c.title || t('pubDetail.chapterN', { n: '?' })).join(', ');
+    const keepMine = await confirmAction({
+      title: t('studio.conflictTitle'), message: t('studio.conflictBody', { chapters: names }),
+      confirmLabel: t('studio.keepMine'), cancelLabel: t('studio.loadTheirs'),
+    });
+    if (keepMine) {
+      save(mode, { rightsConfirmed: confirmed, force: true });
+      return;
+    }
+    try {
+      const p = await fetchPublication(editId);
+      const fresh = new Map((p.chapters || []).map((c) => [c.id, c]));
+      const ids = new Set(changed.map((c) => c.id));
+      setChapters((prev) => prev.map((c) => {
+        const theirs = ids.has(c.id) ? fresh.get(c.id) : null;
+        if (!theirs) return c;
+        const { body, images } = extractInlineImages(theirs.body || '');
+        return { ...c, title: theirs.title || '', body, images, version: theirs.version, status: theirs.status };
+      }));
+      notify(t('studio.loadedTitle'), t('studio.loadedBody'));
+    } catch {
+      notify(t('common.error'), t('pub.loadFailed'));
+    }
+  };
+
+  const confirmUnpublish = async () => {
+    const ok = await confirmAction({
+      title: t('studio.unpublishTitle'), message: t('studio.unpublishBody'),
+      confirmLabel: t('studio.unpublish'), cancelLabel: t('common.cancel'), destructive: true,
+    });
+    if (ok) save('unpublish');
+  };
+
+  // Preview: the book as readers will see it, from what's in the editor now
+  // (nothing saved). The reader takes a whole book passed in.
+  const preview = () => {
+    setPublishOpen(false);
+    navigation.navigate('ChapterReader', {
+      preview: true,
+      publication: {
+        id: editId ?? 'preview', title: title.trim(), theme,
+        chapters: chapterPayload().filter((c) => c.status !== 'draft')
+          .map((c, i) => ({ id: c.id ?? `new${i}`, title: c.title, body: c.body })),
+      },
+      index: 0,
+    });
+  };
+
+  // A cover made in the Cover studio comes back here.
+  const madeCover = route.params?.cover;
+  useEffect(() => {
+    if (!madeCover) return;
+    setCover(madeCover);
+    navigation.setParams({ cover: undefined });
+  }, [madeCover]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Words: each chapter's, and the book's (as readers will get it).
+  const wordsByKey = useMemo(() => {
+    const out = {};
+    chapters.forEach((c) => { out[c.key] = countWords(c.body); });
+    return out;
+  }, [chapters]);
+  const totalWords = chapters.reduce((n, c) => n + (c.status !== 'draft' ? wordsByKey[c.key] || 0 : 0), 0);
+
+  // The outline (wide screens): a chapter's card is scrolled to.
+  const scrollRef = useRef(null);
+  const cardY = useRef({});
+  const pageY = useRef(0);
+  const onCardLayout = useCallback((key, y) => { cardY.current[key] = y; }, []);
+  const jumpTo = (key) => {
+    const y = cardY.current[key];
+    if (y != null) scrollRef.current?.scrollToPosition?.(0, pageY.current + y - 12, true);
   };
 
   if (!isAuthenticated) {
@@ -548,10 +719,47 @@ const PublicationEditor = ({ route, navigation }) => {
           <Ionicons name="close" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.topTitle}>{editId ? t('pub.editTitle') : t('pub.newTitle')}</Text>
-        <View style={styles.iconBtn} />
+        {editId ? (
+          <TouchableOpacity style={styles.iconBtn} hitSlop={8}
+            onPress={() => navigation.navigate('BookCollaborators', { id: editId, title })}
+            accessibilityRole="button" accessibilityLabel={t('studio.people')} testID="editor-people">
+            <Ionicons name="people-outline" size={22} color={colors.textPrimary} />
+          </TouchableOpacity>
+        ) : <View style={styles.iconBtn} />}
       </View>
 
+      {!isOwner ? (
+        <View style={styles.roleBar}>
+          <Ionicons name="create-outline" size={14} color={colors.accent} />
+          <Text style={styles.roleText}>{t('studio.youAre', { role: t(`studio.role.${role}`) })}</Text>
+        </View>
+      ) : null}
+
+      <View style={wide ? styles.studioRow : styles.flex}>
+      {wide ? (
+        // The book's outline beside the writing: every chapter, its words.
+        <ScrollView style={styles.outline} contentContainerStyle={styles.outlineBody} testID="editor-outline">
+          <Text style={styles.outlineTitle}>{t('pub.chapters')}</Text>
+          {chapters.map((ch, idx) => (
+            <TouchableOpacity key={ch.key} style={styles.outlineRow} onPress={() => jumpTo(ch.key)}>
+              <Text style={styles.outlineNum}>{idx + 1}</Text>
+              <View style={styles.flex}>
+                <Text style={styles.outlineName} numberOfLines={1}>{ch.title || t('pubDetail.chapterN', { n: idx + 1 })}</Text>
+                <Text style={styles.outlineMeta}>
+                  {`${wordsByKey[ch.key] || 0} · ${ch.status === 'draft' ? t('pubDetail.draft') : ''}`}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={styles.outlineAdd} onPress={addChapter}>
+            <Ionicons name="add" size={16} color={colors.primary} />
+            <Text style={styles.outlineAddText}>{t('pub.addChapter')}</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : null}
+
       <KeyboardAwareScrollView
+        ref={scrollRef}
         style={styles.flex}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -561,7 +769,7 @@ const PublicationEditor = ({ route, navigation }) => {
         extraScrollHeight={Platform.OS === 'ios' ? 24 : 90}
         keyboardOpeningTime={0}
       >
-        <View style={styles.page}>
+        <View style={styles.page} onLayout={(e) => { pageY.current = e.nativeEvent.layout.y; }}>
           {/* Cover */}
           <View style={styles.coverRow}>
             <TouchableOpacity style={styles.coverPicker} onPress={pickCover} activeOpacity={0.85} disabled={coverUploading}>
@@ -582,6 +790,17 @@ const PublicationEditor = ({ route, navigation }) => {
               {cover && !coverUploading ? (
                 <TouchableOpacity onPress={() => setCover('')}><Text style={styles.removeLink}>{t('common.remove')}</Text></TouchableOpacity>
               ) : null}
+              <TouchableOpacity
+                style={styles.designCover}
+                onPress={() => navigation.navigate('CoverStudio', {
+                  title: title.trim(), subtitle: summary.trim().slice(0, 80), author: currentUser?.username || '',
+                })}
+                accessibilityRole="button"
+                testID="editor-cover-studio"
+              >
+                <MaterialIcons name="auto-awesome" size={15} color={colors.accent} />
+                <Text style={styles.designCoverText}>{t('studio.designCover')}</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -702,6 +921,9 @@ const PublicationEditor = ({ route, navigation }) => {
           <View style={styles.chaptersHeader}>
             <Text style={styles.sectionTitle}>{t('pub.chapters')}</Text>
             <Text style={styles.hint}>{t('pub.markdownHint')}</Text>
+            <Text style={styles.totals} testID="editor-totals">
+              {t('studio.totals', { n: totalWords, m: minutesFor(totalWords), c: chapters.length })}
+            </Text>
           </View>
 
           {chapters.map((ch, idx) => (
@@ -721,6 +943,9 @@ const PublicationEditor = ({ route, navigation }) => {
               onMove={moveChapter}
               onRemove={removeChapter}
               onHistory={openHistory}
+              onSchedule={setScheduling}
+              onLayout={onCardLayout}
+              words={wordsByKey[ch.key]}
             />
           ))}
 
@@ -739,30 +964,56 @@ const PublicationEditor = ({ route, navigation }) => {
           <View style={{ height: spacing.xxl }} />
         </View>
       </KeyboardAwareScrollView>
+      </View>
 
-      {/* Save bar */}
+      {/* Save bar. A draft: save it, or publish (the checklist first). Out
+          already: save keeps it out; unpublishing asks. Co-authors / editors:
+          save — publishing is the author's. */}
       <View style={styles.saveBar}>
-        <TouchableOpacity
-          style={[styles.saveBtn, styles.draftBtn]}
-          onPress={() => save(false)}
-          disabled={saving}
-          activeOpacity={0.85}
-          testID="editor-save-draft"
-        >
-          {saving ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.draftBtnText}>{t('pub.saveDraft')}</Text>}
-        </TouchableOpacity>
+        {isOwner ? (
+          <TouchableOpacity
+            style={[styles.saveBtn, styles.draftBtn]}
+            onPress={() => (status === 'published' && editId ? confirmUnpublish() : save('draft'))}
+            disabled={saving}
+            activeOpacity={0.85}
+            testID={status === 'published' && editId ? 'editor-unpublish' : 'editor-save-draft'}
+          >
+            {saving ? <ActivityIndicator color={colors.textPrimary} /> : (
+              <Text style={styles.draftBtnText}>{status === 'published' && editId ? t('studio.unpublish') : t('pub.saveDraft')}</Text>
+            )}
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={[styles.saveBtn, styles.publishBtn]}
-          onPress={() => save(true)}
+          onPress={() => (isOwner && !(status === 'published' && editId) ? setPublishOpen(true) : save('keep'))}
           disabled={saving}
           activeOpacity={0.85}
           testID="editor-publish"
         >
           {saving ? <ActivityIndicator color={colors.white} /> : (
-            <Text style={styles.publishBtnText}>{status === 'published' && editId ? t('common.save') : t('pub.publish')}</Text>
+            <Text style={styles.publishBtnText}>
+              {isOwner && !(status === 'published' && editId) ? t('pub.publish') : t('common.save')}
+            </Text>
           )}
         </TouchableOpacity>
       </View>
+
+      <PublishSheet
+        visible={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        book={{ title, cover, summary, chapters }}
+        needsRights={!rightsConfirmed}
+        onPreview={preview}
+        onPublish={({ rightsConfirmed: ok }) => save('publish', { rightsConfirmed: ok })}
+        publishing={saving}
+      />
+      <ScheduleSheet
+        visible={!!scheduling}
+        value={scheduling?.publishAt}
+        onPick={(iso) => { updateChapter(scheduling.key, { publishAt: iso }); setScheduling(null); }}
+        onClear={() => { updateChapter(scheduling.key, { publishAt: null }); setScheduling(null); }}
+        onClose={() => setScheduling(null)}
+      />
     </SafeAreaView>
   );
 };
@@ -865,6 +1116,31 @@ const styles = StyleSheet.create({
   draftChipText: { ...typography.caption, color: colors.textMuted, fontSize: 11, fontWeight: '700' },
   draftChipTextOn: { color: colors.warning },
   draftNote: { ...typography.caption, color: colors.warning, marginBottom: spacing.xs },
+  draftRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },
+  scheduleChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: radius.full, borderWidth: 1, borderColor: colors.accent,
+  },
+  scheduleText: { ...typography.caption, color: colors.accent, fontWeight: '700', fontSize: 11 },
+  wordCount: { ...typography.caption, color: colors.textMuted, textAlign: 'right', marginTop: 4, fontSize: 11 },
+  totals: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', marginTop: 4 },
+  designCover: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: spacing.sm },
+  designCoverText: { ...typography.caption, color: colors.accent, fontWeight: '800' },
+  roleBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6,
+    backgroundColor: 'rgba(244,162,97,0.10)',
+  },
+  roleText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  studioRow: { flex: 1, flexDirection: 'row' },
+  outline: { width: 250, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.border },
+  outlineBody: { padding: spacing.md, gap: 4 },
+  outlineTitle: { ...typography.caption, color: colors.textSecondary, fontWeight: '800', textTransform: 'uppercase', marginBottom: spacing.xs },
+  outlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, paddingHorizontal: 6, borderRadius: radius.sm },
+  outlineNum: { ...typography.caption, color: colors.primary, fontWeight: '800', width: 18 },
+  outlineName: { ...typography.label, color: colors.textPrimary },
+  outlineMeta: { ...typography.caption, color: colors.textMuted, fontSize: 11 },
+  outlineAdd: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 8 },
+  outlineAddText: { ...typography.caption, color: colors.primary, fontWeight: '700' },
   removedBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6, padding: spacing.sm, marginBottom: spacing.sm,
     borderRadius: radius.sm, backgroundColor: 'rgba(229,57,53,0.10)',

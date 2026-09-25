@@ -1,4 +1,5 @@
 from django.utils import timezone
+from rest_framework.exceptions import APIException
 
 from .common import *  # noqa: F401,F403
 from ..models import (
@@ -7,6 +8,19 @@ from ..models import (
 )
 
 WORDS_PER_MIN = 200
+
+
+class ChaptersChangedElsewhere(APIException):
+    """409: chapters were changed (a co-author, another phone) since the
+    writer opened them. The body names them; resend with force to keep yours.
+    The view answers with `payload` as is (DRF would turn ids into text)."""
+    status_code = 409
+    default_detail = 'Some chapters were changed elsewhere.'
+    default_code = 'conflict'
+
+    def __init__(self, payload):
+        super().__init__(payload.get('error'))
+        self.payload = payload
 
 
 def _request_user(serializer):
@@ -21,11 +35,15 @@ class ChapterSerializer(serializers.ModelSerializer):
     updated in place (its history and readers' places kept), not recreated."""
     id = serializers.IntegerField(required=False)
     status = serializers.ChoiceField(choices=Chapter.STATUS_CHOICES, required=False)
+    # Sent back as the version the writer started from: a chapter changed
+    # elsewhere since isn't silently overwritten (songs/publishing.py).
+    version = serializers.IntegerField(required=False)
+    publish_at = serializers.DateTimeField(required=False, allow_null=True)
 
     class Meta:
         model = Chapter
-        fields = ['id', 'order', 'title', 'body', 'status', 'version', 'is_removed']
-        read_only_fields = ['version', 'is_removed']
+        fields = ['id', 'order', 'title', 'body', 'status', 'version', 'is_removed', 'publish_at']
+        read_only_fields = ['is_removed']
 
 
 class ChapterTocSerializer(serializers.ModelSerializer):
@@ -36,7 +54,7 @@ class ChapterTocSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Chapter
-        fields = ['id', 'order', 'title', 'word_count', 'version', 'status', 'is_removed', 'comment_count']
+        fields = ['id', 'order', 'title', 'word_count', 'version', 'status', 'is_removed', 'comment_count', 'publish_at']
         read_only_fields = fields
 
     def get_comment_count(self, obj):
@@ -201,6 +219,9 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     rating_avg = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
     author_is_following = serializers.SerializerMethodField()
+    upcoming = serializers.SerializerMethodField()
+    my_role = serializers.SerializerMethodField()
+    collaborators_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Publication
@@ -209,9 +230,10 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
             'author', 'chapters', 'is_owner', 'reading_minutes',
             'likes_count', 'is_liked', 'is_bookmarked', 'last_read_chapter', 'last_read_position',
             'my_percent', 'my_finished', 'rating_avg', 'rating_count', 'author_is_following',
+            'upcoming', 'my_role', 'collaborators_count', 'rights_confirmed_at',
             'created_at', 'updated_at', 'published_at',
         ]
-        read_only_fields = ['author', 'created_at', 'updated_at', 'published_at']
+        read_only_fields = ['author', 'created_at', 'updated_at', 'published_at', 'rights_confirmed_at']
 
     def get_fields(self):
         fields = super().get_fields()
@@ -277,6 +299,31 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     def get_rating_count(self, obj):
         return getattr(obj, 'rating_count_anno', 0) or 0
 
+    def get_upcoming(self, obj):
+        """Scheduled chapters, for readers: "coming Friday". (The author and
+        collaborators have them among the chapters, as drafts with a time.)"""
+        if obj.status != 'published':
+            return []
+        # Chapter.objects, not obj.chapters: the page prefetches the chapters
+        # a reader may see, and filtering that would inherit "no drafts".
+        rows = (Chapter.objects.filter(publication=obj, status=Chapter.DRAFT, is_removed=False,
+                                       publish_at__gt=timezone.now())
+                .order_by('publish_at').values('id', 'title', 'publish_at')[:10])
+        return list(rows)
+
+    def get_my_role(self, obj):
+        user = _request_user(self)
+        if user and obj.author_id == user.id:
+            return 'owner'
+        if hasattr(obj, 'my_collab_role'):
+            return obj.my_collab_role
+        from ..writer_studio import role_of
+        return role_of(user, obj)
+
+    def get_collaborators_count(self, obj):
+        anno = getattr(obj, 'collab_count', None)
+        return anno if anno is not None else obj.collaborators.filter(accepted_at__isnull=False).count()
+
     def get_author_is_following(self, obj):
         user = _request_user(self)
         if not user or user.id == obj.author_id:
@@ -288,10 +335,28 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     def _sync_chapters(self, publication, chapters):
         # In place, keeping history (songs/publishing.py). Chapters come in
         # reading order; `order` from the client is taken from their place.
-        from ..publishing import sync_chapters
+        from ..publishing import sync_chapters, ChapterConflict
         chapters = sorted(chapters, key=lambda ch: ch.get('order') or 0) if all(
             ch.get('order') for ch in chapters) else chapters
-        return sync_chapters(publication, chapters, _request_user(self))
+        force = str(self.initial_data.get('force', '')).lower() in ('1', 'true') if hasattr(self, 'initial_data') else False
+        try:
+            return sync_chapters(publication, chapters, _request_user(self), force=force)
+        except ChapterConflict as c:
+            raise ChaptersChangedElsewhere({'error': 'Some chapters were changed elsewhere since you opened them.',
+                                            'code': 'conflict', 'chapters': c.chapters})
+
+    def _confirm_rights(self, instance, validated_data):
+        """Publishing (the first time, and after being unpublished) needs the
+        author to confirm the words are theirs to publish — once; it's kept."""
+        going_out = validated_data.get('status') == 'published' and (instance is None or instance.status != 'published')
+        if not going_out or (instance is not None and instance.rights_confirmed_at):
+            return
+        if str(self.initial_data.get('rights_confirmed', '')).lower() not in ('1', 'true'):
+            raise serializers.ValidationError({
+                'rights_confirmed': 'Confirm that you wrote this, or have permission to publish it.',
+                'code': 'rights_required',
+            })
+        validated_data['rights_confirmed_at'] = timezone.now()
 
     # A book goes out once (published_at is set the first time): that's news
     # to the author's followers. Chapters added to a book already out are news
@@ -299,6 +364,7 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         from ..book_community import announce
         chapters = validated_data.pop('chapters', [])
+        self._confirm_rights(None, validated_data)
         if validated_data.get('status') == 'published':
             validated_data['published_at'] = timezone.now()
         publication = Publication.objects.create(**validated_data)
@@ -307,8 +373,16 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         return publication
 
     def update(self, instance, validated_data):
+        # One transaction: a chapter conflict leaves the book as it was,
+        # its title and settings included.
+        from django.db import transaction
+        with transaction.atomic():
+            return self._update(instance, validated_data)
+
+    def _update(self, instance, validated_data):
         from ..book_community import announce
         chapters = validated_data.pop('chapters', None)
+        self._confirm_rights(instance, validated_data)
         was_published = bool(instance.published_at)
         new_status = validated_data.get('status', instance.status)
         if new_status == 'published' and not instance.published_at:

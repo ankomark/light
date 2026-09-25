@@ -891,6 +891,24 @@ export const postChapterComment = async (id, index, body, parent = null) =>
 export const deleteChapterComment = async (id, commentId) =>
   apiRequest('delete', `/publications/${id}/comments/${commentId}/`);
 
+// ── Writer Studio ──
+// Who works on a book: { results: [{ id, user, role, accepted }], my_role }.
+export const fetchCollaborators = async (id) => apiRequest('get', `/publications/${id}/collaborators/`);
+export const inviteCollaborator = async (id, username, role) =>
+  apiRequest('post', `/publications/${id}/collaborators/`, { username, role });
+export const setCollaboratorRole = async (id, cid, role) =>
+  apiRequest('patch', `/publications/${id}/collaborators/${cid}/`, { role });
+export const removeCollaborator = async (id, cid) => apiRequest('delete', `/publications/${id}/collaborators/${cid}/`);
+// Books you've been invited to work on: { results: [...] }.
+export const fetchBookInvitations = async () => apiRequest('get', '/publications/invitations/');
+export const answerBookInvitation = async (cid, accept) =>
+  apiRequest('post', `/publications/invitations/${cid}/${accept ? 'accept' : 'decline'}/`);
+// EPUB: POST makes one (the worker), GET → { status, url }.
+export const requestBookExport = async (id) => apiRequest('post', `/publications/${id}/export/`);
+export const fetchBookExport = async (id) => apiRequest('get', `/publications/${id}/export/`);
+// A cover from a template → { url }.
+export const renderBookCover = async (spec) => apiRequest('post', '/publications/cover-render/', spec);
+
 // An author's page: { author, followers_count, is_following, readers_count, finished_count, books }.
 export const fetchAuthorPage = async (userId) => apiRequest('get', `/publications/authors/${userId}/`);
 

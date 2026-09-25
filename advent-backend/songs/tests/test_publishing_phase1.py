@@ -24,7 +24,7 @@ class Base(APITestCase):
         self.reader = User.objects.create_user('reader', 'r@x.com', 'x')
         self.client.force_authenticate(self.author)
         res = self.client.post('/api/publications/', {
-            'title': 'Book', 'category': 'devotional', 'status': 'published',
+            'title': 'Book', 'category': 'devotional', 'status': 'published', 'rights_confirmed': True,
             'chapters': [{'title': 'One', 'body': 'first words'}, {'title': 'Two', 'body': 'second words'},
                          {'title': 'Three', 'body': 'third words'}],
         }, format='json')
@@ -77,7 +77,7 @@ class InPlaceSaveTests(Base):
         ch = self.editor()
         for n in range(ChapterRevision.KEEP + 5):
             ch[0]['body'] = f'draft {n}'
-            self.save(ch)
+            ch = self.save(ch).json()['chapters']        # the editor goes on from what was saved
         self.assertEqual(ChapterRevision.objects.filter(chapter_ref=ch[0]['id']).count(), ChapterRevision.KEEP)
         newest = ChapterRevision.objects.filter(chapter_ref=ch[0]['id']).first()
         self.assertEqual(newest.body, f'draft {ChapterRevision.KEEP + 3}')
