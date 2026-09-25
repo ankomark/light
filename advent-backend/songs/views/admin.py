@@ -2,7 +2,7 @@ from .common import *  # noqa: F401,F403  (DRF symbols, models, StandardPaginati
 from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
-from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES, BookReview, ChapterComment
+from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES, BookReview, ChapterComment, ServiceReview
 from .. import rights
 from ..signals import sync_removal_likes
 from ..serializers.admin import build_report_targets
@@ -70,6 +70,7 @@ _CONTENT_MODELS = {
     'grouppost': GroupPost,       # group chat messages
     'videostudio': Videostudio,
     'mediastation': MediaStation,
+    'servicereview': ServiceReview,   # a review of a service
 }
 
 

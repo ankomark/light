@@ -12,7 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { compressImage } from '../services/imageProcessing';
 import { uploadMedia } from '../services/cloudinary';
-import { createVideoStudio, updateVideoStudio } from '../services/api';
+import { createVideoStudio, updateVideoStudio, fetchOrganizations } from '../services/api';
+import { peekCache, writeCache, userKey } from '../utils/screenCache';
+import { useAuth } from '../context/useAuth';
 import {
   CATEGORIES, SERVICE_TYPES_BY_CATEGORY, SOCIAL_LINKS, CURRENCIES, DAYS, serviceLabel, withScheme, noteServicesChanged,
 } from '../services/servicesCatalog';
@@ -73,14 +75,23 @@ const ServiceForm = ({ route, navigation }) => {
   const [cover, setCover] = useState(existing?.cover_image || '');
   const [gallery, setGallery] = useState(() => existing?.gallery || []);
   const [hours, setHours] = useState(() => existing?.opening_hours || {});
+  // Listed under an organisation its owner belongs to (a church clinic,
+  // a school), or their own name.
+  const { currentUser } = useAuth();
+  const orgsKey = userKey(currentUser?.id, 'orgs:mine');
+  const [orgSlug, setOrgSlug] = useState(existing?.organization?.slug || '');
+  const [myOrgs, setMyOrgs] = useState(() => peekCache(orgsKey) || []);
+  useEffect(() => {
+    fetchOrganizations({ mine: 1 }).then((r) => { const rows = r?.results || []; setMyOrgs(rows); writeCache(orgsKey, rows); }).catch(() => {});
+  }, [orgsKey]);
   const [uploading, setUploading] = useState(null);           // 'logo' | 'cover'
   const [saving, setSaving] = useState(false);
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
 
   // Leaving with changes asks first (a swipe, the back button, the X).
-  const start = useRef(JSON.stringify({ form, logo, cover, gallery, hours }));
+  const start = useRef(JSON.stringify({ form, logo, cover, gallery, hours, orgSlug }));
   const leaving = useRef(false);
-  const dirty = JSON.stringify({ form, logo, cover, gallery, hours }) !== start.current;
+  const dirty = JSON.stringify({ form, logo, cover, gallery, hours, orgSlug }) !== start.current;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   useEffect(() => navigation.addListener('beforeRemove', (e) => {
@@ -142,6 +153,7 @@ const ServiceForm = ({ route, navigation }) => {
       return;
     }
     payload.opening_hours = hours;
+    payload.organization_slug = orgSlug;
     payload.gallery = gallery.filter((u) => u.startsWith('http'));
     // Links: filled in ones as real addresses ("instagram.com/x" → https://…).
     LINK_KEYS.forEach((k) => { const v = form[k].trim(); payload[k] = v ? withScheme(v) : ''; });
@@ -199,6 +211,24 @@ const ServiceForm = ({ route, navigation }) => {
         <Field label={t('services.nameLabel')} value={form.name} onChange={set('name')} placeholder={t('studios.namePlaceholder')} testID="service-name" />
         <Field label={t('services.descLabel')} value={form.description} onChange={set('description')} placeholder={t('studios.aboutPlaceholder')} multiline />
         <Field label={t('services.locationLabel')} value={form.location} onChange={set('location')} placeholder={t('dir.cityCountry')} testID="service-location" />
+
+        {myOrgs.length || orgSlug ? (
+          <>
+            <Text style={styles.label}>{t('services.listedUnder')}</Text>
+            <View style={styles.chips}>
+              {[{ slug: '', name: currentUser?.username || t('org.myself') }, ...myOrgs].map((o) => {
+                const on = o.slug === orgSlug;
+                return (
+                  <TouchableOpacity key={o.slug || '_me'} style={[styles.chip, on && styles.chipOn]} onPress={() => setOrgSlug(o.slug)}
+                    accessibilityRole="radio" accessibilityState={{ checked: on }} testID={`service-org-${o.slug || 'me'}`}>
+                    <Ionicons name={o.slug ? 'business-outline' : 'person-outline'} size={13} color={on ? colors.white : colors.textSecondary} />
+                    <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1}>{o.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
 
         <Text style={styles.label}>{t('services.category')}</Text>
         <View style={styles.chips}>

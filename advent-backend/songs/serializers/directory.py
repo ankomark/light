@@ -1,5 +1,7 @@
 import re
 
+from ..models import ServiceReview
+
 from .common import *  # noqa: F401,F403
 
 
@@ -84,15 +86,33 @@ class VideoStudioSerializer(serializers.ModelSerializer):
     service_types = serializers.ListField(
         child=serializers.CharField(max_length=50), default=list, required=False,
     )
+    organization_slug = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Videostudio
         fields = '__all__'
-        read_only_fields = ('created_by', 'is_verified', 'featured_at')
+        read_only_fields = ('created_by', 'is_verified', 'featured_at', 'organization')
 
     def get_is_owner(self, obj):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.created_by_id == request.user.id)
+
+    def validate_organization_slug(self, slug):
+        """Listed under an organisation its owner belongs to ('' = their own)."""
+        from ..models import Organization
+        from ..organizations import can_publish_under
+        if not slug:
+            return None
+        org = Organization.objects.filter(slug=slug).first()
+        request = self.context.get('request')
+        if org is None or not can_publish_under(getattr(request, 'user', None), org):
+            raise serializers.ValidationError('You can list only under an organisation you belong to.')
+        return org
+
+    def validate(self, attrs):
+        if 'organization_slug' in attrs:
+            attrs['organization'] = attrs.pop('organization_slug')
+        return attrs
 
     def validate_gallery(self, value):
         if not isinstance(value, list):
@@ -159,6 +179,39 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
 
     def get_cover_image(self, obj):
         return media.resolve(obj.cover_image) or ''
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # Trust, at a glance: the stars (the view counts them in its query),
+        # how long they've been here, and who runs it.
+        avg = getattr(obj, 'rating_avg_anno', None)
+        data['rating_avg'] = round(avg, 1) if avg is not None else None
+        data['rating_count'] = getattr(obj, 'rating_count_anno', 0) or 0
+        joined = getattr(obj.created_by, 'date_joined', None)
+        data['member_since'] = joined.year if joined else None
+        from ..organizations import mini
+        data['organization'] = mini(obj.organization) if obj.organization_id else None
+        return data
+
+
+class ServiceReviewSerializer(serializers.ModelSerializer):
+    """A review of a service (and its owner's reply)."""
+    user = SimpleUserSerializer(read_only=True)
+    is_mine = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServiceReview
+        fields = ['id', 'user', 'rating', 'body', 'reply', 'replied_at', 'is_mine', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'reply', 'replied_at', 'is_mine', 'created_at', 'updated_at']
+
+    def get_is_mine(self, obj):
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.user_id == request.user.id)
+
+    def validate_rating(self, v):
+        if not 1 <= int(v) <= 5:
+            raise serializers.ValidationError('A rating is 1 to 5 stars.')
+        return v
 
 
 class LiveEventSerializer(serializers.ModelSerializer):

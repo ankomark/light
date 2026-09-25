@@ -1378,6 +1378,10 @@ class Videostudio(models.Model):
     # Featured on the Services home since this time (set by staff in the
     # Django admin); null = not featured.
     featured_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Run by an organisation (a church clinic, a school): its name and tick
+    # on the listing, the listing on its page. Null = the person's own.
+    organization = models.ForeignKey('Organization', null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name='services')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videostudios')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1415,6 +1419,50 @@ class Videostudio(models.Model):
         verbose_name = "Video Studio"
         verbose_name_plural = "Video Studios"
         ordering = ['-created_at']
+
+
+class ServiceReview(models.Model):
+    """A rating (1–5) and, if they like, a few words about a service — one per
+    person per service, never its owner's. The owner may answer once, in
+    public (and change the answer)."""
+    service = models.ForeignKey(Videostudio, on_delete=models.CASCADE, related_name='reviews')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='service_reviews')
+    rating = models.PositiveSmallIntegerField()
+    body = models.TextField(max_length=2000, blank=True, default='')
+    reply = models.TextField(max_length=2000, blank=True, default='')
+    replied_at = models.DateTimeField(null=True, blank=True)
+    is_removed = models.BooleanField(default=False)     # a moderator's takedown
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('service', 'user')
+        ordering = ['-updated_at', '-id']
+
+
+class ServiceVerification(models.Model):
+    """A service's request for the verified tick: who they are (a registered
+    name, a licence or registration number) and photos of the papers.
+    Staff decide in the Django admin; approving gives the tick."""
+    PENDING, APPROVED, REJECTED = 'pending', 'approved', 'rejected'
+    STATUSES = [(PENDING, 'Pending'), (APPROVED, 'Approved'), (REJECTED, 'Rejected')]
+    service = models.ForeignKey(Videostudio, on_delete=models.CASCADE, related_name='verifications')
+    requested_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    legal_name = models.CharField(max_length=200)
+    registration_number = models.CharField(max_length=100, blank=True, default='')
+    note = models.TextField(max_length=2000, blank=True, default='')
+    documents = models.JSONField(default=list, blank=True)            # R2 URLs, up to 4
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING, db_index=True)
+    decision_note = models.CharField(max_length=500, blank=True, default='')   # why, if refused
+    decided_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.service_id} · {self.legal_name} · {self.status}'
 
 class CommunityCategory(models.Model):
     """A kind of community — Church, Choir, News, Youth, and whatever people

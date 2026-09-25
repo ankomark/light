@@ -13,6 +13,14 @@ const mockApi = {
   fetchServicesHome: jest.fn(),
   fetchVideoStudioById: jest.fn(),
   getOrCreateConversation: jest.fn(),
+  fetchServiceReviews: jest.fn(),
+  saveServiceReview: jest.fn(),
+  deleteMyServiceReview: jest.fn(),
+  replyToServiceReview: jest.fn(),
+  deleteServiceReply: jest.fn(),
+  fetchServiceVerification: jest.fn(),
+  requestServiceVerification: jest.fn(),
+  fetchOrganizations: jest.fn(),
   serviceShareUrl: jest.fn((id) => `https://app.test/service/${id}/`),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
@@ -79,6 +87,10 @@ const svc = (id, extra = {}) => ({
   is_owner: false, is_verified: false, ...extra,
 });
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+const noReviews = (extra = {}) => ({
+  summary: { count: 0, average: null, spread: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 } }, mine: null, can_review: true,
+  is_owner: false, results: [], next: null, ...extra,
+});
 
 beforeEach(async () => {
   await AsyncStorage.clear();
@@ -87,6 +99,8 @@ beforeEach(async () => {
   Object.values(mockApi).forEach((f) => f.mockReset());
   mockApi.serviceShareUrl.mockImplementation((id) => `https://app.test/service/${id}/`);
   mockApi.fetchServicesHome.mockResolvedValue({ counts: {}, featured: [], verified: [], new: [] });
+  mockApi.fetchServiceReviews.mockResolvedValue(noReviews());
+  mockApi.fetchOrganizations.mockResolvedValue({ results: [] });
   mockAuth = { isAuthenticated: true, currentUser: { id: 1, username: 'me' } };
   mockConfirm.mockReset();
   mockNotify.mockReset();
@@ -371,5 +385,123 @@ describe('Phase 2', () => {
     expect(body.opening_hours).toEqual({
       mon: ['08:00', '18:30'], tue: ['08:00', '18:30'], wed: ['08:00', '18:30'], thu: ['08:00', '18:30'], fri: ['08:00', '18:30'],
     });
+  });
+});
+
+// ── Phase 3: trust ──────────────────────────────────────────────────────────
+describe('Phase 3', () => {
+  const ServiceDetail = require('../ServiceDetail').default;
+  const ServiceVerification = require('../ServiceVerification').default;
+  const review = (id, extra = {}) => ({ id, user: { id: 20 + id, username: `u${id}` }, rating: 4, body: `Review ${id}`,
+    reply: '', updated_at: '2026-09-20T10:00:00Z', ...extra });
+  const page = (extra = {}) => svc(5, { name: 'Hope Clinic', created_by: { id: 9, username: 'dr' }, ...extra });
+  const open = async (s, n = nav()) => {
+    mockApi.fetchVideoStudioById.mockResolvedValue(s);
+    const r = render(<ServiceDetail route={{ params: { id: s.id, preview: s } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('service-reviews')).toBeTruthy());
+    return r;
+  };
+
+  test('the stars, who runs it, and how long they\'ve been here', async () => {
+    const n = nav();
+    const r = await open(page({ rating_avg: 4.5, rating_count: 12, member_since: 2024,
+      organization: { slug: 'kmh', name: 'Kisumu Mission Hospital', is_verified: true } }), n);
+    expect(r.getByText('4.5 · reviews.count:12')).toBeTruthy();
+    expect(r.getByText('services.runBy:Kisumu Mission Hospital')).toBeTruthy();
+    expect(r.getByText('services.listedBy:dr · services.memberSince:2024')).toBeTruthy();
+    fireEvent.press(r.getByTestId('service-org'));
+    expect(n.navigate).toHaveBeenCalledWith('OrganizationPage', { slug: 'kmh', name: 'Kisumu Mission Hospital' });
+  });
+
+  test('rate a service; it shows as yours', async () => {
+    mockApi.saveServiceReview.mockResolvedValue(review(1));
+    const r = await open(page());
+    fireEvent.press(r.getByTestId('service-review-write'));
+    fireEvent.press(r.getByTestId('service-star-4'));
+    fireEvent.changeText(r.getByTestId('service-review-input'), 'Kind nurses ');
+    mockApi.fetchServiceReviews.mockResolvedValue(noReviews({
+      summary: { count: 1, average: 4, spread: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 0 } }, mine: review(1, { body: 'Kind nurses', is_mine: true }),
+    }));
+    await act(async () => { fireEvent.press(r.getByTestId('service-review-save')); });
+    expect(mockApi.saveServiceReview).toHaveBeenCalledWith(5, { rating: 4, body: 'Kind nurses' });
+    await waitFor(() => expect(r.getByTestId('service-review-mine')).toBeTruthy());
+    expect(r.queryByTestId('service-review-write')).toBeNull();
+  });
+
+  test('guests are asked to sign in to rate; others\' reviews can be reported', async () => {
+    mockAuth = { isAuthenticated: false, currentUser: null };
+    const n = nav();
+    mockApi.fetchServiceReviews.mockResolvedValue(noReviews({ can_review: false, results: [review(2)] }));
+    const r = await open(page(), n);
+    await waitFor(() => expect(r.getByTestId('service-review-2')).toBeTruthy());
+    fireEvent.press(r.getByTestId('service-review-write'));
+    expect(n.navigate).toHaveBeenCalledWith('Login');
+    expect(r.queryByTestId('service-review-report-2')).toBeNull();          // guests don't report
+    mockAuth = { isAuthenticated: true, currentUser: { id: 1, username: 'me' } };
+    const signedIn = await open(page());
+    await waitFor(() => expect(signedIn.getByTestId('service-review-report-2')).toBeTruthy());
+    fireEvent.press(signedIn.getByTestId('service-review-report-2'));
+    expect(signedIn.getByTestId('report-servicereview-2')).toBeTruthy();
+  });
+
+  test('the owner answers reviews in public, can\'t rate their own, and can get verified', async () => {
+    mockApi.fetchServiceReviews.mockResolvedValue(noReviews({ is_owner: true, can_review: false, results: [review(3, { rating: 2, body: 'Slow' })] }));
+    mockApi.replyToServiceReview.mockResolvedValue(review(3, { rating: 2, body: 'Slow', reply: 'We have more staff now.' }));
+    const n = nav();
+    const r = await open(page({ is_owner: true, is_verified: false }), n);
+    await waitFor(() => expect(r.getByTestId('service-review-reply-3')).toBeTruthy());
+    expect(r.queryByTestId('service-review-write')).toBeNull();
+    fireEvent.press(r.getByTestId('service-review-reply-3'));
+    fireEvent.changeText(r.getByTestId('service-review-input'), 'We have more staff now.');
+    await act(async () => { fireEvent.press(r.getByTestId('service-review-save')); });
+    expect(mockApi.replyToServiceReview).toHaveBeenCalledWith(5, 3, 'We have more staff now.');
+    expect(r.getByText('We have more staff now.')).toBeTruthy();
+    expect(r.getByText('services.replyFrom:Hope Clinic')).toBeTruthy();
+    fireEvent.press(r.getByTestId('service-get-verified'));
+    expect(n.navigate).toHaveBeenCalledWith('ServiceVerification', { id: 5, name: 'Hope Clinic' });
+  });
+
+  test('asking for the tick: the papers, then waiting; refused says why and may ask again', async () => {
+    mockApi.fetchServiceVerification.mockResolvedValue({ status: null });
+    mockApi.requestServiceVerification.mockResolvedValue({ status: 'pending' });
+    const r = render(<ServiceVerification route={{ params: { id: 5, name: 'Hope Clinic' } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('verify-form')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByTestId('verify-send')); });
+    expect(mockNotify).toHaveBeenCalledWith('verify.title', 'verify.missing');
+    fireEvent.changeText(r.getByTestId('verify-legal'), 'Hope Clinic Ltd');
+    await act(async () => { fireEvent.press(r.getByTestId('verify-add-doc')); });
+    await act(async () => { fireEvent.press(r.getByTestId('verify-send')); });
+    expect(mockApi.requestServiceVerification).toHaveBeenCalledWith(5, expect.objectContaining({
+      legal_name: 'Hope Clinic Ltd', documents: ['https://r2.test/cover/x.jpg'] }));
+    expect(r.getByTestId('verify-pending')).toBeTruthy();
+    expect(r.queryByTestId('verify-form')).toBeNull();
+
+    mockApi.fetchServiceVerification.mockResolvedValue({ status: 'rejected', decision_note: 'The photo is unreadable.' });
+    await clearAllCaches();
+    const again = render(<ServiceVerification route={{ params: { id: 6 } }} navigation={nav()} />);
+    await waitFor(() => expect(again.getByTestId('verify-rejected')).toBeTruthy());
+    expect(again.getByText('The photo is unreadable.')).toBeTruthy();
+    expect(again.getByTestId('verify-form')).toBeTruthy();
+  });
+
+  test('the form: listed under an organisation you belong to', async () => {
+    mockApi.fetchOrganizations.mockResolvedValue({ results: [{ slug: 'kmh', name: 'Kisumu Mission Hospital' }] });
+    mockApi.createVideoStudio.mockResolvedValue(svc(6));
+    const r = render(<ServiceForm route={{ params: { category: 'health' } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-org-kmh')).toBeTruthy());
+    fireEvent.press(r.getByTestId('service-org-kmh'));
+    fireEvent.changeText(r.getByTestId('service-name'), 'Mission Clinic');
+    fireEvent.changeText(r.getByTestId('service-location'), 'Kisumu');
+    fireEvent.press(r.getByTestId('service-tag-clinic'));
+    await act(async () => { fireEvent.press(r.getByTestId('service-save')); });
+    expect(mockApi.createVideoStudio).toHaveBeenCalledWith(expect.objectContaining({ organization_slug: 'kmh' }));
+  });
+
+  test('cards carry the stars', async () => {
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [svc(1, { rating_avg: 4.8, rating_count: 20 }), svc(2)], next: null });
+    const r = render(<Studios navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-stars-1')).toBeTruthy());
+    expect(r.getByText('4.8 (20)')).toBeTruthy();
+    expect(r.queryByTestId('service-stars-2')).toBeNull();
   });
 });

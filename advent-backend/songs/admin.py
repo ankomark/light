@@ -6,7 +6,7 @@ from .models import (
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
     Report, AdminActionLog, Appeal, Role, LiveBroadcast, CoHostRequest, Publication,
-    Organization,
+    Organization, ServiceVerification, ServiceReview,
 )
 
 admin.site.register(LiveBroadcast)
@@ -105,6 +105,62 @@ admin.site.register(PostLike)
 admin.site.register(PostComment)
 admin.site.register(PostSave)
 admin.site.register(Notification)
+def _decide_verification(v, status, by, note=''):
+    """Approve or refuse a service's request for the tick, and tell its owner."""
+    from django.utils import timezone
+    from .push import notify_user
+    v.status, v.decided_by, v.decided_at = status, by, timezone.now()
+    if note:
+        v.decision_note = note[:500]
+    v.save(update_fields=['status', 'decided_by', 'decided_at', 'decision_note'])
+    s = v.service
+    if status == ServiceVerification.APPROVED:
+        Videostudio.objects.filter(pk=s.pk).update(is_verified=True)
+        msg = f'{s.name} is now verified ✓'
+    else:
+        msg = f'{s.name} wasn’t verified' + (f': {v.decision_note}' if v.decision_note else '')
+    notify_user(s.created_by, 'service_verified', msg, data={'type': 'service', 'service_id': s.id})
+
+
+@admin.register(ServiceVerification)
+class ServiceVerificationAdmin(admin.ModelAdmin):
+    """Requests for the verified tick on a service. Look at the documents,
+    then approve (select → "Approve"), or refuse: open it, write why in
+    "Decision note", set the status to Rejected and save. The owner is told."""
+    list_display = ('id', 'service', 'legal_name', 'registration_number', 'status', 'created_at', 'decided_at')
+    list_filter = ('status',)
+    search_fields = ('legal_name', 'registration_number', 'service__name')
+    readonly_fields = ('service', 'requested_by', 'legal_name', 'registration_number', 'note', 'document_links',
+                       'decided_by', 'decided_at', 'created_at')
+    fields = readonly_fields + ('status', 'decision_note')
+    actions = ['approve']
+
+    @admin.display(description='Documents')
+    def document_links(self, obj):
+        from django.utils.html import format_html_join
+        return format_html_join(' ', '<a href="{}" target="_blank">Document {}</a>',
+                                ((u, i + 1) for i, u in enumerate(obj.documents or [])))
+
+    @admin.action(description='Approve (gives the verified tick)')
+    def approve(self, request, queryset):
+        for v in queryset.select_related('service', 'service__created_by'):
+            _decide_verification(v, ServiceVerification.APPROVED, request.user)
+
+    def save_model(self, request, obj, form, change):
+        before = ServiceVerification.objects.filter(pk=obj.pk).values_list('status', flat=True).first()
+        if change and 'status' in form.changed_data and obj.status != before and obj.status != ServiceVerification.PENDING:
+            _decide_verification(obj, obj.status, request.user, obj.decision_note)
+        else:
+            super().save_model(request, obj, form, change)
+
+
+@admin.register(ServiceReview)
+class ServiceReviewAdmin(admin.ModelAdmin):
+    list_display = ('id', 'service', 'user', 'rating', 'is_removed', 'created_at')
+    list_filter = ('rating', 'is_removed')
+    raw_id_fields = ('service', 'user')
+
+
 @admin.register(Videostudio)
 class ServiceAdmin(admin.ModelAdmin):
     """Services. The verified tick and the Services home's featured row are

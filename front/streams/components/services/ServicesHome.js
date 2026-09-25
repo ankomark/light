@@ -14,7 +14,7 @@ import { colors, typography, spacing, radius } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
-const Tile = memo(({ item, onOpen, t }) => (
+export const ServiceTile = memo(({ item, onOpen, t }) => (
   <TouchableOpacity style={styles.tile} onPress={() => onOpen(item)} activeOpacity={0.85} testID={`service-tile-${item.id}`}>
     <View style={styles.tileCover}>
       {item.cover_image ? (
@@ -38,7 +38,7 @@ const Row = ({ title, data, onOpen, t, testID }) => (data?.length ? (
   <View style={styles.row} testID={testID}>
     <Text style={styles.rowTitle}>{title}</Text>
     <FlatList horizontal data={data} keyExtractor={(s) => `${testID}_${s.id}`} showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.rail} renderItem={({ item }) => <Tile item={item} onOpen={onOpen} t={t} />} />
+      contentContainerStyle={styles.rail} renderItem={({ item }) => <ServiceTile item={item} onOpen={onOpen} t={t} />} />
   </View>
 ) : null);
 

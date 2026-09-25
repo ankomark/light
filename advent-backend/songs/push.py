@@ -20,6 +20,8 @@ NOTIFICATION_TITLES = {
     'book_review': '⭐ New review',
     'book_invite': '✍️ Invitation to write',
     'org_invite': '\U0001f3db Invitation to an organisation',
+    'service_review': '⭐ Service review',
+    'service_verified': '✅ Verification',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.
@@ -53,6 +55,8 @@ NOTIFICATION_CATEGORIES = {
     'book_review': 'comments',
     'book_invite': 'books',
     'org_invite': 'books',
+    # A review of your service (or a reply to yours): people talking to you.
+    'service_review': 'comments',
 }
 
 

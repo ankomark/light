@@ -927,7 +927,7 @@ class ReportViewSet(viewsets.ViewSet):
         valid_types = {
             'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
             'publication', 'chapter', 'bookreview', 'chaptercomment', 'product', 'productreview', 'grouppost',
-            'videostudio', 'mediastation',
+            'videostudio', 'mediastation', 'servicereview',
         }
         if content_type not in valid_types:
             return Response({'error': f'content_type must be one of {list(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)

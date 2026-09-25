@@ -11,6 +11,7 @@ import {
   CATEGORY_ICON, serviceLabel, priceHint, openState, openLabel,
 } from '../../services/servicesCatalog';
 import { notify } from '../../utils/adminConfirm';
+import { StarRow } from '../BookReviews';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
@@ -115,6 +116,12 @@ const ServiceCard = memo(({ item, t, onOpen, onEdit, onDelete, onReport, style }
 
       <View style={styles.foot}>
         <View style={styles.footInfo}>
+          {item.rating_count ? (
+            <View style={styles.stars} testID={`service-stars-${item.id}`}>
+              <StarRow value={item.rating_avg} size={11} />
+              <Text style={styles.starsText}>{`${item.rating_avg} (${item.rating_count})`}</Text>
+            </View>
+          ) : null}
           <OpenChip hours={item.opening_hours} t={t} />
           {price ? <Text style={styles.price} numberOfLines={1}>{t('services.from', { price })}</Text> : null}
         </View>
@@ -185,6 +192,8 @@ const styles = StyleSheet.create({
   },
   footInfo: { flex: 1, gap: 2 },
   open: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  stars: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  starsText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   dot: { width: 7, height: 7, borderRadius: 4 },
   openText: { ...typography.caption, fontWeight: '700', flexShrink: 1 },
   price: { ...typography.label, color: colors.primary, fontWeight: '800' },

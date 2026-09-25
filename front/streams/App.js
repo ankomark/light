@@ -63,6 +63,7 @@ import OrganizationEdit from './pages/OrganizationEdit';
 import OrganizationMembers from './pages/OrganizationMembers';
 import ServiceForm from './pages/ServiceForm';
 import ServiceDetail from './pages/ServiceDetail';
+import ServiceVerification from './pages/ServiceVerification';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -253,6 +254,9 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.type === 'service' && data.service_id) {
+        // A review of your service, a reply to yours, a verification decision.
+        navigate('ServiceDetail', { id: data.service_id });
       } else if (data?.type === 'org_invite' && data.organization) {
         // An invitation to an organisation: answered on its page.
         navigate('OrganizationPage', { slug: data.organization });
@@ -356,6 +360,7 @@ const App = () => {
                 <Stack.Screen name="OrganizationMembers" component={OrganizationMembers} />
                 <Stack.Screen name="ServiceForm" component={ServiceForm} />
                 <Stack.Screen name="ServiceDetail" component={ServiceDetail} />
+                <Stack.Screen name="ServiceVerification" component={ServiceVerification} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />

@@ -15,7 +15,7 @@ import { notePublicationsChanged } from '../services/publicationStore';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const StarRow = ({ value, size = 14, onPick, testPrefix }) => (
+export const StarRow = ({ value, size = 14, onPick, testPrefix }) => (
   <View style={styles.starRow}>
     {[1, 2, 3, 4, 5].map((n) => {
       const icon = value >= n ? 'star' : value >= n - 0.5 ? 'star-half' : 'star-outline';

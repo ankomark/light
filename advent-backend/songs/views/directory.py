@@ -2,9 +2,12 @@ from .common import *  # noqa: F401,F403
 import base64
 from django.http import HttpResponse
 from django.utils import timezone
-from django.db.models import Q, TextField
+from django.db.models import Avg, Count, Q, TextField
+from rest_framework.exceptions import PermissionDenied
+from django.http import Http404
 from django.db.models.functions import Cast
 from ..models import blocked_ids_for
+from ..serializers.directory import ServiceReviewSerializer
 
 
 
@@ -93,9 +96,16 @@ class AdminNoteViewSet(viewsets.ModelViewSet):
 HOME_ROW = 10
 
 
+def _verification_json(v, service):
+    if v is None:
+        return {'status': 'approved' if service.is_verified else None}
+    return {'id': v.id, 'status': v.status, 'legal_name': v.legal_name, 'decision_note': v.decision_note,
+            'created_at': v.created_at, 'decided_at': v.decided_at}
+
 class VideoStudioViewSet(viewsets.ModelViewSet):
     # select_related avoids an N+1 on created_by (+ its profile) during listing.
-    queryset = Videostudio.objects.filter(is_removed=False).select_related('created_by', 'created_by__profile').order_by('-created_at')
+    queryset = (Videostudio.objects.filter(is_removed=False)
+                .select_related('created_by', 'created_by__profile', 'organization').order_by('-created_at'))
     serializer_class = VideoStudioSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
@@ -120,6 +130,10 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         user_id = self.request.query_params.get('user_id')
         if user_id:
             qs = qs.filter(created_by=user_id)
+        # An organisation's page: the services it runs.
+        org = self.request.query_params.get('organization')
+        if org:
+            qs = qs.filter(organization__slug=org)
         # Nobody the viewer blocked (or who blocked them), and no one who
         # deactivated their account — their own listings excepted.
         user = self.request.user
@@ -128,6 +142,11 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
             blocked = blocked_ids_for(user)
             if blocked:
                 qs = qs.exclude(created_by_id__in=blocked)
+        if self.action in ('list', 'retrieve', 'home'):
+            # The stars, counted in the same query (reviews still up).
+            live = Q(reviews__is_removed=False)
+            qs = qs.annotate(rating_avg_anno=Avg('reviews__rating', filter=live),
+                             rating_count_anno=Count('reviews', filter=live, distinct=True))
         if self.action == 'list':
             qs = self._search(qs)
             # Verified first, then newest: a directory people can trust.
@@ -143,7 +162,7 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
 
         def row(q):
             return VideoStudioListSerializer(q[:HOME_ROW], many=True, context=ctx).data
-        counts = dict(qs.order_by().values('category').annotate(n=Count('pk')).values_list('category', 'n'))
+        counts = dict(qs.order_by().values('category').annotate(n=Count('pk', distinct=True)).values_list('category', 'n'))
         return Response({
             'counts': counts,
             'featured': row(qs.filter(featured_at__isnull=False).order_by('-featured_at')),
@@ -168,6 +187,116 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         for tag in tags:
             match |= Q(tags_text__icontains=f'"{tag}"')
         return qs.filter(match)
+
+    # ── Reviews (one per person, never the owner's), and the owner's reply ──
+
+    @action(detail=True, methods=['get', 'post', 'delete'])
+    def reviews(self, request, pk=None):
+        """GET: the summary (average, count, how the stars fall), yours, and
+        others' (paged). POST {rating, body}: write or change yours. DELETE:
+        take yours down."""
+        s = self.get_object()
+        user = request.user
+        mine = s.reviews.filter(user=user).first() if user.is_authenticated else None
+        if request.method in ('POST', 'DELETE') and not user.is_authenticated:
+            return Response({'error': 'Sign in to review.'}, status=status.HTTP_401_UNAUTHORIZED)
+        if request.method == 'DELETE':
+            if mine:
+                mine.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if request.method == 'POST':
+            if s.created_by_id == user.id:
+                return Response({'error': 'You can’t review your own listing.', 'code': 'own'},
+                                status=status.HTTP_403_FORBIDDEN)
+            if getattr(user, 'is_suspended', False):
+                return Response({'error': 'Your account is suspended.'}, status=status.HTTP_403_FORBIDDEN)
+            ser = ServiceReviewSerializer(mine, data=request.data, context={'request': request}, partial=bool(mine))
+            ser.is_valid(raise_exception=True)
+            review = ser.save(service=s, user=user)
+            if mine is None:
+                from ..push import notify_user
+                notify_user(s.created_by, 'service_review', f'{user.username} rated {s.name} {review.rating}★',
+                            data={'type': 'service', 'service_id': s.id})
+            return Response(ServiceReviewSerializer(review, context={'request': request}).data,
+                            status=status.HTTP_201_CREATED if mine is None else status.HTTP_200_OK)
+
+        qs = s.reviews.filter(is_removed=False).select_related('user', 'user__profile')
+        blocked = blocked_ids_for(user)
+        if blocked:
+            qs = qs.exclude(user_id__in=blocked)
+        spread = dict(qs.order_by().values('rating').annotate(n=Count('pk')).values_list('rating', 'n'))
+        total = sum(spread.values())
+        others = qs.exclude(user=user) if user.is_authenticated else qs
+        page = self.paginate_queryset(others)
+        resp = self.get_paginated_response(ServiceReviewSerializer(page, many=True, context={'request': request}).data)
+        resp.data.update({
+            'summary': {
+                'count': total,
+                'average': round(sum(r * n for r, n in spread.items()) / total, 1) if total else None,
+                'spread': {str(r): spread.get(r, 0) for r in range(1, 6)},
+            },
+            'mine': ServiceReviewSerializer(mine, context={'request': request}).data if mine else None,
+            'can_review': bool(user.is_authenticated and s.created_by_id != user.id),
+            'is_owner': bool(user.is_authenticated and s.created_by_id == user.id),
+        })
+        return resp
+
+    @action(detail=True, methods=['post', 'delete'], url_path=r'reviews/(?P<rid>\d+)/reply',
+            permission_classes=[permissions.IsAuthenticated])
+    def review_reply(self, request, pk=None, rid=None):
+        """The owner answers a review in public: POST {reply}; DELETE to take it back."""
+        s = self.get_object()
+        if s.created_by_id != request.user.id:
+            raise PermissionDenied('Only the listing’s owner replies.')
+        review = s.reviews.filter(pk=rid, is_removed=False).first()
+        if review is None:
+            raise Http404('No such review.')
+        if request.method == 'DELETE':
+            review.reply, review.replied_at = '', None
+        else:
+            reply = str(request.data.get('reply') or '').strip()
+            if not reply or len(reply) > 2000:
+                return Response({'error': 'A reply is 1 to 2000 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+            first = not review.reply
+            review.reply, review.replied_at = reply, timezone.now()
+            if first:
+                from ..push import notify_user
+                notify_user(review.user, 'service_review', f'{s.name} replied to your review',
+                            data={'type': 'service', 'service_id': s.id})
+        review.save(update_fields=['reply', 'replied_at'])
+        return Response(ServiceReviewSerializer(review, context={'request': request}).data)
+
+    # ── The verified tick: asked for by the owner, decided by staff ──
+
+    @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAuthenticated])
+    def verification(self, request, pk=None):
+        """The owner's request for the tick. GET: the latest ({status, …} or
+        {status: null}). POST {legal_name, registration_number?, note?,
+        documents: [R2 URLs, up to 4]}: ask (one waiting at a time)."""
+        from ..models import ServiceVerification as V
+        from .. import r2
+        s = self.get_object()
+        if s.created_by_id != request.user.id:
+            raise PermissionDenied('Only the listing’s owner asks for the tick.')
+        latest = s.verifications.first()
+        if request.method == 'GET':
+            return Response(_verification_json(latest, s))
+        if s.is_verified:
+            return Response({'error': 'Already verified.', 'code': 'verified'}, status=status.HTTP_400_BAD_REQUEST)
+        if latest and latest.status == V.PENDING:
+            return Response({'error': 'Your request is being looked at.', 'code': 'pending'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        legal = str(request.data.get('legal_name') or '').strip()[:200]
+        docs = request.data.get('documents') or []
+        if len(legal) < 2:
+            return Response({'error': 'Give the registered name.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(docs, list) or not docs or len(docs) > 4 or not all(r2.is_r2_url(str(d)) for d in docs):
+            return Response({'error': 'Add 1 to 4 photos of your papers.', 'code': 'documents'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        v = V.objects.create(service=s, requested_by=request.user, legal_name=legal, documents=[str(d) for d in docs],
+                             registration_number=str(request.data.get('registration_number') or '').strip()[:100],
+                             note=str(request.data.get('note') or '').strip()[:2000])
+        return Response(_verification_json(v, s), status=status.HTTP_201_CREATED)
 
     # ── Image serving: stream the stored base64 as a real, cacheable image ────
     def _serve_data_uri(self, data_uri):

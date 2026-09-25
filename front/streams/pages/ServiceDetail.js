@@ -19,6 +19,8 @@ import {
   CATEGORY_ICON, DAYS, SOCIAL_LINKS, serviceLabel, rateText, withScheme, directionsUrl,
 } from '../services/servicesCatalog';
 import { OpenChip } from '../components/services/ServiceCard';
+import ServiceReviews from '../components/services/ServiceReviews';
+import { StarRow } from '../components/BookReviews';
 import ReportModal from '../components/ReportModal';
 import useCachedData from '../utils/useCachedData';
 import { userKey } from '../utils/screenCache';
@@ -125,6 +127,20 @@ const ServiceDetail = ({ route, navigation }) => {
               {s.is_verified ? <MaterialIcons name="verified" size={20} color={colors.primary} testID="service-verified" /> : null}
             </View>
             <Text style={styles.sub}>{`${t(`services.cat.${cat}`)} · ${s.location}`}</Text>
+            {s.rating_count ? (
+              <View style={styles.starsRow} testID="service-stars">
+                <StarRow value={s.rating_avg} size={14} />
+                <Text style={styles.starsText}>{`${s.rating_avg} · ${t('reviews.count', { n: s.rating_count })}`}</Text>
+              </View>
+            ) : null}
+            {s.organization ? (
+              <TouchableOpacity style={styles.orgRow} testID="service-org"
+                onPress={() => navigation.navigate('OrganizationPage', { slug: s.organization.slug, name: s.organization.name })}>
+                <Ionicons name="business-outline" size={14} color={colors.textSecondary} />
+                <Text style={styles.orgText} numberOfLines={1}>{t('services.runBy', { name: s.organization.name })}</Text>
+                {s.organization.is_verified ? <MaterialIcons name="verified" size={14} color={colors.primary} /> : null}
+              </TouchableOpacity>
+            ) : null}
             <OpenChip hours={hours} t={t} style={styles.openChip} />
             <View style={styles.quickRow}>
               <TouchableOpacity style={styles.pill} onPress={() => open(directionsUrl(s.location))} testID="service-directions">
@@ -144,6 +160,13 @@ const ServiceDetail = ({ route, navigation }) => {
             <View style={styles.ownerBar} testID="service-owner-bar">
               <Ionicons name="eye-outline" size={18} color={colors.accent} />
               <Text style={styles.ownerText}>{t('services.ownerView')}</Text>
+              {!s.is_verified ? (
+                <TouchableOpacity style={[styles.editBtn, styles.verifyBtn]} testID="service-get-verified"
+                  onPress={() => navigation.navigate('ServiceVerification', { id: s.id, name: s.name })}>
+                  <MaterialIcons name="verified" size={15} color={colors.primary} />
+                  <Text style={[styles.editText, styles.verifyText]}>{t('verify.cta')}</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('ServiceForm', { service: s })} testID="service-page-edit">
                 <MaterialIcons name="edit" size={16} color={colors.white} />
                 <Text style={styles.editText}>{t('common.edit')}</Text>
@@ -221,8 +244,13 @@ const ServiceDetail = ({ route, navigation }) => {
             </Section>
           ) : null}
 
+          <ServiceReviews service={s} uid={currentUser?.id} t={t} isAuthenticated={isAuthenticated} navigation={navigation} />
+
           {s.created_by?.username ? (
-            <Text style={styles.listedBy}>{t('services.listedBy', { name: s.created_by.username })}</Text>
+            <Text style={styles.listedBy}>
+              {[t('services.listedBy', { name: s.created_by.username }), s.member_since ? t('services.memberSince', { year: s.member_since }) : null]
+                .filter(Boolean).join(' · ')}
+            </Text>
           ) : null}
           {!owner && isAuthenticated ? (
             <TouchableOpacity style={styles.reportLink} onPress={() => setReporting(true)} testID="service-page-report">
@@ -312,6 +340,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: 6,
   },
   editText: { ...typography.caption, color: colors.white, fontWeight: '800' },
+  verifyBtn: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.primary },
+  verifyText: { color: colors.primary },
+  starsRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  starsText: { ...typography.caption, color: colors.textSecondary },
+  orgRow: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', maxWidth: '100%' },
+  orgText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', flexShrink: 1 },
   section: {
     marginHorizontal: spacing.md, marginTop: spacing.lg, paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, gap: spacing.sm,

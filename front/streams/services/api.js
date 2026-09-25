@@ -1009,6 +1009,17 @@ export const fetchServicesHome = async () => apiRequest('get', '/video-studios/h
 // A service's link to share (a rich card that opens it in the app).
 export const serviceShareUrl = (id) => `${PUBLIC_BASE}/service/${id}/`;
 
+// A service's reviews: { summary, mine, can_review, is_owner, results, next }.
+export const fetchServiceReviews = async (id, page = 1) => apiRequest('get', `/video-studios/${id}/reviews/`, null, { params: { page } });
+export const saveServiceReview = async (id, { rating, body }) => apiRequest('post', `/video-studios/${id}/reviews/`, { rating, body });
+export const deleteMyServiceReview = async (id) => apiRequest('delete', `/video-studios/${id}/reviews/`);
+// The owner's public answer to a review.
+export const replyToServiceReview = async (id, rid, reply) => apiRequest('post', `/video-studios/${id}/reviews/${rid}/reply/`, { reply });
+export const deleteServiceReply = async (id, rid) => apiRequest('delete', `/video-studios/${id}/reviews/${rid}/reply/`);
+// Asking for the verified tick: { status: null | 'pending' | 'approved' | 'rejected', decision_note }.
+export const fetchServiceVerification = async (id) => apiRequest('get', `/video-studios/${id}/verification/`);
+export const requestServiceVerification = async (id, data) => apiRequest('post', `/video-studios/${id}/verification/`, data);
+
 export const fetchVideoStudioById = async (id) => {
   return apiRequest('get', `/video-studios/${id}/`);
 };

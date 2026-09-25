@@ -10,8 +10,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  fetchOrganization, fetchPublications, followOrganization, respondOrgInvite,
+  fetchOrganization, fetchPublications, followOrganization, respondOrgInvite, fetchServicesPage,
 } from '../services/api';
+import { ServiceTile } from '../components/services/ServicesHome';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { BookGridTile, useBookGrid, GRID_GAP } from '../components/BookGrid';
 import { notify } from '../utils/adminConfirm';
@@ -41,6 +42,7 @@ const OrganizationPage = ({ route, navigation }) => {
   const key = userKey(currentUser?.id, `org:${slug}`);
   const [org, setOrg] = useState(() => peekCache(key)?.org || null);
   const [books, setBooks] = useState(() => peekCache(key)?.books || null);
+  const [services, setServices] = useState(() => peekCache(key)?.services || []);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const insets = useSafeAreaInsets();
@@ -49,13 +51,19 @@ const OrganizationPage = ({ route, navigation }) => {
   const load = useCallback(async () => {
     setFailed(false);
     const kept = peekCache(key) || await readCache(key);
-    if (kept) { setOrg(kept.org); setBooks(kept.books); }
+    if (kept) { setOrg(kept.org); setBooks(kept.books); setServices(kept.services || []); }
     try {
-      const [o, b] = await Promise.all([fetchOrganization(slug), fetchPublications({ organization: slug })]);
+      const [o, b, sv] = await Promise.all([
+        fetchOrganization(slug), fetchPublications({ organization: slug }),
+        // Its services too (an older server has none): never holding up the page.
+        Promise.resolve().then(() => fetchServicesPage({ organization: slug })).catch(() => null),
+      ]);
       const rows = b?.results ?? [];
+      const svc = sv?.results ?? [];
       setOrg(o);
       setBooks(rows);
-      writeCache(key, { org: o, books: rows });
+      setServices(svc);
+      writeCache(key, { org: o, books: rows, services: svc });
     } catch {
       if (!kept) setFailed(true);
     }
@@ -141,6 +149,16 @@ const OrganizationPage = ({ route, navigation }) => {
           </TouchableOpacity>
         ) : null}
       </View>
+      {services.length ? (
+        <View testID="org-services">
+          <Text style={styles.section}>{t('org.services')}</Text>
+          <FlatList horizontal data={services} keyExtractor={(s) => `svc_${s.id}`} showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+            renderItem={({ item }) => (
+              <ServiceTile item={item} t={t} onOpen={(s) => navigation.navigate('ServiceDetail', { id: s.id, preview: s })} />
+            )} />
+        </View>
+      ) : null}
       <Text style={styles.section}>{t('org.theirBooks')}</Text>
     </View>
   ) : null;
@@ -222,7 +240,8 @@ const styles = StyleSheet.create({
   iconOnly: { flex: 0, width: 46 },
   btnText: { ...typography.label, color: colors.white, fontWeight: '800' },
   btnQuietText: { ...typography.label, color: colors.primary, fontWeight: '800' },
-  section: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm },
+  section: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm, marginBottom: spacing.sm },
+  rail: { gap: spacing.md, paddingRight: spacing.md },
 });
 
 export default OrganizationPage;
