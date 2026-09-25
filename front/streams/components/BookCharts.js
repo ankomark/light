@@ -50,7 +50,9 @@ const dayLabel = (iso, opts = { day: 'numeric', month: 'short' }) => {
 };
 
 /** Readers per day, as columns. data: [{ day, readers }]. */
-export const DailyColumns = ({ data = [], title, t, height = 140 }) => {
+// `onLabel` / `totalKey`: what the counts are (a book's readers by default;
+// a service's page views, …).
+export const DailyColumns = ({ data = [], title, t, height = 140, onLabel, totalKey = 'studioStats.totalReaderDays' }) => {
   const [width, setWidth] = useState(0);
   const [at, setAt] = useState(null);
   const [table, setTable] = useState(false);
@@ -83,7 +85,7 @@ export const DailyColumns = ({ data = [], title, t, height = 140 }) => {
           <View style={styles.readout}>
             <Text style={styles.readoutValue}>{shown ? compact(shown.readers) : '0'}</Text>
             <Text style={styles.readoutLabel}>
-              {shown ? `${t('studioStats.readersOn')} ${dayLabel(shown.day, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}
+              {shown ? `${onLabel || t('studioStats.readersOn')} ${dayLabel(shown.day, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}
             </Text>
           </View>
           <View style={styles.plotRow}>
@@ -96,7 +98,7 @@ export const DailyColumns = ({ data = [], title, t, height = 140 }) => {
               onResponderMove={(e) => pick(e.nativeEvent.locationX)}
               onResponderRelease={() => setAt(null)}
               accessible
-              accessibilityLabel={`${title}: ${t('studioStats.totalReaderDays', { n: total })}`}
+              accessibilityLabel={`${title}: ${t(totalKey, { n: total })}`}
               testID="chart-daily-plot"
             >
               {[0.5, 1].map((f) => (

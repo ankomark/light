@@ -18,6 +18,7 @@ import {
   fetchVideoStudioById, getOrCreateConversation, serviceShareUrl, saveService, recordServiceEvent,
 } from '../services/api';
 import BookingSheet from '../components/services/BookingSheet';
+import { noteServicesChanged } from '../services/servicesCatalog';
 import {
   CATEGORY_ICON, DAYS, SOCIAL_LINKS, serviceLabel, rateText, withScheme, directionsUrl,
 } from '../services/servicesCatalog';
@@ -110,7 +111,10 @@ const ServiceDetail = ({ route, navigation }) => {
     if (!isAuthenticated) { navigation.navigate('Login'); return; }
     const next = !isSaved;
     setSaved(next);
-    try { await saveService(s.id, next); } catch { setSaved(!next); notify(t('common.error'), t('services.saveFailed')); }
+    try {
+      await saveService(s.id, next);
+      noteServicesChanged({ item: { ...s, is_saved: next } });   // the list shows it on the way back
+    } catch { setSaved(!next); notify(t('common.error'), t('services.saveFailed')); }
   };
   const cat = s.category || 'media';
   const hours = s.opening_hours || {};

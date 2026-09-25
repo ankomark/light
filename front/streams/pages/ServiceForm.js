@@ -169,7 +169,10 @@ const ServiceForm = ({ route, navigation }) => {
     setSaving(true);
     try {
       const saved = existing ? await updateVideoStudio(existing.id, payload) : await createVideoStudio(payload);
-      noteServicesChanged({ item: { ...saved, logo: saved.logo || logo, cover_image: saved.cover_image || cover, is_owner: true } });
+      noteServicesChanged({
+        item: { ...saved, logo: saved.logo || logo, cover_image: saved.cover_image || cover, is_owner: true },
+        created: !existing,
+      });
       leaving.current = true;
       navigation.goBack();
     } catch (err) {

@@ -264,6 +264,10 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         from ..organizations import can_publish_under
         if not slug:
             return None
+        # Kept as it is (even if they've since left it): always fine — saving
+        # the book mustn't start failing.
+        if self.instance is not None and self.instance.organization_id and self.instance.organization.slug == slug:
+            return self.instance.organization
         org = Organization.objects.filter(slug=slug).first()
         if org is None or not can_publish_under(_request_user(self), org):
             raise serializers.ValidationError('You can publish only under an organisation you belong to.')

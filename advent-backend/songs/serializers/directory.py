@@ -103,6 +103,9 @@ class VideoStudioSerializer(serializers.ModelSerializer):
         from ..organizations import can_publish_under
         if not slug:
             return None
+        # Kept as it is (even if they've since left it): always fine.
+        if self.instance is not None and self.instance.organization_id and self.instance.organization.slug == slug:
+            return self.instance.organization
         org = Organization.objects.filter(slug=slug).first()
         request = self.context.get('request')
         if org is None or not can_publish_under(getattr(request, 'user', None), org):
@@ -218,7 +221,8 @@ class ServiceBookingSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
         # No day (a quote): '' as well as null.
         if hasattr(data, 'get') and data.get('date') == '':
-            data = {**data, 'date': None}
+            data = data.copy()              # a QueryDict (a form) as well as a dict
+            data['date'] = None
         return super().to_internal_value(data)
 
     def get_service_info(self, obj):
@@ -237,7 +241,10 @@ class ServiceBookingSerializer(serializers.ModelSerializer):
 
     def validate_date(self, v):
         from django.utils import timezone
-        if v and v < timezone.localdate():
+        # A day behind the server's (UTC) date is still "today" for someone
+        # west of it.
+        from datetime import timedelta
+        if v and v < timezone.localdate() - timedelta(days=1):
             raise serializers.ValidationError('That day has passed.')
         return v
 

@@ -139,7 +139,8 @@ const Studios = ({ navigation }) => {
       const id = change.item?.id ?? change.deletedId;
       const had = list.some((s) => s.id === id);
       const merged = change.deletedId ? list.filter((s) => s.id !== id)
-        : had ? list.map((s) => (s.id === id ? { ...s, ...change.item } : s)) : [change.item, ...list];
+        : had ? list.map((s) => (s.id === id ? { ...s, ...change.item } : s))
+          : change.created ? [change.item, ...list] : list;           // a new listing joins; others only update
       setItems(merged);
       const key = keyRef.current;
       if (key) writeCache(key, { items: merged, next: peekCache(key)?.next || null });
@@ -194,7 +195,12 @@ const Studios = ({ navigation }) => {
   // Keep a service to come back to: at once on the card, then the server.
   const toggleSave = useCallback(async (s) => {
     if (!isAuthenticated) { navigation.navigate('Login'); return; }
-    const flip = (on) => setItems((list) => (list || []).map((x) => (x.id === s.id ? { ...x, is_saved: on } : x)));
+    const flip = (on) => {
+      const list = (itemsRef.current || []).map((x) => (x.id === s.id ? { ...x, is_saved: on } : x));
+      setItems(list);
+      const key = keyRef.current;                               // and in its kept copy
+      if (key) writeCache(key, { items: list, next: peekCache(key)?.next || null });
+    };
     flip(!s.is_saved);
     try { await saveService(s.id, !s.is_saved); } catch { flip(!!s.is_saved); notify(t('common.error'), t('services.saveFailed')); }
   }, [isAuthenticated, navigation, t]);

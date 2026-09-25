@@ -66,7 +66,8 @@ const ServiceInsights = ({ route, navigation }) => {
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
             ) : null}
-            <DailyColumns data={data.daily} title={t('insights.viewsPerDay')} t={t} />
+            <DailyColumns data={data.daily} title={t('insights.viewsPerDay')} t={t}
+              onLabel={t('insights.viewsOn')} totalKey="insights.totalViews" />
             <Text style={styles.section}>{t('insights.howReached')}</Text>
             <View style={styles.kpis}>
               {REACH.map((k) => (

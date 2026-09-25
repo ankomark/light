@@ -108,7 +108,7 @@ class BookingTests(Base):
 
     def test_what_isnt_a_request(self):
         self.assertEqual(self.ask(date='').status_code, 400)                          # a booking needs a day
-        self.assertEqual(self.ask(date=str(timezone.localdate() - timedelta(days=1))).status_code, 400)
+        self.assertEqual(self.ask(date=str(timezone.localdate() - timedelta(days=2))).status_code, 400)
         self.assertEqual(self.ask(time='10am').status_code, 400)
         self.assertEqual(self.ask(kind='quote', date='', note='').status_code, 400)    # a quote says what for
         self.assertEqual(self.ask(kind='quote', date='', note='Rewire a house').status_code, 201)
@@ -150,3 +150,36 @@ class EventTests(Base):
         self.client.force_authenticate(self.me)
         self.assertEqual(self.client.get(f'/api/video-studios/{s.id}/insights/').status_code, 403)
         self.assertEqual(ServiceEvent.objects.count(), 2)
+
+class ScanFixTests(Base):
+    def test_a_listing_can_still_be_saved_after_its_owner_left_the_organisation(self):
+        from songs.models import Organization, OrganizationMember
+        org = Organization.objects.create(name='Mission Hospital', slug='mh', kind='ministry')
+        m = OrganizationMember.objects.create(organization=org, user=self.me, role='author', accepted_at=timezone.now())
+        s = listing(self.me, 'Clinic', organization=org)
+        m.delete()                                                     # they left
+        r = self.client.patch(f'/api/video-studios/{s.id}/', {'name': 'Clinic 2', 'organization_slug': 'mh'}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        other = Organization.objects.create(name='Other', slug='other', kind='church')
+        r = self.client.patch(f'/api/video-studios/{s.id}/', {'organization_slug': 'other'}, format='json')
+        self.assertEqual(r.status_code, 400)                          # a new one still needs membership
+
+    def test_a_book_can_still_be_saved_after_its_author_left_the_organisation(self):
+        from songs.models import Organization, OrganizationMember, Publication
+        org = Organization.objects.create(name='Press', slug='press', kind='publisher')
+        m = OrganizationMember.objects.create(organization=org, user=self.me, role='author', accepted_at=timezone.now())
+        pub = Publication.objects.create(title='Book', author=self.me, status='draft', organization=org)
+        m.delete()
+        r = self.client.patch(f'/api/publications/{pub.id}/', {'title': 'Book 2', 'organization_slug': 'press'}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def test_booking_today_west_of_the_server_and_a_form_post(self):
+        s = listing(self.owner, 'Hope Plumbers')
+        yesterday = str(timezone.localdate() - timedelta(days=1))    # "today" somewhere west of UTC
+        r = self.client.post(f'/api/video-studios/{s.id}/bookings/', {'kind': 'booking', 'date': yesterday}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        two_ago = str(timezone.localdate() - timedelta(days=2))
+        self.assertEqual(self.client.post(f'/api/video-studios/{s.id}/bookings/', {'kind': 'booking', 'date': two_ago},
+                                          format='json').status_code, 400)
+        r = self.client.post(f'/api/video-studios/{s.id}/bookings/', {'kind': 'quote', 'date': '', 'note': 'Rewire'})
+        self.assertEqual(r.status_code, 201, r.data)                  # a form, not JSON

@@ -221,7 +221,7 @@ describe('Services list', () => {
     await waitFor(() => expect(r.getByTestId('service-1')).toBeTruthy());
     mockApi.fetchServicesPage.mockImplementation(() => new Promise(() => {}));   // slow
     await new Promise((res) => setTimeout(res, 5));
-    catalog.noteServicesChanged({ item: svc(7, { name: 'Brand new', is_owner: true }) });
+    catalog.noteServicesChanged({ item: svc(7, { name: 'Brand new', is_owner: true }), created: true });
     await act(async () => { mockFocus[mockFocus.length - 1](); });
     expect(r.getByTestId('service-7')).toBeTruthy();
   });
@@ -698,5 +698,40 @@ describe('Phases 4 and 5', () => {
     expect(within(r.getByTestId('service-pin')).getByText('Kisumu, Kenya')).toBeTruthy();
     await act(async () => { fireEvent.press(r.getByTestId('service-save')); });
     expect(mockApi.createVideoStudio).toHaveBeenCalledWith(expect.objectContaining({ latitude: -0.091702, longitude: 34.768 }));
+  });
+});
+
+describe('Scan fixes', () => {
+  const ServiceDetail = require('../ServiceDetail').default;
+
+  test('a heart given on the page shows in the list on the way back — and nothing is added to a list it wasn\'t in', async () => {
+    mockApi.fetchServicesPage.mockResolvedValue({ results: [svc(1), svc(2)], next: null });
+    const r = render(<Studios navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-1')).toBeTruthy());
+    mockApi.fetchServicesPage.mockImplementation(() => new Promise(() => {}));
+    await new Promise((res) => setTimeout(res, 5));
+    catalog.noteServicesChanged({ item: { ...svc(1), is_saved: true } });
+    await act(async () => { mockFocus[mockFocus.length - 1](); });
+    expect(r.getByTestId('service-save-1').props.accessibilityState).toEqual({ selected: true });
+    await new Promise((res) => setTimeout(res, 5));
+    catalog.noteServicesChanged({ item: { ...svc(9), is_saved: true } });     // saved elsewhere, not in this list
+    await act(async () => { mockFocus[mockFocus.length - 1](); });
+    expect(r.queryByTestId('service-9')).toBeNull();
+  });
+
+  test('the page tells the list when its heart changes', async () => {
+    mockApi.saveService.mockResolvedValue({ is_saved: true });
+    mockApi.fetchVideoStudioById.mockResolvedValue(svc(5));
+    const r = render(<ServiceDetail route={{ params: { id: 5, preview: svc(5) } }} navigation={nav()} />);
+    await act(async () => { fireEvent.press(r.getByTestId('service-page-save')); });
+    expect(catalog.servicesChangedSince(0).item).toMatchObject({ id: 5, is_saved: true });
+  });
+
+  test('the insights chart speaks of page views, not readers', async () => {
+    const { DailyColumns } = require('../../components/BookCharts');
+    const tt = (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k);
+    const days = [{ day: '2026-09-20', readers: 3 }, { day: '2026-09-21', readers: 5 }];
+    const r = render(<DailyColumns data={days} title="Views" t={tt} onLabel="page views on" totalKey="insights.totalViews" />);
+    expect(r.getByTestId('chart-daily-plot').props.accessibilityLabel).toBe('Views: insights.totalViews:8');
   });
 });
