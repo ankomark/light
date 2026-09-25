@@ -40,6 +40,12 @@ const mockApi = {
   requestBookExport: jest.fn(),
   fetchBookExport: jest.fn(),
   renderBookCover: jest.fn(),
+  fetchBookAnalytics: jest.fn(),
+  fetchAuthorAnalytics: jest.fn(),
+  fetchBookClubs: jest.fn(),
+  createBookClub: jest.fn(),
+  fetchBookClub: jest.fn(),
+  fetchClubOfGroup: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -146,6 +152,7 @@ beforeEach(async () => {
   mockApi.fetchBooksHome.mockRejectedValue(new Error('not in this test'));
   mockApi.fetchBookReviews.mockRejectedValue(new Error('not in this test'));
   mockApi.fetchBookInvitations.mockResolvedValue({ results: [] });
+  mockApi.fetchBookClubs.mockResolvedValue({ results: [] });
   require('../../services/bookHighlights').__resetBookHighlights();
   require('../../utils/readerSettings').__resetReaderSettings();
   require('../../services/readingTracker').__resetReadingTracker();
@@ -1071,5 +1078,116 @@ describe('Phase 4', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+// ── Phase 5: the Author Studio and book clubs ───────────────────────────────
+describe('Phase 5', () => {
+  const { AuthorStudio, BookInsights } = require('../AuthorStudio');
+  const BookClub = require('../BookClub').default;
+  const BookClubBanner = require('../../components/BookClubBanner').default;
+  const { DailyColumns, niceMax, compact } = require('../../components/BookCharts');
+  const tt = (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k);
+  const days = (n, f = (i) => i) => Array.from({ length: n }, (_, i) => ({ day: `2026-09-${String(i + 1).padStart(2, '0')}`, readers: f(i) }));
+
+  test('axis tops and big numbers read cleanly', () => {
+    expect([niceMax(7), niceMax(23), niceMax(140), niceMax(0)]).toEqual([10, 25, 200, 1]);
+    expect([compact(1284), compact(12900), compact(4200000)]).toEqual(['1,284', '12.9K', '4.2M']);
+  });
+
+  test('readers per day: press shows the day\'s readers; the table has every value', () => {
+    const r = render(<DailyColumns data={days(10, (i) => i * 2)} title="Readers per day" t={tt} />);
+    fireEvent(r.getByTestId('chart-daily-plot'), 'layout', { nativeEvent: { layout: { width: 200 } } });
+    fireEvent(r.getByTestId('chart-daily-plot'), 'responderGrant', { nativeEvent: { locationX: 45 } });   // column 3
+    expect(r.getByText('4')).toBeTruthy();
+    fireEvent.press(r.getByText('studioStats.showTable'));
+    expect(r.getByTestId('chart-daily-table')).toBeTruthy();
+    expect(r.getByText('18')).toBeTruthy();
+  });
+
+  test('the Author Studio: numbers, a range above everything, the books', async () => {
+    const overview = (dd) => ({
+      days: dd, few_readers: false, readers: 42, reading_seconds: 13320, finished: 7, followers: 180,
+      daily: days(dd === 7 ? 7 : 30, () => 3),
+      books: [{ id: 5, title: 'The Silent Path', cover: '', readers: 40, finished: 7, completion: 0.35 }],
+    });
+    mockApi.fetchAuthorAnalytics.mockImplementation(async (dd) => overview(dd));
+    const n = nav();
+    const r = render(<AuthorStudio navigation={n} />);
+    await waitFor(() => expect(r.getByText('The Silent Path')).toBeTruthy());
+    expect(within(r.getByTestId('kpi-readers')).getByText('42')).toBeTruthy();
+    expect(r.getByText('studioStats.bookLine:40,7,35%')).toBeTruthy();
+    fireEvent.press(r.getByTestId('range-7'));
+    await waitFor(() => expect(r.getByTestId('range-7').props.accessibilityState).toEqual({ checked: true }));
+    expect(mockApi.fetchAuthorAnalytics.mock.calls).toEqual([[30], [7]]);
+    fireEvent.press(r.getByTestId('studio-book-5'));
+    expect(n.navigate).toHaveBeenCalledWith('BookInsights', { id: 5, title: 'The Silent Path' });
+  });
+
+  test('a book\'s insights: completion, where readers stop, and early days said plainly', async () => {
+    mockApi.fetchBookAnalytics.mockResolvedValue({
+      days: 30, few_readers: true, readers: 3, readers_all_time: 4, started: 4, finished: 1, completion: 0.25,
+      reading_seconds: 3600, avg_seconds_per_reader: 1200, daily: days(30, () => 1),
+      funnel: [{ index: 0, title: 'One', readers: 4 }, { index: 1, title: 'Two', readers: 2 }],
+      most_left_after: { index: 1, title: 'Two', readers: 2 },
+      likes: 5, saves: 2, highlights: 9, comments: 3, rating_avg: 4.5, rating_count: 2,
+    });
+    const r = render(<BookInsights route={{ params: { id: 5, title: 'Book' } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('kpi-completion')).toBeTruthy());
+    expect(within(r.getByTestId('kpi-completion')).getByText('25%')).toBeTruthy();
+    expect(r.getByTestId('stats-early')).toBeTruthy();
+    expect(r.getByText('studioStats.mostStopHere:2')).toBeTruthy();
+    expect(mockApi.fetchBookAnalytics).toHaveBeenCalledWith(5, 30);
+  });
+
+  test('a book club: this week, the plan, how many are there', async () => {
+    mockApi.fetchBookClub.mockResolvedValue({
+      id: 3, name: 'Sabbath readers', group: { id: 8, slug: 'sabbath-readers', name: 'Sabbath readers', is_private: true },
+      publication: 5, members: 12, is_member: true, finished_members: 1, my_percent: 0.4, starts_on: '2026-09-20',
+      plan: [
+        { through_chapter: 0, due: '2026-09-26', state: 'done', members_there: 10 },
+        { through_chapter: 1, due: '2026-10-03', state: 'current', members_there: 6 },
+      ],
+    });
+    mockApi.fetchPublication.mockResolvedValue(book());
+    const n = nav();
+    const r = render(<BookClub route={{ params: { clubId: 3 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('club-now')).toBeTruthy());
+    expect(r.getByText('club.there:6,12')).toBeTruthy();
+    expect(r.getByText('club.continue:40')).toBeTruthy();
+    fireEvent.press(r.getByTestId('club-chat'));
+    expect(n.navigate).toHaveBeenCalledWith('GroupDetail', { groupSlug: 'sabbath-readers' });
+    fireEvent.press(r.getByTestId('club-live'));
+    expect(n.navigate).toHaveBeenLastCalledWith('GoLive', expect.objectContaining({ kind: 'meet' }));
+  });
+
+  test('start a club from the book page', async () => {
+    mockApi.fetchPublication.mockResolvedValue(book());
+    mockApi.fetchBookClubs.mockResolvedValue({ results: [] });
+    mockApi.createBookClub.mockResolvedValue({ id: 3 });
+    const n = nav();
+    const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('club-start')).toBeTruthy());
+    fireEvent.press(r.getByTestId('club-start'));
+    fireEvent.press(r.getByTestId('club-pace-week2'));
+    fireEvent.press(r.getByTestId('club-public'));
+    await act(async () => { fireEvent.press(r.getByTestId('club-create')); });
+    expect(mockApi.createBookClub).toHaveBeenCalledWith(5, {
+      name: 'club.defaultName:Book 5', private: false, chapters_per_step: 2, every_days: 7,
+    });
+    expect(n.navigate).toHaveBeenLastCalledWith('BookClub', { clubId: 3 });
+  });
+
+  test('a group that is a book club shows the way to its book', async () => {
+    mockApi.fetchClubOfGroup.mockResolvedValue({ club: 3 });
+    const n = nav();
+    const r = render(<BookClubBanner groupSlug="readers" navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('group-book-club')).toBeTruthy());
+    fireEvent.press(r.getByTestId('group-book-club'));
+    expect(n.navigate).toHaveBeenCalledWith('BookClub', { clubId: 3 });
+    mockApi.fetchClubOfGroup.mockResolvedValue({ club: null });
+    const none = render(<BookClubBanner groupSlug="plain" navigation={nav()} />);
+    await act(async () => {});
+    expect(none.queryByTestId('group-book-club')).toBeNull();
   });
 });

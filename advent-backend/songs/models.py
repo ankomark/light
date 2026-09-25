@@ -2255,6 +2255,29 @@ class PublicationExport(models.Model):
         ordering = ['-created_at']
 
 
+class BookClub(models.Model):
+    """A group reading one book together, on a schedule. Built on a Group:
+    the group is the club's membership and its chat; this adds the book and
+    the reading plan (BookClubMilestone). One book per club at a time — a
+    club can move on to its next book."""
+    group = models.OneToOneField('Group', on_delete=models.CASCADE, related_name='book_club')
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='clubs')
+    created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    starts_on = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class BookClubMilestone(models.Model):
+    """"Read up to chapter N by this date" — the club's reading plan."""
+    club = models.ForeignKey(BookClub, on_delete=models.CASCADE, related_name='milestones')
+    through_chapter = models.PositiveIntegerField()        # index among the book's readers' chapters
+    due = models.DateField()
+
+    class Meta:
+        ordering = ['due', 'through_chapter']
+
+
 class ChapterComment(models.Model):
     """A comment in a chapter's discussion (one level of replies). Tied to its
     chapter, so a reader who hasn't got there yet is warned of spoilers."""

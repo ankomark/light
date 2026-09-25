@@ -891,6 +891,18 @@ export const postChapterComment = async (id, index, body, parent = null) =>
 export const deleteChapterComment = async (id, commentId) =>
   apiRequest('delete', `/publications/${id}/comments/${commentId}/`);
 
+// ── Author Studio and book clubs ──
+// How a book is read (totals): { readers, finished, completion, daily, funnel, … }.
+export const fetchBookAnalytics = async (id, days = 30) =>
+  apiRequest('get', `/publications/${id}/analytics/`, null, { params: { days } });
+// All the author's books: { readers, reading_seconds, finished, followers, books, daily }.
+export const fetchAuthorAnalytics = async (days = 30) =>
+  apiRequest('get', '/publications/analytics/', null, { params: { days } });
+export const fetchBookClubs = async (id) => apiRequest('get', `/publications/${id}/clubs/`);
+export const createBookClub = async (id, spec) => apiRequest('post', `/publications/${id}/clubs/`, spec);
+export const fetchBookClub = async (clubId) => apiRequest('get', `/publications/clubs/${clubId}/`);
+export const fetchClubOfGroup = async (slug) => apiRequest('get', `/publications/clubs/by-group/${slug}/`);
+
 // ── Writer Studio ──
 // Who works on a book: { results: [{ id, user, role, accepted }], my_role }.
 export const fetchCollaborators = async (id) => apiRequest('get', `/publications/${id}/collaborators/`);

@@ -8,7 +8,8 @@ from ..models import (
     ChapterRevision, BookHighlight, BookReview, ChapterComment, ReadingActivity, PublicationCollaborator,
     PublicationExport,
 )
-from .. import writer_studio
+from .. import writer_studio, author_studio
+from ..models import BookClub
 from ..publishing import collaborating
 from ..serializers.publications import ChaptersChangedElsewhere
 from django.db.models import Avg
@@ -1376,7 +1377,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
         qs = self._visible().select_related('author', 'author__profile')
         # Engagement actions only need the row; the list and the page need counts.
         if self.action in ('like', 'bookmark', 'progress', 'chapter', 'reading', 'revisions', 'revision',
-                           'reviews', 'discussion', 'delete_comment', 'collaborators', 'collaborator', 'export'):
+                           'reviews', 'discussion', 'delete_comment', 'collaborators', 'collaborator', 'export',
+                           'analytics', 'clubs'):
             return qs
         qs = self._counted(qs, user)
         if self.action == 'retrieve':
@@ -1887,6 +1889,76 @@ class PublicationViewSet(viewsets.ModelViewSet):
             return Response({'status': None, 'url': ''})
         return Response({'id': exp.id, 'status': exp.status, 'url': exp.url, 'error': exp.error,
                          'created_at': exp.created_at, 'finished_at': exp.finished_at})
+
+    # ── Author Studio and book clubs (songs/author_studio.py) ──
+
+    @staticmethod
+    def _days(request):
+        try:
+            return int(request.query_params.get('days', 30))
+        except ValueError:
+            return 30
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def analytics(self, request, pk=None):
+        """How the book is read — totals only. For its writers."""
+        pub = self.get_object()
+        if not writer_studio.can_edit(request.user, pub):
+            raise PermissionDenied('Only the book\'s writers see how it is read.')
+        return Response(author_studio.book_analytics(pub, self._days(request)))
+
+    @action(detail=False, methods=['get'], url_path='analytics', permission_classes=[permissions.IsAuthenticated])
+    def author_analytics(self, request):
+        """All the author's books at a glance."""
+        return Response(author_studio.author_overview(request.user, self._days(request)))
+
+    @action(detail=True, methods=['get', 'post'])
+    def clubs(self, request, pk=None):
+        """GET: clubs reading this book (yours, and public ones). POST {name,
+        private?, starts_on?, chapters_per_step?, every_days?}: start one —
+        a group with a reading plan, you its admin."""
+        pub = self.get_object()
+        if request.method == 'GET':
+            rows = [author_studio.club_summary(c, request.user) | {'name': c.group.name}
+                    for c in author_studio.clubs_for(request.user, pub)[:20]]
+            return Response({'results': rows})
+        if not request.user.is_authenticated:
+            raise PermissionDenied('Sign in to start a book club.')
+        if pub.status != 'published':
+            return Response({'error': 'A book club reads a published book.'}, status=status.HTTP_400_BAD_REQUEST)
+        name = str(request.data.get('name') or f'{pub.title} book club').strip()[:100]
+        starts_on = None
+        if request.data.get('starts_on'):
+            try:
+                starts_on = datetime.strptime(str(request.data['starts_on']), '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'error': 'starts_on is a date: YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            per = int(request.data.get('chapters_per_step') or 1)
+            every = int(request.data.get('every_days') or 7)
+        except (TypeError, ValueError):
+            return Response({'error': 'The plan needs numbers.'}, status=status.HTTP_400_BAD_REQUEST)
+        club = author_studio.create_club(request.user, pub, name,
+                                         is_private=str(request.data.get('private', True)).lower() not in ('0', 'false'),
+                                         starts_on=starts_on, chapters_per_step=per, every_days=every)
+        return Response(author_studio.club_summary(club, request.user) | {'name': club.group.name},
+                        status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path=r'clubs/(?P<cid>\d+)')
+    def club(self, request, cid=None):
+        """One club's page (members, or anyone for a public club)."""
+        club = get_object_or_404(BookClub.objects.select_related('group', 'publication'), pk=cid,
+                                 group__is_removed=False)
+        member = request.user.is_authenticated and GroupMember.objects.filter(group=club.group, user=request.user).exists()
+        if club.group.is_private and not member:
+            raise Http404('No such club.')
+        return Response(author_studio.club_summary(club, request.user) | {'name': club.group.name})
+
+    @action(detail=False, methods=['get'], url_path=r'clubs/by-group/(?P<slug>[-\w]+)')
+    def club_of_group(self, request, slug=None):
+        """The club a group runs, if any — {club: id|null} (the group page shows it)."""
+        club = BookClub.objects.filter(group__slug=slug).values_list('pk', flat=True).first()
+        return Response({'club': club})
 
     @action(detail=False, methods=['post'], url_path='cover-render', permission_classes=[permissions.IsAuthenticated])
     def cover_render(self, request):

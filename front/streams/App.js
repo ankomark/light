@@ -54,6 +54,8 @@ import ChapterDiscussion from './pages/ChapterDiscussion';
 import AuthorPage from './pages/AuthorPage';
 import CoverStudio from './pages/CoverStudio';
 import BookCollaborators from './pages/BookCollaborators';
+import AuthorStudio, { BookInsights } from './pages/AuthorStudio';
+import BookClub from './pages/BookClub';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -332,6 +334,9 @@ const App = () => {
                 <Stack.Screen name="AuthorPage" component={AuthorPage} />
                 <Stack.Screen name="CoverStudio" component={CoverStudio} />
                 <Stack.Screen name="BookCollaborators" component={BookCollaborators} />
+                <Stack.Screen name="AuthorStudio" component={AuthorStudio} />
+                <Stack.Screen name="BookInsights" component={BookInsights} />
+                <Stack.Screen name="BookClub" component={BookClub} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />

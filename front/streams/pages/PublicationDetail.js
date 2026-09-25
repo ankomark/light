@@ -18,6 +18,7 @@ import FollowButton from '../components/FollowButton';
 import ReportModal from '../components/ReportModal';
 import { ChapterListSkeleton } from '../components/SkeletonLoader';
 import BookReviews from '../components/BookReviews';
+import BookClubsSection from '../components/BookClubsSection';
 import { Stars } from '../components/BooksHome';
 import { categoryLabel } from '../utils/publications';
 import { confirmAction, notify } from '../utils/adminConfirm';
@@ -259,6 +260,11 @@ const PublicationDetail = ({ route, navigation }) => {
         </TouchableOpacity>
         {canWrite && (
           <View style={styles.ownerActions}>
+            <TouchableOpacity style={styles.iconBtn} hitSlop={8} testID="pub-insights"
+              onPress={() => navigation.navigate('BookInsights', { id: pub.id, title: pub.title })}
+              accessibilityRole="button" accessibilityLabel={t('studioStats.insights')}>
+              <MaterialIcons name="insights" size={21} color={colors.textSecondary} />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.iconBtn} onPress={onExport} hitSlop={8} disabled={exporting}
               accessibilityRole="button" accessibilityLabel={t('studio.export')} testID="pub-export">
               {exporting ? <ActivityIndicator size="small" color={colors.textSecondary} />
@@ -447,6 +453,9 @@ const PublicationDetail = ({ route, navigation }) => {
             </View>
           ) : null}
           {pub && pub.status === 'published' ? <BookReviews pubId={pub.id} navigation={navigation} onChanged={load} /> : null}
+          {pub && pub.status === 'published' ? (
+            <BookClubsSection pub={pub} navigation={navigation} isAuthenticated={isAuthenticated} />
+          ) : null}
           <View style={{ height: spacing.xxl }} />
         </View>
       </ScrollView>

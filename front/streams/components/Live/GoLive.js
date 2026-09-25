@@ -33,7 +33,8 @@ const GoLive = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const [stage, setStage] = useState('setup'); // setup | lobby
   const [kind, setKind] = useState(route.params?.kind || 'meet');
-  const [title, setTitle] = useState('');
+  // A title can come with the screen (a book club's reading room, say).
+  const [title, setTitle] = useState(route.params?.title || '');
   const [busy, setBusy] = useState(false);
 
   // Lobby (pre-join) state

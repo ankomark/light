@@ -364,7 +364,17 @@ const Articles = ({ navigation }) => {
               : null
           }
           ListHeaderComponent={showHome ? <BooksHome navigation={navigation} />
-            : tab === 'mine' && isAuthenticated ? <BookInvitations onAccepted={() => load({ refresh: true })} /> : null}
+            : tab === 'mine' && isAuthenticated ? (
+              <View>
+                <TouchableOpacity style={styles.studioLink} onPress={() => navigation.navigate('AuthorStudio')}
+                  accessibilityRole="button" testID="articles-studio">
+                  <Ionicons name="stats-chart" size={18} color={colors.accent} />
+                  <Text style={styles.studioLinkText}>{t('studioStats.title')}</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+                <BookInvitations onAccepted={() => load({ refresh: true })} />
+              </View>
+            ) : null}
           ListEmptyComponent={renderEmpty()}
         />
       )}
@@ -429,6 +439,11 @@ const styles = StyleSheet.create({
 
   listContent: { padding: spacing.md, paddingBottom: 96 },
   gridRow: { gap: spacing.sm },
+  studioLink: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, marginBottom: spacing.md,
+    borderRadius: radius.lg, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+  },
+  studioLinkText: { ...typography.label, color: colors.textPrimary, fontWeight: '700', flex: 1 },
 
 
   // List card

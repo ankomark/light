@@ -31,6 +31,7 @@ import { createGroupSocket } from '../services/groupSocket';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import ReportModal from '../components/ReportModal';
+import BookClubBanner from '../components/BookClubBanner';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -1115,6 +1116,9 @@ const GroupDetail = ({ route, navigation }) => {
           )}
         </View>
       )}
+
+      {/* A book club's group: its book and plan are one tap away. */}
+      <BookClubBanner groupSlug={groupSlug} navigation={navigation} />
 
       {isMember && pinnedMsg && (
         <TouchableOpacity style={styles.pinnedBar} activeOpacity={0.85} onPress={() => jumpToMessage(pinnedMsg.id)}>
