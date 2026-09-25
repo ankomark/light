@@ -598,6 +598,23 @@ const ChapterReader = ({ route, navigation }) => {
             <View onLayout={(e) => { blocksY.current = e.nativeEvent.layout.y; }}>{text}</View>
           ) : <ProseSkeleton lines={12} />}
 
+          {/* The end of a chapter: what others made of it. */}
+          {view.status === 'ready' && view.chapter?.status !== 'draft' ? (
+            <TouchableOpacity
+              style={[styles.discussBtn, { borderColor: subtleBorder }]}
+              onPress={() => navigation.navigate('ChapterDiscussion', {
+                id: pubId, index, chapterTitle: title, isBookAuthor: !!book?.is_owner,
+              })}
+              accessibilityRole="button"
+              testID="reader-discuss"
+            >
+              <Ionicons name="chatbubbles-outline" size={18} color={look.text} />
+              <Text style={[styles.discussText, { color: look.text }]}>
+                {entry?.comment_count ? t('reader.discussCount', { n: entry.comment_count }) : t('reader.discuss')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
           {chapters.length > 1 ? (
             <View style={styles.nav}>
               <TouchableOpacity
@@ -788,7 +805,12 @@ const styles = StyleSheet.create({
   retryBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   retryText: { ...typography.label, color: colors.white, fontWeight: '700' },
 
-  nav: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md, marginTop: spacing.xl },
+  discussBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    marginTop: spacing.xl, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1,
+  },
+  discussText: { ...typography.label, fontWeight: '700', opacity: 0.85 },
+  nav: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md, marginTop: spacing.md },
   navBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: spacing.sm + 2, ...shadows.sm,

@@ -1,7 +1,10 @@
 from django.utils import timezone
 
 from .common import *  # noqa: F401,F403
-from ..models import Publication, Chapter, PublicationLike, PublicationBookmark, ReadingProgress, BookHighlight
+from ..models import (
+    Publication, Chapter, PublicationLike, PublicationBookmark, ReadingProgress, BookHighlight, BookReview,
+    ChapterComment,
+)
 
 WORDS_PER_MIN = 200
 
@@ -29,10 +32,15 @@ class ChapterTocSerializer(serializers.ModelSerializer):
     """A chapter in the table of contents: no body (bodies can carry large
     inline images; the reader fetches one chapter at a time). `version`
     tells a phone whether the copy it kept is still current."""
+    comment_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Chapter
-        fields = ['id', 'order', 'title', 'word_count', 'version', 'status', 'is_removed']
+        fields = ['id', 'order', 'title', 'word_count', 'version', 'status', 'is_removed', 'comment_count']
         read_only_fields = fields
+
+    def get_comment_count(self, obj):
+        return getattr(obj, 'comment_count_anno', 0) or 0
 
 
 class ChapterReadSerializer(serializers.ModelSerializer):
@@ -55,14 +63,23 @@ class PublicationListSerializer(serializers.ModelSerializer):
     # The reader's own place in it (null when never opened / not signed in).
     my_percent = serializers.SerializerMethodField()
     my_finished = serializers.SerializerMethodField()
+    rating_avg = serializers.SerializerMethodField()
+    rating_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Publication
         fields = [
             'id', 'title', 'summary', 'cover', 'category', 'status', 'author', 'is_owner',
             'chapter_count', 'likes_count', 'is_liked', 'is_bookmarked', 'created_at', 'updated_at',
-            'my_percent', 'my_finished',
+            'my_percent', 'my_finished', 'rating_avg', 'rating_count',
         ]
+
+    def get_rating_avg(self, obj):
+        v = getattr(obj, 'rating_avg_anno', None)
+        return round(v, 1) if v is not None else None
+
+    def get_rating_count(self, obj):
+        return getattr(obj, 'rating_count_anno', 0) or 0
 
     def get_my_percent(self, obj):
         return getattr(obj, 'my_percent', None)
@@ -96,6 +113,49 @@ class PublicationListSerializer(serializers.ModelSerializer):
             return obj.bookmarked_by_me
         user = _request_user(self)
         return bool(user and obj.bookmarks.filter(user=user).exists())
+
+
+class BookReviewSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+    is_mine = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BookReview
+        fields = ['id', 'user', 'rating', 'body', 'is_mine', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'is_mine', 'created_at', 'updated_at']
+
+    def get_is_mine(self, obj):
+        user = _request_user(self)
+        return bool(user and obj.user_id == user.id)
+
+    def validate_rating(self, v):
+        if not 1 <= v <= 5:
+            raise serializers.ValidationError('A rating is 1 to 5 stars.')
+        return v
+
+
+class ChapterCommentSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(read_only=True)
+    is_mine = serializers.SerializerMethodField()
+    is_author = serializers.SerializerMethodField()
+    replies = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChapterComment
+        fields = ['id', 'user', 'body', 'parent', 'is_mine', 'is_author', 'created_at', 'replies']
+        read_only_fields = fields
+
+    def get_is_mine(self, obj):
+        user = _request_user(self)
+        return bool(user and obj.user_id == user.id)
+
+    def get_is_author(self, obj):
+        # The book's author, marked in their own discussions.
+        return obj.user_id == self.context.get('author_id')
+
+    def get_replies(self, obj):
+        kids = self.context.get('replies', {}).get(obj.id, [])
+        return ChapterCommentSerializer(kids, many=True, context={**self.context, 'replies': {}}).data
 
 
 class BookHighlightSerializer(serializers.ModelSerializer):
@@ -138,6 +198,8 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     last_read_position = serializers.SerializerMethodField()
     my_percent = serializers.SerializerMethodField()
     my_finished = serializers.SerializerMethodField()
+    rating_avg = serializers.SerializerMethodField()
+    rating_count = serializers.SerializerMethodField()
     author_is_following = serializers.SerializerMethodField()
 
     class Meta:
@@ -146,7 +208,7 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
             'id', 'title', 'summary', 'cover', 'theme', 'category', 'status',
             'author', 'chapters', 'is_owner', 'reading_minutes',
             'likes_count', 'is_liked', 'is_bookmarked', 'last_read_chapter', 'last_read_position',
-            'my_percent', 'my_finished', 'author_is_following',
+            'my_percent', 'my_finished', 'rating_avg', 'rating_count', 'author_is_following',
             'created_at', 'updated_at', 'published_at',
         ]
         read_only_fields = ['author', 'created_at', 'updated_at', 'published_at']
@@ -208,6 +270,13 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     def get_my_finished(self, obj):
         return getattr(obj, 'my_finished_at', None) is not None
 
+    def get_rating_avg(self, obj):
+        v = getattr(obj, 'rating_avg_anno', None)
+        return round(v, 1) if v is not None else None
+
+    def get_rating_count(self, obj):
+        return getattr(obj, 'rating_count_anno', 0) or 0
+
     def get_author_is_following(self, obj):
         user = _request_user(self)
         if not user or user.id == obj.author_id:
@@ -222,24 +291,31 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         from ..publishing import sync_chapters
         chapters = sorted(chapters, key=lambda ch: ch.get('order') or 0) if all(
             ch.get('order') for ch in chapters) else chapters
-        sync_chapters(publication, chapters, _request_user(self))
+        return sync_chapters(publication, chapters, _request_user(self))
 
+    # A book goes out once (published_at is set the first time): that's news
+    # to the author's followers. Chapters added to a book already out are news
+    # to its readers too (songs/book_community.py).
     def create(self, validated_data):
+        from ..book_community import announce
         chapters = validated_data.pop('chapters', [])
         if validated_data.get('status') == 'published':
             validated_data['published_at'] = timezone.now()
         publication = Publication.objects.create(**validated_data)
         self._sync_chapters(publication, chapters)
+        announce(publication, was_published=False, newly_visible_chapters=[])
         return publication
 
     def update(self, instance, validated_data):
+        from ..book_community import announce
         chapters = validated_data.pop('chapters', None)
+        was_published = bool(instance.published_at)
         new_status = validated_data.get('status', instance.status)
         if new_status == 'published' and not instance.published_at:
             instance.published_at = timezone.now()
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        if chapters is not None:
-            self._sync_chapters(instance, chapters)
+        appeared = self._sync_chapters(instance, chapters) if chapters is not None else []
+        announce(instance, was_published=was_published, newly_visible_chapters=appeared)
         return instance

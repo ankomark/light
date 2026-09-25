@@ -5,11 +5,31 @@ from .models import (
     Videostudio, CommunityCategory, Group, GroupMember, GroupJoinRequest,
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
-    Report, AdminActionLog, Appeal, Role, LiveBroadcast, CoHostRequest,
+    Report, AdminActionLog, Appeal, Role, LiveBroadcast, CoHostRequest, Publication,
 )
 
 admin.site.register(LiveBroadcast)
 admin.site.register(CoHostRequest)
+
+
+@admin.register(Publication)
+class PublicationAdmin(admin.ModelAdmin):
+    """Books. Editor's picks are chosen here: select books and run "Make
+    editor's pick" — the most recent picks lead Discover."""
+    list_display = ('id', 'title', 'author', 'status', 'category', 'featured_at', 'is_removed', 'published_at')
+    list_filter = ('status', 'category', 'is_removed')
+    search_fields = ('title', 'author__username')
+    raw_id_fields = ('author',)
+    actions = ['make_pick', 'drop_pick']
+
+    @admin.action(description="Make editor's pick")
+    def make_pick(self, request, queryset):
+        from django.utils import timezone
+        queryset.filter(status='published', is_removed=False).update(featured_at=timezone.now())
+
+    @admin.action(description="No longer an editor's pick")
+    def drop_pick(self, request, queryset):
+        queryset.update(featured_at=None)
 
 
 @admin.register(Role)

@@ -4,7 +4,6 @@ import {
   ActivityIndicator, ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchPublications, fetchMyPublications, fetchPublicationsByUrl } from '../services/api';
@@ -14,6 +13,7 @@ import { CATEGORIES, categoryLabel } from '../utils/publications';
 import useGridColumns from '../utils/useGridColumns';
 import { PublicationListSkeleton } from '../components/SkeletonLoader';
 import BookLibrary from '../components/BookLibrary';
+import BooksHome, { Stars } from '../components/BooksHome';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
@@ -74,6 +74,7 @@ const PublicationCard = memo(({ item, onOpen, t, style }) => {
             </>
           )}
         </View>
+        <Stars avg={item.rating_avg} count={item.rating_count} />
       </View>
     </TouchableOpacity>
   );
@@ -209,51 +210,15 @@ const Articles = ({ navigation }) => {
   const open = useCallback((item) => navigation.navigate('PublicationDetail', { id: item.id, preview: item }), [navigation]);
   const write = () => (isAuthenticated ? navigation.navigate('PublicationEditor', {}) : navigation.navigate('Login'));
 
-  // ── Featured hero (top story in Discover) ──
-  const renderFeatured = (item) => (
-    <TouchableOpacity style={styles.featured} activeOpacity={0.9} onPress={() => open(item)}
-      accessibilityRole="button" accessibilityLabel={item.title}>
-      {item.cover ? (
-        <Image source={{ uri: item.cover }} style={styles.featuredCover} contentFit="cover" transition={150} />
-      ) : (
-        <View style={[styles.featuredCover, styles.coverFallback]}>
-          <MaterialIcons name="auto-stories" size={48} color={colors.textMuted} />
-        </View>
-      )}
-      <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} style={styles.featuredOverlay}>
-        <Text style={styles.featuredKicker}>
-          {categoryLabel(item.category, t)}{item.status === 'draft' ? `  ·  ${t('pubDetail.draft')}` : ''}
-        </Text>
-        <Text style={styles.featuredTitle} numberOfLines={2}>{item.title}</Text>
-        <View style={styles.featuredMeta}>
-          <AuthorAvatar uri={item.author?.profile_picture} size={20} />
-          <Text style={[styles.featuredAuthor, styles.cardAuthor]} numberOfLines={1}>
-            {item.author?.username || t('articles.unknownAuthor')}
-          </Text>
-          <Text style={styles.featuredDot}>·</Text>
-          <Text style={styles.featuredAuthor}>{t('articles.chapterShort', { n: item.chapter_count || 0 })}</Text>
-          {item.likes_count > 0 && (
-            <>
-              <Text style={styles.featuredDot}>·</Text>
-              <Ionicons name="heart" size={12} color="#fff" />
-              <Text style={styles.featuredAuthor}> {item.likes_count}</Text>
-            </>
-          )}
-        </View>
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-
   const renderItem = useCallback(({ item }) => (
     <PublicationCard item={item} onOpen={open} t={t} style={cols > 1 ? styles.cardInGrid : null} />
   ), [open, t, cols]);
 
-  const showFeatured = tab === 'discover' && category === 'all' && !searching && items.length > 0;
-  const featured = showFeatured ? items[0] : null;
-  const listData = showFeatured ? items.slice(1) : items;
+  // Discover, unfiltered: the shelves (picks, trending, …) over every book.
+  const showHome = tab === 'discover' && category === 'all' && !searching;
+  const listData = items;
 
   const renderEmpty = () => {
-    if (featured) return null;
     if (needsAccount) {
       return (
         <View style={styles.empty}>
@@ -397,7 +362,7 @@ const Articles = ({ navigation }) => {
               ? <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 16 }} />
               : null
           }
-          ListHeaderComponent={featured ? renderFeatured(featured) : null}
+          ListHeaderComponent={showHome ? <BooksHome navigation={navigation} /> : null}
           ListEmptyComponent={renderEmpty()}
         />
       )}
@@ -463,25 +428,6 @@ const styles = StyleSheet.create({
   listContent: { padding: spacing.md, paddingBottom: 96 },
   gridRow: { gap: spacing.sm },
 
-  // Featured hero
-  featured: {
-    height: 210,
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
-    ...shadows.md,
-  },
-  featuredCover: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
-  featuredOverlay: { flex: 1, justifyContent: 'flex-end', padding: spacing.md },
-  featuredKicker: {
-    ...typography.caption, color: colors.accent, fontWeight: '800',
-    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4,
-  },
-  featuredTitle: { fontSize: 24, fontWeight: '800', color: colors.white, lineHeight: 28 },
-  featuredMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm },
-  featuredAuthor: { ...typography.caption, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
-  featuredDot: { color: 'rgba(255,255,255,0.6)' },
 
   // List card
   card: {

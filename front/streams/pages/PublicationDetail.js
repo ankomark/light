@@ -14,6 +14,8 @@ import {
 import FollowButton from '../components/FollowButton';
 import ReportModal from '../components/ReportModal';
 import { ChapterListSkeleton } from '../components/SkeletonLoader';
+import BookReviews from '../components/BookReviews';
+import { Stars } from '../components/BooksHome';
 import { categoryLabel } from '../utils/publications';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
@@ -173,6 +175,10 @@ const PublicationDetail = ({ route, navigation }) => {
   };
 
   // The reader gets the contents, not the book: it loads each chapter itself.
+  const openDiscussion = (index, ch) => navigation.navigate('ChapterDiscussion', {
+    id: pub.id, index, chapterTitle: ch?.title || '', isBookAuthor: !!pub.is_owner,
+  });
+
   // Opening at the reader's place carries how far into that chapter it was
   // (another phone's place, when this one has none of its own).
   const read = (index) => navigation.navigate('ChapterReader', {
@@ -181,8 +187,8 @@ const PublicationDetail = ({ route, navigation }) => {
     ...(index === lastRead && pub.last_read_position > 0 ? { position: pub.last_read_position } : {}),
     book: {
       id: pub.id, title: pub.title, theme: pub.theme, updated_at: pub.updated_at, is_owner: !!pub.is_owner,
-      chapters: chapters.map(({ id: cid, order, title, version, status, word_count }) => ({
-        id: cid, order, title, version, status, word_count,
+      chapters: chapters.map(({ id: cid, order, title, version, status, word_count, comment_count }) => ({
+        id: cid, order, title, version, status, word_count, comment_count,
       })),
     },
   });
@@ -261,7 +267,15 @@ const PublicationDetail = ({ route, navigation }) => {
                 {head.status === 'draft' && <Text style={styles.draftBadge}>{t('pubDetail.draft')}</Text>}
               </View>
               <Text style={styles.title}>{head.title}</Text>
-              <Text style={styles.author}>{t('pubDetail.by', { name: head.author?.username || t('articles.unknownAuthor') })}</Text>
+              <TouchableOpacity
+                disabled={!head.author?.id}
+                onPress={() => navigation.navigate('AuthorPage', { userId: head.author.id, username: head.author.username })}
+                accessibilityRole="link"
+                testID="pub-author"
+              >
+                <Text style={styles.author}>{t('pubDetail.by', { name: head.author?.username || t('articles.unknownAuthor') })}</Text>
+              </TouchableOpacity>
+              {pub?.rating_avg ? <View style={{ marginTop: 2 }}><Stars avg={pub.rating_avg} count={pub.rating_count} size={13} /></View> : null}
               <Text style={styles.meta}>
                 {chapterTotal === 1 ? t('pubDetail.chapterCountOne') : t('pubDetail.chapterCount', { n: chapterTotal })}
                 {pub?.reading_minutes ? ` · ${t('pubDetail.minRead', { n: pub.reading_minutes })}` : ''}
@@ -367,10 +381,24 @@ const PublicationDetail = ({ route, navigation }) => {
                 {ch.is_removed ? <Text style={[styles.tocMark, styles.tocMarkRemoved]}>{t('pubDetail.removedChapter')}</Text>
                   : ch.status === 'draft' ? <Text style={styles.tocMark}>{t('pubDetail.draft')}</Text> : null}
                 {idx === lastRead && lastRead > 0 ? <Ionicons name="bookmark" size={14} color={colors.accent} /> : null}
+                {pub.status === 'published' && !ch.is_removed && ch.status !== 'draft' ? (
+                  <TouchableOpacity
+                    style={styles.talk}
+                    hitSlop={8}
+                    onPress={() => openDiscussion(idx, ch)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('discussion.title')}
+                    testID={`pub-discuss-${idx}`}
+                  >
+                    <Ionicons name="chatbubble-outline" size={15} color={colors.textSecondary} />
+                    {ch.comment_count ? <Text style={styles.talkN}>{ch.comment_count}</Text> : null}
+                  </TouchableOpacity>
+                ) : null}
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
             ))
           )}
+          {pub && pub.status === 'published' ? <BookReviews pubId={pub.id} navigation={navigation} onChanged={load} /> : null}
           <View style={{ height: spacing.xxl }} />
         </View>
       </ScrollView>
@@ -467,6 +495,8 @@ const styles = StyleSheet.create({
   },
   tocNum: { ...typography.label, color: colors.primary, fontWeight: '800', width: 24 },
   tocChapter: { ...typography.label, color: colors.textPrimary, flex: 1 },
+  talk: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 4 },
+  talkN: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   tocMark: {
     ...typography.caption, color: colors.warning, fontWeight: '700', fontSize: 10, textTransform: 'uppercase',
     borderWidth: 1, borderColor: colors.warning, borderRadius: radius.sm, paddingHorizontal: 5,

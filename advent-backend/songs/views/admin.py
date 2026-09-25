@@ -2,7 +2,7 @@ from .common import *  # noqa: F401,F403  (DRF symbols, models, StandardPaginati
 from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
-from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES
+from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES, BookReview, ChapterComment
 from .. import rights
 from ..signals import sync_removal_likes
 from ..serializers.admin import build_report_targets
@@ -63,6 +63,8 @@ _CONTENT_MODELS = {
     # carries is_removed and is takedown/restore-able here (and via reports).
     'publication': Publication,   # long-form articles
     'chapter': Chapter,           # one chapter of one (the rest of the book stays)
+    'bookreview': BookReview,     # a reader's review of a book
+    'chaptercomment': ChapterComment,   # a comment in a chapter's discussion
     'product': Product,           # marketplace listings
     'productreview': ProductReview,
     'grouppost': GroupPost,       # group chat messages

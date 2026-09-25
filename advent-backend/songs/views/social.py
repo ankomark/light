@@ -4,7 +4,9 @@ import os
 from django.http import HttpResponse, Http404, HttpResponseNotFound
 from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, FloatField, F, Case, When, Value, Sum
 from django.db.models.functions import Coalesce
-from ..models import ChapterRevision, BookHighlight
+from ..models import ChapterRevision, BookHighlight, BookReview, ChapterComment, ReadingActivity
+from django.db.models import Avg
+from .. import book_community
 from ..publishing import (
     visible_chapters_q, reader_chapters, record_reading, revision_list, diff_paragraphs,
     visible_publications, book_percent, reading_stats, apply_highlight_ops,
@@ -916,7 +918,7 @@ class ReportViewSet(viewsets.ViewSet):
         # Admins can act on all of these from the reports screen.
         valid_types = {
             'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
-            'publication', 'chapter', 'product', 'productreview', 'grouppost',
+            'publication', 'chapter', 'bookreview', 'chaptercomment', 'product', 'productreview', 'grouppost',
             'videostudio', 'mediastation',
         }
         if content_type not in valid_types:
@@ -1345,7 +1347,13 @@ class PublicationViewSet(viewsets.ModelViewSet):
                 .values('publication').annotate(n=Count('pk')).values('n')[:1],
                 output_field=IntegerField()), 0)
         chapter_where = {} if all_chapters else {'status': Chapter.PUBLISHED, 'is_removed': False}
-        qs = qs.annotate(chapter_count_anno=count(Chapter, **chapter_where), likes_total=count(PublicationLike))
+        reviews = BookReview.objects.filter(publication=OuterRef('pk'), is_removed=False).order_by().values('publication')
+        qs = qs.annotate(
+            chapter_count_anno=count(Chapter, **chapter_where), likes_total=count(PublicationLike),
+            rating_avg_anno=Subquery(reviews.annotate(a=Avg('rating')).values('a')[:1], output_field=FloatField()),
+            rating_count_anno=Coalesce(Subquery(reviews.annotate(n=Count('pk')).values('n')[:1],
+                                                output_field=IntegerField()), 0),
+        )
         if user.is_authenticated:
             mine = ReadingProgress.objects.filter(publication=OuterRef('pk'), user=user)
             qs = qs.annotate(
@@ -1361,7 +1369,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = self._visible().select_related('author', 'author__profile')
         # Engagement actions only need the row; the list and the page need counts.
-        if self.action in ('like', 'bookmark', 'progress', 'chapter', 'reading', 'revisions', 'revision'):
+        if self.action in ('like', 'bookmark', 'progress', 'chapter', 'reading', 'revisions', 'revision',
+                           'reviews', 'discussion', 'delete_comment'):
             return qs
         qs = self._counted(qs, user)
         if self.action == 'retrieve':
@@ -1369,7 +1378,11 @@ class PublicationViewSet(viewsets.ModelViewSet):
             # and takedowns marked).
             chapters = Chapter.objects.filter(visible_chapters_q(user)).order_by('order', 'id')
             if self._toc():
-                chapters = chapters.defer('body')
+                # The contents carry each chapter's discussion size.
+                chapters = chapters.defer('body').annotate(comment_count_anno=Coalesce(Subquery(
+                    ChapterComment.objects.filter(chapter=OuterRef('pk'), is_removed=False).order_by()
+                    .values('chapter').annotate(n=Count('pk')).values('n')[:1],
+                    output_field=IntegerField()), 0))
             qs = qs.prefetch_related(Prefetch('chapters', queryset=chapters)).annotate(
                 words_total=Coalesce(Subquery(
                     Chapter.objects.filter(visible_chapters_q(user), publication=OuterRef('pk')).order_by()
@@ -1417,6 +1430,176 @@ class PublicationViewSet(viewsets.ModelViewSet):
             return qs.filter(progresses__user=user, progresses__finished_at__isnull=False).order_by('-my_finished_at', '-id')
 
         return qs.order_by('-created_at')
+
+    # ── Discover and community (songs/book_community.py) ──
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def home(self, request):
+        """Discover: continue reading, editor's picks, trending, from authors
+        you follow, new releases, rising authors. Every book row on the page
+        in one query."""
+        user = request.user
+        sections = book_community.home_sections(user)
+        keys = ('continue', 'picks', 'trending', 'following', 'new')
+        ids = {i for k in keys for i in sections[k]}
+        rows = (self._counted(Publication.objects.filter(id__in=ids), user)
+                .select_related('author', 'author__profile').in_bulk())
+        ctx = self.get_serializer_context()
+        out = {k: PublicationListSerializer([rows[i] for i in sections[k] if i in rows], many=True, context=ctx).data
+               for k in keys}
+        people = User.objects.select_related('profile').in_bulk([r['user_id'] for r in sections['rising']])
+        out['rising'] = []
+        for r in sections['rising']:
+            u = people.get(r['user_id'])
+            if u:
+                row = SimpleUserSerializer(u, context=ctx).data
+                row.update(readers=r['readers'], growth=round(r['growth'], 2))
+                out['rising'].append(row)
+        return Response(out)
+
+    @action(detail=True, methods=['get', 'post', 'delete'])
+    def reviews(self, request, pk=None):
+        """GET: the summary (average, count, how the stars fall), the reader's
+        own review, whether they may review yet, and others' reviews (paged).
+        POST {rating, body}: write or change yours — after reading a fifth of
+        the book. DELETE: take yours down."""
+        pub = self.get_object()
+        user = request.user
+        mine = pub.reviews.filter(user=user).first() if user.is_authenticated else None
+        if request.method == 'DELETE':
+            if mine:
+                mine.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if request.method == 'POST':
+            may, why = book_community.review_eligibility(user, pub)
+            if not may:
+                return Response({'error': 'You can review a book once you have read some of it.', 'code': why},
+                                status=status.HTTP_403_FORBIDDEN)
+            ser = BookReviewSerializer(mine, data=request.data, context={'request': request}, partial=bool(mine))
+            ser.is_valid(raise_exception=True)
+            review = ser.save(publication=pub, user=user)
+            if mine is None:
+                from ..push import notify_user
+                notify_user(pub.author, 'book_review', f'{user.username} rated “{pub.title}” {review.rating}★',
+                            data={'type': 'publication', 'publication_id': pub.id})
+            return Response(BookReviewSerializer(review, context={'request': request}).data,
+                            status=status.HTTP_201_CREATED if mine is None else status.HTTP_200_OK)
+
+        qs = pub.reviews.filter(is_removed=False).select_related('user', 'user__profile')
+        blocked = blocked_ids_for(user)
+        if blocked:
+            qs = qs.exclude(user_id__in=blocked)
+        spread = dict(qs.values('rating').annotate(n=Count('pk')).values_list('rating', 'n'))
+        total = sum(spread.values())
+        others = qs.exclude(user=user) if user.is_authenticated else qs
+        page = self.paginate_queryset(others)
+        resp = self.get_paginated_response(BookReviewSerializer(page, many=True, context={'request': request}).data)
+        may, why = book_community.review_eligibility(user, pub)
+        resp.data.update({
+            'summary': {
+                'count': total,
+                'average': round(sum(r * n for r, n in spread.items()) / total, 1) if total else None,
+                'spread': {str(r): spread.get(r, 0) for r in range(1, 6)},
+            },
+            'mine': BookReviewSerializer(mine, context={'request': request}).data if mine else None,
+            'can_review': may,
+            'reason': why,
+        })
+        return resp
+
+    @action(detail=True, methods=['get', 'post'], url_path=r'chapters/(?P<index>\d+)/comments')
+    def discussion(self, request, pk=None, index=None):
+        """A chapter's discussion. A reader who hasn't reached this chapter
+        gets {locked, reached, count} instead of spoilers — ?reveal=1 to read
+        it anyway. POST {body, parent?} to comment or reply."""
+        from collections import defaultdict
+        pub = self.get_object()
+        chapters = list(reader_chapters(pub, request.user).values_list('pk', flat=True))
+        i = int(index)
+        if i >= len(chapters):
+            raise Http404('No such chapter.')
+        chapter_id = chapters[i]
+        user = request.user
+
+        if request.method == 'POST':
+            body = str(request.data.get('body') or '').strip()
+            if not body or len(body) > 2000:
+                return Response({'error': 'A comment is 1 to 2000 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+            parent = None
+            if request.data.get('parent'):
+                parent = ChapterComment.objects.filter(pk=request.data.get('parent'), chapter_id=chapter_id,
+                                                       is_removed=False).first()
+                if parent is None:
+                    return Response({'error': 'That comment is gone.'}, status=status.HTTP_400_BAD_REQUEST)
+                parent = parent.parent or parent               # one level of replies
+            c = ChapterComment.objects.create(publication=pub, chapter_id=chapter_id, user=user, body=body, parent=parent)
+            from ..push import notify_user
+            told = set()
+            if parent and parent.user_id != user.id and parent.user_id not in blocked_ids_for(user):
+                notify_user(parent.user, 'book_discussion', f'{user.username} replied in “{pub.title}”',
+                            data={'type': 'chapter_discussion', 'publication_id': pub.id, 'chapter_index': i})
+                told.add(parent.user_id)
+            if pub.author_id != user.id and pub.author_id not in told:
+                notify_user(pub.author, 'book_discussion',
+                            f'{user.username} commented on chapter {i + 1} of “{pub.title}”',
+                            data={'type': 'chapter_discussion', 'publication_id': pub.id, 'chapter_index': i})
+            ctx = {'request': request, 'author_id': pub.author_id}
+            return Response(ChapterCommentSerializer(c, context=ctx).data, status=status.HTTP_201_CREATED)
+
+        qs = (ChapterComment.objects.filter(chapter_id=chapter_id, is_removed=False)
+              .select_related('user', 'user__profile'))
+        blocked = blocked_ids_for(user)
+        if blocked:
+            qs = qs.exclude(user_id__in=blocked)
+        count = qs.count()
+        reach = book_community.reader_reach(user, pub)
+        if i > reach and request.query_params.get('reveal') not in ('1', 'true'):
+            return Response({'locked': True, 'reached': reach, 'count': count, 'results': []})
+        rows = list(qs[:500])
+        replies = defaultdict(list)
+        for c in rows:
+            if c.parent_id:
+                replies[c.parent_id].append(c)
+        top = [c for c in rows if not c.parent_id]
+        ctx = {'request': request, 'replies': replies, 'author_id': pub.author_id}
+        return Response({'locked': False, 'count': count,
+                         'results': ChapterCommentSerializer(top, many=True, context=ctx).data})
+
+    @action(detail=True, methods=['delete'], url_path=r'comments/(?P<cid>\d+)',
+            permission_classes=[permissions.IsAuthenticated])
+    def delete_comment(self, request, pk=None, cid=None):
+        """Its writer, or the book's author (their own discussion), may take
+        a comment down."""
+        pub = self.get_object()
+        c = get_object_or_404(ChapterComment, pk=cid, publication=pub)
+        if request.user.id not in (c.user_id, pub.author_id):
+            return Response({'error': 'Not yours to remove.'}, status=status.HTTP_403_FORBIDDEN)
+        c.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['get'], url_path=r'authors/(?P<uid>\d+)', permission_classes=[permissions.AllowAny])
+    def author_page(self, request, uid=None):
+        """An author's page: who they are, followers, readers (people who've
+        read their books), books finished by readers, and their books."""
+        author = get_object_or_404(User.objects.select_related('profile'), pk=uid, is_deactivated=False)
+        if author.id in blocked_ids_for(request.user):
+            raise Http404('No such author.')
+        user = request.user
+        books = (self._counted(self._visible().filter(author=author, status='published'), user)
+                 .select_related('author', 'author__profile').order_by('-published_at', '-id')[:100])
+        ctx = self.get_serializer_context()
+        data = SimpleUserSerializer(author, context=ctx).data
+        return Response({
+            'author': data,
+            'followers_count': author.followers.count(),
+            'is_following': bool(user.is_authenticated and user.id != author.id
+                                 and author.followers.filter(id=user.id).exists()),
+            'readers_count': (ReadingActivity.objects.filter(publication__author=author)
+                              .exclude(user=author).values('user').distinct().count()),
+            'finished_count': ReadingProgress.objects.filter(publication__author=author, finished_at__isnull=False)
+                                                     .exclude(user=author).count(),
+            'books': PublicationListSerializer(books, many=True, context=ctx).data,
+        })
 
     @action(detail=False, methods=['get'], url_path='reading-stats', permission_classes=[permissions.IsAuthenticated])
     def reading_stats(self, request):

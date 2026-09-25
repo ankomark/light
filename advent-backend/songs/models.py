@@ -994,6 +994,8 @@ class NotificationPreference(models.Model):
     quiz = models.BooleanField(default=True)
     weather = models.BooleanField(default=True)
     verse = models.BooleanField(default=True)
+    # New books and chapters from authors followed, books saved and being read.
+    books = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -2053,6 +2055,9 @@ class Publication(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    # An editor's pick since this time (set by staff in the Django admin);
+    # null = not a pick. The most recent picks lead Discover.
+    featured_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -2188,6 +2193,38 @@ class BookHighlight(models.Model):
         unique_together = ('user', 'client_id')
         ordering = ['-updated_at', '-id']
         indexes = [models.Index(fields=['user', 'publication', '-updated_at'], name='bookhl_user_pub_idx')]
+
+
+class BookReview(models.Model):
+    """A reader's rating (1–5) and, if they like, a few words — one per
+    reader per book, from someone who has read some of it."""
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='reviews')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='book_reviews')
+    rating = models.PositiveSmallIntegerField()
+    body = models.TextField(max_length=4000, blank=True, default='')
+    is_removed = models.BooleanField(default=False)     # a moderator's takedown
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('publication', 'user')
+        ordering = ['-updated_at', '-id']
+
+
+class ChapterComment(models.Model):
+    """A comment in a chapter's discussion (one level of replies). Tied to its
+    chapter, so a reader who hasn't got there yet is warned of spoilers."""
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='chapter_comments')
+    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='comments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chapter_comments')
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
+    body = models.TextField(max_length=2000)
+    is_removed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        indexes = [models.Index(fields=['chapter', 'created_at'], name='chcomment_chapter_idx')]
 
 
 class ReadingActivity(models.Model):

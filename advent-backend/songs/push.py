@@ -14,6 +14,10 @@ NOTIFICATION_TITLES = {
     'mention': '@ You were mentioned',
     'security': '\U0001f512 Security alert',
     'milestone': '\U0001f389 Milestone',
+    'new_book': '\U0001f4d6 New book',
+    'new_chapter': '\U0001f4d6 New chapter',
+    'book_discussion': '\U0001f4ac Book discussion',
+    'book_review': '⭐ New review',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.
@@ -39,6 +43,12 @@ NOTIFICATION_CATEGORIES = {
     'quiz_reminder': 'quiz',
     'weather_briefing': 'weather',
     'verse_of_the_day': 'verse',
+    'new_book': 'books',
+    'new_chapter': 'books',
+    # Someone replied in a chapter's discussion / reviewed your book: people
+    # talking to you, like a comment.
+    'book_discussion': 'comments',
+    'book_review': 'comments',
 }
 
 

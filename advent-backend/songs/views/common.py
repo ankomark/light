@@ -58,6 +58,8 @@ from ..serializers import (
     PublicationDetailSerializer,
     ChapterReadSerializer,
     BookHighlightSerializer,
+    BookReviewSerializer,
+    ChapterCommentSerializer,
     ChapterSerializer,
     VideoStudioSerializer,
     VideoStudioListSerializer,

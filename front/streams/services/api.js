@@ -872,6 +872,28 @@ export const fetchChapterRevisions = async (id, chapterId) =>
   apiRequest('get', `/publications/${id}/revisions/`, null,
     chapterId != null ? { params: { chapter: chapterId } } : undefined);
 
+// Discover: { continue, picks, trending, following, new, rising }.
+export const fetchBooksHome = async () => apiRequest('get', '/publications/home/');
+
+// Reviews: { summary, mine, can_review, reason, results, next }.
+export const fetchBookReviews = async (id, page = 1) =>
+  apiRequest('get', `/publications/${id}/reviews/`, null, { params: { page } });
+export const saveBookReview = async (id, { rating, body }) =>
+  apiRequest('post', `/publications/${id}/reviews/`, { rating, body });
+export const deleteMyBookReview = async (id) => apiRequest('delete', `/publications/${id}/reviews/`);
+
+// A chapter's discussion: { locked, reached?, count, results }.
+export const fetchChapterDiscussion = async (id, index, { reveal = false } = {}) =>
+  apiRequest('get', `/publications/${id}/chapters/${index}/comments/`, null,
+    reveal ? { params: { reveal: 1 } } : undefined);
+export const postChapterComment = async (id, index, body, parent = null) =>
+  apiRequest('post', `/publications/${id}/chapters/${index}/comments/`, { body, ...(parent ? { parent } : {}) });
+export const deleteChapterComment = async (id, commentId) =>
+  apiRequest('delete', `/publications/${id}/comments/${commentId}/`);
+
+// An author's page: { author, followers_count, is_following, readers_count, finished_count, books }.
+export const fetchAuthorPage = async (userId) => apiRequest('get', `/publications/authors/${userId}/`);
+
 // The reader's own numbers: streak, this week / month, last 7 days.
 // `today` is the phone's date (YYYY-MM-DD) — the server's day is UTC.
 export const fetchReadingStats = async (today) =>

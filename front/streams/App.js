@@ -50,6 +50,8 @@ import PublicationDetail from './pages/PublicationDetail';
 import ChapterReader from './pages/ChapterReader';
 import PublicationEditor from './pages/PublicationEditor';
 import ChapterHistory from './pages/ChapterHistory';
+import ChapterDiscussion from './pages/ChapterDiscussion';
+import AuthorPage from './pages/AuthorPage';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -238,6 +240,14 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.publication_id) {
+        // Books: a discussion opens at its chapter; a new book, chapter or
+        // review opens the book's page.
+        if (data.type === 'chapter_discussion' && data.chapter_index != null) {
+          navigate('ChapterDiscussion', { id: data.publication_id, index: data.chapter_index });
+        } else {
+          navigate('PublicationDetail', { id: data.publication_id });
+        }
       }
     });
     return () => sub.remove();
@@ -314,6 +324,8 @@ const App = () => {
                 <Stack.Screen name="ChapterReader" component={ChapterReader} />
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
                 <Stack.Screen name="ChapterHistory" component={ChapterHistory} />
+                <Stack.Screen name="ChapterDiscussion" component={ChapterDiscussion} />
+                <Stack.Screen name="AuthorPage" component={AuthorPage} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />

@@ -23,6 +23,14 @@ const mockApi = {
   fetchReadingStats: jest.fn(),
   fetchBookHighlights: jest.fn(),
   syncBookHighlights: jest.fn(),
+  fetchBooksHome: jest.fn(),
+  fetchBookReviews: jest.fn(),
+  saveBookReview: jest.fn(),
+  deleteMyBookReview: jest.fn(),
+  fetchChapterDiscussion: jest.fn(),
+  postChapterComment: jest.fn(),
+  deleteChapterComment: jest.fn(),
+  fetchAuthorPage: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -126,6 +134,8 @@ beforeEach(async () => {
   mockApi.fetchBookHighlights.mockResolvedValue({ results: [] });
   mockApi.syncBookHighlights.mockResolvedValue({ applied: [] });
   mockApi.fetchReadingStats.mockResolvedValue(null);
+  mockApi.fetchBooksHome.mockRejectedValue(new Error('not in this test'));
+  mockApi.fetchBookReviews.mockRejectedValue(new Error('not in this test'));
   require('../../services/bookHighlights').__resetBookHighlights();
   require('../../utils/readerSettings').__resetReaderSettings();
   require('../../services/readingTracker').__resetReadingTracker();
@@ -166,9 +176,11 @@ describe('Publishing list', () => {
     const r = render(<Articles navigation={nav()} />);
     await waitFor(() => expect(r.getByText('Book 1')).toBeTruthy());
     mockApi.fetchPublications.mockRejectedValueOnce(new Error('Network Error'));
-    await act(async () => { mockFocus[mockFocus.length - 1](); });   // mount focus is skipped …
+    // Focus reaches every screen part that listens (the list and its shelves).
+    const focusAll = () => act(async () => { [...new Set(mockFocus)].forEach((cb) => cb()); });
+    await focusAll();                                                  // mount focus is skipped …
     store.notePublicationsChanged();
-    await act(async () => { mockFocus[mockFocus.length - 1](); });   // … a change since forces a reload
+    await focusAll();                                                  // … a change since forces a reload
     await waitFor(() => expect(r.getByTestId('articles-offline')).toBeTruthy());
     expect(r.getByText('Book 1')).toBeTruthy();
   });
@@ -734,5 +746,152 @@ describe('Phase 2', () => {
       await act(async () => { fireEvent.press(r.getByTestId('library-shelf-downloaded')); });
       await waitFor(() => expect(r.getByTestId('library-book-5')).toBeTruthy());
     });
+  });
+});
+
+// ── Phase 3: discovery and community ────────────────────────────────────────
+describe('Phase 3', () => {
+  const ChapterDiscussion = require('../ChapterDiscussion').default;
+  const AuthorPage = require('../AuthorPage').default;
+
+  test('Discover shows its shelves over every book, and remembers them', async () => {
+    mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(1)], next: null });
+    mockApi.fetchBooksHome.mockResolvedValue({
+      continue: [pubRow(3, { title: 'Half read', my_percent: 0.5 })],
+      picks: [pubRow(4, { title: 'A pick', rating_avg: 4.5, rating_count: 8 })],
+      trending: [], following: [], new: [pubRow(5, { title: 'Brand new' })],
+      rising: [{ id: 9, username: 'newvoice', readers: 12, growth: 1.42 }],
+    });
+    const n = nav();
+    const r = render(<Articles navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('books-home')).toBeTruthy());
+    expect(r.getByText('home.picks')).toBeTruthy();
+    expect(r.queryByText('home.trending')).toBeNull();                 // an empty shelf isn't shown
+    expect(r.getByText('4.5')).toBeTruthy();                           // a tile shows the average
+    expect(r.getByText('home.risingGrowth:142')).toBeTruthy();
+    fireEvent.press(r.getByTestId('home-author-9'));
+    expect(n.navigate).toHaveBeenCalledWith('AuthorPage', { userId: 9, username: 'newvoice' });
+    r.unmount();
+    mockApi.fetchBooksHome.mockImplementation(() => new Promise(() => {}));
+    const again = render(<Articles navigation={nav()} />);
+    // Painted from the phone at once (a book with no cover shows its title on it too).
+    expect(again.getAllByText('A pick').length).toBeGreaterThan(0);
+  });
+
+  test('a search or a category shows the plain list, not the shelves', async () => {
+    mockApi.fetchPublications.mockResolvedValue({ results: [pubRow(1)], next: null });
+    mockApi.fetchBooksHome.mockResolvedValue({ continue: [], picks: [pubRow(4)], trending: [], following: [], new: [], rising: [] });
+    const r = render(<Articles navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('books-home')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByText('Health')); });
+    expect(r.queryByTestId('books-home')).toBeNull();
+  });
+
+  describe('chapter discussion', () => {
+    const params = { id: 5, index: 2, chapterTitle: 'Three' };
+
+    test('past where the reader is: a spoiler warning first, then the comments on request', async () => {
+      mockApi.fetchChapterDiscussion
+        .mockResolvedValueOnce({ locked: true, reached: 0, count: 3, results: [] })
+        .mockResolvedValueOnce({ locked: false, count: 1, results: [
+          { id: 1, user: { username: 'ann' }, body: 'The twist!', is_author: true, replies: [] }] });
+      const r = render(<ChapterDiscussion route={{ params }} navigation={nav()} />);
+      await waitFor(() => expect(r.getByTestId('discussion-locked')).toBeTruthy());
+      expect(r.getByText('discussion.spoilerReached:1,3')).toBeTruthy();
+      expect(r.queryByText('The twist!')).toBeNull();
+      await act(async () => { fireEvent.press(r.getByTestId('discussion-reveal')); });
+      await waitFor(() => expect(r.getByText('The twist!')).toBeTruthy());
+      expect(mockApi.fetchChapterDiscussion).toHaveBeenLastCalledWith(5, 2, { reveal: true });
+      expect(r.getByText('discussion.author')).toBeTruthy();
+    });
+
+    test('comment, reply to it, and remove your own', async () => {
+      mockApi.fetchChapterDiscussion.mockResolvedValue({ locked: false, count: 0, results: [] });
+      mockApi.postChapterComment
+        .mockResolvedValueOnce({ id: 10, user: { username: 'me' }, body: 'Lovely', parent: null, is_mine: true })
+        .mockResolvedValueOnce({ id: 11, user: { username: 'me' }, body: 'Indeed', parent: 10, is_mine: true });
+      mockApi.deleteChapterComment.mockResolvedValue({});
+      mockConfirm.mockResolvedValue(true);
+      const r = render(<ChapterDiscussion route={{ params }} navigation={nav()} />);
+      await waitFor(() => expect(r.getByText('discussion.empty')).toBeTruthy());
+      fireEvent.changeText(r.getByTestId('discussion-input'), 'Lovely');
+      await act(async () => { fireEvent.press(r.getByTestId('discussion-send')); });
+      expect(r.getByText('Lovely')).toBeTruthy();
+      fireEvent.press(r.getByTestId('discussion-reply-10'));
+      fireEvent.changeText(r.getByTestId('discussion-input'), 'Indeed');
+      await act(async () => { fireEvent.press(r.getByTestId('discussion-send')); });
+      expect(mockApi.postChapterComment).toHaveBeenLastCalledWith(5, 2, 'Indeed', 10);
+      expect(r.getByText('Indeed')).toBeTruthy();
+      await act(async () => { fireEvent.press(r.getByTestId('discussion-remove-10')); });
+      expect(mockApi.deleteChapterComment).toHaveBeenCalledWith(5, 10);
+      expect(r.queryByText('Lovely')).toBeNull();
+      expect(r.queryByText('Indeed')).toBeNull();                        // its replies go with it
+    });
+  });
+
+  test('an author\'s page: numbers, follow, their books', async () => {
+    mockApi.fetchAuthorPage.mockResolvedValue({
+      author: { id: 2, username: 'writer', verified: true }, followers_count: 18400, is_following: false,
+      readers_count: 1234, finished_count: 56, books: [pubRow(5, { title: 'The Silent Path' })],
+    });
+    const n = nav();
+    const r = render(<AuthorPage route={{ params: { userId: 2, username: 'writer' } }} navigation={n} />);
+    await waitFor(() => expect(r.getByText('The Silent Path')).toBeTruthy());
+    expect(r.getByText('18K')).toBeTruthy();
+    expect(r.getByText('1.2K')).toBeTruthy();
+    expect(r.getByText('author.verified')).toBeTruthy();
+    fireEvent.press(r.getByTestId('author-book-5'));
+    expect(n.navigate).toHaveBeenCalledWith('PublicationDetail', expect.objectContaining({ id: 5 }));
+  });
+
+  describe('reviews on the book page', () => {
+    const summary = { count: 3, average: 4.3, spread: { 1: 0, 2: 0, 3: 0, 4: 2, 5: 1 } };
+
+    test('the summary, and a hint until the reader has read some of it', async () => {
+      mockApi.fetchPublication.mockResolvedValue(book({ rating_avg: 4.3, rating_count: 3 }));
+      mockApi.fetchBookReviews.mockResolvedValue({ summary, mine: null, can_review: false, reason: 'read_more',
+        results: [{ id: 1, user: { username: 'ann' }, rating: 5, body: 'Life-changing' }], next: null });
+      const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={nav()} />);
+      await waitFor(() => expect(r.getByTestId('book-reviews')).toBeTruthy());
+      expect(r.getByText('Life-changing')).toBeTruthy();
+      expect(r.getByText('reviews.readMore')).toBeTruthy();
+      expect(r.getAllByText('4.3').length).toBeGreaterThan(0);
+    });
+
+    test('write a review: stars, words, saved', async () => {
+      mockApi.fetchPublication.mockResolvedValue(book());
+      mockApi.fetchBookReviews.mockResolvedValue({ summary: { count: 0, average: null, spread: {} }, mine: null,
+        can_review: true, reason: null, results: [], next: null });
+      mockApi.saveBookReview.mockResolvedValue({ id: 3, rating: 4 });
+      const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={nav()} />);
+      await waitFor(() => expect(r.getByTestId('reviews-write')).toBeTruthy());
+      fireEvent.press(r.getByTestId('reviews-write'));
+      fireEvent.press(r.getByTestId('reviews-star-4'));
+      fireEvent.changeText(r.getByTestId('reviews-input'), 'A gentle, deep book');
+      await act(async () => { fireEvent.press(r.getByTestId('reviews-save')); });
+      expect(mockApi.saveBookReview).toHaveBeenCalledWith(5, { rating: 4, body: 'A gentle, deep book' });
+    });
+  });
+
+  test('the author\'s name opens their page; a chapter\'s bubble opens its discussion', async () => {
+    mockApi.fetchPublication.mockResolvedValue(book({ chapters: [{ id: 51, title: 'One', comment_count: 7, status: 'published' }] }));
+    const n = nav();
+    const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('pub-discuss-0')).toBeTruthy());
+    expect(within(r.getByTestId('pub-discuss-0')).getByText('7')).toBeTruthy();
+    fireEvent.press(r.getByTestId('pub-discuss-0'));
+    expect(n.navigate).toHaveBeenLastCalledWith('ChapterDiscussion', { id: 5, index: 0, chapterTitle: 'One', isBookAuthor: false });
+    fireEvent.press(r.getByTestId('pub-author'));
+    expect(n.navigate).toHaveBeenLastCalledWith('AuthorPage', { userId: 2, username: 'writer' });
+  });
+
+  test('the end of a chapter leads to its discussion', async () => {
+    mockApi.fetchPublicationChapter.mockResolvedValue({ chapter: { id: 51, title: 'One', body: 'Words.', status: 'published' } });
+    const n = nav();
+    const r = render(<ChapterReader route={{ params: { id: 5, index: 0, book: { id: 5, title: 'B', chapters: [{ id: 51, comment_count: 4 }] } } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('reader-discuss')).toBeTruthy());
+    expect(r.getByText('reader.discussCount:4')).toBeTruthy();
+    fireEvent.press(r.getByTestId('reader-discuss'));
+    expect(n.navigate).toHaveBeenCalledWith('ChapterDiscussion', expect.objectContaining({ id: 5, index: 0 }));
   });
 });

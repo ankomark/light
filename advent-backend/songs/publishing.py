@@ -94,7 +94,7 @@ def sync_chapters(publication, chapters, user=None):
     if chapters and not any(ch.get('id') for ch in chapters):
         chapters = [dict(ch, id=existing[i].pk) if i < len(existing) else ch for i, ch in enumerate(chapters)]
 
-    kept_ids, revisions, touched, new = set(), [], set(), []
+    kept_ids, revisions, touched, new, appeared = set(), [], set(), [], []
     for i, ch in enumerate(chapters, start=1):
         title = (ch.get('title') or '')[:200]
         body = ch.get('body') or ''
@@ -116,6 +116,8 @@ def sync_chapters(publication, chapters, user=None):
             c.order = i
             fields.append('order')
         if status and c.status != status:
+            if status == Chapter.PUBLISHED and not c.is_removed:
+                appeared.append(c.pk)            # a draft chapter going out
             c.status = status
             fields.append('status')
         if fields:
@@ -129,6 +131,7 @@ def sync_chapters(publication, chapters, user=None):
         Chapter.objects.filter(pk__in=[c.pk for c in gone]).delete()
     if new:
         Chapter.objects.bulk_create(new)
+        appeared += [c.pk for c in new if c.pk and c.status == Chapter.PUBLISHED]
     if revisions:
         ChapterRevision.objects.bulk_create(revisions)
         _prune(publication, touched)
@@ -136,6 +139,8 @@ def sync_chapters(publication, chapters, user=None):
     # Pictures sent the old way (base64 in the text) go to R2 behind the save.
     for c in publication.chapters.filter(body__contains='data:image/').only('pk'):
         enqueue('pub_inline_images', key=f'chapter:{c.pk}', chapter_id=c.pk)
+    # The chapters readers can now see that they couldn't before.
+    return appeared
 
 
 # ── History ──────────────────────────────────────────────────────────────────

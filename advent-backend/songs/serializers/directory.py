@@ -64,7 +64,7 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         model = NotificationPreference
         fields = [
             'likes', 'comments', 'follows', 'messages', 'groups', 'communities',
-            'live', 'quiz', 'weather', 'verse', 'updated_at',
+            'live', 'quiz', 'weather', 'verse', 'books', 'updated_at',
         ]
         read_only_fields = ['updated_at']
 
