@@ -862,6 +862,20 @@ export const fetchPublication = async (id, { toc = false } = {}) => {
 export const fetchPublicationChapter = async (id, index) =>
   apiRequest('get', `/publications/${id}/chapters/${index}/`);
 
+// Reading as it happened: [{ index, seconds, furthest, position, at }].
+export const sendReadingActivity = async (id, events) =>
+  apiRequest('post', `/publications/${id}/reading/`, { events });
+
+// The author's kept copies of a chapter (newest first), or — with no
+// chapter — the book's deleted chapters. { results: [...] }, no bodies.
+export const fetchChapterRevisions = async (id, chapterId) =>
+  apiRequest('get', `/publications/${id}/revisions/`, null,
+    chapterId != null ? { params: { chapter: chapterId } } : undefined);
+
+// One kept copy with its text, and what's changed since.
+export const fetchChapterRevision = async (id, revisionId) =>
+  apiRequest('get', `/publications/${id}/revisions/${revisionId}/`);
+
 export const createPublication = async (data) => {
   return apiRequest('post', '/publications/', data);
 };

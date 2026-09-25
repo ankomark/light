@@ -17,6 +17,9 @@ const mockApi = {
   saveReadingProgress: jest.fn(async () => ({})),
   createPublication: jest.fn(),
   updatePublication: jest.fn(),
+  sendReadingActivity: jest.fn(),
+  fetchChapterRevisions: jest.fn(),
+  fetchChapterRevision: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -78,11 +81,15 @@ const ChapterReader = require('../ChapterReader').default;
 const { speechChunks } = require('../ChapterReader');
 const PublicationEditor = require('../PublicationEditor').default;
 const { formatBody } = require('../PublicationEditor');
+const ChapterHistory = require('../ChapterHistory').default;
+const { foldChanges } = require('../ChapterHistory');
+const { COMMIT_MS, IDLE_MS } = require('../ChapterReader');
 
 const nav = () => {
   const listeners = {};
   return {
     navigate: jest.fn(), goBack: jest.fn(), replace: jest.fn(), push: jest.fn(), dispatch: jest.fn(),
+    popTo: jest.fn(), setParams: jest.fn(),
     addListener: jest.fn((ev, fn) => { listeners[ev] = fn; return () => { delete listeners[ev]; }; }),
     fire: (ev, e) => listeners[ev]?.(e),
   };
@@ -105,6 +112,8 @@ beforeEach(async () => {
   store.__resetPublicationStore();
   Object.values(mockApi).forEach((f) => f.mockReset());
   mockApi.saveReadingProgress.mockResolvedValue({});
+  mockApi.sendReadingActivity.mockResolvedValue({ accepted: 1 });
+  require('../../services/readingTracker').__resetReadingTracker();
   mockAuth = { isAuthenticated: true, currentUser: { id: 1, username: 'me' } };
   mockConfirm.mockReset();
   mockNotify.mockReset();
@@ -358,7 +367,8 @@ describe('Editor', () => {
     fireEvent.changeText(r.getByPlaceholderText('pub.chapterBodyPlaceholder'), 'Once upon a time');
     await act(async () => { fireEvent.press(r.getByTestId('editor-publish')); });
     expect(mockApi.createPublication).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'My Book', status: 'published', chapters: [{ order: 1, title: '', body: 'Once upon a time' }],
+      title: 'My Book', status: 'published',
+      chapters: [{ order: 1, title: '', body: 'Once upon a time', status: 'published' }],   // new: no id yet
     }));
     expect(n.replace).toHaveBeenCalledWith('PublicationDetail', { id: 77 });
     expect(n.navigate).not.toHaveBeenCalled();
@@ -410,5 +420,142 @@ describe('Editor', () => {
     const r = render(<PublicationEditor route={{ params: {} }} navigation={n} />);
     fireEvent.press(r.getByText('auth.login'));
     expect(n.replace).toHaveBeenCalledWith('Login');
+  });
+});
+
+// ── Phase 1: chapters kept in place, history, reading time ───────────────────
+describe('Phase 1', () => {
+  const saved = (extra = {}) => ({
+    ...book(), ...extra,
+    chapters: [
+      { id: 51, title: 'One', body: 'First', status: 'published', is_removed: false },
+      { id: 52, title: 'Two', body: 'Second', status: 'draft', is_removed: false },
+      { id: 53, title: 'Three', body: 'Third', status: 'published', is_removed: true },
+    ],
+  });
+
+  test('the editor sends chapters back with their ids and draft state', async () => {
+    mockApi.fetchPublication.mockResolvedValue(saved());
+    mockApi.updatePublication.mockResolvedValue({ id: 5 });
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByDisplayValue('First')).toBeTruthy());
+    expect(r.getByText('pub.removedByModerator')).toBeTruthy();                // the author sees the takedown
+    await act(async () => { fireEvent.press(r.getByTestId('editor-draft-0')); }); // chapter 1 → draft
+    await act(async () => { fireEvent.press(r.getByTestId('editor-save-draft')); });
+    const { chapters } = mockApi.updatePublication.mock.calls[0][1];
+    expect(chapters.map((c) => [c.id, c.status])).toEqual([[51, 'draft'], [52, 'draft'], [53, 'published']]);
+  });
+
+  test('History opens for a saved chapter; Deleted chapters for the book', async () => {
+    mockApi.fetchPublication.mockResolvedValue(saved());
+    const n = nav();
+    const r = render(<PublicationEditor route={{ params: { id: 5 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByDisplayValue('First')).toBeTruthy());
+    fireEvent.press(r.getByTestId('editor-history-1'));
+    expect(n.navigate).toHaveBeenCalledWith('ChapterHistory', { pubId: 5, chapterId: 52, chapterTitle: 'Two' });
+    fireEvent.press(r.getByTestId('editor-deleted'));
+    expect(n.navigate).toHaveBeenLastCalledWith('ChapterHistory', { pubId: 5, chapterId: null, chapterTitle: '' });
+  });
+
+  test('a version brought back lands in its chapter; a deleted one comes back as a draft', async () => {
+    mockApi.fetchPublication.mockResolvedValue(saved());
+    const n = nav();
+    const route = { params: { id: 5 } };
+    const r = render(<PublicationEditor route={route} navigation={n} />);
+    await waitFor(() => expect(r.getByDisplayValue('First')).toBeTruthy());
+    r.rerender(<PublicationEditor route={{ params: { id: 5, restore: { chapterId: 51, title: 'One', body: 'First, as it was' } } }} navigation={n} />);
+    await waitFor(() => expect(r.getByDisplayValue('First, as it was')).toBeTruthy());
+    expect(n.setParams).toHaveBeenCalledWith({ restore: undefined });
+    r.rerender(<PublicationEditor route={{ params: { id: 5, restore: { chapterId: null, title: 'Lost', body: 'Found again' } } }} navigation={n} />);
+    await waitFor(() => expect(r.getByDisplayValue('Found again')).toBeTruthy());
+    expect(r.getAllByText('pub.chapterDraft').length).toBe(2);                 // Two, and the one brought back
+  });
+
+  test('History: a version, what changed since, and bringing it back to the editor', async () => {
+    mockApi.fetchChapterRevisions.mockResolvedValue({ results: [
+      { id: 9, chapter_ref: 51, version: 3, title: 'One', word_count: 2, reason: 'edit', created_at: '2026-09-25T09:00:00Z' },
+    ] });
+    mockApi.fetchChapterRevision.mockResolvedValue({
+      id: 9, chapter_ref: 51, version: 3, title: 'One', body: 'Old words', chapter_exists: true,
+      created_at: '2026-09-25T09:00:00Z',
+      changes: [{ op: 'delete', text: 'Old words' }, { op: 'insert', text: 'New words' }],
+    });
+    const n = nav();
+    const r = render(<ChapterHistory route={{ params: { pubId: 5, chapterId: 51, chapterTitle: 'One' } }} navigation={n} />);
+    await waitFor(() => expect(r.getByText('history.version:3')).toBeTruthy());
+    expect(mockApi.fetchChapterRevisions).toHaveBeenCalledWith(5, 51);
+    await act(async () => { fireEvent.press(r.getByTestId('history-row-9')); });
+    expect(r.getByText('− Old words')).toBeTruthy();
+    expect(r.getByText('+ New words')).toBeTruthy();
+    fireEvent.press(r.getByTestId('history-mode-text'));
+    expect(r.getByText('Old words')).toBeTruthy();
+    fireEvent.press(r.getByTestId('history-restore'));
+    expect(n.popTo).toHaveBeenCalledWith('PublicationEditor',
+      { restore: expect.objectContaining({ chapterId: 51, title: 'One', body: 'Old words' }) }, { merge: true });
+  });
+
+  test('long unchanged stretches fold to their first and last lines', () => {
+    const rows = foldChanges([{ op: 'equal', text: 'a\nb\nc\nd\ne\nf' }, { op: 'insert', text: 'g' }]);
+    expect(rows.map((r) => (r.op === 'fold' ? `fold:${r.count}` : r.text))).toEqual(['a', 'fold:4', 'f', 'g']);
+  });
+
+  describe('reading time', () => {
+    const params = { id: 5, index: 0, book: { id: 5, title: 'B', theme: {}, chapters: [{ id: 51, version: 1 }, { id: 52, version: 1 }] } };
+    beforeEach(() => {
+      jest.useFakeTimers();
+      mockApi.fetchPublicationChapter.mockImplementation(async (id, i) => ({ chapter: { id: 51 + i, version: 1, title: 'x', body: 'text' } }));
+    });
+    afterEach(() => jest.useRealTimers());
+    const advance = (ms) => act(async () => { jest.advanceTimersByTime(ms); await Promise.resolve(); });
+
+    test('counted while reading and sent every half minute', async () => {
+      const r = render(<ChapterReader route={{ route: 1, params }} navigation={nav()} />);
+      await act(async () => {});
+      await waitFor(() => expect(r.getByText('text')).toBeTruthy());
+      await advance(COMMIT_MS);
+      await act(async () => {});
+      const sent = mockApi.sendReadingActivity.mock.calls.flatMap((c) => c[1]);
+      expect(sent.length).toBeGreaterThan(0);
+      expect(sent[0]).toMatchObject({ index: 0 });
+      expect(sent.reduce((n, e) => n + e.seconds, 0)).toBeGreaterThanOrEqual(20);
+    });
+
+    test('a phone left open stops counting after a few minutes without a touch', async () => {
+      const r = render(<ChapterReader route={{ params }} navigation={nav()} />);
+      await act(async () => {});
+      await waitFor(() => expect(r.getByText('text')).toBeTruthy());
+      await advance(IDLE_MS + 10 * 60 * 1000);
+      await act(async () => {});
+      const total = mockApi.sendReadingActivity.mock.calls.flatMap((c) => c[1]).reduce((n, e) => n + e.seconds, 0);
+      expect(total).toBeLessThanOrEqual(IDLE_MS / 1000 + 5);
+    });
+
+    test('guests: nothing is recorded', async () => {
+      mockAuth = { isAuthenticated: false, currentUser: null };
+      const r = render(<ChapterReader route={{ params }} navigation={nav()} />);
+      await act(async () => {});
+      await waitFor(() => expect(r.getByText('text')).toBeTruthy());
+      await advance(COMMIT_MS * 3);
+      expect(mockApi.sendReadingActivity).not.toHaveBeenCalled();
+    });
+  });
+
+  test('the book page opens the reader at the place read on another phone', async () => {
+    mockApi.fetchPublication.mockResolvedValue(book({ last_read_chapter: 1, last_read_position: 0.6 }));
+    const n = nav();
+    const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={n} />);
+    await waitFor(() => expect(r.getByTestId('pub-read')).toBeTruthy());
+    fireEvent.press(r.getByTestId('pub-read'));
+    expect(n.navigate.mock.calls[0][1]).toMatchObject({ index: 1, position: 0.6 });
+  });
+
+  test('the author sees draft and removed chapters marked in the contents', async () => {
+    mockApi.fetchPublication.mockResolvedValue(book({
+      is_owner: true,
+      chapters: [{ id: 51, title: 'One', status: 'draft' }, { id: 52, title: 'Two', status: 'published', is_removed: true }],
+    }));
+    const r = render(<PublicationDetail route={{ params: { id: 5 } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByText('pubDetail.removedChapter')).toBeTruthy());
+    expect(r.getAllByText('pubDetail.draft').length).toBeGreaterThan(0);
   });
 });

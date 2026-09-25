@@ -25,7 +25,12 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 
-const blankChapter = () => ({ key: `${Date.now()}_${Math.random()}`, title: '', body: '', images: {}, preview: false });
+// `id` is the saved chapter's (none until first saved): sent back so the save
+// updates it in place — its history and readers' places kept.
+const blankChapter = (extra = {}) => ({
+  key: `${Date.now()}_${Math.random()}`, id: null, title: '', body: '', images: {}, preview: false,
+  status: 'published', isRemoved: false, ...extra,
+});
 
 // A picture goes into the chapter as a plain markdown image of its R2 address:
 // a few dozen characters instead of hundreds of KB of base64 in the chapter —
@@ -110,12 +115,31 @@ export const formatBody = (body = '', sel, kind) => {
 // other chapter (and their markdown previews) on each keystroke.
 const ChapterCard = memo(({
   ch, idx, count, theme, selection, uploading, t,
-  onChange, onFormat, onSelect, onImage, onMove, onRemove,
+  onChange, onFormat, onSelect, onImage, onMove, onRemove, onHistory,
 }) => (
-  <View style={styles.chapterCard}>
+  <View style={[styles.chapterCard, ch.status === 'draft' && styles.chapterCardDraft]}>
     <View style={styles.chapterTop}>
       <Text style={styles.chapterNum}>{t('pubDetail.chapterN', { n: idx + 1 })}</Text>
       <View style={styles.chapterTools}>
+        {/* Draft: kept from readers while the rest of the book is out. */}
+        <TouchableOpacity
+          onPress={() => onChange(ch.key, { status: ch.status === 'draft' ? 'published' : 'draft' })}
+          style={[styles.draftChip, ch.status === 'draft' && styles.draftChipOn]}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: ch.status === 'draft' }}
+          accessibilityLabel={t('pub.toggleDraft')}
+          testID={`editor-draft-${idx}`}
+        >
+          <Ionicons name={ch.status === 'draft' ? 'eye-off' : 'eye-off-outline'} size={13}
+            color={ch.status === 'draft' ? colors.warning : colors.textMuted} />
+          <Text style={[styles.draftChipText, ch.status === 'draft' && styles.draftChipTextOn]}>{t('pubDetail.draft')}</Text>
+        </TouchableOpacity>
+        {ch.id ? (
+          <TouchableOpacity onPress={() => onHistory(ch)} hitSlop={6} style={styles.toolBtn}
+            accessibilityRole="button" accessibilityLabel={t('pub.history')} testID={`editor-history-${idx}`}>
+            <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity onPress={() => onMove(idx, -1)} disabled={idx === 0} hitSlop={6} style={styles.toolBtn}>
           <Ionicons name="arrow-up" size={17} color={idx === 0 ? colors.textMuted : colors.textSecondary} />
         </TouchableOpacity>
@@ -133,6 +157,15 @@ const ChapterCard = memo(({
         </TouchableOpacity>
       </View>
     </View>
+
+    {ch.isRemoved ? (
+      <View style={styles.removedBanner}>
+        <Ionicons name="alert-circle" size={15} color={colors.error} />
+        <Text style={styles.removedText}>{t('pub.removedByModerator')}</Text>
+      </View>
+    ) : ch.status === 'draft' ? (
+      <Text style={styles.draftNote}>{t('pub.chapterDraft')}</Text>
+    ) : null}
 
     <TextInput
       style={styles.chapterTitleInput}
@@ -244,7 +277,10 @@ const PublicationEditor = ({ route, navigation }) => {
         ? d.chapters.map((c, i) => {
             // Stored data-URI images out of the editable text into short tokens.
             const { body, images } = extractInlineImages(c.body || '');
-            return { key: `${fromServer ? 'e' : 'r'}${c.id ?? i}`, title: c.title || '', body, images, preview: false };
+            return blankChapter({
+              key: `${fromServer ? 'e' : 'r'}${c.id ?? i}`, id: c.id ?? null, title: c.title || '', body, images,
+              status: c.status === 'draft' ? 'draft' : 'published', isRemoved: !!(c.is_removed ?? c.isRemoved),
+            });
           })
         : [blankChapter()],
     );
@@ -294,7 +330,7 @@ const PublicationEditor = ({ route, navigation }) => {
     const h = setTimeout(() => {
       const snapshot = {
         title, summary, cover, category, theme,
-        chapters: chapters.map((c) => ({ title: c.title, body: stripTokens(c.body) })),
+        chapters: chapters.map((c) => ({ id: c.id, status: c.status, title: c.title, body: stripTokens(c.body) })),
         at: Date.now(),
       };
       AsyncStorage.setItem(draftKey, JSON.stringify(snapshot)).catch(() => {});
@@ -389,6 +425,32 @@ const PublicationEditor = ({ route, navigation }) => {
 
   const addChapter = () => setChapters((prev) => [...prev, blankChapter()]);
 
+  // History: a saved chapter's earlier versions — or, with none, the book's
+  // deleted chapters. What's picked there comes back here (not saved).
+  const openHistory = useCallback((ch) => {
+    navigation.navigate('ChapterHistory', {
+      pubId: editId, chapterId: ch?.id ?? null, chapterTitle: ch?.title || '',
+    });
+  }, [navigation, editId]);
+
+  // A version chosen in History: into its chapter (or, for a deleted chapter,
+  // as a new draft chapter at the end). Unsaved until the author saves.
+  const restore = route.params?.restore;
+  useEffect(() => {
+    if (!restore) return;
+    const { body, images } = extractInlineImages(restore.body || '');
+    setChapters((prev) => {
+      const at = restore.chapterId ? prev.findIndex((c) => c.id === restore.chapterId) : -1;
+      if (at >= 0) {
+        const next = [...prev];
+        next[at] = { ...next[at], title: restore.title || '', body, images, preview: false };
+        return next;
+      }
+      return [...prev, blankChapter({ title: restore.title || '', body, images, status: 'draft' })];
+    });
+    navigation.setParams({ restore: undefined });
+  }, [restore]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const removeChapter = useCallback((key) => {
     if (chaptersRef.current.length === 1) {
       notify(t('pub.keepChapterTitle'), t('pub.keepChapterBody'));
@@ -420,7 +482,10 @@ const PublicationEditor = ({ route, navigation }) => {
     }
     const cleaned = chapters
       // Expand older base64 tokens back for storage.
-      .map((c, i) => ({ order: i + 1, title: c.title.trim(), body: expandInlineImages(c.body, c.images).trim() }))
+      .map((c, i) => ({
+        ...(c.id ? { id: c.id } : {}),
+        order: i + 1, title: c.title.trim(), body: expandInlineImages(c.body, c.images).trim(), status: c.status,
+      }))
       .filter((c) => c.title || c.body);
     if (cleaned.length === 0) {
       notify(t('pub.addContentTitle'), t('pub.addContentBody'));
@@ -655,6 +720,7 @@ const PublicationEditor = ({ route, navigation }) => {
               onImage={insertImage}
               onMove={moveChapter}
               onRemove={removeChapter}
+              onHistory={openHistory}
             />
           ))}
 
@@ -662,6 +728,13 @@ const PublicationEditor = ({ route, navigation }) => {
             <Ionicons name="add" size={20} color={colors.primary} />
             <Text style={styles.addChapterText}>{t('pub.addChapter')}</Text>
           </TouchableOpacity>
+
+          {editId ? (
+            <TouchableOpacity style={styles.deletedLink} onPress={() => openHistory(null)} testID="editor-deleted">
+              <Ionicons name="trash-bin-outline" size={15} color={colors.textSecondary} />
+              <Text style={styles.deletedLinkText}>{t('pub.deletedChapters')}</Text>
+            </TouchableOpacity>
+          ) : null}
 
           <View style={{ height: spacing.xxl }} />
         </View>
@@ -783,6 +856,22 @@ const styles = StyleSheet.create({
   },
   chapterTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   chapterNum: { ...typography.label, color: colors.primary, fontWeight: '800' },
+  chapterCardDraft: { borderStyle: 'dashed', borderColor: colors.warning },
+  draftChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 3,
+    borderRadius: radius.full, borderWidth: 1, borderColor: colors.border, marginRight: 2,
+  },
+  draftChipOn: { borderColor: colors.warning, backgroundColor: 'rgba(255,193,7,0.10)' },
+  draftChipText: { ...typography.caption, color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  draftChipTextOn: { color: colors.warning },
+  draftNote: { ...typography.caption, color: colors.warning, marginBottom: spacing.xs },
+  removedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, padding: spacing.sm, marginBottom: spacing.sm,
+    borderRadius: radius.sm, backgroundColor: 'rgba(229,57,53,0.10)',
+  },
+  removedText: { ...typography.caption, color: colors.error, flex: 1 },
+  deletedLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: spacing.md },
+  deletedLinkText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
   chapterTools: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   toolBtn: { padding: 4, minWidth: 26, alignItems: 'center' },
   chapterTitleInput: {

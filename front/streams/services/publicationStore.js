@@ -8,9 +8,11 @@
 //     read once opens instantly and with no signal, and a whole book can be
 //     downloaded before a journey.
 //
-// Knowing a kept chapter is current costs nothing: the server gives chapters
-// new ids whenever a book is saved, so a kept chapter whose id still matches
-// the table of contents is exactly what's published.
+// Knowing a kept chapter is current costs nothing: the table of contents
+// carries each chapter's id and version (the version goes up whenever its
+// words change), so a kept chapter matching both is exactly what's published.
+// (Servers from before versions gave chapters new ids on every save; there
+// the id alone decides.)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchPublication, fetchPublicationChapter } from './api';
 import { peekCache, readCache, writeCache, dropCache, userKey } from '../utils/screenCache';
@@ -89,9 +91,16 @@ const store = (key, chapter) => {
   remember(key);
 };
 
-/** The kept copy of chapter `i`, or null. `chapterId`, when known, must match
- *  (a different id means the book was edited since). */
-export const keptChapter = async (pubId, i, chapterId) => {
+// A chapter's entry in the contents → { id, version } (an id alone is fine).
+const refOf = (entry) => (entry != null && typeof entry === 'object'
+  ? { id: entry.id ?? null, version: entry.version ?? null }
+  : { id: entry ?? null, version: null });
+
+/** The kept copy of chapter `i`, or null. `entry` ({ id, version } from the
+ *  contents, or just an id), when known, must match — else the book was
+ *  edited since. */
+export const keptChapter = async (pubId, i, entry) => {
+  const { id: chapterId, version } = refOf(entry);
   const key = chKey(pubId, i);
   let ch = memory.get(key);
   if (!ch) {
@@ -105,6 +114,7 @@ export const keptChapter = async (pubId, i, chapterId) => {
   }
   if (!ch || typeof ch.body !== 'string') return null;
   if (chapterId != null && ch.id !== chapterId) return null;
+  if (version != null && ch.version != null && ch.version !== version) return null;
   return ch;
 };
 
@@ -116,8 +126,8 @@ export const keptChapter = async (pubId, i, chapterId) => {
  * `fallback` is the chapter with its body when the book page carried one
  * (a server from before chapters were served singly).
  */
-export const loadChapter = async (pubId, i, chapterId, fallback = null) => {
-  const current = await keptChapter(pubId, i, chapterId);
+export const loadChapter = async (pubId, i, entry, fallback = null) => {
+  const current = await keptChapter(pubId, i, entry);
   if (current) return { chapter: current, stale: false };
   if (fallback && typeof fallback.body === 'string') {
     store(chKey(pubId, i), fallback);
@@ -140,7 +150,7 @@ export const loadChapter = async (pubId, i, chapterId, fallback = null) => {
 export const keptChapterCount = async (pubId, chapters = []) => {
   let n = 0;
   for (let i = 0; i < chapters.length; i += 1) {
-    if (await keptChapter(pubId, i, chapters[i]?.id)) n += 1;
+    if (await keptChapter(pubId, i, chapters[i])) n += 1;
   }
   return n;
 };
@@ -150,7 +160,7 @@ export const keptChapterCount = async (pubId, chapters = []) => {
 export const downloadBook = async (pubId, chapters = [], onProgress) => {
   let done = 0;
   for (let i = 0; i < chapters.length; i += 1) {
-    const { stale } = await loadChapter(pubId, i, chapters[i]?.id);
+    const { stale } = await loadChapter(pubId, i, chapters[i]);
     if (stale) throw new Error('offline');       // an older copy isn't the book
     done += 1;
     onProgress?.(done, chapters.length);

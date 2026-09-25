@@ -14,18 +14,24 @@ def _request_user(serializer):
 
 
 class ChapterSerializer(serializers.ModelSerializer):
+    """A chapter in the editor. `id` is sent back on save so the chapter is
+    updated in place (its history and readers' places kept), not recreated."""
+    id = serializers.IntegerField(required=False)
+    status = serializers.ChoiceField(choices=Chapter.STATUS_CHOICES, required=False)
+
     class Meta:
         model = Chapter
-        fields = ['id', 'order', 'title', 'body']
-        extra_kwargs = {'id': {'read_only': True}}
+        fields = ['id', 'order', 'title', 'body', 'status', 'version', 'is_removed']
+        read_only_fields = ['version', 'is_removed']
 
 
 class ChapterTocSerializer(serializers.ModelSerializer):
     """A chapter in the table of contents: no body (bodies can carry large
-    inline images; the reader fetches one chapter at a time)."""
+    inline images; the reader fetches one chapter at a time). `version`
+    tells a phone whether the copy it kept is still current."""
     class Meta:
         model = Chapter
-        fields = ['id', 'order', 'title', 'word_count']
+        fields = ['id', 'order', 'title', 'word_count', 'version', 'status', 'is_removed']
         read_only_fields = fields
 
 
@@ -33,7 +39,7 @@ class ChapterReadSerializer(serializers.ModelSerializer):
     """One chapter for the reader."""
     class Meta:
         model = Chapter
-        fields = ['id', 'order', 'title', 'body', 'word_count']
+        fields = ['id', 'order', 'title', 'body', 'word_count', 'version', 'status']
         read_only_fields = fields
 
 
@@ -96,6 +102,7 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
     is_liked = serializers.SerializerMethodField()
     is_bookmarked = serializers.SerializerMethodField()
     last_read_chapter = serializers.SerializerMethodField()
+    last_read_position = serializers.SerializerMethodField()
     author_is_following = serializers.SerializerMethodField()
 
     class Meta:
@@ -103,7 +110,8 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'summary', 'cover', 'theme', 'category', 'status',
             'author', 'chapters', 'is_owner', 'reading_minutes',
-            'likes_count', 'is_liked', 'is_bookmarked', 'last_read_chapter', 'author_is_following',
+            'likes_count', 'is_liked', 'is_bookmarked', 'last_read_chapter', 'last_read_position',
+            'author_is_following',
             'created_at', 'updated_at', 'published_at',
         ]
         read_only_fields = ['author', 'created_at', 'updated_at', 'published_at']
@@ -152,6 +160,13 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         rp = obj.progresses.filter(user=user).first()
         return rp.last_chapter if rp else 0
 
+    def get_last_read_position(self, obj):
+        if hasattr(obj, 'my_last_position'):
+            return obj.my_last_position or 0
+        user = _request_user(self)
+        rp = obj.progresses.filter(user=user).first() if user else None
+        return rp.position if rp else 0
+
     def get_author_is_following(self, obj):
         user = _request_user(self)
         if not user or user.id == obj.author_id:
@@ -161,17 +176,12 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         return obj.author.followers.filter(id=user.id).exists()
 
     def _sync_chapters(self, publication, chapters):
-        publication.chapters.all().delete()
-        Chapter.objects.bulk_create([
-            Chapter(
-                publication=publication,
-                order=ch.get('order', i),
-                title=ch.get('title', ''),
-                body=ch.get('body', ''),
-                word_count=Chapter.count_words(ch.get('body', '')),
-            )
-            for i, ch in enumerate(chapters, start=1)
-        ])
+        # In place, keeping history (songs/publishing.py). Chapters come in
+        # reading order; `order` from the client is taken from their place.
+        from ..publishing import sync_chapters
+        chapters = sorted(chapters, key=lambda ch: ch.get('order') or 0) if all(
+            ch.get('order') for ch in chapters) else chapters
+        sync_chapters(publication, chapters, _request_user(self))
 
     def create(self, validated_data):
         chapters = validated_data.pop('chapters', [])

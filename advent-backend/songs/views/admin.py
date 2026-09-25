@@ -62,6 +62,7 @@ _CONTENT_MODELS = {
     # Extended moderation set — every remaining user-generated content type now
     # carries is_removed and is takedown/restore-able here (and via reports).
     'publication': Publication,   # long-form articles
+    'chapter': Chapter,           # one chapter of one (the rest of the book stays)
     'product': Product,           # marketplace listings
     'productreview': ProductReview,
     'grouppost': GroupPost,       # group chat messages

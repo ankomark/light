@@ -2074,6 +2074,18 @@ class Chapter(models.Model):
     # Words of prose (images and markdown left out), kept at save so the book
     # page can show "N min read" without loading every chapter's body.
     word_count = models.PositiveIntegerField(default=0)
+    # A draft chapter is the author's alone — a published book can carry
+    # chapters still being written.
+    DRAFT, PUBLISHED = 'draft', 'published'
+    STATUS_CHOICES = [(DRAFT, 'Draft'), (PUBLISHED, 'Published')]
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PUBLISHED)
+    # Goes up whenever the title or text changes: a copy kept on a phone is
+    # current exactly when its version matches.
+    version = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+    # Taken down by a moderator: hidden from readers, kept (and marked) for
+    # the author, and never brought back by the author's own saves.
+    is_removed = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['order', 'id']
@@ -2108,14 +2120,67 @@ class PublicationBookmark(models.Model):
         unique_together = ('publication', 'user')
 
 
+class ChapterRevision(models.Model):
+    """A chapter as it was before a save changed it — the author's history,
+    to look back at, compare and restore. Tied to its chapter by id, not a
+    foreign key: the history outlives the chapter, so a deleted chapter (its
+    history grouped still) can be brought back."""
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='revisions')
+    chapter_ref = models.PositiveIntegerField()
+    version = models.PositiveIntegerField()
+    title = models.CharField(max_length=200, blank=True)
+    body = models.TextField(blank=True)
+    word_count = models.PositiveIntegerField(default=0)
+    # Why this copy was kept: 'edit' (replaced by a save), 'delete' (the
+    # chapter was removed from the book), 'restore' (replaced by a restore).
+    reason = models.CharField(max_length=10, default='edit')
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Kept per chapter; older copies are dropped past this.
+    KEEP = 50
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [models.Index(fields=['publication', 'chapter_ref', '-created_at'], name='chrev_pub_ch_idx')]
+
+
 class ReadingProgress(models.Model):
     publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='progresses')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reading_progress')
     last_chapter = models.PositiveIntegerField(default=0)  # chapter index
+    # How far into that chapter (0–1), so another phone opens at the same place.
+    position = models.FloatField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ('publication', 'user')
+
+
+class ReadingActivity(models.Model):
+    """A reader's time in a chapter, one row per chapter per day — what
+    progress, streaks and (in totals only) author analytics are built from.
+
+    The app reports reading as it happens in small batches (and later, when
+    it was offline); each report adds its seconds to the day's row and moves
+    the furthest point read. One row a day keeps the table small however
+    often the app reports."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reading_activity')
+    publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='reading_activity')
+    chapter = models.ForeignKey(Chapter, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    chapter_index = models.PositiveIntegerField()
+    day = models.DateField()
+    seconds = models.PositiveIntegerField(default=0)
+    furthest = models.FloatField(default=0)        # 0–1 of the chapter
+    finished = models.BooleanField(default=False)  # reached its end
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'publication', 'chapter_index', 'day')
+        indexes = [
+            models.Index(fields=['publication', 'day'], name='readact_pub_day_idx'),
+            models.Index(fields=['user', 'day'], name='readact_user_day_idx'),
+        ]
 
 
 class LiveBroadcast(models.Model):

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Modal, Pressable,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Modal, Pressable, AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,7 +8,9 @@ import Markdown from 'react-native-markdown-display';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveReadingProgress, fetchPublication } from '../services/api';
 import { loadChapter, peekBook, readBook, fetchBook } from '../services/publicationStore';
+import { noteReading, flushReading } from '../services/readingTracker';
 import { ProseSkeleton } from '../components/SkeletonLoader';
+import ReportModal from '../components/ReportModal';
 import { markdownTheme, markdownImageRule, resolveWritingTheme, fontFamilyFor, isLightBg } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -25,6 +27,11 @@ const FONT_SIZES = [15, 17, 19, 22];
 const FONT_KEY = 'reader:fontIdx';
 const SAVE_SCROLL_MS = 400;
 const SAVE_PROGRESS_MS = 1500;
+// Reading time: counted in ticks, noted every half minute, and not counted
+// once the reader has neither scrolled nor tapped for a few minutes.
+export const TICK_MS = 5000;
+export const COMMIT_MS = 30000;
+export const IDLE_MS = 3 * 60 * 1000;
 
 // Android's speech engine refuses text past ~4000 characters (it fails
 // silently), so a chapter is read aloud in pieces, split between sentences.
@@ -79,6 +86,7 @@ const ChapterReader = ({ route, navigation }) => {
   const [progress, setProgress] = useState(0); // scroll fraction of the chapter
   const [view, setView] = useState({ status: 'loading', chapter: null, stale: false });
   const [reloadKey, setReloadKey] = useState(0);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const scrollRef = useRef(null);
   const request = useRef(0);
@@ -88,13 +96,46 @@ const ChapterReader = ({ route, navigation }) => {
   const speechRun = useRef(0);        // the current reading-aloud, so stopping ends it
   const shownRef = useRef(false);     // this chapter's text is on screen
   const contentH = useRef(0);
+  const viewportH = useRef(0);
+  // Opened at the reader's place from another phone: a fraction of the
+  // chapter, used once, when this phone has no place of its own for it.
+  const startFrac = useRef(params.position > 0 ? { index: params.index ?? 0, frac: params.position } : null);
 
   const restorePlace = () => {
+    if (!shownRef.current) return;
     const y = pendingY.current;
-    if (!y || !shownRef.current || contentH.current < y) return;
-    pendingY.current = 0;
-    scrollRef.current?.scrollTo({ y, animated: false });
+    if (y) {
+      if (contentH.current < y) return;
+      pendingY.current = 0;
+      startFrac.current = null;
+      scrollRef.current?.scrollTo({ y, animated: false });
+      return;
+    }
+    const start = startFrac.current;
+    const room = contentH.current - viewportH.current;
+    if (start && start.index === indexRef.current && room > 0) {
+      startFrac.current = null;
+      scrollRef.current?.scrollTo({ y: Math.round(start.frac * room), animated: false });
+    }
   };
+
+  // ── Reading time ──
+  // Counted while the reader is really reading: the app open, the chapter on
+  // screen, and a scroll or tap in the last few minutes (a phone left open
+  // on the table isn't reading). Noted every half minute, on a new chapter,
+  // on leaving, and when the app goes to the background — and sent.
+  const indexRef = useRef(index);
+  const clock = useRef({ seconds: 0, furthest: 0, position: 0, lastTouch: Date.now() });
+  const touch = () => { clock.current.lastTouch = Date.now(); };
+  const commitReading = useCallback((i, send = true) => {
+    const c = clock.current;
+    if (!isAuthenticated || pubId == null) return;
+    if (c.seconds > 0 || c.furthest > 0) {
+      noteReading(pubId, { index: i, seconds: c.seconds, furthest: c.furthest, position: c.position });
+    }
+    c.seconds = 0;
+    if (send) flushReading().catch(() => {});
+  }, [isAuthenticated, pubId]);
 
   // Opened with only an id (a link, a restored screen): the contents first.
   useEffect(() => {
@@ -137,19 +178,20 @@ const ChapterReader = ({ route, navigation }) => {
   const fetchInto = useCallback(async (i) => {
     const ch = chapters[i];
     try {
-      return await loadChapter(pubId, i, ch?.id, fallbackFor(i));
+      return await loadChapter(pubId, i, ch, fallbackFor(i));
     } catch (err) {
       // A server without the one-chapter endpoint: the whole book, once.
       if (err?.status === 404 && ch) {
         const full = await fetchPublication(pubId);
         const f = full?.chapters?.[i];
-        if (f && typeof f.body === 'string') return loadChapter(pubId, i, ch.id, f);
+        if (f && typeof f.body === 'string') return loadChapter(pubId, i, ch, f);
       }
       throw err;
     }
   }, [chapters, pubId, fallbackFor]);
 
-  const chapterIds = chapters.map((c) => c.id).join(',');
+  // An edit changes a chapter's version, not its id: both decide a reload.
+  const chapterIds = chapters.map((c) => `${c.id}:${c.version ?? ''}`).join(',');
 
   // Load the chapter (kept → instant; else fetched and kept), then the next
   // one quietly, so turning the page doesn't wait.
@@ -189,6 +231,34 @@ const ChapterReader = ({ route, navigation }) => {
     return () => clearTimeout(h);
   }, [isAuthenticated, pubId, index, book]);
 
+  // A new chapter: what was read of the last one is noted; this one starts fresh.
+  useEffect(() => {
+    indexRef.current = index;
+    clock.current = { seconds: 0, furthest: 0, position: 0, lastTouch: Date.now() };
+    return () => commitReading(index);
+  }, [index, commitReading]);
+
+  // The clock itself, and the half-minute / background notes.
+  useEffect(() => {
+    if (!isAuthenticated || pubId == null) return undefined;
+    flushReading().catch(() => {});     // anything read while offline, now
+    let sinceCommit = 0;
+    const tick = setInterval(() => {
+      const c = clock.current;
+      // Not "=== 'active'": the state can be unknown for a moment at start.
+      const reading = AppState.currentState !== 'background' && shownRef.current
+        && Date.now() - c.lastTouch < IDLE_MS;
+      if (reading) c.seconds += TICK_MS / 1000;
+      sinceCommit += TICK_MS;
+      if (sinceCommit >= COMMIT_MS) { sinceCommit = 0; commitReading(indexRef.current); }
+    }, TICK_MS);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') commitReading(indexRef.current);
+      else touch();
+    });
+    return () => { clearInterval(tick); sub.remove(); };
+  }, [isAuthenticated, pubId, commitReading]);
+
   const stopSpeech = useCallback(() => {
     speechRun.current += 1;
     if (SPEECH_OK) Speech.stop();
@@ -202,7 +272,12 @@ const ChapterReader = ({ route, navigation }) => {
   const onScroll = useCallback((e) => {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
     const max = Math.max(1, contentSize.height - layoutMeasurement.height);
-    setProgress(Math.min(1, Math.max(0, contentOffset.y / max)));
+    const frac = Math.min(1, Math.max(0, contentOffset.y / max));
+    setProgress(frac);
+    if (shownRef.current) {
+      clock.current.position = frac;
+      clock.current.furthest = Math.max(clock.current.furthest, frac);
+    }
     if (!saving.current) return;
     const key = scrollKey(index);
     const y = contentOffset.y;
@@ -214,6 +289,8 @@ const ChapterReader = ({ route, navigation }) => {
   // it — whichever comes second, the saved place or the text, puts it there.
   const onContentSizeChange = useCallback((w, h) => {
     contentH.current = h;
+    // A chapter short enough to fit on the screen is read once it's shown.
+    if (shownRef.current && viewportH.current && h <= viewportH.current + 8) clock.current.furthest = 1;
     restorePlace();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -290,7 +367,29 @@ const ChapterReader = ({ route, navigation }) => {
           accessibilityRole="button" accessibilityLabel={t('common.contents')}>
           <Ionicons name="list" size={22} color={chrome} />
         </TouchableOpacity>
+        {isAuthenticated && !book?.is_owner && view.chapter?.id ? (
+          <TouchableOpacity onPress={() => setReportOpen(true)} style={styles.iconBtn} hitSlop={8}
+            accessibilityRole="button" accessibilityLabel={t('reader.reportChapter')} testID="reader-report">
+            <Ionicons name="flag-outline" size={19} color={chrome} />
+          </TouchableOpacity>
+        ) : null}
       </View>
+
+      {view.chapter?.id ? (
+        <ReportModal
+          visible={reportOpen}
+          onClose={() => setReportOpen(false)}
+          contentType="chapter"
+          objectId={view.chapter.id}
+        />
+      ) : null}
+
+      {view.chapter?.status === 'draft' ? (
+        <View style={styles.staleBar}>
+          <Ionicons name="eye-off-outline" size={14} color={chrome} />
+          <Text style={[styles.staleText, { color: chrome }]}>{t('reader.draftChapter')}</Text>
+        </View>
+      ) : null}
 
       {/* Reading progress bar */}
       <View style={[styles.progressTrack, { backgroundColor: subtleBorder }]}>
@@ -310,8 +409,10 @@ const ChapterReader = ({ route, navigation }) => {
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={64}
         onScroll={onScroll}
-        onScrollBeginDrag={() => { saving.current = true; pendingY.current = 0; }}
+        onScrollBeginDrag={() => { saving.current = true; pendingY.current = 0; startFrac.current = null; touch(); }}
+        onTouchStart={touch}
         onContentSizeChange={onContentSizeChange}
+        onLayout={(e) => { viewportH.current = e.nativeEvent.layout.height; }}
       >
         <View style={styles.page}>
           {chapters.length ? (

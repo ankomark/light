@@ -26,6 +26,7 @@ import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache'
 import formatCount from '../utils/formatCount';
 import { pushRecent, mergePage, hasResults } from '../utils/exploreLogic';
 import { genreName } from '../utils/genres';
+import { categoryLabel } from '../utils/publications';
 import VerifiedBadge from './VerifiedBadge';
 import PlaylistCover from './PlaylistCover';
 import { colors, typography, spacing, radius } from '../constants/theme';
@@ -271,6 +272,8 @@ const ExploreScreen = ({ navigation }) => {
   const openAlbum = useCallback((a) => navigation.navigate('Album', { albumId: a.id, title: a.title }), [navigation]);
   const openPlaylist = useCallback((p) => navigation.navigate('PlaylistDetail', { playlistId: p.id, name: p.name }), [navigation]);
   const openGenre = useCallback((g) => navigation.navigate('Genre', { slug: g.slug, name: genreName(t, g) }), [navigation, t]);
+  // A book's row doubles as its page's top while the contents load.
+  const openBook = useCallback((b) => navigation.navigate('PublicationDetail', { id: b.id, preview: b }), [navigation]);
   // The top result: whatever kind it is, open it the way its section would.
   const openTop = useCallback((top) => {
     if (top.kind === 'track') openTrack(top.item);
@@ -379,7 +382,7 @@ const ExploreScreen = ({ navigation }) => {
     }
     const {
       users = [], hashtags = [], posts = [], tracks = [], groups = [],
-      artists = [], albums = [], playlists = [], genres = [], top = null,
+      artists = [], albums = [], playlists = [], genres = [], books = [], top = null,
     } = results;
     const topCover = top && (top.kind === 'artist'
       ? top.item.profile_picture
@@ -481,6 +484,27 @@ const ExploreScreen = ({ navigation }) => {
                 <View style={styles.resultInfo}>
                   <Text style={styles.resultName} numberOfLines={1}>{p.name}</Text>
                   <Text style={styles.resultSub} numberOfLines={1}>{`${t('search.kind.playlist')} · ${p.owner || ''}`}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </Section>
+        )}
+        {books.length > 0 && (
+          <Section title={t('explore.books')}>
+            {books.map((b) => (
+              <TouchableOpacity key={`bk_${b.id}`} style={styles.resultRow} onPress={() => openBook(b)} activeOpacity={0.7}
+                accessibilityRole="button" testID={`search-book-${b.id}`}>
+                <View style={[styles.trackThumb, styles.bookThumb]}>
+                  {b.cover
+                    ? <Image source={{ uri: b.cover }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" />
+                    : <MaterialIcons name="menu-book" size={20} color={colors.primary} />}
+                </View>
+                <View style={styles.resultInfo}>
+                  <Text style={styles.resultName} numberOfLines={1}>{b.title}</Text>
+                  <Text style={styles.resultSub} numberOfLines={1}>
+                    {`${categoryLabel(b.category, t)} · ${b.author?.username || ''}`}
+                  </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
@@ -706,6 +730,7 @@ const styles = StyleSheet.create({
     width: 42, height: 42, borderRadius: radius.sm, backgroundColor: colors.surface,
     justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
   },
+  bookThumb: { width: 36, height: 48 },   // a book's shape, not a square
 });
 
 export default ExploreScreen;

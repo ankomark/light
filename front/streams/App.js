@@ -49,6 +49,7 @@ import Articles from './pages/Articles';
 import PublicationDetail from './pages/PublicationDetail';
 import ChapterReader from './pages/ChapterReader';
 import PublicationEditor from './pages/PublicationEditor';
+import ChapterHistory from './pages/ChapterHistory';
 import About from './pages/About';
 import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
@@ -312,6 +313,7 @@ const App = () => {
                 <Stack.Screen name="PublicationDetail" component={PublicationDetail} />
                 <Stack.Screen name="ChapterReader" component={ChapterReader} />
                 <Stack.Screen name="PublicationEditor" component={PublicationEditor} />
+                <Stack.Screen name="ChapterHistory" component={ChapterHistory} />
                 <Stack.Screen name="About" component={About} />
                 {/* Utilities: their own headers, so no app bar above them. */}
                 <Stack.Screen name="Calculator" component={Calculator} options={{ headerShown: false }} />

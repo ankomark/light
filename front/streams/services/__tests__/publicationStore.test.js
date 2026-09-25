@@ -35,6 +35,16 @@ test('an edited book (new chapter ids) is fetched again', async () => {
   expect(mockFetchChapter).toHaveBeenCalledTimes(2);
 });
 
+test('chapters keep their id across edits now: the version decides', async () => {
+  mockFetchChapter
+    .mockResolvedValueOnce({ chapter: { ...ch(11, 'v1'), version: 1 } })
+    .mockResolvedValueOnce({ chapter: { ...ch(11, 'v2'), version: 2 } });
+  await store.loadChapter(7, 0, { id: 11, version: 1 });
+  expect((await store.loadChapter(7, 0, { id: 11, version: 1 })).chapter.body).toBe('v1');   // kept, current
+  expect((await store.loadChapter(7, 0, { id: 11, version: 2 })).chapter.body).toBe('v2');   // edited: fetched
+  expect(mockFetchChapter).toHaveBeenCalledTimes(2);
+});
+
 test('offline: an older kept copy is shown, marked stale; nothing kept → the error', async () => {
   mockFetchChapter.mockResolvedValueOnce({ chapter: ch(11, 'old') });
   await store.loadChapter(7, 0, 11);

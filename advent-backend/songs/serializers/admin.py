@@ -53,6 +53,22 @@ def _format_publication(p):
     }
 
 
+def _format_chapter(c):
+    pub = c.publication
+    return {
+        'type': 'chapter', 'id': c.id,
+        'title': f"{(pub.title or '')[:100]} · {(c.title or f'Chapter {c.order}')[:60]}",
+        'publication_id': pub.id,
+        'author': SimpleUserSerializer(pub.author).data,
+        'is_removed': c.is_removed,
+    }
+
+
+def _chapters_by_id(ids):
+    from ..models import Chapter
+    return Chapter.objects.filter(id__in=ids).select_related('publication__author__profile')
+
+
 def _format_product(p):
     return {
         'type': 'product', 'id': p.id, 'title': (p.title or '')[:140],
@@ -71,6 +87,7 @@ _TARGET_FETCHERS = {
     'user':    (lambda ids: User.objects.filter(id__in=ids).select_related('profile'),               _format_user),
     'group':   (lambda ids: Group.objects.filter(id__in=ids),                                        _format_group),
     'publication': (lambda ids: Publication.objects.filter(id__in=ids).select_related('author__profile'), _format_publication),
+    'chapter': (_chapters_by_id, _format_chapter),
     'product': (lambda ids: Product.objects.filter(id__in=ids).select_related('seller__profile'),    _format_product),
 }
 

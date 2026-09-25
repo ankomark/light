@@ -166,12 +166,15 @@ const PublicationDetail = ({ route, navigation }) => {
   };
 
   // The reader gets the contents, not the book: it loads each chapter itself.
+  // Opening at the reader's place carries how far into that chapter it was
+  // (another phone's place, when this one has none of its own).
   const read = (index) => navigation.navigate('ChapterReader', {
     id: pub.id,
     index,
+    ...(index === lastRead && pub.last_read_position > 0 ? { position: pub.last_read_position } : {}),
     book: {
-      id: pub.id, title: pub.title, theme: pub.theme, updated_at: pub.updated_at,
-      chapters: chapters.map(({ id: cid, order, title }) => ({ id: cid, order, title })),
+      id: pub.id, title: pub.title, theme: pub.theme, updated_at: pub.updated_at, is_owner: !!pub.is_owner,
+      chapters: chapters.map(({ id: cid, order, title, version, status }) => ({ id: cid, order, title, version, status })),
     },
   });
 
@@ -333,6 +336,9 @@ const PublicationDetail = ({ route, navigation }) => {
               >
                 <Text style={styles.tocNum}>{idx + 1}</Text>
                 <Text style={styles.tocChapter} numberOfLines={1}>{ch.title || t('pubDetail.chapterN', { n: idx + 1 })}</Text>
+                {/* The author's own marks: readers never get these chapters. */}
+                {ch.is_removed ? <Text style={[styles.tocMark, styles.tocMarkRemoved]}>{t('pubDetail.removedChapter')}</Text>
+                  : ch.status === 'draft' ? <Text style={styles.tocMark}>{t('pubDetail.draft')}</Text> : null}
                 {idx === lastRead && lastRead > 0 ? <Ionicons name="bookmark" size={14} color={colors.accent} /> : null}
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
@@ -430,6 +436,11 @@ const styles = StyleSheet.create({
   },
   tocNum: { ...typography.label, color: colors.primary, fontWeight: '800', width: 24 },
   tocChapter: { ...typography.label, color: colors.textPrimary, flex: 1 },
+  tocMark: {
+    ...typography.caption, color: colors.warning, fontWeight: '700', fontSize: 10, textTransform: 'uppercase',
+    borderWidth: 1, borderColor: colors.warning, borderRadius: radius.sm, paddingHorizontal: 5,
+  },
+  tocMarkRemoved: { color: colors.error, borderColor: colors.error },
 });
 
 export default PublicationDetail;

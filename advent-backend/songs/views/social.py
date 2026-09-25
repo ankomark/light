@@ -2,8 +2,10 @@ from .common import *  # noqa: F401,F403
 import base64
 import os
 from django.http import HttpResponse, Http404, HttpResponseNotFound
-from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, F, Case, When, Value, Sum
+from django.db.models import Exists, OuterRef, Q, Subquery, IntegerField, FloatField, F, Case, When, Value, Sum
 from django.db.models.functions import Coalesce
+from ..models import ChapterRevision
+from ..publishing import visible_chapters_q, reader_chapters, record_reading, revision_list, diff_paragraphs
 from django.db import IntegrityError, transaction
 import re
 from ..post_links import sync_post_links
@@ -910,7 +912,7 @@ class ReportViewSet(viewsets.ViewSet):
         # Admins can act on all of these from the reports screen.
         valid_types = {
             'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
-            'publication', 'product', 'productreview', 'grouppost',
+            'publication', 'chapter', 'product', 'productreview', 'grouppost',
             'videostudio', 'mediastation',
         }
         if content_type not in valid_types:
@@ -1112,7 +1114,8 @@ class ExploreViewSet(viewsets.ViewSet):
     # (?type=) returns.
     SEARCH_SECTION = 8
     SEARCH_TYPED = 50
-    SEARCH_TYPES = ('users', 'artists', 'tracks', 'albums', 'playlists', 'groups', 'genres', 'hashtags', 'posts')
+    SEARCH_TYPES = ('users', 'artists', 'tracks', 'albums', 'playlists', 'groups', 'genres', 'hashtags', 'posts',
+                    'books')
 
     @action(detail=False, methods=['get'])
     def search(self, request):
@@ -1247,6 +1250,27 @@ class ExploreViewSet(viewsets.ViewSet):
             out['groups'] = GroupSerializer([by_id[g['id']] for _, g in ranked if g['id'] in by_id],
                                             many=True, context=ctx).data
 
+        # Books (Publishing): published, not taken down, by people you can
+        # see — title first, then the author, then the summary.
+        if want('books'):
+            liked_n = Coalesce(Subquery(
+                PublicationLike.objects.filter(publication=OuterRef('pk')).order_by().values('publication')
+                .annotate(n=Count('*')).values('n')[:1], output_field=IntegerField()), 0)
+            cands = list(
+                Publication.objects.filter(fz.candidate_q(['title', 'summary', 'author__username'], query),
+                                           status='published', is_removed=False)
+                .exclude(author_id__in=blocked).exclude(author__is_deactivated=True)
+                .annotate(ln=liked_n)
+                .order_by('-ln', '-id').values('id', 'title', 'summary', 'author__username', 'ln')[:fz.CANDIDATES]
+            )
+            ranked = fz.rank(query, cands,
+                             lambda b: [(b['title'], 1.0), (b['author__username'], 0.7), (b['summary'], 0.5)],
+                             lambda b: b['ln'], n)
+            by_id = (PublicationViewSet._counted(Publication.objects.filter(id__in=[b['id'] for _, b in ranked]), me)
+                     .select_related('author', 'author__profile').in_bulk())
+            out['books'] = PublicationListSerializer(
+                [by_id[b['id']] for _, b in ranked if b['id'] in by_id], many=True, context=ctx).data
+
         if want('genres'):
             gs = list(Category.objects.exclude(slug__isnull=True))
             ranked = fz.rank(query, gs, lambda g: [(g.name, 1.0), (g.slug.replace('-', ' '), 1.0)], limit=n)
@@ -1318,15 +1342,18 @@ class PublicationViewSet(viewsets.ModelViewSet):
         return qs
 
     @staticmethod
-    def _counted(qs, user):
+    def _counted(qs, user, all_chapters=False):
         """Counts and the viewer's own marks as subqueries: one query for a
-        page, and no chapters × likes join multiplying rows."""
-        def count(model):
+        page, and no chapters × likes join multiplying rows. Chapters counted
+        are the ones readers get (not drafts or takedowns) unless
+        `all_chapters` — the author's own list."""
+        def count(model, **where):
             return Coalesce(Subquery(
-                model.objects.filter(publication=OuterRef('pk')).order_by()
+                model.objects.filter(publication=OuterRef('pk'), **where).order_by()
                 .values('publication').annotate(n=Count('pk')).values('n')[:1],
                 output_field=IntegerField()), 0)
-        qs = qs.annotate(chapter_count_anno=count(Chapter), likes_total=count(PublicationLike))
+        chapter_where = {} if all_chapters else {'status': Chapter.PUBLISHED, 'is_removed': False}
+        qs = qs.annotate(chapter_count_anno=count(Chapter, **chapter_where), likes_total=count(PublicationLike))
         if user.is_authenticated:
             qs = qs.annotate(
                 liked_by_me=Exists(PublicationLike.objects.filter(publication=OuterRef('pk'), user=user)),
@@ -1338,26 +1365,28 @@ class PublicationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = self._visible().select_related('author', 'author__profile')
         # Engagement actions only need the row; the list and the page need counts.
-        if self.action in ('like', 'bookmark', 'progress', 'chapter'):
+        if self.action in ('like', 'bookmark', 'progress', 'chapter', 'reading', 'revisions', 'revision'):
             return qs
         qs = self._counted(qs, user)
         if self.action == 'retrieve':
-            chapters = Chapter.objects.all()
+            # Readers get published chapters; the author all of theirs (drafts
+            # and takedowns marked).
+            chapters = Chapter.objects.filter(visible_chapters_q(user)).order_by('order', 'id')
             if self._toc():
                 chapters = chapters.defer('body')
             qs = qs.prefetch_related(Prefetch('chapters', queryset=chapters)).annotate(
                 words_total=Coalesce(Subquery(
-                    Chapter.objects.filter(publication=OuterRef('pk')).order_by()
+                    Chapter.objects.filter(visible_chapters_q(user), publication=OuterRef('pk')).order_by()
                     .values('publication').annotate(n=Sum('word_count')).values('n')[:1],
                     output_field=IntegerField()), 0),
             )
             if user.is_authenticated:
                 follows = User.followers.through.objects.filter(
                     from_user_id=OuterRef('author_id'), to_user_id=user.id)
+                mine = ReadingProgress.objects.filter(publication=OuterRef('pk'), user=user)
                 qs = qs.annotate(
-                    my_last_chapter=Subquery(
-                        ReadingProgress.objects.filter(publication=OuterRef('pk'), user=user)
-                        .values('last_chapter')[:1], output_field=IntegerField()),
+                    my_last_chapter=Subquery(mine.values('last_chapter')[:1], output_field=IntegerField()),
+                    my_last_position=Subquery(mine.values('position')[:1], output_field=FloatField()),
                     following_author=Exists(follows),
                 )
         # Chapters (whose bodies can carry heavy base64 inline images) are
@@ -1437,9 +1466,10 @@ class PublicationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path=r'chapters/(?P<index>\d+)')
     def chapter(self, request, pk=None, index=None):
         """One chapter (0-based, in reading order) — the reader loads chapters
-        one at a time instead of the whole book with all its images."""
+        one at a time instead of the whole book with all its images. Counted
+        among the chapters this reader may see (drafts are the author's)."""
         pub = self.get_object()
-        chapters = list(pub.chapters.order_by('order', 'id').values_list('pk', flat=True))
+        chapters = list(reader_chapters(pub, request.user).values_list('pk', flat=True))
         i = int(index)
         if i >= len(chapters):
             raise Http404('No such chapter.')
@@ -1447,6 +1477,50 @@ class PublicationViewSet(viewsets.ModelViewSet):
         return Response({
             'index': i, 'count': len(chapters), 'updated_at': pub.updated_at,
             'chapter': ChapterReadSerializer(ch).data,
+        })
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def reading(self, request, pk=None):
+        """Reading as it happened, in batches (and late, from a phone that was
+        offline): {events: [{index, seconds, furthest, position, at}]}."""
+        pub = self.get_object()
+        events = request.data.get('events')
+        if not isinstance(events, list):
+            return Response({'error': 'events must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'accepted': record_reading(request.user, pub, events)})
+
+    def _own(self, request):
+        pub = self.get_object()
+        if pub.author_id != request.user.id:
+            raise Http404('No such publication.')   # someone else's history isn't there to see
+        return pub
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def revisions(self, request, pk=None):
+        """The author's kept copies: ?chapter=<id> for a chapter's history
+        (newest first), or none for the book's deleted chapters."""
+        pub = self._own(request)
+        ref = request.query_params.get('chapter')
+        try:
+            ref = int(ref) if ref is not None else None
+        except ValueError:
+            return Response({'error': 'chapter must be an id'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'results': revision_list(pub, ref)})
+
+    @action(detail=True, methods=['get'], url_path=r'revisions/(?P<rid>\d+)',
+            permission_classes=[permissions.IsAuthenticated])
+    def revision(self, request, pk=None, rid=None):
+        """One kept copy, with what's changed since (against the chapter as
+        it is now, or nothing if it was deleted)."""
+        pub = self._own(request)
+        rev = get_object_or_404(ChapterRevision, pk=rid, publication=pub)
+        current = pub.chapters.filter(pk=rev.chapter_ref).first()
+        return Response({
+            'id': rev.id, 'chapter_ref': rev.chapter_ref, 'version': rev.version, 'title': rev.title,
+            'body': rev.body, 'word_count': rev.word_count, 'reason': rev.reason, 'created_at': rev.created_at,
+            'chapter_exists': current is not None,
+            'current_version': current.version if current else None,
+            'changes': diff_paragraphs(rev.body, current.body) if current else None,
         })
 
     def update(self, request, *args, **kwargs):
@@ -1469,7 +1543,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         qs = self.filter_queryset(self._counted(
             Publication.objects.filter(author=request.user, is_removed=False)
             .select_related('author', 'author__profile'),
-            request.user,
+            request.user, all_chapters=True,
         ).order_by('-created_at'))
         page = self.paginate_queryset(qs)
         ser = PublicationListSerializer(page if page is not None else qs, many=True,

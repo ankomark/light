@@ -12,6 +12,7 @@ import axios from 'axios';
 import { API_URL, storeTokens, clearTokens } from '../services/api';
 import { clearAllCaches } from '../utils/screenCache';
 import { forgetKeptChapters } from '../services/publicationStore';
+import { clearReadingQueue } from '../services/readingTracker';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 
 const AuthContext = createContext(null);
@@ -68,6 +69,7 @@ export const AuthProvider = ({ children }) => {
     // flash the previous user's feed even for a frame.
     await clearAllCaches();
     await forgetKeptChapters();   // publications kept for offline (can be drafts)
+    await clearReadingQueue();    // reading not yet sent is the leaving account's
     setCurrentUser(null);
     setIsAuthenticated(false);
     setIsEmailVerified(false);

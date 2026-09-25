@@ -16,6 +16,6 @@ export const mergePage = (prev, rows) => {
 };
 
 /** True when a search answer has anything to show. */
-export const RESULT_SECTIONS = ['tracks', 'artists', 'albums', 'playlists', 'genres', 'users', 'hashtags', 'groups', 'posts'];
+export const RESULT_SECTIONS = ['tracks', 'artists', 'albums', 'playlists', 'books', 'genres', 'users', 'hashtags', 'groups', 'posts'];
 export const hasResults = (res) => !!res?.top || RESULT_SECTIONS
   .some((k) => Array.isArray(res?.[k]) && res[k].length > 0);
