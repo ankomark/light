@@ -21,6 +21,11 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { NoticeListSkeleton } from '../components/SkeletonLoader';
 import { announceDM } from '../services/dmSocket';
 import { hasCapability } from '../utils/roles';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import { compressImage } from '../services/imageProcessing';
+import { uploadMedia } from '../services/cloudinary';
+import LinkedText from '../components/LinkedText';
 import { colors, typography, spacing, radius } from '../constants/theme';
 
 // Calm, not bright: smoked glass cards and the warm accent (no light blue).
@@ -52,10 +57,21 @@ export const expiryTime = (expiry, from) => {
   return days ? new Date((from || new Date()).getTime() + days * 86400000) : null;
 };
 
-const NoticeCard = memo(({ item, onDelete, onEdit, t }) => (
-  <View style={[styles.card, item.is_pinned && styles.cardPinned]} testID={`notice-${item.id}`}>
-    {item.is_pinned || item.is_new || (item.can_manage && item.status && item.status !== 'live') ? (
+export const CATEGORIES = ['general', 'event', 'urgent', 'prayer'];
+
+const NoticeCard = memo(({ item, onDelete, onEdit, onOpen, t }) => (
+  <TouchableOpacity style={[styles.card, item.is_pinned && styles.cardPinned, item.category === 'urgent' && styles.cardUrgent]}
+    testID={`notice-${item.id}`} activeOpacity={0.9} onPress={() => onOpen(item)}>
+    {item.cover_image ? (
+      <Image source={{ uri: item.cover_image }} style={styles.cardCover} contentFit="cover" transition={150} />
+    ) : null}
+    {item.is_pinned || item.is_new || (item.category && item.category !== 'general') || (item.can_manage && item.status && item.status !== 'live') ? (
       <View style={styles.tagRow}>
+        {item.category && item.category !== 'general' ? (
+          <View style={[styles.catTag, item.category === 'urgent' && styles.catTagUrgent]}>
+            <Text style={[styles.catTagText, item.category === 'urgent' && styles.catTagTextUrgent]}>{t(`notice.category.${item.category}`)}</Text>
+          </View>
+        ) : null}
         {item.can_manage && item.status === 'scheduled' ? (
           <View style={styles.statusTag} testID={`notice-scheduled-${item.id}`}>
             <MaterialCommunityIcons name="clock-outline" size={12} color={colors.textSecondary} />
@@ -93,7 +109,7 @@ const NoticeCard = memo(({ item, onDelete, onEdit, t }) => (
         </View>
       )}
     </View>
-    <Text style={styles.cardBody} selectable>{item.body}</Text>
+    <LinkedText style={styles.cardBody} numberOfLines={6}>{item.body}</LinkedText>
     <View style={styles.cardFooter}>
       <MaterialCommunityIcons name="account-circle-outline" size={14} color={colors.textMuted} />
       <Text style={styles.cardMeta}>
@@ -102,16 +118,25 @@ const NoticeCard = memo(({ item, onDelete, onEdit, t }) => (
         {item.can_manage && item.expires_at && item.status !== 'expired' ? `  ·  ${t('notice.until', { when: formatDate(item.expires_at) })}` : ''}
       </Text>
     </View>
-  </View>
+  </TouchableOpacity>
 ));
 NoticeCard.displayName = 'NoticeCard';
 
-const NoticeBoard = ({ route }) => {
+const NoticeBoard = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const insets = useSafeAreaInsets();
   // Staff, or a role that may manage the notice board.
   const isAdmin = !!currentUser?.is_staff || hasCapability(currentUser, 'manage_notices');
+
+  // Filters: a category and a search; only the plain board is kept for next time.
+  const [category, setCategory] = useState('');
+  const [query, setQuery] = useState('');
+  const [q, setQ] = useState('');
+  useEffect(() => { const h = setTimeout(() => setQ(query.trim()), 300); return () => clearTimeout(h); }, [query]);
+  const filtered = !!(category || q);
+  const filterRef = useRef({ category: '', q: '' });
+  filterRef.current = { category, q };
 
   const cacheKey = userKey(currentUser?.id, 'notices');
   const [notices, setNotices] = useState(() => peekCache(cacheKey)?.results ?? []);
@@ -131,6 +156,9 @@ const NoticeBoard = ({ route }) => {
   const [editing, setEditing] = useState(null);      // the notice being edited (null: a new one)
   const [when, setWhen] = useState('now');          // 'keep' while editing
   const [expiry, setExpiry] = useState('never');
+  const [noticeCategory, setNoticeCategory] = useState('general');
+  const [cover, setCover] = useState('');           // an uploaded picture's address
+  const [uploadingCover, setUploadingCover] = useState(false);
 
   // The notes I sent (anyone), and answering notes (admins).
   const [myNotesVisible, setMyNotesVisible] = useState(false);
@@ -163,7 +191,9 @@ const NoticeBoard = ({ route }) => {
   // Page 1 replaces the board (and is what the next open paints).
   const load = useCallback(async () => {
     try {
-      const res = await fetchNotices(1);
+      const asked = { ...filterRef.current };
+      const res = await fetchNotices(1, asked);
+      if (filterRef.current.category !== asked.category || filterRef.current.q !== asked.q) return;   // they moved on
       const rows = res?.results ?? (Array.isArray(res) ? res : []);
       freshRef.current = true;
       setNotices(rows);
@@ -171,7 +201,7 @@ const NoticeBoard = ({ route }) => {
       pageRef.current = 1;
       moreRef.current = !!res?.next;
       // Seen now: the next open shouldn't call these new again.
-      writeCache(cacheKey, { results: rows.map((n) => (n.is_new ? { ...n, is_new: false } : n)) });
+      if (!asked.category && !asked.q) writeCache(cacheKey, { results: rows.map((n) => (n.is_new ? { ...n, is_new: false } : n)) });
       if (rows.some((n) => n.is_new)) {
         markNoticesSeen().then(() => announceDM({ type: 'notices_seen' })).catch(() => {});
       }
@@ -183,13 +213,13 @@ const NoticeBoard = ({ route }) => {
     }
   }, [cacheKey]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, category, q]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !moreRef.current) return;
     setLoadingMore(true);
     try {
-      const res = await fetchNotices(pageRef.current + 1);
+      const res = await fetchNotices(pageRef.current + 1, filterRef.current);
       pageRef.current += 1;
       moreRef.current = !!res?.next;
       setNotices((prev) => {
@@ -203,14 +233,34 @@ const NoticeBoard = ({ route }) => {
 
   const resetCompose = () => {
     setTitle(''); setBody(''); setPinned(false); setEditing(null); setWhen('now'); setExpiry('never');
+    setNoticeCategory('general'); setCover('');
   };
 
   const startEdit = useCallback((item) => {
     setEditing(item);
     setTitle(item.title); setBody(item.body); setPinned(!!item.is_pinned);
     setWhen('keep'); setExpiry('keep');
+    setNoticeCategory(item.category || 'general'); setCover(item.cover_image || '');
     setComposeVisible(true);
   }, []);
+
+  // A picture at the top: picked, made smaller on the phone, uploaded.
+  const pickCover = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') { notify(t('chat.permissionRequired'), t('chat.permissionPhotos')); return; }
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
+      if (res.canceled || !res.assets?.length) return;
+      setUploadingCover(true);
+      const small = await compressImage(res.assets[0].uri, { width: 1280, quality: 0.7 });
+      const up = await uploadMedia({ uri: small.uri, name: `notice_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'cover');
+      setCover(up?.url || '');
+    } catch {
+      notify(t('common.error'), t('notice.coverFailed'));
+    } finally {
+      setUploadingCover(false);
+    }
+  };
 
   const openMyNotes = useCallback(async () => {
     setMyNotesVisible(true);
@@ -250,7 +300,7 @@ const NoticeBoard = ({ route }) => {
       const exp = expiry === 'keep' ? undefined
         : expiryTime(expiry, pub || (editing?.publish_at ? new Date(editing.publish_at) : null));
       const fields = {
-        title: title.trim(), body: body.trim(), is_pinned: pinned,
+        title: title.trim(), body: body.trim(), is_pinned: pinned, category: noticeCategory, cover_image: cover,
         ...(pub !== undefined ? { publish_at: pub ? pub.toISOString() : null } : {}),
         ...(exp !== undefined ? { expires_at: exp ? exp.toISOString() : null } : {}),
       };
@@ -345,7 +395,10 @@ const NoticeBoard = ({ route }) => {
     }
   }, [t, cacheKey]);
 
-  const renderItem = useCallback(({ item }) => <NoticeCard item={item} onDelete={handleDelete} onEdit={startEdit} t={t} />, [handleDelete, startEdit, t]);
+  const openNotice = useCallback((item) => navigation?.navigate('Notice', { id: item.id, notice: item }), [navigation]);
+  const renderItem = useCallback(({ item }) => (
+    <NoticeCard item={item} onDelete={handleDelete} onEdit={startEdit} onOpen={openNotice} t={t} />
+  ), [handleDelete, startEdit, openNotice, t]);
 
   return (
     <View style={styles.root}>
@@ -385,6 +438,25 @@ const NoticeBoard = ({ route }) => {
                 </TouchableOpacity>
               )}
             </View>
+
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={16} color={colors.textMuted} />
+              <TextInput value={query} onChangeText={setQuery} placeholder={t('notice.search')} placeholderTextColor={colors.placeholder}
+                style={styles.searchInput} autoCorrect={false} returnKeyType="search" testID="notice-search" />
+              {query ? (
+                <TouchableOpacity onPress={() => setQuery('')} hitSlop={10} accessibilityLabel={t('common.clear')}>
+                  <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catRow}>
+              {['', ...CATEGORIES].map((c) => (
+                <TouchableOpacity key={c || 'all'} onPress={() => setCategory(c)} testID={`cat-${c || 'all'}`}
+                  style={[styles.chip, category === c && styles.chipOn]}>
+                  <Text style={[styles.chipText, category === c && styles.chipTextOn]}>{c ? t(`notice.category.${c}`) : t('notice.all')}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
         }
         ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={styles.more} /> : null}
@@ -400,7 +472,7 @@ const NoticeBoard = ({ route }) => {
           ) : (
             <View style={styles.empty}>
               <MaterialCommunityIcons name="bulletin-board" size={56} color={colors.textMuted} />
-              <Text style={styles.emptyTitle}>{t('notice.none')}</Text>
+              <Text style={styles.emptyTitle}>{filtered ? t('notice.noMatch') : t('notice.none')}</Text>
               <Text style={styles.emptySub}>{isAdmin ? t('notice.postFirst') : t('notice.checkBack')}</Text>
             </View>
           )
@@ -439,6 +511,31 @@ const NoticeBoard = ({ route }) => {
                 <Switch value={pinned} onValueChange={setPinned}
                   trackColor={{ false: 'rgba(255,255,255,0.15)', true: colors.accent }} thumbColor={colors.white} />
               </View>
+              <Text style={styles.chipLabel}>{t('notice.kind')}</Text>
+              <View style={styles.chipRow}>
+                {CATEGORIES.map((c) => (
+                  <TouchableOpacity key={c} onPress={() => setNoticeCategory(c)} style={[styles.chip, noticeCategory === c && styles.chipOn]} testID={`kind-${c}`}>
+                    <Text style={[styles.chipText, noticeCategory === c && styles.chipTextOn]}>{t(`notice.category.${c}`)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {cover ? (
+                <View style={styles.coverWrap}>
+                  <Image source={{ uri: cover }} style={styles.coverPreview} contentFit="cover" />
+                  <TouchableOpacity style={styles.coverRemove} onPress={() => setCover('')} accessibilityLabel={t('notice.removeCover')} testID="cover-remove">
+                    <Ionicons name="close" size={16} color={colors.white} />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.coverAdd} onPress={pickCover} disabled={uploadingCover} testID="cover-add">
+                  {uploadingCover ? <ActivityIndicator color={colors.accent} /> : (
+                    <>
+                      <Ionicons name="image-outline" size={18} color={colors.accent} />
+                      <Text style={styles.coverAddText}>{t('notice.addCover')}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
               <Text style={styles.chipLabel}>{t('notice.publish')}</Text>
               <View style={styles.chipRow}>
                 {(editing ? ['keep', ...WHEN] : WHEN).map((k) => (
@@ -621,6 +718,26 @@ const NoticeBoard = ({ route }) => {
 
 const styles = StyleSheet.create({
   manageRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  cardCover: { width: '100%', height: 150, borderRadius: radius.md, marginBottom: spacing.sm, backgroundColor: 'rgba(255,255,255,0.05)' },
+  cardUrgent: { borderColor: 'rgba(229,57,53,0.55)' },
+  catTag: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: radius.full, backgroundColor: 'rgba(244,162,97,0.14)' },
+  catTagUrgent: { backgroundColor: 'rgba(229,57,53,0.18)' },
+  catTagText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  catTagTextUrgent: { color: '#FF8A80' },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, minHeight: 40, marginBottom: spacing.sm,
+    borderRadius: radius.full, backgroundColor: GLASS, borderWidth: StyleSheet.hairlineWidth, borderColor: GLASS_EDGE,
+  },
+  searchInput: { flex: 1, color: colors.textPrimary, paddingVertical: spacing.xs, fontSize: 15 },
+  catRow: { gap: spacing.xs, paddingBottom: spacing.md },
+  coverWrap: { marginBottom: spacing.md },
+  coverPreview: { width: '100%', height: 150, borderRadius: radius.md },
+  coverRemove: { position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
+  coverAdd: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 48, marginBottom: spacing.md,
+    borderRadius: radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(244,162,97,0.5)',
+  },
+  coverAddText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
   statusTag: {
     flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 1,
     borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.25)',

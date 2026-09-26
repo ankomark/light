@@ -131,3 +131,27 @@ class AdminToolTests(Base):
         other = User.objects.create_user('nother', 'no@x.com', 'x')
         self.client.force_authenticate(other)
         self.assertEqual(self.client.get('/api/admin-notes/mine/').json()['results'], [])
+
+
+from django.test import override_settings
+
+
+@override_settings(R2_PUBLIC_BASE='https://cdn.example')
+class RichNoticeTests(Base):
+    def test_cover_must_be_our_upload_and_category_filters(self):
+        self.assertEqual(self.post(cover_image='https://evil.example/x.jpg').status_code, 400)
+        ok = self.post(cover_image='https://cdn.example/cover/a.jpg', category='event', title='Youth camp')
+        self.assertEqual(ok.status_code, 201)
+        self.post(category='prayer', title='Pray for the sick')
+        self.client.force_authenticate(self.reader)
+        titles = [n['title'] for n in self.client.get('/api/notices/', {'category': 'event'}).json()['results']]
+        self.assertEqual(titles, ['Youth camp'])
+        found = [n['title'] for n in self.client.get('/api/notices/', {'q': 'sick'}).json()['results']]
+        self.assertEqual(found, ['Pray for the sick'])
+
+    def test_a_scheduled_notice_is_not_readable_by_its_id(self):
+        nid = self.post(publish_at=(timezone.now() + timedelta(days=1)).isoformat()).json()['id']
+        self.client.force_authenticate(self.reader)
+        self.assertEqual(self.client.get(f'/api/notices/{nid}/').status_code, 404)
+        self.client.force_authenticate(self.admin)
+        self.assertEqual(self.client.get(f'/api/notices/{nid}/').status_code, 200)

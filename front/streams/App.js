@@ -44,6 +44,7 @@ import HymnList from './components/HymnList';
 import HymnDetail from './components/HymnDetail';
 import { MenuScreen } from './components/HamburgerMenu';
 import NoticeBoard from './pages/NoticeBoard';
+import NoticeDetail from './pages/NoticeDetail';
 import AdventistMedia from './pages/AdventistMedia';
 import Articles from './pages/Articles';
 import PublicationDetail from './pages/PublicationDetail';
@@ -179,6 +180,7 @@ const linking = {
     screens: {
       PostDetail: 'post/:postId',
       ServiceDetail: 'service/:id',
+      Notice: 'notice/:id',
     },
   },
 };
@@ -252,8 +254,9 @@ const App = () => {
         // The admins answered my note: my notes, on the board.
         navigate('NoticeBoard', { openMyNotes: true });
       } else if (data?.type === 'notice') {
-        // A new notice: the board (it opens on it, newest first).
-        navigate('NoticeBoard');
+        // A new notice: that notice.
+        if (data.noticeId) navigate('Notice', { id: data.noticeId });
+        else navigate('NoticeBoard');
       } else if (data?.groupSlug) {
         // Group taps deep-link like the in-app bell: a join request goes to the
         // group's pending-requests page, everything else to the group itself.
@@ -351,6 +354,7 @@ const App = () => {
                 {/* The menu: a screen, so back from a page it opened returns to it. */}
                 <Stack.Screen name="Menu" component={MenuScreen} />
                 <Stack.Screen name="NoticeBoard" component={NoticeBoard} options={{ headerShown: true, title: 'Notice Board', headerStyle: { backgroundColor: '#102E50' }, headerTintColor: '#E0E1DD', headerTitleStyle: { fontWeight: '700' }, headerShadowVisible: false }} />
+                <Stack.Screen name="Notice" component={NoticeDetail} />
                 <Stack.Screen name="AdventistMedia" component={ AdventistMedia} />
                 <Stack.Screen name="Publishing" component={PublishingWrapper} />
                 <Stack.Screen name="PublicationDetail" component={PublicationDetail} />

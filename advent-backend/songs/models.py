@@ -992,6 +992,10 @@ class Notice(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     announced = models.BooleanField(default=False)
     edited_at = models.DateTimeField(null=True, blank=True)
+    # A picture at the top (one of our uploads), and what kind of notice it is.
+    cover_image = models.CharField(max_length=500, blank=True, default='')
+    CATEGORIES = [('general', 'General'), ('event', 'Event'), ('urgent', 'Urgent'), ('prayer', 'Prayer')]
+    category = models.CharField(max_length=12, choices=CATEGORIES, default='general', db_index=True)
 
     class Meta:
         ordering = ['-is_pinned', '-created_at']

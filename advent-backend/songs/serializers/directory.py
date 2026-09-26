@@ -43,6 +43,7 @@ class NoticeSerializer(serializers.ModelSerializer):
             'id', 'title', 'body', 'is_pinned',
             'created_by', 'created_by_username', 'can_manage', 'is_new',
             'created_at', 'updated_at', 'publish_at', 'expires_at', 'edited_at', 'status',
+            'cover_image', 'category',
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at', 'edited_at']
 
@@ -64,6 +65,14 @@ class NoticeSerializer(serializers.ModelSerializer):
         if obj.expires_at and obj.expires_at <= now:
             return 'expired'
         return 'live'
+
+    def validate_cover_image(self, v):
+        v = (v or '').strip()
+        # Our own uploads only — never any address on the internet.
+        from ..views.messaging import _our_upload
+        if v and (len(v) > 500 or not _our_upload(v)):
+            raise serializers.ValidationError('The picture must be uploaded through the app.')
+        return v
 
     def validate(self, attrs):
         pub = attrs.get('publish_at', getattr(self.instance, 'publish_at', None))

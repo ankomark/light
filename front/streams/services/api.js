@@ -1364,9 +1364,12 @@ export const deleteGroup = async (groupSlug) => {
 
 // ==================== NOTICE BOARD ====================
 // Read by any signed-in user; only staff/admins can post (enforced server-side).
-// A page of notices ({results, next}), pinned first then newest.
-export const fetchNotices = async (page = 1) =>
-  apiRequest('get', '/notices/', null, { params: { page, page_size: 20 } });
+// A page of notices ({results, next}), pinned first then newest;
+// category ('general' | 'event' | 'urgent' | 'prayer') and q narrow it.
+export const fetchNotices = async (page = 1, { category, q } = {}) =>
+  apiRequest('get', '/notices/', null, { params: { page, page_size: 20, ...(category ? { category } : {}), ...(q ? { q } : {}) } });
+
+export const fetchNotice = (id) => apiRequest('get', `/notices/${id}/`);
 
 // I've looked at the board: nothing is new any more (the menu badge).
 export const markNoticesSeen = () => apiRequest('post', '/notices/seen/');

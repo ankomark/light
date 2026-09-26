@@ -77,8 +77,16 @@ class NoticeViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Notice.objects.select_related('created_by').order_by('-is_pinned', '-created_at', '-id')
-        if self.action == 'list' and not can_manage_notices(self.request.user):
+        # What's scheduled or taken down is the managers' — not even by its id.
+        if not can_manage_notices(self.request.user):
             qs = qs.filter(live_notices_q())
+        if self.action == 'list':
+            p = self.request.query_params
+            if p.get('category') in dict(Notice.CATEGORIES):
+                qs = qs.filter(category=p['category'])
+            q = (p.get('q') or '').strip()[:100]
+            if q:
+                qs = qs.filter(Q(title__icontains=q) | Q(body__icontains=q))
         return qs
 
     def get_permissions(self):

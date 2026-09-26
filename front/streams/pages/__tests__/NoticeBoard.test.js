@@ -11,6 +11,7 @@ jest.setTimeout(20000);
 
 const mockApi = {
   fetchNotices: jest.fn(),
+  fetchNotice: jest.fn(),
   createNotice: jest.fn(async () => ({})),
   updateNotice: jest.fn(async () => ({})),
   deleteNotice: jest.fn(async () => ({})),
@@ -35,8 +36,20 @@ jest.mock('../../utils/adminConfirm', () => ({
   notify: (...a) => mockNotify(...a),
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialCommunityIcons: () => null }));
-jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+jest.mock('react-native-safe-area-context', () => {
+  const { View } = require('react-native');
+  return { SafeAreaView: View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
+});
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }) }));
+jest.mock('expo-image', () => { const { View } = require('react-native'); return { Image: (p) => <View testID={p.testID} /> }; });
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ status: 'granted' })),
+  launchImageLibraryAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file://pic.jpg' }] })),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+jest.mock('../../services/imageProcessing', () => ({ compressImage: jest.fn(async (uri) => ({ uri })) }));
+const mockUpload = jest.fn(async () => ({ url: 'https://cdn.example/cover/n.jpg' }));
+jest.mock('../../services/cloudinary', () => ({ uploadMedia: (...a) => mockUpload(...a) }));
 
 const mockAnnounced = [];
 jest.mock('../../services/dmSocket', () => ({ announceDM: (e) => mockAnnounced.push(e) }));
@@ -90,7 +103,7 @@ test('pages as you scroll', async () => {
   await waitFor(() => expect(r.getByText('Notice 2')).toBeTruthy());
   await act(async () => { fireEvent(r.UNSAFE_getByType(require('react-native').FlatList), 'endReached'); });
   await waitFor(() => expect(r.getByText('Notice 3')).toBeTruthy());
-  expect(mockApi.fetchNotices).toHaveBeenLastCalledWith(2);
+  expect(mockApi.fetchNotices).toHaveBeenLastCalledWith(2, { category: '', q: '' });
 });
 
 test('an admin deletes with a web-safe confirm', async () => {
@@ -156,7 +169,7 @@ test('a manager schedules, edits (keeping the times), and sees what is scheduled
   await act(async () => { fireEvent.press(r.getByTestId('notice-edit-8')); });
   fireEvent.changeText(r.getByTestId('notice-body'), 'New body');
   await act(async () => { fireEvent.press(r.getByTestId('notice-post')); });
-  expect(mockApi.updateNotice).toHaveBeenCalledWith(8, { title: 'Notice 8', body: 'New body', is_pinned: false });
+  expect(mockApi.updateNotice).toHaveBeenCalledWith(8, { title: 'Notice 8', body: 'New body', is_pinned: false, category: 'general', cover_image: '' });
 });
 
 test('my notes: read or not, and the answer; admins answer from the inbox', async () => {
@@ -179,4 +192,61 @@ test('my notes: read or not, and the answer; admins answer from the inbox', asyn
   await act(async () => { fireEvent.press(a.getByTestId('reply-send-9')); });
   expect(mockApi.replyToAdminNote).toHaveBeenCalledWith(9, 'Done');
   expect(a.getByText('Done')).toBeTruthy();
+});
+test('search and categories ask the server; a card opens its page', async () => {
+  mockApi.fetchNotices.mockImplementation(async (_p, f = {}) => ({ results: [notice(f.category === 'event' ? 20 : 21)], next: null }));
+  const nav = { navigate: jest.fn() };
+  const r = render(<NoticeBoard route={{}} navigation={nav} />);
+  await waitFor(() => expect(r.getByText('Notice 21')).toBeTruthy());
+  await act(async () => { fireEvent.press(r.getByTestId('cat-event')); });
+  await waitFor(() => expect(r.getByText('Notice 20')).toBeTruthy());
+  expect(mockApi.fetchNotices).toHaveBeenLastCalledWith(1, { category: 'event', q: '' });
+  fireEvent.changeText(r.getByTestId('notice-search'), 'camp');
+  await waitFor(() => expect(mockApi.fetchNotices).toHaveBeenLastCalledWith(1, { category: 'event', q: 'camp' }));
+  await act(async () => { fireEvent.press(r.getByTestId('notice-20')); });
+  expect(nav.navigate).toHaveBeenCalledWith('Notice', expect.objectContaining({ id: 20 }));
+});
+
+test('a notice gets a kind and a picture (uploaded as a cover)', async () => {
+  mockUser = { id: 1, username: 'me', is_staff: true };
+  mockApi.fetchNotices.mockResolvedValue({ results: [], next: null });
+  const r = render(<NoticeBoard route={{}} />);
+  await act(async () => { fireEvent.press(r.getByTestId('notice-compose')); });
+  fireEvent.changeText(r.getByTestId('notice-title'), 'Camp');
+  fireEvent.changeText(r.getByTestId('notice-body'), 'Register at https://camp.example');
+  await act(async () => { fireEvent.press(r.getByTestId('kind-event')); });
+  await act(async () => { fireEvent.press(r.getByTestId('cover-add')); });
+  expect(mockUpload).toHaveBeenCalledWith(expect.objectContaining({ uri: 'file://pic.jpg' }), 'cover');
+  await act(async () => { fireEvent.press(r.getByTestId('notice-post')); });
+  expect(mockApi.createNotice.mock.calls[0][0]).toMatchObject({ category: 'event', cover_image: 'https://cdn.example/cover/n.jpg' });
+});
+
+test('links in text are split out to be tapped', () => {
+  const { splitLinks } = require('../../components/LinkedText');
+  expect(splitLinks('Register at https://camp.example/a, or www.x.org.')).toEqual([
+    { text: 'Register at ' }, { text: 'https://camp.example/a', url: 'https://camp.example/a' },
+    { text: ', or ' }, { text: 'www.x.org', url: 'https://www.x.org' }, { text: '.' },
+  ]);
+});
+
+describe('A notice page', () => {
+  const NoticeDetail = require('../NoticeDetail').default;
+  const nav = { goBack: jest.fn() };
+
+  it('shows the copy it was given at once, and shares a link', async () => {
+    mockApi.fetchNotice.mockImplementation(() => new Promise(() => {}));
+    const { Share } = require('react-native');
+    const share = jest.spyOn(Share, 'share').mockResolvedValue({});
+    const r = render(<NoticeDetail navigation={nav} route={{ params: { id: 30, notice: notice(30, { category: 'urgent' }) } }} />);
+    expect(r.getByText('Notice 30')).toBeTruthy();
+    expect(r.getByText('notice.category.urgent')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('notice-share')); });
+    expect(share.mock.calls[0][0].message).toContain('streams://notice/30');
+  });
+
+  it("says so when it's gone (expired, or not yours to see yet)", async () => {
+    mockApi.fetchNotice.mockRejectedValueOnce(Object.assign(new Error('nf'), { response: { status: 404 } }));
+    const r = render(<NoticeDetail navigation={nav} route={{ params: { id: 31 } }} />);
+    await waitFor(() => expect(r.getByText('notice.notAvailable')).toBeTruthy());
+  });
 });
