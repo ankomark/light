@@ -209,14 +209,14 @@ const GroupMessageRow = memo(({
                 </Pressable>
               ) : type === 'file' ? (
                 <Pressable style={styles.fileRow} onPress={() => onOpenFile(item)} disabled={sending}>
-                  <View style={styles.fileIcon}><Ionicons name="document-text" size={22} color={colors.primary} /></View>
+                  <View style={styles.fileIcon}><Ionicons name="document-text" size={22} color={colors.accent} /></View>
                   <Text style={[styles.fileName, isOwn ? styles.txtOwn : styles.txtOther]} numberOfLines={1}>{item.file_name || t('group.preview.message')}</Text>
                   <Ionicons name="download-outline" size={18} color={isOwn ? 'rgba(255,255,255,0.8)' : colors.textMuted} />
                 </Pressable>
               ) : type === 'audio' ? (
                 <Pressable style={styles.audioRow} onPress={() => onPlayAudio(item)} disabled={sending}>
-                  <Ionicons name={isPlaying ? 'pause-circle' : 'play-circle'} size={30} color={isOwn ? colors.white : colors.primary} />
-                  <View style={styles.audioBar}><View style={[styles.audioBarFill, { backgroundColor: isOwn ? 'rgba(255,255,255,0.55)' : colors.primary }]} /></View>
+                  <Ionicons name={isPlaying ? 'pause-circle' : 'play-circle'} size={30} color={isOwn ? colors.white : colors.accent} />
+                  <View style={styles.audioBar}><View style={[styles.audioBarFill, { backgroundColor: isOwn ? 'rgba(255,255,255,0.55)' : 'rgba(244,162,97,0.7)' }]} /></View>
                   <Text style={[styles.audioDuration, isOwn ? styles.txtOwn : styles.txtOther]}>{fmtDuration(item.duration)}</Text>
                 </Pressable>
               ) : null}
@@ -2034,7 +2034,7 @@ const styles = StyleSheet.create({
   mentionChip: { paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.full, backgroundColor: 'rgba(244,162,97,0.16)', borderWidth: 1, borderColor: 'rgba(244,162,97,0.5)' },
   mentionChipText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
   dayWrap: { alignItems: 'center', marginVertical: spacing.sm },
-  dayText: { fontSize: 12, color: colors.textSecondary, fontWeight: '700', overflow: 'hidden', paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.full, backgroundColor: 'rgba(16,46,80,0.8)' },
+  dayText: { fontSize: 12, color: colors.textSecondary, fontWeight: '700', overflow: 'hidden', paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.full, backgroundColor: 'rgba(6,10,16,0.72)' },
   unreadLine: { alignItems: 'center', marginVertical: spacing.sm, paddingVertical: 4, backgroundColor: 'rgba(244,162,97,0.14)', borderRadius: radius.md },
   unreadText: { fontSize: 12, color: colors.accent, fontWeight: '800' },
   slowHint: { ...typography.caption, color: colors.textMuted, textAlign: 'center', paddingVertical: 4, backgroundColor: 'rgba(16,46,80,0.9)' },
@@ -2058,7 +2058,7 @@ const styles = StyleSheet.create({
   earlierText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
 
   sysRow: { alignItems: 'center', marginVertical: spacing.xs },
-  sysText: { ...typography.caption, color: colors.textMuted, backgroundColor: colors.card, borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: 4, overflow: 'hidden' },
+  sysText: { ...typography.caption, color: colors.textMuted, backgroundColor: 'rgba(6,10,16,0.66)', borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: 4, overflow: 'hidden' },
 
   msgRow: { flexDirection: 'row', marginVertical: 2, alignItems: 'flex-end' },
   msgRowOwn: { justifyContent: 'flex-end' },
@@ -2068,17 +2068,25 @@ const styles = StyleSheet.create({
   bubbleCol: { maxWidth: '78%', flexShrink: 1 },
   burstHeart: { position: 'absolute', alignSelf: 'center', top: '30%', fontSize: 40, zIndex: 5 },
   bubble: { borderRadius: radius.lg, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs + 2, ...shadows.sm },
-  bubbleMedia: { padding: 2, borderRadius: 8 }, // slim 2px frame, tidy corners
+  bubbleMedia: { padding: 2, borderRadius: 8 }, // slim 2px frame, tidy corners (the bubble's own dark glass)
   bubbleSending: { opacity: 0.85 },             // dim while in flight
-  bubbleOwn: { backgroundColor: colors.primary, borderBottomRightRadius: 4 },
-  bubbleOther: { backgroundColor: colors.card, borderBottomLeftRadius: 4 },
+  // Smoked glass, not bright blue: near-black and see-through over the backdrop.
+  // Mine carry a faint warm edge; theirs a faint light one — apart without shouting.
+  bubbleOwn: {
+    backgroundColor: 'rgba(14,20,30,0.86)', borderBottomRightRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.38)',
+  },
+  bubbleOther: {
+    backgroundColor: 'rgba(6,10,16,0.74)', borderBottomLeftRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
+  },
   senderName: { ...typography.caption, color: colors.accent, fontWeight: '700', marginBottom: 2 },
   bubbleText: { fontSize: 15, lineHeight: 21 },
   txtOwn: { color: colors.white },
   txtOther: { color: colors.textPrimary },
   metaRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 3 },
   bubbleTime: { fontSize: 10 },
-  timeOwn: { color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
+  timeOwn: { color: 'rgba(255,255,255,0.55)', textAlign: 'right' },
   timeOther: { color: colors.textMuted },
   statusIcon: { marginLeft: 1 },
   statusWrap: { flexDirection: 'row', alignItems: 'center', gap: 3 },
@@ -2093,7 +2101,7 @@ const styles = StyleSheet.create({
   replyHint: { position: 'absolute', left: 12, alignSelf: 'center', width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(244,162,97,0.16)' },
   reactionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: -6, marginLeft: spacing.xs, alignSelf: 'flex-start' },
   reactionsRowOwn: { alignSelf: 'flex-end', marginRight: spacing.xs, marginLeft: 0 },
-  reactionChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  reactionChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.full, backgroundColor: 'rgba(10,14,20,0.88)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)' },
   reactionChipMine: { backgroundColor: 'rgba(244,162,97,0.22)', borderColor: 'rgba(244,162,97,0.6)' },
   reactionEmoji: { fontSize: 13 },
   reactionCount: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
@@ -2107,10 +2115,10 @@ const styles = StyleSheet.create({
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   menuItemText: { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
 
-  imageMsg: { borderRadius: 5, backgroundColor: colors.surface },  // width/height inline (reactive)
+  imageMsg: { borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.05)' },  // width/height inline (reactive)
   uploadOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)' },
   fileRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 2, paddingRight: spacing.xs, minWidth: 180 },
-  fileIcon: { width: 38, height: 38, borderRadius: radius.sm, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  fileIcon: { width: 38, height: 38, borderRadius: radius.sm, backgroundColor: 'rgba(255,255,255,0.07)', alignItems: 'center', justifyContent: 'center' },
   fileName: { flex: 1, fontSize: 14, fontWeight: '600' },
   audioRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minWidth: 160, paddingVertical: 2 },
   audioBar: { flex: 1, height: 4, borderRadius: 2, backgroundColor: 'rgba(128,128,128,0.3)', overflow: 'hidden' },
