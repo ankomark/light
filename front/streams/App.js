@@ -248,6 +248,9 @@ const App = () => {
           postId: data.postId,
           ...(data.commentId ? { commentId: data.commentId, shouldOpenComments: true } : {}),
         });
+      } else if (data?.type === 'admin_reply') {
+        // The admins answered my note: my notes, on the board.
+        navigate('NoticeBoard', { openMyNotes: true });
       } else if (data?.type === 'notice') {
         // A new notice: the board (it opens on it, newest first).
         navigate('NoticeBoard');

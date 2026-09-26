@@ -256,6 +256,8 @@ REST_FRAMEWORK = {
         'group_join': '20/hour',
         'group_action': '120/min',
         'group_invite': '30/hour',
+        'notice_write': '60/hour',
+        'admin_note': '5/hour',
         # Choir/church community chat abuse guards (mirror the group rates).
         'community_post': '90/min',
         'community_react': '60/min',

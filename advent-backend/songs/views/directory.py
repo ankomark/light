@@ -50,23 +50,46 @@ class MediaStationViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def can_manage_notices(user):
+    """Who posts notices and answers notes: staff, or anyone whose role grants
+    `manage_notices` (super admins hold every capability)."""
+    return bool(user and user.is_authenticated and (user.is_staff or user.has_capability('manage_notices')))
+
+
+class CanManageNotices(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return can_manage_notices(request.user)
+
+
+def live_notices_q(now=None):
+    """On the board: published (now or earlier) and not yet expired."""
+    now = now or timezone.now()
+    return ((Q(publish_at__isnull=True) | Q(publish_at__lte=now))
+            & (Q(expires_at__isnull=True) | Q(expires_at__gt=now)))
+
+
 class NoticeViewSet(viewsets.ModelViewSet):
-    """Notice board: anyone signed in can read; only staff/admins can post.
-    Admin-role gating is interim (User.is_staff) and will be expanded later."""
-    # Pinned notices float to the top, then newest-first — this is what makes the
-    # admin "Pin to top" toggle actually reorder the board. select_related the
-    # author so the list doesn't fire a query per row for created_by.username.
-    queryset = (
-        Notice.objects.select_related('created_by')
-        .order_by('-is_pinned', '-created_at')
-    )
+    """Notice board: anyone signed in reads what's live; those who manage
+    notices post, edit, schedule (publish_at) and expire (expires_at) them,
+    and also see what's scheduled or expired. Pinned first, then newest."""
     serializer_class = NoticeSerializer
     pagination_class = StandardPagination
 
+    def get_queryset(self):
+        qs = Notice.objects.select_related('created_by').order_by('-is_pinned', '-created_at', '-id')
+        if self.action == 'list' and not can_manage_notices(self.request.user):
+            qs = qs.filter(live_notices_q())
+        return qs
+
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAdminUser()]
+            return [permissions.IsAuthenticated(), CanManageNotices()]
         return [permissions.IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            self.throttle_scope = 'notice_write'
+        return super().get_throttles()
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
@@ -74,11 +97,26 @@ class NoticeViewSet(viewsets.ModelViewSet):
         if u.is_authenticated:
             # "New" is newer than their last look — or, never looked, than when they joined.
             ctx['notices_seen_at'] = u.notices_seen_at or u.date_joined
+            ctx['can_manage'] = can_manage_notices(u)
         return ctx
+
+    def list(self, request, *args, **kwargs):
+        # A scheduled notice whose time has come is announced now if the
+        # worker hasn't (it may not be running) — nobody misses it.
+        announce_due_notices()
+        return super().list(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         notice = serializer.save(created_by=self.request.user)
-        announce_notice(notice)
+        schedule_announcement(notice)
+
+    def perform_update(self, serializer):
+        before = serializer.instance
+        changed = any(k in serializer.validated_data and serializer.validated_data[k] != getattr(before, k)
+                      for k in ('title', 'body'))
+        notice = serializer.save(**({'edited_at': timezone.now()} if changed else {}))
+        if not notice.announced:
+            schedule_announcement(notice)       # a new publish time moves the push with it
 
     @action(detail=False, methods=['get'])
     def unseen(self, request):
@@ -94,12 +132,33 @@ class NoticeViewSet(viewsets.ModelViewSet):
 
 def unseen_notices(user):
     since = user.notices_seen_at or user.date_joined
-    return Notice.objects.filter(created_at__gt=since).exclude(created_by=user).count()
+    now = timezone.now()
+    return (Notice.objects.filter(live_notices_q(now))
+            .filter(Q(publish_at__gt=since) | Q(publish_at__isnull=True, created_at__gt=since))
+            .exclude(created_by=user).count())
+
+
+def schedule_announcement(notice):
+    """Push now if it's live; otherwise when it goes live (the worker runs the
+    job; the board's next load is the fallback)."""
+    now = timezone.now()
+    if notice.publish_at and notice.publish_at > now:
+        from ..jobs import enqueue
+        enqueue('announce_notice', key=f'notice:{notice.id}', run_after=notice.publish_at, notice_id=notice.id)
+    else:
+        announce_notice(notice)
+
+
+def announce_due_notices():
+    for n in Notice.objects.filter(announced=False).filter(live_notices_q())[:5]:
+        announce_notice(n)
 
 
 def announce_notice(notice):
-    """Everyone hears about a new notice (a push — unless they turned notices
-    off), off the request thread."""
+    """Everyone hears about a notice once (a push — unless they turned notices
+    off), off the request thread. Claimed first, so two paths can't both send."""
+    if not Notice.objects.filter(pk=notice.pk, announced=False).update(announced=True):
+        return
     from ..push import notify_everyone
     run_in_background(
         notify_everyone, 'notice', f"{notice.title}: {(notice.body or '')[:100]}",
@@ -108,26 +167,53 @@ def announce_notice(notice):
 
 
 class AdminNoteViewSet(viewsets.ModelViewSet):
-    """Private notes from users to admins. Any signed-in user may submit one,
-    but only staff/admins can list, read, mark-read (partial_update) or delete.
-    Admin gating is interim (User.is_staff) and will be expanded later."""
+    """Private notes from users to the admins. Anyone signed in may send one
+    (a few an hour) and see their own (/mine/: read or not, and the reply);
+    those who manage notices list, mark, answer and delete them."""
     serializer_class = AdminNoteSerializer
     pagination_class = StandardPagination
 
     def get_queryset(self):
         # Newest note first so the admin inbox reads top-to-bottom by recency.
-        return AdminNote.objects.select_related('sender').order_by('-created_at')
+        return AdminNote.objects.select_related('sender', 'replied_by').order_by('-created_at')
 
     def get_permissions(self):
-        if self.action == 'create':
+        if self.action in ('create', 'mine'):
             return [permissions.IsAuthenticated()]
-        return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated(), CanManageNotices()]
+
+    def get_throttles(self):
+        if self.action == 'create':
+            self.throttle_scope = 'admin_note'
+        return super().get_throttles()
 
     def perform_create(self, serializer):
         # Force is_read=False on create so a sender can't submit a pre-read note;
         # only admins flip it later via update/partial_update.
         serializer.save(sender=self.request.user, is_read=False)
 
+    @action(detail=False, methods=['get'])
+    def mine(self, request):
+        """The notes I sent: read yet, and any answer."""
+        qs = AdminNote.objects.filter(sender=request.user).order_by('-created_at')
+        page = self.paginate_queryset(qs)
+        return self.get_paginated_response(self.get_serializer(page, many=True).data)
+
+    @action(detail=True, methods=['post'])
+    def reply(self, request, pk=None):
+        """Answer a note: the sender sees it under their note and is told."""
+        note = self.get_object()
+        text = (request.data.get('reply') or '').strip()[:2000]
+        if not text:
+            return Response({'error': 'A reply needs some words.'}, status=status.HTTP_400_BAD_REQUEST)
+        note.reply, note.replied_at, note.replied_by, note.is_read = text, timezone.now(), request.user, True
+        note.save(update_fields=['reply', 'replied_at', 'replied_by', 'is_read'])
+        if note.sender_id:
+            Notification.objects.create(recipient_id=note.sender_id, sender=request.user,
+                                        notification_type='admin_reply', message='The admins answered your note')
+            notify_user(note.sender, 'admin_reply', f"The admins answered your note: {text[:100]}",
+                        data={'type': 'admin_reply', 'noteId': note.id})
+        return Response(self.get_serializer(note).data)
 
 HOME_ROW = 10
 

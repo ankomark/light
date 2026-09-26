@@ -34,15 +34,17 @@ class NoticeSerializer(serializers.ModelSerializer):
     can_manage = serializers.SerializerMethodField()
     # Posted since I last looked at the board.
     is_new = serializers.SerializerMethodField()
+    # For those who manage the board: scheduled, live or expired.
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = Notice
         fields = [
             'id', 'title', 'body', 'is_pinned',
             'created_by', 'created_by_username', 'can_manage', 'is_new',
-            'created_at', 'updated_at',
+            'created_at', 'updated_at', 'publish_at', 'expires_at', 'edited_at', 'status',
         ]
-        read_only_fields = ['created_by', 'created_at', 'updated_at']
+        read_only_fields = ['created_by', 'created_at', 'updated_at', 'edited_at']
 
     def get_is_new(self, obj):
         seen = self.context.get('notices_seen_at')
@@ -52,9 +54,23 @@ class NoticeSerializer(serializers.ModelSerializer):
         return bool(seen and obj.created_at > seen and obj.created_by_id != me)
 
     def get_can_manage(self, obj):
-        request = self.context.get('request')
-        # Admin gating is interim (User.is_staff); richer roles come later.
-        return bool(request and request.user.is_authenticated and request.user.is_staff)
+        return bool(self.context.get('can_manage'))
+
+    def get_status(self, obj):
+        from django.utils import timezone as tz
+        now = tz.now()
+        if obj.publish_at and obj.publish_at > now:
+            return 'scheduled'
+        if obj.expires_at and obj.expires_at <= now:
+            return 'expired'
+        return 'live'
+
+    def validate(self, attrs):
+        pub = attrs.get('publish_at', getattr(self.instance, 'publish_at', None))
+        exp = attrs.get('expires_at', getattr(self.instance, 'expires_at', None))
+        if pub and exp and exp <= pub:
+            raise serializers.ValidationError({'expires_at': 'A notice must expire after it is published.'})
+        return attrs
 
 
 class AdminNoteSerializer(serializers.ModelSerializer):
@@ -64,12 +80,22 @@ class AdminNoteSerializer(serializers.ModelSerializer):
         source='sender.username', read_only=True, default=None
     )
 
+    replied_by_username = serializers.CharField(source='replied_by.username', read_only=True, default=None)
+
     class Meta:
         model = AdminNote
-        fields = ['id', 'body', 'sender', 'sender_username', 'is_read', 'created_at']
+        fields = ['id', 'body', 'sender', 'sender_username', 'is_read', 'created_at',
+                  'reply', 'replied_at', 'replied_by_username']
         # is_read stays writable so admins can mark notes read/unread on update;
         # creation forces it false in the viewset so a sender can't pre-set it.
-        read_only_fields = ['sender', 'created_at']
+        # A reply is given through /reply/ only.
+        read_only_fields = ['sender', 'created_at', 'reply', 'replied_at']
+
+    def validate_body(self, v):
+        v = (v or '').strip()
+        if not v:
+            raise serializers.ValidationError('Write something first.')
+        return v[:2000]
 
 
 class NotificationPreferenceSerializer(serializers.ModelSerializer):

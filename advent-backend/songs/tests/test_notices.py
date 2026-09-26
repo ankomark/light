@@ -54,3 +54,80 @@ class ReachTests(Base):
         self.post()
         self.client.force_authenticate(self.admin)
         self.assertEqual(self.client.get('/api/notices/unseen/').json()['count'], 0)
+
+class AdminToolTests(Base):
+    def test_scheduled_notices_wait_then_go_live_and_are_announced_once(self):
+        pushed = []
+        later = timezone.now() + timedelta(hours=2)
+        with mock.patch('songs.push.send_expo_push', side_effect=lambda tokens, *a, **k: pushed.extend(tokens)):
+            r = self.post(publish_at=later.isoformat())
+            self.assertEqual(r.status_code, 201)
+            nid = r.json()['id']
+            self.assertEqual(r.json()['status'], 'scheduled')
+            self.assertEqual(pushed, [])                                 # not yet
+            self.client.force_authenticate(self.reader)
+            self.assertEqual(self.client.get('/api/notices/').json()['results'], [])
+            self.client.force_authenticate(self.admin)
+            self.assertEqual(len(self.client.get('/api/notices/').json()['results']), 1)   # managers see it
+            # Its time comes (the worker may not run): the next load announces it, once.
+            Notice.objects.filter(pk=nid).update(publish_at=timezone.now() - timedelta(minutes=1))
+            self.client.force_authenticate(self.reader)
+            self.assertEqual(len(self.client.get('/api/notices/').json()['results']), 1)
+            self.client.get('/api/notices/')
+        self.assertEqual(pushed, ['ExponentPushToken[nreader]'])
+
+    def test_the_job_announces_a_scheduled_notice(self):
+        from songs.notice_jobs import announce_scheduled_notice
+        n = Notice.objects.create(title='t', body='b', created_by=self.admin,
+                                  publish_at=timezone.now() - timedelta(seconds=1))
+        with mock.patch('songs.push.send_expo_push') as send:
+            announce_scheduled_notice(n.id)
+            announce_scheduled_notice(n.id)
+        self.assertEqual(send.call_count, 1)
+
+    def test_expired_notices_leave_the_board(self):
+        Notice.objects.create(title='old', body='b', created_by=self.admin, announced=True,
+                              expires_at=timezone.now() - timedelta(minutes=1))
+        self.client.force_authenticate(self.reader)
+        self.assertEqual(self.client.get('/api/notices/').json()['results'], [])
+        self.assertEqual(self.client.get('/api/notices/unseen/').json()['count'], 0)
+        bad = self.post(publish_at=timezone.now().isoformat(), expires_at=(timezone.now() - timedelta(hours=1)).isoformat())
+        self.assertEqual(bad.status_code, 400)
+
+    def test_edit_marks_edited(self):
+        nid = self.post().json()['id']
+        r = self.client.patch(f'/api/notices/{nid}/', {'body': 'Friday at 7'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNotNone(r.json()['edited_at'])
+        pinned = self.client.patch(f'/api/notices/{nid}/', {'is_pinned': True}, format='json').json()
+        self.assertEqual(pinned['edited_at'], r.json()['edited_at'])       # pinning isn't an edit
+
+    def test_a_role_with_manage_notices_may_post_others_may_not(self):
+        from songs.models import Role
+        role = Role.objects.create(name='Communications', capabilities=['manage_notices'])
+        comms = User.objects.create_user('ncomms', 'nc@x.com', 'x')
+        comms.role = role
+        comms.save()
+        self.client.force_authenticate(comms)
+        self.assertEqual(self.client.post('/api/notices/', {'title': 't', 'body': 'b'}, format='json').status_code, 201)
+        self.client.force_authenticate(self.reader)
+        self.assertEqual(self.client.post('/api/notices/', {'title': 't', 'body': 'b'}, format='json').status_code, 403)
+        self.assertEqual(self.client.get('/api/admin-notes/').status_code, 403)
+
+    def test_notes_are_rate_limited_answered_and_the_sender_sees_it(self):
+        self.client.force_authenticate(self.reader)
+        codes = [self.client.post('/api/admin-notes/', {'body': f'note {i}'}, format='json').status_code for i in range(6)]
+        self.assertEqual(codes, [201] * 5 + [429])
+        nid = self.client.get('/api/admin-notes/mine/').json()['results'][0]['id']
+        self.client.force_authenticate(self.admin)
+        with mock.patch('songs.push.send_expo_push') as send:
+            r = self.client.post(f'/api/admin-notes/{nid}/reply/', {'reply': 'Thanks, fixing it'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(send.call_count, 1)
+        self.client.force_authenticate(self.reader)
+        mine = self.client.get('/api/admin-notes/mine/').json()['results'][0]
+        self.assertEqual((mine['reply'], mine['is_read'], mine['replied_by_username']), ('Thanks, fixing it', True, 'nadmin'))
+        # Someone else's notes aren't theirs to read.
+        other = User.objects.create_user('nother', 'no@x.com', 'x')
+        self.client.force_authenticate(other)
+        self.assertEqual(self.client.get('/api/admin-notes/mine/').json()['results'], [])

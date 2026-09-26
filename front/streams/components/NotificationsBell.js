@@ -27,6 +27,7 @@ const TYPE_ICON = {
   group_join_approved: { name: 'checkmark-circle', color: '#17BF63' },
   group_join_rejected: { name: 'close-circle', color: colors.error },
   group_mention: { name: 'at', color: colors.accent },
+  admin_reply: { name: 'mail-open', color: colors.accent },
   // "Your song reached 1,000 plays" (opens the song).
   milestone: { name: 'trophy', color: '#E8C66B' },
   // A song of yours taken down / restored (opens Artist Studio).
@@ -190,7 +191,10 @@ const NotificationsBell = ({ navigation }) => {
     setShowPanel(false);
     const type = item.notification_type;
 
-    if (item.group_slug) {
+    if (type === 'admin_reply') {
+      // The admins answered my note.
+      navigation.navigate('NoticeBoard', { openMyNotes: true });
+    } else if (item.group_slug) {
       // Group notifications deep-link to the relevant group screen.
       if (type === 'group_join_request') {
         // Admin/creator → the group's pending join-requests page.

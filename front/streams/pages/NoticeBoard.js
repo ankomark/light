@@ -11,8 +11,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  fetchNotices, createNotice, deleteNotice, markNoticesSeen,
-  createAdminNote, fetchAdminNotes, markAdminNoteRead, deleteAdminNote,
+  fetchNotices, createNotice, updateNotice, deleteNotice, markNoticesSeen,
+  createAdminNote, fetchAdminNotes, fetchMyAdminNotes, replyToAdminNote, markAdminNoteRead, deleteAdminNote,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
@@ -20,21 +20,51 @@ import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache'
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { NoticeListSkeleton } from '../components/SkeletonLoader';
 import { announceDM } from '../services/dmSocket';
+import { hasCapability } from '../utils/roles';
 import { colors, typography, spacing, radius } from '../constants/theme';
 
 // Calm, not bright: smoked glass cards and the warm accent (no light blue).
 const GLASS = 'rgba(8,12,18,0.62)';
 const GLASS_EDGE = 'rgba(255,255,255,0.09)';
 
+const formatDateTime = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+
 const formatDate = (iso) => {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-const NoticeCard = memo(({ item, onDelete, t }) => (
+// When a notice goes up, and when it comes down (the compose sheet's chips).
+const WHEN = ['now', '1h', 'tomorrow'];
+const EXPIRY = ['never', '1d', '7d', '30d'];
+export const publishTime = (when, now = new Date()) => {
+  if (when === '1h') return new Date(now.getTime() + 3600000);
+  if (when === 'tomorrow') {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 1);
+    d.setHours(8, 0, 0, 0);
+    return d;
+  }
+  return null;                                   // now
+};
+export const expiryTime = (expiry, from) => {
+  const days = { '1d': 1, '7d': 7, '30d': 30 }[expiry];
+  return days ? new Date((from || new Date()).getTime() + days * 86400000) : null;
+};
+
+const NoticeCard = memo(({ item, onDelete, onEdit, t }) => (
   <View style={[styles.card, item.is_pinned && styles.cardPinned]} testID={`notice-${item.id}`}>
-    {item.is_pinned || item.is_new ? (
+    {item.is_pinned || item.is_new || (item.can_manage && item.status && item.status !== 'live') ? (
       <View style={styles.tagRow}>
+        {item.can_manage && item.status === 'scheduled' ? (
+          <View style={styles.statusTag} testID={`notice-scheduled-${item.id}`}>
+            <MaterialCommunityIcons name="clock-outline" size={12} color={colors.textSecondary} />
+            <Text style={styles.statusText}>{t('notice.scheduledFor', { when: formatDateTime(item.publish_at) })}</Text>
+          </View>
+        ) : null}
+        {item.can_manage && item.status === 'expired' ? (
+          <View style={styles.statusTag}><Text style={styles.statusText}>{t('notice.expired')}</Text></View>
+        ) : null}
         {item.is_pinned ? (
           <View style={styles.pinnedTag}>
             <MaterialCommunityIcons name="pin" size={12} color={colors.accent} />
@@ -51,28 +81,37 @@ const NoticeCard = memo(({ item, onDelete, t }) => (
     <View style={styles.cardHeader}>
       <Text style={styles.cardTitle}>{item.title}</Text>
       {item.can_manage && (
-        <TouchableOpacity onPress={() => onDelete(item)} hitSlop={8} accessibilityLabel={t('common.delete')}
-          testID={`notice-delete-${item.id}`}>
-          <Ionicons name="trash-outline" size={18} color={colors.error} />
-        </TouchableOpacity>
+        <View style={styles.manageRow}>
+          <TouchableOpacity onPress={() => onEdit(item)} hitSlop={8} accessibilityLabel={t('notice.edit')}
+            testID={`notice-edit-${item.id}`}>
+            <Ionicons name="create-outline" size={18} color={colors.accent} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => onDelete(item)} hitSlop={8} accessibilityLabel={t('common.delete')}
+            testID={`notice-delete-${item.id}`}>
+            <Ionicons name="trash-outline" size={18} color={colors.error} />
+          </TouchableOpacity>
+        </View>
       )}
     </View>
     <Text style={styles.cardBody} selectable>{item.body}</Text>
     <View style={styles.cardFooter}>
       <MaterialCommunityIcons name="account-circle-outline" size={14} color={colors.textMuted} />
       <Text style={styles.cardMeta}>
-        {item.created_by_username || t('notice.leadership')} · {formatDate(item.created_at)}
+        {item.created_by_username || t('notice.leadership')} · {formatDate(item.publish_at || item.created_at)}
+        {item.edited_at ? `  ·  ${t('notice.edited')}` : ''}
+        {item.can_manage && item.expires_at && item.status !== 'expired' ? `  ·  ${t('notice.until', { when: formatDate(item.expires_at) })}` : ''}
       </Text>
     </View>
   </View>
 ));
 NoticeCard.displayName = 'NoticeCard';
 
-const NoticeBoard = () => {
+const NoticeBoard = ({ route }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const insets = useSafeAreaInsets();
-  const isAdmin = !!currentUser?.is_staff;
+  // Staff, or a role that may manage the notice board.
+  const isAdmin = !!currentUser?.is_staff || hasCapability(currentUser, 'manage_notices');
 
   const cacheKey = userKey(currentUser?.id, 'notices');
   const [notices, setNotices] = useState(() => peekCache(cacheKey)?.results ?? []);
@@ -89,6 +128,15 @@ const NoticeBoard = () => {
   const [body, setBody] = useState('');
   const [pinned, setPinned] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [editing, setEditing] = useState(null);      // the notice being edited (null: a new one)
+  const [when, setWhen] = useState('now');          // 'keep' while editing
+  const [expiry, setExpiry] = useState('never');
+
+  // The notes I sent (anyone), and answering notes (admins).
+  const [myNotesVisible, setMyNotesVisible] = useState(false);
+  const [myNotes, setMyNotes] = useState(null);
+  const [replyFor, setReplyFor] = useState(null);
+  const [replyText, setReplyText] = useState('');
 
   // Private note to admins (any user can write; only admins can read).
   const [noteVisible, setNoteVisible] = useState(false);
@@ -153,7 +201,43 @@ const NoticeBoard = () => {
 
   const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 
-  const resetCompose = () => { setTitle(''); setBody(''); setPinned(false); };
+  const resetCompose = () => {
+    setTitle(''); setBody(''); setPinned(false); setEditing(null); setWhen('now'); setExpiry('never');
+  };
+
+  const startEdit = useCallback((item) => {
+    setEditing(item);
+    setTitle(item.title); setBody(item.body); setPinned(!!item.is_pinned);
+    setWhen('keep'); setExpiry('keep');
+    setComposeVisible(true);
+  }, []);
+
+  const openMyNotes = useCallback(async () => {
+    setMyNotesVisible(true);
+    setMyNotes(null);
+    try {
+      const res = await fetchMyAdminNotes();
+      setMyNotes(res?.results ?? []);
+    } catch {
+      setMyNotes([]);
+      notify(t('common.error'), t('notice.loadNotesFailed'));
+    }
+  }, [t]);
+
+  // From the "the admins answered" push or bell: straight to my notes.
+  useEffect(() => { if (route?.params?.openMyNotes) openMyNotes(); }, [route?.params?.openMyNotes, openMyNotes]);
+
+  const sendReply = async (note) => {
+    const text = replyText.trim();
+    if (!text) return;
+    try {
+      const saved = await replyToAdminNote(note.id, text);
+      setInboxNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, ...saved } : n)));
+      setReplyFor(null); setReplyText('');
+    } catch {
+      notify(t('common.error'), t('notice.replyFailed'));
+    }
+  };
 
   const handlePost = async () => {
     if (!title.trim() || !body.trim()) {
@@ -162,7 +246,16 @@ const NoticeBoard = () => {
     }
     try {
       setPosting(true);
-      await createNotice({ title: title.trim(), body: body.trim(), is_pinned: pinned });
+      const pub = when === 'keep' ? undefined : publishTime(when);
+      const exp = expiry === 'keep' ? undefined
+        : expiryTime(expiry, pub || (editing?.publish_at ? new Date(editing.publish_at) : null));
+      const fields = {
+        title: title.trim(), body: body.trim(), is_pinned: pinned,
+        ...(pub !== undefined ? { publish_at: pub ? pub.toISOString() : null } : {}),
+        ...(exp !== undefined ? { expires_at: exp ? exp.toISOString() : null } : {}),
+      };
+      if (editing) await updateNotice(editing.id, fields);
+      else await createNotice(fields);
       setComposeVisible(false);
       resetCompose();
       await load();
@@ -252,7 +345,7 @@ const NoticeBoard = () => {
     }
   }, [t, cacheKey]);
 
-  const renderItem = useCallback(({ item }) => <NoticeCard item={item} onDelete={handleDelete} t={t} />, [handleDelete, t]);
+  const renderItem = useCallback(({ item }) => <NoticeCard item={item} onDelete={handleDelete} onEdit={startEdit} t={t} />, [handleDelete, startEdit, t]);
 
   return (
     <View style={styles.root}>
@@ -280,6 +373,10 @@ const NoticeBoard = () => {
               <TouchableOpacity style={styles.actionBtn} onPress={() => setNoteVisible(true)} activeOpacity={0.85}>
                 <MaterialCommunityIcons name="email-edit-outline" size={18} color={colors.accent} />
                 <Text style={styles.actionBtnText}>{t('notice.noteToAdmins')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.actionBtn} onPress={openMyNotes} activeOpacity={0.85} testID="my-notes">
+                <MaterialCommunityIcons name="email-check-outline" size={18} color={colors.accent} />
+                <Text style={styles.actionBtnText}>{t('notice.myNotes')}</Text>
               </TouchableOpacity>
               {isAdmin && (
                 <TouchableOpacity style={styles.actionBtn} onPress={openInbox} activeOpacity={0.85}>
@@ -323,7 +420,7 @@ const NoticeBoard = () => {
           <View style={[styles.modalSheet, { paddingBottom: spacing.md + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('notice.new')}</Text>
+              <Text style={styles.modalTitle}>{editing ? t('notice.editTitle') : t('notice.new')}</Text>
               <TouchableOpacity onPress={() => { setComposeVisible(false); resetCompose(); }} accessibilityLabel={t('common.close')}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -342,12 +439,29 @@ const NoticeBoard = () => {
                 <Switch value={pinned} onValueChange={setPinned}
                   trackColor={{ false: 'rgba(255,255,255,0.15)', true: colors.accent }} thumbColor={colors.white} />
               </View>
+              <Text style={styles.chipLabel}>{t('notice.publish')}</Text>
+              <View style={styles.chipRow}>
+                {(editing ? ['keep', ...WHEN] : WHEN).map((k) => (
+                  <TouchableOpacity key={k} onPress={() => setWhen(k)} style={[styles.chip, when === k && styles.chipOn]} testID={`when-${k}`}>
+                    <Text style={[styles.chipText, when === k && styles.chipTextOn]}>{t(`notice.when.${k}`)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.chipLabel}>{t('notice.expires')}</Text>
+              <View style={styles.chipRow}>
+                {(editing ? ['keep', ...EXPIRY] : EXPIRY).map((k) => (
+                  <TouchableOpacity key={k} onPress={() => setExpiry(k)} style={[styles.chip, expiry === k && styles.chipOn]} testID={`expiry-${k}`}>
+                    <Text style={[styles.chipText, expiry === k && styles.chipTextOn]}>{t(`notice.expiry.${k}`)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <TouchableOpacity style={[styles.postButton, posting && styles.postButtonDisabled]} onPress={handlePost}
                 disabled={posting} activeOpacity={0.85} testID="notice-post">
                 {posting ? <ActivityIndicator color="#0A1628" /> : (
                   <>
                     <Ionicons name="megaphone-outline" size={18} color="#0A1628" />
-                    <Text style={styles.postButtonText}>{t('notice.post')}</Text>
+                    <Text style={styles.postButtonText}>{editing ? t('notice.save') : when === 'now' || when === 'keep' ? t('notice.post') : t('notice.schedule')}</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -419,7 +533,28 @@ const NoticeBoard = () => {
                       <MaterialCommunityIcons name="account-circle-outline" size={14} color={colors.textMuted} />
                       <Text style={styles.cardMeta}>{item.sender_username || t('notice.unknownSender')} · {formatDate(item.created_at)}</Text>
                     </View>
+                    {item.reply ? (
+                      <View style={styles.replyBox}>
+                        <Text style={styles.replyLabel}>{t('notice.answered', { name: item.replied_by_username || t('notice.leadership') })}</Text>
+                        <Text style={styles.replyText}>{item.reply}</Text>
+                      </View>
+                    ) : null}
+                    {replyFor === item.id ? (
+                      <View style={styles.replyEditor}>
+                        <TextInput style={[styles.input, styles.replyInput]} value={replyText} onChangeText={setReplyText}
+                          placeholder={t('notice.replyPlaceholder')} placeholderTextColor={colors.placeholder} multiline
+                          maxLength={2000} testID={`reply-input-${item.id}`} />
+                        <TouchableOpacity style={styles.replySend} onPress={() => sendReply(item)} testID={`reply-send-${item.id}`}>
+                          <Ionicons name="send" size={16} color="#0A1628" />
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
                     <View style={styles.noteActions}>
+                      <TouchableOpacity style={styles.noteActionBtn} onPress={() => { setReplyFor(replyFor === item.id ? null : item.id); setReplyText(''); }}
+                        testID={`reply-${item.id}`}>
+                        <MaterialCommunityIcons name="reply-outline" size={16} color={colors.accent} />
+                        <Text style={styles.noteActionText}>{item.reply ? t('notice.replyAgain') : t('notice.reply')}</Text>
+                      </TouchableOpacity>
                       <TouchableOpacity style={styles.noteActionBtn} onPress={() => handleToggleNoteRead(item)}>
                         <MaterialCommunityIcons name={item.is_read ? 'email-outline' : 'email-open-outline'} size={16} color={colors.accent} />
                         <Text style={styles.noteActionText}>{item.is_read ? t('notice.markUnread') : t('notice.markRead')}</Text>
@@ -436,11 +571,73 @@ const NoticeBoard = () => {
           </View>
         </View>
       </Modal>
+
+      {/* The notes I sent: read yet, and the admins' answer */}
+      <Modal visible={myNotesVisible} animationType="slide" transparent onRequestClose={() => setMyNotesVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, styles.inboxSheet, { paddingBottom: spacing.md + insets.bottom }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('notice.myNotes')}</Text>
+              <TouchableOpacity onPress={() => setMyNotesVisible(false)} accessibilityLabel={t('common.close')}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            {myNotes === null ? <NoticeListSkeleton count={2} /> : (
+              <FlatList
+                data={myNotes}
+                keyExtractor={(item) => item.id.toString()}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.inboxList}
+                ListEmptyComponent={
+                  <View style={styles.empty}>
+                    <MaterialCommunityIcons name="email-outline" size={48} color={colors.textMuted} />
+                    <Text style={styles.emptyTitle}>{t('notice.noMyNotes')}</Text>
+                  </View>
+                }
+                renderItem={({ item }) => (
+                  <View style={styles.noteCard} testID={`my-note-${item.id}`}>
+                    <Text style={styles.noteBody} selectable>{item.body}</Text>
+                    <View style={styles.cardFooter}>
+                      <MaterialCommunityIcons name={item.is_read ? 'check-all' : 'check'} size={14} color={item.is_read ? colors.accent : colors.textMuted} />
+                      <Text style={styles.cardMeta}>{formatDate(item.created_at)} · {item.is_read ? t('notice.readByAdmins') : t('notice.notReadYet')}</Text>
+                    </View>
+                    {item.reply ? (
+                      <View style={styles.replyBox}>
+                        <Text style={styles.replyLabel}>{t('notice.answered', { name: item.replied_by_username || t('notice.leadership') })}</Text>
+                        <Text style={styles.replyText} selectable>{item.reply}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  manageRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  statusTag: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 1,
+    borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.25)',
+  },
+  statusText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  chipLabel: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', marginBottom: 6 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.md },
+  chip: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
+  chipOn: { backgroundColor: 'rgba(244,162,97,0.18)', borderColor: colors.accent },
+  chipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  chipTextOn: { color: colors.accent },
+  replyBox: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: 'rgba(244,162,97,0.08)', borderLeftWidth: 3, borderLeftColor: colors.accent },
+  replyLabel: { ...typography.caption, color: colors.accent, fontWeight: '700', marginBottom: 2 },
+  replyText: { ...typography.body, color: colors.textPrimary },
+  replyEditor: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, marginTop: spacing.sm },
+  replyInput: { flex: 1, marginBottom: 0, minHeight: 44 },
+  replySend: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   root: { flex: 1, backgroundColor: colors.bg },
   listContent: { padding: spacing.md, width: '100%', maxWidth: 820, alignSelf: 'center' },
   more: { marginVertical: spacing.md },

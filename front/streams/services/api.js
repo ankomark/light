@@ -1371,9 +1371,11 @@ export const fetchNotices = async (page = 1) =>
 // I've looked at the board: nothing is new any more (the menu badge).
 export const markNoticesSeen = () => apiRequest('post', '/notices/seen/');
 
-export const createNotice = async ({ title, body, is_pinned = false }) => {
-  return apiRequest('post', '/notices/', { title, body, is_pinned });
-};
+// publish_at / expires_at: ISO times (null: now / never).
+export const createNotice = async ({ title, body, is_pinned = false, publish_at = null, expires_at = null }) =>
+  apiRequest('post', '/notices/', { title, body, is_pinned, publish_at, expires_at });
+
+export const updateNotice = (id, changes) => apiRequest('patch', `/notices/${id}/`, changes);
 
 export const deleteNotice = async (id) => {
   return apiRequest('delete', `/notices/${id}/`);
@@ -1389,6 +1391,11 @@ export const fetchAdminNotes = async (page = 1) => {
   const res = await apiRequest('get', '/admin-notes/', null, { params: { page, page_size: 100 } });
   return res?.results ?? res;
 };
+
+// The notes I sent: read yet, and the admins' answer.
+export const fetchMyAdminNotes = () => apiRequest('get', '/admin-notes/mine/');
+
+export const replyToAdminNote = (id, reply) => apiRequest('post', `/admin-notes/${id}/reply/`, { reply });
 
 export const markAdminNoteRead = async (id, is_read = true) => {
   return apiRequest('patch', `/admin-notes/${id}/`, { is_read });

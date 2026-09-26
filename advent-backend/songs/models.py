@@ -27,6 +27,7 @@ ADMIN_CAPABILITIES = (
     ('manage_appeals', 'Review appeals'),
     ('view_audit_log', 'View audit log'),
     ('manage_wallpapers', 'Manage app wallpapers'),
+    ('manage_notices', 'Post notices & answer notes to admins'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 
@@ -985,9 +986,19 @@ class Notice(models.Model):
     created_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, related_name='notices')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # On the board from publish_at (null: at once) until expires_at (null: for
+    # good); nnounced once everyone has been pushed about it.
+    publish_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    announced = models.BooleanField(default=False)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-is_pinned', '-created_at']
+
+    @property
+    def live_since(self):
+        return self.publish_at or self.created_at
 
     def __str__(self):
         return self.title
@@ -1035,6 +1046,10 @@ class AdminNote(models.Model):
     sender = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, related_name='admin_notes')
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    # The admins' answer, which the sender sees under their note.
+    reply = models.TextField(blank=True, default='')
+    replied_at = models.DateTimeField(null=True, blank=True)
+    replied_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
 
     class Meta:
         ordering = ['is_read', '-created_at']

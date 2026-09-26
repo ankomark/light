@@ -124,3 +124,59 @@ test('new notices are marked, then seen (the badge clears; the cache forgets "ne
   await waitFor(() => expect(mockAnnounced).toContainEqual({ type: 'notices_seen' }));
   expect(peekCache(userKey(1, 'notices')).results[0].is_new).toBe(false);
 });
+test('the compose chips: now / in an hour / tomorrow 8:00, and expiry from then', () => {
+  const { publishTime, expiryTime } = require('../NoticeBoard');
+  const now = new Date(2026, 8, 26, 15, 30);
+  expect(publishTime('now', now)).toBeNull();
+  expect(publishTime('1h', now).getTime()).toBe(now.getTime() + 3600000);
+  const tomorrow = publishTime('tomorrow', now);
+  expect([tomorrow.getDate(), tomorrow.getHours(), tomorrow.getMinutes()]).toEqual([27, 8, 0]);
+  expect(expiryTime('never', now)).toBeNull();
+  expect(expiryTime('7d', tomorrow).getTime()).toBe(tomorrow.getTime() + 7 * 86400000);
+});
+
+test('a manager schedules, edits (keeping the times), and sees what is scheduled', async () => {
+  mockUser = { id: 1, username: 'me', is_staff: false, capabilities: ['manage_notices'] };
+  mockApi.fetchNotices.mockResolvedValue({ results: [
+    notice(8, { can_manage: true, status: 'scheduled', publish_at: '2026-10-01T08:00:00Z' }),
+  ], next: null });
+  const r = render(<NoticeBoard route={{}} />);
+  await waitFor(() => expect(r.getByTestId('notice-scheduled-8')).toBeTruthy());
+
+  await act(async () => { fireEvent.press(r.getByTestId('notice-compose')); });
+  fireEvent.changeText(r.getByTestId('notice-title'), 'Choir practice');
+  fireEvent.changeText(r.getByTestId('notice-body'), 'Sunday 3pm');
+  await act(async () => { fireEvent.press(r.getByTestId('when-1h')); });
+  await act(async () => { fireEvent.press(r.getByTestId('expiry-7d')); });
+  await act(async () => { fireEvent.press(r.getByTestId('notice-post')); });
+  const made = mockApi.createNotice.mock.calls[0][0];
+  expect(made.title).toBe('Choir practice');
+  expect(new Date(made.expires_at) - new Date(made.publish_at)).toBe(7 * 86400000);
+
+  await act(async () => { fireEvent.press(r.getByTestId('notice-edit-8')); });
+  fireEvent.changeText(r.getByTestId('notice-body'), 'New body');
+  await act(async () => { fireEvent.press(r.getByTestId('notice-post')); });
+  expect(mockApi.updateNotice).toHaveBeenCalledWith(8, { title: 'Notice 8', body: 'New body', is_pinned: false });
+});
+
+test('my notes: read or not, and the answer; admins answer from the inbox', async () => {
+  mockApi.fetchNotices.mockResolvedValue({ results: [], next: null });
+  mockApi.fetchMyAdminNotes.mockResolvedValue({ results: [
+    { id: 4, body: 'The roof leaks', is_read: true, reply: 'Fixed on Monday', replied_by_username: 'elder', created_at: '2026-09-20T10:00:00Z' },
+  ] });
+  const r = render(<NoticeBoard route={{ params: { openMyNotes: true } }} />);
+  await waitFor(() => expect(r.getByText('Fixed on Monday')).toBeTruthy());
+  expect(r.getByText(/notice\.readByAdmins/)).toBeTruthy();
+
+  mockUser = { id: 1, username: 'me', is_staff: true };
+  mockApi.fetchAdminNotes.mockResolvedValue([{ id: 9, body: 'Please add Swahili', is_read: false, created_at: '2026-09-20T10:00:00Z' }]);
+  mockApi.replyToAdminNote.mockResolvedValue({ id: 9, reply: 'Done', is_read: true, replied_by_username: 'me' });
+  const a = render(<NoticeBoard route={{}} />);
+  await act(async () => { fireEvent.press(a.getByText('notice.adminInbox')); });
+  await waitFor(() => expect(a.getByTestId('reply-9')).toBeTruthy());
+  await act(async () => { fireEvent.press(a.getByTestId('reply-9')); });
+  fireEvent.changeText(a.getByTestId('reply-input-9'), 'Done');
+  await act(async () => { fireEvent.press(a.getByTestId('reply-send-9')); });
+  expect(mockApi.replyToAdminNote).toHaveBeenCalledWith(9, 'Done');
+  expect(a.getByText('Done')).toBeTruthy();
+});

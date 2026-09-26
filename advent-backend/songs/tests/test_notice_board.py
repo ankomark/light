@@ -23,7 +23,8 @@ class NoticeBoardOrderingTests(APITestCase):
         self.reader = User.objects.create_user('nb_reader', 'nbr@x.com', 'x')
 
     def _notice(self, title, when, pinned=False):
-        n = Notice.objects.create(title=title, body='body', created_by=self.admin, is_pinned=pinned)
+        # Already announced (as the API would have): this is about the list's shape.
+        n = Notice.objects.create(title=title, body='body', created_by=self.admin, is_pinned=pinned, announced=True)
         Notice.objects.filter(pk=n.pk).update(created_at=when)  # created_at is auto_now_add
         return n
 
