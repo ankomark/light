@@ -360,6 +360,9 @@ export const STRINGS = {
 
     'inbox.title': 'Messages',
     'inbox.empty': 'No conversations yet',
+    'group.detail.cantPost': "You can't send messages here.",
+    'group.detail.removedTitle': "You were removed",
+    'group.detail.removedBody': "An admin removed you from this group. You can no longer read or send messages here.",
     'group.members.search': "Search members",
     'dm.folder.primary': "Primary",
     'dm.folder.requests': "Requests",
@@ -3137,6 +3140,9 @@ export const STRINGS = {
 
     'inbox.title': 'Ujumbe',
     'inbox.empty': 'Hakuna mazungumzo bado',
+    'group.detail.cantPost': "Huwezi kutuma ujumbe hapa.",
+    'group.detail.removedTitle': "Umeondolewa",
+    'group.detail.removedBody': "Msimamizi amekuondoa kwenye kikundi hiki. Huwezi tena kusoma wala kutuma ujumbe hapa.",
     'group.members.search': "Tafuta wanachama",
     'dm.folder.primary': "Kuu",
     'dm.folder.requests': "Maombi",

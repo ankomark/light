@@ -1689,6 +1689,9 @@ class GroupMember(models.Model):
     is_moderator = models.BooleanField(default=False)
     joined_at = models.DateTimeField(auto_now_add=True)
     last_read_at = models.DateTimeField(null=True, blank=True)  # for unread counts
+    # No pushes from this group until then (far future = always). Mentions of
+    # them still come through.
+    muted_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ('group', 'user')
@@ -1762,11 +1765,19 @@ class GroupPost(models.Model):
     # Set when the author edits a text message; drives the "edited" label.
     edited_at = models.DateTimeField(null=True, blank=True)
     reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
+    # The sender's own id for this message: a retried send (a flaky network)
+    # is the same message, never a second one.
+    client_id = models.CharField(max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'client_id'], condition=models.Q(client_id__isnull=False),
+                                    name='uniq_grouppost_client_id'),
+        ]
+        indexes = [models.Index(fields=['group', 'created_at', 'id'], name='grouppost_group_time')]
 
     def __str__(self):
         return f"Message in {self.group.name} by {self.user.username}"

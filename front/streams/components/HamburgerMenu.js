@@ -184,16 +184,22 @@ export const openMenu = (navigation) => {
 const isPage = (route, item) => !!route && route.name === item.route
   && Object.entries(item.params || {}).every(([k, v]) => route.params?.[k] === v);
 
-// Unread messages (and message requests), for the badges. `poll`: keep it
-// fresh (the header's button) — live off the DM socket, with a slow poll
-// behind it; otherwise it's read once (the menu, open for a moment).
-const useUnreadMessages = ({ poll }) => {
+// Unread, for the badges: messages (and message requests), and groups and
+// communities with something new. `poll`: keep it fresh (the header's
+// button) — live off the DM socket, with a slow poll behind it; otherwise
+// it's read once (the menu, open for a moment).
+const NONE = { messages: 0, groups: 0, communities: 0 };
+const useUnread = ({ poll }) => {
   const { isAuthenticated } = useAuth();
-  const [unread, setUnread] = useState(0);
+  const [unread, setUnread] = useState(NONE);
   const refresh = useCallback(() => {
-    if (!isAuthenticated) { setUnread(0); return; }
+    if (!isAuthenticated) { setUnread(NONE); return; }
     fetchUnreadMessageCount()
-      .then((r) => setUnread((r?.unread_count || 0) + (r?.requests || 0)))
+      .then((r) => setUnread({
+        messages: (r?.unread_count || 0) + (r?.requests || 0),
+        groups: r?.groups || 0,
+        communities: r?.communities || 0,
+      }))
       .catch(() => {});
   }, [isAuthenticated]);
   useEffect(() => {
@@ -204,7 +210,7 @@ const useUnreadMessages = ({ poll }) => {
     // A new message or a read receipt: count again (once for a burst).
     let soon = null;
     const unsub = subscribeDM((e) => {
-      if (e.type !== 'message' && e.type !== 'read' && e.type !== 'deleted') return;
+      if (!['message', 'read', 'deleted', 'group_message', 'group_read'].includes(e.type)) return;
       clearTimeout(soon);
       soon = setTimeout(refresh, 400);
     });
@@ -216,11 +222,12 @@ const useUnreadMessages = ({ poll }) => {
 /** The header's menu button (with a dot for unread messages). */
 function HamburgerMenu() {
   const navigation = useNavigation();
-  const unreadMessages = useUnreadMessages({ poll: true });
+  const unread = useUnread({ poll: true });
+  const any = unread.messages + unread.groups + unread.communities;
   return (
     <TouchableOpacity onPress={() => openMenu(navigation)} style={styles.menuButton} accessibilityRole="button" accessibilityLabel="Open menu">
       <Ionicons name="menu" size={26} color={colors.white} />
-      {unreadMessages > 0 && <View style={styles.menuDot} />}
+      {any > 0 && <View style={styles.menuDot} />}
     </TouchableOpacity>
   );
 }
@@ -230,7 +237,8 @@ export function MenuScreen() {
   const navigation = useNavigation();
   const { isAuthenticated, currentUser, logout } = useAuth();
   const { t } = useI18n();
-  const unreadMessages = useUnreadMessages({ poll: false });
+  const unread = useUnread({ poll: false });
+  const badgeFor = { Inbox: unread.messages, Groups: unread.groups, Communities: unread.communities };
 
   // The page the menu was opened over: marked as where you are.
   const below = useNavigationState((s) => s?.routes?.[s.index - 1]);
@@ -350,9 +358,9 @@ export function MenuScreen() {
                     <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
                       {item.label}
                     </Text>
-                    {item.route === 'Inbox' && unreadMessages > 0 ? (
+                    {badgeFor[item.route] > 0 ? (
                       <View style={styles.countBadge}>
-                        <Text style={styles.countBadgeText}>{unreadMessages > 99 ? '99+' : unreadMessages}</Text>
+                        <Text style={styles.countBadgeText}>{badgeFor[item.route] > 99 ? '99+' : badgeFor[item.route]}</Text>
                       </View>
                     ) : active ? (
                       <View style={styles.activeDot} />

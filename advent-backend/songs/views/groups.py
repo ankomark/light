@@ -11,6 +11,7 @@ from ..consumers import (
     broadcast_group_message, broadcast_group_deleted, broadcast_group_pinned, broadcast_group_edited,
 )
 from ..serializers.groups import pinned_preview, GroupAuditLogSerializer
+from .. import group_live as live
 
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
 # never-opened group counts every message as unread (matches the old behaviour).
@@ -21,10 +22,34 @@ REJOIN_COOLDOWN_DAYS = 7
 
 
 def group_system_message(group, text, actor):
-    """Create a 'system' notice in the group chat (e.g. 'X joined')."""
-    return GroupPost.objects.create(
+    """Create a 'system' notice in the group chat (e.g. 'X joined') — and show
+    it live (it used to wait for the next poll). A super admin acts unseen."""
+    post = GroupPost.objects.create(
         group=group, user=actor, message_type='system', content=text,
     )
+    if not getattr(actor, 'is_super_admin', False):
+        broadcast_group_message(group.slug, {
+            'id': post.id, 'content': text, 'message_type': 'system', 'created_at': post.created_at.isoformat(),
+            'user': {'id': actor.id, 'username': actor.username}, 'is_owner': False,
+            'reactions': {'summary': [], 'mine': None}, 'attachments': [], 'reply_to': None,
+        })
+    return post
+
+
+def members_changed(group, event, user):
+    """Someone joined / left / was removed: the count updates live, and someone
+    removed is cut off from the socket at once (songs/consumers.group_event)."""
+    count = GroupMember.objects.filter(group=group).count()
+    live.tell_group(group.slug, {'type': 'members', 'event': event, 'user_id': user.id, 'member_count': count})
+    if event == 'removed':
+        live.tell_group(group.slug, {'type': 'member_removed', 'user_id': user.id})
+
+
+def group_changed(group, request, fields):
+    """Settings changed (name, cover, who may post, the join question): live."""
+    from ..serializers.groups import GroupSerializer
+    data = GroupSerializer(group, context={'request': request}).data
+    live.tell_group(group.slug, {'type': 'group_updated', 'group': {k: data.get(k) for k in fields}})
 
 
 def log_group_action(group, actor, action, detail=''):
@@ -102,6 +127,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             anno_is_admin=Exists(my_member.filter(is_admin=True)),
             anno_is_moderator=Exists(my_member.filter(is_moderator=True)),
             anno_has_pending=Exists(pending),
+            anno_muted_until=Subquery(my_member.values('muted_until')[:1]),
             anno_unread=Coalesce(Subquery(unread, output_field=IntegerField()), 0),
             anno_last_id=Subquery(last.values('id')[:1]),
             anno_last_content=Subquery(last.values('content')[:1]),
@@ -239,6 +265,29 @@ class GroupViewSet(viewsets.ModelViewSet):
         GroupMember.objects.filter(group=group, user=request.user).update(last_read_at=timezone.now())
         return Response({'status': 'ok'})
 
+    MUTE_FOREVER = datetime(9999, 1, 1, tzinfo=dt_timezone.utc)
+
+    @action(detail=True, methods=['post'], url_path='mute')
+    def mute(self, request, slug=None):
+        """{hours: 1 | 8 | 168 | 'always' | 0} — no pushes from this group until
+        then (0 unmutes). My side only."""
+        group = self.get_object()
+        member = GroupMember.objects.filter(group=group, user=request.user).first()
+        if not member:
+            raise PermissionDenied("You are not a member of this group")
+        hours = request.data.get('hours')
+        if hours == 'always':
+            until = self.MUTE_FOREVER
+        else:
+            try:
+                h = int(hours or 0)
+            except (TypeError, ValueError):
+                return Response({'error': 'hours must be a number or "always"'}, status=status.HTTP_400_BAD_REQUEST)
+            until = timezone.now() + timedelta(hours=min(h, 24 * 365)) if h > 0 else None
+        member.muted_until = until
+        member.save(update_fields=['muted_until'])
+        return Response({'muted_until': until})
+
     @action(detail=True, methods=['post'], url_path='leave')
     def leave(self, request, slug=None):
         group = self.get_object()
@@ -249,6 +298,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             return Response({'error': 'The creator cannot leave their own group'}, status=status.HTTP_400_BAD_REQUEST)
         member.delete()
         group_system_message(group, f"{request.user.username} left", request.user)
+        members_changed(group, 'left', request.user)
         return Response({'status': 'left'})
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -256,6 +306,12 @@ class GroupViewSet(viewsets.ModelViewSet):
         response['Pragma'] = 'no-cache'
         response['Expires'] = '0'
         return response
+
+    def perform_update(self, serializer):
+        group = serializer.save()
+        # Name, description, cover, privacy: everyone in the chat sees it now.
+        group_changed(group, self.request, ['name', 'description', 'cover_image', 'is_private',
+                                            'only_admins_can_post', 'join_question'])
 
     def perform_destroy(self, instance):
         instance.delete()
@@ -302,6 +358,7 @@ class GroupViewSet(viewsets.ModelViewSet):
                 status='approved'
             )
             group_system_message(group, f"{request.user.username} joined", request.user)
+            members_changed(group, 'joined', request.user)
             return Response(
                 {"status": "joined", "joined": True},
                 status=status.HTTP_200_OK,
@@ -371,9 +428,10 @@ class GroupViewSet(viewsets.ModelViewSet):
         if removed:
             if removed.user_id == group.creator_id:
                 return Response({"error": "The group creator cannot be removed"}, status=status.HTTP_400_BAD_REQUEST)
-            uname = removed.user.username
+            uname, gone = removed.user.username, removed.user
             removed.delete()
             group_system_message(group, f"{uname} was removed", request.user)
+            members_changed(group, 'removed', gone)
             log_group_action(group, request.user, 'remove_member', f"Removed {uname}")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -403,6 +461,8 @@ class GroupViewSet(viewsets.ModelViewSet):
             group_system_message(group, f"{target.user.username} {verb}", request.user)
             log_group_action(group, request.user, 'grant_admin' if make_admin else 'revoke_admin',
                              f"{target.user.username} {verb}")
+            live.tell_group(group.slug, {'type': 'members', 'event': 'role', 'user_id': target.user_id,
+                                         'is_admin': target.is_admin, 'is_moderator': target.is_moderator})
         return Response(GroupMemberSerializer(target, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='set-moderator')
@@ -429,6 +489,8 @@ class GroupViewSet(viewsets.ModelViewSet):
             group_system_message(group, f"{target.user.username} {verb}", request.user)
             log_group_action(group, request.user, 'grant_moderator' if make_mod else 'revoke_moderator',
                              f"{target.user.username} {verb}")
+            live.tell_group(group.slug, {'type': 'members', 'event': 'role', 'user_id': target.user_id,
+                                         'is_admin': target.is_admin, 'is_moderator': target.is_moderator})
         return Response(GroupMemberSerializer(target, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='posting-policy')
@@ -445,6 +507,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             msg = "Only admins can send messages now" if only_admins else "Everyone can send messages now"
             group_system_message(group, msg, request.user)
             log_group_action(group, request.user, 'posting_policy', msg)
+            group_changed(group, request, ['only_admins_can_post'])
         return Response(GroupSerializer(group, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='join-question')
@@ -457,6 +520,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         group.save(update_fields=['join_question'])
         log_group_action(group, request.user, 'join_question',
                          'Set a join question' if group.join_question else 'Removed the join question')
+        group_changed(group, request, ['join_question'])
         return Response(GroupSerializer(group, context={'request': request}).data)
 
     @action(detail=True, methods=['get'], url_path='audit-log')
@@ -511,6 +575,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         if created:
             GroupJoinRequest.objects.filter(group=group, user=user, status='pending').update(status='approved')
             group_system_message(group, f"{user.username} was added", request.user)
+            members_changed(group, 'joined', user)
             msg = f"You were added to {group.name}"
             Notification.objects.create(
                 recipient=user, sender=request.user, message=msg, notification_type='group_added',
@@ -550,6 +615,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         member, created = GroupMember.objects.get_or_create(group=group, user=request.user)
         if created:
             group_system_message(group, f"{request.user.username} joined via invite", request.user)
+            members_changed(group, 'joined', request.user)
         return Response(GroupSerializer(group, context={'request': request}).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['get'], url_path='check-membership')
@@ -588,6 +654,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             # Upload to R2; store the public URL as the reference.
             group.cover_image = r2.upload_file(request.FILES['cover_image'], 'group_covers')
             group.save()
+            group_changed(group, request, ['cover_image'])
             return Response(
                 GroupSerializer(group, context={'request': request}).data,
                 status=status.HTTP_200_OK
@@ -691,7 +758,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             if len(attachment) > 2000:
                 raise ValidationError({'detail': 'Invalid attachment URL'})
 
-        post = serializer.save(user=self.request.user, group=group)
+        client_id = (str(self.request.data.get('client_id') or '').strip()[:64]) or None
+        post = serializer.save(user=self.request.user, group=group, client_id=client_id)
 
         # Legacy multipart attachments (kept for backward compatibility).
         for file in self.request.FILES.getlist('attachments'):
@@ -709,17 +777,14 @@ class GroupPostViewSet(viewsets.ModelViewSet):
 
         Group.objects.filter(pk=group.pk).update(updated_at=post.created_at)
 
-        # Push notification to other members.
-        preview = content[:80] if content else {
-            'image': '📷 Photo', 'file': '📎 File', 'audio': '🎤 Voice note',
-        }.get(post.message_type, 'New message')
-        others = GroupMember.objects.filter(group=group).exclude(user=self.request.user).select_related('user')
-        for m in others:
-            notify_user(
-                m.user, 'message',
-                f"{group.name} — {self.request.user.username}: {preview}",
-                data={'groupSlug': group.slug},
-            )
+        # Pushes and the live list: batched, off the request — the sender no
+        # longer waits on one push per member. Not for a super admin's
+        # (invisible) messages.
+        if not is_super:
+            preview = content[:80] if content else {
+                'image': '📷 Photo', 'file': '📎 File', 'audio': '🎤 Voice note',
+            }.get(post.message_type, 'New message')
+            run_in_background(live.fan_out, group, self.request.user, post, preview)
         return post
 
     CURSOR_LIMIT = 25
@@ -754,15 +819,33 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         })
 
     def create(self, request, *args, **kwargs):
+        # A retried send (same client id) is the message already made.
+        client_id = (str(request.data.get('client_id') or '').strip()[:64]) or None
+        if client_id:
+            existing = (GroupPost.objects.filter(user=request.user, client_id=client_id,
+                                                 group__slug=self.kwargs.get('group_slug'))
+                        .select_related('user__profile', 'reply_to__user')
+                        .prefetch_related('attachments', 'reactions').first())
+            if existing:
+                return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        post = self.perform_create(serializer)
+        from django.db import IntegrityError
+        try:
+            with transaction.atomic():
+                post = self.perform_create(serializer)
+        except IntegrityError:
+            # Two copies of one retry raced: the first made it; answer with it.
+            existing = GroupPost.objects.filter(user=request.user, client_id=client_id).first() if client_id else None
+            if existing is None:
+                raise
+            return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
         complete_serializer = self.get_serializer(post)
-        # Realtime fan-out to the group's socket room. Super-admin messages are
-        # invisible to regular members, so they are never broadcast (the admin's
-        # own optimistic bubble + fallback poll still show them their message).
+        # Realtime fan-out to the group's socket room — as anyone may see it
+        # (not "mine"). Super-admin messages are invisible to regular members,
+        # so they are never broadcast.
         if not request.user.is_super_admin:
-            broadcast_group_message(post.group.slug, complete_serializer.data)
+            broadcast_group_message(post.group.slug, live.public_copy(complete_serializer.data))
         headers = self.get_success_headers(complete_serializer.data)
         return Response(complete_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
@@ -808,7 +891,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         # Update in place for everyone (no scroll). Skip super-admin-authored
         # messages, which are invisible to regular members (mirrors create()).
         if not request.user.is_super_admin:
-            broadcast_group_edited(post.group.slug, data)
+            broadcast_group_edited(post.group.slug, live.public_copy(data))
         return Response(data)
 
     def _is_group_admin(self, group):
@@ -935,7 +1018,16 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         # get_object() prefetched a now-stale `reactions` set; clear the cache so
         # the serializer re-reads the fresh aggregate.
         post._prefetched_objects_cache = {}
-        return Response(self.get_serializer(post).data)
+        data = self.get_serializer(post).data
+        # Live, for everyone else: the counts (their own pick is theirs to know;
+        # the reactor's other devices learn theirs from user_id + emoji).
+        if not request.user.is_super_admin:
+            mine = (data.get('reactions') or {}).get('mine')
+            live.tell_group(post.group.slug, {
+                'type': 'reaction', 'id': post.id, 'summary': (data.get('reactions') or {}).get('summary', []),
+                'user_id': request.user.id, 'emoji': mine,
+            })
+        return Response(data)
 
 
 
@@ -979,6 +1071,7 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         join_request.save()
         if created:
             group_system_message(join_request.group, f"{join_request.user.username} joined", join_request.user)
+            members_changed(join_request.group, 'joined', join_request.user)
 
         # Tell the requester they're in — tapping the alert opens the group chat.
         group = join_request.group

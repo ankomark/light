@@ -38,7 +38,10 @@ import { peekCache, readCache, writeCache } from '../utils/screenCache';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import {
   mergeMessages, freshPage, cacheableGroupMessages, groupChatKey, replyLabel, isTemp,
+  absorb, applyReaction, settle,
 } from '../utils/groupChat';
+import { nextTempId } from '../utils/chatMessages';
+import { announceDM } from '../services/dmSocket';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -311,7 +314,8 @@ const GroupDetail = ({ route, navigation }) => {
   const [playingId, setPlayingId] = useState(null);
   const [hasEarlier, setHasEarlier] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]); // usernames currently typing
-  const [onlineIds, setOnlineIds] = useState([]);     // user ids currently connected
+  const [onlineIds, setOnlineIds] = useState([]);     // user ids currently connected (older servers)
+  const [onlineCount, setOnlineCount] = useState(null); // how many are here (the server counts)
   const [showJump, setShowJump] = useState(false);    // "jump to newest" FAB
   const [viewingHistory, setViewingHistory] = useState(false); // showing a search-context window, not live
   const [highlightId, setHighlightId] = useState(null); // message to briefly flash after a jump
@@ -489,7 +493,12 @@ const GroupDetail = ({ route, navigation }) => {
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  const markRead = useCallback(() => { markGroupRead(groupSlug).catch(() => {}); }, [groupSlug]);
+  // Read — and tell this device's badge and list at once.
+  const markRead = useCallback(() => {
+    if (!canReadRef.current) return;
+    markGroupRead(groupSlug).catch(() => {});
+    announceDM({ type: 'group_read', group_slug: groupSlug });
+  }, [groupSlug]);
 
   // The safety-net poll: slow while the socket is up, quick while it's down,
   // and not at all in the background.
@@ -533,11 +542,11 @@ const GroupDetail = ({ route, navigation }) => {
     if (!isMember) return undefined;
     const sock = createGroupSocket(groupSlug, {
       onMessage: (msg) => {
-        if (msg?.user?.id === currentUser?.id) return; // already shown optimistically
         // While viewing a search-context window, don't splice live messages into
         // the historical window (it would leave a gap); they're there on return.
         if (viewingHistoryRef.current) return;
-        setMessages((prev) => mergeMessages([msg], prev));
+        // Mine (from here or another device) takes its bubble's place by client id.
+        setMessages((prev) => absorb(prev, msg));
         // Only jump to the newest if they were already at the bottom — don't yank
         // someone out of scrolled-up history.
         if (atBottomRef.current) setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
@@ -553,7 +562,39 @@ const GroupDetail = ({ route, navigation }) => {
         markUserTyping(evt.username, evt.is_typing);
       },
       onPinned: (evt) => setPinnedMsg(evt.pinned || null),
+      // Reactions, members, settings, who's here (songs/group_live.py).
+      onEvent: (evt) => {
+        switch (evt.type) {
+          case 'reaction':
+            setMessages((prev) => applyReaction(prev, evt, currentUser?.id));
+            break;
+          case 'online_count':
+            setOnlineCount(evt.count || 0);
+            break;
+          case 'members':
+            if (evt.member_count != null) setGroup((g) => (g ? { ...g, member_count: evt.member_count } : g));
+            if (evt.event === 'role' && evt.user_id === currentUser?.id) {
+              setIsAdmin(!!evt.is_admin);
+              setIsModerator(!!evt.is_moderator || !!evt.is_admin);
+            }
+            break;
+          case 'member_removed':
+            if (evt.user_id === currentUser?.id) {
+              // Removed: the chat goes now, not at the next reload.
+              canReadRef.current = false;
+              setIsMember(false); setIsAdmin(false); setIsModerator(false);
+              setMessages([]);
+              notify(t('group.detail.removedTitle'), t('group.detail.removedBody'));
+            }
+            break;
+          case 'group_updated':
+            setGroup((g) => (g ? { ...g, ...(evt.group || {}) } : g));
+            break;
+          default: break;
+        }
+      },
       onPresence: (evt) => {
+        if (evt.count != null) setOnlineCount(evt.count);
         if (!evt.user_id) return;
         setOnlineIds((prev) => (
           evt.event === 'online'
@@ -563,7 +604,7 @@ const GroupDetail = ({ route, navigation }) => {
       },
       onStatus: (s) => {
         liveRef.current = s === 'open';
-        if (s === 'closed') setOnlineIds([]); // stale on disconnect
+        if (s === 'closed') { setOnlineIds([]); setOnlineCount(null); } // stale on disconnect
         // Back online: catch up on anything sent while the socket was down.
         else if (canReadRef.current && !viewingHistoryRef.current) loadPosts(true);
         if (pollRef.current) startPoll();
@@ -571,7 +612,7 @@ const GroupDetail = ({ route, navigation }) => {
     });
     socketRef.current = sock;
     return () => { sock.close(); socketRef.current = null; liveRef.current = false; };
-  }, [groupSlug, isMember, currentUser?.id, markUserTyping, loadPosts, startPoll]);
+  }, [groupSlug, isMember, currentUser?.id, markUserTyping, loadPosts, startPoll, t]);
 
   // Tell the room I'm typing (once), and stop after a short idle.
   const notifyTyping = useCallback(() => {
@@ -600,33 +641,45 @@ const GroupDetail = ({ route, navigation }) => {
   // ── Send (optimistic, WhatsApp-style states) ──
   // Show the bubble instantly with a 'sending' clock, then swap in the saved
   // copy (→ delivered double-tick) or flag it 'failed' for a tap-to-retry.
-  const deliver = useCallback(async (payload, replyDisplay) => {
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const optimistic = {
+  // The bubble: new, or (a retry) the failed one sending again, in its place.
+  const putBubble = useCallback((tempId, fields, replyDisplay, retrying) => {
+    if (retrying) {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'sending' } : m)));
+      return;
+    }
+    setMessages((prev) => [...prev, {
       id: tempId,
+      client_id: tempId,
       user: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
-      content: payload.content || '', message_type: payload.message_type || 'text',
-      attachment: payload.attachment || '', file_name: payload.file_name || '', duration: payload.duration,
       reply_to: replyDisplay
         ? { id: replyDisplay.id, content: replyDisplay.content, message_type: replyDisplay.message_type, sender_username: replyDisplay.user?.username || replyDisplay.sender_username }
         : null,
       created_at: new Date().toISOString(), is_owner: true,
       reactions: { summary: [], mine: null },
-      _status: 'sending', _payload: payload, _replyDisplay: replyDisplay || null,
-    };
-    setMessages((prev) => [...prev, optimistic]);
+      _status: 'sending', _replyDisplay: replyDisplay || null,
+      ...fields,
+    }]);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+  }, [currentUser]);
+
+  // Every send carries the bubble's id as its client id, so a retry — or a
+  // send that did land though the answer was lost — is one message, never two.
+  const deliver = useCallback(async (payload, replyDisplay, retryId = null) => {
+    const tempId = retryId || nextTempId();
+    const body = { ...payload, client_id: tempId };
+    putBubble(tempId, {
+      content: payload.content || '', message_type: payload.message_type || 'text',
+      attachment: payload.attachment || '', file_name: payload.file_name || '', duration: payload.duration,
+      _payload: payload,
+    }, replyDisplay, !!retryId);
     try {
-      const saved = await sendGroupMessage(groupSlug, payload);
-      // Swap the optimistic row for the saved one, and drop any copy a concurrent
-      // poll may have already merged in, so the message can't briefly appear twice.
-      setMessages((prev) => prev
-        .filter((m) => m.id === tempId || m.id !== saved.id)
-        .map((m) => (m.id === tempId ? { ...saved } : m)));
-    } catch {
+      const saved = await sendGroupMessage(groupSlug, body);
+      setMessages((prev) => settle(prev, tempId, saved));
+    } catch (e) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
+      if (e?.response?.status === 403) notify(t('common.error'), e?.response?.data?.detail || t('group.detail.cantPost'));
     }
-  }, [groupSlug, currentUser]);
+  }, [groupSlug, putBubble, t]);
 
   const sendPayload = useCallback((payload) => {
     const rd = replyTo;
@@ -636,37 +689,24 @@ const GroupDetail = ({ route, navigation }) => {
 
   // Media send: show the local file instantly, upload it to R2 in the
   // background, then persist the message with just the URL (mirrors DMs).
-  const sendMedia = useCallback(async (media, replyDisplay) => {
+  const sendMedia = useCallback(async (media, replyDisplay, retryId = null) => {
     const { localUri, uploadType, message_type, file_name = '', duration = null, mimeType, blurhash = '' } = media;
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const optimistic = {
-      id: tempId,
-      user: { id: currentUser?.id, username: currentUser?.username, profile_picture: currentUser?.profile_picture },
+    const tempId = retryId || nextTempId();
+    putBubble(tempId, {
       content: '', message_type, attachment: localUri, attachment_blurhash: blurhash, file_name, duration,
-      reply_to: replyDisplay
-        ? { id: replyDisplay.id, content: replyDisplay.content, message_type: replyDisplay.message_type, sender_username: replyDisplay.user?.username || replyDisplay.sender_username }
-        : null,
-      created_at: new Date().toISOString(), is_owner: true,
-      reactions: { summary: [], mine: null },
-      _status: 'sending', _retryMedia: media, _replyDisplay: replyDisplay || null,
-    };
-    setMessages((prev) => [...prev, optimistic]);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+      _retryMedia: media,
+    }, replyDisplay, !!retryId);
     try {
       const uploaded = await uploadMedia({ uri: localUri, name: file_name || `chat_${Date.now()}`, mimeType }, uploadType);
       const saved = await sendGroupMessage(groupSlug, {
         message_type, attachment: uploaded.url, attachment_blurhash: blurhash,
-        file_name, duration, reply_to_id: replyDisplay?.id,
+        file_name, duration, reply_to_id: replyDisplay?.id, client_id: tempId,
       });
-      // Swap the optimistic row for the saved one, and drop any copy a concurrent
-      // poll may have already merged in, so the message can't briefly appear twice.
-      setMessages((prev) => prev
-        .filter((m) => m.id === tempId || m.id !== saved.id)
-        .map((m) => (m.id === tempId ? { ...saved } : m)));
+      setMessages((prev) => settle(prev, tempId, saved));
     } catch {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
     }
-  }, [groupSlug, currentUser]);
+  }, [groupSlug, putBubble]);
 
   const sendMediaMessage = useCallback((media) => {
     const rd = replyTo;
@@ -674,10 +714,11 @@ const GroupDetail = ({ route, navigation }) => {
     sendMedia(media, rd);
   }, [sendMedia, replyTo]);
 
+  // Same bubble, same client id — the server keeps one message however many
+  // times it's asked.
   const retrySend = useCallback((m) => {
-    setMessages((prev) => prev.filter((x) => x.id !== m.id));
-    if (m._retryMedia) sendMedia(m._retryMedia, m._replyDisplay);
-    else deliver(m._payload, m._replyDisplay);
+    if (m._retryMedia) sendMedia(m._retryMedia, m._replyDisplay, m.id);
+    else deliver(m._payload, m._replyDisplay, m.id);
   }, [deliver, sendMedia]);
 
   const handleSendText = useCallback(() => {
@@ -1125,7 +1166,10 @@ const GroupDetail = ({ route, navigation }) => {
 
   const adminsOnly = !!group?.only_admins_can_post;
   const canChat = isMember && (!adminsOnly || isAdmin);
-  const onlineCount = onlineIds.filter((id) => id !== currentUser?.id).length;
+  // Others here: the server's count (me excluded), or — from an older server — the roster.
+  const othersOnline = onlineCount != null
+    ? Math.max(0, onlineCount - 1)
+    : onlineIds.filter((id) => id !== currentUser?.id).length;
 
   return (
     <View style={styles.root}>
@@ -1148,10 +1192,10 @@ const GroupDetail = ({ route, navigation }) => {
             )}
             <View style={{ flex: 1 }}>
               <Text style={styles.headerName} numberOfLines={1}>{group?.name ?? 'Group'}</Text>
-              {onlineCount > 0 ? (
+              {othersOnline > 0 ? (
                 <View style={styles.headerSubRow}>
                   <View style={styles.onlineDot} />
-                  <Text style={styles.headerOnline} numberOfLines={1}>{t('group.detail.onlineCount', { count: onlineCount })}</Text>
+                  <Text style={styles.headerOnline} numberOfLines={1}>{t('group.detail.onlineCount', { count: othersOnline })}</Text>
                 </View>
               ) : (
                 <Text style={styles.headerSub} numberOfLines={1}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
@@ -1376,7 +1420,7 @@ const GroupDetail = ({ route, navigation }) => {
                   <Ionicons name="checkmark" size={20} color={colors.white} />
                 </TouchableOpacity>
               ) : text.trim() ? (
-                <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
+                <TouchableOpacity style={styles.sendBtn} onPress={handleSendText} testID="group-send">
                   <Ionicons name="send" size={18} color={colors.white} />
                 </TouchableOpacity>
               ) : (

@@ -69,6 +69,8 @@ class GroupSerializer(serializers.ModelSerializer):
     unread_count = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
     pinned_message = serializers.SerializerMethodField()
+    # Until when I've muted it (null: not muted). Mine only.
+    muted_until = serializers.SerializerMethodField()
     cover_image = MediaReferenceImageField(required=False, allow_null=True)
     is_private = serializers.BooleanField(default=False)
     # Override the model field: the invite token is only ever revealed to admins.
@@ -82,6 +84,15 @@ class GroupSerializer(serializers.ModelSerializer):
 
     def get_pinned_message(self, obj):
         return pinned_preview(obj.pinned_post)
+
+    def get_muted_until(self, obj):
+        if hasattr(obj, 'anno_muted_until'):
+            v = obj.anno_muted_until
+        else:
+            m = self._membership(obj)
+            v = m.muted_until if m else None
+        from django.utils import timezone as _tz
+        return v if v and v > _tz.now() else None
 
     class Meta:
         model = Group
@@ -293,9 +304,9 @@ class GroupPostSerializer(serializers.ModelSerializer):
             'id', 'content', 'message_type', 'attachment', 'attachment_blurhash',
             'file_name', 'duration', 'edited_at',
             'reply_to', 'reply_to_id', 'created_at', 'updated_at', 'group', 'user',
-            'attachments', 'is_owner', 'reactions',
+            'attachments', 'is_owner', 'reactions', 'client_id',
         ]
-        read_only_fields = ['group', 'user', 'created_at', 'updated_at', 'edited_at', 'attachments', 'reply_to']
+        read_only_fields = ['group', 'user', 'created_at', 'updated_at', 'edited_at', 'attachments', 'reply_to', 'client_id']
         extra_kwargs = {'content': {'required': False, 'allow_blank': True}}
 
     def get_is_owner(self, obj):

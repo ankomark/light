@@ -72,27 +72,42 @@ class GroupWebSocketTests(TransactionTestCase):
         self.assertEqual(event['message']['content'], 'hello realtime')
         await comm.disconnect()
 
-    async def test_presence_roster_on_join(self):
-        """A newcomer learns who is already online (the direct-reply handshake)."""
-        import asyncio
+    async def test_online_is_a_count(self):
+        """Who's here is a count: a newcomer is told it on joining, the others
+        learn it went up — no roster traded between every pair of members."""
+        from django.core.cache import cache
+        await database_sync_to_async(cache.clear)()
         owner_comm, _ = await _connect(self.group.slug, _token(self.owner))
+        first = await _receive_until(owner_comm, 'online_count')
+        self.assertEqual(first['count'], 1)
         member_comm, _ = await _connect(self.group.slug, _token(self.member))
-
-        seen = set()
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + 2
-        while loop.time() < deadline and self.owner.id not in seen:
-            try:
-                evt = await member_comm.receive_json_from(timeout=1)
-            except Exception:
-                break
-            if evt.get('type') == 'presence' and evt.get('event') == 'online':
-                seen.add(evt['user_id'])
-        self.assertIn(self.owner.id, seen, 'newcomer never learned the owner was already online')
-
-        await owner_comm.disconnect()
+        mine = await _receive_until(member_comm, 'online_count')
+        self.assertEqual(mine['count'], 2)
+        seen = await _receive_until(owner_comm, 'presence')
+        if seen['user_id'] == self.owner.id:          # its own arrival first
+            seen = await _receive_until(owner_comm, 'presence')
+        self.assertEqual((seen['event'], seen['user_id'], seen['count']), ('online', self.member.id, 2))
         await member_comm.disconnect()
+        gone = await _receive_until(owner_comm, 'presence')
+        self.assertEqual((gone['event'], gone['count']), ('offline', 1))
+        await owner_comm.disconnect()
 
+    async def test_a_removed_member_is_cut_off(self):
+        from songs.group_live import tell_group
+        member_comm, ok = await _connect(self.group.slug, _token(self.member))
+        self.assertTrue(ok)
+        await database_sync_to_async(tell_group)(self.group.slug, {'type': 'member_removed', 'user_id': self.member.id})
+        evt = await _receive_until(member_comm, 'member_removed')
+        self.assertEqual(evt['user_id'], self.member.id)
+        out = await member_comm.receive_output(timeout=2)
+        self.assertEqual(out['type'], 'websocket.close')
+
+    async def test_banned_or_deactivated_turned_away(self):
+        def ban():
+            User.objects.filter(pk=self.member.pk).update(is_deactivated=True)
+        await database_sync_to_async(ban)()
+        comm, ok = await _connect(self.group.slug, _token(self.member))
+        self.assertFalse(ok)
     async def test_typing_reaches_other_members_not_self(self):
         owner_comm, _ = await _connect(self.group.slug, _token(self.owner))
         member_comm, _ = await _connect(self.group.slug, _token(self.member))

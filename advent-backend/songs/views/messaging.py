@@ -364,7 +364,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
                  .count())
         requests_n = (ConversationState.objects.filter(user=user, accepted=False)
                       .filter(conversation__messages__isnull=False).values('conversation').distinct().count())
-        return Response({'unread_count': count, 'requests': requests_n})
+        # And groups with something new (communities count too; muted ones don't).
+        from ..group_live import unread_groups
+        return Response({'unread_count': count, 'requests': requests_n, **unread_groups(user)})
 
 
 def _our_upload(url):

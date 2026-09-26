@@ -96,7 +96,7 @@ class RequestTests(Base):
         self.assertEqual(self.inbox(self.ann), [])
         req = self.inbox(self.ann, folder='requests')
         self.assertEqual((len(req), req[0]['is_request']), (1, True))
-        self.assertEqual(self.client.get('/api/conversations/unread_count/').data, {'unread_count': 0, 'requests': 1})
+        self.assertEqual(self.client.get('/api/conversations/unread_count/').data, {'unread_count': 0, 'requests': 1, 'groups': 0, 'communities': 0})
         self.client.post(f'/api/conversations/{conv}/state/', {'accepted': True}, format='json')
         self.assertEqual(len(self.inbox(self.ann)), 1)
         self.assertEqual(self.client.get('/api/conversations/unread_count/').data['unread_count'], 2)

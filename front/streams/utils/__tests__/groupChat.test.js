@@ -4,7 +4,7 @@
  * the cache painted must give way to the server's first page correctly.
  */
 import {
-  mergeMessages, freshPage, cacheableGroupMessages, unsent, replyLabel,
+  mergeMessages, freshPage, cacheableGroupMessages, unsent, replyLabel, absorb, settle, applyReaction,
 } from '../groupChat';
 
 const at = (s) => new Date(Date.UTC(2026, 8, 26, 10, 0, s)).toISOString();
@@ -63,4 +63,35 @@ test('unsent and reply labels', () => {
   const t = (k) => k;
   expect(replyLabel({ content: 'hi' }, t)).toBe('hi');
   expect(replyLabel({ message_type: 'image' }, t)).toBe('group.preview.photo');
+});
+
+describe('live and sent, in either order', () => {
+  const bubble = msg('temp_1', 9, { client_id: 'temp_1', _status: 'sending' });
+
+  it('the socket first: the bubble becomes the message; the answer then changes nothing', () => {
+    const live = absorb([msg(1, 1), bubble], msg(7, 9, { client_id: 'temp_1' }));
+    expect(live.map((m) => m.id)).toEqual([1, 7]);
+    expect(settle(live, 'temp_1', msg(7, 9))).toBe(live);
+  });
+
+  it('the answer first: the bubble becomes the message; the echo merges into it', () => {
+    const sent = settle([msg(1, 1), bubble], 'temp_1', msg(7, 9, { client_id: 'temp_1' }));
+    expect(sent.map((m) => m.id)).toEqual([1, 7]);
+    expect(absorb(sent, msg(7, 9, { client_id: 'temp_1' })).map((m) => m.id)).toEqual([1, 7]);
+  });
+
+  it("someone else's message merges by id and keeps my reaction", () => {
+    const list = [msg(3, 3, { reactions: { summary: [{ emoji: '🙏', count: 1 }], mine: '🙏' } })];
+    const out = absorb(list, msg(3, 3, { content: 'edited', reactions: { summary: [{ emoji: '🙏', count: 2 }], mine: null } }));
+    expect(out[0].content).toBe('edited');
+    expect(out[0].reactions).toEqual({ summary: [{ emoji: '🙏', count: 2 }], mine: '🙏' });
+  });
+
+  it('a live reaction: counts for all, "mine" only for me', () => {
+    const list = [msg(3, 3, { reactions: { summary: [], mine: '❤️' } })];
+    const theirs = applyReaction(list, { id: 3, summary: [{ emoji: '🔥', count: 1 }], user_id: 2, emoji: '🔥' }, 1);
+    expect(theirs[0].reactions).toEqual({ summary: [{ emoji: '🔥', count: 1 }], mine: '❤️' });
+    const mine = applyReaction(list, { id: 3, summary: [], user_id: 1, emoji: null }, 1);
+    expect(mine[0].reactions.mine).toBeNull();
+  });
 });

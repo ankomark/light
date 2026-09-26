@@ -44,6 +44,15 @@ const mockApi = {
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
+// The person's own socket (the live list): screens subscribe; the test plays the server.
+const mockDM = new Set();
+const mockAnnounced = [];
+jest.mock('../../services/dmSocket', () => ({
+  subscribeDM: (fn) => { mockDM.add(fn); return () => mockDM.delete(fn); },
+  announceDM: (e) => { mockAnnounced.push(e); },
+}));
+const dmLive = async (evt) => { await act(async () => { [...mockDM].forEach((fn) => fn(evt)); }); };
+
 let mockSocket = null;
 jest.mock('../../services/groupSocket', () => ({
   createGroupSocket: (slug, handlers) => {
@@ -222,6 +231,67 @@ describe('Group chat', () => {
     expect(mockConfirm).toHaveBeenCalled();
     expect(mockApi.deleteGroupPost).toHaveBeenCalledWith('c5', 40);
     await waitFor(() => expect(r.queryByText('post 40')).toBeNull());
+  });
+});
+
+describe('Group chat, live', () => {
+  const open = (slug) => render(
+    <GroupDetail navigation={nav} route={{ params: { groupSlug: slug, group: group(slug) } }} />,
+  );
+  const ready = async (slug, posts = [post(50, 50)]) => {
+    mockApi.fetchGroupDetails.mockResolvedValue(group(slug));
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: posts.slice().reverse(), next: null });
+    const r = open(slug);
+    await waitFor(() => expect(r.getByText(`post ${posts[posts.length - 1].id}`)).toBeTruthy());
+    return r;
+  };
+
+  it('a failed send is retried with the same client id (one message)', async () => {
+    const r = await ready('l1');
+    mockApi.sendGroupMessage.mockRejectedValueOnce(new Error('offline'));
+    const input = r.UNSAFE_getAllByType(require('react-native').TextInput).find((n) => n.props.multiline);
+    fireEvent.changeText(input, 'hello all');
+    await act(async () => { fireEvent.press(r.getByTestId('group-send')); });
+    await waitFor(() => expect(r.getByText('group.detail.tapToRetry')).toBeTruthy());
+    const first = mockApi.sendGroupMessage.mock.calls[0][1];
+    expect(first.client_id).toMatch(/^temp_/);
+    mockApi.sendGroupMessage.mockImplementationOnce(async (_s, p) => post(51, 51, { content: p.content, client_id: p.client_id, user: { id: 1, username: 'me' } }));
+    await act(async () => { fireEvent.press(r.getByText('hello all')); });
+    await waitFor(() => expect(r.queryByText('group.detail.tapToRetry')).toBeNull());
+    expect(mockApi.sendGroupMessage.mock.calls[1][1].client_id).toBe(first.client_id);
+    expect(r.getAllByText('hello all')).toHaveLength(1);
+  });
+
+  it('my message from another device shows; reactions, member count and removal are live', async () => {
+    const r = await ready('l2');
+    await act(async () => { mockSocket.handlers.onMessage(post(52, 52, { content: 'from my laptop', user: { id: 1, username: 'me' } })); });
+    expect(r.getByText('from my laptop')).toBeTruthy();
+
+    await act(async () => { mockSocket.handlers.onEvent({ type: 'reaction', id: 50, summary: [{ emoji: '🔥', count: 3 }], user_id: 2, emoji: '🔥' }); });
+    expect(r.getByText('3')).toBeTruthy();
+
+    await act(async () => { mockSocket.handlers.onEvent({ type: 'online_count', count: 4 }); });
+    expect(r.getByText('group.detail.onlineCount:3')).toBeTruthy();       // others, not me
+
+    await act(async () => { mockSocket.handlers.onEvent({ type: 'member_removed', user_id: 1 }); });
+    expect(mockNotify).toHaveBeenCalledWith('group.detail.removedTitle', 'group.detail.removedBody');
+    expect(r.queryByText('post 50')).toBeNull();
+  });
+});
+
+describe('Group list, live', () => {
+  it('a new message moves its group to the top with a badge; reading clears it', async () => {
+    mockApi.fetchGroups.mockResolvedValue({ results: [group('a'), group('b')], next: null });
+    const r = render(<GroupList navigation={nav} route={{}} mode="group" />);
+    await waitFor(() => expect(r.getByTestId('group-row-b')).toBeTruthy());
+    await dmLive({ type: 'group_message', group_slug: 'b', kind: 'group',
+      message: { id: 9, content: 'fresh news', message_type: 'text', sender_id: 2, sender_username: 'them', created_at: new Date().toISOString() } });
+    const rows = r.getAllByTestId(/^group-row-/).map((n) => n.props.testID);
+    expect(rows[0]).toBe('group-row-b');
+    expect(r.getByText(/fresh news/)).toBeTruthy();
+    expect(r.getByText('1')).toBeTruthy();
+    await dmLive({ type: 'group_read', group_slug: 'b' });
+    expect(r.queryByText('1')).toBeNull();
   });
 });
 

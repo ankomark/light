@@ -25,6 +25,7 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 import { peekCache, readCache, writeCache } from '../utils/screenCache';
 import { groupListKey } from '../utils/groupChat';
 import { confirmAction, notify } from '../utils/adminConfirm';
+import { subscribeDM } from '../services/dmSocket';
 import { useI18n } from '../context/I18nContext';
 
 const TAB_KEYS = [
@@ -227,7 +228,42 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   // one request — this used to fire twice on open for communities.
   const loadRef = useRef(loadGroups);
   loadRef.current = loadGroups;
-  useFocusEffect(useCallback(() => { loadRef.current(); }, []));
+  // While on screen: a slow poll (big communities aren't told live).
+  useFocusEffect(useCallback(() => {
+    loadRef.current();
+    const id = setInterval(() => loadRef.current(), 60000);
+    return () => clearInterval(id);
+  }, []));
+
+  // Live: a new message moves its group to the top with its badge (smaller
+  // groups are told on the person's own socket); reading it clears the badge.
+  useEffect(() => {
+    let soon = null;
+    const unsub = subscribeDM((e) => {
+      if (e.type === 'group_read') {
+        setGroups((prev) => prev.map((g) => (g.slug === e.group_slug ? { ...g, unread_count: 0 } : g)));
+        return;
+      }
+      if (e.type !== 'group_message' || (e.kind && e.kind !== (isCommunity ? 'community' : 'group'))) return;
+      const m = e.message || {};
+      setGroups((prev) => {
+        const row = prev.find((g) => g.slug === e.group_slug);
+        if (!row) {                                  // not in this view's page: ask again
+          clearTimeout(soon);
+          soon = setTimeout(() => loadRef.current(), 500);
+          return prev;
+        }
+        const mine = m.sender_id === currentUser?.id;
+        const updated = {
+          ...row,
+          last_message: { ...m, sender_username: mine ? null : m.sender_username },
+          unread_count: mine ? row.unread_count : (row.unread_count || 0) + 1,
+        };
+        return [updated, ...prev.filter((g) => g.slug !== e.group_slug)];
+      });
+    });
+    return () => { unsub(); clearTimeout(soon); };
+  }, [isCommunity, currentUser?.id]);
   const firstLoad = useRef(true);
   useEffect(() => {
     if (firstLoad.current) { firstLoad.current = false; return; }

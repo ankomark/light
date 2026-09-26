@@ -64,3 +64,42 @@ export const cacheableGroupMessages = (list, size = GROUP_CACHE_SIZE) => {
 export const replyLabel = (m, t) => m.content || ({
   image: t('group.preview.photo'), file: t('group.preview.file'), audio: t('group.preview.voiceNote'),
 }[m.message_type] || t('group.preview.message'));
+
+/**
+ * A message that arrived live. Mine (sent from here, or another device of
+ * mine) takes the place of the bubble with its client id; anyone's is merged
+ * by id. A copy already here keeps what the live one can't know (my reaction).
+ */
+export const absorb = (list, msg) => {
+  if (!msg || msg.id == null) return list;
+  const temp = msg.client_id ? list.findIndex((m) => m.id === msg.client_id) : -1;
+  if (temp >= 0) {
+    const next = list.filter((m) => String(m.id) !== String(msg.id));
+    const at = next.findIndex((m) => m.id === msg.client_id);
+    next[at] = { ...msg, _status: undefined };
+    return next;
+  }
+  const had = list.find((m) => String(m.id) === String(msg.id));
+  const merged = had ? { ...had, ...msg, reactions: msg.reactions ? { ...msg.reactions, mine: had.reactions?.mine ?? null } : had.reactions } : msg;
+  return mergeMessages(list, [merged]);
+};
+
+/** A live reaction: the counts for everyone; "mine" only if it was me. */
+export const applyReaction = (list, evt, meId) => list.map((m) => (String(m.id) === String(evt.id)
+  ? { ...m, reactions: { summary: evt.summary || [], mine: evt.user_id === meId ? (evt.emoji ?? null) : (m.reactions?.mine ?? null) } }
+  : m));
+
+/**
+ * The send's answer. The socket may have delivered the same message first
+ * (absorb put it in the bubble's place already) — then there's nothing to do;
+ * otherwise the bubble becomes the saved message, and any other copy goes.
+ */
+export const settle = (list, tempId, saved) => {
+  if (!saved || saved.id == null) return list;
+  if (!list.some((m) => m.id === tempId)) {
+    return list.some((m) => String(m.id) === String(saved.id)) ? list : mergeMessages(list, [saved]);
+  }
+  return list
+    .filter((m) => m.id === tempId || String(m.id) !== String(saved.id))
+    .map((m) => (m.id === tempId ? { ...saved } : m));
+};

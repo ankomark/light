@@ -75,25 +75,45 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
-        # Announce myself, carrying my channel so those already online can reply
-        # directly and I learn the current online set (channels has no roster API).
-        await self.channel_layer.group_send(self.group_name, {
-            'type': 'presence', 'event': 'online',
-            'user_id': self.user.id, 'username': self.user.username,
-            'channel': self.channel_name,
-        })
-
-    async def disconnect(self, code):
-        if hasattr(self, 'group_name'):
+        self.joined = True
+        # Who's here is a count (songs/group_live.py), not a roster traded
+        # between every pair of members. I learn it now; the others learn when
+        # my first device arrives.
+        first, count = await self._came_online()
+        await self.send_json({'type': 'online_count', 'count': count})
+        if first:
             await self.channel_layer.group_send(self.group_name, {
-                'type': 'presence', 'event': 'offline',
+                'type': 'presence', 'event': 'online', 'count': count,
                 'user_id': self.user.id, 'username': self.user.username,
             })
+
+    async def disconnect(self, code):
+        if getattr(self, 'joined', False):
+            last, count = await self._went_offline()
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            if last:
+                await self.channel_layer.group_send(self.group_name, {
+                    'type': 'presence', 'event': 'offline', 'count': count,
+                    'user_id': self.user.id, 'username': self.user.username,
+                })
+
+    @database_sync_to_async
+    def _came_online(self):
+        from songs.group_live import came_online
+        return came_online(self.slug, self.user.id)
+
+    @database_sync_to_async
+    def _went_offline(self):
+        from songs.group_live import went_offline
+        return went_offline(self.slug, self.user.id)
 
     @database_sync_to_async
     def _can_access(self):
-        from songs.models import Group, GroupMember
+        from songs.models import Group, GroupMember, User
+        # Banned (inactive) or deactivated accounts are turned away.
+        u = User.objects.filter(pk=self.user.pk).values('is_active', 'is_deactivated').first()
+        if not u or not u['is_active'] or u['is_deactivated']:
+            return False
         try:
             group = Group.objects.get(slug=self.slug, is_removed=False)
         except Group.DoesNotExist:
@@ -135,17 +155,18 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
 
     async def presence(self, event):
         await self.send_json({
-            'type': 'presence', 'event': event['event'],
+            'type': 'presence', 'event': event['event'], 'count': event.get('count'),
             'user_id': event['user_id'], 'username': event['username'],
         })
-        # When someone new comes online, tell them (directly) that I'm here too,
-        # so their online roster is complete. The direct reply carries no channel,
-        # so it never triggers another reply (no storm).
-        if event['event'] == 'online' and event.get('channel') and event['user_id'] != self.user.id:
-            await self.channel_layer.send(event['channel'], {
-                'type': 'presence', 'event': 'online',
-                'user_id': self.user.id, 'username': self.user.username,
-            })
+
+    async def group_event(self, event):
+        """Reactions, members joining / leaving / removed, settings changes
+        (songs/group_live.tell_group). Someone removed is told, then cut off —
+        they don't keep reading the chat until they happen to reconnect."""
+        payload = event['payload']
+        await self.send_json(payload)
+        if payload.get('type') == 'member_removed' and payload.get('user_id') == self.user.id:
+            await self.close(code=4403)
 
 
 class DMConsumer(AsyncJsonWebsocketConsumer):

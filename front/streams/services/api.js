@@ -1316,6 +1316,10 @@ export const pinGroupMessage = async (slug, id) =>
 export const unpinGroupMessage = async (slug, id) =>
   apiRequest('post', `/groups/${slug}/posts/${id}/unpin/`);
 
+// No pushes from a group for hours (1, 8, 168), 'always', or 0 to unmute.
+export const muteGroup = (slug, hours) =>
+  apiRequest('post', `/groups/${slug}/mute/`, { hours });
+
 export const markGroupRead = async (slug) =>
   apiRequest('post', `/groups/${slug}/mark-read/`);
 

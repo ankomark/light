@@ -130,6 +130,33 @@ def send_expo_push(tokens, title, body, data=None):
         return None
 
 
+EXPO_BATCH = 100   # Expo takes up to 100 messages per request
+
+
+def notify_many(user_ids, notification_type, message, data=None, title=None):
+    """One push to many people (a group message): two queries for everyone's
+    devices — whoever turned the category off is left out — then the sends in
+    batches of 100, off the request thread. notify_user per person was two
+    queries and a thread each: thousands for a big community."""
+    from .models import DeviceToken
+    from .tasks import run_in_background
+
+    user_ids = list({u for u in user_ids if u})
+    if not user_ids:
+        return 0
+    tokens = DeviceToken.objects.filter(user_id__in=user_ids, is_active=True)
+    category = NOTIFICATION_CATEGORIES.get(notification_type)
+    if category:
+        tokens = tokens.exclude(**{f'user__notification_preference__{category}': False})
+    tokens = list(tokens.values_list('token', flat=True).distinct())
+    if not tokens:
+        return 0
+    title = title or NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
+    for i in range(0, len(tokens), EXPO_BATCH):
+        run_in_background(send_expo_push, tokens[i:i + EXPO_BATCH], title, message, data)
+    return len(tokens)
+
+
 def notify_user(recipient, notification_type, message, data=None, title=None,
                 category=None):
     """Send a push notification to all active devices of a recipient user.
