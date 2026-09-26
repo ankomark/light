@@ -71,14 +71,39 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = SimpleUserSerializer(read_only=True)
+    reply_to = serializers.SerializerMethodField()
+    reactions = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
         fields = [
             'id', 'sender', 'content', 'message_type', 'attachment',
             'file_name', 'duration', 'read', 'created_at',
+            'client_id', 'reply_to', 'reactions', 'edited_at', 'is_deleted',
         ]
         read_only_fields = ['id', 'sender', 'read', 'created_at']
+
+    def get_reply_to(self, obj):
+        from ..messaging import preview_of
+        return preview_of(obj.reply_to) if obj.reply_to_id else None
+
+    def get_reactions(self, obj):
+        """[{emoji, count, mine}] — from the prefetched reactions."""
+        request = self.context.get('request')
+        me = request.user.id if request and request.user.is_authenticated else None
+        counts, mine = {}, None
+        for r in obj.reactions.all():
+            counts[r.emoji] = counts.get(r.emoji, 0) + 1
+            if r.user_id == me:
+                mine = r.emoji
+        return [{'emoji': e, 'count': n, 'mine': e == mine} for e, n in counts.items()]
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # Deleted for everyone (or taken down): the bubble stays, the words go.
+        if obj.is_deleted or obj.is_removed:
+            data.update(content='', attachment='', file_name='', is_deleted=True, reactions=[])
+        return data
 
 
 
@@ -90,6 +115,21 @@ class ConversationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Conversation
         fields = ['id', 'other_participant', 'last_message', 'unread_count', 'updated_at']
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # This person's side of it, and whether the other is here.
+        from ..messaging import is_online
+        data['is_request'] = getattr(obj, 'st_accepted', True) is False
+        data['muted'] = bool(getattr(obj, 'st_muted', False))
+        data['archived'] = bool(getattr(obj, 'st_archived', False))
+        other = data.get('other_participant') or {}
+        if other.get('id'):
+            data['online'] = is_online(other['id'])
+        last = data.get('last_message')
+        if last and getattr(obj, 'last_msg_deleted', False):
+            last.update(content='', is_deleted=True)
+        return data
 
     def get_other_participant(self, obj):
         request = self.context.get('request')

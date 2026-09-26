@@ -16,7 +16,7 @@ const wsBase = () => API_BASE.replace(/^http(s?):\/\//i, (_m, s) => `ws${s}://`)
  * onEdited(msg), onPinned(evt), onTyping(evt), onPresence(evt),
  * onStatus('open'|'closed'). Auto-reconnects with backoff; auth via ?token=.
  */
-function createSocket(path, handlers = {}) {
+export function createSocket(path, handlers = {}) {
   let ws = null;
   let closedByUs = false;
   let retry = 0;
@@ -44,6 +44,7 @@ function createSocket(path, handlers = {}) {
     ws.onmessage = (e) => {
       let data;
       try { data = JSON.parse(e.data); } catch { return; }
+      handlers.onEvent?.(data);
       switch (data.type) {
         case 'message': handlers.onMessage?.(data.message); break;
         case 'edited': handlers.onEdited?.(data.message); break;
@@ -61,6 +62,13 @@ function createSocket(path, handlers = {}) {
     ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
   }
 
+  const send = (obj) => {
+    if (ws && ws.readyState === 1 /* OPEN */) {
+      try { ws.send(JSON.stringify(obj)); return true; } catch { /* noop */ }
+    }
+    return false;
+  };
+
   const sendTyping = (isTyping) => {
     if (ws && ws.readyState === 1 /* OPEN */) {
       try { ws.send(JSON.stringify({ type: 'typing', is_typing: !!isTyping })); } catch { /* noop */ }
@@ -75,7 +83,7 @@ function createSocket(path, handlers = {}) {
   };
 
   connect();
-  return { sendTyping, close };
+  return { send, sendTyping, close };
 }
 
 export function createGroupSocket(slug, handlers = {}) {

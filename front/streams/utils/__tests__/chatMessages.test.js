@@ -8,6 +8,7 @@
  */
 import {
   cacheableMessages, nextTempId, reconcileSent, mergeFullLoad,
+  addIncoming, markFailed, markRetrying, patchMessage,
 } from '../chatMessages';
 
 const msg = (id, extra = {}) => ({ id, content: `m${id}`, ...extra });
@@ -73,5 +74,48 @@ describe('cacheableMessages', () => {
   it('keeps the newest N', () => {
     const list = Array.from({ length: 10 }, (_, i) => msg(i + 1));
     expect(cacheableMessages(list, 3).map((m) => m.id)).toEqual([8, 9, 10]);
+  });
+
+  it('keeps a text that failed to send (the outbox), not a failed photo', () => {
+    const out = cacheableMessages([
+      msg(1),
+      msg('temp_a', { failed: true, client_id: 'temp_a', message_type: 'text' }),
+      msg('temp_b', { failed: true, client_id: 'temp_b', message_type: 'image', attachment: 'file://x.jpg' }),
+      msg('temp_c', { pending: true, client_id: 'temp_c' }),
+    ]);
+    expect(out.map((m) => m.id)).toEqual([1, 'temp_a']);
+  });
+});
+
+describe('addIncoming', () => {
+  it('appends a new message', () => {
+    expect(addIncoming([msg(1)], msg(2)).map((m) => m.id)).toEqual([1, 2]);
+  });
+
+  it('takes the place of my bubble still sending, by client id', () => {
+    const list = [msg(1), msg('temp_a', { pending: true, client_id: 'temp_a' }), msg('temp_b', { client_id: 'temp_b' })];
+    const out = addIncoming(list, msg(7, { client_id: 'temp_a' }));
+    expect(out.map((m) => m.id)).toEqual([1, 7, 'temp_b']);
+    expect(out[1].pending).toBeUndefined();
+  });
+
+  it('never doubles a message that came both ways', () => {
+    const once = addIncoming([msg(1)], msg(2));
+    const twice = addIncoming(once, msg(2, { read: true }));
+    expect(twice.map((m) => m.id)).toEqual([1, 2]);
+    expect(twice[1].read).toBe(true);
+  });
+});
+
+describe('failed sends', () => {
+  it('marks failed, then retrying', () => {
+    const failed = markFailed([msg('temp_a', { pending: true })], 'temp_a');
+    expect(failed[0]).toMatchObject({ pending: false, failed: true });
+    expect(markRetrying(failed, 'temp_a')[0]).toMatchObject({ pending: true, failed: false });
+  });
+
+  it('patches one message', () => {
+    const out = patchMessage([msg(1), msg(2)], 2, (m) => ({ content: m.content + '!' }));
+    expect(out.map((m) => m.content)).toEqual(['m1', 'm2!']);
   });
 });

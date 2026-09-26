@@ -8,6 +8,7 @@ import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import { fetchUnreadMessageCount } from '../services/api';
+import { subscribeDM } from '../services/dmSocket';
 import { isAdmin, isSuperAdmin, hasCapability } from '../utils/roles';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -183,24 +184,32 @@ export const openMenu = (navigation) => {
 const isPage = (route, item) => !!route && route.name === item.route
   && Object.entries(item.params || {}).every(([k, v]) => route.params?.[k] === v);
 
-// Unread messages, for the badges. `poll`: keep it fresh (the header's
-// button); otherwise it's read once (the menu, open for a moment).
+// Unread messages (and message requests), for the badges. `poll`: keep it
+// fresh (the header's button) — live off the DM socket, with a slow poll
+// behind it; otherwise it's read once (the menu, open for a moment).
 const useUnreadMessages = ({ poll }) => {
   const { isAuthenticated } = useAuth();
   const [unread, setUnread] = useState(0);
   const refresh = useCallback(() => {
     if (!isAuthenticated) { setUnread(0); return; }
     fetchUnreadMessageCount()
-      .then((r) => setUnread(r?.unread_count || 0))
+      .then((r) => setUnread((r?.unread_count || 0) + (r?.requests || 0)))
       .catch(() => {});
   }, [isAuthenticated]);
   useEffect(() => {
     refresh();
-    if (!poll) return undefined;
-    const interval = setInterval(refresh, 30000);
+    if (!poll || !isAuthenticated) return undefined;
+    const interval = setInterval(refresh, 60000);
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refresh(); });
-    return () => { clearInterval(interval); sub.remove(); };
-  }, [refresh, poll]);
+    // A new message or a read receipt: count again (once for a burst).
+    let soon = null;
+    const unsub = subscribeDM((e) => {
+      if (e.type !== 'message' && e.type !== 'read' && e.type !== 'deleted') return;
+      clearTimeout(soon);
+      soon = setTimeout(refresh, 400);
+    });
+    return () => { clearInterval(interval); sub.remove(); unsub(); clearTimeout(soon); };
+  }, [refresh, poll, isAuthenticated]);
   return unread;
 };
 

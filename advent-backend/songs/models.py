@@ -81,6 +81,8 @@ class User(AbstractUser):
     # account can still authenticate; logging back in auto-reactivates it.
     is_deactivated = models.BooleanField(default=False)
     deactivated_at = models.DateTimeField(null=True, blank=True)
+    # When they were last connected (the chat header's "last seen").
+    last_seen_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def is_super_admin(self):
@@ -888,6 +890,16 @@ class Message(models.Model):
     file_name = models.CharField(max_length=255, blank=True, default='')
     duration = models.FloatField(null=True, blank=True)  # seconds, for voice notes
     read = models.BooleanField(default=False)
+    # The sender's own id for it, so a retried send (a flaky network) is the
+    # same message, not a second one.
+    client_id = models.CharField(max_length=64, null=True, blank=True)
+    # An answer to an earlier message in the same chat.
+    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    edited_at = models.DateTimeField(null=True, blank=True)
+    # Deleted for everyone by its sender (the row stays: "This message was
+    # deleted"); or taken down by a moderator after a report.
+    is_deleted = models.BooleanField(default=False)
+    is_removed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -900,9 +912,49 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=['conversation', 'created_at'], name='message_conv_created_idx'),
         ]
+        constraints = [
+            models.UniqueConstraint(fields=['sender', 'client_id'], condition=models.Q(client_id__isnull=False),
+                                    name='message_sender_client_id_uniq'),
+        ]
 
     def __str__(self):
         return f"{self.sender.username}: {(self.content or self.message_type)[:50]}"
+
+
+class MessageReaction(models.Model):
+    """An emoji on a message — one per person (a new one replaces it)."""
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+')
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('message', 'user')
+
+
+class MessageHide(models.Model):
+    """A message someone deleted for themselves only."""
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='+')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+')
+
+    class Meta:
+        unique_together = ('message', 'user')
+
+
+class ConversationState(models.Model):
+    """One person's side of a chat: whether they've accepted it (a first
+    message from someone they don't follow is a request until they do),
+    muted it, archived it, or cleared it (messages up to cleared_before_id
+    are gone for them)."""
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='states')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='conversation_states')
+    accepted = models.BooleanField(default=True)
+    muted = models.BooleanField(default=False)
+    archived = models.BooleanField(default=False)
+    cleared_before_id = models.PositiveBigIntegerField(default=0)
+
+    class Meta:
+        unique_together = ('conversation', 'user')
 
 
 class DeviceToken(models.Model):

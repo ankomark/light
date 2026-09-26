@@ -14,7 +14,9 @@ jest.mock('../../context/useAuth', () => ({
   useAuth: () => ({ isAuthenticated: true, currentUser: { username: 'mark' }, logout: mockLogout }),
 }));
 jest.mock('../../context/I18nContext', () => ({ useI18n: () => ({ t: (k) => k }) }));
-jest.mock('../../services/api', () => ({ fetchUnreadMessageCount: jest.fn(async () => ({ unread_count: 3 })) }));
+jest.mock('../../services/api', () => ({ fetchUnreadMessageCount: jest.fn(async () => ({ unread_count: 2, requests: 1 })) }));
+let mockDM = null;
+jest.mock('../../services/dmSocket', () => ({ subscribeDM: (fn) => { mockDM = fn; return () => {}; } }));
 
 const { default: HamburgerMenu, MenuScreen } = require('../HamburgerMenu');
 
@@ -111,11 +113,21 @@ test('close and the profile row', async () => {
   expect(top()).toBe('Menu');
 });
 
-test('the unread count shows on Messages; log out leaves for the login page', async () => {
+test('the unread count (with requests) shows on Messages; log out leaves for the login page', async () => {
   const r = render(<App />);
   await openMenu(r);
   await waitFor(() => expect(r.getByText('3')).toBeTruthy());
   await act(async () => { fireEvent.press(r.getByLabelText('Log out')); });
   expect(mockLogout).toHaveBeenCalled();
   expect(stack()).toEqual(['Login']);
+});
+
+test('a live message counts again', async () => {
+  const api = require('../../services/api');
+  render(<App />);
+  await waitFor(() => expect(api.fetchUnreadMessageCount).toHaveBeenCalled());
+  const before = api.fetchUnreadMessageCount.mock.calls.length;
+  expect(mockDM).toBeTruthy();
+  await act(async () => { mockDM({ type: 'typing' }); mockDM({ type: 'message' }); mockDM({ type: 'message' }); });
+  await waitFor(() => expect(api.fetchUnreadMessageCount.mock.calls.length).toBe(before + 1));
 });

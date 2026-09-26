@@ -927,7 +927,7 @@ class ReportViewSet(viewsets.ViewSet):
         valid_types = {
             'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
             'publication', 'chapter', 'bookreview', 'chaptercomment', 'product', 'productreview', 'grouppost',
-            'videostudio', 'mediastation', 'servicereview',
+            'videostudio', 'mediastation', 'servicereview', 'message',
         }
         if content_type not in valid_types:
             return Response({'error': f'content_type must be one of {list(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)
@@ -941,6 +941,12 @@ class ReportViewSet(viewsets.ViewSet):
         if reason == 'copyright' and len((description or '').strip()) < MIN_COPYRIGHT_REPORT_CHARS:
             return Response({'error': 'Describe the work that is being copied and who owns it.',
                              'code': 'copyright_details'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # A private message can be reported only by someone in that chat —
+        # a report shows it to moderators, so no one else may bring it there.
+        if content_type == 'message':
+            if not Message.objects.filter(pk=object_id, conversation__participants=request.user).exists():
+                return Response({'error': 'Message not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         _, created = Report.objects.get_or_create(
             reporter=request.user,

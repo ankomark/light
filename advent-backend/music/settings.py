@@ -238,6 +238,10 @@ REST_FRAMEWORK = {
         # Services: requests to providers, and how they're found and reached.
         'service_booking': '20/hour',
         'service_event': '120/min',
+        # Direct messages: sending, starting chats, and edits / reactions.
+        'dm_send': '60/min',
+        'dm_start': '30/hour',
+        'dm_action': '120/min',
         'reports': '20/hour',
         # Listening reports: two per song played, plus offline backlogs.
         'plays': '120/min',

@@ -147,3 +147,86 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
                 'user_id': self.user.id, 'username': self.user.username,
             })
 
+
+class DMConsumer(AsyncJsonWebsocketConsumer):
+    """Direct messages, live: one socket per device, joined to the person's
+    own room (songs/messaging.py tells it about new messages, edits,
+    deletions, reactions, read receipts). Typing goes out from here, to the
+    other person in that chat only. Presence: online while connected; the
+    people they chat with are told when they come and go.
+
+    Banned, deactivated or unknown users are turned away."""
+
+    async def connect(self):
+        self.user = self.scope.get('user')
+        if not self.user or not self.user.is_authenticated or not await self._allowed():
+            await self.close(code=4401)
+            return
+        from songs.messaging import dm_room
+        self.room = dm_room(self.user.id)
+        await self.channel_layer.group_add(self.room, self.channel_name)
+        await self.accept()
+        first, partners = await self._came_online()
+        if first:
+            await self._tell_partners(partners, True)
+
+    async def disconnect(self, code):
+        if not hasattr(self, 'room'):
+            return
+        await self.channel_layer.group_discard(self.room, self.channel_name)
+        last, partners = await self._went_offline()
+        if last:
+            await self._tell_partners(partners, False)
+
+    async def receive_json(self, content):
+        if content.get('type') != 'typing':
+            return
+        try:
+            conv_id = int(content.get('conversation_id'))
+        except (TypeError, ValueError):
+            return
+        other = await self._other_in(conv_id)
+        if other:
+            from songs.messaging import dm_room
+            await self.channel_layer.group_send(dm_room(other), {'type': 'dm_event', 'payload': {
+                'type': 'typing', 'conversation_id': conv_id, 'user_id': self.user.id,
+                'is_typing': bool(content.get('is_typing')),
+            }})
+
+    async def dm_event(self, event):
+        await self.send_json(event['payload'])
+
+    async def _tell_partners(self, partners, online):
+        from songs.messaging import dm_room
+        payload = {'type': 'presence', 'user_id': self.user.id, 'online': online}
+        for uid in partners:
+            await self.channel_layer.group_send(dm_room(uid), {'type': 'dm_event', 'payload': payload})
+
+    @database_sync_to_async
+    def _allowed(self):
+        from songs.models import User
+        u = User.objects.filter(pk=self.user.pk).values('is_active', 'is_deactivated').first()
+        return bool(u and u['is_active'] and not u['is_deactivated'])
+
+    @database_sync_to_async
+    def _came_online(self):
+        from songs.messaging import went_online, partner_ids
+        return went_online(self.user.id), partner_ids(self.user)
+
+    @database_sync_to_async
+    def _went_offline(self):
+        from songs.messaging import went_offline, partner_ids
+        return went_offline(self.user.id), partner_ids(self.user)
+
+    @database_sync_to_async
+    def _other_in(self, conv_id):
+        """The other person in this chat — if this user is in it, and neither
+        has blocked the other."""
+        from songs.models import Conversation, is_blocked_between
+        conv = Conversation.objects.filter(pk=conv_id, participants=self.user).first()
+        if conv is None:
+            return None
+        other = conv.participants.exclude(pk=self.user.pk).first()
+        if other is None or is_blocked_between(self.user, other):
+            return None
+        return other.pk

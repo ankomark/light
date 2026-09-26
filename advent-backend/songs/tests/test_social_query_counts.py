@@ -102,7 +102,8 @@ class ChatQueryTests(APITestCase):
         response, n = count_queries(
             lambda: self.client.post(f'/api/conversations/{self.convo.id}/mark_read/'))
         self.assertEqual(response.status_code, 200)
-        self.assertLessEqual(n, 2)
+        # The chat, the update — and who to tell, live, that it was read.
+        self.assertLessEqual(n, 3)
         self.assertFalse(self.convo.messages.filter(read=False).exists())
 
     def test_lean_lookup_still_refuses_outsiders(self):

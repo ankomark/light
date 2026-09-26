@@ -1972,8 +1972,11 @@ export const getR2UploadTicket = (type, contentType, filename) =>
 // ── Direct Messaging ──────────────────────────────────────────────────────────
 // Returns the paginated response { results, next, ... } so the inbox can
 // load more. Page 1 is the freshest conversations (ordered by recent activity).
-export const fetchConversations = async () =>
-  apiRequest('get', '/conversations/', null, { params: { page_size: 20 } });
+// `folder`: 'primary' | 'requests' | 'archived'; `q`: a name or words.
+export const fetchConversations = async ({ folder, q } = {}) =>
+  apiRequest('get', '/conversations/', null, {
+    params: { page_size: 20, ...(folder && folder !== 'primary' ? { folder } : {}), ...(q ? { q } : {}) },
+  });
 
 // Follow a paginated `next` link (preserves path + query) for infinite scroll.
 export const fetchConversationsByUrl = async (nextUrl) => {
@@ -2014,6 +2017,30 @@ export const markConversationRead = (conversationId) =>
 
 export const fetchUnreadMessageCount = () =>
   apiRequest('get', '/conversations/unread_count/');
+
+// A chat's words, searched (the 50 newest that match).
+export const searchMessages = (conversationId, q) =>
+  apiRequest('get', `/conversations/${conversationId}/messages/`, null, { params: { q } });
+
+// Within 15 minutes, by its sender; text only.
+export const editMessage = (conversationId, messageId, content) =>
+  apiRequest('patch', `/conversations/${conversationId}/messages/${messageId}/`, { content });
+
+// scope: 'everyone' (the sender, within 48 hours) | 'me'
+export const deleteMessage = (conversationId, messageId, scope) =>
+  apiRequest('post', `/conversations/${conversationId}/messages/${messageId}/delete/`, { scope });
+
+// Same emoji again takes it back; another replaces it.
+export const reactToMessage = (conversationId, messageId, emoji) =>
+  apiRequest('post', `/conversations/${conversationId}/messages/${messageId}/react/`, { emoji });
+
+// My side of a chat: { accepted?, muted?, archived?, clear? }
+export const setConversationState = (conversationId, changes) =>
+  apiRequest('post', `/conversations/${conversationId}/state/`, changes);
+
+// { online, last_seen }
+export const fetchPresence = (conversationId) =>
+  apiRequest('get', `/conversations/${conversationId}/presence/`);
 
 // ── Admin / moderation panel (gated server-side by IsModerator/IsSuperAdmin) ──
 export const fetchAdminDashboard = () =>
