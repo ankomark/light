@@ -1364,10 +1364,9 @@ export const deleteGroup = async (groupSlug) => {
 
 // ==================== NOTICE BOARD ====================
 // Read by any signed-in user; only staff/admins can post (enforced server-side).
-export const fetchNotices = async (page = 1) => {
-  const res = await apiRequest('get', '/notices/', null, { params: { page, page_size: 100 } });
-  return res?.results ?? res;
-};
+// A page of notices ({results, next}), pinned first then newest.
+export const fetchNotices = async (page = 1) =>
+  apiRequest('get', '/notices/', null, { params: { page, page_size: 20 } });
 
 export const createNotice = async ({ title, body, is_pinned = false }) => {
   return apiRequest('post', '/notices/', { title, body, is_pinned });

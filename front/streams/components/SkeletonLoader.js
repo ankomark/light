@@ -160,8 +160,28 @@ export const ChatSkeleton = ({ count = 7 }) => (
   </View>
 );
 
+// A notice card while the board loads: title, a few lines, the byline.
+export const NoticeSkeleton = () => (
+  <View style={styles.noticeCard}>
+    <SkeletonBox width="60%" height={16} style={{ marginBottom: 10 }} />
+    <SkeletonBox width="100%" height={11} style={{ marginBottom: 6 }} />
+    <SkeletonBox width="92%" height={11} style={{ marginBottom: 6 }} />
+    <SkeletonBox width="70%" height={11} style={{ marginBottom: 14 }} />
+    <SkeletonBox width="35%" height={10} />
+  </View>
+);
+
+export const NoticeListSkeleton = ({ count = 4 }) => (
+  <View testID="notice-skeleton">
+    {Array.from({ length: count }, (_, i) => <NoticeSkeleton key={i} />)}
+  </View>
+);
 export { SkeletonBox };
 const styles = StyleSheet.create({
+  noticeCard: {
+    padding: spacing.md, marginBottom: spacing.md, borderRadius: radius.lg,
+    backgroundColor: 'rgba(8,12,18,0.6)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
+  },
   chat: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md, gap: spacing.sm },
   chatRow: { flexDirection: 'row', alignItems: 'flex-end' },
   chatRowMine: { justifyContent: 'flex-end' },
