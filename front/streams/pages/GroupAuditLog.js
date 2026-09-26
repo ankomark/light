@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchGroupAuditLog } from '../services/api';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius } from '../constants/theme';
+import { PersonListSkeleton } from '../components/SkeletonLoader';
 import { useI18n } from '../context/I18nContext';
 
 const DEFAULT_AVATAR = require('../assets/user-placeholder.png');
@@ -100,7 +101,7 @@ const GroupAuditLog = (props) => {
           </View>
 
           {loading ? (
-            <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+            <View style={{ paddingHorizontal: spacing.md }}><PersonListSkeleton count={6} avatar={44} /></View>
           ) : (
             <FlatList
               data={items}

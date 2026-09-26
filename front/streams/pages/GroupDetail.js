@@ -34,6 +34,7 @@ import RotatingBackground from '../components/RotatingBackground';
 import ReportModal from '../components/ReportModal';
 import BookClubBanner from '../components/BookClubBanner';
 import ChoiceSheet from '../components/ChoiceSheet';
+import { ChatSkeleton, SkeletonBox } from '../components/SkeletonLoader';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { peekCache, readCache, writeCache } from '../utils/screenCache';
@@ -1255,11 +1256,25 @@ const GroupDetail = ({ route, navigation }) => {
     if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
   }, []);
 
+  // Nothing in hand yet (opened from a link or a push, never seen here): the
+  // chat's shape — header and bubbles — at once, not a spinner.
   if (loading) {
     return (
       <View style={styles.root}>
         <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.68)" />
-        <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+        <SafeAreaView edges={['top']} style={styles.headerSafe}>
+          <LinearGradient colors={['rgba(16,46,80,0.95)', 'rgba(10,22,40,0.80)']} style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel={t('common.back')}>
+              <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+            </TouchableOpacity>
+            <SkeletonBox width={38} height={38} borderRadius={19} />
+            <View style={styles.skeletonTitle}>
+              <SkeletonBox width="55%" height={14} />
+              <SkeletonBox width="30%" height={10} />
+            </View>
+          </LinearGradient>
+        </SafeAreaView>
+        <ChatSkeleton />
       </View>
     );
   }
@@ -1411,7 +1426,7 @@ const GroupDetail = ({ route, navigation }) => {
             <TouchableOpacity style={styles.earlierBtn} onPress={loadOlder}><Text style={styles.earlierText}>{t('group.detail.loadEarlier')}</Text></TouchableOpacity>
           ) : null}
           ListEmptyComponent={firstLoad ? (
-            <View style={styles.emptyContainer}><ActivityIndicator color={colors.accent} /></View>
+            <ChatSkeleton />
           ) : group?.kind === 'community' ? (
             <View style={styles.emptyContainer}>
               <View style={styles.welcomeIcon}>
@@ -2010,6 +2025,7 @@ const GroupDetail = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  skeletonTitle: { flex: 1, gap: 6, marginLeft: spacing.sm },
   bottomSafe: { backgroundColor: 'rgba(16,46,80,0.95)' },
   headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   mention: { color: colors.accent, fontWeight: '700' },

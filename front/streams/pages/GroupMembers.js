@@ -9,6 +9,8 @@ import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { notify } from '../utils/adminConfirm';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { PersonListSkeleton } from '../components/SkeletonLoader';
 
 const DEFAULT_AVATAR = require('../assets/user-placeholder.png');
 
@@ -66,9 +68,23 @@ const GroupMembers = (props) => {
   const { currentUser } = useAuth();
   const creatorId = group?.creator?.id;
 
-  const [members, setMembers] = useState([]);
-  const [count, setCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // The first page as last seen, at once; the network refreshes it.
+  const cacheKey = userKey(currentUser?.id, `group-members:${groupSlug}`);
+  const cached = peekCache(cacheKey);
+  const freshRef = useRef(false);   // the network has answered
+  const [members, setMembers] = useState(() => cached?.results ?? []);
+  const [count, setCount] = useState(() => cached?.count ?? 0);
+  const [loading, setLoading] = useState(() => !cached);
+
+  useEffect(() => {
+    if (cached) return undefined;
+    let cancelled = false;
+    readCache(cacheKey).then((disk) => {
+      if (cancelled || !disk?.results?.length || freshRef.current) return;
+      setMembers(disk.results); setCount(disk.count || disk.results.length); setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
@@ -97,6 +113,7 @@ const GroupMembers = (props) => {
       const rows = res?.results ?? (Array.isArray(res) ? res : []);
       setMembers(rows);
       setCount(res?.count ?? rows.length);
+      if (!asked) { writeCache(cacheKey, { results: rows, count: res?.count ?? rows.length }); freshRef.current = true; }
       pageRef.current = 1;
       moreRef.current = !!res?.next;
     } catch {
@@ -104,7 +121,7 @@ const GroupMembers = (props) => {
     } finally {
       if (askedRef.current === asked) setLoading(false);
     }
-  }, [groupSlug, q, t]);
+  }, [groupSlug, q, t, cacheKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -192,7 +209,7 @@ const GroupMembers = (props) => {
           </View>
 
           {loading ? (
-            <View style={styles.loader}><ActivityIndicator size="large" color={colors.accent} /></View>
+            <View style={styles.skeletonPad}><PersonListSkeleton count={8} avatar={44} /></View>
           ) : error ? (
             <View style={styles.emptyWrap}>
               <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
@@ -346,6 +363,7 @@ const GroupMembers = (props) => {
 };
 
 const styles = StyleSheet.create({
+  skeletonPad: { paddingHorizontal: spacing.md },
   searchBox: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginHorizontal: spacing.md, marginBottom: spacing.sm,
     paddingHorizontal: spacing.sm, borderRadius: radius.full, backgroundColor: 'rgba(16,46,80,0.55)', minHeight: 40,

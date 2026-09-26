@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
-import { writeCache, dropCache } from '../../utils/screenCache';
+import { writeCache, dropCache, peekCache } from '../../utils/screenCache';
 import { groupChatKey, groupListKey } from '../../utils/groupChat';
 
 jest.setTimeout(20000);
@@ -188,6 +188,44 @@ describe('Group list', () => {
     await waitFor(() => expect(r.getByTestId('group-row-g1')).toBeTruthy());
     fireEvent.press(r.getByTestId('group-row-g1'));
     expect(nav.navigate).toHaveBeenCalledWith('GroupDetail', expect.objectContaining({ groupSlug: 'g1' }));
+  });
+});
+
+describe('No spinners', () => {
+  it('a first-ever list shows rows about to fill in; another tab keeps the rows until its own arrive', async () => {
+    let answer;
+    mockApi.fetchGroups.mockImplementationOnce(() => new Promise((res) => { answer = res; }));
+    const r = render(<GroupList navigation={nav} route={{}} mode="group" />);
+    expect(r.UNSAFE_queryAllByType(require('react-native').ActivityIndicator)).toHaveLength(0);
+    await act(async () => { answer({ results: [group('ns-pub')], next: null }); });
+    let mine;
+    mockApi.fetchGroups.mockImplementationOnce(() => new Promise((res) => { mine = res; }));
+    await act(async () => { fireEvent.press(r.getByText('group.list.tabMine')); });
+    expect(r.getByText('Group ns-pub')).toBeTruthy();                   // still there, faded
+    await act(async () => { mine({ results: [group('ns-mine')], next: null }); });
+    expect(r.getByText('Group ns-mine')).toBeTruthy();
+    expect(r.queryByText('Group ns-pub')).toBeNull();
+  });
+
+  it('the list quietly fetches the top chats, so opening one paints at once', async () => {
+    mockApi.fetchGroups.mockResolvedValue({ results: [group('pf1'), group('pf2', { is_member: false })], next: null });
+    mockApi.fetchGroupPosts.mockImplementation(async (slug) => ({ results: [post(300, 300, { content: `prefetched ${slug}` })], next: null }));
+    render(<GroupList navigation={nav} route={{}} mode="group" />);
+    await waitFor(() => expect(mockApi.fetchGroupPosts).toHaveBeenCalledWith('pf1', 1));
+    expect(mockApi.fetchGroupPosts).not.toHaveBeenCalledWith('pf2', 1);    // not a member: can't read it
+    mockApi.fetchGroupDetails.mockImplementation(() => new Promise(() => {}));
+    mockApi.fetchGroupPosts.mockImplementation(() => new Promise(() => {}));
+    await waitFor(() => expect(peekCache(groupChatKey(1, 'pf1'))?.messages?.length).toBe(1));
+    const d = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 'pf1', group: group('pf1') } }} />);
+    expect(d.getByText('prefetched pf1')).toBeTruthy();                  // before any answer
+  });
+
+  it('a chat with nothing in hand shows its shape, not a spinner', async () => {
+    mockApi.fetchGroupDetails.mockImplementation(() => new Promise(() => {}));
+    mockApi.fetchGroupPosts.mockImplementation(() => new Promise(() => {}));
+    const r = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 'never-seen' } }} />);
+    expect(r.getByTestId('chat-skeleton')).toBeTruthy();
+    expect(r.UNSAFE_queryAllByType(require('react-native').ActivityIndicator)).toHaveLength(0);
   });
 });
 

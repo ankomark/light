@@ -8,6 +8,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchGroupMedia } from '../services/api';
 import RotatingBackground from '../components/RotatingBackground';
+import { useAuth } from '../context/useAuth';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { SkeletonBox } from '../components/SkeletonLoader';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
@@ -23,8 +26,11 @@ const GroupMedia = (props) => {
   const groupSlug = props.groupSlug ?? props.route?.params?.groupSlug;
   const onClose = props.onClose ?? (() => props.navigation?.goBack());
 
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  // Each filter's first page as last seen, at once.
+  const keyFor = (k) => userKey(currentUser?.id, `group-media:${groupSlug}:${k || 'all'}`);
+  const [items, setItems] = useState(() => peekCache(keyFor(''))?.results ?? []);
+  const [loading, setLoading] = useState(() => !peekCache(keyFor('')));
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [hasNext, setHasNext] = useState(false);
@@ -33,10 +39,14 @@ const GroupMedia = (props) => {
 
   const load = useCallback(async (pageNum = 1) => {
     try {
-      if (pageNum === 1) setLoading(true); else setLoadingMore(true);
+      if (pageNum === 1) {
+        const hit = peekCache(keyFor(kind)) ?? await readCache(keyFor(kind));
+        if (hit?.results) { setItems(hit.results); setHasNext(!!hit.next); setLoading(false); } else setLoading(true);
+      } else setLoadingMore(true);
       const res = await fetchGroupMedia(groupSlug, pageNum, kind);
       const rows = res?.results ?? (Array.isArray(res) ? res : []);
       setItems((prev) => (pageNum === 1 ? rows : [...prev, ...rows]));
+      if (pageNum === 1) writeCache(keyFor(kind), { results: rows, next: res?.next ?? null });
       setHasNext(!!res?.next);
       setPage(pageNum);
     } catch {
@@ -45,7 +55,7 @@ const GroupMedia = (props) => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [groupSlug, kind]);
+  }, [groupSlug, kind, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(1); }, [load]);
 
@@ -101,7 +111,10 @@ const GroupMedia = (props) => {
           </View>
 
           {loading ? (
-            <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+            // Tiles about to fill in, not a spinner.
+            <View style={[styles.grid, styles.skeletonGrid]} testID="media-skeleton">
+              {Array.from({ length: COLS * 4 }, (_, i) => <SkeletonBox key={i} width={tile} height={tile} borderRadius={radius.sm} />)}
+            </View>
           ) : (
             <FlatList
               data={items}
@@ -136,6 +149,7 @@ const GroupMedia = (props) => {
 };
 
 const styles = StyleSheet.create({
+  skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP },
   kinds: { flexDirection: 'row', gap: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   kind: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
   kindOn: { backgroundColor: 'rgba(244,162,97,0.18)', borderColor: colors.accent },

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchGroupJoinRequests, approveJoinRequest, rejectJoinRequest } from '../services/api';
 import GroupRequestItem from './GroupRequestItem';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing } from '../constants/theme';
+import { PersonListSkeleton } from '../components/SkeletonLoader';
 import { useI18n } from '../context/I18nContext';
 import { confirmAction } from '../utils/adminConfirm';
 
@@ -96,7 +97,7 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
           </View>
 
           {loading ? (
-            <View style={styles.loader}><ActivityIndicator size="large" color={colors.accent} /></View>
+            <View style={{ paddingHorizontal: spacing.md }}><PersonListSkeleton count={6} avatar={44} /></View>
           ) : (
             <FlatList
               data={requests}

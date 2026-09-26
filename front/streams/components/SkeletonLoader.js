@@ -146,7 +146,26 @@ export const ProfileSkeleton = () => (
   </View>
 );
 
+// A chat while its messages load: bubbles on both sides, of varied widths,
+// shaped like the conversation about to appear (not a spinner).
+const CHAT_ROWS = [['l', '62%'], ['l', '44%'], ['r', '55%'], ['l', '70%'], ['r', '38%'], ['r', '58%'], ['l', '50%']];
+export const ChatSkeleton = ({ count = 7 }) => (
+  <View style={styles.chat} testID="chat-skeleton">
+    {CHAT_ROWS.slice(0, count).map(([side, w], i) => (
+      <View key={i} style={[styles.chatRow, side === 'r' && styles.chatRowMine]}>
+        {side === 'l' ? <SkeletonBox width={28} height={28} borderRadius={14} style={styles.chatAvatar} /> : null}
+        <SkeletonBox width={w} height={i % 3 === 0 ? 52 : 36} borderRadius={radius.lg} />
+      </View>
+    ))}
+  </View>
+);
+
+export { SkeletonBox };
 const styles = StyleSheet.create({
+  chat: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md, gap: spacing.sm },
+  chatRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  chatRowMine: { justifyContent: 'flex-end' },
+  chatAvatar: { marginRight: spacing.xs },
   postCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

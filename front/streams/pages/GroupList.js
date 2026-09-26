@@ -17,13 +17,14 @@ import { useAuth } from '../context/useAuth';
 import {
   fetchGroups, fetchGroupsByUrl,
   fetchCommunities, fetchCommunitiesByUrl, fetchCommunityCategories,
-  deleteGroup, joinGroupByCode,
+  deleteGroup, joinGroupByCode, fetchGroupPosts,
 } from '../services/api';
 import GroupItem from './GroupItem';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { peekCache, readCache, writeCache } from '../utils/screenCache';
-import { groupListKey } from '../utils/groupChat';
+import { groupListKey, groupChatKey, cacheableGroupMessages } from '../utils/groupChat';
+import { PersonListSkeleton } from '../components/SkeletonLoader';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { subscribeDM } from '../services/dmSocket';
 import { useI18n } from '../context/I18nContext';
@@ -39,6 +40,24 @@ const TAB_KEYS = [
  * engine. `mode` decides which: 'community' adds the category browse and the
  * per-category directory filters; 'group' is the plain list it has always been.
  */
+// The first chats you're likely to open, fetched quietly in the background
+// (one at a time, once a session each) so even a first open paints at once.
+const PREFETCH_MAX = 5;
+const prefetched = new Set();
+async function prefetchChats(rows, meId) {
+  const todo = rows.filter((g) => g.is_member && !prefetched.has(g.slug)).slice(0, PREFETCH_MAX);
+  for (const g of todo) {
+    prefetched.add(g.slug);
+    const key = groupChatKey(meId, g.slug);
+    try {
+      if (peekCache(key)?.messages?.length || (await readCache(key))?.messages?.length) continue;
+      const res = await fetchGroupPosts(g.slug, 1);
+      const messages = (res?.results ?? []).slice().reverse();
+      if (!peekCache(key)) writeCache(key, { group: g, messages: cacheableGroupMessages(messages) });
+    } catch { /* a miss just means that chat loads when opened */ }
+  }
+}
+
 // Which list is on screen — the cache keeps one per view (a search isn't kept).
 const viewOf = (tab, category, filters) => {
   const f = Object.entries(filters || {}).filter(([, v]) => v && String(v).trim()).sort();
@@ -152,6 +171,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   const view = viewOf(activeTab, activeCategory, filters);
   const cacheKey = debouncedSearch ? null : groupListKey(currentUser?.id, mode, view);
   const viewRef = useRef(null);
+  const answeredRef = useRef(null);   // the view the network last answered for
   viewRef.current = `${view}|${debouncedSearch}`;
   const [failed, setFailed] = useState(false);
 
@@ -160,14 +180,18 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   useEffect(() => {
     if (firstView.current) { firstView.current = false; return undefined; }
     const hit = cacheKey ? peekCache(cacheKey) : null;
-    setGroups(hit?.results ?? []);
+    // Nothing kept for this view: the rows on screen stay (faded) until its
+    // own arrive — never a blank list and a spinner.
+    if (hit) setGroups(hit.results ?? []);
     setNextUrl(hit?.next ?? null);
     setLoading(!hit);
     let cancelled = false;
+    const asked = viewRef.current;
     if (cacheKey && !hit) {
       readCache(cacheKey).then((disk) => {
-        if (cancelled || !disk?.results?.length) return;
-        setGroups((prev) => (prev.length ? prev : disk.results));
+        // Too late if the network already answered for this view.
+        if (cancelled || !disk?.results?.length || answeredRef.current === asked) return;
+        setGroups(disk.results);
         setLoading(false);
       });
     }
@@ -198,9 +222,11 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
       if (viewRef.current !== asked) return data;
       const results = data?.results ?? (Array.isArray(data) ? data : []);
       setGroups(results);
+      answeredRef.current = asked;
       setNextUrl(data?.next ?? null);
       setFailed(false);
       if (cacheKey) writeCache(cacheKey, { results, next: data?.next ?? null });
+      prefetchChats(results, currentUser?.id);
       return data;
     } catch {
       // Whatever is on screen stays; an empty screen offers a retry.
@@ -210,7 +236,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
       if (viewRef.current === asked) setLoading(false);
       setRefreshing(false);
     }
-  }, [isCommunity, activeCategory, debouncedSearch, filters, activeTab, cacheKey]);
+  }, [isCommunity, activeCategory, debouncedSearch, filters, activeTab, cacheKey, currentUser?.id]);
 
   // Infinite scroll: append the next page of groups, deduped by slug.
   const loadMore = useCallback(async () => {
@@ -363,7 +389,8 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
     }[activeTab];
 
   const renderEmptyComponent = useCallback(() => (loading ? (
-    <View style={styles.emptyContainer}><ActivityIndicator size="large" color="#F4A261" /></View>
+    // Rows about to fill in, not a spinner.
+    <PersonListSkeleton count={7} avatar={52} />
   ) : failed ? (
     <View style={styles.emptyContainer}>
       <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
