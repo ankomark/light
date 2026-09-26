@@ -244,6 +244,13 @@ describe('A notice page', () => {
     expect(share.mock.calls[0][0].message).toContain('streams://notice/30');
   });
 
+  it('a kept copy of a notice that has since gone is not shown', async () => {
+    mockApi.fetchNotice.mockRejectedValueOnce(Object.assign(new Error('nf'), { response: { status: 404 } }));
+    const r = render(<NoticeDetail navigation={nav} route={{ params: { id: 32, notice: notice(32) } }} />);
+    await waitFor(() => expect(r.getByText('notice.notAvailable')).toBeTruthy());
+    expect(r.queryByText('Notice 32')).toBeNull();
+  });
+
   it("says so when it's gone (expired, or not yours to see yet)", async () => {
     mockApi.fetchNotice.mockRejectedValueOnce(Object.assign(new Error('nf'), { response: { status: 404 } }));
     const r = render(<NoticeDetail navigation={nav} route={{ params: { id: 31 } }} />);

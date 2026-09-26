@@ -155,3 +155,47 @@ class RichNoticeTests(Base):
         self.assertEqual(self.client.get(f'/api/notices/{nid}/').status_code, 404)
         self.client.force_authenticate(self.admin)
         self.assertEqual(self.client.get(f'/api/notices/{nid}/').status_code, 200)
+
+
+class ScanTests(Base):
+    def test_the_board_costs_the_same_for_3_notices_or_12(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def count():
+            with CaptureQueriesContext(connection) as ctx:
+                self.assertEqual(self.client.get('/api/notices/').status_code, 200)
+            return len(ctx.captured_queries)
+        for i in range(3):
+            Notice.objects.create(title=f'a{i}', body='b', created_by=self.admin, announced=True)
+        self.client.force_authenticate(self.reader)
+        count()
+        few = count()
+        for i in range(9):
+            Notice.objects.create(title=f'b{i}', body='b', created_by=self.admin, announced=True)
+        self.assertEqual(count(), few)
+
+    def test_rescheduling_moves_the_push(self):
+        from songs.models import Job
+        nid = self.post(publish_at=(timezone.now() + timedelta(hours=1)).isoformat()).json()['id']
+        later = timezone.now() + timedelta(days=2)
+        self.client.patch(f'/api/notices/{nid}/', {'publish_at': later.isoformat()}, format='json')
+        job = Job.objects.get(kind='announce_notice', key=f'notice:{nid}')
+        self.assertLess(abs((job.run_after - later).total_seconds()), 2)
+
+    def test_admins_mark_notes_but_never_change_them(self):
+        from songs.models import AdminNote
+        note = AdminNote.objects.create(sender=self.reader, body='original words')
+        self.client.force_authenticate(self.admin)
+        self.client.patch(f'/api/admin-notes/{note.id}/', {'is_read': True, 'body': 'rewritten'}, format='json')
+        note.refresh_from_db()
+        self.assertEqual((note.body, note.is_read), ('original words', True))
+
+    def test_closed_accounts_are_not_pushed_and_notices_have_limits(self):
+        User.objects.filter(pk=self.reader.pk).update(is_deactivated=True)
+        pushed = []
+        with mock.patch('songs.push.send_expo_push', side_effect=lambda tokens, *a, **k: pushed.extend(tokens)):
+            self.post()
+        self.assertEqual(pushed, [])
+        self.assertEqual(self.post(body='x' * 10001).status_code, 400)
+        self.assertEqual(self.post(title='   ').status_code, 400)

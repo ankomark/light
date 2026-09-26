@@ -31,7 +31,7 @@ const NoticeDetail = ({ route, navigation }) => {
     if (!notice) readCache(key).then((disk) => { if (!cancelled && disk) setNotice((n) => n || disk); });
     fetchNotice(id)
       .then((n) => { if (!cancelled && n) { setNotice(n); writeCache(key, n); } })
-      .catch((e) => { if (!cancelled && e?.response?.status === 404) setGone(true); });
+      .catch((e) => { if (!cancelled && e?.response?.status === 404) { setGone(true); writeCache(key, null); } });
     return () => { cancelled = true; };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -55,7 +55,7 @@ const NoticeDetail = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {gone && !notice ? (
+      {gone ? (   // expired, deleted, or not live yet: even a kept copy isn't shown
         <View style={styles.gone}>
           <MaterialCommunityIcons name="bulletin-board" size={48} color={colors.textMuted} />
           <Text style={styles.goneText}>{t('notice.notAvailable')}</Text>

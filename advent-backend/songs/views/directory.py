@@ -152,7 +152,10 @@ def schedule_announcement(notice):
     now = timezone.now()
     if notice.publish_at and notice.publish_at > now:
         from ..jobs import enqueue
-        enqueue('announce_notice', key=f'notice:{notice.id}', run_after=notice.publish_at, notice_id=notice.id)
+        from ..models import Job
+        job = enqueue('announce_notice', key=f'notice:{notice.id}', run_after=notice.publish_at, notice_id=notice.id)
+        # A queued job is reused as it was: a new publish time must move it too.
+        Job.objects.filter(pk=job.pk, status=Job.QUEUED).update(run_after=notice.publish_at)
     else:
         announce_notice(notice)
 
@@ -199,6 +202,11 @@ class AdminNoteViewSet(viewsets.ModelViewSet):
         # Force is_read=False on create so a sender can't submit a pre-read note;
         # only admins flip it later via update/partial_update.
         serializer.save(sender=self.request.user, is_read=False)
+
+    def perform_update(self, serializer):
+        # Admins mark a note read or unread — they never change the sender's words.
+        serializer.validated_data.pop('body', None)
+        serializer.save()
 
     @action(detail=False, methods=['get'])
     def mine(self, request):

@@ -66,6 +66,20 @@ class NoticeSerializer(serializers.ModelSerializer):
             return 'expired'
         return 'live'
 
+    def validate_title(self, v):
+        v = (v or '').strip()
+        if not v:
+            raise serializers.ValidationError('A notice needs a title.')
+        return v[:200]
+
+    def validate_body(self, v):
+        v = (v or '').strip()
+        if not v:
+            raise serializers.ValidationError('A notice needs some words.')
+        if len(v) > 10000:
+            raise serializers.ValidationError('Keep a notice under 10,000 characters.')
+        return v
+
     def validate_cover_image(self, v):
         v = (v or '').strip()
         # Our own uploads only — never any address on the internet.

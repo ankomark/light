@@ -206,7 +206,9 @@ def notify_everyone(notification_type, message, data=None, exclude_ids=(), title
     from .models import DeviceToken
     from .tasks import run_in_background
 
-    tokens = DeviceToken.objects.filter(is_active=True).exclude(user_id__in=list(exclude_ids))
+    # Only open accounts: not banned (inactive) or deactivated.
+    tokens = (DeviceToken.objects.filter(is_active=True, user__is_active=True, user__is_deactivated=False)
+              .exclude(user_id__in=list(exclude_ids)))
     category = NOTIFICATION_CATEGORIES.get(notification_type)
     if category:
         tokens = tokens.exclude(**{f'user__notification_preference__{category}': False})
