@@ -32,15 +32,24 @@ class NoticeSerializer(serializers.ModelSerializer):
         source='created_by.username', read_only=True, default=None
     )
     can_manage = serializers.SerializerMethodField()
+    # Posted since I last looked at the board.
+    is_new = serializers.SerializerMethodField()
 
     class Meta:
         model = Notice
         fields = [
             'id', 'title', 'body', 'is_pinned',
-            'created_by', 'created_by_username', 'can_manage',
+            'created_by', 'created_by_username', 'can_manage', 'is_new',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
+
+    def get_is_new(self, obj):
+        seen = self.context.get('notices_seen_at')
+        request = self.context.get('request')
+        me = request.user.id if request and request.user.is_authenticated else None
+        # Newer than my last look — and not one I posted myself.
+        return bool(seen and obj.created_at > seen and obj.created_by_id != me)
 
     def get_can_manage(self, obj):
         request = self.context.get('request')
@@ -68,7 +77,7 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         model = NotificationPreference
         fields = [
             'likes', 'comments', 'follows', 'messages', 'groups', 'communities',
-            'live', 'quiz', 'weather', 'verse', 'books', 'updated_at',
+            'live', 'quiz', 'weather', 'verse', 'books', 'notices', 'updated_at',
         ]
         read_only_fields = ['updated_at']
 

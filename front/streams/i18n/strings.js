@@ -360,6 +360,8 @@ export const STRINGS = {
 
     'inbox.title': 'Messages',
     'inbox.empty': 'No conversations yet',
+    'notice.new_tag': "New",
+    'settings.notif.notices': "New notices",
     'notice.leadership': "Leadership",
     'notice.intro': "Official announcements from the leadership.",
     'notice.loadFailed': "Couldn't load the notice board",
@@ -3189,6 +3191,8 @@ export const STRINGS = {
 
     'inbox.title': 'Ujumbe',
     'inbox.empty': 'Hakuna mazungumzo bado',
+    'notice.new_tag': "Mpya",
+    'settings.notif.notices': "Matangazo mapya",
     'notice.leadership': "Uongozi",
     'notice.intro': "Matangazo rasmi kutoka kwa uongozi.",
     'notice.loadFailed': "Imeshindwa kupakia ubao wa matangazo",

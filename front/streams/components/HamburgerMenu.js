@@ -188,7 +188,7 @@ const isPage = (route, item) => !!route && route.name === item.route
 // communities with something new. `poll`: keep it fresh (the header's
 // button) — live off the DM socket, with a slow poll behind it; otherwise
 // it's read once (the menu, open for a moment).
-const NONE = { messages: 0, groups: 0, communities: 0 };
+const NONE = { messages: 0, groups: 0, communities: 0, notices: 0 };
 const useUnread = ({ poll }) => {
   const { isAuthenticated } = useAuth();
   const [unread, setUnread] = useState(NONE);
@@ -199,6 +199,7 @@ const useUnread = ({ poll }) => {
         messages: (r?.unread_count || 0) + (r?.requests || 0),
         groups: r?.groups || 0,
         communities: r?.communities || 0,
+        notices: r?.notices || 0,
       }))
       .catch(() => {});
   }, [isAuthenticated]);
@@ -210,7 +211,7 @@ const useUnread = ({ poll }) => {
     // A new message or a read receipt: count again (once for a burst).
     let soon = null;
     const unsub = subscribeDM((e) => {
-      if (!['message', 'read', 'deleted', 'group_message', 'group_read'].includes(e.type)) return;
+      if (!['message', 'read', 'deleted', 'group_message', 'group_read', 'notices_seen'].includes(e.type)) return;
       clearTimeout(soon);
       soon = setTimeout(refresh, 400);
     });
@@ -223,7 +224,7 @@ const useUnread = ({ poll }) => {
 function HamburgerMenu() {
   const navigation = useNavigation();
   const unread = useUnread({ poll: true });
-  const any = unread.messages + unread.groups + unread.communities;
+  const any = unread.messages + unread.groups + unread.communities + unread.notices;
   return (
     <TouchableOpacity onPress={() => openMenu(navigation)} style={styles.menuButton} accessibilityRole="button" accessibilityLabel="Open menu">
       <Ionicons name="menu" size={26} color={colors.white} />
@@ -238,7 +239,7 @@ export function MenuScreen() {
   const { isAuthenticated, currentUser, logout } = useAuth();
   const { t } = useI18n();
   const unread = useUnread({ poll: false });
-  const badgeFor = { Inbox: unread.messages, Groups: unread.groups, Communities: unread.communities };
+  const badgeFor = { Inbox: unread.messages, Groups: unread.groups, Communities: unread.communities, NoticeBoard: unread.notices };
 
   // The page the menu was opened over: marked as where you are.
   const below = useNavigationState((s) => s?.routes?.[s.index - 1]);

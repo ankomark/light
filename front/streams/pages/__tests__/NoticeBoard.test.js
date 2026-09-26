@@ -38,6 +38,9 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialCommunity
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }) }));
 
+const mockAnnounced = [];
+jest.mock('../../services/dmSocket', () => ({ announceDM: (e) => mockAnnounced.push(e) }));
+
 const NoticeBoard = require('../NoticeBoard').default;
 const { ActivityIndicator } = require('react-native');
 
@@ -109,4 +112,15 @@ test('anyone can send the admins a note', async () => {
   await act(async () => { fireEvent.press(r.getByTestId('note-send')); });
   expect(mockApi.createAdminNote).toHaveBeenCalledWith('The hall roof leaks');
   expect(mockNotify).toHaveBeenCalledWith('notice.sentTitle', 'notice.sentBody');
+});
+
+test('new notices are marked, then seen (the badge clears; the cache forgets "new")', async () => {
+  const { peekCache } = require('../../utils/screenCache');
+  mockApi.fetchNotices.mockResolvedValue({ results: [notice(7, { is_new: true }), notice(6)], next: null });
+  const r = render(<NoticeBoard />);
+  await waitFor(() => expect(r.getByTestId('notice-new-7')).toBeTruthy());
+  expect(r.queryByTestId('notice-new-6')).toBeNull();
+  await waitFor(() => expect(mockApi.markNoticesSeen).toHaveBeenCalled());
+  await waitFor(() => expect(mockAnnounced).toContainEqual({ type: 'notices_seen' }));
+  expect(peekCache(userKey(1, 'notices')).results[0].is_new).toBe(false);
 });

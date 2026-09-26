@@ -9,6 +9,7 @@ NOTIFICATION_TITLES = {
     'follow': '\U0001f464 New Follower',
     'group_join_request': '\U0001f465 Join Request',
     'group_mention': '\U0001f4ac You were mentioned',
+    'notice': '\U0001f4e2 Notice board',
     'group_join_approved': '✅ Request Approved',
     'group_join_rejected': '\U0001f6ab Request Declined',
     'message': '\U0001f4ac New Message',
@@ -41,6 +42,7 @@ NOTIFICATION_CATEGORIES = {
     'message': 'messages',
     'group_join_request': 'groups',
     'group_mention': 'messages',
+    'notice': 'notices',
     'group_join_approved': 'groups',
     'group_join_rejected': 'groups',
     'group_added': 'groups',
@@ -194,3 +196,20 @@ def notify_user(recipient, notification_type, message, data=None, title=None,
     if not title:
         title = NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
     run_in_background(send_expo_push, tokens, title, message, data)
+
+def notify_everyone(notification_type, message, data=None, exclude_ids=(), title=None):
+    """One push to every signed-in device (a new notice): one query for the
+    tokens — minus whoever turned the category off — then batches of 100,
+    off the request thread."""
+    from .models import DeviceToken
+    from .tasks import run_in_background
+
+    tokens = DeviceToken.objects.filter(is_active=True).exclude(user_id__in=list(exclude_ids))
+    category = NOTIFICATION_CATEGORIES.get(notification_type)
+    if category:
+        tokens = tokens.exclude(**{f'user__notification_preference__{category}': False})
+    tokens = list(tokens.values_list('token', flat=True).distinct())
+    title = title or NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
+    for i in range(0, len(tokens), EXPO_BATCH):
+        run_in_background(send_expo_push, tokens[i:i + EXPO_BATCH], title, message, data)
+    return len(tokens)

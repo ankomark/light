@@ -68,8 +68,43 @@ class NoticeViewSet(viewsets.ModelViewSet):
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        u = self.request.user
+        if u.is_authenticated:
+            # "New" is newer than their last look — or, never looked, than when they joined.
+            ctx['notices_seen_at'] = u.notices_seen_at or u.date_joined
+        return ctx
+
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        notice = serializer.save(created_by=self.request.user)
+        announce_notice(notice)
+
+    @action(detail=False, methods=['get'])
+    def unseen(self, request):
+        """How many notices are new to me (the menu's badge)."""
+        return Response({'count': unseen_notices(request.user)})
+
+    @action(detail=False, methods=['post'])
+    def seen(self, request):
+        """I've looked at the board: nothing is new any more."""
+        User.objects.filter(pk=request.user.pk).update(notices_seen_at=timezone.now())
+        return Response({'count': 0})
+
+
+def unseen_notices(user):
+    since = user.notices_seen_at or user.date_joined
+    return Notice.objects.filter(created_at__gt=since).exclude(created_by=user).count()
+
+
+def announce_notice(notice):
+    """Everyone hears about a new notice (a push — unless they turned notices
+    off), off the request thread."""
+    from ..push import notify_everyone
+    run_in_background(
+        notify_everyone, 'notice', f"{notice.title}: {(notice.body or '')[:100]}",
+        data={'type': 'notice', 'noticeId': notice.id}, exclude_ids=[notice.created_by_id],
+    )
 
 
 class AdminNoteViewSet(viewsets.ModelViewSet):

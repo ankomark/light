@@ -87,6 +87,7 @@ const NOTIFICATION_CATEGORIES = [
   { key: 'weather', labelKey: 'settings.notif.weather', icon: 'weather-partly-cloudy' },
   { key: 'verse', labelKey: 'settings.notif.verse', icon: 'book-open-variant' },
   { key: 'books', labelKey: 'settings.notif.books', icon: 'bookshelf' },
+  { key: 'notices', labelKey: 'settings.notif.notices', icon: 'bulletin-board' },
 ];
 
 // Module scope: no hook here, so the caller passes t in.

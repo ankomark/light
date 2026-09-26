@@ -1368,6 +1368,9 @@ export const deleteGroup = async (groupSlug) => {
 export const fetchNotices = async (page = 1) =>
   apiRequest('get', '/notices/', null, { params: { page, page_size: 20 } });
 
+// I've looked at the board: nothing is new any more (the menu badge).
+export const markNoticesSeen = () => apiRequest('post', '/notices/seen/');
+
 export const createNotice = async ({ title, body, is_pinned = false }) => {
   return apiRequest('post', '/notices/', { title, body, is_pinned });
 };

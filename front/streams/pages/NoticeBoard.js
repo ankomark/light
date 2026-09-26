@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  fetchNotices, createNotice, deleteNotice,
+  fetchNotices, createNotice, deleteNotice, markNoticesSeen,
   createAdminNote, fetchAdminNotes, markAdminNoteRead, deleteAdminNote,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
@@ -19,6 +19,7 @@ import { useI18n } from '../context/I18nContext';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { NoticeListSkeleton } from '../components/SkeletonLoader';
+import { announceDM } from '../services/dmSocket';
 import { colors, typography, spacing, radius } from '../constants/theme';
 
 // Calm, not bright: smoked glass cards and the warm accent (no light blue).
@@ -32,12 +33,21 @@ const formatDate = (iso) => {
 
 const NoticeCard = memo(({ item, onDelete, t }) => (
   <View style={[styles.card, item.is_pinned && styles.cardPinned]} testID={`notice-${item.id}`}>
-    {item.is_pinned && (
-      <View style={styles.pinnedTag}>
-        <MaterialCommunityIcons name="pin" size={12} color={colors.accent} />
-        <Text style={styles.pinnedText}>{t('notice.pinned')}</Text>
+    {item.is_pinned || item.is_new ? (
+      <View style={styles.tagRow}>
+        {item.is_pinned ? (
+          <View style={styles.pinnedTag}>
+            <MaterialCommunityIcons name="pin" size={12} color={colors.accent} />
+            <Text style={styles.pinnedText}>{t('notice.pinned')}</Text>
+          </View>
+        ) : null}
+        {item.is_new ? (
+          <View style={styles.newTag} testID={`notice-new-${item.id}`}>
+            <Text style={styles.newTagText}>{t('notice.new_tag')}</Text>
+          </View>
+        ) : null}
       </View>
-    )}
+    ) : null}
     <View style={styles.cardHeader}>
       <Text style={styles.cardTitle}>{item.title}</Text>
       {item.can_manage && (
@@ -112,7 +122,11 @@ const NoticeBoard = () => {
       setFailed(false);
       pageRef.current = 1;
       moreRef.current = !!res?.next;
-      writeCache(cacheKey, { results: rows });
+      // Seen now: the next open shouldn't call these new again.
+      writeCache(cacheKey, { results: rows.map((n) => (n.is_new ? { ...n, is_new: false } : n)) });
+      if (rows.some((n) => n.is_new)) {
+        markNoticesSeen().then(() => announceDM({ type: 'notices_seen' })).catch(() => {});
+      }
     } catch {
       setFailed(true);   // what's on screen stays
     } finally {
@@ -465,7 +479,10 @@ const styles = StyleSheet.create({
     borderColor: GLASS_EDGE, padding: spacing.md, marginBottom: spacing.md,
   },
   cardPinned: { borderColor: 'rgba(244,162,97,0.55)', backgroundColor: 'rgba(24,18,12,0.7)' },
-  pinnedTag: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginBottom: spacing.xs },
+  tagRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },
+  pinnedTag: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  newTag: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: radius.full, backgroundColor: colors.accent },
+  newTagText: { color: '#0A1628', fontSize: 11, fontWeight: '800' },
   pinnedText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
   cardHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm },
   cardTitle: { ...typography.h3, color: colors.textPrimary, flex: 1 },

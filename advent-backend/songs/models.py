@@ -60,6 +60,8 @@ class User(AbstractUser):
     # Soft moderation state. "Ban" uses Django's is_active (blocks auth);
     # "suspend" is a reversible flag enforced on content-creating actions.
     is_suspended = models.BooleanField(default=False)
+    # When they last looked at the notice board (what's newer is "new").
+    notices_seen_at = models.DateTimeField(null=True, blank=True)
     suspension_reason = models.CharField(max_length=255, blank=True, default='')
     suspended_at = models.DateTimeField(null=True, blank=True)
     # When set, a suspension auto-expires at this time (temporary suspension).
@@ -1058,6 +1060,8 @@ class NotificationPreference(models.Model):
     verse = models.BooleanField(default=True)
     # New books and chapters from authors followed, books saved and being read.
     books = models.BooleanField(default=True)
+    # New notices on the notice board.
+    notices = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

@@ -248,6 +248,9 @@ const App = () => {
           postId: data.postId,
           ...(data.commentId ? { commentId: data.commentId, shouldOpenComments: true } : {}),
         });
+      } else if (data?.type === 'notice') {
+        // A new notice: the board (it opens on it, newest first).
+        navigate('NoticeBoard');
       } else if (data?.groupSlug) {
         // Group taps deep-link like the in-app bell: a join request goes to the
         // group's pending-requests page, everything else to the group itself.
