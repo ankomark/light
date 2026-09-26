@@ -165,7 +165,8 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
         they don't keep reading the chat until they happen to reconnect."""
         payload = event['payload']
         await self.send_json(payload)
-        if payload.get('type') == 'member_removed' and payload.get('user_id') == self.user.id:
+        kind = payload.get('type')
+        if (kind in ('member_removed', 'member_left') and payload.get('user_id') == self.user.id) or kind == 'group_deleted':
             await self.close(code=4403)
 
 

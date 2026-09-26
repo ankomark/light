@@ -1457,56 +1457,6 @@ export const setGroupSlowMode = (slug, seconds) =>
 export const joinGroupByCode = async (code) =>
   apiRequest('post', '/groups/join-by-code/', { code });
 
-// ... other exports
-export const createGroupPost = async (content, groupSlug, attachments = []) => {
-  try {
-    const formData = new FormData();
-    formData.append('content', content || '');
-    
-    // Properly format attachments for FormData
-    attachments.forEach((attachment) => {
-      formData.append('attachments', {
-        uri: attachment.uri,
-        name: attachment.name || `file_${Date.now()}`,
-        type: attachment.type || getMimeTypeFromUri(attachment.uri)
-      });
-    });
-
-    const token = await getAuthToken();
-    const response = await axios.post(
-      `${API_URL}/groups/${groupSlug}/posts/`,
-      formData,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-        transformRequest: () => formData,
-      }
-    );
-
-    // Validate and normalize the response
-    if (!response.data?.id) {
-      throw new Error('Invalid post creation response');
-    }
-
-    return {
-      id: response.data.id,
-      content: response.data.content || '',
-      created_at: response.data.created_at || new Date().toISOString(),
-      user: response.data.user || { username: 'You' }, // Fallback for immediate UI
-      attachments: response.data.attachments || [],
-      group: response.data.group || { slug: groupSlug }
-    };
-  } catch (error) {
-    console.error('Post creation failed:', error);
-    throw error.response?.data || { 
-      message: 'Failed to create post',
-      details: error.message 
-    };
-  }
-};
-
 export const checkGroupMembership = async (slug) => {
   try {
     const response = await apiRequest('get', `/groups/${slug}/check-membership/`);
@@ -2232,7 +2182,6 @@ export default {
   updateCommunity,
   requestJoinGroup,
   fetchGroupPosts,
-  createGroupPost,
   fetchGroupJoinRequests,
   approveJoinRequest,
   rejectJoinRequest,

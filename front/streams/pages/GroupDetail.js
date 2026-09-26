@@ -530,6 +530,9 @@ const GroupDetail = ({ route, navigation }) => {
     if (!canReadRef.current) return;
     markGroupRead(groupSlug).catch(() => {});
     announceDM({ type: 'group_read', group_slug: groupSlug });
+    // So the cached copy knows too (the "unread" line on the next open).
+    const now = new Date().toISOString();
+    setGroup((g) => (g ? { ...g, unread_count: 0, my_settings: { ...(g.my_settings || {}), last_read_at: now } } : g));
   }, [groupSlug]);
 
   // The safety-net poll: slow while the socket is up, quick while it's down,
@@ -619,6 +622,21 @@ const GroupDetail = ({ route, navigation }) => {
               notify(t('group.detail.removedTitle'), t('group.detail.removedBody'));
             }
             break;
+          case 'member_left':
+            // I left (from another device): this one stops showing the chat.
+            if (evt.user_id === currentUser?.id) {
+              canReadRef.current = false;
+              setIsMember(false); setIsAdmin(false); setIsModerator(false);
+              setMessages([]);
+            }
+            break;
+          case 'group_deleted':
+            canReadRef.current = false;
+            setMessages([]);
+            writeCache(cacheKey, null);
+            notify(t('group.detail.deletedTitle'), t('group.detail.deletedBody'));
+            navigation.goBack();
+            break;
           case 'group_updated':
             setGroup((g) => (g ? { ...g, ...(evt.group || {}) } : g));
             break;
@@ -644,7 +662,7 @@ const GroupDetail = ({ route, navigation }) => {
     });
     socketRef.current = sock;
     return () => { sock.close(); socketRef.current = null; liveRef.current = false; };
-  }, [groupSlug, isMember, currentUser?.id, markUserTyping, loadPosts, startPoll, t]);
+  }, [groupSlug, isMember, currentUser?.id, markUserTyping, loadPosts, startPoll, t, cacheKey, navigation]);
 
   // Tell the room I'm typing (once), and stop after a short idle.
   const notifyTyping = useCallback(() => {

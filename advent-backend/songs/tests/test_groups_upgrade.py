@@ -289,3 +289,28 @@ class MemberFeatureTests(Base):
         kinds = [p['message_type'] for p in self.client.get(self.url('posts/media/'), {'type': 'file'}).json()['results']]
         self.assertEqual(kinds, ['file'])
         self.assertEqual(self.client.get(self.url('posts/media/')).json()['count'], 2)
+
+
+class ScanFixTests(Base):
+    def test_leaving_and_deleting_cut_sockets_off(self):
+        from unittest import mock
+        with mock.patch('songs.group_live.tell_group') as tell:
+            self.client.force_authenticate(self.member)
+            self.client.post(self.url('leave/'))
+            self.client.force_authenticate(self.owner)
+            slug = self.group.slug
+            self.assertEqual(self.client.delete(self.url()).status_code, 204)
+        sent = [(c.args[0], c.args[1]['type']) for c in tell.call_args_list]
+        self.assertIn((slug, 'member_left'), sent)
+        self.assertIn((slug, 'group_deleted'), sent)
+
+    def test_add_member_search_skips_the_blocked_and_deactivated(self):
+        from songs.models import Block
+        User.objects.create_user('gfindme', 'gf@x.com', 'x')
+        gone = User.objects.create_user('gfindgone', 'gg2@x.com', 'x')
+        User.objects.filter(pk=gone.pk).update(is_deactivated=True)
+        foe = User.objects.create_user('gfindfoe', 'gff@x.com', 'x')
+        Block.objects.create(blocker=foe, blocked=self.owner)
+        self.client.force_authenticate(self.owner)
+        names = [u['username'] for u in self.client.get(self.url('search-users/'), {'q': 'gfind'}).json()]
+        self.assertEqual(names, ['gfindme'])

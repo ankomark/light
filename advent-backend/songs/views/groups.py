@@ -43,6 +43,9 @@ def members_changed(group, event, user):
     live.tell_group(group.slug, {'type': 'members', 'event': event, 'user_id': user.id, 'member_count': count})
     if event == 'removed':
         live.tell_group(group.slug, {'type': 'member_removed', 'user_id': user.id})
+    elif event == 'left':
+        # Their other devices stop receiving the chat too.
+        live.tell_group(group.slug, {'type': 'member_left', 'user_id': user.id})
 
 
 def group_changed(group, request, fields):
@@ -347,8 +350,11 @@ class GroupViewSet(viewsets.ModelViewSet):
                                             'only_admins_can_post', 'join_question'])
 
     def perform_destroy(self, instance):
+        slug = instance.slug
         instance.delete()
         cache.delete('group_list')
+        # Everyone with it open is told, and cut off.
+        live.tell_group(slug, {'type': 'group_deleted'})
 
     @action(detail=True, methods=['get'], url_path='members')
     def group_members(self, request, slug=None):
@@ -603,8 +609,10 @@ class GroupViewSet(viewsets.ModelViewSet):
             return Response([])
         member_ids = GroupMember.objects.filter(group=group).values_list('user_id', flat=True)
         users = (
-            User.objects.filter(username__icontains=q)
+            # Not deactivated or banned accounts, nor anyone blocked either way.
+            User.objects.filter(username__icontains=q, is_active=True, is_deactivated=False)
             .exclude(id__in=member_ids)
+            .exclude(id__in=blocked_ids_for(request.user))
             .select_related('profile')
             .order_by('username')[:20]
         )
@@ -996,6 +1004,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         """Edit a text message you authored. Only the body changes; the edit is
         stamped and fanned out to the group so everyone sees it update live."""
         post = self.get_object()
+        if request.user.is_currently_suspended:
+            raise PermissionDenied('Your account is suspended.')
         if post.user_id != request.user.id:
             return Response({'error': 'You can only edit your own messages'},
                             status=status.HTTP_403_FORBIDDEN)

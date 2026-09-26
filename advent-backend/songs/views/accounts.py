@@ -366,7 +366,8 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         denied = self._require_can_view(user)
         if denied:
             return denied
-        qs = annotated_tracks(request.user).filter(artist=user).order_by('-created_at')
+        # Newest first; two uploads in the same instant keep a stable order (and pages can't drift).
+        qs = annotated_tracks(request.user).filter(artist=user).order_by('-created_at', '-id')
         paginator = StandardPagination()
         paginator.page_size = 20
         page = paginator.paginate_queryset(qs, request, view=self)

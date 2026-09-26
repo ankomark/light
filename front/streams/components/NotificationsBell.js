@@ -26,6 +26,7 @@ const TYPE_ICON = {
   group_join_request: { name: 'people', color: colors.accent },
   group_join_approved: { name: 'checkmark-circle', color: '#17BF63' },
   group_join_rejected: { name: 'close-circle', color: colors.error },
+  group_mention: { name: 'at', color: colors.accent },
   // "Your song reached 1,000 plays" (opens the song).
   milestone: { name: 'trophy', color: '#E8C66B' },
   // A song of yours taken down / restored (opens Artist Studio).

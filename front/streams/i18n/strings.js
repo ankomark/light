@@ -360,6 +360,8 @@ export const STRINGS = {
 
     'inbox.title': 'Messages',
     'inbox.empty': 'No conversations yet',
+    'group.detail.deletedTitle': "This group was deleted",
+    'group.detail.deletedBody': "Its admin deleted it, with its messages.",
     'group.detail.options': "Group options",
     'group.detail.unreadMessages': "Unread messages",
     'group.detail.mutedAlways': "Muted",
@@ -3180,6 +3182,8 @@ export const STRINGS = {
 
     'inbox.title': 'Ujumbe',
     'inbox.empty': 'Hakuna mazungumzo bado',
+    'group.detail.deletedTitle': "Kikundi hiki kimefutwa",
+    'group.detail.deletedBody': "Msimamizi wake amekifuta, pamoja na ujumbe wake.",
     'group.detail.options': "Chaguo za kikundi",
     'group.detail.unreadMessages': "Ujumbe ambao haujasomwa",
     'group.detail.mutedAlways': "Imenyamazishwa",

@@ -143,6 +143,7 @@ beforeEach(() => {
   mockConfirm.mockClear();
   mockNotify.mockClear();
   nav.navigate.mockClear();
+  nav.goBack.mockClear();
   ['public:all', 'private:all', 'mine:all'].forEach((v) => dropCache(groupListKey(1, 'group', v)));
 });
 
@@ -306,6 +307,21 @@ describe('Group chat, live', () => {
     await act(async () => { mockSocket.handlers.onEvent({ type: 'member_removed', user_id: 1 }); });
     expect(mockNotify).toHaveBeenCalledWith('group.detail.removedTitle', 'group.detail.removedBody');
     expect(r.queryByText('post 50')).toBeNull();
+  });
+});
+
+describe('Group chat, scan fixes', () => {
+  it('a deleted group closes with a notice; leaving on another device clears this one', async () => {
+    mockApi.fetchGroupDetails.mockResolvedValue(group('z1'));
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: [post(90, 90)], next: null });
+    const r = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 'z1', group: group('z1') } }} />);
+    await waitFor(() => expect(r.getByText('post 90')).toBeTruthy());
+    await act(async () => { mockSocket.handlers.onEvent({ type: 'member_left', user_id: 1 }); });
+    expect(r.queryByText('post 90')).toBeNull();
+    expect(mockNotify).not.toHaveBeenCalled();                        // I left: no "removed" notice
+    await act(async () => { mockSocket.handlers.onEvent({ type: 'group_deleted' }); });
+    expect(mockNotify).toHaveBeenCalledWith('group.detail.deletedTitle', 'group.detail.deletedBody');
+    expect(nav.goBack).toHaveBeenCalled();
   });
 });
 
