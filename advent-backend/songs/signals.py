@@ -293,3 +293,12 @@ def delete_processed_files(sender, instance, **kwargs):
     from . import r2
     from .tasks import run_in_background
     run_in_background(r2.delete_prefix, f'tracks/{instance.pk}/')
+
+
+@receiver(post_save, sender=User)
+@receiver(post_delete, sender=User)
+def forget_super_admins(sender, **kwargs):
+    """Who's a super admin is cached (views.common.super_admin_user_ids): any
+    change to someone's record — a role granted or taken — forgets it."""
+    from django.core.cache import cache
+    cache.delete('super_admin_ids')

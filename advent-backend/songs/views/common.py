@@ -163,11 +163,19 @@ def super_admin_user_ids():
     """IDs of every super admin. Super admins operate invisibly in community
     chats: their messages and reactions are filtered out for regular clients, so
     callers pass these ids to ``.exclude(...)`` / skip them in reaction aggregates.
-    Empty-set-friendly: an empty ``__in`` exclude is a harmless no-op."""
-    return set(
-        User.objects.filter(Q(is_superuser=True) | Q(admin_role='super_admin'))
-        .values_list('id', flat=True)
-    )
+    Empty-set-friendly: an empty ``__in`` exclude is a harmless no-op.
+
+    Asked on every group request, so it's cached; any change to a user's
+    record drops the cache (songs/signals: forget_super_admins)."""
+    ids = cache.get(SUPER_ADMINS_KEY)
+    if ids is None:
+        ids = list(User.objects.filter(Q(is_superuser=True) | Q(admin_role='super_admin'))
+                   .values_list('id', flat=True))
+        cache.set(SUPER_ADMINS_KEY, ids, 300)
+    return set(ids)
+
+
+SUPER_ADMINS_KEY = 'super_admin_ids'
 
 
 class IsOwnerOrReadOnly(BasePermission):

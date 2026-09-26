@@ -159,7 +159,7 @@ const GroupAddMembers = ({ route, navigation }) => {
   return (
     <View style={styles.root}>
       <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.72)" />
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
             <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />

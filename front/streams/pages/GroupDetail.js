@@ -1508,6 +1508,8 @@ const GroupDetail = ({ route, navigation }) => {
       {canChat && slowSeconds > 0 && !(isAdmin || isModerator) ? (
         <Text style={styles.slowHint} testID="slow-hint">{t('group.detail.slowModeHint', { time: slowLabel(slowSeconds, t) })}</Text>
       ) : null}
+      {/* Off the home indicator (the keyboard, when up, already lifts it). */}
+      <SafeAreaView edges={kbHeight > 0 ? ['left', 'right'] : ['left', 'right', 'bottom']} style={styles.bottomSafe}>
       {canChat ? (
         <View style={styles.inputBar}>
           {isRecording ? (
@@ -1518,19 +1520,19 @@ const GroupDetail = ({ route, navigation }) => {
             </>
           ) : (
             <>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => setShowEmoji((s) => !s)}><Ionicons name={showEmoji ? 'close' : 'happy-outline'} size={24} color={colors.textSecondary} /></TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={onAttachPress}><Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} /></TouchableOpacity>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => setShowEmoji((s) => !s)} accessibilityLabel={t('dm.emoji')}><Ionicons name={showEmoji ? 'close' : 'happy-outline'} size={24} color={colors.textSecondary} /></TouchableOpacity>
+              <TouchableOpacity style={styles.iconBtn} onPress={onAttachPress} accessibilityLabel={t('dm.attach')}><Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} /></TouchableOpacity>
               <TextInput style={styles.input} placeholder={t('chat.messagePlaceholder')} placeholderTextColor={colors.placeholder} value={text} onChangeText={onChangeText} onFocus={() => setShowEmoji(false)} multiline maxLength={2000} />
               {editingMsg ? (
-                <TouchableOpacity style={styles.sendBtn} onPress={saveEdit}>
+                <TouchableOpacity style={styles.sendBtn} onPress={saveEdit} accessibilityLabel={t('dm.saveEdit')}>
                   <Ionicons name="checkmark" size={20} color={colors.white} />
                 </TouchableOpacity>
               ) : text.trim() ? (
-                <TouchableOpacity style={styles.sendBtn} onPress={handleSendText} testID="group-send">
+                <TouchableOpacity style={styles.sendBtn} onPress={handleSendText} testID="group-send" accessibilityLabel={t('dm.send')}>
                   <Ionicons name="send" size={18} color={colors.white} />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity style={styles.sendBtn} onPress={startRecording}><Ionicons name="mic" size={20} color={colors.white} /></TouchableOpacity>
+                <TouchableOpacity style={styles.sendBtn} onPress={startRecording} accessibilityLabel={t('dm.recordVoice')}><Ionicons name="mic" size={20} color={colors.white} /></TouchableOpacity>
               )}
             </>
           )}
@@ -1555,6 +1557,7 @@ const GroupDetail = ({ route, navigation }) => {
           <TouchableOpacity style={styles.joinBtn} onPress={join}><Text style={styles.joinBtnText}>{t('group.detail.requestToJoin')}</Text></TouchableOpacity>
         </View>
       )}
+      </SafeAreaView>
 
       <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
         <Pressable style={styles.viewerRoot} onPress={() => setViewer(null)}>
@@ -1989,6 +1992,7 @@ const GroupDetail = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  bottomSafe: { backgroundColor: 'rgba(16,46,80,0.95)' },
   headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   mention: { color: colors.accent, fontWeight: '700' },
   mentionBar: { maxHeight: 44, backgroundColor: 'rgba(16,46,80,0.95)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)' },
@@ -2015,7 +2019,7 @@ const styles = StyleSheet.create({
   onlineDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#25D366' },
   headerOnline: { ...typography.caption, color: '#25D366', fontWeight: '700' },
 
-  listContent: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md, flexGrow: 1 },
+  listContent: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md, flexGrow: 1, width: '100%', maxWidth: 900, alignSelf: 'center' },
   earlierBtn: { alignSelf: 'center', backgroundColor: colors.card, borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, marginBottom: spacing.sm },
   earlierText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
 

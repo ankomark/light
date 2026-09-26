@@ -83,7 +83,7 @@ const GroupMedia = (props) => {
     <Modal animationType="slide" transparent={false} visible onRequestClose={onClose}>
       <View style={styles.root}>
         <RotatingBackground intervalMs={45000} scrimColor="rgba(10,22,40,0.78)" />
-        <SafeAreaView style={styles.safe} edges={['top']}>
+        <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
           <View style={styles.header}>
             <Text style={styles.title}>{t('group.media.title')}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={10}>

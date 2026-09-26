@@ -920,16 +920,18 @@ class GroupPostViewSet(viewsets.ModelViewSet):
 
         qs = self.get_queryset()  # membership-gated, group-scoped
         anchor_id = before or after
-        anchor = qs.filter(pk=anchor_id).first()
-        if not anchor:
+        # Only where the anchor sits (its time and id) — not its attachments and reactions.
+        spot = (qs.select_related(None).prefetch_related(None).filter(pk=anchor_id)
+                .values_list('created_at', 'id').first())
+        if not spot:
             return Response({'results': [], 'has_more': False})
         # (time, id) — two messages in the same instant are both reached.
-        at = anchor.created_at
+        at, anchor_pk = spot
         if before:
-            rows = list(qs.filter(Q(created_at__lt=at) | Q(created_at=at, id__lt=anchor.id))
+            rows = list(qs.filter(Q(created_at__lt=at) | Q(created_at=at, id__lt=anchor_pk))
                         .order_by('-created_at', '-id')[:self.CURSOR_LIMIT + 1])  # newest-first
         else:
-            rows = list(qs.filter(Q(created_at__gt=at) | Q(created_at=at, id__gt=anchor.id))
+            rows = list(qs.filter(Q(created_at__gt=at) | Q(created_at=at, id__gt=anchor_pk))
                         .order_by('created_at', 'id')[:self.CURSOR_LIMIT + 1])   # oldest-first
         has_more = len(rows) > self.CURSOR_LIMIT
         rows = rows[:self.CURSOR_LIMIT]

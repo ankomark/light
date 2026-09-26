@@ -65,7 +65,9 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   // Category browse. Replaces the separate Churches/Choirs directory screens:
   // the kinds come from the API, so a category someone invented today shows up
   // here without a release.
-  const [categories, setCategories] = useState([]);
+  // The kinds of community, painted from the last visit (they rarely change).
+  const catKey = groupListKey(currentUser?.id, 'community', 'categories');
+  const [categories, setCategories] = useState(() => (isCommunity ? peekCache(catKey) ?? [] : []));
   // A deep link may open the list pre-filtered to one category.
   const [activeCategory, setActiveCategory] = useState(route?.params?.category || 'all');
   const [search, setSearch] = useState('');
@@ -78,16 +80,22 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
     let alive = true;
     (async () => {
       if (!isCommunity) return;
+      if (!peekCache(catKey)) {
+        const disk = await readCache(catKey);
+        if (alive && Array.isArray(disk) && disk.length) setCategories((prev) => (prev.length ? prev : disk));
+      }
       try {
         const res = await fetchCommunityCategories();
         if (!alive) return;
-        setCategories(Array.isArray(res) ? res : (res?.results || []));
+        const rows = Array.isArray(res) ? res : (res?.results || []);
+        setCategories(rows);
+        writeCache(catKey, rows);
       } catch (e) {
         console.log('[community] categories failed to load', e?.message);
       }
     })();
     return () => { alive = false; };
-  }, [isCommunity]);
+  }, [isCommunity, catKey]);
 
   // Typing shouldn't fire a request per keystroke.
   useEffect(() => {

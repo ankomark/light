@@ -564,6 +564,7 @@ class GroupListScalingTests(APITestCase):
 
         for i in range(3):
             self._make_group(owner, f'Scale A{i}')
+        load_query_count()                    # warm the shared caches (who's a super admin)
         few = load_query_count()
         for i in range(6):
             self._make_group(owner, f'Scale B{i}')

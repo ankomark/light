@@ -190,6 +190,17 @@ describe('Group list', () => {
   });
 });
 
+describe('Communities', () => {
+  it('the kinds of community paint from cache before the network answers', async () => {
+    writeCache(groupListKey(1, 'community', 'categories'), [{ id: 3, slug: 'choirs', name: 'Choirs', icon: 'musical-notes', community_count: 4 }]);
+    mockApi.fetchCommunityCategories.mockImplementation(() => new Promise(() => {}));   // never answers
+    mockApi.fetchCommunities.mockResolvedValue({ results: [], next: null });
+    const r = render(<GroupList navigation={nav} route={{}} mode="community" />);
+    expect(r.getByText('Choirs')).toBeTruthy();
+    await act(async () => {});
+  });
+});
+
 describe('Group chat', () => {
   const open = (slug, params = {}) => render(
     <GroupDetail navigation={nav} route={{ params: { groupSlug: slug, ...params } }} />,
