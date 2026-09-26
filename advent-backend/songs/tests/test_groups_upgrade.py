@@ -240,3 +240,52 @@ class SafetyTests(Base):
         self.assertEqual(self.client.post('/api/reports/', body, format='json').status_code, 404)
         self.client.force_authenticate(self.member)
         self.assertEqual(self.client.post('/api/reports/', body, format='json').status_code, 201)
+
+
+@override_settings(R2_PUBLIC_BASE='https://cdn.example')
+class MemberFeatureTests(Base):
+    def setUp(self):
+        super().setUp()
+        from songs.models import DeviceToken
+        self.named = User.objects.create_user('gnamed', 'gn@x.com', 'x')
+        GroupMember.objects.create(group=self.group, user=self.named, muted_until=timezone.now() + timedelta(days=1))
+        GroupMember.objects.filter(group=self.group, user=self.owner).update(notify_level='mentions')
+        for u in (self.owner, self.member, self.named):
+            DeviceToken.objects.create(user=u, token=f'ExponentPushToken[{u.username}]', is_active=True)
+
+    def test_a_mention_reaches_even_a_muted_member_mentions_only_skips_the_rest(self):
+        from unittest import mock
+        from songs.models import Notification
+        pushes = []
+        with mock.patch('songs.push.send_expo_push', side_effect=lambda tokens, title, body, data=None: pushes.append((tuple(tokens), body))):
+            self.client.force_authenticate(self.member)
+            self.client.post(self.url('posts/'), {'content': 'hello @GNamed, see this'}, format='json')
+            self.client.post(self.url('posts/'), {'content': 'no names here'}, format='json')
+        # The owner chose "mentions only", the named member muted: only the mention gets through.
+        self.assertEqual(pushes, [(('ExponentPushToken[gnamed]',), 'gmember mentioned you in Choir: hello @GNamed, see this')])
+        self.assertTrue(Notification.objects.filter(recipient=self.named, notification_type='group_mention').exists())
+
+    def test_archive_and_notify_level_are_mine(self):
+        self.client.force_authenticate(self.member)
+        r = self.client.post(self.url('me/'), {'archived': True, 'notify': 'mentions'}, format='json')
+        self.assertEqual(r.json()['archived'], True)
+        self.assertEqual(r.json()['notify'], 'mentions')
+        mine = [g['slug'] for g in self.client.get('/api/groups/', {'scope': 'mine'}).json()['results']]
+        archived = [g['slug'] for g in self.client.get('/api/groups/', {'scope': 'archived'}).json()['results']]
+        self.assertNotIn(self.group.slug, mine)
+        self.assertIn(self.group.slug, archived)
+        me = self.client.get(self.url()).json()['my_settings']
+        self.assertEqual((me['archived'], me['notify']), (True, 'mentions'))
+        self.assertEqual(self.client.post(self.url('me/'), {'notify': 'everything'}, format='json').status_code, 400)
+        # Someone else still sees it in theirs.
+        self.client.force_authenticate(self.owner)
+        mine = [g['slug'] for g in self.client.get('/api/groups/', {'scope': 'mine'}).json()['results']]
+        self.assertIn(self.group.slug, mine)
+
+    def test_media_by_kind(self):
+        GroupPost.objects.create(group=self.group, user=self.owner, message_type='image', attachment='https://cdn.example/a.jpg')
+        GroupPost.objects.create(group=self.group, user=self.owner, message_type='file', attachment='https://cdn.example/a.pdf')
+        self.client.force_authenticate(self.member)
+        kinds = [p['message_type'] for p in self.client.get(self.url('posts/media/'), {'type': 'file'}).json()['results']]
+        self.assertEqual(kinds, ['file'])
+        self.assertEqual(self.client.get(self.url('posts/media/')).json()['count'], 2)

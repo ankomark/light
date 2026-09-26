@@ -128,6 +128,9 @@ class GroupViewSet(viewsets.ModelViewSet):
             anno_is_moderator=Exists(my_member.filter(is_moderator=True)),
             anno_has_pending=Exists(pending),
             anno_muted_until=Subquery(my_member.values('muted_until')[:1]),
+            anno_archived=Subquery(my_member.values('archived')[:1]),
+            anno_notify=Subquery(my_member.values('notify_level')[:1]),
+            anno_last_read=Subquery(my_member.values('last_read_at')[:1]),
             anno_unread=Coalesce(Subquery(unread, output_field=IntegerField()), 0),
             anno_last_id=Subquery(last.values('id')[:1]),
             anno_last_content=Subquery(last.values('content')[:1]),
@@ -153,10 +156,11 @@ class GroupViewSet(viewsets.ModelViewSet):
             return qs.filter(is_private=False)
         if scope == 'private':
             return qs.filter(is_private=True)
-        if scope == 'mine':
+        if scope in ('mine', 'archived'):
             if not user.is_authenticated:
                 return qs.none()
-            return qs.filter(members__user=user).distinct()
+            # Mine: what I haven't tucked away; archived: what I have.
+            return qs.filter(members__user=user, members__archived=(scope == 'archived')).distinct()
         return qs
 
     def _apply_discovery_filters(self, qs):
@@ -234,7 +238,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         elif self.action == 'invite_link':
             self.throttle_scope = 'group_invite'
         elif self.action in ('create', 'add_member', 'remove_member', 'set_admin', 'set_moderator',
-                             'set_posting_policy', 'set_join_question', 'set_slow_mode', 'mute'):
+                             'set_posting_policy', 'set_join_question', 'set_slow_mode', 'mute', 'my_settings'):
             self.throttle_scope = 'group_action'
         return super().get_throttles()
 
@@ -271,6 +275,28 @@ class GroupViewSet(viewsets.ModelViewSet):
         group = self.get_object()
         GroupMember.objects.filter(group=group, user=request.user).update(last_read_at=timezone.now())
         return Response({'status': 'ok'})
+
+    @action(detail=True, methods=['post'], url_path='me')
+    def my_settings(self, request, slug=None):
+        """My side of the group: {archived: bool, notify: 'all' | 'mentions'}."""
+        group = self.get_object()
+        member = GroupMember.objects.filter(group=group, user=request.user).first()
+        if not member:
+            raise PermissionDenied("You are not a member of this group")
+        fields = []
+        if 'archived' in request.data:
+            member.archived = str(request.data.get('archived')).lower() in ('1', 'true')
+            fields.append('archived')
+        if 'notify' in request.data:
+            level = request.data.get('notify')
+            if level not in (GroupMember.NOTIFY_ALL, GroupMember.NOTIFY_MENTIONS):
+                return Response({'error': "notify must be 'all' or 'mentions'"}, status=status.HTTP_400_BAD_REQUEST)
+            member.notify_level = level
+            fields.append('notify_level')
+        if fields:
+            member.save(update_fields=fields)
+        return Response({'archived': member.archived, 'notify': member.notify_level,
+                         'muted_until': member.muted_until if member.muted_until and member.muted_until > timezone.now() else None})
 
     MUTE_FOREVER = datetime(9999, 1, 1, tzinfo=dt_timezone.utc)
 
@@ -1056,7 +1082,10 @@ class GroupPostViewSet(viewsets.ModelViewSet):
     def media(self, request, *args, **kwargs):
         """Every image / file / voice note shared in the group, newest first
         (members-only — reuses the same membership gate as the message list)."""
-        qs = self.get_queryset().filter(message_type__in=['image', 'file', 'audio'])
+        kinds = ['image', 'file', 'audio']
+        # ?type=image|file|audio: one kind (the Photos / Files / Voice tabs).
+        wanted = request.query_params.get('type')
+        qs = self.get_queryset().filter(message_type__in=[wanted] if wanted in kinds else kinds)
         page = self.paginate_queryset(qs)
         if page is not None:
             return self.get_paginated_response(self.get_serializer(page, many=True).data)

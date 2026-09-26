@@ -1291,8 +1291,9 @@ export const sendGroupMessage = async (slug, payload) =>
 export const editGroupMessage = async (slug, id, content) =>
   apiRequest('patch', `/groups/${slug}/posts/${id}/edit/`, { content });
 
-export const fetchGroupMedia = async (slug, page = 1) =>
-  apiRequest('get', `/groups/${slug}/posts/media/?page=${page}`);
+// 	ype: 'image' | 'file' | 'audio' (all three when omitted).
+export const fetchGroupMedia = async (slug, page = 1, type = '') =>
+  apiRequest('get', `/groups/${slug}/posts/media/`, null, { params: { page, ...(type ? { type } : {}) } });
 
 export const searchGroupMessages = async (slug, q) =>
   apiRequest('get', `/groups/${slug}/posts/search/?q=${encodeURIComponent(q)}`);
@@ -1315,6 +1316,10 @@ export const pinGroupMessage = async (slug, id) =>
 
 export const unpinGroupMessage = async (slug, id) =>
   apiRequest('post', `/groups/${slug}/posts/${id}/unpin/`);
+
+// My side of a group: { archived?: bool, notify?: 'all' | 'mentions' }.
+export const setGroupMine = (slug, changes) =>
+  apiRequest('post', `/groups/${slug}/me/`, changes);
 
 // No pushes from a group for hours (1, 8, 168), 'always', or 0 to unmute.
 export const muteGroup = (slug, hours) =>

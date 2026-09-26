@@ -5,6 +5,7 @@
  */
 import {
   mergeMessages, freshPage, cacheableGroupMessages, unsent, replyLabel, absorb, settle, applyReaction,
+  splitMentions, mentionQuery, insertMention, firstUnreadIndex,
 } from '../groupChat';
 
 const at = (s) => new Date(Date.UTC(2026, 8, 26, 10, 0, s)).toISOString();
@@ -93,5 +94,29 @@ describe('live and sent, in either order', () => {
     expect(theirs[0].reactions).toEqual({ summary: [{ emoji: '🔥', count: 1 }], mine: '❤️' });
     const mine = applyReaction(list, { id: 3, summary: [], user_id: 1, emoji: null }, 1);
     expect(mine[0].reactions.mine).toBeNull();
+  });
+});
+describe('@mentions and the unread line', () => {
+  it('splits text around @names (not emails)', () => {
+    expect(splitMentions('hi @anna and @bo.b. see mail@x.com')).toEqual([
+      { text: 'hi ' }, { text: '@anna', mention: 'anna' }, { text: ' and ' },
+      { text: '@bo.b.', mention: 'bo.b' }, { text: ' see mail@x.com' },
+    ]);
+    expect(splitMentions('plain')).toEqual([{ text: 'plain' }]);
+  });
+
+  it('reads and finishes the @name being typed', () => {
+    expect(mentionQuery('hello @an')).toBe('an');
+    expect(mentionQuery('hello @')).toBe('');
+    expect(mentionQuery('hello @anna ')).toBeNull();
+    expect(mentionQuery('mail@x')).toBeNull();
+    expect(insertMention('hello @an', 'anna')).toBe('hello @anna ');
+  });
+
+  it('finds the first message from someone else after I last read', () => {
+    const list = [msg(1, 1, { user: { id: 2 } }), msg(2, 5, { user: { id: 1 } }), msg(3, 6, { user: { id: 2 } })];
+    expect(firstUnreadIndex(list, at(3), 1)).toBe(2);         // my own message doesn't count
+    expect(firstUnreadIndex(list, at(10), 1)).toBe(-1);
+    expect(firstUnreadIndex(list, null, 1)).toBe(-1);
   });
 });

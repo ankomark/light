@@ -71,6 +71,9 @@ class GroupSerializer(serializers.ModelSerializer):
     pinned_message = serializers.SerializerMethodField()
     # Until when I've muted it (null: not muted). Mine only.
     muted_until = serializers.SerializerMethodField()
+    # Mine too: archived, which messages push me, and when I last read it
+    # (the chat's "unread messages" line).
+    my_settings = serializers.SerializerMethodField()
     cover_image = MediaReferenceImageField(required=False, allow_null=True)
     is_private = serializers.BooleanField(default=False)
     # Override the model field: the invite token is only ever revealed to admins.
@@ -84,6 +87,17 @@ class GroupSerializer(serializers.ModelSerializer):
 
     def get_pinned_message(self, obj):
         return pinned_preview(obj.pinned_post)
+
+    def get_my_settings(self, obj):
+        if hasattr(obj, 'anno_archived'):
+            if not getattr(obj, 'anno_is_member', False):
+                return None
+            return {'archived': bool(obj.anno_archived), 'notify': obj.anno_notify or 'all',
+                    'last_read_at': obj.anno_last_read}
+        m = self._membership(obj)
+        if not m:
+            return None
+        return {'archived': m.archived, 'notify': m.notify_level, 'last_read_at': m.last_read_at}
 
     def get_muted_until(self, obj):
         if hasattr(obj, 'anno_muted_until'):

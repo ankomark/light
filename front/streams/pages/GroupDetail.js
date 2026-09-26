@@ -25,6 +25,7 @@ import {
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
   pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts, setGroupJoinQuestion,
   fetchGroupMessageContext, fetchGroupPostsBefore, fetchGroupPostsAfter, setGroupSlowMode,
+  fetchGroupMembers, muteGroup, setGroupMine,
 } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { createGroupSocket } from '../services/groupSocket';
@@ -39,8 +40,9 @@ import { peekCache, readCache, writeCache } from '../utils/screenCache';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import {
   mergeMessages, freshPage, cacheableGroupMessages, groupChatKey, replyLabel, isTemp,
-  absorb, applyReaction, settle,
+  absorb, applyReaction, settle, splitMentions, mentionQuery, insertMention, firstUnreadIndex,
 } from '../utils/groupChat';
+import { dayLabel, newDay } from '../utils/dmView';
 import { nextTempId } from '../utils/chatMessages';
 import { announceDM } from '../services/dmSocket';
 
@@ -219,7 +221,11 @@ const GroupMessageRow = memo(({
               ) : null}
 
               {!!item.content && (
-                <Text style={[styles.bubbleText, isOwn ? styles.txtOwn : styles.txtOther, type === 'image' && { marginTop: spacing.xs }]}>{item.content}</Text>
+                <Text style={[styles.bubbleText, isOwn ? styles.txtOwn : styles.txtOther, type === 'image' && { marginTop: spacing.xs }]}>
+                  {splitMentions(item.content).map((part, i) => (part.mention
+                    ? <Text key={i} style={styles.mention}>{part.text}</Text>
+                    : part.text))}
+                </Text>
               )}
 
               <View style={styles.metaRow}>
@@ -335,6 +341,9 @@ const GroupDetail = ({ route, navigation }) => {
   const [jqEditor, setJqEditor] = useState(null);     // string when the admin join-question editor is open
   const [reportMsg, setReportMsg] = useState(null);   // message being reported
   const [slowSheet, setSlowSheet] = useState(false);   // admin: slow mode choices
+  const [notifySheet, setNotifySheet] = useState(false); // my notifications for this group
+  const [unreadId, setUnreadId] = useState(null);      // where "unread messages" starts
+  const [mentionHits, setMentionHits] = useState([]);  // members matching the @name being typed
 
   const listRef = useRef(null);
   const atBottomRef = useRef(true);      // is the chat scrolled to the newest message?
@@ -354,9 +363,12 @@ const GroupDetail = ({ route, navigation }) => {
   const appState = useRef(AppState.currentState);
   const pageRef = useRef(1);
   const freshRef = useRef(false);        // has a first page come from the server yet?
+  // When I'd last read it, as of opening (marking read moves it on the server).
+  const lastReadRef = useRef(seed?.my_settings?.last_read_at || null);
   const liveRef = useRef(false);         // is the socket up (so the poll can be slow)?
   const playingIdRef = useRef(null);
   useEffect(() => { playingIdRef.current = playingId; }, [playingId]);
+  const meIdRef = useRef(currentUser?.id);
   const groupRef = useRef(seed);
   const slowSecondsRef = useRef(seed?.slow_mode_seconds || 0);
   useEffect(() => { groupRef.current = group; slowSecondsRef.current = group?.slow_mode_seconds || 0; }, [group]);
@@ -419,6 +431,19 @@ const GroupDetail = ({ route, navigation }) => {
         // while away goes); after that, pages merge. Sending / failed bubbles
         // always stay.
         const merged = first ? freshPage(prev, incoming) : mergeMessages(prev, incoming);
+        // Opening on something new: a line where it starts, and (if it's more
+        // than a screenful up) the chat opens there rather than at the end.
+        const idx = first ? firstUnreadIndex(merged, lastReadRef.current, meIdRef.current) : -1;
+        if (idx >= 0) {
+          setUnreadId(merged[idx].id);
+          if (merged.length - idx > 6) {
+            atBottomRef.current = false;
+            setTimeout(() => {
+              try { listRef.current?.scrollToIndex({ index: idx, viewPosition: 0.1, animated: false }); } catch { /* best effort */ }
+            }, 120);
+            return merged;
+          }
+        }
         if (!silent && merged.length) setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
         return merged;
       });
@@ -634,6 +659,28 @@ const GroupDetail = ({ route, navigation }) => {
   }, []);
 
   const onChangeText = useCallback((val) => { setText(val); notifyTyping(); }, [notifyTyping]);
+
+  // @name being typed: the members it could be (after a pause).
+  const mentionQ = mentionQuery(text);
+  useEffect(() => {
+    if (mentionQ == null || !isMember) { setMentionHits([]); return undefined; }
+    let cancelled = false;
+    const id = setTimeout(() => {
+      fetchGroupMembers(groupSlug, { q: mentionQ })
+        .then((res) => {
+          if (cancelled) return;
+          const rows = (res?.results ?? []).map((m) => m.user).filter((u) => u && u.id !== currentUser?.id);
+          setMentionHits(rows.slice(0, 6));
+        })
+        .catch(() => { if (!cancelled) setMentionHits([]); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(id); };
+  }, [mentionQ, groupSlug, isMember, currentUser?.id]);
+
+  const pickMention = useCallback((u) => {
+    setText((v) => insertMention(v, u.username));
+    setMentionHits([]);
+  }, []);
 
   useEffect(() => () => {
     clearInterval(recordTimerRef.current);
@@ -1125,12 +1172,37 @@ const GroupDetail = ({ route, navigation }) => {
 
   const heartReact = useCallback((m) => reactToPost(m, '❤️'), [reactToPost]);
 
+  // My side of the group (optimistic; put back if the server says no).
+  const changeMine = useCallback(async (changes) => {
+    const before = groupRef.current;
+    setGroup((g) => (g ? { ...g, my_settings: { ...(g.my_settings || {}), ...(changes.notify ? { notify: changes.notify } : {}), ...('archived' in changes ? { archived: changes.archived } : {}) } } : g));
+    try { await setGroupMine(groupSlug, changes); }
+    catch { setGroup(before); notify(t('common.error'), t('group.detail.settingFailed')); }
+  }, [groupSlug, t]);
+
+  const changeMute = useCallback(async (hours) => {
+    const before = groupRef.current;
+    try {
+      const r = await muteGroup(groupSlug, hours);
+      setGroup((g) => (g ? { ...g, muted_until: r?.muted_until || null } : g));
+    } catch { setGroup(before); notify(t('common.error'), t('group.detail.settingFailed')); }
+  }, [groupSlug, t]);
+
   // ── Render ──
   const renderMessage = useCallback(({ item, index }) => {
     const isOwn = item.user?.id === currentUser?.id || item.is_owner;
     const prev = messages[index - 1];
     const showName = !isOwn && (!prev || prev.user?.id !== item.user?.id || prev.message_type === 'system');
+    const day = newDay(prev, item) ? dayLabel(t, item.created_at) : null;
+    const unread = unreadId != null && String(item.id) === String(unreadId);
     return (
+      <>
+      {day ? <View style={styles.dayWrap}><Text style={styles.dayText}>{day}</Text></View> : null}
+      {unread ? (
+        <View style={styles.unreadLine} testID="unread-line">
+          <Text style={styles.unreadText}>{t('group.detail.unreadMessages')}</Text>
+        </View>
+      ) : null}
       <GroupMessageRow
         item={item}
         isOwn={isOwn}
@@ -1146,8 +1218,9 @@ const GroupDetail = ({ route, navigation }) => {
         onToggleReaction={reactToPost}
         onRetry={retrySend}
       />
+      </>
     );
-  }, [currentUser?.id, messages, playingId, highlightId, openFile, playAudio, startReply, openMsgMenu, reactToPost, heartReact, retrySend]);
+  }, [currentUser?.id, messages, playingId, highlightId, unreadId, t, openFile, playAudio, startReply, openMsgMenu, reactToPost, heartReact, retrySend]);
 
   const keyExtractor = useCallback((item) => String(item.id), []);
   const onScrollToIndexFailed = useCallback(({ averageItemLength, index }) => {
@@ -1173,6 +1246,13 @@ const GroupDetail = ({ route, navigation }) => {
     );
   }
 
+  const mutedUntil = group?.muted_until || null;
+  const archived = !!group?.my_settings?.archived;
+  const notifyLevel = group?.my_settings?.notify || 'all';
+  const notifySummary = mutedUntil
+    ? (new Date(mutedUntil).getFullYear() > 9000 ? t('group.detail.mutedAlways')
+      : t('group.detail.mutedUntil', { when: new Date(mutedUntil).toLocaleString() }))
+    : notifyLevel === 'mentions' ? t('group.detail.mentionsOnly') : t('group.detail.allMessages');
   const adminsOnly = !!group?.only_admins_can_post;
   const slowSeconds = group?.slow_mode_seconds || 0;
   const canChat = isMember && (!adminsOnly || isAdmin);
@@ -1201,7 +1281,10 @@ const GroupDetail = ({ route, navigation }) => {
               <View style={[styles.groupAvatar, styles.groupAvatarFallback]}><Ionicons name="people" size={20} color={colors.primary} /></View>
             )}
             <View style={{ flex: 1 }}>
-              <Text style={styles.headerName} numberOfLines={1}>{group?.name ?? 'Group'}</Text>
+              <View style={styles.headerNameRow}>
+                <Text style={styles.headerName} numberOfLines={1}>{group?.name ?? t('group.add.fallbackName')}</Text>
+                {mutedUntil ? <Ionicons name="notifications-off" size={14} color={colors.textMuted} testID="header-muted" /> : null}
+              </View>
               {othersOnline > 0 ? (
                 <View style={styles.headerSubRow}>
                   <View style={styles.onlineDot} />
@@ -1217,7 +1300,7 @@ const GroupDetail = ({ route, navigation }) => {
               <Ionicons name="search" size={21} color={colors.textPrimary} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={openMenu} style={styles.backBtn}>
+          <TouchableOpacity onPress={openMenu} style={styles.backBtn} testID="group-menu" accessibilityLabel={t('group.detail.options')}>
             <Ionicons name="ellipsis-vertical" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
         </LinearGradient>
@@ -1412,6 +1495,16 @@ const GroupDetail = ({ route, navigation }) => {
         </View>
       )}
 
+      {canChat && mentionHits.length > 0 ? (
+        <ScrollView horizontal keyboardShouldPersistTaps="always" style={styles.mentionBar}
+          contentContainerStyle={styles.mentionBarInner} showsHorizontalScrollIndicator={false}>
+          {mentionHits.map((u) => (
+            <TouchableOpacity key={u.id} style={styles.mentionChip} onPress={() => pickMention(u)} testID={`mention-${u.username}`}>
+              <Text style={styles.mentionChipText}>@{u.username}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ) : null}
       {canChat && slowSeconds > 0 && !(isAdmin || isModerator) ? (
         <Text style={styles.slowHint} testID="slow-hint">{t('group.detail.slowModeHint', { time: slowLabel(slowSeconds, t) })}</Text>
       ) : null}
@@ -1512,7 +1605,7 @@ const GroupDetail = ({ route, navigation }) => {
         <Pressable style={styles.sheetBackdrop} onPress={() => setMenuSheet(false)}>
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle} numberOfLines={1}>{group?.name || 'Group'}</Text>
+            <Text style={styles.sheetTitle} numberOfLines={1}>{group?.name || t('group.add.fallbackName')}</Text>
             <Text style={styles.sheetSubtitle}>{t('group.detail.memberCount', { count: group?.member_count ?? 0 })}{group?.is_private ? t('group.detail.privateSuffix') : ''}</Text>
             {!!group?.category_detail && (
               <View style={styles.categoryBadge}>
@@ -1628,6 +1721,32 @@ const GroupDetail = ({ route, navigation }) => {
                 <View style={styles.sheetOptionText}>
                   <Text style={styles.sheetOptionLabel}>{t('group.detail.slowMode')}</Text>
                   <Text style={styles.sheetOptionHint}>{slowSeconds ? t('group.detail.slowModeEvery', { time: slowLabel(slowSeconds, t) }) : t('group.detail.slowModeOff')}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
+            {isMember && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} testID="notify-option"
+                onPress={() => { setMenuSheet(false); setTimeout(() => setNotifySheet(true), 220); }}>
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name={mutedUntil ? 'notifications-off' : 'notifications'} size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.notifications')}</Text>
+                  <Text style={styles.sheetOptionHint}>{notifySummary}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
+            {isMember && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} testID="archive-option"
+                onPress={() => { setMenuSheet(false); changeMine({ archived: !archived }); }}>
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name={archived ? 'archive' : 'archive-outline'} size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>{archived ? t('group.detail.unarchive') : t('group.detail.archive')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.archiveHint')}</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -1798,6 +1917,21 @@ const GroupDetail = ({ route, navigation }) => {
       </Modal>
 
       <ChoiceSheet
+        visible={notifySheet}
+        title={t('group.detail.notifications')}
+        subtitle={notifySummary}
+        onClose={() => setNotifySheet(false)}
+        cancelLabel={t('common.cancel')}
+        options={[
+          { key: 'all', icon: 'notifications', label: t('group.detail.allMessages') + (notifyLevel === 'all' && !mutedUntil ? '  ✓' : ''), onPress: () => { changeMine({ notify: 'all' }); if (mutedUntil) changeMute(0); } },
+          { key: 'mentions', icon: 'alternate-email', label: t('group.detail.mentionsOnly') + (notifyLevel === 'mentions' && !mutedUntil ? '  ✓' : ''), onPress: () => changeMine({ notify: 'mentions' }) },
+          { key: 'mute8', icon: 'notifications-paused', label: t('group.detail.mute8h'), onPress: () => changeMute(8) },
+          { key: 'mute168', icon: 'notifications-paused', label: t('group.detail.muteWeek'), onPress: () => changeMute(168) },
+          { key: 'muteAlways', icon: 'notifications-off', label: t('group.detail.muteAlways'), onPress: () => changeMute('always') },
+          ...(mutedUntil ? [{ key: 'unmute', icon: 'notifications-active', label: t('group.detail.unmute'), onPress: () => changeMute(0) }] : []),
+        ]}
+      />
+      <ChoiceSheet
         visible={slowSheet}
         title={t('group.detail.slowMode')}
         subtitle={t('group.detail.slowModeSub')}
@@ -1855,6 +1989,16 @@ const GroupDetail = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  mention: { color: colors.accent, fontWeight: '700' },
+  mentionBar: { maxHeight: 44, backgroundColor: 'rgba(16,46,80,0.95)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)' },
+  mentionBarInner: { paddingHorizontal: spacing.sm, paddingVertical: 6, gap: spacing.xs },
+  mentionChip: { paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.full, backgroundColor: 'rgba(244,162,97,0.16)', borderWidth: 1, borderColor: 'rgba(244,162,97,0.5)' },
+  mentionChipText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  dayWrap: { alignItems: 'center', marginVertical: spacing.sm },
+  dayText: { fontSize: 12, color: colors.textSecondary, fontWeight: '700', overflow: 'hidden', paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.full, backgroundColor: 'rgba(16,46,80,0.8)' },
+  unreadLine: { alignItems: 'center', marginVertical: spacing.sm, paddingVertical: 4, backgroundColor: 'rgba(244,162,97,0.14)', borderRadius: radius.md },
+  unreadText: { fontSize: 12, color: colors.accent, fontWeight: '800' },
   slowHint: { ...typography.caption, color: colors.textMuted, textAlign: 'center', paddingVertical: 4, backgroundColor: 'rgba(16,46,80,0.9)' },
   root: { flex: 1, backgroundColor: colors.bg },
   container: { flex: 1, backgroundColor: 'transparent' },

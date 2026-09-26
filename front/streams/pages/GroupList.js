@@ -241,7 +241,9 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
     let soon = null;
     const unsub = subscribeDM((e) => {
       if (e.type === 'group_read') {
-        setGroups((prev) => prev.map((g) => (g.slug === e.group_slug ? { ...g, unread_count: 0 } : g)));
+        const now = new Date().toISOString();
+        setGroups((prev) => prev.map((g) => (g.slug === e.group_slug
+          ? { ...g, unread_count: 0, my_settings: g.my_settings ? { ...g.my_settings, last_read_at: now } : g.my_settings } : g)));
         return;
       }
       if (e.type !== 'group_message' || (e.kind && e.kind !== (isCommunity ? 'community' : 'group'))) return;
@@ -349,6 +351,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
         sub: t(`${ns}.privateNote`),
       },
       mine: { title: t(`${ns}.notInAny`), sub: t(`${ns}.notInAnySub`) },
+      archived: { title: t('group.list.noArchived'), sub: t('group.list.noArchivedSub') },
     }[activeTab];
 
   const renderEmptyComponent = useCallback(() => (loading ? (
@@ -378,7 +381,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
         {/* Tabs */}
         <View style={styles.tabBar}>
           {TAB_KEYS.map((tab) => {
-            const active = activeTab === tab.key;
+            const active = activeTab === tab.key || (tab.key === 'mine' && activeTab === 'archived');
             const label = compactTabs && tab.key === 'mine'
               ? t(`${ns}.tabMineShort`)
               : t(`${ns}.tab${tab.key.charAt(0).toUpperCase()}${tab.key.slice(1)}`);
@@ -500,6 +503,15 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
           </View>
         )}
 
+        {/* Mine: the ones tucked away are a tap off. */}
+        {activeTab === 'mine' || activeTab === 'archived' ? (
+          <TouchableOpacity style={styles.archivedLink} testID="archived-toggle"
+            onPress={() => setActiveTab(activeTab === 'archived' ? 'mine' : 'archived')}>
+            <Ionicons name={activeTab === 'archived' ? 'arrow-back' : 'archive-outline'} size={15} color={colors.accent} />
+            <Text style={styles.archivedLinkText}>{activeTab === 'archived' ? t('group.list.backToMine') : t('group.list.archived')}</Text>
+          </TouchableOpacity>
+        ) : null}
+
         {/* Actions */}
         <View style={styles.actionRow}>
           <TouchableOpacity
@@ -576,6 +588,8 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
 };
 
 const styles = StyleSheet.create({
+  archivedLink: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginHorizontal: spacing.md, marginBottom: spacing.xs, paddingVertical: 4 },
+  archivedLinkText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
   root: { flex: 1, backgroundColor: 'transparent' },
   container: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, backgroundColor: 'transparent' },
   fading: { opacity: 0.6 },

@@ -1700,6 +1700,12 @@ class GroupMember(models.Model):
     # No pushes from this group until then (far future = always). Mentions of
     # them still come through.
     muted_until = models.DateTimeField(null=True, blank=True)
+    # My side of it: tucked away from my list (still in it when I look), and
+    # which messages push me — everything, or only when I'm @mentioned.
+    NOTIFY_ALL, NOTIFY_MENTIONS = 'all', 'mentions'
+    archived = models.BooleanField(default=False)
+    notify_level = models.CharField(max_length=10, default=NOTIFY_ALL,
+                                    choices=[(NOTIFY_ALL, 'All messages'), (NOTIFY_MENTIONS, 'Mentions only')])
 
     class Meta:
         unique_together = ('group', 'user')

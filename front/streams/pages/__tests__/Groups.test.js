@@ -42,6 +42,9 @@ const mockApi = {
   setGroupAdmin: jest.fn(async () => ({})),
   setGroupModerator: jest.fn(async () => ({})),
   setGroupSlowMode: jest.fn(),
+  muteGroup: jest.fn(async (_s, h) => ({ muted_until: h ? '2099-01-01T00:00:00Z' : null })),
+  setGroupMine: jest.fn(async () => ({})),
+  fetchGroupMedia: jest.fn(async () => ({ results: [], next: null })),
   getGroupInviteLink: jest.fn(),
   revokeGroupInvite: jest.fn(async () => ({ code: null })),
   searchGroupUsers: jest.fn(async () => []),
@@ -121,6 +124,7 @@ const GroupList = require('../GroupList').default;
 const GroupDetail = require('../GroupDetail').default;
 const GroupMembers = require('../GroupMembers').default;
 const GroupAddMembers = require('../GroupAddMembers').default;
+const GroupMedia = require('../GroupMedia').default;
 
 const nav = { navigate: jest.fn(), goBack: jest.fn() };
 const group = (slug, extra = {}) => ({
@@ -232,6 +236,7 @@ describe('Group chat', () => {
     mockApi.fetchGroupDetails.mockResolvedValue(group('c4', { is_member: false }));
     mockApi.fetchGroupPosts.mockResolvedValue({ results: [post(30, 30)], next: null });
     const r = open('c4');
+    await act(async () => { await new Promise((res) => setTimeout(res, 300)); });
     await waitFor(() => expect(r.queryByText('post 30')).toBeNull(), { timeout: 5000 });
   });
 
@@ -342,6 +347,66 @@ describe('Safety', () => {
     expect(mockConfirm).toHaveBeenCalled();
     expect(mockApi.revokeGroupInvite).toHaveBeenCalledWith('inv');
     await waitFor(() => expect(r.getByText('group.add.generateLink')).toBeTruthy());
+  });
+});
+
+describe('Member features', () => {
+  const now = Date.now();
+  const iso = (msAgo) => new Date(now - msAgo).toISOString();
+
+  it('opens on an unread line after the last read; day labels; @mentions suggested and highlighted', async () => {
+    const g = group('f1', { my_settings: { archived: false, notify: 'all', last_read_at: iso(60000) } });
+    mockApi.fetchGroupDetails.mockResolvedValue(g);
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: [
+      post(72, 0, { created_at: iso(1000), content: 'hey @me look' }),
+      post(71, 0, { created_at: iso(120000), content: 'old news' }),
+    ], next: null });
+    mockApi.fetchGroupMembers.mockResolvedValue({ results: [{ id: 1, user: { id: 5, username: 'anna' } }], next: null });
+    const r = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 'f1', group: g } }} />);
+    await waitFor(() => expect(r.getByTestId('unread-line')).toBeTruthy());
+    expect(r.getAllByText('dm.today').length).toBeGreaterThan(0);
+    expect(r.getByText('@me')).toBeTruthy();                         // highlighted apart
+
+    const input = r.UNSAFE_getAllByType(require('react-native').TextInput).find((n) => n.props.multiline);
+    fireEvent.changeText(input, 'thanks @an');
+    await waitFor(() => expect(r.getByTestId('mention-anna')).toBeTruthy());
+    expect(mockApi.fetchGroupMembers).toHaveBeenCalledWith('f1', { q: 'an' });
+    await act(async () => { fireEvent.press(r.getByTestId('mention-anna')); });
+    expect(input.props.value).toBe('thanks @anna ');
+  });
+
+  it('notifications: mute for 8 hours; archive', async () => {
+    const g = group('f2', { my_settings: { archived: false, notify: 'all' } });
+    mockApi.fetchGroupDetails.mockResolvedValue(g);
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: [post(80, 80)], next: null });
+    const r = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 'f2', group: g } }} />);
+    await waitFor(() => expect(r.getByText('post 80')).toBeTruthy());
+    const openSheet = async (id) => {
+      await act(async () => { fireEvent.press(r.getByTestId(id)); await new Promise((res) => setTimeout(res, 260)); });
+    };
+    await act(async () => { fireEvent.press(r.getByTestId('group-menu')); });
+    await openSheet('notify-option');
+    await act(async () => { fireEvent.press(r.getByTestId('choice-mute8')); });
+    expect(mockApi.muteGroup).toHaveBeenCalledWith('f2', 8);
+    await act(async () => { fireEvent.press(r.getByTestId('group-menu')); });
+    expect(r.getByText(/^group\.detail\.mutedUntil:/)).toBeTruthy();       // the menu says so
+    await act(async () => { fireEvent.press(r.getByTestId('archive-option')); });
+    expect(mockApi.setGroupMine).toHaveBeenCalledWith('f2', { archived: true });
+  });
+
+  it('the archived view, and media by kind', async () => {
+    mockApi.fetchGroups.mockImplementation(async ({ scope }) => ({ results: [group(`${scope}-g`)], next: null }));
+    const r = render(<GroupList navigation={nav} route={{}} mode="group" />);
+    await waitFor(() => expect(r.getByText('Group public-g')).toBeTruthy());
+    await act(async () => { fireEvent.press(r.getByText('group.list.tabMine')); });
+    await act(async () => { fireEvent.press(r.getByTestId('archived-toggle')); });
+    await waitFor(() => expect(r.getByText('Group archived-g')).toBeTruthy());
+    expect(mockApi.fetchGroups).toHaveBeenLastCalledWith({ scope: 'archived' });
+
+    const m = render(<GroupMedia groupSlug="md" onClose={() => {}} />);
+    await waitFor(() => expect(mockApi.fetchGroupMedia).toHaveBeenCalledWith('md', 1, ''));
+    await act(async () => { fireEvent.press(m.getByTestId('media-kind-file')); });
+    await waitFor(() => expect(mockApi.fetchGroupMedia).toHaveBeenLastCalledWith('md', 1, 'file'));
   });
 });
 

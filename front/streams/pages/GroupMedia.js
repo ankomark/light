@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchGroupMedia } from '../services/api';
 import RotatingBackground from '../components/RotatingBackground';
-import { colors, typography, spacing } from '../constants/theme';
+import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
 const COLS = 3;
@@ -29,11 +29,12 @@ const GroupMedia = (props) => {
   const [page, setPage] = useState(1);
   const [hasNext, setHasNext] = useState(false);
   const [viewer, setViewer] = useState(null);
+  const [kind, setKind] = useState('');   // '' all · image · file · audio
 
   const load = useCallback(async (pageNum = 1) => {
     try {
       if (pageNum === 1) setLoading(true); else setLoadingMore(true);
-      const res = await fetchGroupMedia(groupSlug, pageNum);
+      const res = await fetchGroupMedia(groupSlug, pageNum, kind);
       const rows = res?.results ?? (Array.isArray(res) ? res : []);
       setItems((prev) => (pageNum === 1 ? rows : [...prev, ...rows]));
       setHasNext(!!res?.next);
@@ -44,7 +45,7 @@ const GroupMedia = (props) => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [groupSlug]);
+  }, [groupSlug, kind]);
 
   useEffect(() => { load(1); }, [load]);
 
@@ -90,6 +91,15 @@ const GroupMedia = (props) => {
             </TouchableOpacity>
           </View>
 
+          <View style={styles.kinds}>
+            {[['', 'group.media.all'], ['image', 'group.media.photos'], ['file', 'group.media.files'], ['audio', 'group.media.voice']].map(([k, label]) => (
+              <TouchableOpacity key={k || 'all'} onPress={() => setKind(k)} testID={`media-kind-${k || 'all'}`}
+                style={[styles.kind, kind === k && styles.kindOn]}>
+                <Text style={[styles.kindText, kind === k && styles.kindTextOn]}>{t(label)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           {loading ? (
             <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
           ) : (
@@ -126,6 +136,11 @@ const GroupMedia = (props) => {
 };
 
 const styles = StyleSheet.create({
+  kinds: { flexDirection: 'row', gap: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
+  kind: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  kindOn: { backgroundColor: 'rgba(244,162,97,0.18)', borderColor: colors.accent },
+  kindText: { color: colors.textSecondary, fontWeight: '700', fontSize: 13 },
+  kindTextOn: { color: colors.accent },
   root: { flex: 1, backgroundColor: '#0A1628' },
   safe: { flex: 1, backgroundColor: 'transparent' },
   header: {

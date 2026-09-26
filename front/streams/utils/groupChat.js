@@ -103,3 +103,41 @@ export const settle = (list, tempId, saved) => {
     .filter((m) => m.id === tempId || String(m.id) !== String(saved.id))
     .map((m) => (m.id === tempId ? { ...saved } : m));
 };
+
+// ── @mentions ───────────────────────────────────────────────────────────────
+const MENTION = /(^|[^\w@])@([\w.]{1,40})/g;
+
+/** Text in pieces, @names marked, for highlighting in a bubble. */
+export const splitMentions = (text) => {
+  const s = String(text || '');
+  const parts = [];
+  let last = 0;
+  s.replace(MENTION, (whole, lead, name, at) => {
+    const start = at + lead.length;
+    if (start > last) parts.push({ text: s.slice(last, start) });
+    parts.push({ text: `@${name}`, mention: name.replace(/\.$/, '') });
+    last = start + name.length + 1;
+    return whole;
+  });
+  if (last < s.length) parts.push({ text: s.slice(last) });
+  return parts.length ? parts : [{ text: s }];
+};
+
+/** The @name being typed at the end of the composer (null if none). */
+export const mentionQuery = (text) => {
+  const m = /(^|\s)@([\w.]{0,40})$/.exec(String(text || ''));
+  return m ? m[2] : null;
+};
+
+/** Finish the @name being typed with a member's username. */
+export const insertMention = (text, username) =>
+  String(text || '').replace(/(^|\s)@([\w.]{0,40})$/, (_w, lead) => `${lead}@${username} `);
+
+/** Where "unread messages" starts: the first message from someone else
+ * after I last read the group (-1: nothing new). */
+export const firstUnreadIndex = (list, lastReadAt, meId) => {
+  if (!lastReadAt) return -1;
+  const since = new Date(lastReadAt).getTime();
+  return list.findIndex((m) => !isTemp(m) && m.message_type !== 'system'
+    && m.user?.id !== meId && new Date(m.created_at).getTime() > since);
+};

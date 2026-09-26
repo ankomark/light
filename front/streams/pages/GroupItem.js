@@ -4,16 +4,10 @@ import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { shortAgo } from '../utils/dmView';
 
-function timeAgo(dateStr, t) {
-  if (!dateStr) return '';
-  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
-  if (diff < 60) return t('group.preview.now');
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
-  return new Date(dateStr).toLocaleDateString();
-}
+// now · 5m · 3h · 2d, in the reader's language.
+const timeAgo = (dateStr, t) => shortAgo(t, dateStr);
 
 const previewText = (lm, t, group) => {
   if (!lm) {
@@ -64,6 +58,7 @@ const GroupItem = memo(({ group, onPress, onDelete, onEdit, isCreator }) => {
       <View style={styles.body}>
         <View style={styles.topRow}>
           <Text style={[styles.name, unread > 0 && styles.bold]} numberOfLines={1}>{group.name}</Text>
+          {group.muted_until ? <Ionicons name="notifications-off" size={13} color={colors.textMuted} style={styles.muted} testID={`muted-${group.slug}`} /> : null}
           <Text style={styles.time}>{timeAgo(lm?.created_at || group.updated_at, t)}</Text>
         </View>
         <View style={styles.bottomRow}>
@@ -71,7 +66,7 @@ const GroupItem = memo(({ group, onPress, onDelete, onEdit, isCreator }) => {
             {previewText(lm, t, group)}
           </Text>
           {unread > 0 ? (
-            <View style={styles.badge}><Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text></View>
+            <View style={[styles.badge, group.muted_until && styles.badgeMuted]}><Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text></View>
           ) : isCreator ? (
             expanded ? (
               <View style={styles.actions}>
@@ -98,6 +93,8 @@ const GroupItem = memo(({ group, onPress, onDelete, onEdit, isCreator }) => {
 });
 
 const styles = StyleSheet.create({
+  muted: { marginHorizontal: 4 },
+  badgeMuted: { backgroundColor: colors.textMuted },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2, gap: spacing.sm, backgroundColor: 'rgba(16,46,80,0.55)', borderRadius: radius.md, marginBottom: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)' },
   avatarWrap: { position: 'relative' },
   avatar: { width: 54, height: 54, borderRadius: 27, backgroundColor: colors.surface },

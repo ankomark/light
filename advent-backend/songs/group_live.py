@@ -12,6 +12,8 @@
   socket (ws/dm/) so the list reorders at once; big communities catch up on
   the list's poll (telling thousands of rooms per message isn't worth it).
 """
+import re
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.core.cache import cache
@@ -94,24 +96,58 @@ def watching(slug, user_ids):
 
 # ── A new message's pushes and the live list ───────────────────────────────
 
-def fan_out(group, sender, post, preview):
-    """Push the other members (batched), and tell smaller groups' members'
-    own sockets so their list moves this group to the top."""
+MENTION_RE = re.compile(r'(?<![\w@])@([\w.]{1,40})')
+MAX_MENTIONS = 20
+
+
+def mentioned_ids(group, text, exclude=None):
+    """Members named with @username in `text` (at most 20)."""
     from .models import GroupMember
+    names = {m.rstrip('.').lower() for m in MENTION_RE.findall(text or '')}
+    names.discard('')
+    if not names:
+        return set()
+    from functools import reduce
+    from django.db.models import Q
+    match = reduce(lambda a, b: a | b, (Q(user__username__iexact=n) for n in list(names)[:MAX_MENTIONS]))
+    ids = set(GroupMember.objects.filter(group=group).filter(match).values_list('user_id', flat=True))
+    ids.discard(exclude)
+    return ids
+
+
+def fan_out(group, sender, post, preview):
+    """Push the other members (batched) — those @mentioned always (a mute or
+    "mentions only" doesn't silence being named), everyone else unless they
+    muted the group, chose mentions only, or are looking at it — and tell
+    smaller groups' members' own sockets so their list moves this group up."""
+    from .models import GroupMember, Notification
     from .push import notify_many
     from . import messaging as dm
 
     now = timezone.now()
-    members = GroupMember.objects.filter(group=group).exclude(user=sender)
-    ids = list(members.values_list('user_id', flat=True))
+    rows = list(GroupMember.objects.filter(group=group).exclude(user=sender)
+                .values_list('user_id', 'muted_until', 'notify_level'))
+    ids = [r[0] for r in rows]
     if not ids:
         return
-    muted = set(members.filter(muted_until__gt=now).values_list('user_id', flat=True))
     here = watching(group.slug, ids)
-    targets = [u for u in ids if u not in muted and u not in here]
-    if targets:
-        notify_many(targets, 'message', f"{group.name} — {sender.username}: {preview}",
+    named = mentioned_ids(group, post.content, exclude=sender.id) if post.message_type == 'text' else set()
+    quiet = {uid for uid, until, level in rows
+             if (until and until > now) or level == GroupMember.NOTIFY_MENTIONS}
+    everyone = [u for u in ids if u not in quiet and u not in here and u not in named]
+    if everyone:
+        notify_many(everyone, 'message', f"{group.name} — {sender.username}: {preview}",
                     data={'groupSlug': group.slug})
+    if named:
+        Notification.objects.bulk_create([
+            Notification(recipient_id=u, sender=sender, group=group, notification_type='group_mention',
+                         message=f"{sender.username} mentioned you in {group.name}")
+            for u in named
+        ])
+        reach = [u for u in named if u not in here]
+        if reach:
+            notify_many(reach, 'group_mention', f"{sender.username} mentioned you in {group.name}: {preview}",
+                        data={'groupSlug': group.slug, 'messageId': post.id})
 
     if len(ids) <= LIVE_LIST_MAX_MEMBERS:
         dm.tell(ids + [sender.id], {
@@ -121,8 +157,8 @@ def fan_out(group, sender, post, preview):
                 'file_name': post.file_name, 'sender_id': sender.id, 'sender_username': sender.username,
                 'created_at': post.created_at.isoformat(),
             },
+            'mentions': sorted(named),
         })
-
 
 def unread_groups(user):
     """How many of my groups, and communities, have something I haven't read
