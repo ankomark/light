@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -37,7 +37,9 @@ const previewText = (lm, t, group) => {
   return lm.sender_username ? `${lm.sender_username}: ${body}` : body;
 };
 
-const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
+// Memoised, with callbacks that take the group: the list's refresh and live
+// updates re-render only the rows whose group changed.
+const GroupItem = memo(({ group, onPress, onDelete, onEdit, isCreator }) => {
   const { t } = useI18n();
   const unread = group.unread_count || 0;
   const lm = group.last_message;
@@ -45,7 +47,7 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.8}>
+    <TouchableOpacity style={styles.row} onPress={() => onPress(group)} activeOpacity={0.8} testID={`group-row-${group.slug}`}>
       <View style={styles.avatarWrap}>
         {group.cover_image ? (
           <Image source={{ uri: group.cover_image }} style={styles.avatar} contentFit="cover" transition={150} />
@@ -73,10 +75,10 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
           ) : isCreator ? (
             expanded ? (
               <View style={styles.actions}>
-                <TouchableOpacity onPress={() => { setExpanded(false); onEdit(); }} hitSlop={8} style={styles.actionBtn}>
+                <TouchableOpacity onPress={() => { setExpanded(false); onEdit(group); }} hitSlop={8} style={styles.actionBtn}>
                   <MaterialIcons name="edit" size={17} color={colors.textMuted} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => { setExpanded(false); onDelete(); }} hitSlop={8} style={styles.actionBtn}>
+                <TouchableOpacity onPress={() => { setExpanded(false); onDelete(group); }} hitSlop={8} style={styles.actionBtn}>
                   <MaterialIcons name="delete-outline" size={18} color={colors.error} />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setExpanded(false)} hitSlop={8} style={styles.actionBtn}>
@@ -93,7 +95,7 @@ const GroupItem = ({ group, onPress, onDelete, onEdit, isCreator }) => {
       </View>
     </TouchableOpacity>
   );
-};
+});
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2, gap: spacing.sm, backgroundColor: 'rgba(16,46,80,0.55)', borderRadius: radius.md, marginBottom: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)' },
@@ -114,5 +116,7 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', marginLeft: spacing.sm, gap: spacing.xs },
   actionBtn: { padding: 2 },
 });
+
+GroupItem.displayName = 'GroupItem';
 
 export default GroupItem;

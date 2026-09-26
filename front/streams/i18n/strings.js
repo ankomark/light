@@ -360,6 +360,7 @@ export const STRINGS = {
 
     'inbox.title': 'Messages',
     'inbox.empty': 'No conversations yet',
+    'group.members.search': "Search members",
     'dm.folder.primary': "Primary",
     'dm.folder.requests': "Requests",
     'dm.folder.archived': "Archived",
@@ -3136,6 +3137,7 @@ export const STRINGS = {
 
     'inbox.title': 'Ujumbe',
     'inbox.empty': 'Hakuna mazungumzo bado',
+    'group.members.search': "Tafuta wanachama",
     'dm.folder.primary': "Kuu",
     'dm.folder.requests': "Maombi",
     'dm.folder.archived': "Kumbukumbu",

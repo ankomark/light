@@ -1203,19 +1203,11 @@ export const fetchDailyVerse = async (day = null) =>
 // Group endpoints
 // Returns the paginated envelope { results, next, ... } so the caller can
 // infinite-scroll; keeps the retry/backoff since this is the community landing.
-export const fetchGroups = async (retries = 3, delay = 1000) => {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await apiRequest('get', '/groups/', null, { params: { page_size: 20 } });
-    } catch (error) {
-      if (attempt === retries) {
-        console.error('Failed to fetch groups after retries:', error);
-        throw error.response?.data || { message: 'Failed to fetch groups' };
-      }
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-};
+// `scope`: 'public' | 'private' | 'mine' — resolved by the server, so each tab
+// pages correctly. One try: the list paints from cache while this runs, and a
+// failure keeps what's shown (retrying three times only held the spinner up).
+export const fetchGroups = async ({ scope } = {}) =>
+  apiRequest('get', '/groups/', null, { params: { page_size: 20, ...(scope ? { scope } : {}) } });
 
 // Follow a paginated `next` link (preserves path + query) for infinite scroll.
 export const fetchGroupsByUrl = async (nextUrl) => {
@@ -1407,15 +1399,10 @@ export const rejectJoinRequest = async (requestId) => {
   return apiRequest('post', `/group-join-requests/${requestId}/reject/`);
 };
 
-export const fetchGroupMembers = async (slug) => {
-  try {
-    const response = await apiRequest('get', `/groups/${slug}/members/`);
-    return response; // No need to transform, as backend provides correct structure
-  } catch (error) {
-    console.error('Failed to fetch members:', error);
-    throw error;
-  }
-};
+// A page of members ({results, next, count}), admins first; `q` searches names.
+export const fetchGroupMembers = async (slug, { page = 1, q = '' } = {}) =>
+  apiRequest('get', `/groups/${slug}/members/`, null,
+    { params: { paged: 1, page, page_size: 40, ...(q ? { q } : {}) } });
 
 // Group admin actions (WhatsApp-style member management).
 export const removeGroupMember = async (slug, userId) =>

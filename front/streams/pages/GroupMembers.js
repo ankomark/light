@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity, Pressable, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity, Pressable, TextInput } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { notify } from '../utils/adminConfirm';
 
 const DEFAULT_AVATAR = require('../assets/user-placeholder.png');
 
@@ -66,65 +67,106 @@ const GroupMembers = (props) => {
   const creatorId = group?.creator?.id;
 
   const [members, setMembers] = useState([]);
+  const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  const [query, setQuery] = useState('');
+  const [q, setQ] = useState('');
   const [actionMember, setActionMember] = useState(null); // member whose action sheet is open
   const [confirmRemove, setConfirmRemove] = useState(null); // member pending removal
   const [busy, setBusy] = useState(false);
+  const pageRef = useRef(1);
+  const moreRef = useRef(false);
+  const askedRef = useRef('');
 
+  // Pause, then search (on the server: a community can have thousands).
+  useEffect(() => {
+    const id = setTimeout(() => setQ(query.trim()), 300);
+    return () => clearTimeout(id);
+  }, [query]);
+
+  // A page at a time, the people who run it first.
   const load = useCallback(async () => {
+    const asked = q;
+    askedRef.current = asked;
     try {
       setError(null);
-      const data = await fetchGroupMembers(groupSlug);
-      setMembers(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Failed to load members:', err);
-      setError(t('group.members.loadFailed'));
+      const res = await fetchGroupMembers(groupSlug, { page: 1, q: asked });
+      if (askedRef.current !== asked) return;
+      const rows = res?.results ?? (Array.isArray(res) ? res : []);
+      setMembers(rows);
+      setCount(res?.count ?? rows.length);
+      pageRef.current = 1;
+      moreRef.current = !!res?.next;
+    } catch {
+      if (askedRef.current === asked) setError(t('group.members.loadFailed'));
     } finally {
-      setLoading(false);
+      if (askedRef.current === asked) setLoading(false);
     }
-  }, [groupSlug, t]);
+  }, [groupSlug, q, t]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !moreRef.current) return;
+    const asked = q;
+    setLoadingMore(true);
+    try {
+      const res = await fetchGroupMembers(groupSlug, { page: pageRef.current + 1, q: asked });
+      if (askedRef.current !== asked) return;
+      pageRef.current += 1;
+      moreRef.current = !!res?.next;
+      setMembers((prev) => {
+        const have = new Set(prev.map((m) => m.id));
+        return [...prev, ...(res?.results ?? []).filter((m) => !have.has(m.id))];
+      });
+    } catch { /* scrolling again retries */ } finally { setLoadingMore(false); }
+  }, [groupSlug, q, loadingMore]);
+
+  // A role change or removal updates the row in place — no reload of a
+  // list that may be thousands long.
+  const patchMember = (userId, patch) => setMembers((prev) => prev.map((m) => (m.user?.id === userId ? { ...m, ...patch } : m)));
 
   const changeAdmin = useCallback(async (member, makeAdmin) => {
     setActionMember(null);
     setBusy(true);
     try {
       await setGroupAdmin(groupSlug, member.user.id, makeAdmin);
-      await load();
+      patchMember(member.user.id, { is_admin: makeAdmin, ...(makeAdmin ? { is_moderator: false } : {}) });
     } catch (e) {
-      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.members.updateFailed'));
+      notify(t('common.error'), e?.response?.data?.error || t('group.members.updateFailed'));
     } finally {
       setBusy(false);
     }
-  }, [groupSlug, load, t]);
+  }, [groupSlug, t]);
 
   const changeModerator = useCallback(async (member, makeMod) => {
     setActionMember(null);
     setBusy(true);
     try {
       await setGroupModerator(groupSlug, member.user.id, makeMod);
-      await load();
+      patchMember(member.user.id, { is_moderator: makeMod });
     } catch (e) {
-      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.members.updateFailed'));
+      notify(t('common.error'), e?.response?.data?.error || t('group.members.updateFailed'));
     } finally {
       setBusy(false);
     }
-  }, [groupSlug, load, t]);
+  }, [groupSlug, t]);
 
   const doRemove = useCallback(async (member) => {
     setConfirmRemove(null);
     setBusy(true);
     try {
       await removeGroupMember(groupSlug, member.user.id);
-      await load();
+      setMembers((prev) => prev.filter((m) => m.user?.id !== member.user.id));
+      setCount((n) => Math.max(0, n - 1));
     } catch (e) {
-      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.members.removeFailed'));
+      notify(t('common.error'), e?.response?.data?.error || t('group.members.removeFailed'));
     } finally {
       setBusy(false);
     }
-  }, [groupSlug, load, t]);
+  }, [groupSlug, t]);
 
   const am = actionMember;
   const amIsCreator = am && am.user?.id === creatorId;
@@ -139,7 +181,7 @@ const GroupMembers = (props) => {
               <Text style={styles.title}>{t('group.members.title')}</Text>
               {!loading && !error && (
                 <Text style={styles.subtitle}>
-                  {members.length} {members.length === 1 ? t('group.members.person') : t('group.members.people')}
+                  {count} {count === 1 ? t('group.members.person') : t('group.members.people')}
                   {isAdmin ? t('group.members.tapToManage') : ''}
                 </Text>
               )}
@@ -160,8 +202,19 @@ const GroupMembers = (props) => {
               </TouchableOpacity>
             </View>
           ) : (
+            <>
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={16} color={colors.textMuted} />
+              <TextInput value={query} onChangeText={setQuery} placeholder={t('group.members.search')}
+                placeholderTextColor={colors.textMuted} style={styles.searchInput} autoCapitalize="none"
+                autoCorrect={false} testID="members-search" />
+            </View>
             <FlatList
               data={members}
+              onEndReached={loadMore}
+              onEndReachedThreshold={0.5}
+              keyboardShouldPersistTaps="handled"
+              ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={styles.more} /> : null}
               keyExtractor={(item) => item.id.toString()}
               renderItem={({ item }) => (
                 <GroupMemberItem
@@ -181,6 +234,7 @@ const GroupMembers = (props) => {
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
             />
+            </>
           )}
         </SafeAreaView>
 
@@ -292,6 +346,13 @@ const GroupMembers = (props) => {
 };
 
 const styles = StyleSheet.create({
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginHorizontal: spacing.md, marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm, borderRadius: radius.full, backgroundColor: 'rgba(16,46,80,0.55)', minHeight: 40,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  searchInput: { flex: 1, color: colors.textPrimary, paddingVertical: spacing.xs, fontSize: 15 },
+  more: { marginVertical: spacing.md },
   root: { flex: 1, backgroundColor: '#0A1628' },
   safe: { flex: 1, backgroundColor: 'transparent' },
   header: {

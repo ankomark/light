@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, AppState, Modal,
-  ScrollView, Alert, Pressable, useWindowDimensions, Animated, PanResponder,
+  ScrollView, Pressable, useWindowDimensions, Animated, PanResponder,
 } from 'react-native';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
@@ -34,6 +34,11 @@ import ReportModal from '../components/ReportModal';
 import BookClubBanner from '../components/BookClubBanner';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { peekCache, readCache, writeCache } from '../utils/screenCache';
+import { confirmAction, notify } from '../utils/adminConfirm';
+import {
+  mergeMessages, freshPage, cacheableGroupMessages, groupChatKey, replyLabel, isTemp,
+} from '../utils/groupChat';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -43,9 +48,11 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 // as an optional enhancement that only turns on once an EAS build includes it.
 let Blurhash = null;
 try { Blurhash = require('react-native-blurhash').Blurhash; } catch { Blurhash = null; }
-// Realtime arrives over the WebSocket; the poll is now just a safety net that
-// catches anything missed during a socket reconnect, so it can be slow.
-const POLL_MS = 12000;
+// Realtime arrives over the WebSocket; the poll is just a safety net that
+// catches anything missed during a reconnect — slow while the socket is up,
+// quick while it's down. It asks only for what's newer than we hold.
+const POLL_LIVE_MS = 30000;
+const POLL_MS = 5000;
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const EMOJIS = ['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','🥰','😘','😋','😜','🤪','🤔','🤭','😎','🥳','😢','😭','😤','😡','🥺','😱','🙏','👍','👎','👏','🙌','🤝','💪','🫶','❤️','🧡','💛','💚','💙','💜','🔥','✨','🎉','💯','✅','🕊️','📖','🎵','☀️','⭐'];
 const REACTIONS = ['❤️', '👍', '🙏', '🎵', '😂', '🔥']; // quick-react row
@@ -58,17 +65,16 @@ const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const fmtDate = (d) => new Date(d).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' + fmtTime(d);
 const fmtDuration = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.round((s || 0) % 60)).padStart(2, '0')}`;
-const replyLabel = (m, t) => m.content || ({
-  image: t('group.preview.photo'), file: t('group.preview.file'), audio: t('group.preview.voiceNote'),
-}[m.message_type] || t('group.preview.message'));
 
 /**
  * One chat row: swipe-right-to-reply (PanResponder, no GestureHandlerRootView),
  * WhatsApp-style delivery state (clock → double-tick, or failed/tap-to-retry),
  * an upload spinner over in-flight images, and emoji reactions.
+ * Memoised on primitive props and stable callbacks: a new message, a poll or
+ * a keystroke re-renders only the rows that changed, not the whole chat.
  */
-const GroupMessageRow = ({
-  item, isOwn, showName, playingId,
+const GroupMessageRow = memo(({
+  item, isOwn, showName, isPlaying,
   onReply, onLongPress, onOpenImage, onOpenFile, onPlayAudio, onToggleReaction, onRetry, onDoubleTap, highlighted,
 }) => {
   const { t } = useI18n();
@@ -198,7 +204,7 @@ const GroupMessageRow = ({
                 </Pressable>
               ) : type === 'audio' ? (
                 <Pressable style={styles.audioRow} onPress={() => onPlayAudio(item)} disabled={sending}>
-                  <Ionicons name={playingId === item.id ? 'pause-circle' : 'play-circle'} size={30} color={isOwn ? colors.white : colors.primary} />
+                  <Ionicons name={isPlaying ? 'pause-circle' : 'play-circle'} size={30} color={isOwn ? colors.white : colors.primary} />
                   <View style={styles.audioBar}><View style={[styles.audioBarFill, { backgroundColor: isOwn ? 'rgba(255,255,255,0.55)' : colors.primary }]} /></View>
                   <Text style={[styles.audioDuration, isOwn ? styles.txtOwn : styles.txtOther]}>{fmtDuration(item.duration)}</Text>
                 </Pressable>
@@ -245,13 +251,8 @@ const GroupMessageRow = ({
       </Animated.View>
     </View>
   );
-};
-
-const mergeMessages = (a, b) => {
-  const map = new Map();
-  [...a, ...b].forEach((m) => map.set(String(m.id), m));
-  return Array.from(map.values()).sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
-};
+});
+GroupMessageRow.displayName = 'GroupMessageRow';
 
 /** The category-specific fields a community carries (conference, genre, ...).
  *  Driven by the category's field_schema, so a user-created kind renders its
@@ -280,16 +281,22 @@ const GroupDetail = ({ route, navigation }) => {
   const { currentUser } = useAuth();
   const kbHeight = useKeyboardHeight(); // float the composer above the keyboard (edge-to-edge safe)
 
-  const [group, setGroup] = useState(initialGroup || null);
-  const [isMember, setIsMember] = useState(initialGroup?.is_member || false);
-  const [isAdmin, setIsAdmin] = useState(initialGroup?.is_admin || false);
-  const [isModerator, setIsModerator] = useState(initialGroup?.is_moderator || false);
-  const [requested, setRequested] = useState(initialGroup?.has_pending_request || false);
-  const [messages, setMessages] = useState([]);
-  // When we arrive from the list we already have the group object, so we can
-  // render the chat shell straight away instead of blocking on a full reload.
-  const [loading, setLoading] = useState(!initialGroup);
-  const [firstLoad, setFirstLoad] = useState(true); // first posts fetch in flight
+  // Open on the last chat we saw here — the group and its newest messages —
+  // straight from memory when this session has them, from disk otherwise
+  // (below); the network then refreshes it in place instead of a spinner.
+  const cacheKey = groupChatKey(currentUser?.id, groupSlug);
+  const cached = peekCache(cacheKey);
+  const seed = initialGroup || cached?.group || null;
+  const [group, setGroup] = useState(seed);
+  const [isMember, setIsMember] = useState(seed?.is_member || false);
+  const [isAdmin, setIsAdmin] = useState(seed?.is_admin || false);
+  const [isModerator, setIsModerator] = useState(seed?.is_moderator || false);
+  const [requested, setRequested] = useState(seed?.has_pending_request || false);
+  const [messages, setMessages] = useState(() => cached?.messages ?? []);
+  // With the group in hand (from the list or the cache) the chat shell renders
+  // at once instead of blocking on a full reload.
+  const [loading, setLoading] = useState(!seed);
+  const [firstLoad, setFirstLoad] = useState(() => !cached?.messages?.length); // nothing to show yet
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [viewer, setViewer] = useState(null);
@@ -308,7 +315,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [showJump, setShowJump] = useState(false);    // "jump to newest" FAB
   const [viewingHistory, setViewingHistory] = useState(false); // showing a search-context window, not live
   const [highlightId, setHighlightId] = useState(null); // message to briefly flash after a jump
-  const [pinnedMsg, setPinnedMsg] = useState(initialGroup?.pinned_message || null);
+  const [pinnedMsg, setPinnedMsg] = useState(seed?.pinned_message || null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -333,9 +340,39 @@ const GroupDetail = ({ route, navigation }) => {
   const myTypingRef = useRef({ active: false, idle: null }); // outbound typing throttle
   // Only members may read the chat (public groups included). Mirrored into a ref
   // so the poll/AppState callbacks can gate without re-subscribing.
-  const canReadRef = useRef(initialGroup?.is_member || false);
+  const canReadRef = useRef(seed?.is_member || false);
   const appState = useRef(AppState.currentState);
   const pageRef = useRef(1);
+  const freshRef = useRef(false);        // has a first page come from the server yet?
+  const liveRef = useRef(false);         // is the socket up (so the poll can be slow)?
+  const playingIdRef = useRef(null);
+  useEffect(() => { playingIdRef.current = playingId; }, [playingId]);
+  const groupRef = useRef(seed);
+  useEffect(() => { groupRef.current = group; }, [group]);
+
+  // Cold start: the disk copy, if the network hasn't answered first.
+  useEffect(() => {
+    if (cached) return undefined;
+    let cancelled = false;
+    readCache(cacheKey).then((disk) => {
+      if (cancelled || !disk) return;
+      if (disk.group) {
+        setGroup((g) => g || disk.group);
+        if (!initialGroup) {
+          setIsMember(!!disk.group.is_member); setIsAdmin(!!disk.group.is_admin);
+          setIsModerator(!!disk.group.is_moderator); canReadRef.current = !!disk.group.is_member;
+          setPinnedMsg((p) => p || disk.group.pinned_message || null);
+        }
+        setLoading(false);
+      }
+      if (Array.isArray(disk.messages) && disk.messages.length && !freshRef.current) {
+        setMessages((prev) => (prev.length ? prev : disk.messages));
+        setFirstLoad(false);
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const recordingRef = useRef(null);
   const recordTimerRef = useRef(null);
   const recordStartRef = useRef(0);
@@ -344,29 +381,57 @@ const GroupDetail = ({ route, navigation }) => {
   // ── Load ──
   const loadPosts = useCallback(async (silent = false) => {
     try {
+      // After the first page, a poll asks only for what's newer than the
+      // newest message held — a few rows, not the page of 30 every time.
+      const newest = [...messagesRef.current].reverse().find((m) => !isTemp(m) && typeof m.id === 'number');
+      if (silent && freshRef.current && newest) {
+        const res = await fetchGroupPostsAfter(groupSlug, newest.id);
+        const newer = res?.results ?? [];
+        if (!canReadRef.current) return undefined;
+        if (res?.has_more) { freshRef.current = false; return loadPosts(true); } // far behind: take the newest page
+        if (newer.length) {
+          setMessages((prev) => mergeMessages(prev, newer));
+          if (atBottomRef.current) setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+        }
+        return undefined;
+      }
       const res = await fetchGroupPosts(groupSlug, 1);
+      // Removed (or left) while this was in flight: what it brought isn't theirs to see.
+      if (!canReadRef.current) return undefined;
       const incoming = (res?.results ?? []).slice().reverse();
       setHasEarlier(!!res?.next);
       hasNewerRef.current = false; // this is the live newest page
+      const first = !freshRef.current;
+      freshRef.current = true;
       setMessages((prev) => {
-        // Keep optimistic rows that are still sending or failed so they don't
-        // blink out between polls; drop only the ones already confirmed gone.
-        const keepTemps = prev.filter((m) => String(m.id).startsWith('temp_') && (m._status === 'sending' || m._status === 'failed'));
-        const base = prev.filter((m) => !String(m.id).startsWith('temp_'));
-        const merged = mergeMessages([...base, ...keepTemps], incoming);
+        // The first page replaces what the cache painted (a message deleted
+        // while away goes); after that, pages merge. Sending / failed bubbles
+        // always stay.
+        const merged = first ? freshPage(prev, incoming) : mergeMessages(prev, incoming);
         if (!silent && merged.length) setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
         return merged;
       });
     } catch { /* ignore */ }
+    return undefined;
   }, [groupSlug]);
+
+  // Keep the cache current with what's on screen (debounced: a burst of
+  // messages is one write). Not while showing a search's window of history.
+  useEffect(() => {
+    if (!group || viewingHistory) return undefined;
+    const handle = setTimeout(() => writeCache(cacheKey, {
+      group, messages: isMember ? cacheableGroupMessages(messages) : [],
+    }), 500);
+    return () => clearTimeout(handle);
+  }, [messages, group, isMember, viewingHistory, cacheKey]);
 
   const loadGroup = useCallback(async () => {
     // Only members can read messages (public groups too). If the list already
     // told us the user is a member, start fetching messages right now — in
     // parallel with the group-details request — so the chat fills in without
     // waiting for two sequential round-trips.
-    const canReadNow = !!initialGroup?.is_member;
-    const postsPromise = canReadNow ? loadPosts() : null;
+    const canReadNow = !!canReadRef.current;
+    const postsPromise = canReadNow ? loadPosts(messagesRef.current.length > 0) : null;
     try {
       const g = await fetchGroupDetails(groupSlug);
       setGroup(g);
@@ -376,9 +441,13 @@ const GroupDetail = ({ route, navigation }) => {
       setRequested(!!g.has_pending_request);
       setPinnedMsg(g.pinned_message || null);
       canReadRef.current = !!g.is_member;
+      // No longer a member (removed, or left elsewhere): the cached chat goes.
+      if (!g.is_member) setMessages([]);
       if (!postsPromise && g.is_member) await loadPosts();
     } catch {
-      Alert.alert(t('common.error'), t('group.detail.loadFailed'));
+      // With something on screen (the list's copy, or the cache), keep it and
+      // say nothing — the poll catches up. Only an empty screen is worth a word.
+      if (!initialGroup && !groupRef.current) notify(t('common.error'), t('group.detail.loadFailed'));
     } finally {
       if (postsPromise) await postsPromise.catch(() => {});
       setLoading(false);
@@ -422,17 +491,26 @@ const GroupDetail = ({ route, navigation }) => {
 
   const markRead = useCallback(() => { markGroupRead(groupSlug).catch(() => {}); }, [groupSlug]);
 
+  // The safety-net poll: slow while the socket is up, quick while it's down,
+  // and not at all in the background.
+  const startPoll = useCallback(() => {
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      if (canReadRef.current && !viewingHistoryRef.current && appState.current === 'active') loadPosts(true);
+    }, liveRef.current ? POLL_LIVE_MS : POLL_MS);
+  }, [loadPosts]);
+
   useFocusEffect(
     useCallback(() => {
       loadGroup();
       markRead();
-      pollRef.current = setInterval(() => { if (canReadRef.current && !viewingHistoryRef.current) loadPosts(true); }, POLL_MS);
+      startPoll();
       const sub = AppState.addEventListener('change', (n) => {
         if (n === 'active' && appState.current !== 'active' && canReadRef.current && !viewingHistoryRef.current) { loadPosts(true); markRead(); }
         appState.current = n;
       });
-      return () => { clearInterval(pollRef.current); sub.remove(); markRead(); };
-    }, [loadGroup, loadPosts, markRead])
+      return () => { clearInterval(pollRef.current); pollRef.current = null; sub.remove(); markRead(); };
+    }, [loadGroup, loadPosts, markRead, startPoll])
   );
 
   // ── Realtime socket ──
@@ -483,11 +561,17 @@ const GroupDetail = ({ route, navigation }) => {
             : prev.filter((id) => id !== evt.user_id)
         ));
       },
-      onStatus: (s) => { if (s === 'closed') setOnlineIds([]); }, // stale on disconnect
+      onStatus: (s) => {
+        liveRef.current = s === 'open';
+        if (s === 'closed') setOnlineIds([]); // stale on disconnect
+        // Back online: catch up on anything sent while the socket was down.
+        else if (canReadRef.current && !viewingHistoryRef.current) loadPosts(true);
+        if (pollRef.current) startPoll();
+      },
     });
     socketRef.current = sock;
-    return () => { sock.close(); socketRef.current = null; };
-  }, [groupSlug, isMember, currentUser?.id, markUserTyping]);
+    return () => { sock.close(); socketRef.current = null; liveRef.current = false; };
+  }, [groupSlug, isMember, currentUser?.id, markUserTyping, loadPosts, startPoll]);
 
   // Tell the room I'm typing (once), and stop after a short idle.
   const notifyTyping = useCallback(() => {
@@ -606,7 +690,7 @@ const GroupDetail = ({ route, navigation }) => {
   const attachImage = useCallback(async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') { Alert.alert(t('chat.permissionRequired'), t('chat.permissionPhotos')); return; }
+      if (status !== 'granted') { notify(t('chat.permissionRequired'), t('chat.permissionPhotos')); return; }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (res.canceled || !res.assets?.length) return;
       const p = await compressImage(res.assets[0].uri, { width: 1080, quality: 0.6 });
@@ -617,7 +701,7 @@ const GroupDetail = ({ route, navigation }) => {
         try { blurhash = await Blurhash.encode(p.uri, 4, 3); } catch { /* placeholder is optional */ }
       }
       sendMediaMessage({ localUri: p.uri, uploadType: 'chat-image', message_type: 'image', mimeType: 'image/jpeg', blurhash });
-    } catch { Alert.alert(t('common.error'), t('chat.attachImageFailed')); }
+    } catch { notify(t('common.error'), t('chat.attachImageFailed')); }
   }, [sendMediaMessage, t]);
 
   const attachFile = useCallback(async () => {
@@ -625,12 +709,12 @@ const GroupDetail = ({ route, navigation }) => {
       const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.length) return;
       const f = res.assets[0];
-      if (f.size && f.size > MAX_FILE_BYTES) { Alert.alert(t('chat.fileTooLargeTitle'), t('group.detail.fileTooLargeBody')); return; }
+      if (f.size && f.size > MAX_FILE_BYTES) { notify(t('chat.fileTooLargeTitle'), t('group.detail.fileTooLargeBody')); return; }
       sendMediaMessage({
         localUri: f.uri, uploadType: 'chat-file', message_type: 'file',
         file_name: f.name || 'file', mimeType: f.mimeType || 'application/octet-stream',
       });
-    } catch { Alert.alert(t('common.error'), t('chat.attachFileFailed')); }
+    } catch { notify(t('common.error'), t('chat.attachFileFailed')); }
   }, [sendMediaMessage, t]);
 
   const onAttachPress = useCallback(() => {
@@ -663,15 +747,15 @@ const GroupDetail = ({ route, navigation }) => {
       }
       if (!path) return;
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
-      else Alert.alert(t('chat.savedTitle'), t('common.savedAs', { name: msg.file_name }));
-    } catch { Alert.alert(t('common.error'), t('chat.openFileFailed')); }
+      else notify(t('chat.savedTitle'), t('common.savedAs', { name: msg.file_name }));
+    } catch { notify(t('common.error'), t('chat.openFileFailed')); }
   }, [t]);
 
   // ── Voice ──
   const startRecording = useCallback(async () => {
     try {
       const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) { Alert.alert(t('chat.permissionRequired'), t('chat.permissionMic')); return; }
+      if (!perm.granted) { notify(t('chat.permissionRequired'), t('chat.permissionMic')); return; }
       await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const rec = new Recording();
       await rec.prepareToRecordAsync(VOICE_NOTE_RECORDING_OPTIONS);
@@ -679,7 +763,7 @@ const GroupDetail = ({ route, navigation }) => {
       recordingRef.current = rec; recordStartRef.current = Date.now();
       setShowEmoji(false); setIsRecording(true); setRecordSecs(0);
       recordTimerRef.current = setInterval(() => setRecordSecs((s) => s + 1), 1000);
-    } catch { Alert.alert(t('common.error'), t('chat.recordFailed')); setIsRecording(false); }
+    } catch { notify(t('common.error'), t('chat.recordFailed')); setIsRecording(false); }
   }, [t]);
 
   const stopRecording = useCallback(async (cancel = false) => {
@@ -698,13 +782,13 @@ const GroupDetail = ({ route, navigation }) => {
         localUri: uri, uploadType: 'chat-audio', message_type: 'audio',
         duration: seconds, mimeType: 'audio/m4a',
       });
-    } catch { Alert.alert(t('common.error'), t('chat.saveVoiceFailed')); }
+    } catch { notify(t('common.error'), t('chat.saveVoiceFailed')); }
   }, [sendMediaMessage, t]);
 
   const playAudio = useCallback(async (msg) => {
     try {
       if (soundRef.current) { await soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; }
-      if (playingId === msg.id) { setPlayingId(null); return; }
+      if (playingIdRef.current === msg.id) { setPlayingId(null); return; }
       // Legacy base64 → write to a cache file first; R2/local URIs play
       // directly (expo-av streams https).
       let sourceUri = msg.attachment;
@@ -723,8 +807,8 @@ const GroupDetail = ({ route, navigation }) => {
       // Another sound started (only one plays at a time): this note is done.
       sound.setOnFocusLost(() => { setPlayingId(null); sound.unloadAsync().catch(() => {}); if (soundRef.current === sound) soundRef.current = null; });
       sound.setOnPlaybackStatusUpdate((st) => { if (st.didJustFinish) { setPlayingId(null); sound.unloadAsync().catch(() => {}); soundRef.current = null; } });
-    } catch { Alert.alert(t('common.error'), t('chat.playVoiceFailed')); setPlayingId(null); }
-  }, [playingId, t]);
+    } catch { notify(t('common.error'), t('chat.playVoiceFailed')); setPlayingId(null); }
+  }, [t]);
 
   // ── Group menu (luxury sheet) ──
   const openMenu = useCallback(() => setMenuSheet(true), []);
@@ -762,7 +846,7 @@ const GroupDetail = ({ route, navigation }) => {
   const doLeave = useCallback(async () => {
     setLeaveConfirm(false);
     try { await leaveGroup(groupSlug); navigation.goBack(); }
-    catch { Alert.alert(t('common.error'), t('group.detail.leaveFailed')); }
+    catch { notify(t('common.error'), t('group.detail.leaveFailed')); }
   }, [groupSlug, navigation, t]);
 
   const canLeave = isMember && group?.creator?.id !== currentUser?.id;
@@ -774,7 +858,7 @@ const GroupDetail = ({ route, navigation }) => {
       const updated = await setGroupPostingPolicy(groupSlug, next);
       setGroup(updated);
     } catch {
-      Alert.alert(t('common.error'), t('group.detail.settingFailed'));
+      notify(t('common.error'), t('group.detail.settingFailed'));
     }
   }, [group, groupSlug, t]);
 
@@ -782,12 +866,12 @@ const GroupDetail = ({ route, navigation }) => {
     try {
       await requestJoinGroup(groupSlug, answer || '');
       setRequested(true);
-      Alert.alert(t('group.detail.requestSentTitle'), t('group.detail.requestSentBody'));
+      notify(t('group.detail.requestSentTitle'), t('group.detail.requestSentBody'));
     } catch (e) {
       // requestJoinGroup rejects with the response body itself ({ error } / { message }).
       const msg = e?.error || e?.response?.data?.error || e?.message || t('group.detail.requestFailed');
       if (/already/i.test(msg)) setRequested(true);
-      Alert.alert(t('common.notice'), msg);
+      notify(t('common.notice'), msg);
     }
   };
 
@@ -803,7 +887,7 @@ const GroupDetail = ({ route, navigation }) => {
     try {
       const updated = await setGroupJoinQuestion(groupSlug, q);
       setGroup((g) => ({ ...(g || {}), join_question: updated?.join_question ?? q }));
-    } catch { Alert.alert(t('common.error'), t('group.detail.saveFailed')); }
+    } catch { notify(t('common.error'), t('group.detail.saveFailed')); }
   }, [jqEditor, groupSlug, t]);
 
   // ── Message actions: react / reply / delete ──
@@ -930,7 +1014,7 @@ const GroupDetail = ({ route, navigation }) => {
     setMenuMsg(null);
     const prev = pinnedMsg;
     try { setPinnedMsg(await pinGroupMessage(groupSlug, m.id)); }
-    catch { setPinnedMsg(prev); Alert.alert(t('common.error'), t('group.detail.pinFailed')); }
+    catch { setPinnedMsg(prev); notify(t('common.error'), t('group.detail.pinFailed')); }
   }, [groupSlug, pinnedMsg, t]);
 
   const unpinMessage = useCallback(async () => {
@@ -939,7 +1023,7 @@ const GroupDetail = ({ route, navigation }) => {
     if (!prev) return;
     setPinnedMsg(null);
     try { await unpinGroupMessage(groupSlug, prev.id); }
-    catch { setPinnedMsg(prev); Alert.alert(t('common.error'), t('group.detail.pinFailed')); }
+    catch { setPinnedMsg(prev); notify(t('common.error'), t('group.detail.pinFailed')); }
   }, [groupSlug, pinnedMsg, t]);
 
   const saveEdit = useCallback(async () => {
@@ -957,26 +1041,26 @@ const GroupDetail = ({ route, navigation }) => {
     } catch {
       // Roll back to the original text on failure.
       setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, content: m.content, edited_at: m.edited_at || null } : x)));
-      Alert.alert(t('common.error'), t('group.detail.editFailed'));
+      notify(t('common.error'), t('group.detail.editFailed'));
     }
   }, [editingMsg, text, groupSlug, cancelEdit, t]);
 
-  const confirmDelete = useCallback((m) => {
+  // Web-safe: Alert's buttons never fire on web, so deleting did nothing there.
+  const confirmDelete = useCallback(async (m) => {
     setMenuMsg(null);
     if (!canDelete(m)) return;
-    Alert.alert(t('group.detail.deleteMessageTitle'), t('group.detail.deleteMessageBody'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('common.delete'), style: 'destructive', onPress: async () => {
-        try {
-          await deleteGroupPost(groupSlug, m.id);
-          setMessages((prev) => prev.filter((x) => x.id !== m.id));
-          // Clear the pinned banner locally too (don't just wait on the WS event).
-          setPinnedMsg((p) => (p && String(p.id) === String(m.id) ? null : p));
-        }
-        catch { Alert.alert(t('common.error'), t('group.detail.deleteMessageFailed')); }
-      } },
-    ]);
-  }, [groupSlug, currentUser, isAdmin, t]);
+    const ok = await confirmAction({
+      title: t('group.detail.deleteMessageTitle'), message: t('group.detail.deleteMessageBody'),
+      confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteGroupPost(groupSlug, m.id);
+      setMessages((prev) => prev.filter((x) => x.id !== m.id));
+      // Clear the pinned banner locally too (don't just wait on the WS event).
+      setPinnedMsg((p) => (p && String(p.id) === String(m.id) ? null : p));
+    } catch { notify(t('common.error'), t('group.detail.deleteMessageFailed')); }
+  }, [groupSlug, currentUser, isAdmin, isModerator, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Toggle an emoji reaction; the API returns the post's fresh reaction state.
   const reactToPost = useCallback(async (m, emoji) => {
@@ -989,6 +1073,8 @@ const GroupDetail = ({ route, navigation }) => {
     } catch { /* ignore */ }
   }, [groupSlug]);
 
+  const heartReact = useCallback((m) => reactToPost(m, '❤️'), [reactToPost]);
+
   // ── Render ──
   const renderMessage = useCallback(({ item, index }) => {
     const isOwn = item.user?.id === currentUser?.id || item.is_owner;
@@ -999,11 +1085,11 @@ const GroupDetail = ({ route, navigation }) => {
         item={item}
         isOwn={isOwn}
         showName={showName}
-        playingId={playingId}
+        isPlaying={playingId === item.id}
         highlighted={String(item.id) === String(highlightId)}
         onReply={startReply}
         onLongPress={openMsgMenu}
-        onDoubleTap={(m) => reactToPost(m, '❤️')}
+        onDoubleTap={heartReact}
         onOpenImage={setViewer}
         onOpenFile={openFile}
         onPlayAudio={playAudio}
@@ -1011,7 +1097,22 @@ const GroupDetail = ({ route, navigation }) => {
         onRetry={retrySend}
       />
     );
-  }, [currentUser?.id, messages, playingId, highlightId, openFile, playAudio, startReply, openMsgMenu, reactToPost, retrySend]);
+  }, [currentUser?.id, messages, playingId, highlightId, openFile, playAudio, startReply, openMsgMenu, reactToPost, heartReact, retrySend]);
+
+  const keyExtractor = useCallback((item) => String(item.id), []);
+  const onScrollToIndexFailed = useCallback(({ averageItemLength, index }) => {
+    listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: true });
+  }, []);
+  const onListScroll = useCallback((e) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const atBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+    atBottomRef.current = atBottom;
+    const shouldShow = !atBottom || viewingHistoryRef.current;
+    setShowJump((prev) => (prev === shouldShow ? prev : shouldShow));
+  }, []);
+  const onListContentSize = useCallback(() => {
+    if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
+  }, []);
 
   if (loading) {
     return (
@@ -1137,22 +1238,18 @@ const GroupDetail = ({ route, navigation }) => {
         <FlatList
           ref={listRef}
           data={messages}
-          keyExtractor={(item) => String(item.id)}
+          keyExtractor={keyExtractor}
           renderItem={renderMessage}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          onScrollToIndexFailed={({ averageItemLength, index }) => {
-            listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: true });
-          }}
-          onScroll={(e) => {
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            const atBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
-            atBottomRef.current = atBottom;
-            const shouldShow = !atBottom || viewingHistoryRef.current;
-            setShowJump((prev) => (prev === shouldShow ? prev : shouldShow));
-          }}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={20}
+          maxToRenderPerBatch={12}
+          windowSize={11}
+          onScrollToIndexFailed={onScrollToIndexFailed}
+          onScroll={onListScroll}
           scrollEventThrottle={100}
-          onContentSizeChange={() => { if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false }); }}
+          onContentSizeChange={onListContentSize}
           onEndReachedThreshold={0.15}
           onEndReached={loadNewer}
           ListHeaderComponent={hasEarlier ? (

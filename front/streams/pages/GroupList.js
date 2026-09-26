@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   FlatList,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   TouchableOpacity,
   TextInput,
   Modal,
@@ -23,6 +22,9 @@ import {
 import GroupItem from './GroupItem';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { peekCache, readCache, writeCache } from '../utils/screenCache';
+import { groupListKey } from '../utils/groupChat';
+import { confirmAction, notify } from '../utils/adminConfirm';
 import { useI18n } from '../context/I18nContext';
 
 const TAB_KEYS = [
@@ -36,11 +38,21 @@ const TAB_KEYS = [
  * engine. `mode` decides which: 'community' adds the category browse and the
  * per-category directory filters; 'group' is the plain list it has always been.
  */
+// Which list is on screen — the cache keeps one per view (a search isn't kept).
+const viewOf = (tab, category, filters) => {
+  const f = Object.entries(filters || {}).filter(([, v]) => v && String(v).trim()).sort();
+  return `${tab}:${category}${f.length ? `:${JSON.stringify(f)}` : ''}`;
+};
+
 const GroupList = ({ navigation, route, mode = 'group' }) => {
   const isCommunity = mode === 'community';
   const { t } = useI18n();
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  // Paint the last list seen for this view at once (memory, then disk), then
+  // refresh it in place — faded while it does — instead of a spinner.
+  const firstKey = groupListKey(currentUser?.id, mode, viewOf('public', route?.params?.category || 'all', {}));
+  const [groups, setGroups] = useState(() => peekCache(firstKey)?.results ?? []);
+  const [loading, setLoading] = useState(() => !peekCache(firstKey));
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
@@ -48,7 +60,6 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
-  const { currentUser } = useAuth();
 
   // Category browse. Replaces the separate Churches/Choirs directory screens:
   // the kinds come from the API, so a category someone invented today shows up
@@ -94,8 +105,10 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   );
 
   // Switching category retires the previous category's filters.
+  // (Same object when there's nothing to clear — a fresh {} would make the
+  // list load a second time on open.)
   useEffect(() => {
-    setFilters({});
+    setFilters((f) => (Object.keys(f).length ? {} : f));
     setShowFilters(false);
   }, [activeCategory]);
 
@@ -126,35 +139,69 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
     ];
   }, [categories, t]);
 
-  // Memoized fetch function
-  const loadGroups = useCallback(async (showLoader = true) => {
+  // This view's cache key (none while searching).
+  const view = viewOf(activeTab, activeCategory, filters);
+  const cacheKey = debouncedSearch ? null : groupListKey(currentUser?.id, mode, view);
+  const viewRef = useRef(null);
+  viewRef.current = `${view}|${debouncedSearch}`;
+  const [failed, setFailed] = useState(false);
+
+  // Another view: its cached list at once (or rows about to fill in).
+  const firstView = useRef(true);
+  useEffect(() => {
+    if (firstView.current) { firstView.current = false; return undefined; }
+    const hit = cacheKey ? peekCache(cacheKey) : null;
+    setGroups(hit?.results ?? []);
+    setNextUrl(hit?.next ?? null);
+    setLoading(!hit);
+    let cancelled = false;
+    if (cacheKey && !hit) {
+      readCache(cacheKey).then((disk) => {
+        if (cancelled || !disk?.results?.length) return;
+        setGroups((prev) => (prev.length ? prev : disk.results));
+        setLoading(false);
+      });
+    }
+    return () => { cancelled = true; };
+  }, [cacheKey]);
+
+  // Cold start: the disk copy of the first view, if the network hasn't answered.
+  useEffect(() => {
+    if (peekCache(firstKey)) return undefined;
+    let cancelled = false;
+    readCache(firstKey).then((disk) => {
+      if (cancelled || !disk?.results?.length) return;
+      setGroups((prev) => (prev.length ? prev : disk.results));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [firstKey]);
+
+  // Page 1 of the current view. Both kinds scope their tabs on the server, so
+  // each tab pages correctly (the old client-side split missed anything past
+  // the first page). A late answer for a view they've left is dropped.
+  const loadGroups = useCallback(async () => {
+    const asked = viewRef.current;
     try {
-      if (showLoader) setLoading(true);
       const data = isCommunity
-        ? await fetchCommunities({
-          category: activeCategory,
-          search: debouncedSearch,
-          // Communities scope server-side so the tabs page correctly; groups
-          // keep the client-side split they have always used.
-          scope: activeTab,
-          ...filters,
-        })
-        : await fetchGroups();
-      setGroups(data?.results ?? (Array.isArray(data) ? data : []));
+        ? await fetchCommunities({ category: activeCategory, search: debouncedSearch, scope: activeTab, ...filters })
+        : await fetchGroups({ scope: activeTab });
+      if (viewRef.current !== asked) return data;
+      const results = data?.results ?? (Array.isArray(data) ? data : []);
+      setGroups(results);
       setNextUrl(data?.next ?? null);
+      setFailed(false);
+      if (cacheKey) writeCache(cacheKey, { results, next: data?.next ?? null });
       return data;
-    } catch (error) {
-      console.error('Failed to load groups:', error);
-      Alert.alert(
-        t('common.error'),
-        error.detail || error.message || t(`${ns}.loadFailed`)
-      );
-      throw error;
+    } catch {
+      // Whatever is on screen stays; an empty screen offers a retry.
+      if (viewRef.current === asked) setFailed(true);
+      return null;
     } finally {
-      if (showLoader) setLoading(false);
+      if (viewRef.current === asked) setLoading(false);
       setRefreshing(false);
     }
-  }, [t, isCommunity, activeCategory, debouncedSearch, filters, activeTab]);
+  }, [isCommunity, activeCategory, debouncedSearch, filters, activeTab, cacheKey]);
 
   // Infinite scroll: append the next page of groups, deduped by slug.
   const loadMore = useCallback(async () => {
@@ -176,66 +223,36 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
     }
   }, [loadingMore, nextUrl, isCommunity]);
 
-  // Load data on focus and initial mount
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-
-      const loadData = async () => {
-        try {
-          if (isActive) setLoading(true);
-          await loadGroups();
-        } catch (error) {
-          if (isActive) {
-            setGroups([]);
-          }
-        }
-      };
-
-      loadData();
-
-      return () => {
-        isActive = false;
-      };
-    }, [loadGroups])
-  );
-
-  // Category / search / filter changes re-query the server (communities only).
+  // On focus, and whenever the view changes (tab, category, search, filters):
+  // one request — this used to fire twice on open for communities.
+  const loadRef = useRef(loadGroups);
+  loadRef.current = loadGroups;
+  useFocusEffect(useCallback(() => { loadRef.current(); }, []));
+  const firstLoad = useRef(true);
   useEffect(() => {
-    if (!isCommunity) return;
-    loadGroups(false);
-  }, [isCommunity, activeCategory, debouncedSearch, filters, activeTab, loadGroups]);
+    if (firstLoad.current) { firstLoad.current = false; return; }
+    loadGroups();
+  }, [loadGroups]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    loadGroups(false);
+    loadGroups();
   }, [loadGroups]);
 
+  // Web-safe: Alert's buttons never fire on web, so deleting did nothing there.
   const handleDeleteGroup = useCallback(async (group) => {
-    Alert.alert(
-      t(`${nsCreate}.deleteTitle`),
-      t(`${ns}.deleteConfirm`, { name: group.name }),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteGroup(group.slug);
-              setGroups(prev => prev.filter(g => g.slug !== group.slug));
-            } catch (error) {
-              console.error('Failed to delete group:', error);
-              Alert.alert(
-                t('common.error'),
-                error.detail || error.message || t(`${ns}.deleteFailed`)
-              );
-            }
-          },
-        },
-      ]
-    );
-  }, [t]);
+    const ok = await confirmAction({
+      title: t(`${nsCreate}.deleteTitle`), message: t(`${ns}.deleteConfirm`, { name: group.name }),
+      confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteGroup(group.slug);
+      setGroups((prev) => prev.filter((g) => g.slug !== group.slug));
+    } catch (error) {
+      notify(t('common.error'), error?.detail || error?.message || t(`${ns}.deleteFailed`));
+    }
+  }, [t, ns, nsCreate]);
 
   const handleEditGroup = useCallback((group) => {
     navigation.navigate('CreateGroup', {
@@ -257,38 +274,35 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
       const group = await joinGroupByCode(code);
       setJoinOpen(false);
       setJoinCode('');
-      await loadGroups(false);
+      loadGroups();
       navigation.navigate('GroupDetail', { groupSlug: group.slug, group });
     } catch (e) {
-      Alert.alert(t(`${ns}.joinFailedTitle`), e?.response?.data?.error || t(`${ns}.inviteInvalid`));
+      notify(t(`${ns}.joinFailedTitle`), e?.response?.data?.error || t(`${ns}.inviteInvalid`));
     } finally {
       setJoining(false);
     }
-  }, [joinCode, loadGroups, navigation, t]);
+  }, [joinCode, loadGroups, navigation, t, ns]);
 
   // Split the visible groups into the three tabs. Private groups only ever reach
   // the client when the user is already a member (server-enforced), so the
   // Private tab naturally shows just the private groups they belong to.
-  const filtered = useMemo(() => {
-    // Communities are already scoped by the server, so the page is the answer.
-    if (isCommunity) return groups;
-    if (activeTab === 'public') return groups.filter(g => !g.is_private);
-    if (activeTab === 'private') return groups.filter(g => g.is_private);
-    return groups.filter(g => g.is_member); // mine
-  }, [groups, activeTab, isCommunity]);
+  // Both kinds are scoped by the server now, so the page is the answer.
+  const filtered = groups;
+
+  // Pass the group along so its chat opens at once, without a refetch.
+  const openGroup = useCallback((item) => {
+    navigation.navigate('GroupDetail', { groupSlug: item.slug, group: item });
+  }, [navigation]);
 
   const renderGroupItem = useCallback(({ item }) => (
     <GroupItem
       group={item}
-      onPress={() => navigation.navigate('GroupDetail', {
-        groupSlug: item.slug,
-        group: item // Pass the group to avoid immediate refetch
-      })}
-      onDelete={() => handleDeleteGroup(item)}
-      onEdit={() => handleEditGroup(item)}
+      onPress={openGroup}
+      onDelete={handleDeleteGroup}
+      onEdit={handleEditGroup}
       isCreator={currentUser?.id === item.creator?.id}
     />
-  ), [currentUser?.id, handleDeleteGroup, handleEditGroup, navigation]);
+  ), [currentUser?.id, handleDeleteGroup, handleEditGroup, openGroup]);
 
   const emptyCopy = isCommunity && (activeCategory !== 'all' || debouncedSearch)
     ? { title: t('community.list.noneInCategory'), sub: t('community.list.noneInCategorySub') }
@@ -301,23 +315,26 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
       mine: { title: t(`${ns}.notInAny`), sub: t(`${ns}.notInAnySub`) },
     }[activeTab];
 
-  const renderEmptyComponent = useCallback(() => (
+  const renderEmptyComponent = useCallback(() => (loading ? (
+    <View style={styles.emptyContainer}><ActivityIndicator size="large" color="#F4A261" /></View>
+  ) : failed ? (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
+      <Text style={styles.emptyText}>{t(`${ns}.loadFailed`)}</Text>
+      <TouchableOpacity onPress={() => { setLoading(true); loadGroups(); }} style={styles.retryBtn} testID="groups-retry">
+        <Text style={styles.retryText}>{t('common.retry')}</Text>
+      </TouchableOpacity>
+    </View>
+  ) : (
     <View style={styles.emptyContainer}>
       <Ionicons name="people-circle-outline" size={56} color={colors.textMuted} />
       <Text style={styles.emptyText}>{emptyCopy.title}</Text>
       <Text style={styles.emptySubtext}>{emptyCopy.sub}</Text>
     </View>
-  ), [emptyCopy]);
+  )), [emptyCopy, loading, failed, t, ns, loadGroups]);
 
-  if (loading && !refreshing && groups.length === 0) {
-    return (
-      <View style={styles.root}>
-        <View style={styles.fullScreenLoader}>
-          <ActivityIndicator size="large" color="#F4A261" />
-        </View>
-      </View>
-    );
-  }
+  // The tabs, search and categories stay on screen while a view loads — only
+  // the list waits (a spinner in its place, or the old rows, faded).
 
   return (
     <View style={styles.root}>
@@ -476,6 +493,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
               tintColor="#fff"
             />
           }
+          style={loading && filtered.length > 0 && !refreshing ? styles.fading : null}
           contentContainerStyle={filtered.length === 0 && styles.listContent}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -524,7 +542,9 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   container: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, backgroundColor: 'transparent' },
-  fullScreenLoader: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
+  fading: { opacity: 0.6 },
+  retryBtn: { marginTop: spacing.sm, backgroundColor: colors.accent, borderRadius: radius.full, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  retryText: { color: '#0A1628', fontWeight: '800' },
 
   tabBar: {
     flexDirection: 'row',

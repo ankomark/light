@@ -267,7 +267,19 @@ class GroupViewSet(viewsets.ModelViewSet):
         if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user).exists()):
             raise PermissionDenied("You are not a member of this group")
 
-        members = GroupMember.objects.filter(group=group).select_related('user', 'user__profile')
+        members = (GroupMember.objects.filter(group=group).select_related('user', 'user__profile')
+                   # The people who run it first, then by who joined first.
+                   .order_by('-is_admin', '-is_moderator', 'joined_at', 'id'))
+        q = (request.query_params.get('q') or '').strip()[:60]
+        if q:
+            members = members.filter(user__username__icontains=q)
+        # ?paged=1: a page at a time with a total (a community can have
+        # thousands). Without it, the whole list — what older app builds expect.
+        if request.query_params.get('paged'):
+            paginator = StandardPagination()
+            page = paginator.paginate_queryset(members, request, view=self)
+            data = GroupMemberSerializer(page, many=True, context={'request': request}).data
+            return paginator.get_paginated_response(data)
         serializer = GroupMemberSerializer(members, many=True, context={'request': request})
         return Response(serializer.data)
 
@@ -647,7 +659,7 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             .exclude(user_id__in=self._hidden_ids())
             .select_related('user__profile', 'reply_to__user')
             .prefetch_related('attachments', 'reactions')
-            .order_by('-created_at')
+            .order_by('-created_at', '-id')
         )
 
     def perform_create(self, serializer):
@@ -726,12 +738,14 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         anchor = qs.filter(pk=anchor_id).first()
         if not anchor:
             return Response({'results': [], 'has_more': False})
+        # (time, id) — two messages in the same instant are both reached.
+        at = anchor.created_at
         if before:
-            rows = list(qs.filter(created_at__lt=anchor.created_at)
-                        .order_by('-created_at')[:self.CURSOR_LIMIT + 1])  # newest-first
+            rows = list(qs.filter(Q(created_at__lt=at) | Q(created_at=at, id__lt=anchor.id))
+                        .order_by('-created_at', '-id')[:self.CURSOR_LIMIT + 1])  # newest-first
         else:
-            rows = list(qs.filter(created_at__gt=anchor.created_at)
-                        .order_by('created_at')[:self.CURSOR_LIMIT + 1])   # oldest-first
+            rows = list(qs.filter(Q(created_at__gt=at) | Q(created_at=at, id__gt=anchor.id))
+                        .order_by('created_at', 'id')[:self.CURSOR_LIMIT + 1])   # oldest-first
         has_more = len(rows) > self.CURSOR_LIMIT
         rows = rows[:self.CURSOR_LIMIT]
         return Response({
