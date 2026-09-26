@@ -1662,6 +1662,14 @@ class Group(models.Model):
     # Optional prompt shown to someone requesting to join (their answer becomes the
     # join request's message). Blank = no question.
     join_question = models.CharField(max_length=200, blank=True, default='')
+    # The invite link's limits: it stops working after this time, or after this
+    # many people joined with it (null: no limit). Revoking clears the code.
+    invite_expires_at = models.DateTimeField(null=True, blank=True)
+    invite_max_uses = models.PositiveIntegerField(null=True, blank=True)
+    invite_uses = models.PositiveIntegerField(default=0)
+    # Slow mode: members (not admins or moderators) may send one message every
+    # this many seconds. 0 = off.
+    slow_mode_seconds = models.PositiveIntegerField(default=0)
     # Soft moderation takedown — hidden from public group listings.
     is_removed = models.BooleanField(default=False)
     slug = models.SlugField(unique=True, max_length=100)

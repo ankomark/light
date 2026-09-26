@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db.models import (
-    OuterRef, Subquery, Exists, Count, Value, IntegerField, DateTimeField,
+    OuterRef, Subquery, Exists, Count, Value, IntegerField, DateTimeField, F,
 )
 from django.db.models.functions import Coalesce
 
@@ -231,6 +231,11 @@ class GroupViewSet(viewsets.ModelViewSet):
         # Cap mass join-request spam (the global ScopedRateThrottle reads this).
         if self.action in ('request_join', 'join_by_code'):
             self.throttle_scope = 'group_join'
+        elif self.action == 'invite_link':
+            self.throttle_scope = 'group_invite'
+        elif self.action in ('create', 'add_member', 'remove_member', 'set_admin', 'set_moderator',
+                             'set_posting_policy', 'set_join_question', 'set_slow_mode', 'mute'):
+            self.throttle_scope = 'group_action'
         return super().get_throttles()
 
     def get_serializer_context(self):
@@ -244,6 +249,8 @@ class GroupViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
+        if self.request.user.is_currently_suspended:
+            raise PermissionDenied('Your account is suspended.')
         # A group has no category or per-category details — those belong to
         # communities, so drop them rather than trusting the client.
         extra = {'kind': self.kind}
@@ -523,6 +530,26 @@ class GroupViewSet(viewsets.ModelViewSet):
         group_changed(group, request, ['join_question'])
         return Response(GroupSerializer(group, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='slow-mode')
+    def set_slow_mode(self, request, slug=None):
+        """{seconds: 0 (off) .. 3600}: members may send one message that often.
+        Admins and moderators are never slowed. Admins only."""
+        group = self.get_object()
+        if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
+            raise PermissionDenied("Only admins can change this setting")
+        try:
+            seconds = max(0, min(int(request.data.get('seconds') or 0), 3600))
+        except (TypeError, ValueError):
+            return Response({'error': 'seconds must be a number'}, status=status.HTTP_400_BAD_REQUEST)
+        if group.slow_mode_seconds != seconds:
+            group.slow_mode_seconds = seconds
+            group.save(update_fields=['slow_mode_seconds'])
+            msg = f"Slow mode is on: one message every {seconds} seconds" if seconds else "Slow mode is off"
+            group_system_message(group, msg, request.user)
+            log_group_action(group, request.user, 'slow_mode', msg)
+            group_changed(group, request, ['slow_mode_seconds'])
+        return Response(GroupSerializer(group, context={'request': request}).data)
+
     @action(detail=True, methods=['get'], url_path='audit-log')
     def audit_log(self, request, slug=None):
         """The group's moderation trail. Visible to admins and moderators only."""
@@ -567,9 +594,12 @@ class GroupViewSet(viewsets.ModelViewSet):
         user_id = request.data.get('user_id')
         if not user_id:
             return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-        user = User.objects.filter(id=user_id).first()
+        user = User.objects.filter(id=user_id, is_active=True, is_deactivated=False).first()
         if not user:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+        # Nobody is put in a group by someone they've blocked (or who blocked them).
+        if is_blocked_between(request.user, user):
+            return Response({"error": "You can't add this person."}, status=status.HTTP_403_FORBIDDEN)
 
         member, created = GroupMember.objects.get_or_create(group=group, user=user)
         if created:
@@ -594,10 +624,39 @@ class GroupViewSet(viewsets.ModelViewSet):
         group = self.get_object()
         if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can manage invite links")
-        if request.data.get('regenerate') or not group.invite_code:
+        # {revoke: true}: the link stops working, and no new one is made.
+        if request.data.get('revoke'):
+            group.invite_code = None
+            group.invite_expires_at = group.invite_max_uses = None
+            group.invite_uses = 0
+            group.save(update_fields=['invite_code', 'invite_expires_at', 'invite_max_uses', 'invite_uses'])
+            log_group_action(group, request.user, 'invite', 'Revoked the invite link')
+            return Response({'code': None, 'group_name': group.name})
+        fresh = bool(request.data.get('regenerate')) or not group.invite_code
+        if fresh:
             group.invite_code = uuid.uuid4()
-            group.save(update_fields=['invite_code'])
-        return Response({'code': str(group.invite_code), 'group_name': group.name})
+            group.invite_uses = 0
+        # Limits, set with a new link (or changed on the current one):
+        # expires_in_hours (1..720, 0 = never), max_uses (1..10000, 0 = unlimited).
+        fields = ['invite_code', 'invite_uses']
+        if 'expires_in_hours' in request.data:
+            try:
+                h = int(request.data.get('expires_in_hours') or 0)
+            except (TypeError, ValueError):
+                return Response({'error': 'expires_in_hours must be a number'}, status=status.HTTP_400_BAD_REQUEST)
+            group.invite_expires_at = timezone.now() + timedelta(hours=min(h, 720)) if h > 0 else None
+            fields.append('invite_expires_at')
+        if 'max_uses' in request.data:
+            try:
+                n = int(request.data.get('max_uses') or 0)
+            except (TypeError, ValueError):
+                return Response({'error': 'max_uses must be a number'}, status=status.HTTP_400_BAD_REQUEST)
+            group.invite_max_uses = min(n, 10000) if n > 0 else None
+            fields.append('invite_max_uses')
+        group.save(update_fields=fields)
+        return Response({'code': str(group.invite_code), 'group_name': group.name,
+                         'expires_at': group.invite_expires_at, 'max_uses': group.invite_max_uses,
+                         'uses': group.invite_uses})
 
     @action(detail=False, methods=['post'], url_path='join-by-code')
     def join_by_code(self, request):
@@ -611,9 +670,18 @@ class GroupViewSet(viewsets.ModelViewSet):
         group = Group.objects.filter(invite_code=code_uuid, is_removed=False).first()
         if not group:
             return Response({"error": "This invite link is invalid or has expired"}, status=status.HTTP_404_NOT_FOUND)
+        already = GroupMember.objects.filter(group=group, user=request.user).exists()
+        if not already:
+            if group.invite_expires_at and group.invite_expires_at <= timezone.now():
+                return Response({"error": "This invite link has expired"}, status=status.HTTP_410_GONE)
+            if group.invite_max_uses and group.invite_uses >= group.invite_max_uses:
+                return Response({"error": "This invite link has been used up"}, status=status.HTTP_410_GONE)
+            if request.user.is_currently_suspended:
+                raise PermissionDenied('Your account is suspended.')
 
         member, created = GroupMember.objects.get_or_create(group=group, user=request.user)
         if created:
+            Group.objects.filter(pk=group.pk).update(invite_uses=F('invite_uses') + 1)
             group_system_message(group, f"{request.user.username} joined via invite", request.user)
             members_changed(group, 'joined', request.user)
         return Response(GroupSerializer(group, context={'request': request}).data, status=status.HTTP_200_OK)
@@ -683,6 +751,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             self.throttle_scope = 'group_post'
         elif self.action == 'react':
             self.throttle_scope = 'group_react'
+        elif self.action in ('edit_message', 'destroy', 'pin_message', 'unpin_message'):
+            self.throttle_scope = 'group_action'
         return super().get_throttles()
 
     def get_permissions(self):
@@ -739,6 +809,25 @@ class GroupPostViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("You are not a member of this group")
         if group.only_admins_can_post and not (is_super or (member and member.is_admin)):
             raise PermissionDenied("Only admins can send messages in this group")
+        if self.request.user.is_currently_suspended:
+            raise PermissionDenied("Your account is suspended.")
+        # Slow mode: one message every N seconds for members (not those who run it).
+        runs_it = is_super or (member and (member.is_admin or member.is_moderator))
+        if group.slow_mode_seconds and not runs_it:
+            last = (GroupPost.objects.filter(group=group, user=self.request.user)
+                    .exclude(message_type='system').order_by('-created_at')
+                    .values_list('created_at', flat=True).first())
+            if last:
+                wait = group.slow_mode_seconds - (timezone.now() - last).total_seconds()
+                if wait > 0:
+                    from rest_framework.exceptions import Throttled
+                    raise Throttled(wait=int(wait) + 1, detail=f'Slow mode is on: wait {int(wait) + 1}s.')
+
+        # A reply quotes a message of THIS group — never one from another
+        # (a private group's words would show in its preview).
+        reply = serializer.validated_data.get('reply_to')
+        if reply is not None and (reply.group_id != group.id or reply.is_removed):
+            raise ValidationError({'detail': 'You can only reply to a message in this group.'})
 
         # A message needs text or an attachment.
         content = (serializer.validated_data.get('content') or '').strip()
@@ -757,8 +846,13 @@ class GroupPostViewSet(viewsets.ModelViewSet):
                 )
             if len(attachment) > 2000:
                 raise ValidationError({'detail': 'Invalid attachment URL'})
+            # Our own uploads only — never any address on the internet (a
+            # tracking pixel, or something hostile, in everyone's chat).
+            from .messaging import _our_upload
+            if not _our_upload(attachment):
+                raise ValidationError({'detail': 'Attachments must be uploaded through the app.'})
 
-        client_id = (str(self.request.data.get('client_id') or '').strip()[:64]) or None
+        client_id =(str(self.request.data.get('client_id') or '').strip()[:64]) or None
         post = serializer.save(user=self.request.user, group=group, client_id=client_id)
 
         # Legacy multipart attachments (kept for backward compatibility).
@@ -1004,6 +1098,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         post = self.get_object()
         if not request.user.is_super_admin and not GroupMember.objects.filter(group=post.group, user=request.user).exists():
             raise PermissionDenied("You are not a member of this group")
+        if request.user.is_currently_suspended:
+            raise PermissionDenied("Your account is suspended.")
         emoji = (request.data.get('emoji') or '').strip()
         if not emoji or len(emoji) > 16:
             return Response({'error': 'Invalid emoji.'}, status=status.HTTP_400_BAD_REQUEST)

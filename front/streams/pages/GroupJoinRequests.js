@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Modal, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchGroupJoinRequests, approveJoinRequest, rejectJoinRequest } from '../services/api';
@@ -7,6 +7,7 @@ import GroupRequestItem from './GroupRequestItem';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { confirmAction } from '../utils/adminConfirm';
 
 const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClose: onCloseProp }) => {
   const { t } = useI18n();
@@ -67,14 +68,10 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
 
   // Declining locks the person out of re-requesting for a week, so confirm first.
   const handleReject = (requestId) => {
-    Alert.alert(
-      t('groupReq.rejectTitle'),
-      t('groupReq.rejectBody'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        { text: t('common.reject'), style: 'destructive', onPress: () => doReject(requestId) },
-      ],
-    );
+    confirmAction({
+      title: t('groupReq.rejectTitle'), message: t('groupReq.rejectBody'),
+      confirmLabel: t('common.reject'), cancelLabel: t('common.cancel'), destructive: true,
+    }).then((ok) => { if (ok) doReject(requestId); });   // web-safe
   };
 
   return (

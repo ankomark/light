@@ -1436,8 +1436,17 @@ export const addGroupMember = async (slug, userId) =>
   apiRequest('post', `/groups/${slug}/add-member/`, { user_id: userId });
 
 // Admin: get (or rotate, with regenerate=true) the group's invite code.
-export const getGroupInviteLink = async (slug, regenerate = false) =>
-  apiRequest('post', `/groups/${slug}/invite-link/`, { regenerate });
+// limits: { expires_in_hours (0 = never), max_uses (0 = unlimited) }.
+export const getGroupInviteLink = async (slug, regenerate = false, limits = {}) =>
+  apiRequest('post', `/groups/${slug}/invite-link/`, { regenerate, ...limits });
+
+// The link stops working; no new one is made.
+export const revokeGroupInvite = (slug) =>
+  apiRequest('post', `/groups/${slug}/invite-link/`, { revoke: true });
+
+// Members may send one message every seconds (0 = off). Admins only.
+export const setGroupSlowMode = (slug, seconds) =>
+  apiRequest('post', `/groups/${slug}/slow-mode/`, { seconds });
 
 // Anyone: join a group using an invite code.
 export const joinGroupByCode = async (code) =>

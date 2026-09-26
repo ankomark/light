@@ -41,6 +41,11 @@ const mockApi = {
   removeGroupMember: jest.fn(async () => ({})),
   setGroupAdmin: jest.fn(async () => ({})),
   setGroupModerator: jest.fn(async () => ({})),
+  setGroupSlowMode: jest.fn(),
+  getGroupInviteLink: jest.fn(),
+  revokeGroupInvite: jest.fn(async () => ({ code: null })),
+  searchGroupUsers: jest.fn(async () => []),
+  addGroupMember: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -95,6 +100,14 @@ jest.mock('expo-haptics', () => ({
 jest.mock('../../components/RotatingBackground', () => () => null);
 jest.mock('../../components/ReportModal', () => () => null);
 jest.mock('../../components/BookClubBanner', () => () => null);
+jest.mock('../../components/ChoiceSheet', () => {
+  const { View, Text, TouchableOpacity } = require('react-native');
+  return ({ visible, options }) => (visible ? (
+    <View>{options.map((o) => (
+      <TouchableOpacity key={o.key} onPress={o.onPress} testID={`choice-${o.key}`}><Text>{o.label}</Text></TouchableOpacity>
+    ))}</View>
+  ) : null);
+});
 jest.mock('../../hooks/useKeyboardHeight', () => () => 0);
 jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-document-picker', () => ({}));
@@ -107,6 +120,7 @@ jest.mock('../../services/cloudinary', () => ({}));
 const GroupList = require('../GroupList').default;
 const GroupDetail = require('../GroupDetail').default;
 const GroupMembers = require('../GroupMembers').default;
+const GroupAddMembers = require('../GroupAddMembers').default;
 
 const nav = { navigate: jest.fn(), goBack: jest.fn() };
 const group = (slug, extra = {}) => ({
@@ -292,6 +306,42 @@ describe('Group list, live', () => {
     expect(r.getByText('1')).toBeTruthy();
     await dmLive({ type: 'group_read', group_slug: 'b' });
     expect(r.queryByText('1')).toBeNull();
+  });
+});
+
+describe('Safety', () => {
+  it('slow mode: members see the hint; a slowed send says why; admins set it', async () => {
+    mockApi.fetchGroupDetails.mockResolvedValue(group('s1', { slow_mode_seconds: 30 }));
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: [post(60, 60)], next: null });
+    const r = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 's1', group: group('s1', { slow_mode_seconds: 30 }) } }} />);
+    await waitFor(() => expect(r.getByTestId('slow-hint')).toBeTruthy());
+    const err = Object.assign(new Error('slow'), { response: { status: 429 } });
+    mockApi.sendGroupMessage.mockRejectedValueOnce(err);
+    const input = r.UNSAFE_getAllByType(require('react-native').TextInput).find((n) => n.props.multiline);
+    fireEvent.changeText(input, 'again');
+    await act(async () => { fireEvent.press(r.getByTestId('group-send')); });
+    await waitFor(() => expect(mockNotify).toHaveBeenCalledWith('group.detail.slowMode', 'group.detail.slowModeHint:group.detail.seconds:30'));
+
+    // An admin: no hint; the menu sets it.
+    const admin = group('s2', { is_admin: true });
+    mockApi.fetchGroupDetails.mockResolvedValue(admin);
+    mockApi.setGroupSlowMode.mockResolvedValue({ ...admin, slow_mode_seconds: 60 });
+    const a = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 's2', group: admin } }} />);
+    await waitFor(() => expect(a.getByText('post 60')).toBeTruthy());
+    expect(a.queryByTestId('slow-hint')).toBeNull();
+  });
+
+  it('invite links: limits for a new link, then revoke', async () => {
+    mockApi.getGroupInviteLink.mockResolvedValue({ code: 'abc-123', group_name: 'G', max_uses: 10, uses: 2, expires_at: null });
+    const r = render(<GroupAddMembers navigation={nav} route={{ params: { groupSlug: 'inv', group: group('inv') } }} />);
+    await act(async () => { fireEvent.press(r.getByTestId('limit-uses-10')); });
+    await act(async () => { fireEvent.press(r.getByText('group.add.generateLink')); });
+    expect(mockApi.getGroupInviteLink).toHaveBeenCalledWith('inv', true, { expires_in_hours: 0, max_uses: 10 });
+    expect(r.getByText('group.add.usedOf:2,10')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('invite-revoke')); });
+    expect(mockConfirm).toHaveBeenCalled();
+    expect(mockApi.revokeGroupInvite).toHaveBeenCalledWith('inv');
+    await waitFor(() => expect(r.getByText('group.add.generateLink')).toBeTruthy());
   });
 });
 

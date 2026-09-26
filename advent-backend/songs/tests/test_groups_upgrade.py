@@ -141,3 +141,102 @@ class LiveSendTests(Base):
         self.assertIsNone(self.client.get(self.url()).json()['muted_until'])
         self.client.post(self.url('mark-read/'))
         self.assertEqual(self.client.get('/api/conversations/unread_count/').json()['groups'], 0)
+
+
+from django.test import override_settings
+
+
+@override_settings(R2_PUBLIC_BASE='https://cdn.example')
+class SafetyTests(Base):
+    def post(self, **data):
+        return self.client.post(self.url('posts/'), {'content': 'x', **data}, format='json')
+
+    def test_attachments_must_be_our_uploads(self):
+        self.client.force_authenticate(self.member)
+        bad = self.post(message_type='image', attachment='https://evil.example/track.gif')
+        self.assertEqual(bad.status_code, 400)
+        ok = self.post(message_type='image', attachment='https://cdn.example/chat/a.jpg')
+        self.assertEqual(ok.status_code, 201)
+
+    def test_a_reply_cannot_quote_another_group(self):
+        secret = Group.objects.create(creator=self.outsider, name='Secret', is_private=True)
+        hidden = GroupPost.objects.create(group=secret, user=self.outsider, content='private words')
+        self.client.force_authenticate(self.member)
+        r = self.post(reply_to_id=hidden.id)
+        self.assertEqual(r.status_code, 400)
+        self.assertNotIn('private words', r.content.decode())
+
+    def test_suspended_cannot_post_react_or_create(self):
+        post = GroupPost.objects.create(group=self.group, user=self.owner, content='hi')
+        User.objects.filter(pk=self.member.pk).update(is_suspended=True)
+        self.member.refresh_from_db()
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.post().status_code, 403)
+        self.assertEqual(self.client.post(self.url(f'posts/{post.id}/react/'), {'emoji': '🙏'}, format='json').status_code, 403)
+        self.assertEqual(self.client.post('/api/groups/', {'name': 'New'}, format='json').status_code, 403)
+        # A suspension that has lapsed is no suspension.
+        User.objects.filter(pk=self.member.pk).update(suspended_until=timezone.now() - timedelta(days=1))
+        self.member.refresh_from_db()
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.post().status_code, 201)
+
+    def test_slow_mode_slows_members_not_admins(self):
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.post(self.url('slow-mode/'), {'seconds': 30}, format='json').status_code, 200)
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.post().status_code, 201)
+        slowed = self.post()
+        self.assertEqual(slowed.status_code, 429)
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.post().status_code, 201)
+        self.assertEqual(self.post().status_code, 201)
+        # Members can't change it.
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.post(self.url('slow-mode/'), {'seconds': 0}, format='json').status_code, 403)
+
+    def test_invite_links_expire_run_out_and_can_be_revoked(self):
+        self.client.force_authenticate(self.owner)
+        code = self.client.post(self.url('invite-link/'), {'regenerate': True, 'max_uses': 1}, format='json').json()['code']
+        a = User.objects.create_user('ginvitea', 'ia@x.com', 'x')
+        b = User.objects.create_user('ginviteb', 'ib@x.com', 'x')
+        self.client.force_authenticate(a)
+        self.assertEqual(self.client.post('/api/groups/join-by-code/', {'code': code}, format='json').status_code, 200)
+        self.client.force_authenticate(b)
+        self.assertEqual(self.client.post('/api/groups/join-by-code/', {'code': code}, format='json').status_code, 410)
+
+        self.client.force_authenticate(self.owner)
+        code = self.client.post(self.url('invite-link/'), {'regenerate': True, 'expires_in_hours': 1}, format='json').json()['code']
+        Group.objects.filter(pk=self.group.pk).update(invite_expires_at=timezone.now() - timedelta(minutes=1))
+        self.client.force_authenticate(b)
+        self.assertEqual(self.client.post('/api/groups/join-by-code/', {'code': code}, format='json').status_code, 410)
+
+        self.client.force_authenticate(self.owner)
+        self.assertIsNone(self.client.post(self.url('invite-link/'), {'revoke': True}, format='json').json()['code'])
+        self.client.force_authenticate(b)
+        self.assertEqual(self.client.post('/api/groups/join-by-code/', {'code': code}, format='json').status_code, 404)
+
+    def test_invite_limits_are_admins_business(self):
+        self.client.force_authenticate(self.owner)
+        self.client.post(self.url('invite-link/'), {'regenerate': True, 'max_uses': 5}, format='json')
+        self.assertEqual(self.client.get(self.url()).json()['invite_max_uses'], 5)
+        self.client.force_authenticate(self.member)
+        body = self.client.get(self.url()).json()
+        self.assertNotIn('invite_max_uses', body)
+        self.assertIsNone(body['invite_code'])
+
+    def test_add_member_respects_blocks_and_deactivation(self):
+        from songs.models import Block
+        gone = User.objects.create_user('ggone', 'gg@x.com', 'x')
+        User.objects.filter(pk=gone.pk).update(is_deactivated=True)
+        Block.objects.create(blocker=self.outsider, blocked=self.owner)
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.post(self.url('add-member/'), {'user_id': gone.id}, format='json').status_code, 404)
+        self.assertEqual(self.client.post(self.url('add-member/'), {'user_id': self.outsider.id}, format='json').status_code, 403)
+
+    def test_only_members_report_a_group_message(self):
+        post = GroupPost.objects.create(group=self.group, user=self.owner, content='hi')
+        body = {'content_type': 'grouppost', 'object_id': post.id, 'reason': 'spam'}
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(self.client.post('/api/reports/', body, format='json').status_code, 404)
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.post('/api/reports/', body, format='json').status_code, 201)

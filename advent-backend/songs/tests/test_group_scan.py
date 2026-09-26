@@ -5,11 +5,13 @@
 from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from songs.models import User, Group, GroupMember, GroupPost, GroupJoinRequest
 
 
+@override_settings(R2_PUBLIC_BASE='https://cdn.example')
 class GroupPrivacyScanTests(APITestCase):
     def setUp(self):
         # Throttle counters live in the (process-global) cache; clear them so the

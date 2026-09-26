@@ -24,7 +24,7 @@ import {
   fetchGroupDetails, fetchGroupPosts, sendGroupMessage, editGroupMessage, markGroupRead,
   leaveGroup, requestJoinGroup, reactToGroupPost, deleteGroupPost, setGroupPostingPolicy,
   pinGroupMessage, unpinGroupMessage, searchGroupMessages, fetchMessageReceipts, setGroupJoinQuestion,
-  fetchGroupMessageContext, fetchGroupPostsBefore, fetchGroupPostsAfter,
+  fetchGroupMessageContext, fetchGroupPostsBefore, fetchGroupPostsAfter, setGroupSlowMode,
 } from '../services/api';
 import { uploadMedia } from '../services/cloudinary';
 import { createGroupSocket } from '../services/groupSocket';
@@ -32,6 +32,7 @@ import { useAuth } from '../context/useAuth';
 import RotatingBackground from '../components/RotatingBackground';
 import ReportModal from '../components/ReportModal';
 import BookClubBanner from '../components/BookClubBanner';
+import ChoiceSheet from '../components/ChoiceSheet';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { peekCache, readCache, writeCache } from '../utils/screenCache';
@@ -67,6 +68,10 @@ const isData = (uri) => typeof uri === 'string' && uri.startsWith('data:');
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const fmtDate = (d) => new Date(d).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' + fmtTime(d);
+// Slow mode, in words: 10s, 1 min, 5 min.
+const slowLabel = (s, t) => (s >= 60 ? t('group.detail.minutes', { n: Math.round(s / 60) }) : t('group.detail.seconds', { n: s }));
+const SLOW_CHOICES = [0, 10, 30, 60, 300];
+
 const fmtDuration = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.round((s || 0) % 60)).padStart(2, '0')}`;
 
 /**
@@ -329,6 +334,7 @@ const GroupDetail = ({ route, navigation }) => {
   const [joinAnswer, setJoinAnswer] = useState(null); // string when the join-question modal is open
   const [jqEditor, setJqEditor] = useState(null);     // string when the admin join-question editor is open
   const [reportMsg, setReportMsg] = useState(null);   // message being reported
+  const [slowSheet, setSlowSheet] = useState(false);   // admin: slow mode choices
 
   const listRef = useRef(null);
   const atBottomRef = useRef(true);      // is the chat scrolled to the newest message?
@@ -352,7 +358,8 @@ const GroupDetail = ({ route, navigation }) => {
   const playingIdRef = useRef(null);
   useEffect(() => { playingIdRef.current = playingId; }, [playingId]);
   const groupRef = useRef(seed);
-  useEffect(() => { groupRef.current = group; }, [group]);
+  const slowSecondsRef = useRef(seed?.slow_mode_seconds || 0);
+  useEffect(() => { groupRef.current = group; slowSecondsRef.current = group?.slow_mode_seconds || 0; }, [group]);
 
   // Cold start: the disk copy, if the network hasn't answered first.
   useEffect(() => {
@@ -677,7 +684,9 @@ const GroupDetail = ({ route, navigation }) => {
       setMessages((prev) => settle(prev, tempId, saved));
     } catch (e) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
-      if (e?.response?.status === 403) notify(t('common.error'), e?.response?.data?.detail || t('group.detail.cantPost'));
+      const code = e?.response?.status;
+      if (code === 403) notify(t('common.error'), e?.response?.data?.detail || t('group.detail.cantPost'));
+      else if (code === 429) notify(t('group.detail.slowMode'), t('group.detail.slowModeHint', { time: slowLabel(slowSecondsRef.current || 0, t) }));
     }
   }, [groupSlug, putBubble, t]);
 
@@ -1165,6 +1174,7 @@ const GroupDetail = ({ route, navigation }) => {
   }
 
   const adminsOnly = !!group?.only_admins_can_post;
+  const slowSeconds = group?.slow_mode_seconds || 0;
   const canChat = isMember && (!adminsOnly || isAdmin);
   // Others here: the server's count (me excluded), or — from an older server — the roster.
   const othersOnline = onlineCount != null
@@ -1402,6 +1412,9 @@ const GroupDetail = ({ route, navigation }) => {
         </View>
       )}
 
+      {canChat && slowSeconds > 0 && !(isAdmin || isModerator) ? (
+        <Text style={styles.slowHint} testID="slow-hint">{t('group.detail.slowModeHint', { time: slowLabel(slowSeconds, t) })}</Text>
+      ) : null}
       {canChat ? (
         <View style={styles.inputBar}>
           {isRecording ? (
@@ -1606,6 +1619,19 @@ const GroupDetail = ({ route, navigation }) => {
               </TouchableOpacity>
             )}
 
+            {isAdmin && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} testID="slow-mode-option"
+                onPress={() => { setMenuSheet(false); setTimeout(() => setSlowSheet(true), 220); }}>
+                <View style={[styles.sheetIcon, styles.sheetIconFile]}>
+                  <Ionicons name="timer-outline" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.slowMode')}</Text>
+                  <Text style={styles.sheetOptionHint}>{slowSeconds ? t('group.detail.slowModeEvery', { time: slowLabel(slowSeconds, t) }) : t('group.detail.slowModeOff')}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
             {canLeave && (
               <TouchableOpacity style={[styles.sheetOption, styles.sheetOptionDanger]} activeOpacity={0.85} onPress={askLeave}>
                 <View style={[styles.sheetIcon, styles.sheetIconDanger]}>
@@ -1771,6 +1797,21 @@ const GroupDetail = ({ route, navigation }) => {
         </KeyboardAvoidingView>
       </Modal>
 
+      <ChoiceSheet
+        visible={slowSheet}
+        title={t('group.detail.slowMode')}
+        subtitle={t('group.detail.slowModeSub')}
+        onClose={() => setSlowSheet(false)}
+        cancelLabel={t('common.cancel')}
+        options={SLOW_CHOICES.map((sec) => ({
+          key: String(sec), icon: sec ? 'timer' : 'timer-off',
+          label: (sec ? slowLabel(sec, t) : t('group.detail.slowModeOff')) + (sec === slowSeconds ? '  ✓' : ''),
+          onPress: async () => {
+            try { const g = await setGroupSlowMode(groupSlug, sec); if (g) setGroup(g); }
+            catch { notify(t('common.error'), t('group.detail.settingFailed')); }
+          },
+        }))}
+      />
       <ReportModal
         visible={!!reportMsg}
         onClose={() => setReportMsg(null)}
@@ -1814,6 +1855,7 @@ const GroupDetail = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  slowHint: { ...typography.caption, color: colors.textMuted, textAlign: 'center', paddingVertical: 4, backgroundColor: 'rgba(16,46,80,0.9)' },
   root: { flex: 1, backgroundColor: colors.bg },
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },

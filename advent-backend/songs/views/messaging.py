@@ -113,7 +113,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
     def create(self, request):
         """Start (or find) a chat with someone: {user_id}."""
-        if getattr(request.user, 'is_suspended', False):
+        if request.user.is_currently_suspended:
             return Response({'error': 'Your account is suspended.'}, status=status.HTTP_403_FORBIDDEN)
         other_id = request.data.get('user_id')
         if not other_id:
@@ -172,7 +172,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
     def send_message(self, request, pk=None):
         conversation = self.get_object()
         me = request.user
-        if getattr(me, 'is_suspended', False):
+        if me.is_currently_suspended:
             return Response({'error': 'Your account is suspended.'}, status=status.HTTP_403_FORBIDDEN)
         other = conversation.participants.exclude(id=me.id).first()
         if other and (is_blocked_between(me, other) or other.is_deactivated or not other.is_active):

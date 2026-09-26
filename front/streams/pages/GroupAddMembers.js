@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity, ActivityIndicator,
-  StyleSheet, Share, Alert,
+  StyleSheet, Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { searchGroupUsers, addGroupMember, getGroupInviteLink } from '../services/api';
+import { searchGroupUsers, addGroupMember, getGroupInviteLink, revokeGroupInvite } from '../services/api';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { confirmAction, notify } from '../utils/adminConfirm';
 
 const DEFAULT_AVATAR = require('../assets/user-placeholder.png');
 
@@ -52,19 +53,23 @@ const GroupAddMembers = ({ route, navigation }) => {
       await addGroupMember(groupSlug, user.id);
       setAddedIds(prev => [...prev, user.id]);
     } catch (e) {
-      Alert.alert(t('common.error'), e?.response?.data?.error || t('group.add.addFailed'));
+      notify(t('common.error'), e?.response?.data?.error || t('group.add.addFailed'));
     } finally {
       setAddingId(null);
     }
   }, [groupSlug, t]);
 
-  const fetchInvite = useCallback(async (regenerate = false) => {
+  // How long the link lasts, and for how many people (new links; 0 = no limit).
+  const [expiresIn, setExpiresIn] = useState(0);
+  const [maxUses, setMaxUses] = useState(0);
+
+  const fetchInvite = useCallback(async (regenerate = false, limits = null) => {
     setLoadingInvite(true);
     try {
-      const res = await getGroupInviteLink(groupSlug, regenerate);
+      const res = await getGroupInviteLink(groupSlug, regenerate, limits || {});
       setInvite(res);
     } catch {
-      Alert.alert(t('common.error'), t('group.add.linkFailed'));
+      notify(t('common.error'), t('group.add.linkFailed'));
     } finally {
       setLoadingInvite(false);
     }
@@ -72,17 +77,44 @@ const GroupAddMembers = ({ route, navigation }) => {
 
   // Regenerating breaks every previously-shared link — confirm first.
   const confirmRegenerate = useCallback(() => {
-    Alert.alert(
-      t('group.add.regenTitle'),
-      t('group.add.regenBody'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        { text: t('group.add.regenConfirm'), style: 'destructive', onPress: () => fetchInvite(true) },
-      ],
-    );
-  }, [t, fetchInvite]);
+    confirmAction({
+      title: t('group.add.regenTitle'), message: t('group.add.regenBody'),
+      confirmLabel: t('group.add.regenConfirm'), cancelLabel: t('common.cancel'), destructive: true,
+    }).then((ok) => { if (ok) fetchInvite(true, { expires_in_hours: expiresIn, max_uses: maxUses }); });   // web-safe
+  }, [t, fetchInvite, expiresIn, maxUses]);
+
+  // A limit applies to the current link at once (the server changes it in place).
+  const setLimit = useCallback((kind, value) => {
+    if (kind === 'expires') setExpiresIn(value); else setMaxUses(value);
+    if (invite?.code) fetchInvite(false, kind === 'expires' ? { expires_in_hours: value } : { max_uses: value });
+  }, [invite?.code, fetchInvite]);
+
+  const revoke = useCallback(async () => {
+    const ok = await confirmAction({
+      title: t('group.add.revokeTitle'), message: t('group.add.revokeBody'),
+      confirmLabel: t('group.add.revoke'), cancelLabel: t('common.cancel'), destructive: true,
+    });
+    if (!ok) return;
+    try { await revokeGroupInvite(groupSlug); setInvite(null); }
+    catch { notify(t('common.error'), t('group.add.linkFailed')); }
+  }, [groupSlug, t]);
 
   const inviteLink = invite?.code ? `streams://join/${invite.code}` : '';
+  const limitNote = invite?.code ? [
+    invite.max_uses ? t('group.add.usedOf', { n: invite.uses || 0, max: invite.max_uses }) : null,
+    invite.expires_at ? t('group.add.expiresOn', { when: new Date(invite.expires_at).toLocaleString() }) : null,
+  ].filter(Boolean).join(' · ') : '';
+
+  const Chips = ({ kind, value, options }) => (
+    <View style={styles.chipRow}>
+      {options.map(([v, label]) => (
+        <TouchableOpacity key={v} onPress={() => setLimit(kind, v)} testID={`limit-${kind}-${v}`}
+          style={[styles.chip, value === v && styles.chipOn]} activeOpacity={0.85}>
+          <Text style={[styles.chipText, value === v && styles.chipTextOn]}>{label}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
 
   const shareInvite = useCallback(async () => {
     if (!invite?.code) return;
@@ -159,15 +191,30 @@ const GroupAddMembers = ({ route, navigation }) => {
                   <Text style={styles.regenText}>{t('common.reset')}</Text>
                 </TouchableOpacity>
               </View>
+              {limitNote ? <Text style={styles.limitNote}>{limitNote}</Text> : null}
               <Text style={styles.inviteHint}>{t('group.add.linkWarning')}</Text>
+              <TouchableOpacity onPress={revoke} style={styles.revokeBtn} testID="invite-revoke">
+                <Ionicons name="close-circle-outline" size={16} color={colors.error} />
+                <Text style={styles.revokeText}>{t('group.add.revoke')}</Text>
+              </TouchableOpacity>
             </>
           ) : (
-            <TouchableOpacity style={styles.getLinkBtn} onPress={() => fetchInvite(false)} disabled={loadingInvite} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.getLinkBtn} onPress={() => fetchInvite(true, { expires_in_hours: expiresIn, max_uses: maxUses })} disabled={loadingInvite} activeOpacity={0.85}>
               {loadingInvite ? <ActivityIndicator size="small" color={colors.accent} /> : (
                 <Text style={styles.getLinkText}>{t('group.add.generateLink')}</Text>
               )}
             </TouchableOpacity>
           )}
+        </View>
+
+        {/* The link's limits */}
+        <View style={styles.limitsCard}>
+          <Text style={styles.limitLabel}>{t('group.add.expires')}</Text>
+          <Chips kind="expires" value={expiresIn}
+            options={[[0, t('group.add.never')], [24, t('group.add.oneDay')], [168, t('group.add.sevenDays')]]} />
+          <Text style={styles.limitLabel}>{t('group.add.maxUses')}</Text>
+          <Chips kind="uses" value={maxUses}
+            options={[[0, t('group.add.unlimited')], [1, '1'], [10, '10'], [100, '100']]} />
         </View>
 
         {/* Search */}
@@ -218,6 +265,16 @@ const GroupAddMembers = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  limitsCard: { marginHorizontal: spacing.md, marginBottom: spacing.sm, gap: 4 },
+  limitLabel: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: 4 },
+  chip: { paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  chipOn: { backgroundColor: 'rgba(244,162,97,0.18)', borderColor: colors.accent },
+  chipText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  chipTextOn: { color: colors.accent },
+  limitNote: { ...typography.caption, color: colors.accent, marginTop: spacing.xs },
+  revokeBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.sm, alignSelf: 'flex-start' },
+  revokeText: { ...typography.caption, color: colors.error, fontWeight: '700' },
   root: { flex: 1, backgroundColor: '#0A1628' },
   safe: { flex: 1, backgroundColor: 'transparent' },
   header: {

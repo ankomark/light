@@ -947,6 +947,10 @@ class ReportViewSet(viewsets.ViewSet):
         if content_type == 'message':
             if not Message.objects.filter(pk=object_id, conversation__participants=request.user).exists():
                 return Response({'error': 'Message not found.'}, status=status.HTTP_404_NOT_FOUND)
+        # Likewise a group's message: only its members may report it.
+        if content_type == 'grouppost':
+            if not GroupPost.objects.filter(pk=object_id, group__members__user=request.user).exists():
+                return Response({'error': 'Message not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         _, created = Report.objects.get_or_create(
             reporter=request.user,

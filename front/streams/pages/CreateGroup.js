@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
+  View, Text, TextInput, StyleSheet, TouchableOpacity, ActivityIndicator,
   KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -15,6 +15,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { confirmAction, notify } from '../utils/adminConfirm';
 
 const NAVY = '#0A1628';
 
@@ -83,7 +84,7 @@ const GroupForm = ({ navigation, route }) => {
       const body = error?.response?.data;
       const msg = (Array.isArray(body?.name) ? body.name[0] : body?.name)
         || body?.detail || t('community.categoryFailed');
-      Alert.alert(t('common.error'), msg);
+      notify(t('common.error'), msg);
     } finally {
       setCreatingCategory(false);
     }
@@ -93,7 +94,7 @@ const GroupForm = ({ navigation, route }) => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(t('chat.permissionRequired'), t(`${ns}.permissionPhotos`));
+        notify(t('chat.permissionRequired'), t(`${ns}.permissionPhotos`));
         return;
       }
 
@@ -114,25 +115,21 @@ const GroupForm = ({ navigation, route }) => {
       }
     } catch (error) {
       console.error('Image picker error:', error);
-      Alert.alert(t('common.error'), t(`${ns}.imageFailed`));
+      notify(t('common.error'), t(`${ns}.imageFailed`));
     }
   };
 
   const handleSubmit = () => {
     if (!name.trim()) {
-      Alert.alert(t(`${ns}.nameRequiredTitle`), t(`${ns}.nameRequired`));
+      notify(t(`${ns}.nameRequiredTitle`), t(`${ns}.nameRequired`));
       return;
     }
     // Turning a private group public exposes it to discovery — confirm first.
     if (isEditMode && existingGroup?.is_private && !isPrivate) {
-      Alert.alert(
-        t(`${ns}.goPublicTitle`),
-        t(`${ns}.goPublicBody`),
-        [
-          { text: t('common.cancel'), style: 'cancel' },
-          { text: t(`${ns}.goPublicConfirm`), style: 'destructive', onPress: doSubmit },
-        ],
-      );
+      confirmAction({
+        title: t(`${ns}.goPublicTitle`), message: t(`${ns}.goPublicBody`),
+        confirmLabel: t(`${ns}.goPublicConfirm`), cancelLabel: t('common.cancel'), destructive: true,
+      }).then((ok) => { if (ok) doSubmit(); });   // web-safe: Alert's buttons never fire on web
       return;
     }
     doSubmit();
@@ -191,37 +188,29 @@ const GroupForm = ({ navigation, route }) => {
         : (typeof body?.name === 'string' ? body.name : null);
       const msg = nameErr || body?.detail || body?.error || body?.message
         || error?.message || t(`${ns}.saveFailed`);
-      Alert.alert(t('common.error'), msg);
+      notify(t('common.error'), msg);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleDelete = () => {
-    Alert.alert(
-      t(`${ns}.deleteTitle`),
-      t(`${ns}.deleteConfirm`),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setIsLoading(true);
-              await deleteGroup(existingGroup.slug);
-              route.params?.onDelete?.();
-              navigation.goBack();
-            } catch (error) {
-              console.error('Delete error:', error);
-              Alert.alert(t('common.error'), t(`${ns}.deleteFailed`));
-            } finally {
-              setIsLoading(false);
-            }
-          },
-        },
-      ]
-    );
+    confirmAction({
+      title: t(`${ns}.deleteTitle`), message: t(`${ns}.deleteConfirm`),
+      confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), destructive: true,
+    }).then(async (ok) => {
+      if (!ok) return;
+      try {
+        setIsLoading(true);
+        await deleteGroup(existingGroup.slug);
+        route.params?.onDelete?.();
+        navigation.goBack();
+      } catch {
+        notify(t('common.error'), t(`${ns}.deleteFailed`));
+      } finally {
+        setIsLoading(false);
+      }
+    });
   };
 
   const canSubmit = !!name.trim() && !isLoading;

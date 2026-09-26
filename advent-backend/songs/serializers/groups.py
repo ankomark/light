@@ -97,7 +97,20 @@ class GroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group
         fields = '__all__'
-        read_only_fields = ['creator', 'slug', 'created_at', 'updated_at']
+        # The invite link's limits are set through /invite-link/ only.
+        read_only_fields = ['creator', 'slug', 'created_at', 'updated_at',
+                            'invite_expires_at', 'invite_max_uses', 'invite_uses']
+
+    def validate_slow_mode_seconds(self, v):
+        return max(0, min(int(v or 0), 3600))
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # How the invite link is limited is the admins' business, like the code.
+        if data.get('invite_code') is None:
+            for k in ('invite_expires_at', 'invite_max_uses', 'invite_uses'):
+                data.pop(k, None)
+        return data
 
     @staticmethod
     def _upload_cover(validated_data):
