@@ -6,7 +6,7 @@
 // Text stays one tap away for the chats where a picture is too much, and a
 // capture that fails (the web, an old build without the native module) falls
 // back to it rather than to an error.
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Share, Image, ScrollView,
   ActivityIndicator, Platform, useWindowDimensions,
@@ -34,6 +34,9 @@ const APP_NAME = 'Adventist Life';
 
 // 4:5, the shape a phone's feed and status screens show whole.
 const RATIO = 5 / 4;
+// How far a very long verse may shrink to fit (then it is clipped, which the
+// curated verses never reach).
+const MIN_FIT = 0.6;
 const IS_WEB = Platform.OS === 'web';
 
 export const verseMessage = (verse) => `“${verse.text}”\n— ${verse.reference}`;
@@ -58,16 +61,24 @@ export const copyVerse = async (verse) => {
  *
  *  One column, top to bottom — title, verse, name, Bible — with the book in
  *  the flow rather than pinned over the foot, so no verse can run under it.
- *  4:5 is the least height, not the only one: a very long verse makes the
- *  card taller instead of being cut or covered. */
+ *  Always 4:5: a verse too long for the room above the book is set smaller,
+ *  a step at a time, until it fits. */
 export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
   const k = width / 320;
   const len = verse.text.length;
-  const size = (len > 300 ? 13 : len > 210 ? 14.5 : len > 130 ? 16.5 : 19.5) * k;
+  // Measured, then stepped down while the verse is taller than its room.
+  const [fit, setFit] = useState(1);
+  const room = useRef(0);
+  const used = useRef(0);
+  useEffect(() => { setFit(1); room.current = 0; used.current = 0; }, [verse.text, verse.reference, width]);
+  const check = () => {
+    if (room.current && used.current > room.current) setFit((f) => (f > MIN_FIT ? f * 0.92 : f));
+  };
+  const size = (len > 210 ? 14.5 : len > 130 ? 16.5 : 19.5) * k * fit;
   // A date, never "Today": the picture outlives the day it was made.
   const day = verse.date ? fmt(parseISO(verse.date), 'd MMMM yyyy') : '';
   return (
-    <View ref={ref} collapsable={false} style={[styles.card, { width, minHeight: width * RATIO }]}>
+    <View ref={ref} collapsable={false} style={[styles.card, { width, height: width * RATIO }]}>
       <LinearGradient
         colors={[TEAL_DEEP, TEAL, TEAL_LIFT]}
         locations={[0, 0.55, 1]}
@@ -77,15 +88,17 @@ export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
         <Text style={[styles.cardTitle, { fontSize: 9.5 * k, letterSpacing: 1.8 * k }]}>{title}</Text>
         {!!day && <Text style={[styles.cardDate, { fontSize: 9 * k }]}>{day}</Text>}
 
-        <View style={styles.cardMiddle}>
-          <Text style={[styles.cardQuote, { fontSize: 44 * k, marginBottom: -20 * k }]}>“</Text>
-          <Text style={[styles.cardVerse, { fontSize: size, lineHeight: size * 1.55 }]}>{verse.text}</Text>
-          <LinearGradient
-            colors={['transparent', GOLD_SOFT, 'transparent']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={[styles.cardRule, { marginTop: 14 * k }]}
-          />
-          <Text style={[styles.cardRef, { fontSize: 12.5 * k, marginTop: 9 * k }]}>{verse.reference}</Text>
+        <View style={styles.cardMiddle} testID="verse-card-room" onLayout={(e) => { room.current = e.nativeEvent.layout.height; check(); }}>
+          <View testID="verse-card-words" onLayout={(e) => { used.current = e.nativeEvent.layout.height; check(); }}>
+            <Text style={[styles.cardQuote, { fontSize: 44 * k, marginBottom: -20 * k }]}>“</Text>
+            <Text style={[styles.cardVerse, { fontSize: size, lineHeight: size * 1.55 }]}>{verse.text}</Text>
+            <LinearGradient
+              colors={['transparent', GOLD_SOFT, 'transparent']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={[styles.cardRule, { marginTop: 14 * k }]}
+            />
+            <Text style={[styles.cardRef, { fontSize: 12.5 * k, marginTop: 9 * k }]}>{verse.reference}</Text>
+          </View>
         </View>
       </View>
       {/* Just above the book, on teal: the pages below are too light to
@@ -93,7 +106,7 @@ export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
       <Text style={[styles.cardBrand, { fontSize: 8 * k, marginTop: 14 * k, marginBottom: 6 * k }]}>{APP_NAME}</Text>
       <Image
         source={require('../assets/verse-book.png')}
-        style={[styles.cardBook, { width: width * 0.58 }]}
+        style={[styles.cardBook, { width: width * 0.62 }]}
         resizeMode="contain"
       />
     </View>
@@ -231,11 +244,11 @@ const styles = StyleSheet.create({
   card: { borderRadius: 18, overflow: 'hidden', backgroundColor: TEAL },
   // Below everything, flush with the bottom edge.
   cardBook: { alignSelf: 'center', aspectRatio: 600 / 239 },
-  cardBody: { flexGrow: 1 },
+  cardBody: { flex: 1 },
   cardTitle: { fontFamily: DISPLAY_MID, color: GOLD_SOFT, textAlign: 'center', textTransform: 'uppercase' },
   cardDate: { fontFamily: SERIF, color: 'rgba(242,239,230,0.7)', textAlign: 'center', marginTop: 3 },
-  // Whatever room the verse leaves, it sits centred in.
-  cardMiddle: { flexGrow: 1, justifyContent: 'center', paddingTop: 8 },
+  // Whatever room is left above the book, the verse sits centred in.
+  cardMiddle: { flex: 1, justifyContent: 'center', overflow: 'hidden' },
   cardQuote: { fontFamily: DISPLAY, color: 'rgba(227,196,106,0.35)', textAlign: 'center' },
   cardVerse: { fontFamily: SERIF, color: PARCHMENT, textAlign: 'center' },
   cardRule: { height: 1, opacity: 0.75, marginHorizontal: '18%' },
