@@ -21,6 +21,7 @@ import {
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import { quizLanguage } from '../utils/quizCache';
+import WhySheet from '../components/WhySheet';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
@@ -77,6 +78,7 @@ const QuizPlay = ({ navigation, route }) => {
   const [chosen, setChosen] = useState(null);
   const [feedback, setFeedback] = useState(null);   // the verdict on the question shown
   const [remaining, setRemaining] = useState(null); // speed mode only
+  const [whyOpen, setWhyOpen] = useState(false);
   const shownAt = useRef(Date.now());
   // Answers go to the server one after another, behind the play: the chain is
   // what results wait on, so the totals shown at the end are the server's.
@@ -538,6 +540,14 @@ const QuizPlay = ({ navigation, route }) => {
               </View>
               <Text style={styles.reference}>{feedback.reference}</Text>
               <Text style={styles.explanation}>{feedback.explanation}</Text>
+              <TouchableOpacity
+                style={styles.whyBtn}
+                onPress={() => setWhyOpen(true)}
+                accessibilityRole="button"
+              >
+                <Ionicons name="bulb-outline" size={15} color={GOLD} />
+                <Text style={styles.whyText}>{t('quiz.why.button')}</Text>
+              </TouchableOpacity>
             </View>
           )}
         </ScrollView>
@@ -552,6 +562,16 @@ const QuizPlay = ({ navigation, route }) => {
         )}
 
       </SafeAreaView>
+
+      {/* The answer has to be on the server before it can be explained: the
+          sheet waits for the answers being recorded behind the play. */}
+      <WhySheet
+        visible={whyOpen}
+        onClose={() => setWhyOpen(false)}
+        questionId={feedback?.qid}
+        lang={run?.language || lang}
+        ready={() => chain.current}
+      />
     </View>
   );
 };
@@ -613,6 +633,12 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.08)',
   },
   wide: { alignSelf: 'stretch' },
+  whyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    minHeight: 36, paddingHorizontal: 12, marginTop: 8, borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.45)',
+  },
+  whyText: { fontFamily: DISPLAY_MID, fontSize: 11.5, letterSpacing: 0.6, color: GOLD },
   challengeBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     marginHorizontal: 20, marginTop: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 14,

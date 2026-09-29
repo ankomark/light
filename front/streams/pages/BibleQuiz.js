@@ -32,6 +32,7 @@ import {
 } from '../services/quizSound';
 import BottomSheet from '../components/BottomSheet';
 import ShareCardSheet from '../components/ShareCardSheet';
+import WhySheet from '../components/WhySheet';
 import QuizResultCard, { resultMessage } from '../components/QuizResultCard';
 import useReducedMotion from '../utils/useReducedMotion';
 import { parseReference } from '../utils/dailyVerseText';
@@ -138,6 +139,9 @@ const BibleQuiz = ({ navigation }) => {
       .catch(() => {});
     return () => { live = false; };
   }, [groupsKey]);
+
+  // "Why?" on a reviewed question: which one is open.
+  const [whyFor, setWhyFor] = useState(null);
 
   // Sharing the result, and a word when something happened (copied, saved).
   const [sharing, setSharing] = useState(false);
@@ -604,6 +608,16 @@ const BibleQuiz = ({ navigation }) => {
                           ? ` · ${t('quiz.youSaid')} ${q.choices[chosen]}`
                           : ''}
                       </Text>
+                      <TouchableOpacity
+                        style={styles.readLink}
+                        onPress={() => setWhyFor(q.id)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t('quiz.why.button')}: ${i + 1}`}
+                      >
+                        <Ionicons name="bulb-outline" size={13} color={GOLD} />
+                        <Text style={styles.readLinkText}>{t('quiz.why.button')}</Text>
+                      </TouchableOpacity>
                       {!!place(r?.reference) && (
                         <TouchableOpacity
                           style={styles.readLink}
@@ -649,6 +663,13 @@ const BibleQuiz = ({ navigation }) => {
 
           </ScrollView>
         </SafeAreaView>
+
+        <WhySheet
+          visible={!!whyFor}
+          onClose={() => setWhyFor(null)}
+          questionId={whyFor}
+          lang={quiz?.language || lang}
+        />
 
         {!!toast && (
           <View style={styles.toast} pointerEvents="none" accessibilityLiveRegion="polite">

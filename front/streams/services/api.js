@@ -1159,6 +1159,10 @@ export const fetchQuizHistory = async () => apiRequest('get', '/quiz/my-history/
 // level they add up to, with the bar fraction already worked out.
 export const fetchQuizStats = async () => apiRequest('get', '/quiz/stats/');
 
+// "Why?" — an answered question's answer explained (level: why|simple|children).
+export const askQuizWhy = async (questionId, level = 'why', lang = 'en') =>
+  apiRequest('post', '/quiz/why/', { question_id: questionId, level, language: lang });
+
 // The progress screen: history, calendar, badges, strengths, freeze offer.
 export const fetchQuizProgress = async () => apiRequest('get', '/quiz/progress/');
 

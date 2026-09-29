@@ -306,6 +306,8 @@ AI_MODEL = os.getenv('AI_MODEL', 'claude-sonnet-5')
 AI_FAST_MODEL = os.getenv('AI_FAST_MODEL', 'claude-haiku-4-5-20251001')
 # New answers per person per day (answers already kept are free).
 AI_DAILY_LIMIT = int(os.getenv('AI_DAILY_LIMIT', '40'))
+# The quiz's "Why?" explanations (songs/quiz_ai.py), through the anthropic SDK.
+AI_QUIZ_MODEL = os.getenv('AI_QUIZ_MODEL', 'claude-opus-5-5')
 
 # ── LiveKit (live broadcasting) ───────────────────────────────────────────────
 # Cloud now; self-hosting later is just changing these env vars (no code change).

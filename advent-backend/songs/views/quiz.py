@@ -379,6 +379,34 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             'best_run': max(daily['best_run'] or 0, practice['best_run'] or 0),
         })
 
+    @action(detail=False, methods=['post'])
+    def why(self, request):
+        """Why an answer is right, explained by Claude from the Scripture
+        behind it. POST {question_id, level: why|simple|children, language}.
+        Only for a question you have already answered."""
+        from .. import quiz_ai
+        question = QuizQuestion.objects.filter(pk=request.data.get('question_id')).first()
+        if not question:
+            raise NotFound('No such question.')
+        try:
+            out = quiz_ai.explain(request.user, question, request.data.get('level') or 'why',
+                                  _language(request))
+        except ValueError:
+            raise ValidationError({'level': 'Use why, simple or children.'})
+        except PermissionError:
+            return Response({'error': 'Answer the question first.', 'code': 'not_answered'},
+                            status=status.HTTP_403_FORBIDDEN)
+        except quiz_ai.AiOff:
+            return Response({'error': 'AI is not available.', 'code': 'ai_off'},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except quiz_ai.AiLimit:
+            return Response({'error': "You've used today's AI answers.", 'code': 'ai_limit'},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+        except quiz_ai.AiFailed:
+            return Response({'error': 'AI could not answer just now.', 'code': 'ai_failed'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        return Response(out)
+
     @action(detail=False, methods=['get'])
     def progress(self, request):
         """History, the calendar, badges, strengths and the freeze offer — the

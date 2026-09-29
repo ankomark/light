@@ -12,6 +12,7 @@ const mockApi = {
   startQuizSession: jest.fn(),
   answerQuizSession: jest.fn(),
   finishQuizSession: jest.fn(async () => ({})),
+  askQuizWhy: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 7, username: 'mark' } }) }));
@@ -117,4 +118,24 @@ test('a server from before instant answers is still waited for', async () => {
   fireEvent.press(screen.getByText('A1'));
   await waitFor(() => expect(screen.getByText('quiz.notQuite')).toBeTruthy());
   expect(mockApi.answerQuizSession).toHaveBeenCalledWith(9, 1, 0, expect.any(Number));
+});
+
+test('"Why?" after an answer is asked only once the answer is on the server', async () => {
+  const order = [];
+  let recorded;
+  mockApi.startQuizSession.mockResolvedValue(run('speed', [q(1, 0), q(2, 0)], { language: 'en' }));
+  mockApi.answerQuizSession.mockImplementation(() => new Promise((r) => {
+    recorded = () => { order.push('recorded'); r(brief(10)); };
+  }));
+  mockApi.askQuizWhy.mockImplementation(async () => { order.push('asked'); return { text: 'Because.' }; });
+  const screen = render(<QuizPlay navigation={{ goBack: jest.fn() }} route={{ params: { mode: 'speed' } }} />);
+  await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+  fireEvent.press(screen.getByText('A1'));
+  fireEvent.press(screen.getByText('quiz.why.button'));
+  await waitFor(() => expect(typeof recorded).toBe('function'));
+  expect(mockApi.askQuizWhy).not.toHaveBeenCalled();
+  await act(async () => { recorded(); });
+  await waitFor(() => expect(screen.getByText('Because.')).toBeTruthy());
+  expect(order).toEqual(['recorded', 'asked']);
+  expect(mockApi.askQuizWhy).toHaveBeenCalledWith(1, 'why', 'en');
 });

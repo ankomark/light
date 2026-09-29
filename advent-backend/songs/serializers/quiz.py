@@ -113,7 +113,7 @@ class QuizSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuizSession
         fields = [
-            'id', 'mode', 'mode_config', 'score', 'answered', 'points',
+            'id', 'mode', 'language', 'mode_config', 'score', 'answered', 'points',
             'streak', 'longest_streak', 'is_finished', 'total_questions',
             'questions', 'started_at', 'finished_at',
         ]
