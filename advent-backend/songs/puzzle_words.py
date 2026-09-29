@@ -19,7 +19,7 @@ import re
 
 from . import book_ai, quiz_ai
 from .book_ai import AiFailed, AiLimit, AiOff  # noqa: F401 — the view catches these
-from .puzzle import tongue
+from .models import AiAnswer
 
 # word: (English, Swahili). Plain words, as short as they can be.
 GLOSSARY = {
@@ -106,19 +106,31 @@ SYSTEM = (
 )
 
 
-def _example(word, language):
+def _example(puzzle, word):
     """(reference, text) of a verse the word appears in, as a whole word.
-    A search of the whole Bible, so kept: the same word is asked about again."""
+
+    Looked for where it is cheap to look: the board's own verse, then the
+    theme's scripture, never the whole Bible — a search of every verse took
+    seconds against the real database, for a line of context. Kept, because
+    the same word is asked about again.
+    """
     from django.core.cache import cache
-    key = f'puzzle:example:{language}:{word}'
+    from .puzzle import _scope
+    language = puzzle.language or 'en'
+    key = f'puzzle:example:{language}:{puzzle.theme_id}:{word}'
     kept = cache.get(key)
     if kept is not None:
         return tuple(kept)
+    pattern = re.compile(r'\b%s\b' % re.escape(word), re.I)
     found = (None, None)
-    for v in tongue(language).verses().filter(text__icontains=word)[:30]:
-        if re.search(r'\b%s\b' % re.escape(word), v.text, re.I):
-            found = (v.reference, v.text)
-            break
+    own = puzzle.sw_verse if language == 'sw' else puzzle.verse
+    if own and pattern.search(own.text):
+        found = (own.reference, own.text)
+    else:
+        for v in _scope(puzzle.theme, language=language).filter(text__icontains=word)[:20]:
+            if pattern.search(v.text):
+                found = (v.reference, v.text)
+                break
     cache.set(key, list(found), 60 * 60 * 24)
     return found
 
@@ -141,14 +153,20 @@ def meaning(user, puzzle, word, lang='en'):
         raise PermissionError('not found')
     lang = lang if lang in book_ai.LANGS else 'en'
     language = puzzle.language or 'en'
-    reference, text = _example(word, language)
-    out = {'word': word, 'reference': reference, 'verse': text}
 
     hit = GLOSSARY.get(word) if language == 'en' else None
     if hit:
-        return {**out, 'meaning': hit[1] if lang == 'sw' else hit[0], 'source': 'glossary'}
+        reference, text = _example(puzzle, word)
+        return {'word': word, 'reference': reference, 'verse': text,
+                'meaning': hit[1] if lang == 'sw' else hit[0], 'source': 'glossary'}
 
     key = book_ai._key('puzzle-word', language, lang, word)
+    # Say so at once when the AI cannot be asked and nobody has asked before:
+    # no reason to look anything up first.
+    if not book_ai.enabled() and not AiAnswer.objects.filter(key=key).exists():
+        raise AiOff()
+    reference, text = _example(puzzle, word)
+    out = {'word': word, 'reference': reference, 'verse': text}
 
     def make():
         bible = 'the Swahili Bible (NENO)' if language == 'sw' else 'the King James Bible'

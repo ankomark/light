@@ -171,8 +171,26 @@ class WordMeaningTests(APITestCase):
         self.assertIsNotNone(first.data['reference'])
 
     @override_settings(ANTHROPIC_API_KEY='')
-    def test_without_ai_it_says_so(self):
+    def test_without_ai_it_says_so_at_once(self):
+        """No verse is looked for first: that search took seconds on the real
+        database, only to be thrown away."""
+        from songs import puzzle_words
         self._find(self.word)
-        res = self._ask(self.word)
+        with patch.object(puzzle_words, '_example') as example:
+            res = self._ask(self.word)
         self.assertEqual(res.status_code, 503)
         self.assertEqual(res.data['code'], 'ai_off')
+        example.assert_not_called()
+
+    @override_settings(ANTHROPIC_API_KEY='')
+    def test_without_ai_the_glossary_still_answers(self):
+        PuzzleProgress.objects.create(user=self.user, puzzle=self.puzzle, bonus=['SMOTE'])
+        res = self._ask('SMOTE')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['source'], 'glossary')
+
+    def test_the_example_is_the_boards_own_verse_when_it_has_the_word(self):
+        from songs import puzzle_words
+        verse = self.puzzle.verse
+        word = next(w for w in self.puzzle.words if w.lower() in verse.text.lower())
+        self.assertEqual(puzzle_words._example(self.puzzle, word)[0], verse.reference)
