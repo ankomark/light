@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  startQuizSession, answerQuizSession, finishQuizSession, buyQuizHint,
+  startQuizSession, answerQuizSession, finishQuizSession, buyQuizHint, fetchQuizDuel,
 } from '../services/api';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
@@ -46,16 +46,57 @@ export const challengeFrom = (params) => {
   return { from, score };
 };
 
-/** The link that challenges someone to beat `score` in `mode`. */
-export const challengeLink = (mode, username, score) =>
-  `streams://quiz/${mode}?from=${encodeURIComponent(username || '')}&score=${score}`;
+/** The link that challenges someone to beat `score` in `mode` — for a Speed
+ *  run, a duel on its very questions (`runId`). */
+export const challengeLink = (mode, username, score, runId) => {
+  const who = `from=${encodeURIComponent(username || '')}&score=${score}`;
+  if (mode === 'speed' && runId) return `streams://quiz/duel?of=${runId}&${who}`;
+  return `streams://quiz/${mode}?${who}`;
+};
+
+const DUEL_REFUSALS = ['own_duel', 'already_played', 'gone', 'not_ready', 'not_found'];
+
+/** A duel's two sides, answer by answer. */
+const DuelCard = ({ duel, t }) => {
+  if (!duel?.them) return null;
+  const Side = ({ side, you }) => (
+    <View style={duelStyles.side}>
+      <View style={duelStyles.sideTop}>
+        <Text style={[duelStyles.name, you && duelStyles.nameYou]} numberOfLines={1}>
+          {you ? t('quiz.duel.you') : side.username}
+        </Text>
+        <Text style={duelStyles.score}>{side.score}</Text>
+        <Coins value={side.points} size={16} textSize={13} />
+      </View>
+      <View style={duelStyles.marks}>
+        {side.marks.map((m, i) => (
+          // eslint-disable-next-line react/no-array-index-key
+          <View key={i} style={[duelStyles.mark, m === true && duelStyles.right, m === false && duelStyles.wrong]} />
+        ))}
+      </View>
+    </View>
+  );
+  return (
+    <View style={duelStyles.card} testID="duel-card">
+      {!!duel.verdict && (
+        <Text style={duelStyles.verdict}>
+          {t(`quiz.duel.${duel.verdict}`, { name: duel.them.username })}
+        </Text>
+      )}
+      <Side side={duel.me} you />
+      <Side side={duel.them} />
+    </View>
+  );
+};
 
 const QuizPlay = ({ navigation, route }) => {
   const { t, resolvedLanguage } = useI18n();
   const { preferences, setPreference } = usePreferences();
-  const MODES_PLAYED = ['speed', 'streak', 'review', 'section'];
+  const MODES_PLAYED = ['speed', 'streak', 'review', 'section', 'duel'];
   const mode = MODES_PLAYED.includes(route?.params?.mode) ? route.params.mode : 'speed';
   const category = mode === 'section' ? route?.params?.category : undefined;
+  const duelOf = mode === 'duel' ? route?.params?.of : undefined;
+  const [duel, setDuel] = useState(null);
   // What the run is called on screen: the section's own name, else the mode's.
   const title = (label) => (category ? t(`quiz.section.${category}`) : t(`quiz.mode.${mode}`) || label);
   const { currentUser } = useAuth();
@@ -106,7 +147,7 @@ const QuizPlay = ({ navigation, route }) => {
       setOver(false);
       setShowResults(false);
       chain.current = Promise.resolve();
-      const started = await startQuizSession(mode, lang, { category });
+      const started = await startQuizSession(mode, lang, { category, of: duelOf });
       setRun(started);
       setQi(0);
       setTotals({
@@ -120,11 +161,21 @@ const QuizPlay = ({ navigation, route }) => {
       shownAt.current = Date.now();
     } catch (e) {
       const code = e?.response?.data?.code || e?.data?.code;
-      setError(code === 'nothing_due' ? t('quiz.reviewNothingDue') : t('quiz.loadFailed'));
+      setError(code === 'nothing_due' ? t('quiz.reviewNothingDue')
+        : DUEL_REFUSALS.includes(code) ? t(`quiz.duel.${code}`)
+        : t('quiz.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [mode, t, lang, category]);
+  }, [mode, t, lang, category, duelOf]);
+
+  // A duel's results are the two runs side by side, once this one is in.
+  useEffect(() => {
+    if (mode !== 'duel' || !showResults || !run) return undefined;
+    let live = true;
+    fetchQuizDuel(run.id).then((d) => { if (live) setDuel(d); }).catch(() => {});
+    return () => { live = false; };
+  }, [mode, showResults, run]);
 
   useEffect(() => { begin(); }, [begin]);
 
@@ -337,7 +388,7 @@ const QuizPlay = ({ navigation, route }) => {
     const sendChallenge = () => {
       Share.share({
         message: `${t('quiz.challenge.message', { score: mine, unit, mode: config.label })}\n${
-          challengeLink(mode, currentUser?.username, mine)}`,
+          challengeLink(mode, currentUser?.username, mine, run?.id)}`,
       }).catch(() => {});
     };
     return (
@@ -379,7 +430,9 @@ const QuizPlay = ({ navigation, route }) => {
               </View>
             </View>
 
-            {!!challenge && (
+            {mode === 'duel' && <DuelCard duel={duel} t={t} />}
+
+            {!!challenge && mode !== 'duel' && (
               <View style={[styles.verdict, mine > challenge.score && styles.verdictWon]}
                     accessibilityLiveRegion="polite">
                 <Ionicons name={mine > challenge.score ? 'trophy' : 'flag-outline'} size={16} color={GOLD} />
@@ -643,6 +696,24 @@ const QuizPlay = ({ navigation, route }) => {
     </View>
   );
 };
+
+const duelStyles = StyleSheet.create({
+  card: {
+    alignSelf: 'stretch', gap: 12, padding: 14, borderRadius: 14, marginBottom: 4,
+    backgroundColor: 'rgba(5,8,14,0.9)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.4)',
+  },
+  verdict: { fontFamily: DISPLAY, fontSize: 15, letterSpacing: 0.4, color: GOLD, textAlign: 'center' },
+  side: { gap: 6 },
+  sideTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  name: { flex: 1, fontSize: 14, color: '#C6CBD2' },
+  nameYou: { color: PARCHMENT, fontWeight: '800' },
+  score: { fontFamily: DISPLAY, fontSize: 16, color: PARCHMENT },
+  marks: { flexDirection: 'row', gap: 4 },
+  mark: { flex: 1, height: 8, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.10)' },
+  right: { backgroundColor: GOLD },
+  wrong: { backgroundColor: 'rgba(229,57,53,0.55)' },
+});
 
 const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24 },

@@ -1174,11 +1174,15 @@ export const buyStreakFreeze = async () => apiRequest('post', '/quiz/freeze/', {
 // you are wrong, and Speed times each question separately. The server holds the
 // rules — the clock here drives the UI, it does not decide the score.
 
-// mode: 'speed' | 'streak' | 'review' | 'section' (with `category`).
-export const startQuizSession = async (mode, lang, { category } = {}) =>
+// mode: 'speed' | 'streak' | 'review' | 'section' (with `category`) |
+// 'duel' (with `of`: the Speed run it answers).
+export const startQuizSession = async (mode, lang, { category, of } = {}) =>
   apiRequest('post', '/quiz-sessions/', {
-    mode, ...(lang ? { language: lang } : {}), ...(category ? { category } : {}),
+    mode, ...(lang ? { language: lang } : {}), ...(category ? { category } : {}), ...(of ? { of } : {}),
   });
+
+// A duel side by side: { me, them, verdict }, each with score, points, marks.
+export const fetchQuizDuel = async (id) => apiRequest('get', `/quiz-sessions/${id}/duel/`);
 
 export const fetchQuizSession = async (id) =>
   apiRequest('get', `/quiz-sessions/${id}/`);

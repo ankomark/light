@@ -19,6 +19,8 @@ REVIEW = 'review'
 # One part of the Bible at a time — the Law, the Gospels… — for practice
 # where it is needed (the progress screen names the weakest).
 SECTION = 'section'
+# Another player's Speed run, played on the same questions.
+DUEL = 'duel'
 # The modes played for a personal best (the hub's cards).
 BEST_MODES = (SPEED, STREAK)
 
@@ -102,6 +104,8 @@ MODES[SECTION] = {
     'repeatable': True,
     'ranked': False,
 }
+
+MODES[DUEL] = {**MODES[SPEED], 'label': 'Duel', 'mix': []}
 
 MODE_CHOICES = tuple((key, cfg['label']) for key, cfg in MODES.items())
 

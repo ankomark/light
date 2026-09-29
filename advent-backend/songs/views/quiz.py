@@ -14,7 +14,7 @@ from ..models import (
     DailyQuiz, PuzzleProgress, QuizAnswer, QuizAttempt, QuizQuestion, QuizSession,
     VerseDay,
 )
-from ..modes import BEST_MODES, DAILY, MODES, REVIEW, SECTION, config
+from ..modes import BEST_MODES, DAILY, DUEL, MODES, REVIEW, SECTION, config
 from ..quiz import generate_for_date, record_bank_answers, start_session
 from ..scoring import coin_balance, level_for, score_answer
 from ..streaks import day_streaks, streak_for
@@ -81,6 +81,20 @@ def _read_answer(answers, question):
     if chosen is None or not (0 <= chosen < len(question.choices)):
         chosen = None
     return chosen, seconds
+
+
+def _tell_challenger(session):
+    """The one who sent a duel hears how it went."""
+    from ..push import notify_user
+    original = session.duel_of
+    verdict = ('beat you' if session.points > original.points
+               else 'fell short of you' if session.points < original.points else 'tied with you')
+    try:
+        notify_user(original.user, 'quiz_duel',
+                    f'{session.user.username} {verdict}: {session.score} right, {session.points} coins.',
+                    data={'type': 'quiz_duel', 'session': session.pk})
+    except Exception:  # noqa: BLE001 — a push never undoes an answer
+        pass
 
 
 def _review_due(user):
@@ -479,7 +493,14 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             )
 
         try:
-            if mode == REVIEW:
+            if mode == DUEL:
+                from ..quiz_duel import DuelRefused, start_duel
+                try:
+                    session = start_duel(request.user, request.data.get('of'))
+                except DuelRefused as refused:
+                    code = status.HTTP_404_NOT_FOUND if refused.code == 'not_found' else status.HTTP_400_BAD_REQUEST
+                    return Response({'error': 'This duel cannot be played.', 'code': refused.code}, status=code)
+            elif mode == REVIEW:
                 from ..quiz_review import NothingDue, start_review
                 try:
                     session = start_review(request.user, _language(request))
@@ -563,6 +584,8 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                 session.finished_at = timezone.now()
             session.save()
         record_bank_answers([(question.bank_question_id, correct)])
+        if session.is_finished and session.mode == DUEL and session.duel_of_id:
+            _tell_challenger(session)
         from ..quiz_review import note_miss, note_review
         if question.review_item_id:
             note_review(question.review_item_id, correct)
@@ -592,6 +615,16 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             'points': session.points, 'streak': session.streak,
             'longest_streak': session.longest_streak, 'is_finished': session.is_finished,
         }
+
+    @action(detail=True, methods=['get'])
+    def duel(self, request, pk=None):
+        """A duel side by side: {me, them, verdict} — each with the score,
+        coins and a mark per question."""
+        from ..quiz_duel import comparison
+        session = self.get_object()
+        if session.mode != DUEL:
+            raise NotFound('Not a duel.')
+        return Response(comparison(session))
 
     # A 50/50 costs enough to be a choice, not a habit.
     HINT_COST = 15

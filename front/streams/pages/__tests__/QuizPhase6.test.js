@@ -17,6 +17,7 @@ const mockApi = {
   startQuizSession: jest.fn(),
   answerQuizSession: jest.fn(),
   finishQuizSession: jest.fn(async () => ({})),
+  fetchQuizDuel: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 7, username: 'mark' } }) }));
@@ -145,5 +146,33 @@ describe('playing them', () => {
     mockApi.startQuizSession.mockRejectedValue({ response: { data: { code: 'nothing_due' } } });
     const screen = render(<QuizPlay navigation={nav()} route={{ params: { mode: 'review' } }} />);
     await waitFor(() => expect(screen.getByText('quiz.reviewNothingDue')).toBeTruthy());
+  });
+});
+
+describe('duels', () => {
+  const over = { id: 8, mode: 'duel', is_finished: true, score: 8, points: 180, longest_streak: 5,
+    answered: 10, total_questions: 10, questions: [], mode_config: { label: 'Duel' } };
+
+  test('a duel link plays that run, and ends side by side', async () => {
+    mockApi.startQuizSession.mockResolvedValue(over);
+    mockApi.fetchQuizDuel.mockResolvedValue({
+      verdict: 'won',
+      me: { username: 'ivy', score: 8, points: 180, marks: [true, true, false] },
+      them: { username: 'mark', score: 6, points: 150, marks: [true, false, false] },
+    });
+    const screen = render(<QuizPlay navigation={nav()}
+      route={{ params: { mode: 'duel', of: '41', from: 'mark', score: '150' } }} />);
+    await waitFor(() => expect(screen.getByTestId('duel-card')).toBeTruthy(), { timeout: 8000 });
+    expect(mockApi.startQuizSession).toHaveBeenCalledWith('duel', 'en', { category: undefined, of: '41' });
+    expect(mockApi.fetchQuizDuel).toHaveBeenCalledWith(8);
+    expect(screen.getByText('quiz.duel.won:mark')).toBeTruthy();
+    expect(screen.getByText('quiz.duel.you')).toBeTruthy();
+    expect(screen.queryByText(/quiz\.challenge\.(won|lost)/)).toBeNull();      // the card says it
+  });
+
+  test("a duel that can't be played says why", async () => {
+    mockApi.startQuizSession.mockRejectedValue({ response: { data: { code: 'already_played' } } });
+    const screen = render(<QuizPlay navigation={nav()} route={{ params: { mode: 'duel', of: '41' } }} />);
+    await waitFor(() => expect(screen.getByText('quiz.duel.already_played')).toBeTruthy());
   });
 });

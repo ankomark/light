@@ -4,6 +4,7 @@ import json
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
 NOTIFICATION_TITLES = {
+    'quiz_duel': '\u2694\ufe0f Your duel was played',
     'like': '❤️ New Like',
     'comment': '\U0001f4ac New Comment',
     'follow': '\U0001f464 New Follower',
@@ -52,6 +53,8 @@ NOTIFICATION_CATEGORIES = {
     'cohost_request': 'live',
     'cohost_approved': 'live',
     'quiz_reminder': 'quiz',
+    # Someone played the duel you sent them.
+    'quiz_duel': 'quiz',
     'weather_briefing': 'weather',
     'verse_of_the_day': 'verse',
     'new_book': 'books',

@@ -3074,6 +3074,10 @@ class QuizSession(models.Model):
     mode = models.CharField(max_length=12, db_index=True)
     # The language it was played in, so a miss comes back for review in it.
     language = models.CharField(max_length=5, default='en')
+    # A duel answers another player's Speed run: the same questions, in the
+    # same order, so the two can be compared answer by answer.
+    duel_of = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name='duels')
     # Filled in as the run proceeds — a session is scored answer by answer, not
     # in one submission at the end, because Streak has to know immediately.
     score = models.PositiveSmallIntegerField(default=0)

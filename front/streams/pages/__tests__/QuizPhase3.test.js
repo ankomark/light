@@ -151,6 +151,9 @@ describe('challenging a friend', () => {
     expect(challengeFrom({ from: '', score: '5' })).toBeNull();
     expect(challengeFrom({ from: 'mark', score: '-1' })).toBeNull();
     expect(challengeLink('speed', 'ann marie', 90)).toBe('streams://quiz/speed?from=ann%20marie&score=90');
+    // A Speed run with its id becomes a duel on the same questions.
+    expect(challengeLink('speed', 'mark', 90, 41)).toBe('streams://quiz/duel?of=41&from=mark&score=90');
+    expect(challengeLink('streak', 'mark', 12, 41)).toBe('streams://quiz/streak?from=mark&score=12');
   });
 
   const finished = (extra) => ({
