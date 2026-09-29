@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  fetchDailyQuiz, submitDailyQuiz, fetchQuizLeaderboard,
+  fetchDailyQuiz, submitDailyQuiz, fetchQuizLeaderboard, fetchGroups,
 } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { colors, spacing, radius } from '../constants/theme';
@@ -121,6 +121,23 @@ const BibleQuiz = ({ navigation }) => {
       if (now.period === wanted.period && now.scope === wanted.scope) setBoard(data);
     } catch { /* a nicety, not the quiz */ }
   }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The groups you belong to — a church, a youth group — each a board of its
+  // own beside everyone and the people you follow. Kept once read.
+  const groupsKey = userKey(currentUser?.id, 'quiz:myGroups');
+  const [myGroups, setMyGroups] = useState(() => peekCache(groupsKey) || []);
+  useEffect(() => {
+    let live = true;
+    Promise.resolve().then(() => fetchGroups({ scope: 'mine' }))
+      .then((res) => {
+        const list = (res?.results || res || []).filter((g) => g?.slug).slice(0, 8)
+          .map((g) => ({ slug: g.slug, name: g.name }));
+        writeCache(groupsKey, list, { persist: false });
+        if (live) setMyGroups(list);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [groupsKey]);
 
   // Sharing the result, and a word when something happened (copied, saved).
   const [sharing, setSharing] = useState(false);
@@ -494,27 +511,35 @@ const BibleQuiz = ({ navigation }) => {
                   </TouchableOpacity>
                 ))}
               </View>
-              <View style={styles.scopes}>
-                {['everyone', 'following'].map((sc) => (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.scopes} testID="board-scopes">
+                {[
+                  { key: 'everyone', label: t('quiz.board.everyone') },
+                  { key: 'following', label: t('quiz.board.following') },
+                  ...myGroups.map((g) => ({ key: `group:${g.slug}`, label: g.name, group: true })),
+                ].map((sc) => (
                   <TouchableOpacity
-                    key={sc}
-                    style={[styles.scope, boardScope === sc && styles.scopeOn]}
-                    onPress={() => setBoardScope(sc)}
+                    key={sc.key}
+                    style={[styles.scope, boardScope === sc.key && styles.scopeOn]}
+                    onPress={() => setBoardScope(sc.key)}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: boardScope === sc }}
+                    accessibilityState={{ selected: boardScope === sc.key }}
                   >
-                    <Text style={[styles.scopeText, boardScope === sc && styles.tabTextOn]}>
-                      {t(`quiz.board.${sc}`)}
+                    {sc.group && <Ionicons name="people" size={12} color={boardScope === sc.key ? GOLD : '#A9BCD0'} />}
+                    <Text style={[styles.scopeText, boardScope === sc.key && styles.tabTextOn]} numberOfLines={1}>
+                      {sc.label}
                     </Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
 
               {!board ? (
                 <ActivityIndicator color={GOLD} style={styles.boardLoading} />
               ) : !board.results?.length ? (
                 <Text style={styles.boardEmpty}>
-                  {t(boardScope === 'following' ? 'quiz.board.emptyFollowing' : 'quiz.board.empty')}
+                  {t(boardScope === 'following' ? 'quiz.board.emptyFollowing'
+                    : boardScope.startsWith('group:') ? 'quiz.board.emptyGroup'
+                    : 'quiz.board.empty')}
                 </Text>
               ) : (
                 <>
@@ -1020,6 +1045,7 @@ const styles = StyleSheet.create({
   tabTextOn: { color: GOLD },
   scopes: { flexDirection: 'row', gap: 8, marginBottom: 2 },
   scope: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: 180,
     minHeight: 30, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 15,
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
   },

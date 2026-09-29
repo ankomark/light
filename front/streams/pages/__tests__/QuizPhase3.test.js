@@ -17,6 +17,7 @@ const mockApi = {
   startQuizSession: jest.fn(),
   answerQuizSession: jest.fn(),
   finishQuizSession: jest.fn(async () => ({})),
+  fetchGroups: jest.fn(async () => ({ results: [] })),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 7, username: 'mark' } }) }));
@@ -64,6 +65,7 @@ const nav = () => ({ goBack: jest.fn(), navigate: jest.fn(), push: jest.fn() });
 beforeEach(() => {
   Object.values(mockApi).forEach((f) => f.mockReset());
   mockApi.finishQuizSession.mockResolvedValue({});
+  mockApi.fetchGroups.mockResolvedValue({ results: [] });
   mockSharing.shareAsync.mockClear();
   mockClipboard.setStringAsync.mockClear();
   dropCache(quizKeys(7).daily);
@@ -116,6 +118,18 @@ describe('the leaderboard', () => {
     fireEvent.press(screen.getByText('quiz.board.following'));
     await waitFor(() => expect(screen.getByText('quiz.board.emptyFollowing')).toBeTruthy());
     expect(mockApi.fetchQuizLeaderboard).toHaveBeenLastCalledWith(undefined, { period: 'week', scope: 'following' });
+  });
+
+  test("each of my groups has its own board", async () => {
+    mockApi.fetchGroups.mockResolvedValue({ results: [{ slug: 'rongo-youth', name: 'Rongo Youth' }] });
+    mockApi.fetchDailyQuiz.mockResolvedValue(played);
+    mockApi.fetchQuizLeaderboard.mockResolvedValue({ results: [], me: null });
+    const screen = render(<BibleQuiz navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('Rongo Youth')).toBeTruthy());
+    fireEvent.press(screen.getByText('Rongo Youth'));
+    await waitFor(() => expect(mockApi.fetchQuizLeaderboard)
+      .toHaveBeenLastCalledWith(undefined, { period: 'today', scope: 'group:rongo-youth' }));
+    await waitFor(() => expect(screen.getByText('quiz.board.emptyGroup')).toBeTruthy());
   });
 
   test('below the rows shown, my own place is pinned', async () => {

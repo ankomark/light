@@ -9,6 +9,7 @@ from datetime import date as date_cls, timedelta
 from django.db.models import Count, Max, Sum
 
 from .common import *  # noqa: F401,F403
+from rest_framework.exceptions import NotFound
 from ..models import (
     DailyQuiz, PuzzleProgress, QuizAnswer, QuizAttempt, QuizQuestion, QuizSession,
     VerseDay,
@@ -226,7 +227,8 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         person's summed daily points, then correct answers, then days played.
 
         `scope=following` narrows any of them to the people you follow, and
-        you: a board you can actually climb.
+        you: a board you can actually climb. `scope=group:<slug>` is a group's
+        members (a church, a youth group), for members only.
 
         `me` is your own place on it, even below the fifty shown.
         """
@@ -235,8 +237,19 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             raise ValidationError({'period': 'Use today, week or all.'})
         day = self._day(request)
         circle = None
-        if request.query_params.get('scope') == 'following':
+        scope = request.query_params.get('scope') or ''
+        if scope == 'following':
             circle = set(request.user.followed_by.values_list('id', flat=True)) | {request.user.pk}
+        elif scope.startswith('group:'):
+            # A church, a youth group, a choir: its members' board — for its
+            # members only, as the group's own posts are.
+            group = Group.objects.filter(slug=scope[len('group:'):]).first()
+            if not group:
+                raise NotFound('No such group.')
+            members = set(group.members.values_list('user_id', flat=True))
+            if request.user.pk not in members:
+                raise PermissionDenied("Only members can see this group's board.")
+            circle = members
 
         if period == 'today':
             # Every language's quiz for the day, on one board.

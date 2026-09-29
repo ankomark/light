@@ -1152,3 +1152,38 @@ class InstantPracticeTests(APITestCase):
                                {'question_id': q['id'], 'choice': wrong, 'seconds': 2, 'brief': True}, format='json')
         self.assertFalse(res.data['correct'])
         self.assertEqual(res.data['session']['points'], 0)
+
+
+class GroupBoardTests(APITestCase):
+    """A church or youth group's own board."""
+
+    def setUp(self):
+        cache.clear()
+        from songs.models import Group, GroupMember, QuizAttempt, User
+        self.QuizAttempt = QuizAttempt
+        self.me = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.friend = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
+        self.outsider = User.objects.create_user('zed', 'z@x.com', 'pw12345!')
+        self.group = Group.objects.create(name='Rongo Youth', creator=self.me)
+        for u in (self.me, self.friend):
+            GroupMember.objects.get_or_create(group=self.group, user=u)
+        today = timezone.localdate()
+        quiz = DailyQuiz.objects.create(date=today)
+        for u, p in ((self.outsider, 900), (self.me, 100), (self.friend, 150)):
+            QuizAttempt.objects.create(user=u, quiz=quiz, score=10, total=20, points=p)
+        self.client.force_authenticate(self.me)
+
+    def test_the_board_is_the_groups_members(self):
+        for period in ('today', 'week', 'all'):
+            board = self.client.get(f'/api/quiz/leaderboard/?period={period}&scope=group:{self.group.slug}').data
+            self.assertEqual([r['user']['username'] for r in board['results']], ['ivy', 'mark'], period)
+            self.assertEqual(board['me'], {'rank': 2, 'of': 2}, period)
+
+    def test_only_members_see_it(self):
+        self.client.force_authenticate(self.outsider)
+        res = self.client.get(f'/api/quiz/leaderboard/?scope=group:{self.group.slug}')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_an_unknown_group(self):
+        self.assertEqual(self.client.get('/api/quiz/leaderboard/?scope=group:nope').status_code,
+                         status.HTTP_404_NOT_FOUND)

@@ -1142,12 +1142,13 @@ export const submitDailyQuiz = async (answers, durationSeconds, lang) =>
     ...(lang ? { language: lang } : {}),
   });
 
-// period: 'today' (default) | 'week' | 'all'; scope: 'everyone' | 'following'.
+// period: 'today' (default) | 'week' | 'all';
+// scope: 'everyone' | 'following' | 'group:<slug>' (a group you belong to).
 export const fetchQuizLeaderboard = async (day, { period, scope } = {}) => {
   const q = [
     day && `date=${encodeURIComponent(day)}`,
     period && period !== 'today' && `period=${encodeURIComponent(period)}`,
-    scope === 'following' && 'scope=following',
+    scope && scope !== 'everyone' && `scope=${encodeURIComponent(scope)}`,
   ].filter(Boolean);
   return apiRequest('get', `/quiz/leaderboard/${q.length ? `?${q.join('&')}` : ''}`);
 };
