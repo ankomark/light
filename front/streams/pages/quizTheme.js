@@ -7,7 +7,6 @@
  */
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import RotatingBackground from '../components/RotatingBackground';
 
 export const DISPLAY = 'Cinzel_700Bold';
 export const DISPLAY_MID = 'Cinzel_600SemiBold';
@@ -56,8 +55,19 @@ export const mmss = (seconds) => {
  * A long interval on purpose. A picture changing under a puzzle you are
  * concentrating on reads as a glitch, not as atmosphere.
  */
+// The Word Puzzle's picture, for every quiz screen too: one background that
+// stays put across the games, dark enough for gold and parchment on top. A
+// shade more scrim than the puzzle's (0.45), for the verses the quiz sets on it.
 export const Backdrop = () => (
-  <RotatingBackground intervalMs={120000} scrimColor="rgba(10,22,40,0.74)" />
+  <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <Image
+      source={require('../assets/puzzle-bg.jpg')}
+      style={StyleSheet.absoluteFill}
+      resizeMode="cover"
+      accessibilityIgnoresInvertColors
+    />
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(6,10,20,0.55)' }]} />
+  </View>
 );
 
 /** Styles every quiz screen shares — cards, choices, buttons, eyebrows. */

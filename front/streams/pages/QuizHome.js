@@ -317,16 +317,6 @@ const QuizHome = ({ navigation }) => {
             })}
           </ScrollView>
 
-          {/* The puzzle's coins already count in the wallet above; it
-              belongs here with the rest of what earns them. */}
-          <ModeCard
-            icon="grid"
-            title={t('quiz.home.puzzleTitle')}
-            body={t('quiz.home.puzzleBody')}
-            onPress={() => navigation.navigate('PuzzlePlay')}
-            t={t}
-          />
-
           <Text style={styles.note}>{t('quiz.home.note')}</Text>
         </ScrollView>
       </View>

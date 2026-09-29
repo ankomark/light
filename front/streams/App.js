@@ -84,6 +84,8 @@ import GroupList from './pages/GroupList';
 import BibleQuiz from './pages/BibleQuiz';
 import QuizHome from './pages/QuizHome';
 import QuizProgress from './pages/QuizProgress';
+// The quiz's own backdrop (the Word Puzzle's picture), for the hub and progress too.
+import { Backdrop as QuizBackdrop } from './pages/quizTheme';
 import QuizPlay from './pages/QuizPlay';
 import PuzzlePlay from './pages/PuzzlePlay';
 import GroupDetail from './pages/GroupDetail';
@@ -480,7 +482,7 @@ const App = () => {
 // The same backdrop and header as the quiz hub it opens from.
 const QuizProgressWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <QuizBackdrop />
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Your progress couldn't load.">
       <QuizProgress navigation={navigation} route={route} />
@@ -490,7 +492,7 @@ const QuizProgressWrapper = ({ navigation, route }) => (
 
 const QuizHomeWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <QuizBackdrop />
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="The quiz couldn't load.">
       <QuizHome navigation={navigation} route={route} />

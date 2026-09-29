@@ -160,13 +160,11 @@ describe('the quiz hub', () => {
     expect(screen.getByText(require('date-fns').format(new Date(), 'EEEE d MMMM'))).toBeTruthy();
   });
 
-  test('leads to the word puzzle', async () => {
+  test('the word puzzle is not linked from here (it has its own place in the menu)', async () => {
     mockApi.fetchDailyQuiz.mockResolvedValue(quiz());
-    const n = nav();
-    const screen = render(<QuizHome navigation={n} />);
-    await waitFor(() => expect(screen.getByText('quiz.home.puzzleTitle')).toBeTruthy());
-    fireEvent.press(screen.getByText('quiz.home.puzzleTitle'));
-    expect(n.navigate).toHaveBeenCalledWith('PuzzlePlay');
+    const screen = render(<QuizHome navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('quiz.title')).toBeTruthy());
+    expect(screen.queryByText('quiz.home.puzzleTitle')).toBeNull();
   });
 });
 
