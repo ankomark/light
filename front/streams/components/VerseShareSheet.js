@@ -6,7 +6,7 @@
 // Text stays one tap away for the chats where a picture is too much, and a
 // capture that fails (the web, an old build without the native module) falls
 // back to it rather than to an error.
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Share, Image, ScrollView,
   ActivityIndicator, Platform, useWindowDimensions,
@@ -34,16 +34,6 @@ const APP_NAME = 'Adventist Life';
 
 // 4:5, the shape a phone's feed and status screens show whole.
 const RATIO = 5 / 4;
-// The Bible along the foot, as on the verse screen: 82% of the width
-// (8% in from the left, 10% from the right — the screen's own placement).
-const BOOK_WIDTH = 0.82;
-const BOOK_RATIO = 600 / 239;
-// How much of the book's height the panel's room may not reach into: the panel
-// may rest on the top of the book, as the screen's card does, but no lower.
-const BOOK_OVERLAP_ROOM = 0.55;
-// How far a very long verse may shrink to fit (then it is clipped, which the
-// curated verses never reach).
-const MIN_FIT = 0.6;
 const IS_WEB = Platform.OS === 'web';
 
 export const verseMessage = (verse) => `“${verse.text}”\n— ${verse.reference}`;
@@ -63,64 +53,44 @@ export const copyVerse = async (verse) => {
   }
 };
 
-/** The picture itself: the verse screen in miniature — teal, the open Bible
- *  along the foot, the verse on the same dark frosted panel above it — so a
- *  shared verse looks like the app it came from. Sizes follow the card's
- *  width, so the preview and the captured file are one layout at any size.
- *
- *  Always 4:5. The panel sits in the room above the book (overlapping its top
- *  edge a little, as on the screen); a verse too tall for that room is set
- *  smaller, a step at a time, until the panel fits. */
+/** The picture itself. Sizes follow the card's width, so the preview and the
+ *  captured file are one layout at any screen size. */
 export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
   const k = width / 320;
   const len = verse.text.length;
-  // Measured, then stepped down while the panel is taller than its room.
-  const [fit, setFit] = useState(1);
-  const room = useRef(0);
-  const used = useRef(0);
-  useEffect(() => { setFit(1); room.current = 0; used.current = 0; }, [verse.text, verse.reference, width]);
-  const check = () => {
-    if (room.current && used.current > room.current) setFit((f) => (f > MIN_FIT ? f * 0.92 : f));
-  };
-  const size = (len > 210 ? 14 : len > 130 ? 16 : 18.5) * k * fit;
+  const size = (len > 210 ? 14.5 : len > 130 ? 16.5 : 19.5) * k;
   // A date, never "Today": the picture outlives the day it was made.
   const day = verse.date ? fmt(parseISO(verse.date), 'd MMMM yyyy') : '';
-  const bookHeight = width * BOOK_WIDTH / BOOK_RATIO;
   return (
     <View ref={ref} collapsable={false} style={[styles.card, { width, height: width * RATIO }]}>
       <LinearGradient
         colors={[TEAL_DEEP, TEAL, TEAL_LIFT]}
-        locations={[0, 0.5, 1]}
+        locations={[0, 0.55, 1]}
         style={StyleSheet.absoluteFill}
       />
       <Image
         source={require('../assets/verse-book.png')}
-        style={[styles.cardBook, { width: width * BOOK_WIDTH }]}
+        style={[styles.cardBook, { width: width * 0.62 }]}
         resizeMode="contain"
       />
-      <View style={[styles.cardBody, {
-        paddingTop: 16 * k, paddingHorizontal: 16 * k, bottom: bookHeight * BOOK_OVERLAP_ROOM,
-      }]}>
-        <Text style={[styles.cardBrand, { fontSize: 8 * k, letterSpacing: 1.6 * k }]}>{APP_NAME}</Text>
-        <View style={styles.cardRoom} testID="verse-card-room"
-              onLayout={(e) => { room.current = e.nativeEvent.layout.height; check(); }}>
-          <View style={[styles.cardPanel, { borderRadius: 20 * k, padding: 18 * k, paddingTop: 14 * k }]}
-                testID="verse-card-words"
-                onLayout={(e) => { used.current = e.nativeEvent.layout.height; check(); }}>
-            <Text style={[styles.cardTitle, { fontSize: 8.5 * k, letterSpacing: 1.3 * k }]}>
-              {day ? `${title} · ${day}` : title}
-            </Text>
-            <Text style={[styles.cardQuote, { fontSize: 42 * k, marginTop: 2 * k, marginBottom: -18 * k }]}>“</Text>
-            <Text style={[styles.cardVerse, { fontSize: size, lineHeight: size * 1.6 }]}>{verse.text}</Text>
-            <LinearGradient
-              colors={['transparent', GOLD_SOFT, 'transparent']}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={[styles.cardRule, { marginTop: 14 * k }]}
-            />
-            <Text style={[styles.cardRef, { fontSize: 12 * k, marginTop: 9 * k }]}>{verse.reference}</Text>
-          </View>
+      <View style={[styles.cardBody, { padding: 22 * k }]}>
+        <Text style={[styles.cardTitle, { fontSize: 9.5 * k, letterSpacing: 1.8 * k }]}>{title}</Text>
+        {!!day && <Text style={[styles.cardDate, { fontSize: 9 * k }]}>{day}</Text>}
+
+        <View style={styles.cardMiddle}>
+          <Text style={[styles.cardQuote, { fontSize: 44 * k, marginBottom: -20 * k }]}>“</Text>
+          <Text style={[styles.cardVerse, { fontSize: size, lineHeight: size * 1.55 }]}>{verse.text}</Text>
+          <LinearGradient
+            colors={['transparent', GOLD_SOFT, 'transparent']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={[styles.cardRule, { marginTop: 14 * k }]}
+          />
+          <Text style={[styles.cardRef, { fontSize: 12.5 * k, marginTop: 9 * k }]}>{verse.reference}</Text>
         </View>
       </View>
+      {/* Just above the book, on teal: the pages below are too light to
+          write on in parchment, and too varied to trust with anything else. */}
+      <Text style={[styles.cardBrand, { fontSize: 8 * k, bottom: width * 0.25 + 6 * k }]}>{APP_NAME}</Text>
     </View>
   );
 });
@@ -254,25 +224,22 @@ const styles = StyleSheet.create({
   },
 
   card: { borderRadius: 18, overflow: 'hidden', backgroundColor: TEAL },
-  // As on the verse screen: along the foot, flush with the bottom edge.
-  cardBook: { position: 'absolute', bottom: 0, left: '8%', aspectRatio: BOOK_RATIO },
-  cardBody: { position: 'absolute', top: 0, left: 0, right: 0 },
-  cardBrand: {
-    alignSelf: 'center', fontFamily: DISPLAY_MID,
-    color: 'rgba(242,239,230,0.6)', textTransform: 'uppercase',
+  cardBook: {
+    position: 'absolute', bottom: 0, alignSelf: 'center', aspectRatio: 600 / 239,
   },
-  // The space between the name and the book; the panel is centred in it.
-  cardRoom: { flex: 1, justifyContent: 'center' },
-  // The verse screen's own card: dense translucent teal, a gold hairline.
-  cardPanel: {
-    backgroundColor: 'rgba(0,44,49,0.82)',
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(227,196,106,0.35)',
-  },
+  cardBody: { flex: 1 },
   cardTitle: { fontFamily: DISPLAY_MID, color: GOLD_SOFT, textAlign: 'center', textTransform: 'uppercase' },
+  cardDate: { fontFamily: SERIF, color: 'rgba(242,239,230,0.7)', textAlign: 'center', marginTop: 3 },
+  // The upper two-thirds: the book has the foot.
+  cardMiddle: { flex: 1, justifyContent: 'center', paddingBottom: '22%' },
   cardQuote: { fontFamily: DISPLAY, color: 'rgba(227,196,106,0.35)', textAlign: 'center' },
-  cardVerse: { fontFamily: SERIF, color: PARCHMENT, textAlign: 'center', letterSpacing: 0.2 },
-  cardRule: { height: 1, opacity: 0.75 },
-  cardRef: { fontFamily: DISPLAY, color: GOLD_SOFT, textAlign: 'center', letterSpacing: 1.1 },
+  cardVerse: { fontFamily: SERIF, color: PARCHMENT, textAlign: 'center' },
+  cardRule: { height: 1, opacity: 0.75, marginHorizontal: '18%' },
+  cardRef: { fontFamily: DISPLAY, color: GOLD_SOFT, textAlign: 'center', letterSpacing: 1 },
+  cardBrand: {
+    position: 'absolute', alignSelf: 'center', fontFamily: DISPLAY_MID,
+    color: 'rgba(242,239,230,0.55)', letterSpacing: 1.2, textTransform: 'uppercase',
+  },
 
   row: { flexDirection: 'row', gap: 10 },
   option: {
