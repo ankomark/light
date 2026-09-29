@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
+  Animated, PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,8 +28,11 @@ import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
   setSoundEnabled, setMusicEnabled, tapFeedback, finishFeedback, playLoop, stopLoop,
-  unload as unloadSound,
+  pageFeedback, streakFeedback, unload as unloadSound,
 } from '../services/quizSound';
+import BottomSheet from '../components/BottomSheet';
+import useReducedMotion from '../utils/useReducedMotion';
+import { parseReference } from '../utils/dailyVerseText';
 import { loadDraft, saveDraft, clearDraft } from '../utils/quizDraft';
 import { peekCache, writeCache } from '../utils/screenCache';
 import { quizKeys, isToday, formatQuizDay, withAttempt } from '../utils/quizCache';
@@ -53,6 +57,11 @@ const DIFFICULTY_TINT = {
   hard: { fg: '#FF8A86', bg: 'rgba(229,57,53,0.16)' },
 };
 
+// A swipe, not a wobble: far enough, and clearly more across than down, so
+// a long verse can still be scrolled without the question changing.
+const SWIPE_MIN = 60;
+const isAcross = (g) => Math.abs(g.dx) > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 2;
+
 const mmss = (seconds) => {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -75,6 +84,11 @@ const BibleQuiz = ({ navigation }) => {
   const [outcome, setOutcome] = useState(null);
   const [board, setBoard] = useState(null);
   const [elapsed, setElapsed] = useState(0);
+  const [mapOpen, setMapOpen] = useState(false);
+  const reduceMotion = useReducedMotion();
+  // Which way the new question came from, so it slides in from that side.
+  const slide = useRef(new Animated.Value(0)).current;
+  const cameFrom = useRef(0);
   const startedAt = useRef(Date.now());
   // When the current question first appeared, and how long each one took.
   // The server uses these for the speed bonus (clamped there, so a wrong
@@ -184,6 +198,40 @@ const BibleQuiz = ({ navigation }) => {
     questionShownAt.current = Date.now();
   }, [questions, index]);
 
+  // One way to change question — the arrows, a swipe and the map all use it:
+  // the time on the one being left is banked, and the next slides in.
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const questionCount = questions.length;
+  const goTo = useCallback((next) => {
+    const to = Math.max(0, Math.min(questionCount - 1, next));
+    if (to === indexRef.current) return;
+    bankTime();
+    cameFrom.current = to > indexRef.current ? 1 : -1;
+    pageFeedback();
+    setIndex(to);
+  }, [questionCount, bankTime]);
+
+  useEffect(() => {
+    if (!cameFrom.current || reduceMotion) { slide.setValue(0); return; }
+    slide.setValue(cameFrom.current * 36);
+    cameFrom.current = 0;
+    Animated.spring(slide, { toValue: 0, friction: 9, tension: 70, useNativeDriver: true }).start();
+  }, [index, reduceMotion, slide]);
+
+  // Swipe left for the next question, right for the one before — the arrows
+  // stay: a swipe is a shortcut, not the only way.
+  const goToRef = useRef(goTo);
+  goToRef.current = goTo;
+  const swipe = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => isAcross(g),
+    onPanResponderRelease: (_, g) => {
+      if (g.dx < -SWIPE_MIN) goToRef.current(indexRef.current + 1);
+      else if (g.dx > SWIPE_MIN) goToRef.current(indexRef.current - 1);
+    },
+    onPanResponderTerminationRequest: () => true,
+  })).current;
+
   const myRank = useMemo(() => {
     if (board?.me?.rank) return board.me.rank;
     const rows = board?.results || [];
@@ -268,6 +316,23 @@ const BibleQuiz = ({ navigation }) => {
     }
   };
 
+  // The score counts up to itself once, straight after submitting — not on a
+  // later visit, where it is a record to read, not a moment. A perfect score
+  // gets its own word and its own feel.
+  const [shownScore, setShownScore] = useState(null);
+  const counted = useRef(false);
+  useEffect(() => {
+    if (!outcome || counted.current) return undefined;
+    counted.current = true;
+    const target = outcome.score;
+    if (outcome.total && target === outcome.total) streakFeedback();
+    if (reduceMotion || !target) { setShownScore(target); return undefined; }
+    const value = new Animated.Value(0);
+    const id = value.addListener(({ value: v }) => setShownScore(Math.round(v)));
+    Animated.timing(value, { toValue: target, duration: 900, useNativeDriver: false }).start();
+    return () => value.removeListener(id);
+  }, [outcome, reduceMotion]);
+
   // ── loading / error ───────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -304,7 +369,8 @@ const BibleQuiz = ({ navigation }) => {
     const accuracy = total ? Math.round((score / total) * 100) : 0;
     const points = outcome ? outcome.points : quiz.my_attempt.points;
     const streak = outcome ? outcome.longest_streak : quiz.my_attempt.longest_streak;
-    const band = accuracy >= 80 ? 'high' : accuracy >= 50 ? 'mid' : 'low';
+    const perfect = total > 0 && score === total;
+    const band = perfect ? 'perfect' : accuracy >= 80 ? 'high' : accuracy >= 50 ? 'mid' : 'low';
 
     return (
       <View style={styles.root}>
@@ -317,10 +383,11 @@ const BibleQuiz = ({ navigation }) => {
               <Text style={styles.resultTitle}>{t('quiz.title')}</Text>
             </View>
 
-            <View style={styles.medallionOuter}>
-              <View style={styles.medallionInner}>
+            <View style={[styles.medallionOuter, perfect && styles.medallionPerfect]}>
+              <View style={[styles.medallionInner, perfect && styles.medallionInnerPerfect]}
+                    accessible accessibilityLabel={`${score} / ${total}. ${t(`quiz.band.${band}`)}`}>
                 <View style={styles.scoreRow}>
-                  <Text style={styles.scoreValue}>{score}</Text>
+                  <Text style={styles.scoreValue}>{outcome && shownScore != null ? shownScore : score}</Text>
                   <Text style={styles.scoreOf}>/{total}</Text>
                 </View>
                 <Text style={[styles.eyebrow, styles.bandLabel]}>{t(`quiz.band.${band}`)}</Text>
@@ -402,6 +469,18 @@ const BibleQuiz = ({ navigation }) => {
                           ? ` · ${t('quiz.youSaid')} ${q.choices[chosen]}`
                           : ''}
                       </Text>
+                      {!!parseReference(r?.reference) && (
+                        <TouchableOpacity
+                          style={styles.readLink}
+                          onPress={() => navigation.push?.('bible', parseReference(r.reference))}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${t('quiz.readInBible')}: ${r.reference}`}
+                        >
+                          <Ionicons name="book-outline" size={13} color={GOLD} />
+                          <Text style={styles.readLinkText}>{t('quiz.readInBible')}</Text>
+                        </TouchableOpacity>
+                      )}
                       {r?.correct && r?.points_earned > 0 && (
                         <View style={styles.reviewPointsRow}>
                           <Coin size={17} />
@@ -468,9 +547,20 @@ const BibleQuiz = ({ navigation }) => {
               style={[styles.progressFill, { width: `${((index + 1) / questions.length) * 100}%` }]}
             />
           </View>
-          <Text style={styles.progressText}>
-            {String(index + 1).padStart(2, '0')} / {questions.length}
-          </Text>
+          {/* Tap the count for every question at once: which are answered,
+              and a way straight to any of them. */}
+          <TouchableOpacity
+            onPress={() => setMapOpen(true)}
+            style={styles.mapBtn}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={t('quiz.map.open')}
+          >
+            <Text style={styles.progressText}>
+              {String(index + 1).padStart(2, '0')} / {questions.length}
+            </Text>
+            <Ionicons name="grid-outline" size={12} color={MUTED} />
+          </TouchableOpacity>
         </View>
 
         <View style={styles.metaRow}>
@@ -485,6 +575,7 @@ const BibleQuiz = ({ navigation }) => {
           </View>
         </View>
 
+        <Animated.View style={[styles.flex, { transform: [{ translateX: slide }] }]} {...swipe.panHandlers}>
         <ScrollView
           contentContainerStyle={styles.playScroll}
           showsVerticalScrollIndicator={false}
@@ -527,12 +618,13 @@ const BibleQuiz = ({ navigation }) => {
             })}
           </View>
         </ScrollView>
+        </Animated.View>
 
         <View style={styles.footer}>
           {index > 0 && (
             <TouchableOpacity
               style={styles.backBtn}
-              onPress={() => { bankTime(); setIndex((i) => Math.max(0, i - 1)); }}
+              onPress={() => goTo(index - 1)}
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityLabel={t('quiz.previous')}
@@ -542,7 +634,7 @@ const BibleQuiz = ({ navigation }) => {
           )}
           <TouchableOpacity
             style={[styles.primaryBtn, styles.grow, submitting && styles.disabled]}
-            onPress={onLast ? submit : () => { bankTime(); setIndex((i) => Math.min(questions.length - 1, i + 1)); }}
+            onPress={onLast ? submit : () => goTo(index + 1)}
             disabled={submitting}
             activeOpacity={0.85}
           >
@@ -562,6 +654,39 @@ const BibleQuiz = ({ navigation }) => {
         </View>
 
       </SafeAreaView>
+
+      <BottomSheet
+        visible={mapOpen}
+        onClose={() => setMapOpen(false)}
+        heightRatio={0.55}
+        header={(
+          <View style={styles.mapHead}>
+            <Text style={styles.mapTitle}>{t('quiz.map.title')}</Text>
+            <Text style={styles.mapCount}>
+              {t('quiz.map.answered', { answered: answeredCount, total: questions.length })}
+            </Text>
+          </View>
+        )}
+      >
+        <ScrollView contentContainerStyle={styles.mapGrid} testID="quiz-map">
+          {questions.map((qq, i) => {
+            const done = answers[qq.id] != null;
+            const here = i === index;
+            return (
+              <TouchableOpacity
+                key={qq.id}
+                style={[styles.mapCell, done && styles.mapCellDone, here && styles.mapCellHere]}
+                onPress={() => { setMapOpen(false); goTo(i); }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: here }}
+                accessibilityLabel={t(done ? 'quiz.map.itemDone' : 'quiz.map.item', { n: i + 1 })}
+              >
+                <Text style={[styles.mapNum, done && styles.mapNumDone]}>{i + 1}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 };
@@ -598,6 +723,22 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 4, borderRadius: 2 },
   progressText: { fontFamily: DISPLAY_MID, fontSize: 10, letterSpacing: 1.2, color: MUTED },
+  mapBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32 },
+  mapHead: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 12, gap: 3 },
+  mapTitle: { fontFamily: DISPLAY, fontSize: 15, letterSpacing: 0.6, color: PARCHMENT },
+  mapCount: { fontSize: 12, color: MUTED },
+  mapGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center',
+    paddingHorizontal: 20, paddingBottom: 24,
+  },
+  mapCell: {
+    width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
+  },
+  mapCellDone: { backgroundColor: 'rgba(244,162,97,0.85)', borderColor: GOLD },
+  mapCellHere: { borderWidth: 2, borderColor: PARCHMENT },
+  mapNum: { fontFamily: DISPLAY_MID, fontSize: 14, color: '#A9BCD0' },
+  mapNumDone: { color: '#0A1628' },
 
   metaRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -682,6 +823,10 @@ const styles = StyleSheet.create({
   scoreValue: { fontFamily: DISPLAY, fontSize: 54, color: GOLD, lineHeight: 60 },
   scoreOf: { fontFamily: DISPLAY_MID, fontSize: 24, color: MUTED },
   bandLabel: { marginTop: 6, color: '#A9BCD0' },
+  medallionPerfect: { borderColor: GOLD, borderWidth: 1.5 },
+  medallionInnerPerfect: { borderColor: GOLD, backgroundColor: 'rgba(244,162,97,0.12)' },
+  readLink: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', marginTop: 2 },
+  readLinkText: { fontFamily: DISPLAY_MID, fontSize: 10.5, letterSpacing: 0.8, color: GOLD },
   rankOf: { fontSize: 10, color: MUTED },
 
   statsCard: {

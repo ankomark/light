@@ -163,6 +163,12 @@ export const wrongFeedback = () => {
 
 export const tickFeedback = () => play('tick');
 
+// Moving between questions: the lightest touch there is, no sound.
+export const pageFeedback = () => {
+  if (!enabled) return;
+  Haptics.selectionAsync().catch(() => {});
+};
+
 export const finishFeedback = () => {
   play('finish');
   if (!enabled) return;

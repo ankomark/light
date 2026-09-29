@@ -8,7 +8,7 @@ jest.mock('../../services/bible', () => ({
   fetchBibleChapter: (...a) => mockBible.fetchBibleChapter(...a),
 }));
 
-const { versionForVerse, translateVerse, bookIdFor } = require('../dailyVerseText');
+const { versionForVerse, translateVerse, bookIdFor, parseReference } = require('../dailyVerseText');
 
 const kjv = { book: 'Psalms', chapter: 23, verse: 1, text: 'The LORD is my shepherd; I shall not want.', reference: 'Psalms 23:1' };
 
@@ -78,5 +78,20 @@ describe('translateVerse', () => {
   test('the server and the reader agree on every book name', () => {
     expect(bookIdFor('Song of Solomon')).toBe('SNG');
     expect(bookIdFor('Nowhere')).toBeNull();
+  });
+});
+
+describe('parseReference', () => {
+  test('a reference becomes the place the reader opens at', () => {
+    expect(parseReference('John 3:16')).toEqual({ bookId: 'JHN', chapter: 3, verse: 16 });
+    expect(parseReference('Song of Solomon 2:4')).toEqual({ bookId: 'SNG', chapter: 2, verse: 4 });
+    expect(parseReference('1 Corinthians 13:4')).toEqual({ bookId: '1CO', chapter: 13, verse: 4 });
+  });
+
+  test('anything it cannot place is null, so no link is offered', () => {
+    expect(parseReference('')).toBeNull();
+    expect(parseReference(null)).toBeNull();
+    expect(parseReference('Nowhere 1:1')).toBeNull();
+    expect(parseReference('John three')).toBeNull();
   });
 });

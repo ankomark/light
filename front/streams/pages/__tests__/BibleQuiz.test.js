@@ -25,10 +25,11 @@ jest.mock('../../context/I18nContext', () => ({ useI18n: () => ({ t: mockT }) })
 jest.mock('../../context/PreferencesContext', () => ({
   usePreferences: () => ({ preferences: { quizMusic: false, quizSound: false }, setPreference: jest.fn() }),
 }));
-jest.mock('../../services/quizSound', () => ({
+const mockSound = {
   setSoundEnabled: jest.fn(), setMusicEnabled: jest.fn(), tapFeedback: jest.fn(), finishFeedback: jest.fn(),
-  playLoop: jest.fn(), stopLoop: jest.fn(), unload: jest.fn(),
-}));
+  playLoop: jest.fn(), stopLoop: jest.fn(), unload: jest.fn(), pageFeedback: jest.fn(), streakFeedback: jest.fn(),
+};
+jest.mock('../../services/quizSound', () => new Proxy({}, { get: (_, k) => (...a) => mockSound[k](...a) }));
 jest.mock('../../utils/quizDraft', () => ({
   loadDraft: jest.fn(async () => null), saveDraft: jest.fn(), clearDraft: jest.fn(),
 }));
@@ -59,10 +60,11 @@ const results = [
     explanation: 'The LORD is my shepherd — Psalms 23:1', points_earned: 0 },
 ];
 const played = () => quiz({ my_attempt: { score: 1, total: 2, points: 12, longest_streak: 1, duration_seconds: 40, results } });
-const nav = () => ({ goBack: jest.fn(), navigate: jest.fn() });
+const nav = () => ({ goBack: jest.fn(), navigate: jest.fn(), push: jest.fn() });
 
 beforeEach(() => {
   Object.values(mockApi).forEach((f) => f.mockClear());
+  Object.values(mockSound).forEach((f) => f.mockClear());
   mockApi.fetchQuizLeaderboard.mockImplementation(async () => ({ results: [], me: null }));
   mockConfirm.mockReset();
   mockConfirm.mockImplementation(async () => true);
@@ -165,5 +167,62 @@ describe('the quiz hub', () => {
     await waitFor(() => expect(screen.getByText('quiz.home.puzzleTitle')).toBeTruthy());
     fireEvent.press(screen.getByText('quiz.home.puzzleTitle'));
     expect(n.navigate).toHaveBeenCalledWith('PuzzlePlay');
+  });
+});
+
+describe('phase 2: moving around, and what the result feels like', () => {
+  const threeQuestions = () => quiz({ questions: [question(1), question(2), question(3)] });
+
+  test('the map shows which are answered and goes straight to any question', async () => {
+    mockApi.fetchDailyQuiz.mockResolvedValue(threeQuestions());
+    const screen = render(<BibleQuiz navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy(), { timeout: 8000 });
+    fireEvent.press(screen.getByLabelText('A. Alpha'));
+
+    fireEvent.press(screen.getByLabelText('quiz.map.open'));
+    await waitFor(() => expect(screen.getByTestId('quiz-map')).toBeTruthy());
+    expect(screen.getByText('quiz.map.answered:1,3')).toBeTruthy();
+    expect(screen.getByLabelText('quiz.map.itemDone:1')).toBeTruthy();
+    expect(screen.getByLabelText('quiz.map.item:3')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('quiz.map.item:3'));
+    await waitFor(() => expect(screen.getByText('Prompt 3')).toBeTruthy());
+    expect(mockSound.pageFeedback).toHaveBeenCalled();
+  });
+
+  test('moving on is felt; pressing Back on the first question is not', async () => {
+    mockApi.fetchDailyQuiz.mockResolvedValue(threeQuestions());
+    const screen = render(<BibleQuiz navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+    fireEvent.press(screen.getByText('quiz.next'));
+    await waitFor(() => expect(screen.getByText('Prompt 2')).toBeTruthy());
+    expect(mockSound.pageFeedback).toHaveBeenCalledTimes(1);
+  });
+
+  test('each reviewed question opens its verse in the Bible reader', async () => {
+    mockApi.fetchDailyQuiz.mockResolvedValue(played());
+    const n = nav();
+    const screen = render(<BibleQuiz navigation={n} />);
+    await waitFor(() => expect(screen.getByText('quiz.review')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('quiz.readInBible: John 3:16'));
+    expect(n.push).toHaveBeenCalledWith('bible', { bookId: 'JHN', chapter: 3, verse: 16 });
+  });
+
+  test('a perfect score has its own word and its own feel', async () => {
+    mockApi.fetchDailyQuiz.mockResolvedValue(quiz({ questions: [question(1)] }));
+    mockApi.submitDailyQuiz.mockResolvedValue({ attempt: { id: 5 }, score: 1, total: 1, points: 12, longest_streak: 1, results: [results[0]] });
+    const screen = render(<BibleQuiz navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('A. Alpha'));
+    fireEvent.press(screen.getByText('quiz.submit:1,1'));
+    await waitFor(() => expect(screen.getByText('quiz.band.perfect')).toBeTruthy());
+    expect(mockSound.streakFeedback).toHaveBeenCalledTimes(1);
+  });
+
+  test('a score read later is not counted up or celebrated again', async () => {
+    mockApi.fetchDailyQuiz.mockResolvedValue(quiz({ my_attempt: { score: 2, total: 2, points: 30, longest_streak: 2, results } }));
+    const screen = render(<BibleQuiz navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('quiz.band.perfect')).toBeTruthy());
+    expect(mockSound.streakFeedback).not.toHaveBeenCalled();
   });
 });

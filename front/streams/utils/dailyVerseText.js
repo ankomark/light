@@ -18,6 +18,14 @@ import { formatRef } from '../services/bibleLibrary';
 const BOOK_IDS = new Map(BIBLE_BOOKS.map((b) => [b.english, b.id]));
 export const bookIdFor = (name) => BOOK_IDS.get(name) || null;
 
+/** "Song of Solomon 2:4" → { bookId: 'SNG', chapter: 2, verse: 4 }, the way
+ *  the Bible reader opens at a verse; null for anything it cannot place. */
+export const parseReference = (reference) => {
+  const m = /^(.+?)\s+(\d+):(\d+)/.exec(String(reference || '').trim());
+  const bookId = m && bookIdFor(m[1]);
+  return bookId ? { bookId, chapter: Number(m[2]), verse: Number(m[3]) } : null;
+};
+
 // The version shown when someone reads the app in Swahili but has never
 // chosen a Bible: NENO, the reader's first Swahili version.
 const SWAHILI_DEFAULT = 'swh_bib';
