@@ -16,7 +16,7 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import useCachedData from '../utils/useCachedData';
-import { quizKeys, isToday, formatQuizDay } from '../utils/quizCache';
+import { quizKeys, quizLanguage, isToday, formatQuizDay } from '../utils/quizCache';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Coin, Coins, quizStyles as q, DISPLAY, DISPLAY_MID, SERIF, SERIF_BOLD,
@@ -24,14 +24,15 @@ import {
 } from './quizTheme';
 
 const QuizHome = ({ navigation }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { currentUser } = useAuth();
-  const keys = quizKeys(currentUser?.id);
+  const lang = quizLanguage(resolvedLanguage);
+  const keys = quizKeys(currentUser?.id, lang);
 
   // Each painted from the last copy at once, then refreshed behind it — the
   // pattern Home and Music use. Each on its own: one failing must not blank
   // the screen. The daily one is also what the quiz itself opens on.
-  const dailyData = useCachedData(keys.daily, fetchDailyQuiz);
+  const dailyData = useCachedData(keys.daily, () => fetchDailyQuiz(undefined, lang));
   const bestsData = useCachedData(keys.bests, fetchQuizBests);
   const statsData = useCachedData(keys.stats, fetchQuizStats);
   const bests = bestsData.data;

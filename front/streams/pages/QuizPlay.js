@@ -20,6 +20,7 @@ import {
 } from '../services/api';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import { quizLanguage } from '../utils/quizCache';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
@@ -48,10 +49,11 @@ export const challengeLink = (mode, username, score) =>
   `streams://quiz/${mode}?from=${encodeURIComponent(username || '')}&score=${score}`;
 
 const QuizPlay = ({ navigation, route }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { preferences, setPreference } = usePreferences();
   const mode = route?.params?.mode === 'streak' ? 'streak' : 'speed';
   const { currentUser } = useAuth();
+  const lang = quizLanguage(resolvedLanguage);
   const challenge = challengeFrom(route?.params);
   const soundOn = preferences?.[PREF_KEYS.quizSound] !== false;
   const musicOn = preferences?.[PREF_KEYS.quizMusic] !== false;
@@ -78,7 +80,7 @@ const QuizPlay = ({ navigation, route }) => {
       setError('');
       setFeedback(null);
       setChosen(null);
-      const started = await startQuizSession(mode);
+      const started = await startQuizSession(mode, lang);
       setSession(started);
       setQuestion(started.questions?.[0] || null);
       shownAt.current = Date.now();
@@ -87,7 +89,7 @@ const QuizPlay = ({ navigation, route }) => {
     } finally {
       setLoading(false);
     }
-  }, [mode, t]);
+  }, [mode, t, lang]);
 
   useEffect(() => { begin(); }, [begin]);
 

@@ -1128,13 +1128,18 @@ export const fetchCommunitiesByUrl = async (nextUrl) => {
 // shared by everyone, so the leaderboard compares like with like. The answers
 // are not in the payload — they come back only after you submit.
 
-export const fetchDailyQuiz = async (day) =>
-  apiRequest('get', `/quiz/today/${day ? `?date=${day}` : ''}`);
+// `lang`: 'en' | 'sw' — the quiz is built from that language's Bible (the
+// server falls back to English when the Swahili one is not imported).
+export const fetchDailyQuiz = async (day, lang) => {
+  const q = [day && `date=${day}`, lang && `lang=${lang}`].filter(Boolean);
+  return apiRequest('get', `/quiz/today/${q.length ? `?${q.join('&')}` : ''}`);
+};
 
-export const submitDailyQuiz = async (answers, durationSeconds) =>
+export const submitDailyQuiz = async (answers, durationSeconds, lang) =>
   apiRequest('post', '/quiz/submit/', {
     answers,
     duration_seconds: durationSeconds,
+    ...(lang ? { language: lang } : {}),
   });
 
 // period: 'today' (default) | 'week' | 'all'; scope: 'everyone' | 'following'.
@@ -1164,8 +1169,8 @@ export const buyStreakFreeze = async () => apiRequest('post', '/quiz/freeze/', {
 // you are wrong, and Speed times each question separately. The server holds the
 // rules — the clock here drives the UI, it does not decide the score.
 
-export const startQuizSession = async (mode) =>
-  apiRequest('post', '/quiz-sessions/', { mode });
+export const startQuizSession = async (mode, lang) =>
+  apiRequest('post', '/quiz-sessions/', { mode, ...(lang ? { language: lang } : {}) });
 
 export const fetchQuizSession = async (id) =>
   apiRequest('get', `/quiz-sessions/${id}/`);

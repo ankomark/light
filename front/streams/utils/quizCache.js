@@ -7,8 +7,12 @@
 import { format, parseISO } from 'date-fns';
 import { userKey } from './screenCache';
 
-export const quizKeys = (userId) => ({
-  daily: userKey(userId, 'quiz:daily'),
+/** The languages the quiz is played in; anything else plays in English. */
+export const quizLanguage = (appLanguage) => (appLanguage === 'sw' ? 'sw' : 'en');
+
+export const quizKeys = (userId, lang = 'en') => ({
+  // Per language: a Swahili quiz and an English one are different questions.
+  daily: userKey(userId, `quiz:daily:${lang}`),
   stats: userKey(userId, 'quiz:stats'),
   bests: userKey(userId, 'quiz:bests'),
 });

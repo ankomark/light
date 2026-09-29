@@ -36,13 +36,24 @@ def _as_float(value):
     return seconds if 0 <= seconds < 86400 else None
 
 
-def _quiz_for(day):
-    """The stored quiz for `day`, generating it the first time it is asked for."""
-    quiz = DailyQuiz.objects.filter(date=day).first()
+QUIZ_LANGUAGES = ('en', 'sw')
+
+
+def _language(request):
+    """The language asked for (`lang` in the query or the body), `en` if none
+    or one the quiz is not played in."""
+    raw = request.query_params.get('lang') or (request.data.get('language') if hasattr(request, 'data') else None)
+    return raw if raw in QUIZ_LANGUAGES else 'en'
+
+
+def _quiz_for(day, language='en'):
+    """The stored quiz for `day` in `language`, generating it the first time
+    it is asked for (in English when that language's Bible is not imported)."""
+    quiz = DailyQuiz.objects.filter(date=day, language=language).first()
     if quiz:
         return quiz
     try:
-        return generate_for_date(day)
+        return generate_for_date(day, language=language)
     except ValueError as exc:
         # The corpus is empty or too thin — a real 503, not a broken quiz.
         raise APIException(str(exc))
@@ -101,7 +112,13 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['get'])
     def today(self, request):
-        quiz = _quiz_for(self._day(request))
+        """Today's quiz in the language asked for — unless today has already
+        been played, in which case the quiz that was played, with its review:
+        one attempt a day, whichever language it was in."""
+        day = self._day(request)
+        played = (QuizAttempt.objects.filter(user=request.user, quiz__date=day)
+                  .select_related('quiz').first())
+        quiz = played.quiz if played else _quiz_for(day, _language(request))
         return Response(self.get_serializer(quiz).data)
 
     @action(detail=False, methods=['post'])
@@ -110,9 +127,10 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         something on the board, so a second run is refused rather than
         overwriting a worse (or better) first try."""
         day = self._day(request)
-        quiz = _quiz_for(day)
+        quiz = _quiz_for(day, _language(request))
 
-        if QuizAttempt.objects.filter(quiz=quiz, user=request.user).exists():
+        # Once a day, in whichever language: the board counts both.
+        if QuizAttempt.objects.filter(quiz__date=day, user=request.user).exists():
             return Response(
                 {'error': 'You have already played today. Come back tomorrow.',
                  'code': 'already_played'},
@@ -211,15 +229,13 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             circle = set(request.user.followed_by.values_list('id', flat=True)) | {request.user.pk}
 
         if period == 'today':
-            quiz = DailyQuiz.objects.filter(date=day).first()
-            if not quiz:
-                return Response({'date': day, 'period': period, 'results': [], 'me': None})
-            ranked = quiz.attempts.order_by(*self.BOARD_ORDER)
+            # Every language's quiz for the day, on one board.
+            ranked = QuizAttempt.objects.filter(quiz__date=day).order_by(*self.BOARD_ORDER)
             if circle is not None:
                 ranked = ranked.filter(user_id__in=circle)
             attempts = ranked.select_related('user', 'user__profile')[:self.BOARD_SIZE]
             return Response({
-                'date': quiz.date,
+                'date': day,
                 'period': period,
                 'results': QuizAttemptSerializer(attempts, many=True).data,
                 'me': self._my_place(ranked, request.user),
@@ -388,7 +404,7 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
         return QuizSession.objects.filter(user=self.request.user)
 
     def create(self, request):
-        """Start a run. POST {"mode": "speed" | "streak"}."""
+        """Start a run. POST {"mode": "speed" | "streak", "language": "en" | "sw"}."""
         mode = request.data.get('mode')
         if mode not in MODES or mode == DAILY:
             raise ValidationError({
@@ -410,7 +426,7 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             )
 
         try:
-            session = start_session(request.user, mode)
+            session = start_session(request.user, mode, _language(request))
         except ValueError as exc:
             raise APIException(str(exc))
         return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED)

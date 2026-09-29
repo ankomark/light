@@ -37,7 +37,8 @@ import useReducedMotion from '../utils/useReducedMotion';
 import { parseReference } from '../utils/dailyVerseText';
 import { loadDraft, saveDraft, clearDraft } from '../utils/quizDraft';
 import { peekCache, writeCache } from '../utils/screenCache';
-import { quizKeys, isToday, formatQuizDay, withAttempt } from '../utils/quizCache';
+import { quizKeys, quizLanguage, isToday, formatQuizDay, withAttempt } from '../utils/quizCache';
+import { fetchBibleBooks } from '../services/bible';
 import { confirmAction } from '../utils/adminConfirm';
 // One backdrop and one coin for every quiz screen, so a change lands everywhere.
 import { Backdrop, Coin, Coins } from './quizTheme';
@@ -71,8 +72,9 @@ const mmss = (seconds) => {
 };
 
 const BibleQuiz = ({ navigation }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { currentUser } = useAuth();
+  const lang = quizLanguage(resolvedLanguage);
   const { preferences, setPreference } = usePreferences();
   const soundOn = preferences?.[PREF_KEYS.quizSound] !== false;
   const musicOn = preferences?.[PREF_KEYS.quizMusic] !== false;
@@ -125,7 +127,7 @@ const BibleQuiz = ({ navigation }) => {
   }, []);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
-  const dailyKey = quizKeys(currentUser?.id).daily;
+  const dailyKey = quizKeys(currentUser?.id, lang).daily;
 
   // Start on a quiz: the clock, and either the board (played) or an
   // interrupted run picked back up (not yet played).
@@ -161,7 +163,7 @@ const BibleQuiz = ({ navigation }) => {
       setLoading(true);
     }
     try {
-      const fresh = await fetchDailyQuiz();
+      const fresh = await fetchDailyQuiz(undefined, lang);
       writeCache(dailyKey, fresh);
       if (!usable || fresh.date !== kept.date) {
         await adopt(fresh);
@@ -177,7 +179,7 @@ const BibleQuiz = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  }, [t, adopt, dailyKey]);
+  }, [t, adopt, dailyKey, lang]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -266,6 +268,19 @@ const BibleQuiz = ({ navigation }) => {
 
   // The review: straight after submitting, or any time later today from the
   // attempt the server keeps.
+  // A Swahili quiz names its books in Swahili ("Zaburi 23:1"): the reader's
+  // own list of NENO's book names places them for "Read in Bible".
+  const [bookNames, setBookNames] = useState(null);
+  useEffect(() => {
+    if (quiz?.language !== 'sw') return undefined;
+    let live = true;
+    fetchBibleBooks('swh_bib')
+      .then((books) => { if (live) setBookNames(new Map(books.map((b) => [b.name, b.id]))); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [quiz?.language]);
+  const place = useCallback((reference) => parseReference(reference, bookNames), [bookNames]);
+
   const review = useMemo(
     () => outcome?.results || quiz?.my_attempt?.results || [],
     [outcome, quiz],
@@ -318,7 +333,7 @@ const BibleQuiz = ({ navigation }) => {
       Object.entries(answers).forEach(([id, choice]) => {
         payload[id] = { choice, seconds: Number((spent.current[id] || 0).toFixed(1)) };
       });
-      const res = await submitDailyQuiz(payload, seconds);
+      const res = await submitDailyQuiz(payload, seconds, quiz?.language || lang);
       setOutcome(res);
       // The kept copy now says "played", with the review, so reopening the
       // quiz — or the hub — shows the result rather than the questions.
@@ -558,10 +573,10 @@ const BibleQuiz = ({ navigation }) => {
                           ? ` · ${t('quiz.youSaid')} ${q.choices[chosen]}`
                           : ''}
                       </Text>
-                      {!!parseReference(r?.reference) && (
+                      {!!place(r?.reference) && (
                         <TouchableOpacity
                           style={styles.readLink}
-                          onPress={() => navigation.push?.('bible', parseReference(r.reference))}
+                          onPress={() => navigation.push?.('bible', place(r.reference))}
                           hitSlop={8}
                           accessibilityRole="button"
                           accessibilityLabel={`${t('quiz.readInBible')}: ${r.reference}`}

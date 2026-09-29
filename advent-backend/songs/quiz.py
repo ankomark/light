@@ -21,8 +21,8 @@ import re
 
 from django.db import transaction
 
-from .bible_books import BIBLE_BOOKS, BOOKS_BY_NAME
-from .models import BibleVerse, DailyQuiz, QuizQuestion
+from .bible_books import BIBLE_BOOKS
+from .models import BibleText, BibleVerse, DailyQuiz, QuizQuestion
 from .scoring import base_points_for
 
 # 20 a day: enough to be a sitting, not so many it becomes a chore.
@@ -61,13 +61,90 @@ def category_for(book_number):
     return ''
 
 
+# ── languages ─────────────────────────────────────────────────────────────────
+# Words never blanked in a Swahili verse: the small words that carry grammar,
+# not meaning, as STOPWORDS does for the KJV.
+SW_STOPWORDS = {
+    'na', 'ya', 'wa', 'kwa', 'katika', 'la', 'za', 'cha', 'vya', 'ni', 'si', 'hii',
+    'huu', 'hiyo', 'huo', 'huyo', 'yule', 'wale', 'hao', 'kama', 'lakini', 'au',
+    'pia', 'tena', 'yeye', 'wao', 'sisi', 'ninyi', 'mimi', 'wewe', 'yako', 'yangu',
+    'yake', 'yao', 'wetu', 'wenu', 'zake', 'zao', 'kila', 'bali', 'hata', 'kisha',
+    'kwamba', 'ndipo', 'basi', 'ili', 'nao', 'naye', 'nami', 'kwake', 'kwao',
+    'juu', 'chini', 'ndani', 'mbele', 'nyuma', 'pamoja', 'akasema', 'wakasema',
+    'akamwambia', 'akawaambia', 'hivyo', 'hapo', 'huko', 'kule', 'sana', 'wote',
+    'yote', 'zote', 'hilo', 'hayo', 'wala', 'ingawa', 'kwenye', 'ambaye', 'ambao',
+    'ambayo', 'ambalo', 'ndiye', 'ndio', 'mpaka', 'hadi', 'baada', 'kabla',
+}
+
+
+class Corpus:
+    """A Bible to build questions from, in the language they are asked in.
+
+    English is the KJV (BibleVerse); Swahili is NENO (BibleText, imported
+    with `import_bible_version swh_bib`). What differs is only where the
+    verses live, what the books are called, how the prompts read, and which
+    words are too small to blank out — the builders are the same.
+    """
+
+    def __init__(self, language, model, where, prompts, stopwords, word_re, import_hint):
+        self.language = language
+        self.model = model
+        self.where = where
+        self.prompts = prompts
+        self.stopwords = stopwords
+        self.word_re = re.compile(word_re)
+        self.import_hint = import_hint
+
+    def verses(self):
+        return self.model.objects.filter(**self.where)
+
+    def book_names(self):
+        """[(number, name)] in canon order, in this Bible's own language."""
+        if self.model is BibleVerse:
+            return [(b['number'], b['name']) for b in BIBLE_BOOKS]
+        return sorted(set(self.verses().values_list('book_number', 'book')))
+
+    @staticmethod
+    def chapters(book_number):
+        book = next((b for b in BIBLE_BOOKS if b['number'] == book_number), None)
+        return book['chapters'] if book else 0
+
+    def clean_word(self, word):
+        return self.word_re.sub('', word)
+
+    def prompt(self, kind, **params):
+        return self.prompts[kind].format(**params)
+
+
+ENGLISH = Corpus(
+    'en', BibleVerse, {},
+    {'book': 'Which book is this verse from?',
+     'blank': 'Which word completes this verse?',
+     'reference': 'Which chapter of {book} is this verse from?'},
+    STOPWORDS, r"[^A-Za-z'-]", 'run "manage.py import_bible" first',
+)
+SWAHILI = Corpus(
+    'sw', BibleText, {'version': 'swh_bib'},
+    {'book': 'Mstari huu unatoka kitabu gani?',
+     'blank': 'Ni neno gani linakamilisha mstari huu?',
+     'reference': 'Mstari huu unatoka sura gani ya {book}?'},
+    SW_STOPWORDS, r"[^\w'-]", 'run "manage.py import_bible_version swh_bib" first',
+)
+CORPORA = {'en': ENGLISH, 'sw': SWAHILI}
+
+
+def corpus_for(language):
+    """The Bible for `language`, or the KJV when that one has not been
+    imported — a Swahili speaker gets an English quiz rather than none."""
+    corpus = CORPORA.get(language) or ENGLISH
+    if corpus is not ENGLISH and not corpus.verses().exists():
+        return ENGLISH
+    return corpus
+
+
 def _seed_for(date):
     """A stable seed per day — same date, same quiz, on any machine."""
     return int(hashlib.sha256(date.isoformat().encode()).hexdigest()[:12], 16)
-
-
-def _clean_word(word):
-    return re.sub(r"[^A-Za-z'-]", '', word)
 
 
 def _shuffled_choices(rng, correct, distractors, count=4):
@@ -90,7 +167,7 @@ def _shuffled_choices(rng, correct, distractors, count=4):
 # ── question builders ────────────────────────────────────────────────────────
 # Each returns a dict or None (None = this verse doesn't suit; try another).
 
-def _q_book(rng, verse, difficulty):
+def _q_book(rng, verse, difficulty, corpus=ENGLISH):
     """Which book is this verse from?
 
     Simple draws wrong answers from the other testament (a reader who knows the
@@ -98,11 +175,12 @@ def _q_book(rng, verse, difficulty):
     testament, where that shortcut stops working.
     """
     same_testament = verse.book_number <= 39
+    names = corpus.book_names()
     if difficulty == QuizQuestion.SIMPLE:
-        pool = [b['name'] for b in BIBLE_BOOKS if (b['number'] <= 39) != same_testament]
+        pool = [name for number, name in names if (number <= 39) != same_testament]
     else:
-        pool = [b['name'] for b in BIBLE_BOOKS
-                if (b['number'] <= 39) == same_testament and b['name'] != verse.book]
+        pool = [name for number, name in names
+                if (number <= 39) == same_testament and name != verse.book]
     rng.shuffle(pool)
     built = _shuffled_choices(rng, verse.book, pool)
     if not built:
@@ -110,7 +188,7 @@ def _q_book(rng, verse, difficulty):
     choices, answer = built
     return {
         'kind': 'book',
-        'prompt': 'Which book is this verse from?',
+        'prompt': corpus.prompt('book'),
         'passage': verse.text,
         'choices': choices,
         'answer_index': answer,
@@ -118,28 +196,29 @@ def _q_book(rng, verse, difficulty):
     }
 
 
-def _q_blank(rng, verse, difficulty):
+def _q_blank(rng, verse, difficulty, corpus=ENGLISH):
     """A word removed from the verse; the wrong answers are real words from the
     same book, so they read plausibly rather than obviously wrong."""
     words = verse.text.split()
+    clean, stop = corpus.clean_word, corpus.stopwords
     candidates = [
         (i, w) for i, w in enumerate(words)
-        if len(_clean_word(w)) > 3 and _clean_word(w).lower() not in STOPWORDS
+        if len(clean(w)) > 3 and clean(w).lower() not in stop
     ]
     if not candidates:
         return None
     idx, raw = rng.choice(candidates)
-    answer = _clean_word(raw)
+    answer = clean(raw)
 
     # Distractors: other substantial words from the same book.
-    neighbours = (BibleVerse.objects
-                  .filter(book=verse.book).exclude(pk=verse.pk)
+    neighbours = (corpus.verses()
+                  .filter(book_number=verse.book_number).exclude(pk=verse.pk)
                   .values_list('text', flat=True)[:400])
     pool = []
     for text in neighbours:
         for w in text.split():
-            cw = _clean_word(w)
-            if (len(cw) > 3 and cw.lower() not in STOPWORDS
+            cw = clean(w)
+            if (len(cw) > 3 and cw.lower() not in stop
                     and cw.lower() != answer.lower() and cw not in pool):
                 pool.append(cw)
     rng.shuffle(pool)
@@ -152,7 +231,7 @@ def _q_blank(rng, verse, difficulty):
     blanked[idx] = '______'
     return {
         'kind': 'blank',
-        'prompt': 'Which word completes this verse?',
+        'prompt': corpus.prompt('blank'),
         'passage': ' '.join(blanked),
         'choices': choices,
         'answer_index': answer_index,
@@ -160,15 +239,15 @@ def _q_blank(rng, verse, difficulty):
     }
 
 
-def _q_reference(rng, verse, difficulty):
+def _q_reference(rng, verse, difficulty, corpus=ENGLISH):
     """Which chapter of the (named) book is this from?
 
     Hard on purpose: knowing the passage is not enough, you have to place it.
     """
-    book = BOOKS_BY_NAME.get(verse.book)
-    if not book or book['chapters'] < 4:
+    chapters = corpus.chapters(verse.book_number)
+    if chapters < 4:
         return None
-    others = [c for c in range(1, book['chapters'] + 1) if c != verse.chapter]
+    others = [c for c in range(1, chapters + 1) if c != verse.chapter]
     # Prefer nearby chapters — a distant wrong answer is easy to dismiss.
     others.sort(key=lambda c: abs(c - verse.chapter))
     near = others[:8]
@@ -179,7 +258,7 @@ def _q_reference(rng, verse, difficulty):
     choices, answer_index = built
     return {
         'kind': 'reference',
-        'prompt': f'Which chapter of {verse.book} is this verse from?',
+        'prompt': corpus.prompt('reference', book=verse.book),
         'passage': verse.text,
         'choices': choices,
         'answer_index': answer_index,
@@ -194,14 +273,14 @@ BUILDERS = {
 }
 
 
-def _pick_verses(rng, count):
+def _pick_verses(rng, count, corpus=ENGLISH):
     """Verses long enough to be worth asking about, spread across the corpus."""
     ids = list(
-        BibleVerse.objects.filter(text__regex=r'(\S+\s+){%d,}' % MIN_WORDS)
+        corpus.verses().filter(text__regex=r'(\S+\s+){%d,}' % MIN_WORDS)
         .values_list('id', flat=True)
     )
     if len(ids) < count:
-        ids = list(BibleVerse.objects.values_list('id', flat=True))
+        ids = list(corpus.verses().values_list('id', flat=True))
     rng.shuffle(ids)
     return ids
 
@@ -274,7 +353,7 @@ def record_bank_answers(results):
             BankQuestion.objects.filter(pk=b.pk).update(is_active=False, retired_reason=reason)
 
 
-def build_questions(rng, mix):
+def build_questions(rng, mix, corpus=ENGLISH):
     """Build question dicts for `mix` — [(difficulty, count), ...].
 
     Shared by the daily quiz and every practice mode: what a question *is*
@@ -283,26 +362,25 @@ def build_questions(rng, mix):
     generated from verses. Raises ValueError when the corpus cannot supply them.
     """
     # The written ones first, so the verses are only asked to make up the rest.
-    banked = {d: _from_bank(rng, d, round(n * BANK_SHARE)) for d, n in mix}
+    banked = {d: _from_bank(rng, d, round(n * BANK_SHARE), corpus.language) for d, n in mix}
     mix = [(d, n - len(banked[d])) for d, n in mix]
     wanted_total = sum(count for _, count in mix)
-    verse_ids = _pick_verses(rng, wanted_total)
+    verse_ids = _pick_verses(rng, wanted_total, corpus)
     if len(verse_ids) < wanted_total:
         raise ValueError(
-            'The Bible corpus holds %d usable verses — run "manage.py import_bible" first.'
-            % len(verse_ids)
+            'The Bible corpus holds %d usable verses — %s.' % (len(verse_ids), corpus.import_hint)
         )
 
     built, cursor = [], 0
     for difficulty, wanted in mix:
         made = 0
         while made < wanted and cursor < len(verse_ids):
-            verse = BibleVerse.objects.filter(pk=verse_ids[cursor]).first()
+            verse = corpus.verses().filter(pk=verse_ids[cursor]).first()
             cursor += 1
             if not verse or len(verse.text.split()) < MIN_WORDS:
                 continue
             for builder in BUILDERS[difficulty]:
-                q = builder(rng, verse, difficulty)
+                q = builder(rng, verse, difficulty, corpus)
                 if q:
                     q['difficulty'] = difficulty
                     q['category'] = category_for(verse.book_number)
@@ -327,31 +405,35 @@ def build_questions(rng, mix):
     return out
 
 
-def generate_for_date(date, force=False):
-    """Build (or rebuild) the quiz for `date`. Returns the DailyQuiz.
+def generate_for_date(date, force=False, language='en'):
+    """Build (or rebuild) the quiz for `date` in `language`. Returns the
+    DailyQuiz — the English one when that language's Bible is not imported.
 
     Raises ValueError when the corpus is too thin to build a full quiz — better
     than silently serving a five-question day.
     """
-    existing = DailyQuiz.objects.filter(date=date).first()
+    corpus = corpus_for(language)
+    existing = DailyQuiz.objects.filter(date=date, language=corpus.language).first()
     if existing and not force:
         return existing
 
-    built = build_questions(random.Random(_seed_for(date)), MIX)
+    # Each language its own seed, so the two quizzes are not the same verses.
+    seed = _seed_for(date) + (0 if corpus is ENGLISH else 7919)
+    built = build_questions(random.Random(seed), MIX, corpus)
 
     with transaction.atomic():
         if existing:
             existing.questions.all().delete()
             quiz = existing
         else:
-            quiz = DailyQuiz.objects.create(date=date)
+            quiz = DailyQuiz.objects.create(date=date, language=corpus.language)
         QuizQuestion.objects.bulk_create([
             QuizQuestion(quiz=quiz, order=i, **q) for i, q in enumerate(built)
         ])
     return quiz
 
 
-def start_session(user, mode):
+def start_session(user, mode, language='en'):
     """Open a practice run and generate the questions it will ask.
 
     Unseeded on purpose: the daily quiz must be the same for everyone, a
@@ -361,7 +443,7 @@ def start_session(user, mode):
     from .modes import config
 
     cfg = config(mode)
-    built = build_questions(random.Random(), cfg['mix'])
+    built = build_questions(random.Random(), cfg['mix'], corpus_for(language))
 
     with transaction.atomic():
         session = QuizSession.objects.create(user=user, mode=mode)

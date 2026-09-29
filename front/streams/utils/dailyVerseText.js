@@ -19,10 +19,11 @@ const BOOK_IDS = new Map(BIBLE_BOOKS.map((b) => [b.english, b.id]));
 export const bookIdFor = (name) => BOOK_IDS.get(name) || null;
 
 /** "Song of Solomon 2:4" → { bookId: 'SNG', chapter: 2, verse: 4 }, the way
- *  the Bible reader opens at a verse; null for anything it cannot place. */
-export const parseReference = (reference) => {
+ *  the Bible reader opens at a verse; null for anything it cannot place.
+ *  `names` (Map name → id) places books named in another language too. */
+export const parseReference = (reference, names = null) => {
   const m = /^(.+?)\s+(\d+):(\d+)/.exec(String(reference || '').trim());
-  const bookId = m && bookIdFor(m[1]);
+  const bookId = m && (bookIdFor(m[1]) || names?.get(m[1]) || null);
   return bookId ? { bookId, chapter: Number(m[2]), verse: Number(m[3]) } : null;
 };
 

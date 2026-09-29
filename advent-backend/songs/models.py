@@ -2747,21 +2747,55 @@ class BibleVerse(models.Model):
         return self.reference
 
 
+class BibleText(models.Model):
+    """A verse of a Bible version other than the KJV — the Swahili NENO the
+    quiz is played from in Swahili, imported with `manage.py
+    import_bible_version swh_bib`.
+
+    Its own table, not BibleVerse: everything that reads BibleVerse (the verse
+    of the day, the word puzzle, the English quiz) is built on the KJV, and a
+    Swahili verse turning up in any of them would be a bug. The book's name is
+    stored in the version's own language ("Zaburi").
+    """
+    version = models.CharField(max_length=20, db_index=True)
+    book = models.CharField(max_length=60)
+    book_number = models.PositiveSmallIntegerField(db_index=True)
+    chapter = models.PositiveSmallIntegerField()
+    verse = models.PositiveSmallIntegerField()
+    text = models.TextField()
+
+    class Meta:
+        unique_together = ('version', 'book_number', 'chapter', 'verse')
+        indexes = [models.Index(fields=['version', 'book_number'])]
+
+    def __str__(self):
+        return f"{self.version} {self.reference}"
+
+    @property
+    def reference(self):
+        return f"{self.book} {self.chapter}:{self.verse}"
+
+
 class DailyQuiz(models.Model):
     """One quiz per calendar day, shared by everyone.
 
     Built on first request for that date (there is no scheduler on this deploy)
     and kept, so a late player gets the same twenty questions as an early one —
     which is what makes a leaderboard mean anything."""
-    date = models.DateField(unique=True, db_index=True)
+    date = models.DateField(db_index=True)
+    # One quiz a day in each language the quiz is played in, built from that
+    # language's Bible (English from the KJV, Swahili from BibleText). A person
+    # still plays once a day, in whichever they choose.
+    language = models.CharField(max_length=5, default='en', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-date']
         verbose_name_plural = 'Daily quizzes'
+        unique_together = ('date', 'language')
 
     def __str__(self):
-        return f"Quiz for {self.date.isoformat()}"
+        return f"Quiz for {self.date.isoformat()} ({self.language})"
 
 
 class QuizQuestion(models.Model):

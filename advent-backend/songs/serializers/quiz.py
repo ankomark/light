@@ -31,7 +31,7 @@ class DailyQuizSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DailyQuiz
-        fields = ['id', 'date', 'questions', 'my_attempt', 'counts']
+        fields = ['id', 'date', 'language', 'questions', 'my_attempt', 'counts']
 
     def get_my_attempt(self, obj):
         """Their attempt, with its review once it exists.
