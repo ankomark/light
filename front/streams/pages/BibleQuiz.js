@@ -30,6 +30,9 @@ import {
   unload as unloadSound,
 } from '../services/quizSound';
 import { loadDraft, saveDraft, clearDraft } from '../utils/quizDraft';
+import { peekCache, writeCache } from '../utils/screenCache';
+import { quizKeys, isToday, formatQuizDay, withAttempt } from '../utils/quizCache';
+import { confirmAction } from '../utils/adminConfirm';
 // One backdrop and one coin for every quiz screen, so a change lands everywhere.
 import { Backdrop, Coin, Coins } from './quizTheme';
 
@@ -83,33 +86,59 @@ const BibleQuiz = ({ navigation }) => {
     try { setBoard(await fetchQuizLeaderboard()); } catch { /* a nicety, not the quiz */ }
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const data = await fetchDailyQuiz();
-      setQuiz(data);
-      startedAt.current = Date.now();
-      if (data?.my_attempt) {
-        // Already played: nothing to restore, and any draft is spent.
-        clearDraft();
-        loadBoard();
-      } else {
-        // Pick up an interrupted run rather than losing the day's one attempt.
-        const draft = await loadDraft(data?.date);
-        if (draft) {
-          setAnswers(draft.answers || {});
-          setIndex(Math.min(draft.index || 0, (data.questions?.length || 1) - 1));
-          spent.current = draft.spent || {};
-          if (draft.elapsed) startedAt.current = Date.now() - draft.elapsed * 1000;
-        }
+  const dailyKey = quizKeys(currentUser?.id).daily;
+
+  // Start on a quiz: the clock, and either the board (played) or an
+  // interrupted run picked back up (not yet played).
+  const adopt = useCallback(async (data) => {
+    setQuiz(data);
+    startedAt.current = Date.now();
+    if (data?.my_attempt) {
+      // Already played: nothing to restore, and any draft is spent.
+      clearDraft();
+      loadBoard();
+    } else {
+      // Pick up an interrupted run rather than losing the day's one attempt.
+      const draft = await loadDraft(data?.date);
+      if (draft) {
+        setAnswers(draft.answers || {});
+        setIndex(Math.min(draft.index || 0, (data.questions?.length || 1) - 1));
+        spent.current = draft.spent || {};
+        if (draft.elapsed) startedAt.current = Date.now() - draft.elapsed * 1000;
       }
-    } catch (e) {
-      setError(e?.response?.data?.detail || e?.message || t('quiz.loadFailed'));
+    }
+  }, [loadBoard]);
+
+  const load = useCallback(async () => {
+    setError('');
+    // The hub has usually just loaded today's quiz: open on that at once
+    // rather than fetching the same twenty questions again behind a spinner.
+    const kept = peekCache(dailyKey);
+    const usable = isToday(kept) && !!kept.questions?.length;
+    if (usable) {
+      await adopt(kept);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    try {
+      const fresh = await fetchDailyQuiz();
+      writeCache(dailyKey, fresh);
+      if (!usable || fresh.date !== kept.date) {
+        await adopt(fresh);
+      } else if (fresh.my_attempt && !kept.my_attempt) {
+        // Played meanwhile (another phone): the result, not the questions.
+        await adopt(fresh);
+      } else {
+        setQuiz(fresh);
+      }
+    } catch {
+      // With the kept copy on screen, a failed refresh changes nothing.
+      if (!usable) setError(t('quiz.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [t, loadBoard]);
+  }, [t, adopt, dailyKey]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -155,17 +184,24 @@ const BibleQuiz = ({ navigation }) => {
     questionShownAt.current = Date.now();
   }, [questions, index]);
 
-  const resultsById = useMemo(() => {
-    const map = {};
-    (outcome?.results || []).forEach((r) => { map[r.question_id] = r; });
-    return map;
-  }, [outcome]);
-
   const myRank = useMemo(() => {
+    if (board?.me?.rank) return board.me.rank;
     const rows = board?.results || [];
     const i = rows.findIndex((r) => r.user?.username === currentUser?.username);
     return i === -1 ? null : i + 1;
   }, [board, currentUser]);
+
+  // The review: straight after submitting, or any time later today from the
+  // attempt the server keeps.
+  const review = useMemo(
+    () => outcome?.results || quiz?.my_attempt?.results || [],
+    [outcome, quiz],
+  );
+  const reviewById = useMemo(() => {
+    const map = {};
+    review.forEach((r) => { map[r.question_id] = r; });
+    return map;
+  }, [review]);
 
   const choose = (questionId, choiceIndex) => {
     if (!playing) return;
@@ -185,6 +221,21 @@ const BibleQuiz = ({ navigation }) => {
   };
 
   const submit = async () => {
+    // Twenty questions, one attempt: a gap should be a choice, not a slip.
+    const missing = questions.length - answeredCount;
+    if (missing > 0) {
+      const go = await confirmAction({
+        title: t('quiz.unansweredTitle'),
+        message: t('quiz.unansweredBody', { count: missing }),
+        confirmLabel: t('quiz.submitAnyway'),
+        cancelLabel: t('quiz.keepGoing'),
+      });
+      if (!go) {
+        const first = questions.findIndex((qq) => answers[qq.id] == null);
+        if (first !== -1) { bankTime(); setIndex(first); }
+        return;
+      }
+    }
     try {
       setSubmitting(true);
       bankTime();
@@ -196,11 +247,22 @@ const BibleQuiz = ({ navigation }) => {
       });
       const res = await submitDailyQuiz(payload, seconds);
       setOutcome(res);
+      // The kept copy now says "played", with the review, so reopening the
+      // quiz — or the hub — shows the result rather than the questions.
+      writeCache(dailyKey, withAttempt(quiz, res, seconds));
       clearDraft();
       finishFeedback();
       loadBoard();
     } catch (e) {
-      setError(e?.response?.data?.error || e?.message || t('quiz.submitFailed'));
+      const code = e?.response?.data?.code || e?.data?.code;
+      if (code === 'already_played') {
+        // Played on another phone: show that result instead of an error.
+        setError('');
+        clearDraft();
+        load();
+        return;
+      }
+      setError(t('quiz.submitFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -251,7 +313,7 @@ const BibleQuiz = ({ navigation }) => {
           <ScrollView contentContainerStyle={styles.resultScroll} showsVerticalScrollIndicator={false}>
 
             <View style={styles.resultHead}>
-              <Text style={styles.eyebrow}>{quiz?.date}</Text>
+              <Text style={styles.eyebrow}>{formatQuizDay(quiz?.date)}</Text>
               <Text style={styles.resultTitle}>{t('quiz.title')}</Text>
             </View>
 
@@ -284,6 +346,9 @@ const BibleQuiz = ({ navigation }) => {
               <View style={styles.stat}>
                 <Text style={styles.statValue}>{myRank ? myRank : '—'}</Text>
                 <Text style={styles.eyebrow}>{t('quiz.stat.rank')}</Text>
+                {!!board?.me?.of && (
+                  <Text style={styles.rankOf}>{t('quiz.rankOf', { count: board.me.of })}</Text>
+                )}
               </View>
             </View>
             <Text style={styles.timeNote}>{t('quiz.tookTime', { time: mmss(seconds) })}</Text>
@@ -307,12 +372,17 @@ const BibleQuiz = ({ navigation }) => {
               </View>
             )}
 
-            {!!outcome && (
+            {review.length > 0 && (
               <View style={styles.reviewBlock}>
                 <Text style={styles.eyebrow}>{t('quiz.review')}</Text>
                 {questions.map((q, i) => {
-                  const r = resultsById[q.id];
+                  const r = reviewById[q.id];
                   const chosen = r?.chosen_index;
+                  // The whole verse, restored (a blanked word filled back in),
+                  // without the reference the card already shows above it.
+                  const verseText = r?.explanation
+                    ? r.explanation.replace(` — ${r.reference}`, '')
+                    : q.passage;
                   return (
                     <View style={styles.reviewCard} key={q.id}>
                       <View style={styles.reviewTop}>
@@ -324,7 +394,7 @@ const BibleQuiz = ({ navigation }) => {
                         />
                         <Text style={styles.reviewRef} numberOfLines={1}>{r?.reference}</Text>
                       </View>
-                      {!!q.passage && <Text style={styles.reviewPassage}>{q.passage}</Text>}
+                      {!!verseText && <Text style={styles.reviewPassage}>{verseText}</Text>}
                       <Text style={styles.reviewAnswer}>
                         {t('quiz.answerWas')}{' '}
                         <Text style={styles.reviewAnswerBold}>{q.choices[r?.answer_index]}</Text>
@@ -370,7 +440,8 @@ const BibleQuiz = ({ navigation }) => {
       <SafeAreaView style={styles.flex} edges={['top', 'bottom']}>
 
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
+                            accessibilityRole="button" accessibilityLabel={t('common.close')}>
             <Ionicons name="close" size={22} color="#7E8DA3" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('quiz.title')}</Text>
@@ -437,6 +508,9 @@ const BibleQuiz = ({ navigation }) => {
                   style={[styles.choice, active && styles.choiceActive]}
                   onPress={() => choose(current.id, i)}
                   activeOpacity={0.85}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: active }}
+                  accessibilityLabel={`${String.fromCharCode(65 + i)}. ${choice}`}
                 >
                   <Text style={[styles.choiceLetter, active && styles.goldText]}>
                     {String.fromCharCode(65 + i)}
@@ -460,6 +534,8 @@ const BibleQuiz = ({ navigation }) => {
               style={styles.backBtn}
               onPress={() => { bankTime(); setIndex((i) => Math.max(0, i - 1)); }}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={t('quiz.previous')}
             >
               <Ionicons name="chevron-back" size={18} color="#A9BCD0" />
             </TouchableOpacity>
@@ -606,6 +682,7 @@ const styles = StyleSheet.create({
   scoreValue: { fontFamily: DISPLAY, fontSize: 54, color: GOLD, lineHeight: 60 },
   scoreOf: { fontFamily: DISPLAY_MID, fontSize: 24, color: MUTED },
   bandLabel: { marginTop: 6, color: '#A9BCD0' },
+  rankOf: { fontSize: 10, color: MUTED },
 
   statsCard: {
     flexDirection: 'row', marginTop: spacing.lg, paddingVertical: spacing.md,

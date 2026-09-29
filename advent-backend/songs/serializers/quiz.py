@@ -1,3 +1,5 @@
+from django.db.models import Count
+
 from .common import *  # noqa: F401,F403
 
 from ..models import DailyQuiz, QuizAttempt, QuizQuestion, QuizSession
@@ -32,18 +34,45 @@ class DailyQuizSerializer(serializers.ModelSerializer):
         fields = ['id', 'date', 'questions', 'my_attempt', 'counts']
 
     def get_my_attempt(self, obj):
+        """Their attempt, with its review once it exists.
+
+        The answers are only secret until someone has played: after that the
+        review is theirs to come back to all day, not something shown once in
+        the submit response and lost when the screen closes.
+        """
         request = self.context.get('request')
         if not (request and request.user.is_authenticated):
             return None
         attempt = obj.attempts.filter(user=request.user).first()
-        return QuizAttemptSerializer(attempt).data if attempt else None
+        if not attempt:
+            return None
+        return {**QuizAttemptSerializer(attempt).data, 'results': review_for(attempt)}
 
     def get_counts(self, obj):
-        """How many of each difficulty, so the client can show the split."""
-        out = {}
-        for difficulty, _ in QuizQuestion.DIFFICULTY_CHOICES:
-            out[difficulty] = obj.questions.filter(difficulty=difficulty).count()
-        return out
+        """How many of each difficulty, so the client can show the split —
+        one grouped query rather than one per difficulty."""
+        found = dict(obj.questions.values_list('difficulty').annotate(n=Count('id')))
+        return {d: found.get(d, 0) for d, _ in QuizQuestion.DIFFICULTY_CHOICES}
+
+
+def review_for(attempt):
+    """The per-question review of a daily attempt, from its stored answers —
+    the same shape the submit response gives, less the points breakdown."""
+    rows = (attempt.answer_rows.select_related('question')
+            .order_by('question__order', 'question_id'))
+    return [
+        {
+            'question_id': r.question_id,
+            'chosen_index': r.chosen_index,
+            'answer_index': r.question.answer_index,
+            'correct': r.is_correct,
+            'reference': r.question.reference,
+            'explanation': r.question.explanation,
+            'points_earned': r.points_earned,
+            'streak_after': r.streak_after,
+        }
+        for r in rows
+    ]
 
 
 class QuizAttemptSerializer(serializers.ModelSerializer):

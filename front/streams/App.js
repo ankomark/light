@@ -267,6 +267,9 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.type === 'quiz_reminder') {
+        // "Today's quiz is waiting": the quiz hub, with the day's card on top.
+        navigate('QuizHome');
       } else if (data?.type === 'verse_of_the_day') {
         // The morning verse: the screen it came from, not the app's front door.
         navigate('DailyVerse');

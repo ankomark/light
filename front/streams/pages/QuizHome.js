@@ -5,7 +5,7 @@
  * Speed and Streak sit below it as practice you can return to, each showing
  * your own best so there is something to beat.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -13,6 +13,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchDailyQuiz, fetchQuizBests, fetchQuizStats } from '../services/api';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import useCachedData from '../utils/useCachedData';
+import { quizKeys, isToday, formatQuizDay } from '../utils/quizCache';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Coin, Coins, quizStyles as q, DISPLAY, DISPLAY_MID, SERIF, SERIF_BOLD,
@@ -21,34 +24,36 @@ import {
 
 const QuizHome = ({ navigation }) => {
   const { t } = useI18n();
-  const [daily, setDaily] = useState(null);
-  const [bests, setBests] = useState(null);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  const keys = quizKeys(currentUser?.id);
 
+  // Each painted from the last copy at once, then refreshed behind it — the
+  // pattern Home and Music use. Each on its own: one failing must not blank
+  // the screen. The daily one is also what the quiz itself opens on.
+  const dailyData = useCachedData(keys.daily, fetchDailyQuiz);
+  const bestsData = useCachedData(keys.bests, fetchQuizBests);
+  const statsData = useCachedData(keys.stats, fetchQuizStats);
+  const bests = bestsData.data;
+  const stats = statsData.data;
+  // Yesterday's kept quiz, with yesterday's "played" mark, is not today's.
+  const daily = isToday(dailyData.data) ? dailyData.data : null;
+
+  // Back from a quiz or a run: the coins and the "played" mark have moved, so
+  // refresh quietly — the kept copy stays on screen meanwhile. The first
+  // focus is the mount, which loads already.
+  const focusedBefore = useRef(false);
   useFocusEffect(useCallback(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        // Both are useful on their own — one failing must not blank the screen.
-        const [d, b, st] = await Promise.allSettled([
-          fetchDailyQuiz(), fetchQuizBests(), fetchQuizStats(),
-        ]);
-        if (!alive) return;
-        if (d.status === 'fulfilled') setDaily(d.value);
-        if (b.status === 'fulfilled') setBests(b.value);
-        if (st.status === 'fulfilled') setStats(st.value);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, []));
+    if (!focusedBefore.current) { focusedBefore.current = true; return; }
+    dailyData.reload();
+    bestsData.reload();
+    statsData.reload();
+  }, [dailyData.reload, bestsData.reload, statsData.reload])); // eslint-disable-line react-hooks/exhaustive-deps
 
   const played = !!daily?.my_attempt;
+  const nothingYet = !dailyData.data && !bests && !stats;
+  const allFailed = dailyData.failed && bestsData.failed && statsData.failed;
 
-  if (loading && !daily && !bests && !stats) {
+  if (nothingYet && !allFailed) {
     return (
       <View style={q.rootClear}>
         <View style={q.centered}><ActivityIndicator size="large" color={GOLD} /></View>
@@ -139,9 +144,11 @@ const QuizHome = ({ navigation }) => {
             style={styles.dailyCard}
             onPress={() => navigation.navigate('BibleQuiz')}
             activeOpacity={0.88}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('quiz.title')}. ${played ? t('quiz.home.seeResult') : t('quiz.home.play')}`}
           >
             <View style={styles.dailyTop}>
-              <Text style={q.eyebrow}>{daily?.date}</Text>
+              <Text style={q.eyebrow}>{formatQuizDay(daily?.date)}</Text>
               {played && (
                 <View style={styles.doneChip}>
                   <Ionicons name="checkmark" size={11} color={GOLD} />
@@ -188,6 +195,16 @@ const QuizHome = ({ navigation }) => {
             t={t}
           />
 
+          {/* The puzzle's coins already count in the wallet above; it
+              belongs here with the rest of what earns them. */}
+          <ModeCard
+            icon="grid"
+            title={t('quiz.home.puzzleTitle')}
+            body={t('quiz.home.puzzleBody')}
+            onPress={() => navigation.navigate('PuzzlePlay')}
+            t={t}
+          />
+
           <Text style={styles.note}>{t('quiz.home.note')}</Text>
         </ScrollView>
       </View>
@@ -196,14 +213,15 @@ const QuizHome = ({ navigation }) => {
 };
 
 const ModeCard = ({ icon, title, body, best, bestLabel, bestValue, coins, onPress, t }) => (
-  <TouchableOpacity style={styles.modeCard} onPress={onPress} activeOpacity={0.88}>
+  <TouchableOpacity style={styles.modeCard} onPress={onPress} activeOpacity={0.88}
+                    accessibilityRole="button" accessibilityLabel={`${title}. ${body}`}>
     <View style={styles.modeIcon}>
       <Ionicons name={icon} size={20} color={GOLD} />
     </View>
     <View style={styles.modeBody}>
       <Text style={styles.modeTitle}>{title}</Text>
       <Text style={styles.modeText}>{body}</Text>
-      {best?.played > 0 ? (
+      {!bestLabel ? null : best?.played > 0 ? (
         <View style={styles.bestRow}>
           <Text style={styles.modeBest}>{bestLabel}</Text>
           {coins

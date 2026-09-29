@@ -101,7 +101,8 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
 
         if QuizAttempt.objects.filter(quiz=quiz, user=request.user).exists():
             return Response(
-                {'error': 'You have already played today. Come back tomorrow.'},
+                {'error': 'You have already played today. Come back tomorrow.',
+                 'code': 'already_played'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -177,14 +178,26 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         to correct answers, then time, then who finished first."""
         quiz = DailyQuiz.objects.filter(date=self._day(request)).first()
         if not quiz:
-            return Response({'date': self._day(request), 'results': []})
-        attempts = (quiz.attempts
-                    .select_related('user', 'user__profile')
-                    .order_by('-points', '-score', 'duration_seconds', 'completed_at')[:50])
+            return Response({'date': self._day(request), 'results': [], 'me': None})
+        ranked = quiz.attempts.order_by(*self.BOARD_ORDER)
+        attempts = ranked.select_related('user', 'user__profile')[:self.BOARD_SIZE]
         return Response({
             'date': quiz.date,
             'results': QuizAttemptSerializer(attempts, many=True).data,
+            # Your own place, even below the fifty shown: "—" is no answer to
+            # "how did I do?". Counted in the board's own order.
+            'me': self._my_place(ranked, request.user),
         })
+
+    BOARD_ORDER = ('-points', '-score', 'duration_seconds', 'completed_at')
+    BOARD_SIZE = 50
+
+    @staticmethod
+    def _my_place(ranked, user):
+        users = list(ranked.values_list('user_id', flat=True))
+        if user.pk not in users:
+            return None
+        return {'rank': users.index(user.pk) + 1, 'of': len(users)}
 
 
     @action(detail=False, methods=['get'])

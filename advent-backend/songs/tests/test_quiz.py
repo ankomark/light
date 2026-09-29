@@ -930,3 +930,84 @@ class QuizReminderTests(APITestCase):
         # notify_user drops it; the reminder row still marks the daily nudge as
         # spent, so they are not retried all day.
         self.assertLessEqual(QuizReminder.objects.filter(user=self.regular).count(), 1)
+
+
+class QuizPhaseOneTests(APITestCase):
+    """The review stays, your rank is always known, and the errors can be read."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_corpus()
+
+    def setUp(self):
+        cache.clear()
+        forget_recorded_plays()
+        from songs.models import User
+        self.User = User
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+
+    def _play(self, right=True, user=None):
+        if user:
+            self.client.force_authenticate(user)
+        questions = self.client.get('/api/quiz/today/').data['questions']
+        quiz = DailyQuiz.objects.get()
+        key = {q.id: q.answer_index for q in quiz.questions.all()}
+        answers = {str(q['id']): (key[q['id']] if right else (key[q['id']] + 1) % len(q['choices']))
+                   for q in questions}
+        res = self.client.post('/api/quiz/submit/', {'answers': answers, 'duration_seconds': 60}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content[:200])
+        return res
+
+    def test_before_playing_the_answers_stay_secret(self):
+        res = self.client.get('/api/quiz/today/')
+        self.assertIsNone(res.data['my_attempt'])
+
+    def test_after_playing_the_review_comes_back_with_the_quiz(self):
+        submitted = self._play().data['results']
+        again = self.client.get('/api/quiz/today/').data['my_attempt']
+        self.assertEqual(len(again['results']), len(submitted))
+        for mine, first in zip(again['results'], submitted):
+            for field in ('question_id', 'chosen_index', 'answer_index', 'correct',
+                          'reference', 'explanation', 'points_earned'):
+                self.assertEqual(mine[field], first[field], field)
+
+    def test_the_review_follows_the_quiz_order(self):
+        self._play()
+        order = [q['id'] for q in self.client.get('/api/quiz/today/').data['questions']]
+        review = [r['question_id'] for r in self.client.get('/api/quiz/today/').data['my_attempt']['results']]
+        self.assertEqual(review, order)
+
+    def test_counts_are_one_query_not_three(self):
+        self.client.get('/api/quiz/today/')          # build it first
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        with CaptureQueriesContext(connection) as ctx:
+            self.client.get('/api/quiz/today/')
+        difficulty_counts = [q for q in ctx.captured_queries if 'difficulty' in q['sql'] and 'COUNT' in q['sql'].upper()]
+        self.assertEqual(len(difficulty_counts), 1)
+
+    def test_my_rank_is_known_even_below_the_fifty_shown(self):
+        from songs.views.quiz import DailyQuizViewSet
+        others = [self.User.objects.create_user(f'u{i}', f'u{i}@x.com', 'pw12345!') for i in range(3)]
+        for u in others:
+            self._play(right=True, user=u)
+        self._play(right=False, user=self.user)
+        DailyQuizViewSet.BOARD_SIZE, was = 2, DailyQuizViewSet.BOARD_SIZE   # show only two
+        try:
+            board = self.client.get('/api/quiz/leaderboard/').data
+        finally:
+            DailyQuizViewSet.BOARD_SIZE = was
+        self.assertEqual(len(board['results']), 2)
+        self.assertEqual(board['me'], {'rank': 4, 'of': 4})
+
+    def test_no_place_before_playing(self):
+        self._play(user=self.User.objects.create_user('ivy', 'i@x.com', 'pw12345!'))
+        self.client.force_authenticate(self.user)
+        self.assertIsNone(self.client.get('/api/quiz/leaderboard/').data['me'])
+
+    def test_a_second_attempt_is_refused_with_a_code_the_app_can_translate(self):
+        self._play()
+        res = self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['code'], 'already_played')
