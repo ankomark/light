@@ -84,7 +84,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             raise APIException(str(exc))
 
         puzzle._progress_cache = self._progress(puzzle, create=False)
-        return Response(self.get_serializer(puzzle).data)
+        return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
 
     @action(detail=False, methods=['get'])
     def next(self, request):
@@ -99,8 +99,22 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         except ValueError as exc:
             raise APIException(str(exc))
 
-        puzzle._progress_cache = self._progress(puzzle, create=False)
-        return Response(self.get_serializer(puzzle).data)
+        if not hasattr(puzzle, '_progress_cache'):
+            puzzle._progress_cache = self._progress(puzzle, create=False)
+        return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
+
+    @staticmethod
+    def _wallet(user):
+        """The purse and the streak, sent with the level: one request to open
+        the game rather than two."""
+        earned, spent, balance = coin_balance(user)
+        current, best, played_today = streak_for(user)
+        return {
+            'earned': earned, 'spent': spent, 'balance': balance, 'hint_cost': HINT_COST,
+            # So the app can show "+5" the moment a word lands.
+            'coins_per_word': COINS_PER_WORD, 'coins_per_bonus_word': COINS_PER_BONUS_WORD,
+            'day_streak': current, 'best_day_streak': best, 'played_today': played_today,
+        }
 
     @action(detail=True, methods=['post'])
     def found(self, request, pk=None):

@@ -29,6 +29,9 @@ import {
   fetchPuzzleLevel, fetchNextPuzzle, claimPuzzleWord, buyPuzzleHint, fetchCoinWallet,
 } from '../services/api';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import { peekCache, writeCache, userKey } from '../utils/screenCache';
+import { applyFind } from '../utils/puzzleKeys';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
@@ -56,6 +59,10 @@ const TILE_MIN = 15;        // nor smaller — below this a letter stops reading
 
 const PuzzlePlay = ({ navigation, route }) => {
   const { t } = useI18n();
+  const { currentUser } = useAuth();
+  // The level in hand, kept on the phone: opening the game shows it at once
+  // and the server's copy replaces it a moment later.
+  const levelKey = userKey(currentUser?.id, 'puzzle:current');
   const { width, height } = useWindowDimensions();
   const { preferences, setPreference } = usePreferences();
   const soundOn = preferences?.[PREF_KEYS.quizSound] !== false;
@@ -68,19 +75,27 @@ const PuzzlePlay = ({ navigation, route }) => {
     asked.theme ? { theme: asked.theme, level: asked.level || 1 } : null,
   );
 
-  const [puzzle, setPuzzle] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const kept = asked.theme ? null : peekCache(levelKey);
+  const [puzzle, setPuzzle] = useState(kept);
+  const [loading, setLoading] = useState(!kept);
   const [error, setError] = useState('');
   const [traced, setTraced] = useState([]);      // indexes into the wheel
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState(null);
   const [shake, setShake] = useState(false);
-  const [balance, setBalance] = useState(null);
+  const [balance, setBalance] = useState(kept?.wallet?.balance ?? null);
   // The purse and the streak used to live on the hub. They belong here.
-  const [streak, setStreak] = useState(null);
+  const [streak, setStreak] = useState(kept?.wallet || null);
+  // Finds go to the server one after another, behind the play; the next
+  // level is fetched the moment this one is finished, so "Next" is instant.
+  const chain = useRef(Promise.resolve());
+  const upcoming = useRef(null);
+  const walletRef = useRef(streak);
+  walletRef.current = streak;
   // The wheel's own order, so Shuffle can rearrange it without touching the
   // puzzle: the letters are the same, only where they sit changes.
-  const [order, setOrder] = useState([]);
+  // Starts from the kept board, if the screen opened on one, so Shuffle works at once.
+  const [order, setOrder] = useState(() => (kept ? [...Array((kept.letters || '').length).keys()] : []));
   // Where the finger is, in wheel coordinates — the loose end of the line.
   const [pointer, setPointer] = useState(null);
   // How tall the board's area turned out to be. Tiles are sized to fit it, so
@@ -112,24 +127,46 @@ const PuzzlePlay = ({ navigation, route }) => {
   // heard the instant the finger lifts instead of a round trip later.
   const refused = useRef(new Set());
 
+  const shownId = useRef(kept?.id ?? null);
+  const show = useCallback((data, { keep = true } = {}) => {
+    // A new board gets a fresh wheel; the same board keeps its shuffle.
+    if (shownId.current !== data.id) {
+      shownId.current = data.id;
+      setOrder([...Array((data.letters || '').length).keys()]);
+    }
+    setPuzzle(data);
+    if (data.wallet) {
+      setBalance(data.wallet.balance);
+      setStreak(data.wallet);
+    }
+    if (keep && !data.is_complete) writeCache(levelKey, data);
+  }, [levelKey]);
+
   const load = useCallback(async (choice) => {
+    setError('');
+    setTraced([]);
+    // A word refused on one board may well be an answer on the next.
+    refused.current = new Set();
+    // The next level, fetched while this one was being finished: no wait.
+    if (!choice && upcoming.current) {
+      show(upcoming.current);
+      upcoming.current = null;
+      setLoading(false);
+      return;
+    }
+    const current = !choice && peekCache(levelKey);
+    if (current) show(current, { keep: false }); else setLoading(true);
     try {
-      setLoading(true);
-      setError('');
-      setTraced([]);
-      // A word refused on one board may well be an answer on the next.
-      refused.current = new Set();
       const data = choice
         ? await fetchPuzzleLevel(choice.theme, choice.level)
         : await fetchNextPuzzle();
-      setPuzzle(data);
-      setOrder([...Array((data.letters || '').length).keys()]);
-    } catch (e) {
-      setError(e?.response?.data?.detail || e?.message || t('puzzle.loadFailed'));
+      show(data);
+    } catch {
+      if (!current) setError(t('puzzle.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, show, levelKey]);
 
   // `round` is what makes "next" work when there is no pick to change:
   // bumping it re-runs the effect, so exactly one request goes out either way.
@@ -145,6 +182,10 @@ const PuzzlePlay = ({ navigation, route }) => {
     let alive = true;
     (async () => {
       try {
+        // The level brings the wallet with it; ask separately only for an
+        // older server that does not.
+        await new Promise((r) => setTimeout(r, 1500));
+        if (!alive || walletRef.current) return;
         const w = await fetchCoinWallet();
         if (!alive) return;
         setBalance(w.balance);
@@ -235,6 +276,36 @@ const PuzzlePlay = ({ navigation, route }) => {
     setBalance((b) => (b == null ? b : b + (delta || 0)));
   }, []);
 
+  // Tell the server about a find, in order, behind the play. Its answer
+  // brings what only it can: the coin total and, when the board is done, the
+  // verse — and it is what makes the find count. The next level is fetched as
+  // soon as this one is recorded as finished.
+  const record = useCallback((attempt, finishing) => {
+    const id = puzzle?.id;
+    const post = () => claimPuzzleWord(id, attempt);
+    chain.current = chain.current
+      .then(() => post().catch(() => post()))
+      .then((res) => {
+        if (!res) return;
+        if (res.balance != null) setBalance(res.balance);
+        if (res.completion_bonus) {
+          setBalance((b) => (res.balance != null || b == null ? b : b + res.completion_bonus));
+          setFlash({ word: t('puzzle.solved'), coins: res.completion_bonus });
+          setTimeout(() => setFlash(null), 1800);
+        }
+        if (res.verse) setPuzzle((prev) => (prev && prev.id === id ? { ...prev, verse: res.verse } : prev));
+        if (finishing || res.is_complete) {
+          fetchNextPuzzle().then((next) => { upcoming.current = next; }).catch(() => {});
+        }
+      })
+      .catch(() => { /* offline: the board is right when the level is next read */ });
+  }, [puzzle?.id, t]);
+
+  // Whatever changes on the board is kept, so reopening shows it as it stood.
+  useEffect(() => {
+    if (puzzle && !puzzle.is_complete && !asked.theme) writeCache(levelKey, puzzle);
+  }, [puzzle, levelKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const reject = useCallback(() => {
     wrongFeedback();
     setShake(true);
@@ -251,10 +322,38 @@ const PuzzlePlay = ({ navigation, route }) => {
     if (!puzzle || attempt.length < 3) return;
     if (claimed.has(attempt) || refused.current.has(attempt)) { reject(); return; }
 
-    // Everything above was decided here and answered instantly. This one has to
-    // be asked, so acknowledge the trace now and let the verdict follow — a
-    // silent gap between letting go and hearing anything is what makes a guess
-    // feel like it went nowhere.
+    // Decided here, now: each answer's fingerprint came with the board
+    // (utils/puzzleKeys.js). The server hears about it behind the play and
+    // still decides what it pays.
+    const outcome = applyFind(puzzle, attempt);
+    if (outcome.kind) {
+      const perWord = streak?.coins_per_word ?? null;
+      if (outcome.kind === 'slot') {
+        const { done } = outcome;
+        correctFeedback();
+        setPuzzle(outcome.puzzle);
+        if (perWord != null) addCoins(null, perWord);
+        setFlash({ word: attempt, coins: perWord });
+        setTimeout(() => setFlash(null), 1500);
+        if (done) finishFeedback();
+        record(attempt, done);
+      } else if (outcome.kind === 'bonus') {
+        const perBonus = streak?.coins_per_bonus_word ?? null;
+        bonusFeedback();
+        setPuzzle(outcome.puzzle);
+        if (perBonus != null) addCoins(null, perBonus);
+        setFlash({ word: attempt, coins: perBonus, bonus: true });
+        setTimeout(() => setFlash(null), 1500);
+        record(attempt, false);
+      } else {
+        // Neither on the board nor a bonus word: nothing to ask the server.
+        refused.current.add(attempt);
+        reject();
+      }
+      return;
+    }
+
+    // An older server (no fingerprints): ask it, and let the verdict follow.
     tickFeedback();
 
     try {
@@ -291,7 +390,7 @@ const PuzzlePlay = ({ navigation, route }) => {
       // refusal, or a moment offline would poison the word for the whole level.
       reject();
     }
-  }, [puzzle, letters, claimed, reject, addCoins]);
+  }, [puzzle, letters, claimed, reject, addCoins, streak, record]);
 
   const knobAt = (pageX, pageY) => {
     const x = pageX - wheelBox.current.x;
@@ -365,7 +464,8 @@ const PuzzlePlay = ({ navigation, route }) => {
       }));
       tapFeedback();
     } catch (e) {
-      setError(e?.response?.data?.error || t('puzzle.hintFailed'));
+      const data = e?.response?.data || e?.data || {};
+      setError(data.cost != null ? t('puzzle.hintNoCoins', { cost: data.cost }) : t('puzzle.hintFailed'));
       setTimeout(() => setError(''), 2600);
       wrongFeedback();
     } finally {
@@ -661,7 +761,7 @@ const PuzzlePlay = ({ navigation, route }) => {
           <View style={[styles.flash, flash.bonus && styles.flashBonus]} pointerEvents="none">
             {!!flash.bonus && <Text style={styles.flashBonusTag}>{t('puzzle.bonus')}</Text>}
             <Text style={styles.flashWord}>{flash.word}</Text>
-            <Coins value={`+${flash.coins}`} size={24} textSize={20} />
+            {flash.coins != null && <Coins value={`+${flash.coins}`} size={24} textSize={20} />}
           </View>
         )}
       </SafeAreaView>

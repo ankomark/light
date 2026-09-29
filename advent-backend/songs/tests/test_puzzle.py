@@ -280,8 +280,33 @@ class PuzzleApiTests(APITestCase):
 
     def test_slots_say_where_and_how_long_but_not_what(self):
         res = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=1')
-        for slot in res.data['slots']:
-            self.assertEqual(set(slot), {'length', 'row', 'col', 'dir'})
+        from songs.serializers.puzzle import word_key
+        words = {p['word'] for p in self.puzzle.placements}
+        for slot, placement in zip(res.data['slots'], self.puzzle.placements):
+            # Where and how long, and a fingerprint — never the word itself.
+            self.assertEqual(set(slot), {'length', 'row', 'col', 'dir', 'key'})
+            self.assertNotIn(slot['key'], words)
+            self.assertEqual(slot['key'], word_key(self.puzzle.pk, placement['word']))
+
+    def test_word_keys_match_the_apps_fingerprint(self):
+        """The app computes the same: SHA-256 of "<id>:<WORD>", first 16 hex."""
+        import hashlib
+        from songs.serializers.puzzle import word_key
+        self.assertEqual(word_key(7, 'GRACE'), hashlib.sha256(b'7:GRACE').hexdigest()[:16])
+        # The same vector the app's test checks (utils/__tests__/sha256.test.js).
+        self.assertEqual(word_key(7, 'GRACE'), '9f813bdfc2d728fa')
+
+    def test_bonus_keys_are_fingerprints_too(self):
+        from songs.serializers.puzzle import word_key
+        res = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=1')
+        self.assertEqual(sorted(res.data['bonus_keys']),
+                         sorted(word_key(self.puzzle.pk, w) for w in self.puzzle.bonus_words or []))
+        self.assertEqual(len(res.data['bonus_keys']), res.data['bonus_total'])
+
+    def test_the_wallet_comes_with_the_level(self):
+        res = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=1')
+        self.assertIn('balance', res.data['wallet'])
+        self.assertIn('day_streak', res.data['wallet'])
 
     # ── playing ──────────────────────────────────────────────────────────────
     def test_a_correct_word_is_accepted_and_paid(self):
@@ -965,3 +990,27 @@ class ThemeVocabularyTests(APITestCase):
         # Same word count, but nothing of the longest length.
         lopsided = [w for w in plenty if len(w) != BASE_MAX] * 4
         self.assertTrue(_thin(lopsided))
+
+
+class ResumeFastPathTests(APITestCase):
+    """Coming back mid-level: the same board, with what was found, read once."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_wide_corpus()
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+
+    def test_next_resumes_the_level_in_hand_with_its_finds(self):
+        first = self.client.get('/api/puzzles/next/').data
+        word = WordPuzzle.objects.get(pk=first['id']).placements[0]['word']
+        self.client.post(f"/api/puzzles/{first['id']}/found/", {'word': word}, format='json')
+        again = self.client.get('/api/puzzles/next/').data
+        self.assertEqual(again['id'], first['id'])
+        self.assertEqual(again['found'], [word])
+        self.assertIn('wallet', again)
+        self.assertEqual(again['wallet']['balance'], again['wallet']['earned'] - again['wallet']['spent'])

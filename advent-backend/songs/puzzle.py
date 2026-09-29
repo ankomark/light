@@ -231,9 +231,16 @@ def candidates_for(user):
     build: `next_puzzle` walks it and takes the first that does. Deterministic
     given the same progress, so asking twice cannot skip a level.
     """
+    return _plan(user)[0]
+
+
+def _plan(user):
+    """candidates_for's work, with what it read along the way — the level
+    being resumed and the per-theme counts — so the caller need not read
+    them again. → (options, started progress or None, {theme_id: completed})."""
     themes = list(PuzzleTheme.objects.filter(is_active=True))
     if not themes:
-        return []
+        return [], None, {}
 
     options = []
     started = (PuzzleProgress.objects
@@ -257,7 +264,7 @@ def candidates_for(user):
         level = per_theme.get(theme.id, 0) + 1
         if (theme, level) not in options:
             options.append((theme, level))
-    return options
+    return options, started, per_theme
 
 
 def choose_for(user):
@@ -276,10 +283,20 @@ def next_puzzle(user):
     moves past it rather than handing back an error, and only a set where
     nothing at all builds is a real failure.
     """
+    options, started, per_theme = _plan(user)
+    # Resuming — the usual case: the board and the player's place in it are
+    # already in hand, so nothing is read twice.
+    if started and started.puzzle.theme.is_active:
+        puzzle = backfill(started.puzzle)
+        puzzle._progress_cache = started
+        puzzle.theme._levels_completed = per_theme.get(puzzle.theme_id, 0)
+        return puzzle
     failure = None
-    for theme, level in candidates_for(user):
+    for theme, level in options:
         try:
-            return generate(theme, level)
+            puzzle = generate(theme, level)
+            puzzle.theme._levels_completed = per_theme.get(theme.id, 0)
+            return puzzle
         except ValueError as exc:
             failure = exc
     raise ValueError(str(failure) if failure else 'No puzzle themes are active.')

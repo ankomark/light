@@ -4,6 +4,20 @@ from ..models import PuzzleProgress, PuzzleTheme, WordPuzzle
 from ..puzzle import band_for
 
 
+def word_key(puzzle_id, word):
+    """A word's fingerprint on one board: the first 16 hex characters of
+    SHA-256 over "<puzzle id>:<WORD>". The app computes the same over what was
+    spelled (utils/sha256.js) and compares.
+
+    This lets a find show at once. It hides the answers from a glance at the
+    payload, not from someone determined: the wheel's letters spell few enough
+    words to try them all. The coins at stake are a few a word, and every
+    claim is still checked and paid by the server.
+    """
+    import hashlib
+    return hashlib.sha256(f'{puzzle_id}:{word}'.encode('utf-8')).hexdigest()[:16]
+
+
 class PuzzleThemeSerializer(serializers.ModelSerializer):
     levels_completed = serializers.SerializerMethodField()
 
@@ -12,6 +26,9 @@ class PuzzleThemeSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'slug', 'description', 'icon', 'levels_completed']
 
     def get_levels_completed(self, obj):
+        # Already counted by whoever chose the level (songs/puzzle.py).
+        if hasattr(obj, '_levels_completed'):
+            return obj._levels_completed
         request = self.context.get('request')
         if not (request and request.user.is_authenticated):
             return 0
@@ -41,12 +58,13 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
     is_complete = serializers.SerializerMethodField()
     verse = serializers.SerializerMethodField()
     band = serializers.SerializerMethodField()
+    bonus_keys = serializers.SerializerMethodField()
 
     class Meta:
         model = WordPuzzle
         fields = [
             'id', 'theme', 'level', 'letters', 'rows', 'cols', 'layout',
-            'slots', 'revealed', 'found', 'bonus', 'bonus_total',
+            'slots', 'revealed', 'found', 'bonus', 'bonus_total', 'bonus_keys',
             'hints_used', 'is_complete', 'verse', 'band',
         ]
 
@@ -66,11 +84,19 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
         return [''.join('#' if ch != '.' else '.' for ch in row) for row in (obj.grid or [])]
 
     def get_slots(self, obj):
-        """Where each answer sits and how long it is — never which word it is."""
+        """Where each answer sits and how long it is — never which word it is —
+        and its key: a fingerprint of the word (see word_key), so the app can
+        tell the moment a word is spelled which slot it fills, and fill it,
+        without waiting on the server. The server still decides what counts."""
         return [
-            {'length': len(p['word']), 'row': p['row'], 'col': p['col'], 'dir': p['dir']}
+            {'length': len(p['word']), 'row': p['row'], 'col': p['col'], 'dir': p['dir'],
+             'key': word_key(obj.pk, p['word'])}
             for p in obj.placements
         ]
+
+    def get_bonus_keys(self, obj):
+        """The bonus words' fingerprints, in no particular order."""
+        return sorted(word_key(obj.pk, w) for w in (obj.bonus_words or []))
 
     # ── what this player has earned sight of ─────────────────────────────────
     def _progress(self, obj):
