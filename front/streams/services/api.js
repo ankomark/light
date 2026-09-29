@@ -1192,6 +1192,10 @@ export const answerQuizSession = async (id, questionId, choice, seconds, { brief
     ...(brief ? { brief: true } : {}),
   });
 
+// 50/50 on a practice question: → { removed: [i, j], cost, balance }.
+export const buyQuizHint = async (id, questionId) =>
+  apiRequest('post', `/quiz-sessions/${id}/hint/`, { question_id: questionId });
+
 export const finishQuizSession = async (id) =>
   apiRequest('post', `/quiz-sessions/${id}/finish/`, {});
 

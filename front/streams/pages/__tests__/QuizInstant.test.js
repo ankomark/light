@@ -13,6 +13,7 @@ const mockApi = {
   answerQuizSession: jest.fn(),
   finishQuizSession: jest.fn(async () => ({})),
   askQuizWhy: jest.fn(),
+  buyQuizHint: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 7, username: 'mark' } }) }));
@@ -138,4 +139,54 @@ test('"Why?" after an answer is asked only once the answer is on the server', as
   await waitFor(() => expect(screen.getByText('Because.')).toBeTruthy());
   expect(order).toEqual(['recorded', 'asked']);
   expect(mockApi.askQuizWhy).toHaveBeenCalledWith(1, 'why', 'en');
+});
+
+test('three right in a row shows the combo', async () => {
+  mockApi.startQuizSession.mockResolvedValue(run('speed', [q(1, 0), q(2, 0), q(3, 0), q(4, 0)]));
+  mockApi.answerQuizSession.mockResolvedValue(brief(10));
+  const screen = render(<QuizPlay navigation={{ goBack: jest.fn() }} route={{ params: { mode: 'speed' } }} />);
+  await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+  for (const n of [1, 2, 3]) {
+    fireEvent.press(screen.getByText('A1'));
+    if (n < 3) {
+      expect(screen.queryByText(/quiz\.combo/)).toBeNull();
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => { fireEvent.press(screen.getByText('quiz.next')); });
+    }
+  }
+  expect(screen.getByText('quiz.combo:3')).toBeTruthy();
+});
+
+test('50/50 takes two wrong answers away, bought from the server', async () => {
+  mockApi.startQuizSession.mockResolvedValue(run('speed', [q(1, 2), q(2, 0)]));
+  mockApi.buyQuizHint.mockResolvedValue({ removed: [0, 3], cost: 15, balance: 85 });
+  const screen = render(<QuizPlay navigation={{ goBack: jest.fn() }} route={{ params: { mode: 'speed' } }} />);
+  await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByLabelText('quiz.hint.label:15')); });
+  expect(mockApi.buyQuizHint).toHaveBeenCalledWith(9, 1);
+  await waitFor(() => expect(screen.getByText('A1')).toBeTruthy());
+  const disabled = (label) => {
+    let node = screen.getByText(label);
+    while (node && node.props.accessibilityState === undefined) node = node.parent;
+    return node?.props.accessibilityState?.disabled;
+  };
+  expect(disabled('A1')).toBe(true);
+  expect(disabled('D1')).toBe(true);
+  expect(disabled('C1')).toBe(false);
+});
+
+test('without the coins, 50/50 says so', async () => {
+  mockApi.startQuizSession.mockResolvedValue(run('speed', [q(1, 2)]));
+  mockApi.buyQuizHint.mockRejectedValue({ response: { data: { code: 'not_enough_coins' } } });
+  const screen = render(<QuizPlay navigation={{ goBack: jest.fn() }} route={{ params: { mode: 'speed' } }} />);
+  await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByLabelText('quiz.hint.label:15')); });
+  await waitFor(() => expect(screen.getByText('quiz.hint.noCoins')).toBeTruthy());
+});
+
+test('no 50/50 on a true-or-false question', async () => {
+  mockApi.startQuizSession.mockResolvedValue(run('speed', [q(1, 0, { choices: ['True', 'False'] })]));
+  const screen = render(<QuizPlay navigation={{ goBack: jest.fn() }} route={{ params: { mode: 'speed' } }} />);
+  await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+  expect(screen.queryByLabelText('quiz.hint.label:15')).toBeNull();
 });

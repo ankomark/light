@@ -10,13 +10,14 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Share,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Share, Animated,
 } from 'react-native';
+import useReducedMotion from '../utils/useReducedMotion';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  startQuizSession, answerQuizSession, finishQuizSession,
+  startQuizSession, answerQuizSession, finishQuizSession, buyQuizHint,
 } from '../services/api';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
@@ -79,6 +80,10 @@ const QuizPlay = ({ navigation, route }) => {
   const [feedback, setFeedback] = useState(null);   // the verdict on the question shown
   const [remaining, setRemaining] = useState(null); // speed mode only
   const [whyOpen, setWhyOpen] = useState(false);
+  // 50/50 on the question shown: the choices taken away, and how the buying went.
+  const [hint, setHint] = useState({ qid: null, removed: [], busy: false, error: '' });
+  const reduceMotion = useReducedMotion();
+  const comboPop = useRef(new Animated.Value(1)).current;
   const shownAt = useRef(Date.now());
   // Answers go to the server one after another, behind the play: the chain is
   // what results wait on, so the totals shown at the end are the server's.
@@ -237,6 +242,31 @@ const QuizPlay = ({ navigation, route }) => {
     }, 100);
     return () => clearInterval(id);
   }, [limit, finished, feedback, question, send]);
+
+  const combo = totals?.streak || 0;
+  useEffect(() => {
+    if (combo < 3 || reduceMotion) return;
+    comboPop.setValue(combo % 5 === 0 ? 1.5 : 1.25);
+    Animated.spring(comboPop, { toValue: 1, friction: 4, tension: 140, useNativeDriver: true }).start();
+  }, [combo, reduceMotion, comboPop]);
+
+  // Two wrong answers taken away, for coins — the server charges and chooses.
+  const buyHint = async () => {
+    if (!question || !run || hint.busy) return;
+    setHint({ qid: question.id, removed: [], busy: true, error: '' });
+    try {
+      const res = await buyQuizHint(run.id, question.id);
+      tapFeedback();
+      setHint({ qid: question.id, removed: res.removed || [], busy: false, error: '' });
+    } catch (e) {
+      const code = e?.response?.data?.code || e?.data?.code;
+      setHint({
+        qid: question.id, removed: [], busy: false,
+        error: t(code === 'not_enough_coins' ? 'quiz.hint.noCoins' : 'quiz.hint.failed'),
+      });
+    }
+  };
+  const removed = hint.qid === question?.id ? hint.removed : [];
 
   const next = async () => {
     if (over) {
@@ -486,6 +516,41 @@ const QuizPlay = ({ navigation, route }) => {
 
           <Text style={q.prompt}>{question.prompt}</Text>
 
+          {/* A run of right answers, counted where it is being made. */}
+          {combo >= 3 && (
+            <Animated.View style={[styles.combo, combo >= 5 && styles.comboBig, { transform: [{ scale: comboPop }] }]}
+                           accessible accessibilityLiveRegion="polite"
+                           accessibilityLabel={t('quiz.combo', { count: combo })}>
+              <Ionicons name="flame" size={combo >= 5 ? 16 : 13} color={GOLD} />
+              <Text style={[styles.comboText, combo >= 5 && styles.comboTextBig]}>
+                {t('quiz.combo', { count: combo })}
+              </Text>
+            </Animated.View>
+          )}
+
+          {!answered && question.choices.length >= 3 && (
+            <View style={styles.hintRow}>
+              <TouchableOpacity
+                style={[styles.hintBtn, (removed.length > 0 || hint.busy) && styles.hintBtnOff]}
+                onPress={buyHint}
+                disabled={removed.length > 0 || hint.busy}
+                accessibilityRole="button"
+                accessibilityLabel={t('quiz.hint.label', { cost: 15 })}
+              >
+                {hint.busy ? <ActivityIndicator size="small" color={GOLD} /> : (
+                  <>
+                    <Text style={styles.hintText}>50/50</Text>
+                    <Coin size={14} />
+                    <Text style={styles.hintCost}>15</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              {!!hint.error && hint.qid === question.id && (
+                <Text style={styles.hintError}>{hint.error}</Text>
+              )}
+            </View>
+          )}
+
           <View style={styles.choices}>
             {question.choices.map((choice, i) => {
               // Once answered the truth is shown: the right one green, and the
@@ -493,6 +558,7 @@ const QuizPlay = ({ navigation, route }) => {
               const isRight = answered && i === feedback.answer_index;
               const isMyWrong = answered && i === chosen && !feedback.correct;
               const selected = !answered && chosen === i;
+              const gone = removed.includes(i) && !answered;
               return (
                 <TouchableOpacity
                   key={`${question.id}-${i}`}
@@ -501,9 +567,11 @@ const QuizPlay = ({ navigation, route }) => {
                     selected && q.choiceActive,
                     isRight && q.choiceRight,
                     isMyWrong && q.choiceWrong,
+                    gone && styles.choiceGone,
                   ]}
                   onPress={() => send(i)}
-                  disabled={answered}
+                  disabled={answered || gone}
+                  accessibilityState={{ disabled: answered || gone }}
                   activeOpacity={0.85}
                 >
                   <Text style={[q.choiceLetter, (selected || isRight) && q.gold]}>
@@ -633,6 +701,24 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.08)',
   },
   wide: { alignSelf: 'stretch' },
+  combo: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start',
+    marginTop: 10, paddingHorizontal: 10, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(244,162,97,0.14)',
+  },
+  comboBig: { height: 32, paddingHorizontal: 14, borderRadius: 16, backgroundColor: 'rgba(244,162,97,0.24)' },
+  comboText: { fontFamily: DISPLAY_MID, fontSize: 11.5, letterSpacing: 0.6, color: GOLD },
+  comboTextBig: { fontFamily: DISPLAY, fontSize: 14 },
+  hintRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  hintBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 14,
+    borderRadius: 18, borderWidth: 1, borderColor: 'rgba(244,162,97,0.45)',
+  },
+  hintBtnOff: { opacity: 0.45 },
+  hintText: { fontFamily: DISPLAY, fontSize: 12, letterSpacing: 0.8, color: GOLD },
+  hintCost: { fontFamily: DISPLAY_MID, fontSize: 12, color: GOLD },
+  hintError: { flex: 1, fontSize: 12, color: '#A9BCD0' },
+  choiceGone: { opacity: 0.25 },
   whyBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
     minHeight: 36, paddingHorizontal: 12, marginTop: 8, borderRadius: 18,

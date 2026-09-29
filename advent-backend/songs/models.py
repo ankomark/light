@@ -2863,6 +2863,8 @@ class QuizQuestion(models.Model):
     review_item = models.ForeignKey(
         'ReviewItem', on_delete=models.SET_NULL, null=True, blank=True, related_name='asks',
     )
+    # A 50/50 bought on this question (practice only): once per question.
+    hint_used = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['order']
@@ -3222,7 +3224,8 @@ class CoinSpend(models.Model):
     """
     HINT = 'hint'
     FREEZE = 'freeze'
-    REASON_CHOICES = ((HINT, 'Puzzle hint'), (FREEZE, 'Streak freeze'))
+    QUIZ_HINT = 'quiz_hint'
+    REASON_CHOICES = ((HINT, 'Puzzle hint'), (FREEZE, 'Streak freeze'), (QUIZ_HINT, 'Quiz 50/50'))
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='coin_spends')
     amount = models.PositiveIntegerField()

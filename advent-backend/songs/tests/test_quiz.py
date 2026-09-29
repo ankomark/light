@@ -1187,3 +1187,58 @@ class GroupBoardTests(APITestCase):
     def test_an_unknown_group(self):
         self.assertEqual(self.client.get('/api/quiz/leaderboard/?scope=group:nope').status_code,
                          status.HTTP_404_NOT_FOUND)
+
+
+class QuizHintTests(APITestCase):
+    """50/50 in practice: two wrong answers gone, for coins, once."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_corpus()
+
+    def setUp(self):
+        cache.clear()
+        forget_recorded_plays()
+        from songs.models import CoinSpend, DailyQuiz, QuizAttempt, User
+        self.CoinSpend = CoinSpend
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+        old = DailyQuiz.objects.create(date=date(2020, 1, 1))
+        QuizAttempt.objects.create(user=self.user, quiz=old, score=5, total=20, points=100)
+        self.run = self.client.post('/api/quiz-sessions/', {'mode': 'speed'}, format='json').data
+        self.q = next(q for q in self.run['questions'] if len(q['choices']) == 4)
+
+    def hint(self, q=None):
+        q = q or self.q
+        return self.client.post(f"/api/quiz-sessions/{self.run['id']}/hint/", {'question_id': q['id']}, format='json')
+
+    def test_two_wrong_answers_are_taken_away_and_the_right_one_stays(self):
+        res = self.hint()
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.content[:200])
+        self.assertEqual(len(res.data['removed']), 2)
+        self.assertNotIn(self.q['answer_index'], res.data['removed'])
+        self.assertEqual(res.data['balance'], 100 - 15)
+        self.assertEqual(self.CoinSpend.objects.get().reason, 'quiz_hint')
+
+    def test_once_per_question(self):
+        self.hint()
+        res = self.hint()
+        self.assertEqual(res.data['code'], 'used')
+        self.assertEqual(self.CoinSpend.objects.count(), 1)
+
+    def test_not_without_the_coins(self):
+        self.CoinSpend.objects.create(user=self.user, amount=90, reason='hint')
+        res = self.hint()
+        self.assertEqual(res.data['code'], 'not_enough_coins')
+        from songs.models import QuizQuestion
+        self.assertFalse(QuizQuestion.objects.get(pk=self.q['id']).hint_used)   # nothing kept
+
+    def test_not_after_answering(self):
+        self.client.post(f"/api/quiz-sessions/{self.run['id']}/answer/",
+                         {'question_id': self.q['id'], 'choice': 0, 'seconds': 2}, format='json')
+        self.assertEqual(self.hint().data['code'], 'answered')
+
+    def test_not_on_someone_elses_run(self):
+        from songs.models import User
+        self.client.force_authenticate(User.objects.create_user('ivy', 'i@x.com', 'pw12345!'))
+        self.assertEqual(self.hint().status_code, status.HTTP_404_NOT_FOUND)

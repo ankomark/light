@@ -593,6 +593,48 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             'longest_streak': session.longest_streak, 'is_finished': session.is_finished,
         }
 
+    # A 50/50 costs enough to be a choice, not a habit.
+    HINT_COST = 15
+
+    @action(detail=True, methods=['post'])
+    def hint(self, request, pk=None):
+        """50/50: two wrong answers taken away, for coins. Practice only (the
+        ranked daily quiz has none), once per question, before answering.
+        POST {"question_id": n} → {removed: [i, j], cost, balance}."""
+        import random as _random
+        from ..scoring import coin_balance
+
+        session = self.get_object()
+        if session.is_finished:
+            return Response({'error': 'This run is already over.', 'code': 'finished'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        question = session.questions.filter(pk=request.data.get('question_id')).first()
+        if not question:
+            raise ValidationError({'question_id': 'Not a question in this run.'})
+        if QuizAnswer.objects.filter(session=session, question=question).exists():
+            return Response({'error': 'Already answered.', 'code': 'answered'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if len(question.choices) < 3:
+            return Response({'error': 'Nothing to take away.', 'code': 'no_hint'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            # Marked first, conditionally: two taps at once buy it once.
+            claimed = QuizQuestion.objects.filter(pk=question.pk, hint_used=False).update(hint_used=True)
+            if not claimed:
+                return Response({'error': 'Already used on this question.', 'code': 'used'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            _earned, _spent, balance = coin_balance(request.user)
+            if balance < self.HINT_COST:
+                transaction.set_rollback(True)
+                return Response({'error': 'Not enough coins.', 'code': 'not_enough_coins',
+                                 'cost': self.HINT_COST, 'balance': balance},
+                                status=status.HTTP_400_BAD_REQUEST)
+            CoinSpend.objects.create(user=request.user, amount=self.HINT_COST, reason=CoinSpend.QUIZ_HINT)
+        wrong = [i for i in range(len(question.choices)) if i != question.answer_index]
+        removed = sorted(_random.sample(wrong, len(question.choices) - 2))
+        return Response({'removed': removed, 'cost': self.HINT_COST,
+                         'balance': balance - self.HINT_COST})
+
     @action(detail=True, methods=['post'])
     def finish(self, request, pk=None):
         """End a run early — walking away still records what was played."""
