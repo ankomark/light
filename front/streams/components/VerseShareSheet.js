@@ -34,6 +34,9 @@ const APP_NAME = 'Adventist Life';
 
 // 4:5, the shape a phone's feed and status screens show whole.
 const RATIO = 5 / 4;
+// The Bible at the foot, as a share of the card's width: a small mark under
+// the verse, not a second picture competing with it.
+const BOOK_WIDTH = 0.25;
 // How far a very long verse may shrink to fit (then it is clipped, which the
 // curated verses never reach).
 const MIN_FIT = 0.6;
@@ -106,7 +109,7 @@ export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
       <Text style={[styles.cardBrand, { fontSize: 8 * k, marginTop: 14 * k, marginBottom: 6 * k }]}>{APP_NAME}</Text>
       <Image
         source={require('../assets/verse-book.png')}
-        style={[styles.cardBook, { width: width * 0.62 }]}
+        style={[styles.cardBook, { width: width * BOOK_WIDTH }]}
         resizeMode="contain"
       />
     </View>
