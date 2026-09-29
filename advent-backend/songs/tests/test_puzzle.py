@@ -1107,3 +1107,141 @@ class LetterHintTests(APITestCase):
         self.assertEqual(verse['book_number'], BOOKS_BY_NAME['Psalms']['number'])
         self.assertEqual(verse['chapter'], 23)
         self.assertIn('verse', verse)
+
+
+class StarsAndLevelsTests(APITestCase):
+    """Stars for how little help a board took, and the levels map."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_wide_corpus()
+        PuzzleTheme.objects.update(is_active=False)
+        cls.theme = PuzzleTheme.objects.create(
+            name='Wide', slug='wide', order=1,
+            source={'kind': 'passage', 'book': 'Psalms', 'chapter': 119},
+        )
+
+    def setUp(self):
+        cache.clear()
+        reset_theme_words()
+        reset_dictionary()
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+
+    def _finish(self, level, hints=0, letters=0):
+        puzzle = generate(self.theme, level)
+        PuzzleProgress.objects.update_or_create(
+            user=self.user, puzzle=puzzle,
+            defaults={'found': list(puzzle.words), 'is_complete': True,
+                      'hints_used': hints, 'letters_used': letters,
+                      'completed_at': timezone.now()},
+        )
+        return puzzle
+
+    def test_stars_follow_the_help_taken(self):
+        from songs.puzzle import stars_for
+        p = PuzzleProgress(is_complete=True)
+        self.assertEqual(stars_for(p), 3)
+        p.letters_used = 3
+        self.assertEqual(stars_for(p), 2)
+        p.letters_used, p.hints_used = 0, 1
+        self.assertEqual(stars_for(p), 2)
+        p.letters_used = 1
+        self.assertEqual(stars_for(p), 1)
+        self.assertEqual(stars_for(PuzzleProgress(is_complete=False)), 0)
+        self.assertEqual(stars_for(None), 0)
+
+    def test_the_map_shows_each_level_reached_and_the_next(self):
+        self._finish(1)
+        self._finish(2, hints=1)
+        res = self.client.get(f'/api/puzzle-themes/{self.theme.slug}/levels/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['next_level'], 3)
+        self.assertEqual([lv['stars'] for lv in res.data['levels']], [3, 2, 0])
+        self.assertFalse(res.data['levels'][2]['is_complete'])
+        self.assertEqual(res.data['theme']['stars'], 5)
+
+    def test_the_themes_list_counts_in_one_go(self):
+        self._finish(1)
+        with CaptureQueriesContext(connection) as ctx:
+            res = self.client.get('/api/puzzle-themes/')
+        row = next(t for t in res.data if t['slug'] == self.theme.slug)
+        self.assertEqual(row['levels_completed'], 1)
+        self.assertEqual(row['next_level'], 2)
+        self.assertEqual(row['stars'], 3)
+        self.assertLessEqual(len(ctx.captured_queries), 4)
+
+    def test_a_finished_level_says_its_stars_and_time(self):
+        puzzle = self._finish(1, letters=2)
+        res = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=1')
+        self.assertEqual(res.data['stars'], 2)
+        self.assertIsNotNone(res.data['seconds'])
+        self.assertEqual(res.data['id'], puzzle.id)
+
+    def test_next_goes_on_from_the_furthest_level(self):
+        self._finish(1)
+        self._finish(2)
+        res = self.client.get('/api/puzzles/next/')
+        self.assertEqual(res.data['level'], 3)
+
+
+class DailyPuzzleTests(APITestCase):
+    """One board a day, the same for everyone, apart from the levels."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_wide_corpus()
+        PuzzleTheme.objects.update(is_active=False)
+        cls.theme = PuzzleTheme.objects.create(
+            name='Wide daily', slug='wide-daily', order=1,
+            source={'kind': 'passage', 'book': 'Psalms', 'chapter': 119},
+        )
+
+    def setUp(self):
+        cache.clear()
+        forget_recorded_plays()
+        reset_theme_words()
+        reset_dictionary()
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.other = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+
+    def test_everyone_gets_the_same_board_today(self):
+        mine = self.client.get('/api/puzzles/daily/')
+        self.assertEqual(mine.status_code, 200, mine.data)
+        self.client.force_authenticate(self.other)
+        theirs = self.client.get('/api/puzzles/daily/')
+        self.assertEqual(mine.data['id'], theirs.data['id'])
+        self.assertEqual(str(mine.data['day']), str(timezone.localdate()))
+        self.assertIn('wallet', mine.data)
+        self.assertEqual(WordPuzzle.objects.filter(day__isnull=False).count(), 1)
+
+    def test_opening_it_starts_the_clock_but_not_the_streak(self):
+        from songs.models import PlayDay
+        res = self.client.get('/api/puzzles/daily/')
+        self.assertTrue(PuzzleProgress.objects.filter(user=self.user, puzzle_id=res.data['id']).exists())
+        self.assertFalse(PlayDay.objects.filter(user=self.user).exists())
+
+    def test_it_is_not_a_level_and_is_never_resumed_as_one(self):
+        daily = self.client.get('/api/puzzles/daily/').data
+        word = WordPuzzle.objects.get(pk=daily['id']).placements[0]['word']
+        self.client.post(f"/api/puzzles/{daily['id']}/found/", {'word': word}, format='json')
+        nxt = self.client.get('/api/puzzles/next/').data
+        self.assertNotEqual(nxt['id'], daily['id'])
+        self.assertEqual(nxt['level'], 1)
+        # Level 8 of the theme is its own board, not the daily one.
+        lv = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=8').data
+        self.assertNotEqual(lv['id'], daily['id'])
+
+    def test_finishing_it_counts_toward_the_streak_and_has_a_time(self):
+        from songs.models import PlayDay
+        daily = self.client.get('/api/puzzles/daily/').data
+        puzzle = WordPuzzle.objects.get(pk=daily['id'])
+        for w in puzzle.words:
+            last = self.client.post(f'/api/puzzles/{puzzle.id}/found/', {'word': w}, format='json')
+        self.assertTrue(last.data['is_complete'])
+        self.assertTrue(PlayDay.objects.filter(user=self.user).exists())
+        again = self.client.get('/api/puzzles/daily/').data
+        self.assertTrue(again['is_complete'])
+        self.assertEqual(again['stars'], 3)
+        self.assertIsNotNone(again['seconds'])

@@ -10,9 +10,13 @@ grid to decide — so a forged request cannot mint coins.
 """
 from collections import Counter
 
+from django.db.models import Count, Max
+
 from .common import *  # noqa: F401,F403
 from ..models import CoinSpend, PuzzleProgress, PuzzleTheme, WordPuzzle
-from ..puzzle import LEVEL_LIMIT, generate, next_puzzle
+from ..puzzle import (
+    LEVEL_LIMIT, band_for, daily_puzzle, generate, next_puzzle, stars_for,
+)
 from ..scoring import (
     COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, LETTER_COST, coin_balance,
     completion_bonus,
@@ -37,6 +41,58 @@ class PuzzleThemeViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return PuzzleTheme.objects.filter(is_active=True)
+
+    def _mine(self, request):
+        """This player's finished levels (not daily boards), one read."""
+        return (PuzzleProgress.objects
+                .filter(user=request.user, is_complete=True, puzzle__day__isnull=True)
+                .select_related('puzzle'))
+
+    def list(self, request, *args, **kwargs):
+        """Every theme, with how far this player has got and the stars won —
+        counted in one query, not one per theme."""
+        themes = list(self.get_queryset())
+        done, top, stars = Counter(), {}, Counter()
+        for p in self._mine(request):
+            tid = p.puzzle.theme_id
+            done[tid] += 1
+            top[tid] = max(top.get(tid, 0), p.puzzle.level)
+            stars[tid] += stars_for(p)
+        for theme in themes:
+            theme._levels_completed = done[theme.id]
+            theme._next_level = top.get(theme.id, 0) + 1
+            theme._stars = stars[theme.id]
+        return Response(self.get_serializer(themes, many=True).data)
+
+    @action(detail=True, methods=['get'])
+    def levels(self, request, slug=None):
+        """The levels map: every level reached so far in this theme, with its
+        stars, and the next one open to play."""
+        theme = self.get_object()
+        rows = {}
+        for p in (PuzzleProgress.objects
+                  .filter(user=request.user, puzzle__theme=theme, puzzle__day__isnull=True)
+                  .select_related('puzzle')):
+            rows[p.puzzle.level] = p
+        reached = max([lv for lv, p in rows.items() if p.is_complete] or [0])
+        next_level = reached + 1
+        levels = []
+        for lv in range(1, next_level + 1):
+            p = rows.get(lv)
+            levels.append({
+                'level': lv, 'band': band_for(lv),
+                'is_complete': bool(p and p.is_complete),
+                'started': bool(p and not p.is_complete),
+                'stars': stars_for(p),
+            })
+        theme._levels_completed = sum(1 for p in rows.values() if p.is_complete)
+        theme._next_level = next_level
+        theme._stars = sum(stars_for(p) for p in rows.values())
+        return Response({
+            'theme': self.get_serializer(theme).data,
+            'levels': levels,
+            'next_level': next_level,
+        })
 
 
 class WordPuzzleViewSet(viewsets.GenericViewSet):
@@ -95,6 +151,21 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
 
         if not hasattr(puzzle, '_progress_cache'):
             puzzle._progress_cache = self._progress(puzzle, create=False)
+        return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
+
+    @action(detail=False, methods=['get'])
+    def daily(self, request):
+        """GET /api/puzzles/daily/ — today's board, the same for everyone.
+
+        Opening it starts the clock (the progress row is made here), so a time
+        on the daily board means the same thing for everyone who has one.
+        """
+        day = timezone.localdate()
+        try:
+            puzzle = daily_puzzle(day)
+        except ValueError as exc:
+            raise APIException(str(exc))
+        puzzle._progress_cache = self._progress(puzzle)
         return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
 
     @staticmethod
@@ -189,6 +260,10 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             # Held back until the board is done — the base word is in this
             # text, so an early reveal would give the longest answer away.
             'verse': _verse(puzzle) if progress.is_complete else None,
+            # How the board was won, once it is.
+            'stars': stars_for(progress) if progress.is_complete else 0,
+            'seconds': (max(0, int((progress.completed_at - progress.started_at).total_seconds()))
+                        if progress.is_complete and progress.completed_at else None),
         })
 
     def _bonus(self, request, puzzle, progress, word):

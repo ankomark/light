@@ -3248,11 +3248,24 @@ class WordPuzzle(models.Model):
         'BibleVerse', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='puzzles',
     )
+    # Set on the Daily Puzzle: one board a day, the same for everyone, apart
+    # from the levels. A daily board is never resumed as "the next level" and
+    # never counts toward a theme's levels.
+    day = models.DateField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('theme', 'level')
         ordering = ['theme__order', 'level']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['theme', 'level'], condition=models.Q(day__isnull=True),
+                name='puzzle_one_per_theme_level',
+            ),
+            models.UniqueConstraint(
+                fields=['day'], condition=models.Q(day__isnull=False),
+                name='puzzle_one_a_day',
+            ),
+        ]
 
     @property
     def words(self):

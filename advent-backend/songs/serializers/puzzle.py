@@ -1,7 +1,7 @@
 from .common import *  # noqa: F401,F403
 
 from ..models import PuzzleProgress, PuzzleTheme, WordPuzzle
-from ..puzzle import band_for
+from ..puzzle import band_for, stars_for
 
 
 def word_key(puzzle_id, word):
@@ -36,10 +36,21 @@ def verse_payload(puzzle):
 
 class PuzzleThemeSerializer(serializers.ModelSerializer):
     levels_completed = serializers.SerializerMethodField()
+    # Only on the themes list and the levels map, which count them in one go;
+    # null inside a level's payload, where nobody reads them.
+    next_level = serializers.SerializerMethodField()
+    stars = serializers.SerializerMethodField()
 
     class Meta:
         model = PuzzleTheme
-        fields = ['id', 'name', 'slug', 'description', 'icon', 'levels_completed']
+        fields = ['id', 'name', 'slug', 'description', 'icon', 'levels_completed',
+                  'next_level', 'stars']
+
+    def get_next_level(self, obj):
+        return getattr(obj, '_next_level', None)
+
+    def get_stars(self, obj):
+        return getattr(obj, '_stars', None)
 
     def get_levels_completed(self, obj):
         # Already counted by whoever chose the level (songs/puzzle.py).
@@ -77,6 +88,8 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
     bonus_keys = serializers.SerializerMethodField()
     shown = serializers.SerializerMethodField()
     letters_used = serializers.SerializerMethodField()
+    stars = serializers.SerializerMethodField()
+    seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = WordPuzzle
@@ -84,7 +97,19 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
             'id', 'theme', 'level', 'letters', 'rows', 'cols', 'layout',
             'slots', 'revealed', 'found', 'bonus', 'bonus_total', 'bonus_keys',
             'hints_used', 'shown', 'letters_used', 'is_complete', 'verse', 'band',
+            'stars', 'seconds', 'day',
         ]
+
+    def get_stars(self, obj):
+        return stars_for(self._progress(obj))
+
+    def get_seconds(self, obj):
+        """How long a finished board took: from opening it (the Daily Puzzle)
+        or from the first word (a level), to the last."""
+        p = self._progress(obj)
+        if not (p and p.is_complete and p.completed_at and p.started_at):
+            return None
+        return max(0, int((p.completed_at - p.started_at).total_seconds()))
 
     # ── the board's shape ────────────────────────────────────────────────────
     def get_rows(self, obj):

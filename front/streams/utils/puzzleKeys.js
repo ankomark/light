@@ -6,6 +6,15 @@ import sha256 from './sha256';
 
 export const wordKey = (puzzleId, word) => sha256(`${puzzleId}:${word}`).slice(0, 16);
 
+/** Stars for a finished board, as the server gives them (songs/puzzle.py →
+ *  stars_for): 3 with no help, 2 with up to a word's worth (a word counts
+ *  as three letters), 1 with more. */
+export const starsFor = (p) => {
+  const used = (p?.hints_used || 0) * 3 + (p?.letters_used || 0);
+  if (used === 0) return 3;
+  return used <= 3 ? 2 : 1;
+};
+
 /**
  * What the spelled `word` is on this board, decided here and now:
  *   { kind: 'slot', index }   one of the answers (which slot it fills)
@@ -44,6 +53,7 @@ export const applyFind = (puzzle, word) => {
         found,
         revealed: [...(puzzle.revealed || []), { word, row: slot.row, col: slot.col, dir: slot.dir }],
         is_complete: done,
+        ...(done ? { stars: starsFor(puzzle) } : {}),
       },
     };
   }

@@ -89,6 +89,8 @@ import BattleScreen from './pages/BattleScreen';
 import { Backdrop as QuizBackdrop } from './pages/quizTheme';
 import QuizPlay from './pages/QuizPlay';
 import PuzzlePlay from './pages/PuzzlePlay';
+import PuzzleThemes from './pages/PuzzleThemes';
+import PuzzleLevels from './pages/PuzzleLevels';
 import GroupDetail from './pages/GroupDetail';
 import CreateGroup from './pages/CreateGroup';
 import GroupMembers from './pages/GroupMembers';
@@ -419,6 +421,8 @@ const App = () => {
                 <Stack.Screen name="Battle" component={BattleScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizPlay" component={QuizPlay} options={{ headerShown: false }} />
                 <Stack.Screen name="PuzzlePlay" component={PuzzlePlayWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="PuzzleThemes" component={PuzzleThemesWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="PuzzleLevels" component={PuzzleLevelsWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="GroupDetail" component={GroupDetail} />
                 <Stack.Screen name="CreateGroup" component={CreateGroup} />
                 <Stack.Screen name="GroupMembers" component={GroupMembers} options={{ title: 'Group Members' }}/>
@@ -567,6 +571,28 @@ const PuzzlePlayWrapper = ({ navigation, route }) => (
     </View>
     <ErrorBoundary fallbackMessage="The puzzle couldn't load.">
       <PuzzlePlay navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+// The puzzle's themes and levels map: the game's backdrop, and the app's
+// header — these are pages you pass through, not a board to fit.
+const PuzzleThemesWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <QuizBackdrop />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="The puzzle themes couldn't load.">
+      <PuzzleThemes navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const PuzzleLevelsWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <QuizBackdrop />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="The levels couldn't load.">
+      <PuzzleLevels navigation={navigation} route={route} />
     </ErrorBoundary>
   </View>
 );

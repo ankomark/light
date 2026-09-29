@@ -19,9 +19,9 @@ import random
 import re
 from collections import Counter
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
-from django.db.models import Count
+from django.db.models import Count, Max
 
 from .models import BibleVerse, BibleWord, PuzzleProgress, PuzzleTheme, WordPuzzle
 
@@ -73,6 +73,27 @@ def answer_floor(level):
     """How common a word must be to be an answer at this level."""
     reached = min(1.0, max(0, level - 1) / float(FLOOR_REACHED_AT))
     return int(round(EARLY_FREQUENCY + (ANSWER_MIN_FREQUENCY - EARLY_FREQUENCY) * reached))
+
+
+# Stars for a finished board, by how much help it took. A whole word is worth
+# three letters, which is roughly what it costs (15 coins against 5).
+WORD_HINT_WEIGHT = 3
+
+
+def help_used(progress):
+    """Letters bought, plus three for every word bought."""
+    return (progress.hints_used or 0) * WORD_HINT_WEIGHT + (progress.letters_used or 0)
+
+
+def stars_for(progress):
+    """3 with no help, 2 with a little (up to a word's worth), 1 otherwise;
+    0 for a board not finished."""
+    if not (progress and progress.is_complete):
+        return 0
+    used = help_used(progress)
+    if used == 0:
+        return 3
+    return 2 if used <= WORD_HINT_WEIGHT else 1
 
 
 def _seed_for(theme_slug, level):
@@ -243,25 +264,28 @@ def _plan(user):
         return [], None, {}
 
     options = []
-    started = (PuzzleProgress.objects
-               .filter(user=user, is_complete=False)
+    # The Daily Puzzle is its own thing: never resumed as the next level,
+    # never counted toward a theme.
+    mine = PuzzleProgress.objects.filter(user=user, puzzle__day__isnull=True)
+    started = (mine.filter(is_complete=False)
                .select_related('puzzle', 'puzzle__theme')
                .order_by('-started_at')
                .first())
     if started and started.puzzle.theme.is_active:
         options.append((started.puzzle.theme, started.puzzle.level))
 
-    done = PuzzleProgress.objects.filter(user=user, is_complete=True)
-    per_theme = dict(
-        done.values_list('puzzle__theme')
-            .annotate(n=Count('id'))
-            .values_list('puzzle__theme', 'n')
-    )
+    rows = (mine.filter(is_complete=True)
+            .values('puzzle__theme')
+            .annotate(n=Count('id'), top=Max('puzzle__level')))
+    per_theme = {r['puzzle__theme']: r['n'] for r in rows}
+    furthest = {r['puzzle__theme']: r['top'] for r in rows}
 
     # Rotate the running order by how much has been finished overall.
     turn = sum(per_theme.values()) % len(themes)
     for theme in themes[turn:] + themes[:turn]:
-        level = per_theme.get(theme.id, 0) + 1
+        # On from the furthest level finished: a level picked from the map
+        # out of order must not send the player back over old ground.
+        level = furthest.get(theme.id, 0) + 1
         if (theme, level) not in options:
             options.append((theme, level))
     return options, started, per_theme
@@ -522,11 +546,45 @@ def generate(theme, level, force=False):
     Raises ValueError when the theme cannot produce a workable set of letters —
     better than a level with two answers that still pays a completion bonus.
     """
-    existing = WordPuzzle.objects.filter(theme=theme, level=level).first()
+    existing = WordPuzzle.objects.filter(theme=theme, level=level, day__isnull=True).first()
     if existing and not force:
         return backfill(existing)
-
     rng = random.Random(_seed_for(theme.slug, level))
+    return _build(theme, level, rng, existing=existing)
+
+
+# The Daily Puzzle's difficulty: past the first easy boards, well short of hard.
+DAILY_LEVEL = 8
+
+
+def daily_puzzle(day):
+    """The board for `day`, the same for everyone: built on first ask.
+
+    The theme turns with the date, so the week is not seven Gospels boards;
+    a theme that will not build is passed over for the next.
+    """
+    existing = WordPuzzle.objects.filter(day=day).select_related('theme', 'verse').first()
+    if existing:
+        return backfill(existing)
+    themes = list(PuzzleTheme.objects.filter(is_active=True))
+    if not themes:
+        raise ValueError('No puzzle themes are active.')
+    start = day.toordinal() % len(themes)
+    failure = None
+    for theme in themes[start:] + themes[:start]:
+        rng = random.Random(_seed_for(f'daily:{day.isoformat()}', DAILY_LEVEL))
+        try:
+            return _build(theme, DAILY_LEVEL, rng, day=day)
+        except ValueError as exc:
+            failure = exc
+        except IntegrityError:
+            # Someone else built it a moment ago.
+            return backfill(WordPuzzle.objects.get(day=day))
+    raise ValueError(str(failure))
+
+
+def _build(theme, level, rng, existing=None, day=None):
+    """Lay out one board for `theme` at `level`'s difficulty and keep it."""
     target_len = level_base_length(level)
     wanted = level_answer_count(level)
     floor = answer_floor(level)
@@ -581,7 +639,7 @@ def generate(theme, level, force=False):
                 theme=theme, level=level, letters=letters,
                 size=max(len(grid), len(grid[0]) if grid else 0),
                 grid=grid, placements=shifted,
-                bonus_words=bonus, verse=verse,
+                bonus_words=bonus, verse=verse, day=day,
             )
 
     raise ValueError(

@@ -26,13 +26,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  fetchPuzzleLevel, fetchNextPuzzle, claimPuzzleWord, buyPuzzleHint, buyPuzzleLetter,
-  fetchCoinWallet,
+  fetchPuzzleLevel, fetchNextPuzzle, fetchDailyPuzzle, claimPuzzleWord, buyPuzzleHint,
+  buyPuzzleLetter, fetchCoinWallet,
 } from '../services/api';
+import { quizLanguage } from '../utils/quizCache';
+import { dailyKey } from './PuzzleThemes';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import { peekCache, writeCache, userKey } from '../utils/screenCache';
-import { applyFind } from '../utils/puzzleKeys';
+import { applyFind, starsFor } from '../utils/puzzleKeys';
 import { BIBLE_BOOKS } from '../utils/bibleVersions';
 import ShareCardSheet from '../components/ShareCardSheet';
 import PuzzleShareCard, { puzzleMessage, starText } from '../components/PuzzleShareCard';
@@ -44,7 +46,7 @@ import {
   bonusFeedback, tickFeedback, playLoop, stopLoop, unload as unloadSound,
 } from '../services/quizSound';
 import {
-  Coin, Coins, quizStyles as q, DISPLAY, DISPLAY_MID, SERIF_BOLD,
+  Coin, Coins, quizStyles as q, mmss, DISPLAY, DISPLAY_MID, SERIF_BOLD,
   GOLD, PARCHMENT, MUTED, INK, RIGHT,
 } from './quizTheme';
 
@@ -63,11 +65,14 @@ const TILE_MAX = 38;        // a tile is never bigger than this
 const TILE_MIN = 15;        // nor smaller — below this a letter stops reading
 
 const PuzzlePlay = ({ navigation, route }) => {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { currentUser } = useAuth();
+  // The puzzle in the app's language: Swahili from the Swahili Bible, when
+  // the server has it; English otherwise.
+  const lang = quizLanguage(resolvedLanguage);
   // The level in hand, kept on the phone: opening the game shows it at once
   // and the server's copy replaces it a moment later.
-  const levelKey = userKey(currentUser?.id, 'puzzle:current');
+  const levelKey = userKey(currentUser?.id, lang === 'en' ? 'puzzle:current' : `puzzle:current:${lang}`);
   const { width, height } = useWindowDimensions();
   const { preferences, setPreference } = usePreferences();
   const soundOn = preferences?.[PREF_KEYS.quizSound] !== false;
@@ -75,12 +80,20 @@ const PuzzlePlay = ({ navigation, route }) => {
 
   // Params are honoured when something deep-links a specific level, but the
   // ordinary way in is with none: the server decides what comes next.
+  // `daily` is today's Daily Puzzle; `theme` + `level` a level off the map.
   const asked = route?.params || {};
-  const [pick, setPick] = useState(
-    asked.theme ? { theme: asked.theme, level: asked.level || 1 } : null,
-  );
+  const pickFrom = (params) => (params.daily ? { daily: true }
+    : params.theme ? { theme: params.theme, level: Number(params.level) || 1 } : null);
+  const [pick, setPick] = useState(() => pickFrom(asked));
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
 
-  const kept = asked.theme ? null : peekCache(levelKey);
+  // Where a board is kept on the phone: the level in hand, or today's daily
+  // one. A level picked off the map is not kept — the map has it.
+  const keyFor = useCallback((choice) => (choice?.daily ? dailyKey(currentUser?.id, lang)
+    : choice ? null : levelKey), [currentUser?.id, lang, levelKey]);
+
+  const kept = keyFor(pick) ? peekCache(keyFor(pick)) : null;
   const [puzzle, setPuzzle] = useState(kept);
   const [loading, setLoading] = useState(!kept);
   const [error, setError] = useState('');
@@ -156,8 +169,10 @@ const PuzzlePlay = ({ navigation, route }) => {
       setBalance(data.wallet.balance);
       setStreak(data.wallet);
     }
-    if (keep && !data.is_complete) writeCache(levelKey, data);
-  }, [levelKey]);
+    const key = keyFor(pickRef.current);
+    // The daily board is kept finished too: the themes screen shows its time.
+    if (keep && key && (!data.is_complete || pickRef.current?.daily)) writeCache(key, data);
+  }, [keyFor]);
 
   const load = useCallback(async (choice) => {
     setError('');
@@ -175,28 +190,41 @@ const PuzzlePlay = ({ navigation, route }) => {
       setLoading(false);
       return;
     }
-    const current = !choice && peekCache(levelKey);
+    const key = keyFor(choice);
+    const current = key && peekCache(key);
     if (current) show(current, { keep: false }); else setLoading(true);
     try {
-      const data = choice
-        ? await fetchPuzzleLevel(choice.theme, choice.level)
-        : await fetchNextPuzzle();
+      const data = choice?.daily ? await fetchDailyPuzzle(lang)
+        : choice ? await fetchPuzzleLevel(choice.theme, choice.level, lang)
+          : await fetchNextPuzzle(lang);
       show(data);
     } catch {
       if (!current) setError(t('puzzle.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [t, show, levelKey]);
+  }, [t, show, keyFor, lang]);
 
   // `round` is what makes "next" work when there is no pick to change:
   // bumping it re-runs the effect, so exactly one request goes out either way.
   const [round, setRound] = useState(0);
   useEffect(() => { load(pick); }, [load, pick, round]);
 
-  /** Finished — ask for whatever comes next, theme included. */
+  // New orders from the themes screen or the map, for the board already open.
+  const firstNonce = useRef(asked.nonce);
+  useEffect(() => {
+    if (asked.nonce === undefined || asked.nonce === firstNonce.current) return;
+    firstNonce.current = asked.nonce;
+    upcoming.current = null;
+    setPick(pickFrom(asked));
+    setRound((n) => n + 1);
+  }, [asked.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Finished — on to the next: the theme's next level for one picked off
+   *  the map, otherwise whatever the server chooses. */
   const advance = () => {
-    setPick(null);
+    const was = pickRef.current;
+    setPick(was?.theme && puzzle ? { theme: was.theme, level: puzzle.level + 1 } : null);
     setRound((n) => n + 1);
   };
   useEffect(() => {
@@ -353,18 +381,25 @@ const PuzzlePlay = ({ navigation, route }) => {
           setFlash({ word: t('puzzle.solved'), coins: res.completion_bonus });
           setTimeout(() => setFlash(null), 1800);
         }
-        if (res.verse) setPuzzle((prev) => (prev && prev.id === id ? { ...prev, verse: res.verse } : prev));
-        if (finishing || res.is_complete) {
-          fetchNextPuzzle().then((next) => { upcoming.current = next; }).catch(() => {});
+        if (res.verse || res.seconds != null) {
+          setPuzzle((prev) => (prev && prev.id === id ? {
+            ...prev,
+            ...(res.verse ? { verse: res.verse } : {}),
+            ...(res.seconds != null ? { seconds: res.seconds, stars: res.stars } : {}),
+          } : prev));
+        }
+        if ((finishing || res.is_complete) && !pickRef.current?.theme) {
+          fetchNextPuzzle(lang).then((next) => { upcoming.current = next; }).catch(() => {});
         }
       })
       .catch(() => { /* offline: the board is right when the level is next read */ });
-  }, [puzzle?.id, t]);
+  }, [puzzle?.id, t, lang]);
 
   // Whatever changes on the board is kept, so reopening shows it as it stood.
   useEffect(() => {
-    if (puzzle && !puzzle.is_complete && !asked.theme) writeCache(levelKey, puzzle);
-  }, [puzzle, levelKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const key = keyFor(pickRef.current);
+    if (puzzle && key && (!puzzle.is_complete || pickRef.current?.daily)) writeCache(key, puzzle);
+  }, [puzzle, keyFor]);
 
   // The verse in its chapter, in the reader's own Bible, opened at the verse.
   const readInBible = () => {
@@ -451,6 +486,7 @@ const PuzzlePlay = ({ navigation, route }) => {
           found: res.found,
           revealed: [...(prev.revealed || []), res.placement],
           is_complete: res.is_complete,
+          ...(res.is_complete ? { stars: res.stars ?? starsFor(prev), seconds: res.seconds } : {}),
         }));
         // The server sends what was earned, not the whole purse — counting
         // the purse cost four queries a word. Add the delta to what is already
@@ -691,9 +727,13 @@ const PuzzlePlay = ({ navigation, route }) => {
   const verseBook = verse?.book_number ? BIBLE_BOOKS[verse.book_number - 1]?.id : null;
   const shareLine = [
     starText(puzzle.stars),
-    t('puzzle.share.words', { count: puzzle.slots.length }),
+    puzzle.day && puzzle.seconds != null
+      ? mmss(puzzle.seconds)
+      : t('puzzle.share.words', { count: puzzle.slots.length }),
   ].filter(Boolean).join('  ·  ');
-  const shareTitle = `${puzzle.theme?.name} · ${t('puzzle.level', { level: puzzle.level })}`;
+  const shareTitle = puzzle.day
+    ? `${t('puzzle.daily.title')} · ${puzzle.day}`
+    : `${puzzle.theme?.name} · ${t('puzzle.level', { level: puzzle.level })}`;
 
   return (
     <View style={q.rootClear}>
@@ -712,14 +752,27 @@ const PuzzlePlay = ({ navigation, route }) => {
             <Ionicons name="chevron-back" size={24} color={PARCHMENT} />
           </TouchableOpacity>
           <View style={styles.barMid}>
-            <Text style={styles.barTitle} numberOfLines={1}>{puzzle.theme?.name}</Text>
+            <Text style={styles.barTitle} numberOfLines={1}>
+              {puzzle.day ? t('puzzle.daily.title') : puzzle.theme?.name}
+            </Text>
             <Text style={q.eyebrow} accessibilityLabel={boardLabel}>
-              {t('puzzle.level', { level: puzzle.level })}
-              {!!puzzle.band && <Text style={styles.band}> · {t(`puzzle.band.${puzzle.band}`)}</Text>}
+              {puzzle.day
+                ? puzzle.theme?.name
+                : t('puzzle.level', { level: puzzle.level })}
+              {!puzzle.day && !!puzzle.band && <Text style={styles.band}> · {t(`puzzle.band.${puzzle.band}`)}</Text>}
               {' · '}{found.length}/{puzzle.slots.length}
             </Text>
           </View>
           <View style={styles.headerRight}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PuzzleThemes')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={t('puzzle.themes.title')}
+              testID="puzzle-themes-open"
+            >
+              <Ionicons name="grid-outline" size={19} color={PARCHMENT} />
+            </TouchableOpacity>
             {streak?.day_streak > 0 && (
               <View
                 style={styles.streak}
@@ -809,11 +862,25 @@ const PuzzlePlay = ({ navigation, route }) => {
               </View>
             ))}
           </View>
-          {!!puzzle.verse && (
-            <View style={styles.verseCard}>
-              <Text style={q.eyebrow}>{t('puzzle.verseTitle')}</Text>
-              <Text style={styles.verseText}>{puzzle.verse.text}</Text>
-              <Text style={styles.verseRef}>{puzzle.verse.reference}</Text>
+          {/* A finished board: how it was won, the verse it came from, and
+              what can be done with it. */}
+          {(puzzle.is_complete || !!puzzle.verse) && (
+            <View style={styles.verseCard} testID="puzzle-solved">
+              {!!puzzle.stars && (
+                <Text style={styles.stars} accessibilityLabel={t('puzzle.starsOf', { count: puzzle.stars })}>
+                  {starText(puzzle.stars)}
+                </Text>
+              )}
+              {puzzle.seconds != null && !!puzzle.day && (
+                <Text style={styles.solvedIn}>{t('puzzle.daily.time', { time: mmss(puzzle.seconds) })}</Text>
+              )}
+              {!!puzzle.verse && (
+                <>
+                  <Text style={q.eyebrow}>{t('puzzle.verseTitle')}</Text>
+                  <Text style={styles.verseText}>{puzzle.verse.text}</Text>
+                  <Text style={styles.verseRef}>{puzzle.verse.reference}</Text>
+                </>
+              )}
               <View style={styles.verseActions}>
                 {!!verseBook && (
                   <TouchableOpacity
@@ -1123,6 +1190,8 @@ const styles = StyleSheet.create({
     backgroundColor: GOLD,
   },
   linkLoose: { opacity: 0.55 },
+  stars: { fontSize: 22, letterSpacing: 4, color: GOLD },
+  solvedIn: { fontFamily: DISPLAY_MID, fontSize: 12, letterSpacing: 1, color: PARCHMENT },
   roundBtn: {
     width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.18)',

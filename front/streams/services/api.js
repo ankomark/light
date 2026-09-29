@@ -1224,12 +1224,24 @@ export const fetchQuizBests = async () => apiRequest('get', '/quiz-sessions/best
 // grid comes down without the answers: a word is claimed by sending the two
 // ends of the drag, and the server reads its own grid to decide.
 
-export const fetchPuzzleLevel = async (theme, level = 1) =>
-  apiRequest('get', `/puzzles/level/?theme=${encodeURIComponent(theme)}&level=${level}`);
+const langQuery = (lang, sep = '?') => (lang && lang !== 'en' ? `${sep}lang=${lang}` : '');
+
+export const fetchPuzzleLevel = async (theme, level = 1, lang) =>
+  apiRequest('get', `/puzzles/level/?theme=${encodeURIComponent(theme)}&level=${level}${langQuery(lang, '&')}`);
 
 // The level to play now, chosen by the server. Takes no theme on purpose:
 // which subject comes next is not the client's decision.
-export const fetchNextPuzzle = async () => apiRequest('get', '/puzzles/next/');
+export const fetchNextPuzzle = async (lang) => apiRequest('get', `/puzzles/next/${langQuery(lang)}`);
+
+// Today's Daily Puzzle, the same board for everyone. Opening it starts the clock.
+export const fetchDailyPuzzle = async (lang) => apiRequest('get', `/puzzles/daily/${langQuery(lang)}`);
+
+// The themes, with how far this player has got in each and the stars won.
+export const fetchPuzzleThemes = async (lang) => apiRequest('get', `/puzzle-themes/${langQuery(lang)}`);
+
+// One theme's levels map: { theme, levels: [{ level, stars, is_complete }], next_level }.
+export const fetchPuzzleLevels = async (slug, lang) =>
+  apiRequest('get', `/puzzle-themes/${encodeURIComponent(slug)}/levels/${langQuery(lang)}`);
 
 export const claimPuzzleWord = async (puzzleId, word) =>
   apiRequest('post', `/puzzles/${puzzleId}/found/`, { word });
@@ -2237,6 +2249,9 @@ export default {
   fetchQuizStats,
   fetchPuzzleLevel,
   fetchNextPuzzle,
+  fetchDailyPuzzle,
+  fetchPuzzleThemes,
+  fetchPuzzleLevels,
   claimPuzzleWord,
   buyPuzzleHint,
   buyPuzzleLetter,
