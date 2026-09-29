@@ -309,9 +309,13 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         level, this_level, next_level = level_for(earned)
         span = max(1, next_level - this_level)
 
+        from ..quiz_progress import freeze_offer
+
         return Response({
             # What they have to spend.
             'total_coins': balance,
+            # A streak broken yesterday that coins can still buy back.
+            'freeze': freeze_offer(request.user),
             'coins_earned': earned,
             'coins_spent': spent,
             'daily_coins': daily['coins'] or 0,
@@ -331,6 +335,23 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             'best_day': daily['best_day'] or 0,
             'best_run': max(daily['best_run'] or 0, practice['best_run'] or 0),
         })
+
+    @action(detail=False, methods=['get'])
+    def progress(self, request):
+        """History, the calendar, badges, strengths and the freeze offer — the
+        progress screen in one request."""
+        from ..quiz_progress import progress_for
+        return Response(progress_for(request.user))
+
+    @action(detail=False, methods=['post'])
+    def freeze(self, request):
+        """Buy back yesterday: coins spent, the day streak restored."""
+        from ..quiz_progress import FreezeRefused, buy_freeze
+        try:
+            streak = buy_freeze(request.user)
+        except FreezeRefused as refused:
+            return Response({'code': refused.code}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(streak, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get'], url_path='my-history')
     def my_history(self, request):

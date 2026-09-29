@@ -83,6 +83,7 @@ import Studios from './pages/Studios';
 import GroupList from './pages/GroupList';
 import BibleQuiz from './pages/BibleQuiz';
 import QuizHome from './pages/QuizHome';
+import QuizProgress from './pages/QuizProgress';
 import QuizPlay from './pages/QuizPlay';
 import PuzzlePlay from './pages/PuzzlePlay';
 import GroupDetail from './pages/GroupDetail';
@@ -406,6 +407,7 @@ const App = () => {
                 <Stack.Screen name="Communities" component={CommunityListWrapper} />
                 <Stack.Screen name="BibleQuiz" component={BibleQuiz} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizHome" component={QuizHomeWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="QuizProgress" component={QuizProgressWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizPlay" component={QuizPlay} options={{ headerShown: false }} />
                 <Stack.Screen name="PuzzlePlay" component={PuzzlePlayWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="GroupDetail" component={GroupDetail} />
@@ -475,6 +477,17 @@ const App = () => {
 // else — reached from the hamburger menu, they should not feel like a separate
 // app. The play screens stay full-screen: mid-question is no place for app
 // chrome, so they draw their own wallpaper and their own compact bar.
+// The same backdrop and header as the quiz hub it opens from.
+const QuizProgressWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Your progress couldn't load.">
+      <QuizProgress navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
 const QuizHomeWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
     <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />

@@ -1153,6 +1153,12 @@ export const fetchQuizHistory = async () => apiRequest('get', '/quiz/my-history/
 // level they add up to, with the bar fraction already worked out.
 export const fetchQuizStats = async () => apiRequest('get', '/quiz/stats/');
 
+// The progress screen: history, calendar, badges, strengths, freeze offer.
+export const fetchQuizProgress = async () => apiRequest('get', '/quiz/progress/');
+
+// Buy back yesterday: spends coins, restores the day streak.
+export const buyStreakFreeze = async () => apiRequest('post', '/quiz/freeze/', {});
+
 // ── Practice modes (Speed Quiz, Streak) ──────────────────────────────────────
 // Personal runs, answered one question at a time: Streak has to know the moment
 // you are wrong, and Speed times each question separately. The server holds the

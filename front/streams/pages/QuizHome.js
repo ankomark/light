@@ -5,13 +5,14 @@
  * Speed and Streak sit below it as practice you can return to, each showing
  * your own best so there is something to beat.
  */
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { fetchDailyQuiz, fetchQuizBests, fetchQuizStats } from '../services/api';
+import { fetchDailyQuiz, fetchQuizBests, fetchQuizStats, buyStreakFreeze } from '../services/api';
+import { confirmAction, notify } from '../utils/adminConfirm';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import useCachedData from '../utils/useCachedData';
@@ -48,6 +49,31 @@ const QuizHome = ({ navigation }) => {
     bestsData.reload();
     statsData.reload();
   }, [dailyData.reload, bestsData.reload, statsData.reload])); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A day streak that broke yesterday can be bought back with coins, once a
+  // week — offered here, where the streak is shown.
+  const freeze = stats?.freeze;
+  const [freezing, setFreezing] = useState(false);
+  const restore = async () => {
+    const go = await confirmAction({
+      title: t('quiz.freeze.confirmTitle', { count: freeze.run }),
+      message: t('quiz.freeze.confirmBody', { cost: freeze.cost }),
+      confirmLabel: t('quiz.freeze.restore'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!go) return;
+    setFreezing(true);
+    try {
+      await buyStreakFreeze();
+      notify(t('quiz.freeze.doneTitle'), t('quiz.freeze.doneBody', { count: freeze.run + 1 }));
+    } catch (e) {
+      const code = e?.response?.data?.code || e?.data?.code;
+      notify(t('common.error'), t(code === 'not_enough_coins' ? 'quiz.freeze.noCoins' : 'quiz.freeze.gone'));
+    } finally {
+      setFreezing(false);
+      statsData.reload();
+    }
+  };
 
   const played = !!daily?.my_attempt;
   const nothingYet = !dailyData.data && !bests && !stats;
@@ -136,6 +162,46 @@ const QuizHome = ({ navigation }) => {
                   <Text style={q.eyebrow}>{t('quiz.stats.bestRun')}</Text>
                 </View>
               </View>
+            </View>
+          )}
+
+          {!!stats && (
+            <TouchableOpacity
+              style={styles.progressLink}
+              onPress={() => navigation.navigate('QuizProgress')}
+              accessibilityRole="button"
+            >
+              <Ionicons name="stats-chart" size={15} color={GOLD} />
+              <Text style={styles.progressLinkText}>{t('quiz.progress.title')}</Text>
+              <Ionicons name="chevron-forward" size={16} color={MUTED} />
+            </TouchableOpacity>
+          )}
+
+          {!!freeze?.available && (
+            <View style={styles.freezeCard} testID="freeze-offer">
+              <View style={styles.freezeTop}>
+                <Ionicons name="snow" size={18} color={ICE} />
+                <Text style={styles.freezeTitle}>{t('quiz.freeze.title', { count: freeze.run })}</Text>
+              </View>
+              <Text style={styles.freezeBody}>{t('quiz.freeze.body', { cost: freeze.cost })}</Text>
+              <TouchableOpacity
+                style={[styles.freezeBtn, (!freeze.affordable || freezing) && styles.freezeBtnOff]}
+                onPress={restore}
+                disabled={!freeze.affordable || freezing}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !freeze.affordable || freezing }}
+              >
+                {freezing ? <ActivityIndicator size="small" color={INK} /> : (
+                  <>
+                    <Coin size={16} />
+                    <Text style={styles.freezeBtnText}>
+                      {freeze.affordable
+                        ? t('quiz.freeze.restoreFor', { cost: freeze.cost })
+                        : t('quiz.freeze.short', { count: freeze.cost - freeze.balance })}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           )}
 
@@ -239,8 +305,31 @@ const ModeCard = ({ icon, title, body, best, bestLabel, bestValue, coins, onPres
   </TouchableOpacity>
 );
 
+const ICE = '#8EC5FF';
+
 const styles = StyleSheet.create({
   scroll: { padding: 20, paddingBottom: 40, gap: 12 },
+
+  progressLink: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 16,
+    borderRadius: 14, backgroundColor: '#05080E',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  progressLinkText: { flex: 1, fontFamily: DISPLAY_MID, fontSize: 12.5, letterSpacing: 0.6, color: PARCHMENT },
+
+  freezeCard: {
+    padding: 16, gap: 8, borderRadius: 16, backgroundColor: '#05080E',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(142,197,255,0.45)',
+  },
+  freezeTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  freezeTitle: { flex: 1, fontFamily: SERIF_BOLD, fontSize: 16, color: PARCHMENT },
+  freezeBody: { fontSize: 13, lineHeight: 19, color: '#A9BCD0' },
+  freezeBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    minHeight: 46, borderRadius: 23, backgroundColor: ICE, marginTop: 4,
+  },
+  freezeBtnOff: { opacity: 0.5 },
+  freezeBtnText: { fontFamily: DISPLAY, fontSize: 12.5, letterSpacing: 0.8, color: INK },
 
   // Near-black rather than the translucent white the other cards use: the two
   // headline cards sit forward of the navy wash instead of floating on it.

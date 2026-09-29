@@ -3068,7 +3068,8 @@ class CoinSpend(models.Model):
     be reconciled against what they earned and what they spent.
     """
     HINT = 'hint'
-    REASON_CHOICES = ((HINT, 'Puzzle hint'),)
+    FREEZE = 'freeze'
+    REASON_CHOICES = ((HINT, 'Puzzle hint'), (FREEZE, 'Streak freeze'))
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='coin_spends')
     amount = models.PositiveIntegerField()
@@ -3099,6 +3100,10 @@ class PlayDay(models.Model):
     """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='play_days')
     date = models.DateField()
+    # A day not played but paid for with coins (a streak freeze), so a streak
+    # survives one missed day. It counts toward the streak like any other; the
+    # calendar shows it differently. See songs/quiz_progress.py.
+    frozen = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('user', 'date')
