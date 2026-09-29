@@ -31,6 +31,8 @@ import {
   pageFeedback, streakFeedback, unload as unloadSound,
 } from '../services/quizSound';
 import BottomSheet from '../components/BottomSheet';
+import ShareCardSheet from '../components/ShareCardSheet';
+import QuizResultCard, { resultMessage } from '../components/QuizResultCard';
 import useReducedMotion from '../utils/useReducedMotion';
 import { parseReference } from '../utils/dailyVerseText';
 import { loadDraft, saveDraft, clearDraft } from '../utils/quizDraft';
@@ -96,9 +98,32 @@ const BibleQuiz = ({ navigation }) => {
   const questionShownAt = useRef(Date.now());
   const spent = useRef({});
 
+  // Which board: today, this week or all time; everyone or the people you
+  // follow. Read through refs so a tab change reloads the board only.
+  const [boardPeriod, setBoardPeriod] = useState('today');
+  const [boardScope, setBoardScope] = useState('everyone');
+  const boardWanted = useRef({ period: 'today', scope: 'everyone' });
+  boardWanted.current = { period: boardPeriod, scope: boardScope };
   const loadBoard = useCallback(async () => {
-    try { setBoard(await fetchQuizLeaderboard()); } catch { /* a nicety, not the quiz */ }
+    const wanted = { ...boardWanted.current };
+    try {
+      const data = await fetchQuizLeaderboard(undefined, wanted);
+      // A slower answer for a tab since left must not overwrite the one shown.
+      const now = boardWanted.current;
+      if (now.period === wanted.period && now.scope === wanted.scope) setBoard(data);
+    } catch { /* a nicety, not the quiz */ }
   }, []);
+
+  // Sharing the result, and a word when something happened (copied, saved).
+  const [sharing, setSharing] = useState(false);
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef(null);
+  const showToast = useCallback((text) => {
+    clearTimeout(toastTimer.current);
+    setToast(text);
+    toastTimer.current = setTimeout(() => setToast(''), 1900);
+  }, []);
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   const dailyKey = quizKeys(currentUser?.id).daily;
 
@@ -333,6 +358,17 @@ const BibleQuiz = ({ navigation }) => {
     return () => value.removeListener(id);
   }, [outcome, reduceMotion]);
 
+  // A tab changed: that board, and only it.
+  const showingResult = !!outcome || !!quiz?.my_attempt;
+  const tabsTouched = useRef(false);
+  useEffect(() => {
+    // The first run is the mount: the board is already being fetched then.
+    if (!tabsTouched.current) { tabsTouched.current = true; return; }
+    if (!showingResult) return;
+    setBoard(null);
+    loadBoard();
+  }, [boardPeriod, boardScope]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── loading / error ───────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -420,24 +456,77 @@ const BibleQuiz = ({ navigation }) => {
             </View>
             <Text style={styles.timeNote}>{t('quiz.tookTime', { time: mmss(seconds) })}</Text>
 
-            {!!board?.results?.length && (
-              <View style={styles.boardCard}>
-                <Text style={styles.eyebrow}>{t('quiz.leaderboard')}</Text>
-                {board.results.slice(0, 8).map((row, i) => {
-                  const isMe = row.user?.username === currentUser?.username;
-                  return (
-                    <View style={[styles.boardRow, isMe && styles.boardRowMe]} key={row.id}>
-                      <Text style={[styles.boardRank, isMe && styles.goldText]}>{i + 1}</Text>
-                      <Text style={[styles.boardName, isMe && styles.boardNameMe]} numberOfLines={1}>
-                        {row.user?.username}
-                      </Text>
-                      <Text style={styles.boardCorrect}>{row.score}/{row.total}</Text>
-                      <Coins value={row.points} size={19} textSize={15} />
-                    </View>
-                  );
-                })}
+            <View style={styles.boardCard}>
+              <Text style={styles.eyebrow}>{t('quiz.leaderboard')}</Text>
+              <View style={styles.tabs} accessibilityRole="tablist">
+                {['today', 'week', 'all'].map((p) => (
+                  <TouchableOpacity
+                    key={p}
+                    style={[styles.tab, boardPeriod === p && styles.tabOn]}
+                    onPress={() => setBoardPeriod(p)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: boardPeriod === p }}
+                  >
+                    <Text style={[styles.tabText, boardPeriod === p && styles.tabTextOn]}>
+                      {t(`quiz.board.${p}`)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
-            )}
+              <View style={styles.scopes}>
+                {['everyone', 'following'].map((sc) => (
+                  <TouchableOpacity
+                    key={sc}
+                    style={[styles.scope, boardScope === sc && styles.scopeOn]}
+                    onPress={() => setBoardScope(sc)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: boardScope === sc }}
+                  >
+                    <Text style={[styles.scopeText, boardScope === sc && styles.tabTextOn]}>
+                      {t(`quiz.board.${sc}`)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {!board ? (
+                <ActivityIndicator color={GOLD} style={styles.boardLoading} />
+              ) : !board.results?.length ? (
+                <Text style={styles.boardEmpty}>
+                  {t(boardScope === 'following' ? 'quiz.board.emptyFollowing' : 'quiz.board.empty')}
+                </Text>
+              ) : (
+                <>
+                  {board.results.slice(0, 8).map((row, i) => {
+                    const isMe = row.user?.username === currentUser?.username;
+                    return (
+                      <View style={[styles.boardRow, isMe && styles.boardRowMe]} key={row.id}>
+                        <Text style={[styles.boardRank, isMe && styles.goldText]}>{i + 1}</Text>
+                        <Text style={[styles.boardName, isMe && styles.boardNameMe]} numberOfLines={1}>
+                          {row.user?.username}
+                        </Text>
+                        <Text style={styles.boardCorrect}>
+                          {boardPeriod === 'today'
+                            ? `${row.score}/${row.total}`
+                            : t('quiz.board.days', { count: row.days })}
+                        </Text>
+                        <Coins value={row.points} size={19} textSize={15} />
+                      </View>
+                    );
+                  })}
+                  {/* Below the eight shown: your own place, pinned. */}
+                  {!!board.me && board.me.rank > Math.min(8, board.results.length) && (
+                    <View style={[styles.boardRow, styles.boardRowMe, styles.boardRowPinned]}>
+                      <Text style={[styles.boardRank, styles.goldText]}>{board.me.rank}</Text>
+                      <Text style={[styles.boardName, styles.boardNameMe]} numberOfLines={1}>
+                        {currentUser?.username}
+                      </Text>
+                      <Text style={styles.boardCorrect}>{t('quiz.rankOf', { count: board.me.of })}</Text>
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
 
             {review.length > 0 && (
               <View style={styles.reviewBlock}>
@@ -495,15 +584,62 @@ const BibleQuiz = ({ navigation }) => {
 
             <TouchableOpacity
               style={[styles.primaryBtn, styles.fullBtn]}
+              onPress={() => setSharing(true)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+            >
+              <Ionicons name="share-social" size={16} color="#0A1628" />
+              <Text style={styles.primaryBtnText}>{t('quiz.share.button')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.ghostBtn, styles.fullBtn]}
               onPress={() => navigation.goBack()}
               activeOpacity={0.85}
+              accessibilityRole="button"
             >
-              <Text style={styles.primaryBtnText}>{t('common.done')}</Text>
+              <Text style={styles.ghostBtnText}>{t('common.done')}</Text>
             </TouchableOpacity>
             <Text style={styles.footNote}>{t('quiz.comeBackTomorrow')}</Text>
 
           </ScrollView>
         </SafeAreaView>
+
+        {!!toast && (
+          <View style={styles.toast} pointerEvents="none" accessibilityLiveRegion="polite">
+            <Text style={styles.toastText}>{toast}</Text>
+          </View>
+        )}
+
+        {(() => {
+          // The shape of the day, one mark a question, with no answers in it.
+          const marks = questions.map((qq) => !!reviewById[qq.id]?.correct);
+          const shared = {
+            title: t('quiz.title'),
+            day: formatQuizDay(quiz?.date),
+            score, total, points, marks,
+            coinsLabel: t('quiz.share.coins', { count: points }),
+            beatMe: t('quiz.share.beatMe'),
+          };
+          return (
+            <ShareCardSheet
+              visible={sharing}
+              onClose={() => setSharing(false)}
+              title={t('quiz.share.title')}
+              message={resultMessage(shared)}
+              onToast={showToast}
+              renderCard={(ref, width) => (
+                <QuizResultCard
+                  ref={ref}
+                  width={width}
+                  {...shared}
+                  band={t(`quiz.band.${band}`)}
+                  streak={streak}
+                  streakLabel={t('quiz.share.run', { count: streak })}
+                />
+              )}
+            />
+          );
+        })()}
       </View>
     );
   }
@@ -850,6 +986,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, borderRadius: 10,
   },
   boardRowMe: { backgroundColor: 'rgba(244,162,97,0.13)' },
+  boardRowPinned: { marginTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(244,162,97,0.3)' },
+  boardLoading: { marginVertical: 18 },
+  boardEmpty: { fontSize: 13, color: MUTED, textAlign: 'center', marginVertical: 14 },
+  tabs: {
+    flexDirection: 'row', padding: 3, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  tab: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
+  tabOn: { backgroundColor: 'rgba(244,162,97,0.18)' },
+  tabText: { fontFamily: DISPLAY_MID, fontSize: 11, letterSpacing: 0.6, color: MUTED },
+  tabTextOn: { color: GOLD },
+  scopes: { flexDirection: 'row', gap: 8, marginBottom: 2 },
+  scope: {
+    minHeight: 30, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 15,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  scopeOn: { borderColor: GOLD_DEEP, backgroundColor: 'rgba(244,162,97,0.10)' },
+  scopeText: { fontSize: 12, color: '#A9BCD0' },
+  ghostBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    minHeight: 52, paddingHorizontal: spacing.lg, borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  ghostBtnText: { fontFamily: DISPLAY, fontSize: 12, letterSpacing: 1, color: PARCHMENT, textTransform: 'uppercase' },
+  toast: {
+    position: 'absolute', bottom: 40, alignSelf: 'center',
+    paddingVertical: 9, paddingHorizontal: 16, borderRadius: 16,
+    backgroundColor: 'rgba(5,8,14,0.95)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.35)',
+  },
+  toastText: { fontSize: 13, color: PARCHMENT },
   boardRank: { fontFamily: DISPLAY_MID, fontSize: 14, color: MUTED, width: 18 },
   boardName: { flex: 1, fontSize: 14, color: '#C6CBD2' },
   boardNameMe: { color: '#F6E9D8', fontWeight: '800' },

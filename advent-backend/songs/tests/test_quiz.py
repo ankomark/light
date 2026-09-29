@@ -1011,3 +1011,85 @@ class QuizPhaseOneTests(APITestCase):
         res = self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(res.data['code'], 'already_played')
+
+
+class LeaderboardPeriodTests(APITestCase):
+    """Today, this week and all time; everyone or just the people you follow."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_corpus()
+
+    def setUp(self):
+        cache.clear()
+        forget_recorded_plays()
+        from songs.models import User
+        self.User = User
+        self.me = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.friend = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
+        self.stranger = User.objects.create_user('zed', 'z@x.com', 'pw12345!')
+        # `followers` holds who follows a person: mark follows ivy.
+        self.friend.followers.add(self.me)
+        self.today = timezone.localdate()
+
+    def _attempt(self, user, day, points, score=10):
+        from songs.models import QuizAttempt
+        quiz = DailyQuiz.objects.get_or_create(date=day)[0]
+        return QuizAttempt.objects.create(user=user, quiz=quiz, score=score, total=20, points=points)
+
+    def _board(self, **params):
+        self.client.force_authenticate(self.me)
+        q = '&'.join(f'{k}={v}' for k, v in params.items())
+        res = self.client.get(f'/api/quiz/leaderboard/?{q}')
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.content[:200])
+        return res.data
+
+    def names(self, board):
+        return [r['user']['username'] for r in board['results']]
+
+    def test_week_adds_up_the_days_from_monday(self):
+        monday = self.today - timedelta(days=self.today.weekday())
+        self._attempt(self.me, monday, 100)
+        if self.today != monday:                     # on a Monday there is only the one day
+            self._attempt(self.me, self.today, 50)
+        self._attempt(self.stranger, monday - timedelta(days=1), 900)   # last week: not counted
+        self._attempt(self.friend, self.today, 120)
+        board = self._board(period='week')
+        mine = next(r for r in board['results'] if r['user']['username'] == 'mark')
+        self.assertEqual(mine['points'], 150 if self.today != monday else 100)
+        self.assertNotIn('zed', self.names(board))
+
+    def test_all_time_counts_everything_and_ranks_me(self):
+        self._attempt(self.stranger, self.today - timedelta(days=40), 900)
+        self._attempt(self.me, self.today, 100)
+        self._attempt(self.friend, self.today, 50)
+        board = self._board(period='all')
+        self.assertEqual(self.names(board), ['zed', 'mark', 'ivy'])
+        self.assertEqual(board['me'], {'rank': 2, 'of': 3})
+        self.assertEqual(board['results'][1]['days'], 1)
+
+    def test_following_is_the_people_i_follow_and_me(self):
+        for u, p in ((self.stranger, 900), (self.me, 100), (self.friend, 50)):
+            self._attempt(u, self.today, p)
+        for period in ('today', 'week', 'all'):
+            board = self._board(period=period, scope='following')
+            self.assertEqual(set(self.names(board)), {'mark', 'ivy'}, period)
+            self.assertEqual(board['me']['rank'], 1, period)          # first among friends
+
+    def test_a_new_attempt_shows_on_the_week_at_once(self):
+        self._attempt(self.friend, self.today, 50)
+        self.assertEqual(self.names(self._board(period='week')), ['ivy'])   # now cached
+        questions = self.client.get('/api/quiz/today/').data['questions']
+        self.client.post('/api/quiz/submit/', {'answers': {str(q['id']): 0 for q in questions}}, format='json')
+        self.assertIn('mark', self.names(self._board(period='week')))
+
+    def test_an_unknown_period_is_refused(self):
+        self.client.force_authenticate(self.me)
+        self.assertEqual(self.client.get('/api/quiz/leaderboard/?period=year').status_code,
+                         status.HTTP_400_BAD_REQUEST)
+
+    def test_today_is_still_the_default(self):
+        self._attempt(self.me, self.today, 100)
+        board = self._board()
+        self.assertEqual(board['period'], 'today')
+        self.assertEqual(board['results'][0]['total'], 20)

@@ -1137,8 +1137,15 @@ export const submitDailyQuiz = async (answers, durationSeconds) =>
     duration_seconds: durationSeconds,
   });
 
-export const fetchQuizLeaderboard = async (day) =>
-  apiRequest('get', `/quiz/leaderboard/${day ? `?date=${day}` : ''}`);
+// period: 'today' (default) | 'week' | 'all'; scope: 'everyone' | 'following'.
+export const fetchQuizLeaderboard = async (day, { period, scope } = {}) => {
+  const q = [
+    day && `date=${encodeURIComponent(day)}`,
+    period && period !== 'today' && `period=${encodeURIComponent(period)}`,
+    scope === 'following' && 'scope=following',
+  ].filter(Boolean);
+  return apiRequest('get', `/quiz/leaderboard/${q.length ? `?${q.join('&')}` : ''}`);
+};
 
 export const fetchQuizHistory = async () => apiRequest('get', '/quiz/my-history/');
 

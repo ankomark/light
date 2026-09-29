@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,6 +19,7 @@ import {
   startQuizSession, answerQuizSession, finishQuizSession,
 } from '../services/api';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
@@ -30,10 +31,28 @@ import {
   GOLD, GOLD_DEEP, PARCHMENT, MUTED, INK, RIGHT, WRONG, DIFFICULTY_TINT, mmss,
 } from './quizTheme';
 
+/**
+ * A friend's challenge, from the link they sent (streams://quiz/speed?from=
+ * mark&score=180): whose it is and what to beat. Only what a link can be
+ * trusted with — a short name, a whole number — or nothing.
+ */
+export const challengeFrom = (params) => {
+  const from = String(params?.from || '').trim().slice(0, 30);
+  const score = Number(params?.score);
+  if (!from || !Number.isInteger(score) || score < 0 || score > 100000) return null;
+  return { from, score };
+};
+
+/** The link that challenges someone to beat `score` in `mode`. */
+export const challengeLink = (mode, username, score) =>
+  `streams://quiz/${mode}?from=${encodeURIComponent(username || '')}&score=${score}`;
+
 const QuizPlay = ({ navigation, route }) => {
   const { t } = useI18n();
   const { preferences, setPreference } = usePreferences();
   const mode = route?.params?.mode === 'streak' ? 'streak' : 'speed';
+  const { currentUser } = useAuth();
+  const challenge = challengeFrom(route?.params);
   const soundOn = preferences?.[PREF_KEYS.quizSound] !== false;
   const musicOn = preferences?.[PREF_KEYS.quizMusic] !== false;
 
@@ -197,6 +216,15 @@ const QuizPlay = ({ navigation, route }) => {
   // ── the run is over ───────────────────────────────────────────────────────
   if (finished) {
     const isStreak = mode === 'streak';
+    // What a challenge measures: coins in Speed, the run itself in Streak.
+    const mine = isStreak ? session.longest_streak : session.points;
+    const unit = t(isStreak ? 'quiz.challenge.inARow' : 'quiz.challenge.coins');
+    const sendChallenge = () => {
+      Share.share({
+        message: `${t('quiz.challenge.message', { score: mine, unit, mode: config.label })}\n${
+          challengeLink(mode, currentUser?.username, mine)}`,
+      }).catch(() => {});
+    };
     return (
       <View style={q.root}>
         <Backdrop />
@@ -233,9 +261,27 @@ const QuizPlay = ({ navigation, route }) => {
               </View>
             </View>
 
+            {!!challenge && (
+              <View style={[styles.verdict, mine > challenge.score && styles.verdictWon]}
+                    accessibilityLiveRegion="polite">
+                <Ionicons name={mine > challenge.score ? 'trophy' : 'flag-outline'} size={16} color={GOLD} />
+                <Text style={styles.verdictText}>
+                  {mine > challenge.score
+                    ? t('quiz.challenge.won', { name: challenge.from })
+                    : t('quiz.challenge.lost', { name: challenge.from, gap: challenge.score - mine + 1 })}
+                </Text>
+              </View>
+            )}
+
             <TouchableOpacity style={[q.primaryBtn, styles.wide]} onPress={begin} activeOpacity={0.85}>
               <Text style={q.primaryBtnText}>{t('quiz.playAgain')}</Text>
             </TouchableOpacity>
+            {mine > 0 && (
+              <TouchableOpacity style={[q.ghostBtn, styles.wide]} onPress={sendChallenge}
+                                activeOpacity={0.85} accessibilityRole="button">
+                <Text style={q.ghostBtnText}>{t('quiz.challenge.send')}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[q.ghostBtn, styles.wide]}
               onPress={() => navigation.goBack()}
@@ -268,6 +314,17 @@ const QuizPlay = ({ navigation, route }) => {
       <Backdrop />
       <SafeAreaView style={q.flex} edges={['top', 'bottom']}>
 
+        {!!challenge && (
+          <View style={styles.challengeBar}>
+            <Ionicons name="flag" size={13} color={GOLD} />
+            <Text style={styles.challengeText} numberOfLines={1}>
+              {t('quiz.challenge.beat', {
+                name: challenge.from, score: challenge.score,
+                unit: t(mode === 'streak' ? 'quiz.challenge.inARow' : 'quiz.challenge.coins'),
+              })}
+            </Text>
+          </View>
+        )}
         <View style={q.header}>
           <TouchableOpacity onPress={quit} style={q.iconBtn} hitSlop={10}>
             <Ionicons name="close" size={22} color="#7E8DA3" />
@@ -470,6 +527,20 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.08)',
   },
   wide: { alignSelf: 'stretch' },
+  challengeBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    marginHorizontal: 20, marginTop: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 14,
+    backgroundColor: 'rgba(244,162,97,0.12)',
+  },
+  challengeText: { fontFamily: DISPLAY_MID, fontSize: 11.5, letterSpacing: 0.4, color: GOLD },
+  verdict: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'stretch',
+    padding: 12, borderRadius: 14, marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  verdictWon: { backgroundColor: 'rgba(244,162,97,0.14)', borderColor: GOLD_DEEP },
+  verdictText: { flex: 1, fontSize: 14, color: PARCHMENT },
 
   overScroll: { padding: 24, paddingTop: 48, alignItems: 'center', gap: 10 },
   overTitle: { fontFamily: SERIF_BOLD, fontSize: 25, color: PARCHMENT, textAlign: 'center' },

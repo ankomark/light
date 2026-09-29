@@ -183,6 +183,8 @@ const linking = {
       Notice: 'notice/:id',
       // The home-screen verse widget opens here.
       DailyVerse: 'daily-verse',
+      // A friend's challenge: streams://quiz/speed?from=mark&score=180.
+      QuizPlay: 'quiz/:mode',
     },
   },
 };

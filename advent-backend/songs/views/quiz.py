@@ -4,7 +4,7 @@ There is no scheduler on this deploy, so the day's quiz is built on first
 request and then kept — everyone who plays that date gets the same twenty
 questions, which is what makes the leaderboard comparable.
 """
-from datetime import date as date_cls
+from datetime import date as date_cls, timedelta
 
 from django.db.models import Count, Max, Sum
 
@@ -69,6 +69,19 @@ def _read_answer(answers, question):
     if chosen is None or not (0 <= chosen < len(question.choices)):
         chosen = None
     return chosen, seconds
+
+
+BOARD_VERSION_KEY = 'quiz-board:version'
+
+
+def _board_version():
+    return cache.get(BOARD_VERSION_KEY) or 0
+
+
+def _bump_board_version():
+    """A new attempt changes the week and all-time boards: move every cached
+    one aside rather than finding and deleting each."""
+    cache.set(BOARD_VERSION_KEY, _board_version() + 1, None)
 
 
 class DailyQuizViewSet(viewsets.GenericViewSet):
@@ -161,6 +174,7 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             for row in rows:
                 row.attempt = attempt
             QuizAnswer.objects.bulk_create(rows)
+        _bump_board_version()
 
         return Response({
             'attempt': QuizAttemptSerializer(attempt).data,
@@ -173,24 +187,87 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['get'])
     def leaderboard(self, request):
-        """The day's board, ranked on points — difficulty and speed are part of
-        the achievement, so a careful 17 can outrank a lucky 17. Ties fall back
-        to correct answers, then time, then who finished first."""
-        quiz = DailyQuiz.objects.filter(date=self._day(request)).first()
-        if not quiz:
-            return Response({'date': self._day(request), 'results': [], 'me': None})
-        ranked = quiz.attempts.order_by(*self.BOARD_ORDER)
-        attempts = ranked.select_related('user', 'user__profile')[:self.BOARD_SIZE]
+        """A board of the daily quiz.
+
+        `period`: `today` (the default) ranks the day's attempts on points —
+        difficulty and speed are part of the achievement, so a careful 17 can
+        outrank a lucky 17; ties fall back to correct answers, then time, then
+        who finished first. `week` (Monday to today) and `all` rank each
+        person's summed daily points, then correct answers, then days played.
+
+        `scope=following` narrows any of them to the people you follow, and
+        you: a board you can actually climb.
+
+        `me` is your own place on it, even below the fifty shown.
+        """
+        period = request.query_params.get('period') or 'today'
+        if period not in self.PERIODS:
+            raise ValidationError({'period': 'Use today, week or all.'})
+        day = self._day(request)
+        circle = None
+        if request.query_params.get('scope') == 'following':
+            circle = set(request.user.followed_by.values_list('id', flat=True)) | {request.user.pk}
+
+        if period == 'today':
+            quiz = DailyQuiz.objects.filter(date=day).first()
+            if not quiz:
+                return Response({'date': day, 'period': period, 'results': [], 'me': None})
+            ranked = quiz.attempts.order_by(*self.BOARD_ORDER)
+            if circle is not None:
+                ranked = ranked.filter(user_id__in=circle)
+            attempts = ranked.select_related('user', 'user__profile')[:self.BOARD_SIZE]
+            return Response({
+                'date': quiz.date,
+                'period': period,
+                'results': QuizAttemptSerializer(attempts, many=True).data,
+                'me': self._my_place(ranked, request.user),
+            })
+
+        rows = self._totals(period, day)
+        if circle is not None:
+            rows = [r for r in rows if r['user_id'] in circle]
+        top = rows[:self.BOARD_SIZE]
+        users = User.objects.select_related('profile').in_bulk([r['user_id'] for r in top])
+        mine = next((i for i, r in enumerate(rows) if r['user_id'] == request.user.pk), None)
         return Response({
-            'date': quiz.date,
-            'results': QuizAttemptSerializer(attempts, many=True).data,
-            # Your own place, even below the fifty shown: "—" is no answer to
-            # "how did I do?". Counted in the board's own order.
-            'me': self._my_place(ranked, request.user),
+            'date': day,
+            'period': period,
+            'results': [
+                {
+                    'id': f"{period}-{r['user_id']}",
+                    'user': SimpleUserSerializer(users[r['user_id']]).data,
+                    'points': r['points'], 'score': r['score'], 'days': r['days'],
+                }
+                for r in top if r['user_id'] in users
+            ],
+            'me': None if mine is None else {'rank': mine + 1, 'of': len(rows)},
         })
 
+    PERIODS = ('today', 'week', 'all')
     BOARD_ORDER = ('-points', '-score', 'duration_seconds', 'completed_at')
     BOARD_SIZE = 50
+    # The week and all-time boards add up many attempts: kept for a few
+    # minutes, and dropped the moment anyone submits (see _board_version).
+    BOARD_CACHE_SECONDS = 300
+
+    @classmethod
+    def _totals(cls, period, day):
+        """Everyone's summed daily results for the period, best first, as
+        [{user_id, points, score, days}]."""
+        start = day - timedelta(days=day.weekday()) if period == 'week' else None
+        key = 'quiz-board:%s:%s:%s:%s' % (_board_version(), period, start or 'all', day)
+        rows = cache.get(key)
+        if rows is None:
+            qs = QuizAttempt.objects.filter(quiz__date__lte=day)
+            if start:
+                qs = qs.filter(quiz__date__gte=start)
+            rows = list(
+                qs.values('user_id')
+                .annotate(points=Sum('points'), score=Sum('score'), days=Count('id'))
+                .order_by('-points', '-score', '-days', 'user_id')
+            )
+            cache.set(key, rows, cls.BOARD_CACHE_SECONDS)
+        return rows
 
     @staticmethod
     def _my_place(ranked, user):
