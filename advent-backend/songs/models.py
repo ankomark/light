@@ -3294,6 +3294,11 @@ class PuzzleProgress(models.Model):
     # traced. Counted apart (letters_used) so a board can be ranked on it.
     shown = models.JSONField(default=list)
     letters_used = models.PositiveSmallIntegerField(default=0)
+    # Who sent the link this board was opened from: they hear how it went,
+    # and each can see the other's result on it.
+    challenger = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
     coins_earned = models.PositiveIntegerField(default=0)
     is_complete = models.BooleanField(default=False, db_index=True)
     started_at = models.DateTimeField(auto_now_add=True)

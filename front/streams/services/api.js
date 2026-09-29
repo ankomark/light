@@ -1236,6 +1236,19 @@ export const fetchNextPuzzle = async (lang) => apiRequest('get', `/puzzles/next/
 // Today's Daily Puzzle, the same board for everyone. Opening it starts the clock.
 export const fetchDailyPuzzle = async (lang) => apiRequest('get', `/puzzles/daily/${langQuery(lang)}`);
 
+// One board by its id — what a friend's challenge link opens. `from` names
+// the friend who sent it: they will hear how it went.
+export const fetchPuzzle = async (id, { from } = {}) =>
+  apiRequest('get', `/puzzles/${id}/${from ? `?from=${encodeURIComponent(from)}` : ''}`);
+
+// A challenge side by side: { me, them, verdict: won | lost | tied | waiting }.
+export const fetchPuzzleVersus = async (id, username) =>
+  apiRequest('get', `/puzzles/${id}/versus/?user=${encodeURIComponent(username)}`);
+
+// Today's Daily Puzzle leaderboard: scope everyone | following | group:<slug>.
+export const fetchPuzzleDailyBoard = async (scope = 'everyone') =>
+  apiRequest('get', `/puzzles/daily/leaderboard/${scope && scope !== 'everyone' ? `?scope=${encodeURIComponent(scope)}` : ''}`);
+
 // The themes, with how far this player has got in each and the stars won.
 export const fetchPuzzleThemes = async (lang) => apiRequest('get', `/puzzle-themes/${langQuery(lang)}`);
 
@@ -2252,6 +2265,9 @@ export default {
   fetchDailyPuzzle,
   fetchPuzzleThemes,
   fetchPuzzleLevels,
+  fetchPuzzle,
+  fetchPuzzleVersus,
+  fetchPuzzleDailyBoard,
   claimPuzzleWord,
   buyPuzzleHint,
   buyPuzzleLetter,

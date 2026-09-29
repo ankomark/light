@@ -1245,3 +1245,146 @@ class DailyPuzzleTests(APITestCase):
         self.assertTrue(again['is_complete'])
         self.assertEqual(again['stars'], 3)
         self.assertIsNotNone(again['seconds'])
+
+
+class DailyLeaderboardTests(APITestCase):
+    """Today's Daily Puzzle, ranked: less help first, then the quicker."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_wide_corpus()
+        PuzzleTheme.objects.update(is_active=False)
+        cls.theme = PuzzleTheme.objects.create(
+            name='Wide board', slug='wide-board', order=1,
+            source={'kind': 'passage', 'book': 'Psalms', 'chapter': 119},
+        )
+
+    def setUp(self):
+        cache.clear()
+        reset_theme_words()
+        reset_dictionary()
+        self.me = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.me)
+        from songs.puzzle import daily_puzzle
+        self.puzzle = daily_puzzle(timezone.localdate())
+
+    def _finished(self, user, minutes, hints=0, letters=0):
+        start = timezone.now() - timedelta(hours=1)
+        p = PuzzleProgress.objects.create(
+            user=user, puzzle=self.puzzle, found=list(self.puzzle.words), is_complete=True,
+            hints_used=hints, letters_used=letters,
+        )
+        PuzzleProgress.objects.filter(pk=p.pk).update(
+            started_at=start, completed_at=start + timedelta(minutes=minutes))
+        return p
+
+    def test_less_help_beats_more_speed(self):
+        fast = User.objects.create_user('fast', 'f@x.com', 'pw12345!')
+        slow = User.objects.create_user('slow', 's@x.com', 'pw12345!')
+        self._finished(fast, 1, letters=1)
+        self._finished(slow, 5)
+        self._finished(self.me, 3)
+        User.objects.create_user('idle', 'i@x.com', 'pw12345!')
+        res = self.client.get('/api/puzzles/daily/leaderboard/')
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual([r['user']['username'] for r in res.data['results']], ['mark', 'slow', 'fast'])
+        self.assertEqual(res.data['results'][0]['seconds'], 180)
+        self.assertEqual(res.data['results'][2]['stars'], 2)
+        self.assertEqual(res.data['me'], {'rank': 1, 'of': 3, 'seconds': 180, 'stars': 3})
+
+    def test_unfinished_boards_are_not_ranked(self):
+        PuzzleProgress.objects.create(user=self.me, puzzle=self.puzzle)
+        res = self.client.get('/api/puzzles/daily/leaderboard/')
+        self.assertEqual(res.data['results'], [])
+        self.assertIsNone(res.data['me'])
+
+    def test_the_people_i_follow(self):
+        friend = User.objects.create_user('friend', 'fr@x.com', 'pw12345!')
+        stranger = User.objects.create_user('stranger', 'st@x.com', 'pw12345!')
+        friend.followers.add(self.me)          # I follow them
+        self._finished(friend, 2)
+        self._finished(stranger, 1)
+        res = self.client.get('/api/puzzles/daily/leaderboard/?scope=following')
+        self.assertEqual([r['user']['username'] for r in res.data['results']], ['friend'])
+
+    def test_a_group_board_is_for_its_members(self):
+        from songs.models import Group, GroupMember
+        other = User.objects.create_user('ann', 'a@x.com', 'pw12345!')
+        group = Group.objects.create(name='Choir', slug='choir', creator=other)
+        GroupMember.objects.filter(group=group).delete()
+        GroupMember.objects.create(group=group, user=other)
+        self._finished(other, 2)
+        res = self.client.get('/api/puzzles/daily/leaderboard/?scope=group:choir')
+        self.assertEqual(res.status_code, 403)
+        GroupMember.objects.create(group=group, user=self.me)
+        res = self.client.get('/api/puzzles/daily/leaderboard/?scope=group:choir')
+        self.assertEqual([r['user']['username'] for r in res.data['results']], ['ann'])
+
+
+class ChallengeTests(APITestCase):
+    """Challenge a friend to the same board: each sees the other's result."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_wide_corpus()
+        PuzzleTheme.objects.update(is_active=False)
+        cls.theme = PuzzleTheme.objects.create(
+            name='Wide challenge', slug='wide-challenge', order=1,
+            source={'kind': 'passage', 'book': 'Psalms', 'chapter': 119},
+        )
+
+    def setUp(self):
+        cache.clear()
+        reset_theme_words()
+        reset_dictionary()
+        self.mark = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.ivy = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
+        self.puzzle = generate(self.theme, 1)
+
+    def _solve(self, user, hints=0):
+        self.client.force_authenticate(user)
+        for w in self.puzzle.words:
+            last = self.client.post(f'/api/puzzles/{self.puzzle.id}/found/', {'word': w}, format='json')
+        if hints:
+            PuzzleProgress.objects.filter(user=user, puzzle=self.puzzle).update(hints_used=hints)
+        return last
+
+    def test_opening_a_challenge_link_starts_the_clock_and_names_the_sender(self):
+        self.client.force_authenticate(self.ivy)
+        res = self.client.get(f'/api/puzzles/{self.puzzle.id}/?from=mark')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['id'], self.puzzle.id)
+        self.assertIn('wallet', res.data)
+        progress = PuzzleProgress.objects.get(user=self.ivy, puzzle=self.puzzle)
+        self.assertEqual(progress.challenger, self.mark)
+
+    def test_my_own_link_is_not_a_challenge(self):
+        self.client.force_authenticate(self.mark)
+        self.client.get(f'/api/puzzles/{self.puzzle.id}/?from=mark')
+        self.assertFalse(PuzzleProgress.objects.filter(user=self.mark, challenger__isnull=False).exists())
+
+    def test_finishing_tells_the_sender_and_both_see_the_result(self):
+        from unittest import mock
+        self._solve(self.mark, hints=1)
+        self.client.force_authenticate(self.ivy)
+        self.client.get(f'/api/puzzles/{self.puzzle.id}/?from=mark')
+        with mock.patch('songs.views.puzzle.notify_user') as notify:
+            self._solve(self.ivy)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args[0][0], self.mark)
+        self.assertEqual(notify.call_args[0][1], 'puzzle_challenge')
+        self.assertIn('They beat you.', notify.call_args[0][2])
+
+        res = self.client.get(f'/api/puzzles/{self.puzzle.id}/versus/?user=mark')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['verdict'], 'won')
+        self.assertEqual(res.data['them']['stars'], 2)
+        self.client.force_authenticate(self.mark)
+        back = self.client.get(f'/api/puzzles/{self.puzzle.id}/versus/?user=ivy')
+        self.assertEqual(back.data['verdict'], 'lost')
+
+    def test_no_challenge_no_comparison(self):
+        User.objects.create_user('zed', 'z@x.com', 'pw12345!')
+        self.client.force_authenticate(self.ivy)
+        res = self.client.get(f'/api/puzzles/{self.puzzle.id}/versus/?user=zed')
+        self.assertEqual(res.status_code, 404)

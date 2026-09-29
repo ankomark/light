@@ -19,6 +19,7 @@ import { useAuth } from '../context/useAuth';
 import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { quizLanguage } from '../utils/quizCache';
 import { starText } from '../components/PuzzleShareCard';
+import PuzzleBoardSheet from '../components/PuzzleBoardSheet';
 import {
   quizStyles as q, mmss, DISPLAY, DISPLAY_MID, GOLD, PARCHMENT, MUTED, INK,
 } from './quizTheme';
@@ -42,6 +43,7 @@ const PuzzleThemes = ({ navigation }) => {
   const [themes, setThemes] = useState(() => peekCache(key));
   const [daily, setDaily] = useState(() => peekCache(dailyKey(currentUser?.id, lang)));
   const [failed, setFailed] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -85,6 +87,15 @@ const PuzzleThemes = ({ navigation }) => {
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color={GOLD} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.boardLink}
+        onPress={() => setBoardOpen(true)}
+        accessibilityRole="button"
+        testID="puzzle-themes-board"
+      >
+        <Ionicons name="podium-outline" size={14} color={GOLD} />
+        <Text style={styles.boardLinkText}>{t('puzzle.board.title')}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -137,6 +148,7 @@ const PuzzleThemes = ({ navigation }) => {
           <Ionicons name="chevron-forward" size={18} color={MUTED} />
         </TouchableOpacity>
       ))}
+      <PuzzleBoardSheet visible={boardOpen} onClose={() => setBoardOpen(false)} />
     </ScrollView>
   );
 };
@@ -167,6 +179,8 @@ const styles = StyleSheet.create({
   metaText: { fontFamily: DISPLAY_MID, fontSize: 10, letterSpacing: 1, color: GOLD },
   metaStars: { fontSize: 12, color: GOLD },
   retry: { alignItems: 'center', gap: 6, padding: 16 },
+  boardLink: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end', paddingHorizontal: 4 },
+  boardLinkText: { fontFamily: DISPLAY_MID, fontSize: 11, letterSpacing: 0.8, color: GOLD },
 });
 
 export default PuzzleThemes;

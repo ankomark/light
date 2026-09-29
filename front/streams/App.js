@@ -193,6 +193,8 @@ const linking = {
       QuizPlay: 'quiz/:mode',
       // A Live Bible Battle to join: streams://battle/ABC123.
       Battle: 'battle/:code',
+      // A friend's word puzzle challenge: streams://puzzle/42?from=mark.
+      PuzzlePlay: 'puzzle/:puzzleId',
     },
   },
 };
@@ -280,6 +282,9 @@ const App = () => {
       } else if (data?.type === 'quiz_duel') {
         // Someone played the duel you sent: back to the quiz.
         navigate('QuizHome');
+      } else if (data?.type === 'puzzle_challenge' && data.puzzle) {
+        // A friend finished the puzzle you sent: that board, side by side.
+        navigate('PuzzlePlay', { puzzleId: data.puzzle, versus: data.from, nonce: Date.now() });
       } else if (data?.type === 'quiz_reminder') {
         // "Today's quiz is waiting": the quiz hub, with the day's card on top.
         navigate('QuizHome');

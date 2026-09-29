@@ -5,6 +5,7 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
 NOTIFICATION_TITLES = {
     'quiz_duel': '\u2694\ufe0f Your duel was played',
+    'puzzle_challenge': '\U0001f9e9 Your puzzle challenge was played',
     'like': '❤️ New Like',
     'comment': '\U0001f4ac New Comment',
     'follow': '\U0001f464 New Follower',
@@ -55,6 +56,8 @@ NOTIFICATION_CATEGORIES = {
     'quiz_reminder': 'quiz',
     # Someone played the duel you sent them.
     'quiz_duel': 'quiz',
+    # Someone finished the word puzzle you challenged them to.
+    'puzzle_challenge': 'quiz',
     'weather_briefing': 'weather',
     'verse_of_the_day': 'verse',
     'new_book': 'books',

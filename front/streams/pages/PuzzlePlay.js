@@ -21,14 +21,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
-  PanResponder, useWindowDimensions, Animated, Easing, AccessibilityInfo, Pressable,
+  PanResponder, useWindowDimensions, Animated, Easing, AccessibilityInfo, Pressable, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  fetchPuzzleLevel, fetchNextPuzzle, fetchDailyPuzzle, claimPuzzleWord, buyPuzzleHint,
-  buyPuzzleLetter, fetchCoinWallet,
+  fetchPuzzleLevel, fetchNextPuzzle, fetchDailyPuzzle, fetchPuzzle, fetchPuzzleVersus,
+  claimPuzzleWord, buyPuzzleHint, buyPuzzleLetter, fetchCoinWallet,
 } from '../services/api';
+import PuzzleBoardSheet from '../components/PuzzleBoardSheet';
 import { quizLanguage } from '../utils/quizCache';
 import { dailyKey } from './PuzzleThemes';
 import { useI18n } from '../context/I18nContext';
@@ -82,8 +83,14 @@ const PuzzlePlay = ({ navigation, route }) => {
   // ordinary way in is with none: the server decides what comes next.
   // `daily` is today's Daily Puzzle; `theme` + `level` a level off the map.
   const asked = route?.params || {};
+  // `puzzleId` is one board by its id: a friend's challenge link (`from`
+  // is who sent it), or the one you sent, opened from the news that they
+  // played it (`versus`).
   const pickFrom = (params) => (params.daily ? { daily: true }
-    : params.theme ? { theme: params.theme, level: Number(params.level) || 1 } : null);
+    : params.puzzleId ? {
+      id: Number(params.puzzleId), from: params.from, versus: params.versus || params.from,
+    }
+      : params.theme ? { theme: params.theme, level: Number(params.level) || 1 } : null);
   const [pick, setPick] = useState(() => pickFrom(asked));
   const pickRef = useRef(pick);
   pickRef.current = pick;
@@ -131,6 +138,9 @@ const PuzzlePlay = ({ navigation, route }) => {
   const [wordsOpen, setWordsOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [toast, setToast] = useState('');
+  const [boardOpen, setBoardOpen] = useState(false);
+  // A challenge side by side, once the board is done: { me, them, verdict }.
+  const [versus, setVersus] = useState(null);
 
   // Narrow enough that labels have to give way, matching the threshold the
   // group screens use so "small phone" means one thing across the app.
@@ -195,8 +205,9 @@ const PuzzlePlay = ({ navigation, route }) => {
     if (current) show(current, { keep: false }); else setLoading(true);
     try {
       const data = choice?.daily ? await fetchDailyPuzzle(lang)
-        : choice ? await fetchPuzzleLevel(choice.theme, choice.level, lang)
-          : await fetchNextPuzzle(lang);
+        : choice?.id ? await fetchPuzzle(choice.id, { from: choice.from })
+          : choice ? await fetchPuzzleLevel(choice.theme, choice.level, lang)
+            : await fetchNextPuzzle(lang);
       show(data);
     } catch {
       if (!current) setError(t('puzzle.loadFailed'));
@@ -209,6 +220,37 @@ const PuzzlePlay = ({ navigation, route }) => {
   // bumping it re-runs the effect, so exactly one request goes out either way.
   const [round, setRound] = useState(0);
   useEffect(() => { load(pick); }, [load, pick, round]);
+
+  // A challenge, finished: how it compares. Asked again when the other side
+  // may since have finished too.
+  const versusWith = pick?.versus;
+  const doneId = puzzle?.is_complete ? puzzle.id : null;
+  useEffect(() => {
+    setVersus(null);
+    if (!versusWith || !doneId) return undefined;
+    let live = true;
+    // Behind the finds still on their way, so our own finish is counted.
+    chain.current
+      .then(() => fetchPuzzleVersus(doneId, versusWith))
+      .then((res) => { if (live) setVersus(res); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [versusWith, doneId]);
+
+  /** Send this board to a friend: a link that opens it for them, naming you. */
+  const challenge = () => {
+    if (!puzzle) return;
+    const link = `streams://puzzle/${puzzle.id}?from=${encodeURIComponent(currentUser?.username || '')}`;
+    const title = puzzle.day
+      ? t('puzzle.daily.title')
+      : `${puzzle.theme?.name} · ${t('puzzle.level', { level: puzzle.level })}`;
+    const message = puzzle.is_complete
+      ? t('puzzle.challenge.beatMe', {
+        title, stars: starText(puzzle.stars || 0), time: mmss(puzzle.seconds || 0),
+      })
+      : t('puzzle.challenge.tryThis', { title });
+    Share.share({ message: `${message}\n${link}` }).catch(() => {});
+  };
 
   // New orders from the themes screen or the map, for the board already open.
   const firstNonce = useRef(asked.nonce);
@@ -903,6 +945,46 @@ const PuzzlePlay = ({ navigation, route }) => {
                   <Text style={styles.verseActionText}>{t('puzzle.share.button')}</Text>
                 </TouchableOpacity>
               </View>
+              <View style={styles.verseActions}>
+                <TouchableOpacity
+                  style={styles.verseAction}
+                  onPress={challenge}
+                  accessibilityRole="button"
+                  testID="puzzle-challenge"
+                >
+                  <Ionicons name="flash-outline" size={15} color={GOLD} />
+                  <Text style={styles.verseActionText}>{t('puzzle.challenge.button')}</Text>
+                </TouchableOpacity>
+                {!!puzzle.day && (
+                  <TouchableOpacity
+                    style={styles.verseAction}
+                    onPress={() => setBoardOpen(true)}
+                    accessibilityRole="button"
+                    testID="puzzle-board-open"
+                  >
+                    <Ionicons name="podium-outline" size={15} color={GOLD} />
+                    <Text style={styles.verseActionText}>{t('puzzle.board.button')}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {!!versus?.them && (
+                <View style={styles.versus} testID="puzzle-versus">
+                  <Text style={styles.versusVerdict}>
+                    {t(`puzzle.versus.${versus.verdict}`, { name: versus.them.username })}
+                  </Text>
+                  {[{ side: versus.me, you: true }, { side: versus.them }].map(({ side, you }) => (
+                    <View key={you ? 'me' : 'them'} style={styles.versusRow}>
+                      <Text style={[styles.versusName, you && styles.versusYou]} numberOfLines={1}>
+                        {you ? t('puzzle.versus.you') : side.username}
+                      </Text>
+                      <Text style={styles.versusStars}>{side.is_complete ? starText(side.stars) : ''}</Text>
+                      <Text style={styles.versusTime}>
+                        {side.is_complete ? mmss(side.seconds || 0) : `${side.found}/${side.total}`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
           )}
 
@@ -1135,6 +1217,7 @@ const PuzzlePlay = ({ navigation, route }) => {
         )}
       </SafeAreaView>
 
+      <PuzzleBoardSheet visible={boardOpen} onClose={() => setBoardOpen(false)} />
       <PuzzleWordsSheet
         visible={wordsOpen}
         onClose={() => setWordsOpen(false)}
@@ -1191,6 +1274,16 @@ const styles = StyleSheet.create({
   },
   linkLoose: { opacity: 0.55 },
   stars: { fontSize: 22, letterSpacing: 4, color: GOLD },
+  versus: {
+    alignSelf: 'stretch', marginTop: 8, padding: 12, borderRadius: 12, gap: 6,
+    backgroundColor: 'rgba(244,162,97,0.08)',
+  },
+  versusVerdict: { fontFamily: DISPLAY, fontSize: 14, color: GOLD, textAlign: 'center', marginBottom: 2 },
+  versusRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  versusName: { flex: 1, fontSize: 14, color: PARCHMENT },
+  versusYou: { fontWeight: '700' },
+  versusStars: { fontSize: 12, color: GOLD },
+  versusTime: { width: 52, textAlign: 'right', fontFamily: DISPLAY_MID, fontSize: 13, color: PARCHMENT },
   solvedIn: { fontFamily: DISPLAY_MID, fontSize: 12, letterSpacing: 1, color: PARCHMENT },
   roundBtn: {
     width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',

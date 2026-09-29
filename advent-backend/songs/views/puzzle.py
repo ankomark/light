@@ -10,12 +10,15 @@ grid to decide — so a forged request cannot mint coins.
 """
 from collections import Counter
 
-from django.db.models import Count, Max
+from rest_framework.exceptions import NotFound
+
+from django.db.models import Count, F, Max
 
 from .common import *  # noqa: F401,F403
 from ..models import CoinSpend, PuzzleProgress, PuzzleTheme, WordPuzzle
 from ..puzzle import (
-    LEVEL_LIMIT, band_for, daily_puzzle, generate, next_puzzle, stars_for,
+    LEVEL_LIMIT, WORD_HINT_WEIGHT, band_for, daily_puzzle, generate, help_used,
+    next_puzzle, stars_for,
 )
 from ..scoring import (
     COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, LETTER_COST, coin_balance,
@@ -95,6 +98,56 @@ class PuzzleThemeViewSet(viewsets.ReadOnlyModelViewSet):
         })
 
 
+def _seconds(progress):
+    if not (progress and progress.is_complete and progress.completed_at):
+        return None
+    return max(0, int((progress.completed_at - progress.started_at).total_seconds()))
+
+
+def _result(progress, user, puzzle):
+    """One side of a challenge: how far they got and how."""
+    return {
+        'username': user.username,
+        'is_complete': bool(progress and progress.is_complete),
+        'found': len(set(progress.found or [])) if progress else 0,
+        'total': len(puzzle.placements),
+        'seconds': _seconds(progress),
+        'stars': stars_for(progress),
+        'help': help_used(progress) if progress else 0,
+    }
+
+
+def _verdict(mine, theirs):
+    """'won', 'lost' or 'tied' once both have finished — less help first,
+    then the quicker — and 'waiting' until then."""
+    if not (mine['is_complete'] and theirs['is_complete']):
+        return 'waiting'
+    a = (mine['help'], mine['seconds'] or 0)
+    b = (theirs['help'], theirs['seconds'] or 0)
+    return 'won' if a < b else 'lost' if a > b else 'tied'
+
+
+def _tell_challenger(progress):
+    """The one who sent the challenge hears how it went."""
+    challenger = progress.challenger
+    if not challenger:
+        return
+    theirs = PuzzleProgress.objects.filter(user=challenger, puzzle=progress.puzzle).first()
+    mine = _result(progress, progress.user, progress.puzzle)
+    yours = _result(theirs, challenger, progress.puzzle)
+    verdict = _verdict(yours, mine)
+    words = {'won': 'You still lead.', 'lost': 'They beat you.', 'tied': 'A tie.'}.get(verdict, '')
+    minutes, secs = divmod(mine['seconds'] or 0, 60)
+    try:
+        notify_user(challenger, 'puzzle_challenge',
+                    f"{progress.user.username} solved your puzzle in {minutes}:{secs:02d} "
+                    f"with {mine['stars']} stars. {words}".strip(),
+                    data={'type': 'puzzle_challenge', 'puzzle': progress.puzzle_id,
+                          'from': progress.user.username})
+    except Exception:  # noqa: BLE001 — a push never undoes a find
+        pass
+
+
 class WordPuzzleViewSet(viewsets.GenericViewSet):
     """Play a level: read it, claim a word, buy a hint."""
     serializer_class = WordPuzzleSerializer
@@ -152,6 +205,100 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         if not hasattr(puzzle, '_progress_cache'):
             puzzle._progress_cache = self._progress(puzzle, create=False)
         return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
+
+    def retrieve(self, request, pk=None):
+        """GET /api/puzzles/<id>/ — one board, as `level` returns it: what a
+        challenge link opens. `?from=<username>` is the friend who sent it.
+        Opening a challenge starts the clock, and the sender hears how it went.
+        """
+        puzzle = get_object_or_404(self.get_queryset(), pk=pk)
+        progress = self._progress(puzzle, create=False)
+        sender = (request.query_params.get('from') or '').strip()
+        if sender and sender != request.user.username:
+            challenger = User.objects.filter(username=sender).first()
+            if challenger and not (progress and (progress.challenger_id or progress.is_complete)):
+                if not progress:
+                    progress = PuzzleProgress.objects.create(user=request.user, puzzle=puzzle)
+                progress.challenger = challenger
+                progress.save(update_fields=['challenger'])
+        puzzle._progress_cache = progress
+        return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
+
+    @action(detail=True, methods=['get'])
+    def versus(self, request, pk=None):
+        """GET /api/puzzles/<id>/versus/?user=<username> — a challenge side
+        by side: {me, them, verdict}. Only between the two it was sent between.
+        """
+        puzzle = get_object_or_404(self.get_queryset(), pk=pk)
+        other = User.objects.filter(username=request.query_params.get('user') or '').first()
+        if not other or other.pk == request.user.pk:
+            raise NotFound('No such challenge.')
+        mine = PuzzleProgress.objects.filter(user=request.user, puzzle=puzzle).first()
+        theirs = PuzzleProgress.objects.filter(user=other, puzzle=puzzle).first()
+        linked = ((mine and mine.challenger_id == other.pk)
+                  or (theirs and theirs.challenger_id == request.user.pk))
+        if not linked:
+            raise NotFound('No such challenge.')
+        me = _result(mine, request.user, puzzle)
+        them = _result(theirs, other, puzzle)
+        return Response({'me': me, 'them': them, 'verdict': _verdict(me, them)})
+
+    @action(detail=False, methods=['get'], url_path='daily/leaderboard')
+    def daily_leaderboard(self, request):
+        """Today's Daily Puzzle, ranked: finished boards only, less help
+        first (a word hint counts as three letters), then the quicker, then who
+        finished first. `scope`: everyone (the default), `following` (the
+        people you follow, and you), or `group:<slug>` (members only).
+        `me` is your own place, even below the fifty shown.
+        """
+        day = timezone.localdate()
+        raw = request.query_params.get('date')
+        if raw:
+            from datetime import date as date_cls
+            try:
+                day = date_cls.fromisoformat(raw)
+            except ValueError:
+                raise ValidationError({'date': 'Use YYYY-MM-DD.'})
+        ranked = (PuzzleProgress.objects
+                  .filter(puzzle__day=day, is_complete=True, completed_at__isnull=False)
+                  .annotate(help=F('hints_used') * WORD_HINT_WEIGHT + F('letters_used'),
+                            took=F('completed_at') - F('started_at'))
+                  .order_by('help', 'took', 'completed_at'))
+        scope = request.query_params.get('scope') or ''
+        if scope == 'following':
+            circle = set(request.user.followed_by.values_list('id', flat=True)) | {request.user.pk}
+            ranked = ranked.filter(user_id__in=circle)
+        elif scope.startswith('group:'):
+            group = Group.objects.filter(slug=scope[len('group:'):]).first()
+            if not group:
+                raise NotFound('No such group.')
+            members = set(group.members.values_list('user_id', flat=True))
+            if request.user.pk not in members:
+                raise PermissionDenied("Only members can see this group's board.")
+            ranked = ranked.filter(user_id__in=members)
+
+        top = list(ranked.select_related('user', 'user__profile')[:self.BOARD_SIZE])
+        order = list(ranked.values_list('user_id', flat=True))
+        mine = next((p for p in top if p.user_id == request.user.pk), None)
+        if request.user.pk in order and not mine:
+            mine = ranked.filter(user=request.user).first()
+        return Response({
+            'date': day,
+            'results': [{
+                'id': p.pk,
+                'user': SimpleUserSerializer(p.user).data,
+                'seconds': _seconds(p),
+                'stars': stars_for(p),
+                'hints_used': p.hints_used,
+                'letters_used': p.letters_used,
+            } for p in top],
+            'me': None if request.user.pk not in order else {
+                'rank': order.index(request.user.pk) + 1, 'of': len(order),
+                'seconds': _seconds(mine), 'stars': stars_for(mine),
+            },
+        })
+
+    BOARD_SIZE = 50
 
     @action(detail=False, methods=['get'])
     def daily(self, request):
@@ -241,6 +388,8 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             fields += ['is_complete', 'completed_at']
         progress.coins_earned = (progress.coins_earned or 0) + coins + bonus
         progress.save(update_fields=fields)
+        if bonus and progress.challenger_id:
+            _tell_challenger(progress)
 
         return Response({
             'correct': True,
