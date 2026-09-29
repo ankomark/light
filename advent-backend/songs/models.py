@@ -3276,6 +3276,11 @@ class PuzzleProgress(models.Model):
     # A bonus word must never bring a level closer to finished.
     bonus = models.JSONField(default=list)
     hints_used = models.PositiveSmallIntegerField(default=0)
+    # Single letters bought on a tile the player chose: [[row, col], ...].
+    # A letter is help, not a find — the word it sits in still has to be
+    # traced. Counted apart (letters_used) so a board can be ranked on it.
+    shown = models.JSONField(default=list)
+    letters_used = models.PositiveSmallIntegerField(default=0)
     coins_earned = models.PositiveIntegerField(default=0)
     is_complete = models.BooleanField(default=False, db_index=True)
     started_at = models.DateTimeField(auto_now_add=True)
@@ -3298,9 +3303,13 @@ class CoinSpend(models.Model):
     be reconciled against what they earned and what they spent.
     """
     HINT = 'hint'
+    LETTER = 'letter'
     FREEZE = 'freeze'
     QUIZ_HINT = 'quiz_hint'
-    REASON_CHOICES = ((HINT, 'Puzzle hint'), (FREEZE, 'Streak freeze'), (QUIZ_HINT, 'Quiz 50/50'))
+    REASON_CHOICES = (
+        (HINT, 'Puzzle hint'), (LETTER, 'Puzzle letter'),
+        (FREEZE, 'Streak freeze'), (QUIZ_HINT, 'Quiz 50/50'),
+    )
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='coin_spends')
     amount = models.PositiveIntegerField()

@@ -18,6 +18,22 @@ def word_key(puzzle_id, word):
     return hashlib.sha256(f'{puzzle_id}:{word}'.encode('utf-8')).hexdigest()[:16]
 
 
+def verse_payload(puzzle):
+    """The verse a finished level was drawn from, ready to render."""
+    verse = puzzle.verse
+    if not verse:
+        return None
+    return {
+        'reference': verse.reference,
+        'text': verse.text,
+        'book': verse.book,
+        # So "Read in Bible" can open the chapter at this verse.
+        'book_number': verse.book_number,
+        'chapter': verse.chapter,
+        'verse': verse.verse,
+    }
+
+
 class PuzzleThemeSerializer(serializers.ModelSerializer):
     levels_completed = serializers.SerializerMethodField()
 
@@ -59,13 +75,15 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
     verse = serializers.SerializerMethodField()
     band = serializers.SerializerMethodField()
     bonus_keys = serializers.SerializerMethodField()
+    shown = serializers.SerializerMethodField()
+    letters_used = serializers.SerializerMethodField()
 
     class Meta:
         model = WordPuzzle
         fields = [
             'id', 'theme', 'level', 'letters', 'rows', 'cols', 'layout',
             'slots', 'revealed', 'found', 'bonus', 'bonus_total', 'bonus_keys',
-            'hints_used', 'is_complete', 'verse', 'band',
+            'hints_used', 'shown', 'letters_used', 'is_complete', 'verse', 'band',
         ]
 
     # ── the board's shape ────────────────────────────────────────────────────
@@ -119,6 +137,22 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
         seen = set(p.found or []) | set(p.hinted or [])
         return [x for x in obj.placements if x['word'] in seen]
 
+    def get_shown(self, obj):
+        """Single letters this player bought: [{row, col, letter}]."""
+        p = self._progress(obj)
+        if not (p and p.shown):
+            return []
+        grid = obj.grid or []
+        out = []
+        for row, col in p.shown:
+            if 0 <= row < len(grid) and 0 <= col < len(grid[row]):
+                out.append({'row': row, 'col': col, 'letter': grid[row][col]})
+        return out
+
+    def get_letters_used(self, obj):
+        p = self._progress(obj)
+        return p.letters_used if p else 0
+
     def get_band(self, obj):
         """How hard this level calls itself: simple, moderate or hard."""
         return band_for(obj.level)
@@ -145,11 +179,7 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
         p = self._progress(obj)
         if not (p and p.is_complete) or not obj.verse:
             return None
-        return {
-            'reference': obj.verse.reference,
-            'text': obj.verse.text,
-            'book': obj.verse.book,
-        }
+        return verse_payload(obj)
 
     def get_hints_used(self, obj):
         p = self._progress(obj)

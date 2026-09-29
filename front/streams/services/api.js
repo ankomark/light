@@ -1239,6 +1239,10 @@ export const buyPuzzleHint = async (puzzleId) =>
 
 export const fetchCoinWallet = async () => apiRequest('get', '/puzzles/wallet/');
 
+// One letter, on a tile the player picked: → { row, col, letter, cost, balance }.
+export const buyPuzzleLetter = async (puzzleId, row, col) =>
+  apiRequest('post', `/puzzles/${puzzleId}/letter/`, { row, col });
+
 // The weather place lives on the server as well as the device: the morning
 // briefing is sent by a cron job, which cannot ask a sleeping phone where it is.
 export const fetchWeatherPlace = async () => apiRequest('get', '/weather-place/');
@@ -2235,6 +2239,7 @@ export default {
   fetchNextPuzzle,
   claimPuzzleWord,
   buyPuzzleHint,
+  buyPuzzleLetter,
   fetchCoinWallet,
   fetchWeatherPlace,
   saveWeatherPlace,

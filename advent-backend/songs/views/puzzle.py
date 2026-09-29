@@ -14,23 +14,17 @@ from .common import *  # noqa: F401,F403
 from ..models import CoinSpend, PuzzleProgress, PuzzleTheme, WordPuzzle
 from ..puzzle import LEVEL_LIMIT, generate, next_puzzle
 from ..scoring import (
-    COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, coin_balance, completion_bonus,
+    COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, LETTER_COST, coin_balance,
+    completion_bonus,
 )
 from ..streaks import streak_for
 from ..serializers.puzzle import (
-    PuzzleThemeSerializer, PuzzleProgressSerializer, WordPuzzleSerializer,
+    PuzzleThemeSerializer, PuzzleProgressSerializer, WordPuzzleSerializer, verse_payload,
 )
 
 
-def _verse(puzzle):
-    """The verse a finished level was drawn from, ready to render."""
-    if not puzzle.verse:
-        return None
-    return {
-        'reference': puzzle.verse.reference,
-        'text': puzzle.verse.text,
-        'book': puzzle.verse.book,
-    }
+# The verse a finished level was drawn from (serializers/puzzle.py).
+_verse = verse_payload
 
 
 class PuzzleThemeViewSet(viewsets.ReadOnlyModelViewSet):
@@ -111,6 +105,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         current, best, played_today = streak_for(user)
         return {
             'earned': earned, 'spent': spent, 'balance': balance, 'hint_cost': HINT_COST,
+            'letter_cost': LETTER_COST,
             # So the app can show "+5" the moment a word lands.
             'coins_per_word': COINS_PER_WORD, 'coins_per_bonus_word': COINS_PER_BONUS_WORD,
             'day_streak': current, 'best_day_streak': best, 'played_today': played_today,
@@ -275,6 +270,62 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             'hints_used': progress.hints_used,
         })
 
+    @action(detail=True, methods=['post'])
+    def letter(self, request, pk=None):
+        """Buy one letter, on a tile the player chose. POST {row, col}.
+
+        The cheap hint: it shows what is on that tile and nothing else, and the
+        word it sits in still has to be traced. Refused for a tile that is not
+        on the board or already shows its letter, and — like a word hint — for
+        a purse that cannot pay.
+        """
+        puzzle = get_object_or_404(self.get_queryset(), pk=pk)
+        try:
+            row, col = int(request.data.get('row')), int(request.data.get('col'))
+        except (TypeError, ValueError):
+            raise ValidationError({'row': 'Send the row and column of a tile.'})
+        grid = puzzle.grid or []
+        if not (0 <= row < len(grid) and 0 <= col < len(grid[row])) or grid[row][col] == '.':
+            raise ValidationError({'row': 'That is not a tile on this board.'})
+
+        with transaction.atomic():
+            progress, _ = PuzzleProgress.objects.select_for_update().get_or_create(
+                user=request.user, puzzle=puzzle,
+            )
+            if progress.is_complete:
+                return Response({'error': 'This board is finished.', 'code': 'finished'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            open_words = set(progress.found or []) | set(progress.hinted or [])
+            showing = {tuple(c) for c in (progress.shown or [])}
+            for p in puzzle.placements:
+                if p['word'] in open_words:
+                    for i in range(len(p['word'])):
+                        showing.add((p['row'] + (i if p['dir'] == 'down' else 0),
+                                     p['col'] + (i if p['dir'] == 'across' else 0)))
+            if (row, col) in showing:
+                return Response({'error': 'That letter is already showing.', 'code': 'shown'},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            _earned, _spent, balance = coin_balance(request.user)
+            if balance < LETTER_COST:
+                return Response(
+                    {'error': 'A letter costs %d coins; you have %d.' % (LETTER_COST, balance),
+                     'code': 'not_enough_coins', 'cost': LETTER_COST, 'balance': balance},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            CoinSpend.objects.create(
+                user=request.user, amount=LETTER_COST, reason=CoinSpend.LETTER, puzzle=puzzle,
+            )
+            progress.shown = list(progress.shown or []) + [[row, col]]
+            progress.letters_used = (progress.letters_used or 0) + 1
+            progress.save(update_fields=['shown', 'letters_used'])
+
+        return Response({
+            'row': row, 'col': col, 'letter': grid[row][col],
+            'cost': LETTER_COST, 'balance': balance - LETTER_COST,
+            'letters_used': progress.letters_used,
+        })
+
     @action(detail=False, methods=['get'], url_path='my-progress')
     def my_progress(self, request):
         rows = (PuzzleProgress.objects.filter(user=request.user)
@@ -289,7 +340,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         current, best, played_today = streak_for(request.user)
         return Response({
             'earned': earned, 'spent': spent, 'balance': balance,
-            'hint_cost': HINT_COST, 'coins_per_word': COINS_PER_WORD,
+            'hint_cost': HINT_COST, 'letter_cost': LETTER_COST, 'coins_per_word': COINS_PER_WORD,
             'coins_per_bonus_word': COINS_PER_BONUS_WORD,
             # The same streak the quiz shows: one record of showing up.
             'day_streak': current, 'best_day_streak': best,

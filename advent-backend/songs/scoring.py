@@ -131,6 +131,9 @@ COINS_PER_WORD = 5
 COMPLETION_BASE = 20
 COMPLETION_PER_LEVEL = 5
 HINT_COST = 15
+# One letter, on a tile the player picks: the cheap nudge, for when a whole
+# word would give away more than was wanted.
+LETTER_COST = 5
 
 
 def completion_bonus(level):

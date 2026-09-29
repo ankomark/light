@@ -21,17 +21,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
-  PanResponder, useWindowDimensions,
+  PanResponder, useWindowDimensions, Animated, Easing, AccessibilityInfo, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  fetchPuzzleLevel, fetchNextPuzzle, claimPuzzleWord, buyPuzzleHint, fetchCoinWallet,
+  fetchPuzzleLevel, fetchNextPuzzle, claimPuzzleWord, buyPuzzleHint, buyPuzzleLetter,
+  fetchCoinWallet,
 } from '../services/api';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { applyFind } from '../utils/puzzleKeys';
+import { BIBLE_BOOKS } from '../utils/bibleVersions';
+import ShareCardSheet from '../components/ShareCardSheet';
+import PuzzleShareCard, { puzzleMessage, starText } from '../components/PuzzleShareCard';
+import PuzzleWordsSheet from '../components/PuzzleWordsSheet';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
@@ -101,6 +106,18 @@ const PuzzlePlay = ({ navigation, route }) => {
   // How tall the board's area turned out to be. Tiles are sized to fit it, so
   // a big board shrinks rather than running off the bottom of the screen.
   const [viewport, setViewport] = useState(0);
+  // A blank tile tapped: the hint button offers that one letter instead.
+  const [picked, setPicked] = useState(null);           // "row,col"
+  // Letters tapped one at a time rather than dragged: they wait for ✓.
+  const tapping = useRef(false);
+  const [tapMode, setTapMode] = useState(false);
+  // A screen reader cannot drag across the wheel: it gets letter buttons.
+  const [reader, setReader] = useState(false);
+  // The finish: tiles light up in a wave across the board.
+  const celebrate = useRef(new Animated.Value(1)).current;
+  const [wordsOpen, setWordsOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [toast, setToast] = useState('');
 
   // Narrow enough that labels have to give way, matching the threshold the
   // group screens use so "small phone" means one thing across the app.
@@ -145,6 +162,10 @@ const PuzzlePlay = ({ navigation, route }) => {
   const load = useCallback(async (choice) => {
     setError('');
     setTraced([]);
+    tracedRef.current = [];
+    tapping.current = false;
+    setTapMode(false);
+    setPicked(null);
     // A word refused on one board may well be an answer on the next.
     refused.current = new Set();
     // The next level, fetched while this one was being finished: no wait.
@@ -210,6 +231,20 @@ const PuzzlePlay = ({ navigation, route }) => {
   // Leaving the screen must never leave music playing behind it.
   useEffect(() => () => { stopLoop(); unloadSound(); }, []);
 
+  useEffect(() => {
+    let live = true;
+    Promise.resolve(AccessibilityInfo.isScreenReaderEnabled?.())
+      .then((on) => { if (live) setReader(!!on); })
+      .catch(() => {});
+    const sub = AccessibilityInfo.addEventListener?.('screenReaderChanged', (on) => setReader(!!on));
+    return () => { live = false; sub?.remove?.(); };
+  }, []);
+
+  const showToast = useCallback((text) => {
+    setToast(text);
+    setTimeout(() => setToast(''), 2200);
+  }, []);
+
   const source = (puzzle?.letters || '').split('');
   // What the wheel shows, in its current arrangement.
   const letters = order.length === source.length ? order.map((i) => source[i]) : source;
@@ -220,6 +255,8 @@ const PuzzlePlay = ({ navigation, route }) => {
     tapFeedback();
     setTraced([]);
     tracedRef.current = [];
+    tapping.current = false;
+    setTapMode(false);
     setOrder((prev) => {
       const next = [...prev];
       for (let i = next.length - 1; i > 0; i -= 1) {
@@ -255,8 +292,31 @@ const PuzzlePlay = ({ navigation, route }) => {
         map[`${r},${c}`] = { letter: p.word[i], solid: found.includes(p.word) };
       }
     });
+    // Single letters bought on a tile: shown, like a hint, never solid.
+    (puzzle?.shown || []).forEach((s) => {
+      const key = `${s.row},${s.col}`;
+      if (!map[key]) map[key] = { letter: s.letter, solid: false };
+    });
     return map;
-  }, [puzzle?.revealed, found]);
+  }, [puzzle?.revealed, puzzle?.shown, found]);
+
+  /** The board in words, for a screen reader: what is found, and how many
+   *  of each length are left. */
+  const boardLabel = useMemo(() => {
+    if (!puzzle) return '';
+    const left = {};
+    (puzzle.slots || []).forEach((s) => { left[s.length] = (left[s.length] || 0) + 1; });
+    found.forEach((w) => { if (left[w.length]) left[w.length] -= 1; });
+    const rest = Object.keys(left).map(Number).sort((a, b) => a - b)
+      .filter((n) => left[n] > 0)
+      .map((n) => t('puzzle.a11y.leftOf', { count: left[n], length: n }))
+      .join(', ');
+    return t('puzzle.a11y.board', {
+      total: (puzzle.slots || []).length,
+      found: found.length ? found.join(', ') : t('puzzle.a11y.none'),
+      left: rest || t('puzzle.a11y.none'),
+    });
+  }, [puzzle, found, t]);
 
   const word = traced.map((i) => letters[i]).join('');
 
@@ -306,11 +366,37 @@ const PuzzlePlay = ({ navigation, route }) => {
     if (puzzle && !puzzle.is_complete && !asked.theme) writeCache(levelKey, puzzle);
   }, [puzzle, levelKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The verse in its chapter, in the reader's own Bible, opened at the verse.
+  const readInBible = () => {
+    const v = puzzle?.verse;
+    const bookId = v?.book_number ? BIBLE_BOOKS[v.book_number - 1]?.id : null;
+    if (!bookId) return;
+    stopLoop();
+    navigation?.push?.('bible', { bookId, chapter: v.chapter, verse: v.verse });
+  };
+
+  // Back from the Bible: the music picks up where it was left.
+  const musicRef = useRef(musicOn);
+  musicRef.current = musicOn;
+  useEffect(() => navigation?.addListener?.('focus', () => {
+    if (musicRef.current) playLoop();
+  }), [navigation]);
+
   const reject = useCallback(() => {
     wrongFeedback();
     setShake(true);
     setTimeout(() => setShake(false), 380);
   }, []);
+
+  /** The board is done: a wave of light across it, and a word for anyone
+   *  who cannot see it. */
+  const solvedNow = useCallback(() => {
+    celebrate.setValue(0);
+    Animated.timing(celebrate, {
+      toValue: 1, duration: 1400, easing: Easing.out(Easing.quad), useNativeDriver: true,
+    }).start();
+    AccessibilityInfo.announceForAccessibility?.(t('puzzle.solved'));
+  }, [celebrate, t]);
 
   const submit = useCallback(async (indexes) => {
     const attempt = indexes.map((i) => letters[i]).join('');
@@ -335,7 +421,7 @@ const PuzzlePlay = ({ navigation, route }) => {
         if (perWord != null) addCoins(null, perWord);
         setFlash({ word: attempt, coins: perWord });
         setTimeout(() => setFlash(null), 1500);
-        if (done) finishFeedback();
+        if (done) { finishFeedback(); solvedNow(); }
         record(attempt, done);
       } else if (outcome.kind === 'bonus') {
         const perBonus = streak?.coins_per_bonus_word ?? null;
@@ -372,7 +458,7 @@ const PuzzlePlay = ({ navigation, route }) => {
         addCoins(res.balance, res.coins_earned + (res.completion_bonus || 0));
         setFlash({ word: res.word, coins: res.coins_earned + (res.completion_bonus || 0) });
         setTimeout(() => setFlash(null), 1500);
-        if (res.is_complete) finishFeedback();
+        if (res.is_complete) { finishFeedback(); solvedNow(); }
       } else if (res.bonus && !res.already_found) {
         // Not on the board, but a real word all the same — and it sounds
         // different, so the two kinds of find are never confused.
@@ -390,7 +476,7 @@ const PuzzlePlay = ({ navigation, route }) => {
       // refusal, or a moment offline would poison the word for the whole level.
       reject();
     }
-  }, [puzzle, letters, claimed, reject, addCoins, streak, record]);
+  }, [puzzle, letters, claimed, reject, addCoins, streak, record, solvedNow]);
 
   const knobAt = (pageX, pageY) => {
     const x = pageX - wheelBox.current.x;
@@ -418,7 +504,47 @@ const PuzzlePlay = ({ navigation, route }) => {
     const longer = [...current, index];
     tracedRef.current = longer;
     setTraced(longer);
+    gestureKnobs.current += 1;
     tapFeedback();
+  };
+
+  // Letters picked this gesture: two or more is a drag, which submits on
+  // release; one is a tap, which waits for the next tap or for ✓.
+  const gestureKnobs = useRef(0);
+
+  /** Tap a letter: add it, or take it back if it was the last one tapped. */
+  const tapLetter = (index) => {
+    if (index < 0) return;
+    const current = tracedRef.current;
+    let next;
+    if (current[current.length - 1] === index) next = current.slice(0, -1);
+    else if (current.includes(index)) return;
+    else next = [...current, index];
+    tracedRef.current = next;
+    setTraced(next);
+    tapping.current = next.length > 0;
+    setTapMode(next.length > 0);
+    tapFeedback();
+    if (reader) AccessibilityInfo.announceForAccessibility?.(next.map((i) => letters[i]).join(' '));
+  };
+
+  const endTapping = () => {
+    tapping.current = false;
+    setTapMode(false);
+  };
+
+  /** ✓ on tapped letters: send them as a word. */
+  const submitTapped = () => {
+    const picked = tracedRef.current;
+    tracedRef.current = [];
+    endTapping();
+    submit(picked);
+  };
+
+  const clearTapped = () => {
+    tracedRef.current = [];
+    setTraced([]);
+    endTapping();
   };
 
   const trackPointer = (e) => {
@@ -432,26 +558,78 @@ const PuzzlePlay = ({ navigation, route }) => {
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
+      gestureKnobs.current = 0;
       trackPointer(e);
-      extend(knobAt(e.nativeEvent.pageX, e.nativeEvent.pageY));
+      const at = knobAt(e.nativeEvent.pageX, e.nativeEvent.pageY);
+      if (tapping.current) {
+        // Mid-way through tapping a word: this touch carries it on.
+        const current = tracedRef.current;
+        if (at >= 0 && current[current.length - 1] === at) {
+          tapLetter(at);
+          gestureKnobs.current = -1;     // a take-back, never a submit
+          return;
+        }
+      } else {
+        tracedRef.current = [];
+      }
+      extend(at);
     },
     onPanResponderMove: (e) => {
       trackPointer(e);
       extend(knobAt(e.nativeEvent.pageX, e.nativeEvent.pageY));
     },
     onPanResponderRelease: () => {
-      const picked = tracedRef.current;
-      tracedRef.current = [];
-      submit(picked);
+      setPointer(null);
+      if (gestureKnobs.current >= 2) {
+        // A drag across the letters: that is the word.
+        const picked = tracedRef.current;
+        tracedRef.current = [];
+        endTapping();
+        submit(picked);
+        return;
+      }
+      // A tap: the letter stays lit and the word waits for more, or for ✓.
+      const on = tracedRef.current.length > 0;
+      tapping.current = on;
+      setTapMode(on);
     },
     onPanResponderTerminate: () => {
       tracedRef.current = [];
       setTraced([]);
       setPointer(null);
+      endTapping();
     },
-  }), [submit, knobs.length]);
+  }), [submit, knobs.length, reader]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** One letter, on the tile picked: the cheap hint. */
+  const buyLetter = async () => {
+    if (!puzzle || busy || !picked) return;
+    const [row, col] = picked.split(',').map(Number);
+    try {
+      setBusy(true);
+      const res = await buyPuzzleLetter(puzzle.id, row, col);
+      setBalance(res.balance);
+      setPuzzle((prev) => ({
+        ...prev,
+        shown: [...(prev.shown || []), { row: res.row, col: res.col, letter: res.letter }],
+        letters_used: res.letters_used,
+      }));
+      tapFeedback();
+    } catch (e) {
+      const data = e?.response?.data || e?.data || {};
+      setError(data.code === 'not_enough_coins'
+        ? t('puzzle.letterNoCoins', { cost: data.cost })
+        : t('puzzle.letterFailed'));
+      setTimeout(() => setError(''), 2600);
+      wrongFeedback();
+    } finally {
+      setBusy(false);
+      setPicked(null);
+    }
+  };
 
   const hint = async () => {
+    if (picked) { buyLetter(); return; }
     if (!puzzle || busy) return;
     try {
       setBusy(true);
@@ -507,6 +685,15 @@ const PuzzlePlay = ({ navigation, route }) => {
   const fitsTall = viewport ? Math.floor((viewport - 16) / rows) : TILE_MAX;
   const tile = Math.max(TILE_MIN, Math.min(TILE_MAX, fitsWide, fitsTall));
   const remaining = puzzle.slots.length - found.length;
+  const hintCost = streak?.hint_cost ?? 15;
+  const letterCost = streak?.letter_cost ?? 5;
+  const verse = puzzle.verse;
+  const verseBook = verse?.book_number ? BIBLE_BOOKS[verse.book_number - 1]?.id : null;
+  const shareLine = [
+    starText(puzzle.stars),
+    t('puzzle.share.words', { count: puzzle.slots.length }),
+  ].filter(Boolean).join('  ·  ');
+  const shareTitle = `${puzzle.theme?.name} · ${t('puzzle.level', { level: puzzle.level })}`;
 
   return (
     <View style={q.rootClear}>
@@ -526,7 +713,7 @@ const PuzzlePlay = ({ navigation, route }) => {
           </TouchableOpacity>
           <View style={styles.barMid}>
             <Text style={styles.barTitle} numberOfLines={1}>{puzzle.theme?.name}</Text>
-            <Text style={q.eyebrow}>
+            <Text style={q.eyebrow} accessibilityLabel={boardLabel}>
               {t('puzzle.level', { level: puzzle.level })}
               {!!puzzle.band && <Text style={styles.band}> · {t(`puzzle.band.${puzzle.band}`)}</Text>}
               {' · '}{found.length}/{puzzle.slots.length}
@@ -570,15 +757,29 @@ const PuzzlePlay = ({ navigation, route }) => {
                   if (mark !== '#') {
                     return <View key={`${r},${c}`} style={{ width: tile, height: tile }} />;
                   }
-                  const cell = revealedCells[`${r},${c}`];
-                  return (
-                    <View
-                      key={`${r},${c}`}
+                  const at = `${r},${c}`;
+                  const cell = revealedCells[at];
+                  const isPicked = picked === at;
+                  // The finish: a wave from the top left, each tile in turn.
+                  const wave = ((r + c) / (rows + cols)) * 0.6;
+                  const lit = cell?.solid ? {
+                    transform: [{
+                      scale: celebrate.interpolate({
+                        inputRange: [0, wave, wave + 0.2, wave + 0.4, 1],
+                        outputRange: [1, 1, 1.22, 1, 1],
+                        extrapolate: 'clamp',
+                      }),
+                    }],
+                  } : null;
+                  const face = (
+                    <Animated.View
                       style={[
                         styles.tile,
                         { width: tile - 3, height: tile - 3, margin: 1.5 },
                         cell?.solid && styles.tileFound,
                         cell && !cell.solid && styles.tileHinted,
+                        isPicked && styles.tilePicked,
+                        lit,
                       ]}
                     >
                       {!!cell && (
@@ -586,7 +787,23 @@ const PuzzlePlay = ({ navigation, route }) => {
                           {cell.letter}
                         </Text>
                       )}
-                    </View>
+                      {isPicked && busy && <ActivityIndicator size="small" color={INK} />}
+                    </Animated.View>
+                  );
+                  // A blank tile can be tapped for its letter.
+                  if (cell || puzzle.is_complete) return <React.Fragment key={at}>{face}</React.Fragment>;
+                  return (
+                    <Pressable
+                      key={at}
+                      onPress={() => { tapFeedback(); setPicked(isPicked ? null : at); }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isPicked }}
+                      accessibilityLabel={t('puzzle.a11y.tile', { row: r + 1, col: c + 1 })}
+                      accessibilityHint={t('puzzle.a11y.tileHint', { cost: letterCost })}
+                      testID={`tile-${at}`}
+                    >
+                      {face}
+                    </Pressable>
                   );
                 })}
               </View>
@@ -597,6 +814,28 @@ const PuzzlePlay = ({ navigation, route }) => {
               <Text style={q.eyebrow}>{t('puzzle.verseTitle')}</Text>
               <Text style={styles.verseText}>{puzzle.verse.text}</Text>
               <Text style={styles.verseRef}>{puzzle.verse.reference}</Text>
+              <View style={styles.verseActions}>
+                {!!verseBook && (
+                  <TouchableOpacity
+                    style={styles.verseAction}
+                    onPress={readInBible}
+                    accessibilityRole="button"
+                    testID="puzzle-read"
+                  >
+                    <Ionicons name="book-outline" size={15} color={GOLD} />
+                    <Text style={styles.verseActionText}>{t('puzzle.readInBible')}</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.verseAction}
+                  onPress={() => setSharing(true)}
+                  accessibilityRole="button"
+                  testID="puzzle-share"
+                >
+                  <Ionicons name="share-social-outline" size={15} color={GOLD} />
+                  <Text style={styles.verseActionText}>{t('puzzle.share.button')}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -624,8 +863,8 @@ const PuzzlePlay = ({ navigation, route }) => {
         <View style={styles.wheelWrap}>
           {!!word && (
             <View
-              style={[styles.tracedPill, shake && styles.tracedWrong]}
-              pointerEvents="none"
+              style={[styles.tracedPill, tapMode && styles.tracedPillTap, shake && styles.tracedWrong]}
+              pointerEvents={tapMode ? 'box-none' : 'none'}
             >
               {/* Eight letters at this tracking is wide, and a reader with a
                   large system font makes it wider. Shrink rather than spill. */}
@@ -637,6 +876,21 @@ const PuzzlePlay = ({ navigation, route }) => {
               >
                 {word}
               </Text>
+              {/* Tapped letters wait: the tick sends them, the cross starts again. */}
+              {tapMode && (
+                <>
+                  <TouchableOpacity onPress={submitTapped} hitSlop={8} style={styles.pillBtn}
+                                    accessibilityRole="button" accessibilityLabel={t('puzzle.submitWord')}
+                                    testID="tap-submit">
+                    <Ionicons name="checkmark" size={18} color={GOLD} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={clearTapped} hitSlop={8} style={styles.pillBtn}
+                                    accessibilityRole="button" accessibilityLabel={t('puzzle.clearWord')}
+                                    testID="tap-clear">
+                    <Ionicons name="close" size={18} color={MUTED} />
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           )}
           <View
@@ -645,6 +899,9 @@ const PuzzlePlay = ({ navigation, route }) => {
               if (node) node.measureInWindow((x, y) => { wheelBox.current = { x, y }; });
             }}
             {...responder.panHandlers}
+            // A screen reader has the letter buttons below instead.
+            accessibilityElementsHidden={reader}
+            importantForAccessibility={reader ? 'no-hide-descendants' : 'auto'}
           >
             {/* The line that follows the finger: a segment between each pair
                 of chosen letters, and a loose one out to the fingertip. */}
@@ -718,22 +975,49 @@ const PuzzlePlay = ({ navigation, route }) => {
           </View>
         </View>
 
+        {reader && (
+          <View style={styles.readerRow} testID="reader-letters">
+            {letters.map((l, i) => (
+              <TouchableOpacity
+                // eslint-disable-next-line react/no-array-index-key
+                key={`${l}-${i}`}
+                style={[styles.readerKey, traced.includes(i) && styles.knobOn]}
+                onPress={() => tapLetter(i)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: traced.includes(i) }}
+                accessibilityLabel={t('puzzle.a11y.letter', { letter: l })}
+              >
+                <Text style={[styles.readerKeyText, traced.includes(i) && styles.knobTextOn]}>{l}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         <View style={styles.footer}>
+          {/* The hint: a whole word, or — with a blank tile picked — just
+              that tile's letter, for less. */}
           <TouchableOpacity
-            style={[styles.hintBtn, (busy || remaining === 0) && q.disabled]}
+            style={[styles.hintBtn, picked && styles.hintBtnLetter, (busy || (remaining === 0 && !picked)) && q.disabled]}
             onPress={hint}
-            disabled={busy || remaining === 0}
+            disabled={busy || (remaining === 0 && !picked)}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={picked
+              ? t('puzzle.letterFor', { cost: letterCost })
+              : t('puzzle.hintFor', { cost: hintCost })}
+            testID="puzzle-hint"
           >
-            <Ionicons name="bulb" size={16} color={GOLD} />
+            <Ionicons name={picked ? 'text' : 'bulb'} size={16} color={GOLD} />
             {/* On a narrow screen the word gives way once the next-level
                 button joins the row — the bulb and the price still say what
                 the button is, and three controls will not fit otherwise. */}
             {!(compact && puzzle.is_complete) && (
-              <Text style={styles.hintText} numberOfLines={1}>{t('puzzle.hint')}</Text>
+              <Text style={styles.hintText} numberOfLines={1}>
+                {t(picked ? 'puzzle.letter' : 'puzzle.hint')}
+              </Text>
             )}
             <Coin size={14} />
-            <Text style={styles.hintCostText}>15</Text>
+            <Text style={styles.hintCostText}>{picked ? letterCost : hintCost}</Text>
           </TouchableOpacity>
 
           {puzzle.is_complete && (
@@ -747,14 +1031,27 @@ const PuzzlePlay = ({ navigation, route }) => {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity
-            style={styles.shuffleBtn}
-            onPress={shuffle}
-            activeOpacity={0.85}
-            accessibilityLabel={t('puzzle.shuffle')}
-          >
-            <Ionicons name="shuffle" size={20} color={PARCHMENT} />
-          </TouchableOpacity>
+          <View style={styles.footerEnd}>
+            <TouchableOpacity
+              style={styles.roundBtn}
+              onPress={() => setWordsOpen(true)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={t('puzzle.words.title')}
+              testID="puzzle-words-open"
+            >
+              <Ionicons name="list" size={19} color={PARCHMENT} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.roundBtn}
+              onPress={shuffle}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={t('puzzle.shuffle')}
+            >
+              <Ionicons name="shuffle" size={20} color={PARCHMENT} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {!!flash && (
@@ -764,7 +1061,36 @@ const PuzzlePlay = ({ navigation, route }) => {
             {flash.coins != null && <Coins value={`+${flash.coins}`} size={24} textSize={20} />}
           </View>
         )}
+        {!!toast && (
+          <View style={styles.toast} pointerEvents="none">
+            <Text style={styles.toastText}>{toast}</Text>
+          </View>
+        )}
       </SafeAreaView>
+
+      <PuzzleWordsSheet
+        visible={wordsOpen}
+        onClose={() => setWordsOpen(false)}
+        puzzle={puzzle}
+      />
+      <ShareCardSheet
+        visible={sharing}
+        onClose={() => setSharing(false)}
+        title={t('puzzle.share.title')}
+        message={puzzleMessage({ title: shareTitle, line: shareLine, verse })}
+        onToast={showToast}
+        renderCard={(ref, w) => (
+          <PuzzleShareCard
+            ref={ref}
+            width={w}
+            title={t('puzzle.share.cardTitle')}
+            subtitle={shareTitle}
+            layout={puzzle.layout}
+            verse={verse}
+            line={shareLine}
+          />
+        )}
+      />
     </View>
   );
 };
@@ -797,12 +1123,39 @@ const styles = StyleSheet.create({
     backgroundColor: GOLD,
   },
   linkLoose: { opacity: 0.55 },
-  shuffleBtn: {
+  roundBtn: {
     width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.18)',
-    // Far right, with or without the next-level button beside it to push it there.
-    marginLeft: 'auto',
   },
+  // Far right, with or without the next-level button beside it to push it there.
+  footerEnd: { flexDirection: 'row', gap: 8, marginLeft: 'auto' },
+  hintBtnLetter: { backgroundColor: 'rgba(244,162,97,0.14)', borderColor: GOLD },
+  tilePicked: { borderColor: GOLD, borderWidth: 2.5, backgroundColor: 'rgba(250,226,195,0.98)' },
+  verseActions: { flexDirection: 'row', gap: 10, marginTop: 6 },
+  verseAction: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.5)',
+  },
+  verseActionText: { fontFamily: DISPLAY_MID, fontSize: 11, letterSpacing: 0.8, color: GOLD },
+  tracedPillTap: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 8 },
+  pillBtn: { paddingHorizontal: 2 },
+  readerRow: {
+    flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6,
+    paddingHorizontal: 12, paddingBottom: 4,
+  },
+  readerKey: {
+    minWidth: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  readerKeyText: { fontFamily: DISPLAY, fontSize: 17, color: PARCHMENT },
+  toast: {
+    position: 'absolute', bottom: 90, alignSelf: 'center',
+    paddingHorizontal: 16, paddingVertical: 9, borderRadius: 18,
+    backgroundColor: 'rgba(5,8,14,0.94)',
+  },
+  toastText: { fontSize: 13, color: PARCHMENT },
   bonusChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6,
     paddingHorizontal: 10, paddingVertical: 3, borderRadius: 11,

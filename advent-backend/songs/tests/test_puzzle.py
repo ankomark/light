@@ -1014,3 +1014,96 @@ class ResumeFastPathTests(APITestCase):
         self.assertEqual(again['found'], [word])
         self.assertIn('wallet', again)
         self.assertEqual(again['wallet']['balance'], again['wallet']['earned'] - again['wallet']['spent'])
+
+
+class LetterHintTests(APITestCase):
+    """The cheap hint: one letter, on a tile the player picked."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_corpus()
+        cls.theme = PuzzleTheme.objects.create(
+            name='Psalm 23 letters', slug='psalm-23-letters',
+            source={'kind': 'passage', 'book': 'Psalms', 'chapter': 23},
+        )
+
+    def setUp(self):
+        cache.clear()
+        forget_recorded_plays()
+        reset_theme_words()
+        reset_dictionary()
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+        WordPuzzle.objects.all().delete()
+        self.puzzle = generate(self.theme, 1, force=True)
+
+    def _rich(self, coins=100):
+        from datetime import date
+        from songs.models import DailyQuiz
+        quiz = DailyQuiz.objects.create(date=date(2026, 1, 2))
+        QuizAttempt.objects.create(user=self.user, quiz=quiz, score=1, total=1, points=coins)
+
+    def _tile(self):
+        p = self.puzzle.placements[0]
+        return p['row'], p['col'], p['word'][0]
+
+    def _buy(self, row, col):
+        return self.client.post(f'/api/puzzles/{self.puzzle.id}/letter/',
+                                {'row': row, 'col': col}, format='json')
+
+    def test_a_letter_shows_that_tile_and_costs_coins(self):
+        from songs.scoring import LETTER_COST
+        self._rich()
+        row, col, letter = self._tile()
+        res = self._buy(row, col)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data['letter'], letter)
+        self.assertEqual(res.data['cost'], LETTER_COST)
+        self.assertEqual(res.data['balance'], 100 - LETTER_COST)
+        self.assertEqual(CoinSpend.objects.get(user=self.user).reason, CoinSpend.LETTER)
+        level = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=1').data
+        self.assertEqual(level['shown'], [{'row': row, 'col': col, 'letter': letter}])
+        self.assertEqual(level['letters_used'], 1)
+        self.assertEqual(level['wallet']['letter_cost'], LETTER_COST)
+        # A letter is not a find: the word still has to be traced.
+        self.assertEqual(level['found'], [])
+
+    def test_the_same_tile_is_not_sold_twice(self):
+        self._rich()
+        row, col, _ = self._tile()
+        self._buy(row, col)
+        again = self._buy(row, col)
+        self.assertEqual(again.status_code, 400)
+        self.assertEqual(again.data['code'], 'shown')
+        self.assertEqual(CoinSpend.objects.filter(user=self.user).count(), 1)
+
+    def test_a_tile_of_a_found_word_is_already_showing(self):
+        self._rich()
+        p = self.puzzle.placements[0]
+        self.client.post(f'/api/puzzles/{self.puzzle.id}/found/', {'word': p['word']}, format='json')
+        res = self._buy(p['row'], p['col'])
+        self.assertEqual(res.data['code'], 'shown')
+
+    def test_an_empty_cell_or_nonsense_is_refused(self):
+        self._rich()
+        grid = self.puzzle.grid
+        blank = next(((r, c) for r, line in enumerate(grid) for c, ch in enumerate(line) if ch == '.'), None)
+        if blank:
+            self.assertEqual(self._buy(*blank).status_code, 400)
+        self.assertEqual(self._buy(99, 99).status_code, 400)
+        self.assertEqual(self.client.post(f'/api/puzzles/{self.puzzle.id}/letter/', {}, format='json').status_code, 400)
+        self.assertFalse(CoinSpend.objects.filter(user=self.user).exists())
+
+    def test_no_coins_no_letter(self):
+        row, col, _ = self._tile()
+        res = self._buy(row, col)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data['code'], 'not_enough_coins')
+
+    def test_the_finished_verse_says_where_it_is(self):
+        for p in self.puzzle.placements:
+            last = self.client.post(f'/api/puzzles/{self.puzzle.id}/found/', {'word': p['word']}, format='json')
+        verse = last.data['verse']
+        self.assertEqual(verse['book_number'], BOOKS_BY_NAME['Psalms']['number'])
+        self.assertEqual(verse['chapter'], 23)
+        self.assertIn('verse', verse)
