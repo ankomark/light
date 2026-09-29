@@ -19,8 +19,9 @@ def word_key(puzzle_id, word):
 
 
 def verse_payload(puzzle):
-    """The verse a finished level was drawn from, ready to render."""
-    verse = puzzle.verse
+    """The verse a finished level was drawn from, ready to render — from the
+    Bible the board was spelled from."""
+    verse = puzzle.sw_verse if getattr(puzzle, 'language', 'en') == 'sw' else puzzle.verse
     if not verse:
         return None
     return {
@@ -45,6 +46,14 @@ class PuzzleThemeSerializer(serializers.ModelSerializer):
         model = PuzzleTheme
         fields = ['id', 'name', 'slug', 'description', 'icon', 'levels_completed',
                   'next_level', 'stars']
+
+    def to_representation(self, obj):
+        """In Swahili, the Swahili name where there is one."""
+        data = super().to_representation(obj)
+        if self.context.get('lang') == 'sw':
+            data['name'] = obj.name_sw or obj.name
+            data['description'] = obj.description_sw or obj.description
+        return data
 
     def get_next_level(self, obj):
         return getattr(obj, '_next_level', None)
@@ -72,7 +81,7 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
     plus the letters of any word this player has already found or paid a hint
     for. A player can see where the words are without being told what they are.
     """
-    theme = PuzzleThemeSerializer(read_only=True)
+    theme = serializers.SerializerMethodField()
     rows = serializers.SerializerMethodField()
     cols = serializers.SerializerMethodField()
     layout = serializers.SerializerMethodField()
@@ -97,8 +106,12 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
             'id', 'theme', 'level', 'letters', 'rows', 'cols', 'layout',
             'slots', 'revealed', 'found', 'bonus', 'bonus_total', 'bonus_keys',
             'hints_used', 'shown', 'letters_used', 'is_complete', 'verse', 'band',
-            'stars', 'seconds', 'day',
+            'stars', 'seconds', 'day', 'language',
         ]
+
+    def get_theme(self, obj):
+        # Named in the language the board is spelled in.
+        return PuzzleThemeSerializer(obj.theme, context={**self.context, 'lang': obj.language}).data
 
     def get_stars(self, obj):
         return stars_for(self._progress(obj))

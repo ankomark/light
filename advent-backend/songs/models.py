@@ -3206,6 +3206,10 @@ class PuzzleTheme(models.Model):
     name = models.CharField(max_length=60, unique=True)
     slug = models.SlugField(max_length=60, unique=True)
     description = models.CharField(max_length=200, blank=True, default='')
+    # For the Swahili puzzle. A topic theme also needs `term_sw` in its source
+    # (the word searched for in the Swahili Bible), or it is not offered there.
+    name_sw = models.CharField(max_length=60, blank=True, default='')
+    description_sw = models.CharField(max_length=200, blank=True, default='')
     icon = models.CharField(max_length=40, blank=True, default='book')
     source = models.JSONField(default=dict)
     # Lowest first — the order themes are offered in.
@@ -3252,18 +3256,25 @@ class WordPuzzle(models.Model):
     # from the levels. A daily board is never resumed as "the next level" and
     # never counts toward a theme's levels.
     day = models.DateField(null=True, blank=True, db_index=True)
+    # The Bible it is spelled from: 'en' the KJV, 'sw' the Swahili NENO. Each
+    # language has its own levels and its own daily board.
+    language = models.CharField(max_length=5, default='en', db_index=True)
+    # A Swahili board's verse (BibleText); an English one's is `verse`.
+    sw_verse = models.ForeignKey(
+        'BibleText', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['theme__order', 'level']
         constraints = [
             models.UniqueConstraint(
-                fields=['theme', 'level'], condition=models.Q(day__isnull=True),
-                name='puzzle_one_per_theme_level',
+                fields=['theme', 'level', 'language'], condition=models.Q(day__isnull=True),
+                name='puzzle_one_per_theme_level_language',
             ),
             models.UniqueConstraint(
-                fields=['day'], condition=models.Q(day__isnull=False),
-                name='puzzle_one_a_day',
+                fields=['day', 'language'], condition=models.Q(day__isnull=False),
+                name='puzzle_one_a_day_per_language',
             ),
         ]
 
@@ -3384,7 +3395,9 @@ class BibleWord(models.Model):
     Built by `manage.py build_word_index` from the corpus, so the dictionary is
     scripture's own vocabulary and nothing else.
     """
-    word = models.CharField(max_length=24, unique=True)
+    word = models.CharField(max_length=24)
+    # 'en' from the KJV; 'sw' from the Swahili NENO (build_word_index --language sw).
+    language = models.CharField(max_length=5, default='en', db_index=True)
     length = models.PositiveSmallIntegerField(db_index=True)
     # Letters in alphabetical order — 'BREAD' -> 'ABDER'.
     letters = models.CharField(max_length=24, db_index=True)
@@ -3394,7 +3407,10 @@ class BibleWord(models.Model):
 
     class Meta:
         ordering = ['-frequency', 'word']
-        indexes = [models.Index(fields=['length', '-frequency'])]
+        indexes = [models.Index(fields=['language', 'length', '-frequency'])]
+        constraints = [
+            models.UniqueConstraint(fields=['language', 'word'], name='bibleword_one_per_language'),
+        ]
 
     def __str__(self):
         return self.word

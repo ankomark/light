@@ -18,8 +18,15 @@ from .common import *  # noqa: F401,F403
 from ..models import CoinSpend, PuzzleProgress, PuzzleTheme, WordPuzzle
 from ..puzzle import (
     LEVEL_LIMIT, WORD_HINT_WEIGHT, band_for, daily_puzzle, generate, help_used,
-    next_puzzle, stars_for,
+    language_available, next_puzzle, stars_for,
 )
+
+
+def _language(request):
+    """The language to play in: `lang` when its Bible is here, else English
+    — a Swahili speaker gets an English board rather than none."""
+    lang = request.query_params.get('lang') or 'en'
+    return lang if language_available(lang) else 'en'
 from ..scoring import (
     COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, LETTER_COST, coin_balance,
     completion_bonus,
@@ -43,12 +50,27 @@ class PuzzleThemeViewSet(viewsets.ReadOnlyModelViewSet):
     throttle_scope = 'quiz'
 
     def get_queryset(self):
-        return PuzzleTheme.objects.filter(is_active=True)
+        themes = PuzzleTheme.objects.filter(is_active=True)
+        if _language(self.request) != 'en':
+            # A topic with no word to search for in that Bible cannot build.
+            themes = [t for t in themes if (t.source or {}).get('kind') != PuzzleTheme.TOPIC
+                      or (t.source or {}).get(f'term_{_language(self.request)}')]
+        return themes
+
+    def get_object(self):
+        theme = next((t for t in self.get_queryset() if t.slug == self.kwargs.get('slug')), None)
+        if not theme:
+            raise NotFound('No such theme.')
+        return theme
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), 'lang': _language(self.request)}
 
     def _mine(self, request):
         """This player's finished levels (not daily boards), one read."""
         return (PuzzleProgress.objects
-                .filter(user=request.user, is_complete=True, puzzle__day__isnull=True)
+                .filter(user=request.user, is_complete=True, puzzle__day__isnull=True,
+                        puzzle__language=_language(request))
                 .select_related('puzzle'))
 
     def list(self, request, *args, **kwargs):
@@ -74,7 +96,8 @@ class PuzzleThemeViewSet(viewsets.ReadOnlyModelViewSet):
         theme = self.get_object()
         rows = {}
         for p in (PuzzleProgress.objects
-                  .filter(user=request.user, puzzle__theme=theme, puzzle__day__isnull=True)
+                  .filter(user=request.user, puzzle__theme=theme, puzzle__day__isnull=True,
+                          puzzle__language=_language(request))
                   .select_related('puzzle')):
             rows[p.puzzle.level] = p
         reached = max([lv for lv, p in rows.items() if p.is_complete] or [0])
@@ -155,7 +178,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
     throttle_scope = 'quiz'
 
     def get_queryset(self):
-        return WordPuzzle.objects.select_related('theme', 'verse')
+        return WordPuzzle.objects.select_related('theme', 'verse', 'sw_verse')
 
     def _progress(self, puzzle, create=True):
         if create:
@@ -180,7 +203,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             raise ValidationError({'level': 'That is not a level.'})
 
         try:
-            puzzle = generate(theme, level)
+            puzzle = generate(theme, level, language=_language(request))
         except ValueError as exc:
             # The theme cannot supply enough words — a real failure, not an
             # undersized puzzle that still pays a completion bonus.
@@ -198,7 +221,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         client's to do.
         """
         try:
-            puzzle = next_puzzle(request.user)
+            puzzle = next_puzzle(request.user, _language(request))
         except ValueError as exc:
             raise APIException(str(exc))
 
@@ -309,7 +332,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         """
         day = timezone.localdate()
         try:
-            puzzle = daily_puzzle(day)
+            puzzle = daily_puzzle(day, _language(request))
         except ValueError as exc:
             raise APIException(str(exc))
         puzzle._progress_cache = self._progress(puzzle)
@@ -549,6 +572,30 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             'cost': LETTER_COST, 'balance': balance - LETTER_COST,
             'letters_used': progress.letters_used,
         })
+
+    @action(detail=True, methods=['post'])
+    def meaning(self, request, pk=None):
+        """What a word found on this board means. POST {word, language}.
+        From the glossary when it has the word, otherwise explained by Claude
+        and kept for everyone. Only for a word this player has found."""
+        from .. import puzzle_words
+        puzzle = get_object_or_404(self.get_queryset(), pk=pk)
+        lang = request.data.get('language') or request.query_params.get('lang') or 'en'
+        try:
+            out = puzzle_words.meaning(request.user, puzzle, request.data.get('word'), lang)
+        except PermissionError:
+            return Response({'error': 'Find the word first.', 'code': 'not_found'},
+                            status=status.HTTP_403_FORBIDDEN)
+        except puzzle_words.AiOff:
+            return Response({'error': 'AI is not available.', 'code': 'ai_off'},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except puzzle_words.AiLimit:
+            return Response({'error': "You've used today's AI answers.", 'code': 'ai_limit'},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+        except puzzle_words.AiFailed:
+            return Response({'error': 'AI could not answer just now.', 'code': 'ai_failed'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        return Response(out)
 
     @action(detail=False, methods=['get'], url_path='my-progress')
     def my_progress(self, request):

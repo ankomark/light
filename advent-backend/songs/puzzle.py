@@ -23,7 +23,8 @@ from django.db import IntegrityError, transaction
 
 from django.db.models import Count, Max
 
-from .models import BibleVerse, BibleWord, PuzzleProgress, PuzzleTheme, WordPuzzle
+from .bible_books import BOOKS_BY_NAME
+from .models import BibleText, BibleVerse, BibleWord, PuzzleProgress, PuzzleTheme, WordPuzzle
 
 MIN_ANSWER = 3          # shortest word the wheel will accept
 BASE_MIN, BASE_MAX = 5, 8   # letters on the wheel
@@ -69,10 +70,55 @@ EARLY_FREQUENCY = 120
 FLOOR_REACHED_AT = 25
 
 
-def answer_floor(level):
+# ── languages ────────────────────────────────────────────────────────────────
+# English is played from the KJV (BibleVerse); Swahili from NENO (BibleText,
+# imported with `import_bible_version swh_bib`, indexed with
+# `build_word_index --language sw`). What differs is where the verses live and
+# how common a word has to be: Swahili builds its words from prefixes and
+# suffixes, so the same meaning is spread over many more spellings and each
+# one is rarer. Its floors are lower to leave a vocabulary the same size.
+class Tongue:
+    def __init__(self, code, model, where, min_frequency, early_frequency):
+        self.code = code
+        self.model = model
+        self.where = where
+        self.min_frequency = min_frequency
+        self.early_frequency = early_frequency
+
+    def verses(self):
+        return self.model.objects.filter(**self.where)
+
+
+TONGUES = {
+    'en': Tongue('en', BibleVerse, {}, 25, EARLY_FREQUENCY),
+    'sw': Tongue('sw', BibleText, {'version': 'swh_bib'}, 8, 40),
+}
+PUZZLE_LANGUAGES = tuple(TONGUES)
+
+
+def tongue(language):
+    return TONGUES.get(language) or TONGUES['en']
+
+
+def language_available(language):
+    """Whether the puzzle can be played in `language` here: English always;
+    another only once its Bible is indexed. Remembered for a few minutes."""
+    if language == 'en' or language not in TONGUES:
+        return language == 'en'
+    from django.core.cache import cache
+    key = f'puzzle:lang:{language}'
+    known = cache.get(key)
+    if known is None:
+        known = BibleWord.objects.filter(language=language).exists()
+        cache.set(key, known, 300)
+    return known
+
+
+def answer_floor(level, language='en'):
     """How common a word must be to be an answer at this level."""
+    t = tongue(language)
     reached = min(1.0, max(0, level - 1) / float(FLOOR_REACHED_AT))
-    return int(round(EARLY_FREQUENCY + (ANSWER_MIN_FREQUENCY - EARLY_FREQUENCY) * reached))
+    return int(round(t.early_frequency + (t.min_frequency - t.early_frequency) * reached))
 
 
 # Stars for a finished board, by how much help it took. A whole word is worth
@@ -125,7 +171,7 @@ def _thin(words):
     return False
 
 
-def _scope(theme, widen=False):
+def _scope(theme, widen=False, language='en'):
     """The verses a theme is built from.
 
     `widen` drops the narrowest part of the scope — a single chapter becomes
@@ -135,23 +181,28 @@ def _scope(theme, widen=False):
     """
     source = theme.source or {}
     kind = source.get('kind', PuzzleTheme.BOOKS)
+    t = tongue(language)
+    everything = t.verses()
 
     if kind == PuzzleTheme.BOOKS:
         first, last = int(source.get('first', 1)), int(source.get('last', 66))
-        return BibleVerse.objects.filter(
-            book_number__gte=first, book_number__lte=last,
-        )
+        return everything.filter(book_number__gte=first, book_number__lte=last)
 
     if kind == PuzzleTheme.PASSAGE:
-        verses = BibleVerse.objects.filter(book=source.get('book', ''))
+        # Named by its English book, which every Bible numbers the same way.
+        book = BOOKS_BY_NAME.get(source.get('book', ''))
+        if not book:
+            return everything.none()
+        verses = everything.filter(book_number=book['number'])
         if source.get('chapter') and not widen:
             verses = verses.filter(chapter=int(source['chapter']))
         return verses
 
-    term = (source.get('term') or '').strip()
+    # A topic is a word searched for, in the language being played.
+    term = (source.get('term' if language == 'en' else f'term_{language}') or '').strip()
     if not term:
-        return BibleVerse.objects.none()
-    return BibleVerse.objects.filter(text__icontains=term)
+        return everything.none()
+    return everything.filter(text__icontains=term)
 
 
 def _count_words(verses):
@@ -167,7 +218,7 @@ def _count_words(verses):
 _THEME_WORDS = {}
 
 
-def _theme_words(theme):
+def _theme_words(theme, language='en'):
     """Candidate words for a theme, most characteristic first.
 
     Read from the theme's own scripture. The book-range themes used to return
@@ -175,13 +226,13 @@ def _theme_words(theme):
     board they produced actually came from the fallback corpus and had nothing
     to do with the theme. They read their verses now, like everything else.
     """
-    key = (theme.pk, theme.slug)
+    key = (theme.pk, theme.slug, language)
     if key in _THEME_WORDS:
         return _THEME_WORDS[key]
 
-    words = _count_words(_scope(theme))
+    words = _count_words(_scope(theme, language=language))
     if _thin(words):
-        wider = _count_words(_scope(theme, widen=True))
+        wider = _count_words(_scope(theme, widen=True, language=language))
         if len(wider) > len(words):
             words = wider
 
@@ -201,7 +252,7 @@ def reset_theme_words():
 MIN_BASE_POOL = 24
 
 
-def base_pool(theme, length, min_frequency):
+def base_pool(theme, length, min_frequency, language='en'):
     """Candidate wheels of `length` for a theme, most characteristic first.
 
     A single chapter yields a handful of words of any one length, so a theme
@@ -210,7 +261,7 @@ def base_pool(theme, length, min_frequency):
     up from the wider corpus — the theme still leads, and its verse reveal is
     still drawn from its own text, but the game does not stall.
     """
-    words = _theme_words(theme)
+    words = _theme_words(theme, language)
     if not words:
         # A theme with no vocabulary at all is misconfigured — a passage that
         # was never imported, a topic that matches nothing. Topping that up
@@ -224,7 +275,7 @@ def base_pool(theme, length, min_frequency):
 
     seen = set(own)
     wider = (BibleWord.objects
-             .filter(length=length, frequency__gte=min_frequency)
+             .filter(language=language, length=length, frequency__gte=min_frequency)
              .order_by('-frequency')
              .values_list('word', flat=True)[:400])
     return own + [w for w in wider if w not in seen]
@@ -235,7 +286,7 @@ def base_pool(theme, length, min_frequency):
 LEVEL_LIMIT = 9999
 
 
-def candidates_for(user):
+def candidates_for(user, language='en'):
     """Every (theme, level) this person could be given now, best first.
 
     Picking a subject is not a decision worth handing to the player. Left to
@@ -252,10 +303,10 @@ def candidates_for(user):
     build: `next_puzzle` walks it and takes the first that does. Deterministic
     given the same progress, so asking twice cannot skip a level.
     """
-    return _plan(user)[0]
+    return _plan(user, language)[0]
 
 
-def _plan(user):
+def _plan(user, language='en'):
     """candidates_for's work, with what it read along the way — the level
     being resumed and the per-theme counts — so the caller need not read
     them again. → (options, started progress or None, {theme_id: completed})."""
@@ -266,7 +317,10 @@ def _plan(user):
     options = []
     # The Daily Puzzle is its own thing: never resumed as the next level,
     # never counted toward a theme.
-    mine = PuzzleProgress.objects.filter(user=user, puzzle__day__isnull=True)
+    # And each language has its own levels: Swahili level 3 is its own board.
+    mine = PuzzleProgress.objects.filter(
+        user=user, puzzle__day__isnull=True, puzzle__language=language,
+    )
     started = (mine.filter(is_complete=False)
                .select_related('puzzle', 'puzzle__theme')
                .order_by('-started_at')
@@ -291,15 +345,15 @@ def _plan(user):
     return options, started, per_theme
 
 
-def choose_for(user):
+def choose_for(user, language='en'):
     """The single best (theme, level) — what `candidates_for` puts first."""
-    options = candidates_for(user)
+    options = candidates_for(user, language)
     if not options:
         raise ValueError('No puzzle themes are active.')
     return options[0]
 
 
-def next_puzzle(user):
+def next_puzzle(user, language='en'):
     """The level to play now: the first candidate that actually builds.
 
     A theme whose source cannot yield a workable level — too few words, a
@@ -307,7 +361,7 @@ def next_puzzle(user):
     moves past it rather than handing back an error, and only a set where
     nothing at all builds is a real failure.
     """
-    options, started, per_theme = _plan(user)
+    options, started, per_theme = _plan(user, language)
     # Resuming — the usual case: the board and the player's place in it are
     # already in hand, so nothing is read twice.
     if started and started.puzzle.theme.is_active:
@@ -318,7 +372,7 @@ def next_puzzle(user):
     failure = None
     for theme, level in options:
         try:
-            puzzle = generate(theme, level)
+            puzzle = generate(theme, level, language=language)
             puzzle.theme._levels_completed = per_theme.get(theme.id, 0)
             return puzzle
         except ValueError as exc:
@@ -326,16 +380,16 @@ def next_puzzle(user):
     raise ValueError(str(failure) if failure else 'No puzzle themes are active.')
 
 
-def _theme_verses(theme, widen=False):
+def _theme_verses(theme, widen=False, language='en'):
     """Every verse inside a theme's scope — the same scope its words came from."""
-    return _scope(theme, widen=widen)
+    return _scope(theme, widen=widen, language=language)
 
 
 # How many of a level's words to try before settling for any verse in scope.
 VERSE_SEARCH_WORDS = 4
 
 
-def _verse_for(theme, words, rng):
+def _verse_for(theme, words, rng, language='en'):
     """A verse from the theme that actually contains one of the level's words.
 
     This is the level's reward for finishing, so it has to be *the* verse the
@@ -350,19 +404,19 @@ def _verse_for(theme, words, rng):
     # The narrow scope first — a Psalm 23 level would rather reveal a verse of
     # Psalm 23 — then the wider one its words may have come from.
     for widen in (False, True):
-        verses = _theme_verses(theme, widen=widen)
+        verses = _theme_verses(theme, widen=widen, language=language)
         for word in words[:VERSE_SEARCH_WORDS]:
             pool = list(verses.filter(text__icontains=word)[:40])
             hits = [v for v in pool
                     if re.search(r'\b%s\b' % re.escape(word), v.text, re.I)]
             if hits:
                 return rng.choice(hits)
-    return _theme_verses(theme).first()
+    return _theme_verses(theme, language=language).first()
 
 
 # ── which words the letters can spell ────────────────────────────────────────
 
-_DICTIONARY = None
+_DICTIONARY = {}
 
 
 # A word has to be common enough that a player could reasonably think of it.
@@ -373,7 +427,7 @@ _DICTIONARY = None
 ANSWER_MIN_FREQUENCY = 25
 
 
-def dictionary():
+def dictionary(language='en'):
     """(word, Counter, frequency) for every answerable word, loaded once.
 
     A few thousand words is small enough to hold and check in memory; the subset
@@ -381,32 +435,33 @@ def dictionary():
     would be far slower. The frequency rides along so a level can ask for only
     the common part of it without a second query.
     """
-    global _DICTIONARY
-    if _DICTIONARY is None:
-        _DICTIONARY = [
+    if language not in _DICTIONARY:
+        _DICTIONARY[language] = [
             (w, Counter(w), f)
             for w, f in BibleWord.objects
-            .filter(length__gte=MIN_ANSWER, frequency__gte=ANSWER_MIN_FREQUENCY)
+            .filter(language=language, length__gte=MIN_ANSWER,
+                    frequency__gte=tongue(language).min_frequency)
             .order_by('-frequency').values_list('word', 'frequency')
         ]
-    return _DICTIONARY
+    return _DICTIONARY[language]
 
 
 def reset_dictionary():
     """Drop the cache — used by tests, and after re-indexing."""
-    global _DICTIONARY
-    _DICTIONARY = None
+    _DICTIONARY.clear()
 
 
-def words_from(letters, min_frequency=ANSWER_MIN_FREQUENCY):
+def words_from(letters, min_frequency=None, language='en'):
     """Every indexed word spellable from `letters`, longest first.
 
     A letter may be used only as often as it appears — two Ls need two Ls.
     `min_frequency` raises the bar for a level that wants only common words.
     """
+    if min_frequency is None:
+        min_frequency = tongue(language).min_frequency
     have = Counter(letters)
     out = []
-    for word, need, freq in dictionary():
+    for word, need, freq in dictionary(language):
         if freq < min_frequency:
             continue
         if len(word) <= len(letters) and not (need - have):
@@ -525,45 +580,53 @@ def backfill(puzzle):
     have does not.
     """
     changed = []
+    language = puzzle.language or 'en'
     if not puzzle.bonus_words and puzzle.letters:
         on_board = {p['word'] for p in puzzle.placements}
-        puzzle.bonus_words = [w for w in words_from(puzzle.letters) if w not in on_board]
+        puzzle.bonus_words = [w for w in words_from(puzzle.letters, language=language)
+                              if w not in on_board]
         changed.append('bonus_words')
-    if puzzle.verse_id is None:
+    field = 'verse' if language == 'en' else 'sw_verse'
+    if getattr(puzzle, f'{field}_id') is None:
         rng = random.Random(_seed_for(puzzle.theme.slug, puzzle.level))
-        verse = _verse_for(puzzle.theme, [p['word'] for p in puzzle.placements], rng)
+        verse = _verse_for(puzzle.theme, [p['word'] for p in puzzle.placements], rng, language)
         if verse:
-            puzzle.verse = verse
-            changed.append('verse')
+            setattr(puzzle, field, verse)
+            changed.append(field)
     if changed:
         puzzle.save(update_fields=changed)
     return puzzle
 
 
-def generate(theme, level, force=False):
+def generate(theme, level, force=False, language='en'):
     """Build (or rebuild) one level. Returns the WordPuzzle.
 
     Raises ValueError when the theme cannot produce a workable set of letters —
     better than a level with two answers that still pays a completion bonus.
     """
-    existing = WordPuzzle.objects.filter(theme=theme, level=level, day__isnull=True).first()
+    existing = WordPuzzle.objects.filter(
+        theme=theme, level=level, day__isnull=True, language=language,
+    ).first()
     if existing and not force:
         return backfill(existing)
-    rng = random.Random(_seed_for(theme.slug, level))
-    return _build(theme, level, rng, existing=existing)
+    # English keeps the seed it always had, so no English board changes.
+    seed = theme.slug if language == 'en' else f'{theme.slug}:{language}'
+    rng = random.Random(_seed_for(seed, level))
+    return _build(theme, level, rng, existing=existing, language=language)
 
 
 # The Daily Puzzle's difficulty: past the first easy boards, well short of hard.
 DAILY_LEVEL = 8
 
 
-def daily_puzzle(day):
+def daily_puzzle(day, language='en'):
     """The board for `day`, the same for everyone: built on first ask.
 
     The theme turns with the date, so the week is not seven Gospels boards;
     a theme that will not build is passed over for the next.
     """
-    existing = WordPuzzle.objects.filter(day=day).select_related('theme', 'verse').first()
+    existing = (WordPuzzle.objects.filter(day=day, language=language)
+                .select_related('theme', 'verse').first())
     if existing:
         return backfill(existing)
     themes = list(PuzzleTheme.objects.filter(is_active=True))
@@ -572,24 +635,24 @@ def daily_puzzle(day):
     start = day.toordinal() % len(themes)
     failure = None
     for theme in themes[start:] + themes[:start]:
-        rng = random.Random(_seed_for(f'daily:{day.isoformat()}', DAILY_LEVEL))
+        rng = random.Random(_seed_for(f'daily:{day.isoformat()}:{language}', DAILY_LEVEL))
         try:
-            return _build(theme, DAILY_LEVEL, rng, day=day)
+            return _build(theme, DAILY_LEVEL, rng, day=day, language=language)
         except ValueError as exc:
             failure = exc
         except IntegrityError:
             # Someone else built it a moment ago.
-            return backfill(WordPuzzle.objects.get(day=day))
+            return backfill(WordPuzzle.objects.get(day=day, language=language))
     raise ValueError(str(failure))
 
 
-def _build(theme, level, rng, existing=None, day=None):
+def _build(theme, level, rng, existing=None, day=None, language='en'):
     """Lay out one board for `theme` at `level`'s difficulty and keep it."""
     target_len = level_base_length(level)
     wanted = level_answer_count(level)
-    floor = answer_floor(level)
+    floor = answer_floor(level, language)
 
-    candidates = base_pool(theme, target_len, floor)
+    candidates = base_pool(theme, target_len, floor, language)
     if not candidates:
         raise ValueError('Theme "%s" has no usable words.' % theme.name)
 
@@ -601,12 +664,12 @@ def _build(theme, level, rng, existing=None, day=None):
     ordered = candidates[start:] + candidates[:start]
 
     for base in ordered[:40]:
-        answers = words_from(base, floor)
+        answers = words_from(base, floor, language)
         if len(answers) < 5:
             # These letters cannot make five words that common. Take the wheel
             # anyway at the standard floor: an easy level built from slightly
             # rarer words beats a level that refuses to exist.
-            answers = words_from(base)
+            answers = words_from(base, language=language)
         if len(answers) < 5:
             continue
         chosen = answers[:wanted]
@@ -622,8 +685,10 @@ def _build(theme, level, rng, existing=None, day=None):
         # Everything else the wheel can spell. `letters` is a shuffle of `base`,
         # so this is the same set of words, minus the ones on the board.
         on_board = {p['word'] for p in placements}
-        bonus = [w for w in words_from(letters) if w not in on_board]
-        verse = _verse_for(theme, [p['word'] for p in placements], rng)
+        bonus = [w for w in words_from(letters, language=language) if w not in on_board]
+        verse = _verse_for(theme, [p['word'] for p in placements], rng, language)
+        # The reveal is a verse of the Bible being played.
+        verses = {'verse': verse} if language == 'en' else {'sw_verse': verse}
 
         with transaction.atomic():
             if existing:
@@ -631,7 +696,8 @@ def _build(theme, level, rng, existing=None, day=None):
                 existing.placements = shifted
                 existing.letters = letters
                 existing.bonus_words = bonus
-                existing.verse = verse
+                for field, value in verses.items():
+                    setattr(existing, field, value)
                 existing.size = max(len(grid), len(grid[0]) if grid else 0)
                 existing.save()
                 return existing
@@ -639,7 +705,7 @@ def _build(theme, level, rng, existing=None, day=None):
                 theme=theme, level=level, letters=letters,
                 size=max(len(grid), len(grid[0]) if grid else 0),
                 grid=grid, placements=shifted,
-                bonus_words=bonus, verse=verse, day=day,
+                bonus_words=bonus, day=day, language=language, **verses,
             )
 
     raise ValueError(

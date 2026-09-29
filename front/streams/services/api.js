@@ -1249,6 +1249,11 @@ export const fetchPuzzleVersus = async (id, username) =>
 export const fetchPuzzleDailyBoard = async (scope = 'everyone') =>
   apiRequest('get', `/puzzles/daily/leaderboard/${scope && scope !== 'everyone' ? `?scope=${encodeURIComponent(scope)}` : ''}`);
 
+// What a word found on this board means: { word, meaning, source, reference, verse }.
+// `language` is the language to explain it in.
+export const fetchPuzzleMeaning = async (id, word, language = 'en') =>
+  apiRequest('post', `/puzzles/${id}/meaning/`, { word, language });
+
 // The themes, with how far this player has got in each and the stars won.
 export const fetchPuzzleThemes = async (lang) => apiRequest('get', `/puzzle-themes/${langQuery(lang)}`);
 
@@ -2268,6 +2273,7 @@ export default {
   fetchPuzzle,
   fetchPuzzleVersus,
   fetchPuzzleDailyBoard,
+  fetchPuzzleMeaning,
   claimPuzzleWord,
   buyPuzzleHint,
   buyPuzzleLetter,

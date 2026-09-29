@@ -10,6 +10,7 @@ player finds is a word that actually appears in scripture.
 
     python manage.py build_word_index
     python manage.py build_word_index --min 3 --max 9
+    python manage.py build_word_index --language sw     # from the Swahili NENO
 """
 import re
 from collections import Counter
@@ -17,7 +18,7 @@ from collections import Counter
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from songs.models import BibleVerse, BibleWord
+from songs.models import BibleText, BibleVerse, BibleWord
 
 # Archaic forms that are common enough to survive the frequency filter but that
 # no player would think to look for.
@@ -35,24 +36,36 @@ class Command(BaseCommand):
         parser.add_argument('--max', type=int, default=9, help='Longest word to keep (default 9).')
         parser.add_argument('--min-frequency', type=int, default=3,
                             help='Drop words rarer than this (default 3).')
+        parser.add_argument('--language', default='en', choices=['en', 'sw'],
+                            help='en: the KJV (default). sw: the Swahili NENO, which '
+                                 'must be imported first (import_bible_version swh_bib).')
 
     def handle(self, *args, **options):
         low, high = options['min'], options['max']
         floor = options['min_frequency']
+        language = options['language']
+        if language == 'sw':
+            verses = BibleText.objects.filter(version='swh_bib')
+            hint = 'run "manage.py import_bible_version swh_bib" first'
+            exclude = set()
+        else:
+            verses = BibleVerse.objects.all()
+            hint = 'run "manage.py import_bible" first'
+            exclude = EXCLUDE
 
-        if not BibleVerse.objects.exists():
-            self.stderr.write('The corpus is empty — run "manage.py import_bible" first.')
+        if not verses.exists():
+            self.stderr.write('The corpus is empty — %s.' % hint)
             return
 
         counts = Counter()
-        total = BibleVerse.objects.count()
+        total = verses.count()
         self.stdout.write('Reading %d verses...' % total)
 
         # Streamed: the whole corpus does not need to be resident at once.
-        for text in BibleVerse.objects.values_list('text', flat=True).iterator(chunk_size=2000):
+        for text in verses.values_list('text', flat=True).iterator(chunk_size=2000):
             for raw in text.split():
                 word = re.sub(r'[^A-Za-z]', '', raw).upper()
-                if low <= len(word) <= high and word not in EXCLUDE:
+                if low <= len(word) <= high and word not in exclude:
                     counts[word] += 1
 
         keep = {w: n for w, n in counts.items() if n >= floor}
@@ -60,12 +73,18 @@ class Command(BaseCommand):
                           % (len(counts), len(keep), floor))
 
         rows = [
-            BibleWord(word=w, length=len(w), letters=''.join(sorted(w)), frequency=n)
+            BibleWord(word=w, language=language, length=len(w),
+                      letters=''.join(sorted(w)), frequency=n)
             for w, n in keep.items()
         ]
         with transaction.atomic():
-            BibleWord.objects.all().delete()
+            BibleWord.objects.filter(language=language).delete()
             BibleWord.objects.bulk_create(rows, batch_size=2000)
+        from songs.puzzle import reset_dictionary, reset_theme_words
+        from django.core.cache import cache
+        reset_dictionary()
+        reset_theme_words()
+        cache.delete(f'puzzle:lang:{language}')
 
         self.stdout.write(self.style.SUCCESS(
             'Indexed %d words (%d-%d letters).' % (len(rows), low, high)
