@@ -21,12 +21,14 @@ import {
   Animated, AccessibilityInfo, Image, ScrollView, PanResponder, useWindowDimensions,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import * as Speech from 'expo-speech';
+// expo-speech and expo-clipboard are native and may be missing from an older
+// build; they load on first use (utils/optionalNative.js), never at launch.
+import { speech } from '../utils/optionalNative';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import GlassView from '../components/GlassView';
-import VerseShareSheet, { copyVerse } from '../components/VerseShareSheet';
+import VerseShareSheet, { copyVerse, canCopy } from '../components/VerseShareSheet';
 import { format as fmt, subDays } from 'date-fns';
 import { useI18n } from '../context/I18nContext';
 import { usePreferences } from '../context/PreferencesContext';
@@ -73,6 +75,9 @@ const TRANSLATION_WAIT_MS = 2500;
 // long verse can still be scrolled without the day changing under it.
 const SWIPE_MIN = 60;
 const isAcross = (g) => Math.abs(g.dx) > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 2;
+
+// Stopping a voice that may not exist (no expo-speech in this build).
+const hush = () => { try { speech()?.stop(); } catch { /* nothing speaking */ } };
 
 // Feedback that must never fail the thing it accompanies.
 const tick = () => { Haptics.selectionAsync().catch(() => {}); };
@@ -198,18 +203,19 @@ const DailyVerse = ({ navigation }) => {
   // new day, or leaving the screen, stops the old one.
   const [speaking, setSpeaking] = useState(false);
   useEffect(() => {
-    Speech.stop();
+    hush();
     setSpeaking(false);
   }, [shown]);
-  useEffect(() => () => { Speech.stop(); }, []);
+  useEffect(() => () => { hush(); }, []);
+  const canSpeak = !!speech();
   const listen = useCallback(() => {
     if (!shownVerse) return;
     tick();
-    if (speaking) { Speech.stop(); setSpeaking(false); return; }
+    if (speaking) { hush(); setSpeaking(false); return; }
     setSpeaking(true);
     const done = () => setSpeaking(false);
     // In the verse's own language, so a Swahili verse is not read in English.
-    Speech.speak(`${shownVerse.text} ... ${spokenReference(shownVerse)}`, {
+    speech()?.speak(`${shownVerse.text} ... ${spokenReference(shownVerse)}`, {
       language: shownVerse.lang || 'en', rate: 0.92, onDone: done, onStopped: done, onError: done,
     });
   }, [shownVerse, speaking]);
@@ -219,7 +225,7 @@ const DailyVerse = ({ navigation }) => {
   const bookId = verse ? bookIdFor(verse.book) : null;
   const readChapter = useCallback(() => {
     if (!verse || !bookId) return;
-    Speech.stop();
+    hush();
     navigation?.push?.('bible', { bookId, chapter: verse.chapter, verse: verse.verse });
   }, [verse, bookId, navigation]);
 
@@ -252,7 +258,7 @@ const DailyVerse = ({ navigation }) => {
   const share = useCallback(() => {
     if (!shownVerse) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    Speech.stop();
+    hush();
     setSharing(true);
   }, [shownVerse]);
   const closeShare = useCallback(() => setSharing(false), []);
@@ -363,10 +369,12 @@ const DailyVerse = ({ navigation }) => {
                 <Text style={styles.quoteMark}>“</Text>
                 <Text
                   style={[styles.verse, { fontSize: size, lineHeight: size * 1.62 }]}
-                  onLongPress={copy}
-                  accessibilityHint={t('verse.copyHint')}
-                  accessibilityActions={[{ name: 'longpress', label: t('verse.copy') }]}
-                  onAccessibilityAction={copy}
+                  {...(canCopy() ? {
+                    onLongPress: copy,
+                    accessibilityHint: t('verse.copyHint'),
+                    accessibilityActions: [{ name: 'longpress', label: t('verse.copy') }],
+                    onAccessibilityAction: copy,
+                  } : {})}
                 >
                   {shownVerse.text}
                 </Text>
@@ -385,16 +393,18 @@ const DailyVerse = ({ navigation }) => {
                 {/* Quiet, inside the card: they belong to this verse, and the
                     foot already carries the screen's one loud action. */}
                 <View style={styles.cardActions}>
-                  <TouchableOpacity
-                    onPress={listen}
-                    hitSlop={8}
-                    style={styles.cardAction}
-                    accessibilityRole="button"
-                    accessibilityLabel={speaking ? t('verse.stop') : t('verse.listen')}
-                  >
-                    <Ionicons name={speaking ? 'stop-circle-outline' : 'volume-high-outline'} size={16} color={GOLD_SOFT} />
-                    <Text style={styles.cardActionText}>{speaking ? t('verse.stop') : t('verse.listen')}</Text>
-                  </TouchableOpacity>
+                  {canSpeak && (
+                    <TouchableOpacity
+                      onPress={listen}
+                      hitSlop={8}
+                      style={styles.cardAction}
+                      accessibilityRole="button"
+                      accessibilityLabel={speaking ? t('verse.stop') : t('verse.listen')}
+                    >
+                      <Ionicons name={speaking ? 'stop-circle-outline' : 'volume-high-outline'} size={16} color={GOLD_SOFT} />
+                      <Text style={styles.cardActionText}>{speaking ? t('verse.stop') : t('verse.listen')}</Text>
+                    </TouchableOpacity>
+                  )}
                   {!!passage && (
                     <TouchableOpacity
                       onPress={keep}

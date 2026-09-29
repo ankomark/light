@@ -67,7 +67,9 @@ export const publishWidgetVerse = async (payload) => {
       && kept.reference === payload.reference && kept.title === payload.title) return;
   await store(payload);
   try {
-    const { requestWidgetUpdate } = require('react-native-android-widget');
+    const widget = require('../utils/optionalNative').androidWidget();
+    if (!widget) return;
+    const { requestWidgetUpdate } = widget;
     const { default: DailyVerseWidget, WIDGET_NAME } = require('./DailyVerseWidget');
     const React = require('react');
     await requestWidgetUpdate({

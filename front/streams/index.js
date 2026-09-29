@@ -6,9 +6,17 @@ import App from './App';
 
 // The home-screen verse widget (Android): Android wakes this headless task
 // to draw and refresh it. See widgets/widgetTaskHandler.js.
+// Guarded: on a build made before the widget package was added, the module
+// is missing, and that must not stop the app from starting.
 if (Platform.OS === 'android') {
-  const { registerWidgetTaskHandler } = require('react-native-android-widget');
-  registerWidgetTaskHandler(require('./widgets/widgetTaskHandler').default);
+  const widget = require('./utils/optionalNative').androidWidget();
+  if (widget) {
+    try {
+      widget.registerWidgetTaskHandler(require('./widgets/widgetTaskHandler').default);
+    } catch {
+      // No widget this build; the app runs without it.
+    }
+  }
 }
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

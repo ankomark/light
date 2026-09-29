@@ -13,10 +13,11 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
-import * as Clipboard from 'expo-clipboard';
+// Not imported at the top: on a build made before these were added, loading
+// them crashes the app at launch. See utils/optionalNative.js.
+import { viewShot, clipboard } from '../utils/optionalNative';
 import { format as fmt, parseISO } from 'date-fns';
 import BottomSheet from './BottomSheet';
 import { useI18n } from '../context/I18nContext';
@@ -33,12 +34,17 @@ const APP_NAME = 'Adventist Life';
 
 // 4:5, the shape a phone's feed and status screens show whole.
 const RATIO = 5 / 4;
-const CAN_SAVE = Platform.OS !== 'web';
+const IS_WEB = Platform.OS === 'web';
 
 export const verseMessage = (verse) => `“${verse.text}”\n— ${verse.reference}`;
 
+/** Whether this build can copy at all (expo-clipboard is native). */
+export const canCopy = () => !!clipboard();
+
 /** Put the verse on the clipboard. Resolves true when it got there. */
 export const copyVerse = async (verse) => {
+  const Clipboard = clipboard();
+  if (!Clipboard) return false;
   try {
     await Clipboard.setStringAsync(verseMessage(verse));
     return true;
@@ -112,10 +118,14 @@ const VerseShareSheet = ({ visible, onClose, verse, onToast }) => {
   const [busy, setBusy] = useState(null);     // which option is working
   const cardW = Math.min(winW - 48, 320);
 
-  const capture = useCallback(
-    () => captureRef(cardRef, { format: 'png', quality: 1, result: 'tmpfile' }),
-    [],
-  );
+  // A picture needs react-native-view-shot in the build; without it the
+  // picture option falls back to text and saving is not offered.
+  const shot = viewShot();
+  const canSave = !IS_WEB && !!shot;
+  const capture = useCallback(async () => {
+    if (!shot) throw new Error('view-shot is not in this build');
+    return shot.captureRef(cardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+  }, [shot]);
 
   const shareText = useCallback(() => {
     onClose();
@@ -187,11 +197,13 @@ const VerseShareSheet = ({ visible, onClose, verse, onToast }) => {
         <View style={styles.row}>
           <Option icon="chatbubble-ellipses-outline" label={t('verse.shareText')} onPress={shareText}
                   testID="verse-share-text" />
-          {CAN_SAVE && (
+          {canSave && (
             <Option icon="download-outline" label={t('verse.save')} onPress={save}
                     busy={busy === 'save'} testID="verse-save" />
           )}
-          <Option icon="copy-outline" label={t('verse.copy')} onPress={copy} testID="verse-copy" />
+          {canCopy() && (
+            <Option icon="copy-outline" label={t('verse.copy')} onPress={copy} testID="verse-copy" />
+          )}
         </View>
       </ScrollView>
     </BottomSheet>
