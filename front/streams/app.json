@@ -70,6 +70,28 @@
         }
       ],
       "expo-web-browser",
+      [
+        "react-native-android-widget",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/cinzel/700Bold/Cinzel_700Bold.ttf",
+            "./node_modules/@expo-google-fonts/lora/400Regular/Lora_400Regular.ttf"
+          ],
+          "widgets": [
+            {
+              "name": "DailyVerse",
+              "label": "Verse of the Day",
+              "description": "Today's verse from Adventist Life",
+              "minWidth": "250dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 10800000
+            }
+          ]
+        }
+      ],
       "expo-sqlite",
       "expo-asset",
       "@livekit/react-native-expo-plugin",

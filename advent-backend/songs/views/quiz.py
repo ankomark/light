@@ -11,11 +11,12 @@ from django.db.models import Count, Max, Sum
 from .common import *  # noqa: F401,F403
 from ..models import (
     DailyQuiz, PuzzleProgress, QuizAnswer, QuizAttempt, QuizQuestion, QuizSession,
+    VerseDay,
 )
 from ..modes import DAILY, MODES, config
 from ..quiz import generate_for_date, start_session
 from ..scoring import coin_balance, level_for, score_answer
-from ..streaks import streak_for
+from ..streaks import day_streaks, streak_for
 from ..serializers.quiz import (
     DailyQuizSerializer, QuizAttemptSerializer, QuizSessionSerializer,
 )
@@ -421,8 +422,12 @@ class DailyVerseView(APIView):
     # so the endpoint cannot be walked through the whole rotation at once.
     HISTORY_DAYS = 14
 
+    # A day's verse never changes; the bound only lets a re-import show through.
+    CACHE_SECONDS = 24 * 60 * 60
+
     def get(self, request):
         from ..devotion import verse_for_date
+        from ..verse_reflections import reflection_for
 
         today = timezone.localdate()
         raw = request.query_params.get('date')
@@ -436,16 +441,45 @@ class DailyVerseView(APIView):
                 raise ValidationError(
                     {'date': 'Only today and the last %d days.' % self.HISTORY_DAYS})
 
-        verse = verse_for_date(day)
-        if not verse:
-            raise APIException('The Bible text has not been imported yet.')
+        # The same for everyone on a given day, and the morning push sends the
+        # whole congregation here at once: look it up once per date, not once
+        # per person. A missing corpus is not cached, so an import shows at once.
+        key = 'daily-verse:%s' % day.isoformat()
+        body = cache.get(key)
+        if body is None:
+            verse = verse_for_date(day)
+            if not verse:
+                raise APIException('The Bible text has not been imported yet.')
+            body = {
+                'date': day.isoformat(),
+                'reference': verse.reference,
+                'book': verse.book,
+                'chapter': verse.chapter,
+                'verse': verse.verse,
+                'text': verse.text,
+                'reflection': reflection_for(verse.book, verse.chapter, verse.verse),
+            }
+            cache.set(key, body, self.CACHE_SECONDS)
 
-        return Response({
-            'date': day.isoformat(),
-            'reference': verse.reference,
-            'book': verse.book,
-            'chapter': verse.chapter,
-            'verse': verse.verse,
-            'text': verse.text,
-            'is_today': day == today,
-        })
+        out = {**body, 'is_today': day == today}
+        # The home-screen widget refreshes on its own every few hours: that
+        # is the phone fetching, not the person reading, so it is not a visit.
+        if day == today and request.query_params.get('via') != 'widget':
+            out['streak'] = self._streak(request.user, today)
+        return Response(out)
+
+    # Enough history for any streak worth showing; the best run is "best in
+    # the last year or so", which is what anyone means by it.
+    STREAK_WINDOW = 400
+
+    def _streak(self, user, today):
+        """Record today's visit and return the run it extends.
+
+        Only today's verse counts: paging back through the fortnight is
+        catching up, and a streak made of catching up would be a fiction.
+        """
+        VerseDay.objects.get_or_create(user=user, date=today)
+        days = list(VerseDay.objects.filter(user=user)
+                    .order_by('-date').values_list('date', flat=True)[:self.STREAK_WINDOW])
+        current, best = day_streaks(days, today)
+        return {'current': current, 'best': best}

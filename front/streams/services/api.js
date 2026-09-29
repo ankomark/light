@@ -1197,8 +1197,12 @@ export const clearWeatherPlace = async () => apiRequest('delete', '/weather-plac
 
 // One encouraging verse a day, chosen on the server so everyone sees the same
 // one. `day` is optional and only reaches back as far as the server allows.
-export const fetchDailyVerse = async (day = null) =>
-  apiRequest('get', day ? `/daily-verse/?date=${encodeURIComponent(day)}` : '/daily-verse/');
+// `via: 'widget'` marks the home-screen widget's own refresh, which the
+// server does not count toward the reading streak.
+export const fetchDailyVerse = async (day = null, { via } = {}) => {
+  const q = [day && `date=${encodeURIComponent(day)}`, via && `via=${encodeURIComponent(via)}`].filter(Boolean);
+  return apiRequest('get', `/daily-verse/${q.length ? `?${q.join('&')}` : ''}`);
+};
 
 // Group endpoints
 // Returns the paginated envelope { results, next, ... } so the caller can

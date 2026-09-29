@@ -1,0 +1,244 @@
+// Share the verse of the day as a picture: the card below is both what the
+// sheet shows and what is captured, so the preview is exactly what is sent.
+//
+// A picture because that is how verses travel — a WhatsApp status, a group
+// chat, an Instagram story — and a picture carries the app's name with it.
+// Text stays one tap away for the chats where a picture is too much, and a
+// capture that fails (the web, an old build without the native module) falls
+// back to it rather than to an error.
+import React, { useCallback, useRef, useState } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet, Share, Image, ScrollView,
+  ActivityIndicator, Platform, useWindowDimensions,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
+import * as Clipboard from 'expo-clipboard';
+import { format as fmt, parseISO } from 'date-fns';
+import BottomSheet from './BottomSheet';
+import { useI18n } from '../context/I18nContext';
+
+const TEAL = '#004B51';
+const TEAL_DEEP = '#00343A';
+const TEAL_LIFT = '#015C63';
+const PARCHMENT = '#F2EFE6';
+const GOLD_SOFT = '#E3C46A';
+const DISPLAY = 'Cinzel_700Bold';
+const DISPLAY_MID = 'Cinzel_600SemiBold';
+const SERIF = 'Lora_400Regular';
+const APP_NAME = 'Adventist Life';
+
+// 4:5, the shape a phone's feed and status screens show whole.
+const RATIO = 5 / 4;
+const CAN_SAVE = Platform.OS !== 'web';
+
+export const verseMessage = (verse) => `“${verse.text}”\n— ${verse.reference}`;
+
+/** Put the verse on the clipboard. Resolves true when it got there. */
+export const copyVerse = async (verse) => {
+  try {
+    await Clipboard.setStringAsync(verseMessage(verse));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The picture itself. Sizes follow the card's width, so the preview and the
+ *  captured file are one layout at any screen size. */
+export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
+  const k = width / 320;
+  const len = verse.text.length;
+  const size = (len > 210 ? 14.5 : len > 130 ? 16.5 : 19.5) * k;
+  // A date, never "Today": the picture outlives the day it was made.
+  const day = verse.date ? fmt(parseISO(verse.date), 'd MMMM yyyy') : '';
+  return (
+    <View ref={ref} collapsable={false} style={[styles.card, { width, height: width * RATIO }]}>
+      <LinearGradient
+        colors={[TEAL_DEEP, TEAL, TEAL_LIFT]}
+        locations={[0, 0.55, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+      <Image
+        source={require('../assets/verse-book.png')}
+        style={[styles.cardBook, { width: width * 0.62 }]}
+        resizeMode="contain"
+      />
+      <View style={[styles.cardBody, { padding: 22 * k }]}>
+        <Text style={[styles.cardTitle, { fontSize: 9.5 * k, letterSpacing: 1.8 * k }]}>{title}</Text>
+        {!!day && <Text style={[styles.cardDate, { fontSize: 9 * k }]}>{day}</Text>}
+
+        <View style={styles.cardMiddle}>
+          <Text style={[styles.cardQuote, { fontSize: 44 * k, marginBottom: -20 * k }]}>“</Text>
+          <Text style={[styles.cardVerse, { fontSize: size, lineHeight: size * 1.55 }]}>{verse.text}</Text>
+          <LinearGradient
+            colors={['transparent', GOLD_SOFT, 'transparent']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={[styles.cardRule, { marginTop: 14 * k }]}
+          />
+          <Text style={[styles.cardRef, { fontSize: 12.5 * k, marginTop: 9 * k }]}>{verse.reference}</Text>
+        </View>
+      </View>
+      {/* Just above the book, on teal: the pages below are too light to
+          write on in parchment, and too varied to trust with anything else. */}
+      <Text style={[styles.cardBrand, { fontSize: 8 * k, bottom: width * 0.25 + 6 * k }]}>{APP_NAME}</Text>
+    </View>
+  );
+});
+
+const Option = ({ icon, label, onPress, primary, busy, testID }) => (
+  <TouchableOpacity
+    onPress={onPress}
+    disabled={busy}
+    style={[styles.option, primary && styles.optionPrimary]}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    testID={testID}
+  >
+    {busy
+      ? <ActivityIndicator size="small" color={primary ? TEAL_DEEP : GOLD_SOFT} />
+      : <Ionicons name={icon} size={18} color={primary ? TEAL_DEEP : GOLD_SOFT} />}
+    <Text style={[styles.optionText, primary && styles.optionTextPrimary]}>{label}</Text>
+  </TouchableOpacity>
+);
+
+const VerseShareSheet = ({ visible, onClose, verse, onToast }) => {
+  const { t } = useI18n();
+  const { width: winW } = useWindowDimensions();
+  const cardRef = useRef(null);
+  const [busy, setBusy] = useState(null);     // which option is working
+  const cardW = Math.min(winW - 48, 320);
+
+  const capture = useCallback(
+    () => captureRef(cardRef, { format: 'png', quality: 1, result: 'tmpfile' }),
+    [],
+  );
+
+  const shareText = useCallback(() => {
+    onClose();
+    Share.share({ message: verseMessage(verse) }).catch(() => {});
+  }, [verse, onClose]);
+
+  const shareImage = useCallback(async () => {
+    setBusy('image');
+    let uri = null;
+    try {
+      if (await Sharing.isAvailableAsync()) uri = await capture();
+    } catch {
+      uri = null;
+    }
+    setBusy(null);
+    if (!uri) { shareText(); return; }
+    onClose();
+    Sharing.shareAsync(uri, { mimeType: 'image/png', UTI: 'public.png', dialogTitle: t('verse.share') })
+      .catch(() => {});
+  }, [capture, shareText, onClose, t]);
+
+  const save = useCallback(async () => {
+    setBusy('save');
+    try {
+      // Write-only: adding a picture needs no read access to anyone's photos.
+      const perm = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
+      if (!perm.granted) { onToast?.(t('verse.savePermission')); return; }
+      // Saved into the library as the app's own new file, not moved into an
+      // album — a move is what makes Android ask "allow this app to modify".
+      await MediaLibrary.saveToLibraryAsync(await capture());
+      onClose();
+      onToast?.(t('verse.saved'));
+    } catch {
+      onToast?.(t('verse.saveFailed'));
+    } finally {
+      setBusy(null);
+    }
+  }, [capture, onClose, onToast, t]);
+
+  const copy = useCallback(async () => {
+    const ok = await copyVerse(verse);
+    onClose();
+    onToast?.(ok ? t('verse.copied') : t('common.error'));
+  }, [verse, onClose, onToast, t]);
+
+  if (!verse) return null;
+
+  return (
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      heightRatio={0.9}
+      header={(
+        <View style={styles.head}>
+          <Text style={styles.headTitle}>{t('verse.share')}</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('common.close')}>
+            <Ionicons name="close" size={22} color="rgba(242,239,230,0.7)" />
+          </TouchableOpacity>
+        </View>
+      )}
+    >
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false} testID="verse-share-sheet">
+        <View style={styles.previewWrap}>
+          <VerseCard ref={cardRef} verse={verse} width={cardW} title={t('verse.title')} />
+        </View>
+
+        <Option icon="image-outline" label={t('verse.shareImage')} onPress={shareImage}
+                primary busy={busy === 'image'} testID="verse-share-image" />
+        <View style={styles.row}>
+          <Option icon="chatbubble-ellipses-outline" label={t('verse.shareText')} onPress={shareText}
+                  testID="verse-share-text" />
+          {CAN_SAVE && (
+            <Option icon="download-outline" label={t('verse.save')} onPress={save}
+                    busy={busy === 'save'} testID="verse-save" />
+          )}
+          <Option icon="copy-outline" label={t('verse.copy')} onPress={copy} testID="verse-copy" />
+        </View>
+      </ScrollView>
+    </BottomSheet>
+  );
+};
+
+const styles = StyleSheet.create({
+  head: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 6, paddingBottom: 10,
+  },
+  headTitle: { fontFamily: DISPLAY, fontSize: 15, letterSpacing: 0.8, color: PARCHMENT },
+  body: { paddingHorizontal: 20, paddingBottom: 16, gap: 12 },
+  previewWrap: {
+    alignItems: 'center', marginBottom: 4,
+    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+
+  card: { borderRadius: 18, overflow: 'hidden', backgroundColor: TEAL },
+  cardBook: {
+    position: 'absolute', bottom: 0, alignSelf: 'center', aspectRatio: 600 / 239,
+  },
+  cardBody: { flex: 1 },
+  cardTitle: { fontFamily: DISPLAY_MID, color: GOLD_SOFT, textAlign: 'center', textTransform: 'uppercase' },
+  cardDate: { fontFamily: SERIF, color: 'rgba(242,239,230,0.7)', textAlign: 'center', marginTop: 3 },
+  // The upper two-thirds: the book has the foot.
+  cardMiddle: { flex: 1, justifyContent: 'center', paddingBottom: '22%' },
+  cardQuote: { fontFamily: DISPLAY, color: 'rgba(227,196,106,0.35)', textAlign: 'center' },
+  cardVerse: { fontFamily: SERIF, color: PARCHMENT, textAlign: 'center' },
+  cardRule: { height: 1, opacity: 0.75, marginHorizontal: '18%' },
+  cardRef: { fontFamily: DISPLAY, color: GOLD_SOFT, textAlign: 'center', letterSpacing: 1 },
+  cardBrand: {
+    position: 'absolute', alignSelf: 'center', fontFamily: DISPLAY_MID,
+    color: 'rgba(242,239,230,0.55)', letterSpacing: 1.2, textTransform: 'uppercase',
+  },
+
+  row: { flexDirection: 'row', gap: 10 },
+  option: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    paddingVertical: 12, paddingHorizontal: 8, borderRadius: 14,
+    backgroundColor: 'rgba(0,52,58,0.9)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(227,196,106,0.3)',
+  },
+  optionPrimary: { backgroundColor: GOLD_SOFT, borderColor: GOLD_SOFT, paddingVertical: 14 },
+  optionText: { fontFamily: DISPLAY_MID, fontSize: 11, letterSpacing: 0.6, color: PARCHMENT },
+  optionTextPrimary: { fontFamily: DISPLAY, fontSize: 13, color: TEAL_DEEP },
+});
+
+export default VerseShareSheet;

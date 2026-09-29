@@ -172,7 +172,7 @@ try {
 }
 
 // Deep linking: a shared post or service URL (streams://post/123,
-// streams://service/12, or the web page
+// streams://service/12, the verse widget's streams://daily-verse, or the web page
 // https://<public-host>/post/123) opens the app straight to that post.
 const linking = {
   prefixes: ['streams://', PUBLIC_BASE, API_BASE],
@@ -181,6 +181,8 @@ const linking = {
       PostDetail: 'post/:postId',
       ServiceDetail: 'service/:id',
       Notice: 'notice/:id',
+      // The home-screen verse widget opens here.
+      DailyVerse: 'daily-verse',
     },
   },
 };
@@ -265,6 +267,9 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.type === 'verse_of_the_day') {
+        // The morning verse: the screen it came from, not the app's front door.
+        navigate('DailyVerse');
       } else if (data?.type === 'service_booking') {
         // A request to your service, or the answer to yours: that tab.
         navigate('ServiceBookings', { role: data.role === 'incoming' ? 'incoming' : 'mine' });

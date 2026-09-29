@@ -3188,6 +3188,26 @@ class VerseSend(models.Model):
         return f"{self.user.username} · {self.date}"
 
 
+class VerseDay(models.Model):
+    """One row per person per day they opened the verse of the day.
+
+    Its own table rather than PlayDay: reading the verse is not playing a
+    game, and counting it there would hand out game streaks for a glance.
+    Written when today's verse is fetched — paging back through earlier days
+    does not count, since that is catching up, not showing up.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='verse_days')
+    date = models.DateField()
+
+    class Meta:
+        unique_together = ('user', 'date')
+        ordering = ['-date']
+        indexes = [models.Index(fields=['user', '-date'])]
+
+    def __str__(self):
+        return f"{self.user.username} · {self.date}"
+
+
 class WeatherBriefing(models.Model):
     """One row per person per day a morning briefing went out.
 

@@ -129,3 +129,109 @@ class DailyVerseApiTests(APITestCase):
         other = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
         self.client.force_authenticate(other)
         self.assertEqual(self.client.get('/api/daily-verse/').data['reference'], mine)
+
+    def test_a_day_is_looked_up_once_not_once_per_person(self):
+        first = self.client.get('/api/daily-verse/').data
+        # Gone from the database, still served: the second read is the cache's.
+        BibleVerse.objects.all().delete()
+        again = self.client.get('/api/daily-verse/')
+        self.assertEqual(again.status_code, status.HTTP_200_OK)
+        self.assertEqual(again.data['reference'], first['reference'])
+        self.assertTrue(again.data['is_today'])
+
+    def test_a_cached_day_still_knows_it_is_no_longer_today(self):
+        day = (timezone.localdate() - timedelta(days=1)).isoformat()
+        self.client.get(f'/api/daily-verse/?date={day}')
+        self.assertFalse(self.client.get(f'/api/daily-verse/?date={day}').data['is_today'])
+
+
+class EmptyCorpusApiTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.client.force_authenticate(User.objects.create_user('mark', 'm@x.com', 'pw12345!'))
+
+    def test_an_import_shows_at_once_after_an_empty_corpus(self):
+        """The failure is not cached, so the import is not hidden for a day."""
+        self.assertEqual(self.client.get('/api/daily-verse/').status_code, 500)
+        seed_curated()
+        self.assertEqual(self.client.get('/api/daily-verse/').status_code, status.HTTP_200_OK)
+
+
+class ReflectionTests(APITestCase):
+    """A line under each verse, in both languages the app speaks."""
+
+    def test_every_curated_verse_has_a_line_in_english_and_swahili(self):
+        from songs.verse_reflections import REFLECTIONS
+        missing = [r for r in REFERENCES if r not in REFLECTIONS]
+        self.assertEqual(missing, [])
+        for ref, (en, sw) in REFLECTIONS.items():
+            self.assertTrue(en.strip() and sw.strip(), ref)
+            self.assertNotEqual(en, sw, ref)
+
+    def test_no_line_is_written_for_a_verse_that_is_never_shown(self):
+        from songs.verse_reflections import REFLECTIONS
+        self.assertEqual(sorted(set(REFLECTIONS) - set(REFERENCES)), [])
+
+    def test_a_line_is_short_enough_to_sit_under_the_verse(self):
+        from songs.verse_reflections import REFLECTIONS
+        for ref, pair in REFLECTIONS.items():
+            for line in pair:
+                self.assertLessEqual(len(line), 110, (ref, line))
+
+
+class VerseStreakApiTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        seed_curated()
+
+    def setUp(self):
+        from songs.models import VerseDay
+        self.VerseDay = VerseDay
+        cache.clear()
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+        self.today = timezone.localdate()
+
+    def test_the_verse_comes_with_its_reflection(self):
+        res = self.client.get('/api/daily-verse/')
+        self.assertTrue(res.data['reflection']['en'])
+        self.assertTrue(res.data['reflection']['sw'])
+
+    def test_opening_today_starts_a_streak(self):
+        res = self.client.get('/api/daily-verse/')
+        self.assertEqual(res.data['streak'], {'current': 1, 'best': 1})
+
+    def test_consecutive_days_extend_it(self):
+        for back in (1, 2, 3):
+            self.VerseDay.objects.create(user=self.user, date=self.today - timedelta(days=back))
+        self.assertEqual(self.client.get('/api/daily-verse/').data['streak']['current'], 4)
+
+    def test_a_missed_day_starts_again_but_the_best_is_kept(self):
+        for back in (2, 3, 4, 5):
+            self.VerseDay.objects.create(user=self.user, date=self.today - timedelta(days=back))
+        streak = self.client.get('/api/daily-verse/').data['streak']
+        self.assertEqual(streak, {'current': 1, 'best': 4})
+
+    def test_opening_twice_in_a_day_counts_once(self):
+        self.client.get('/api/daily-verse/')
+        self.client.get('/api/daily-verse/')
+        self.assertEqual(self.VerseDay.objects.filter(user=self.user).count(), 1)
+
+    def test_paging_back_is_not_showing_up(self):
+        day = (self.today - timedelta(days=2)).isoformat()
+        res = self.client.get(f'/api/daily-verse/?date={day}')
+        self.assertNotIn('streak', res.data)
+        self.assertFalse(self.VerseDay.objects.exists())
+
+    def test_a_streak_is_ones_own_even_when_the_verse_is_cached(self):
+        self.VerseDay.objects.create(user=self.user, date=self.today - timedelta(days=1))
+        self.assertEqual(self.client.get('/api/daily-verse/').data['streak']['current'], 2)
+        other = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
+        self.client.force_authenticate(other)
+        self.assertEqual(self.client.get('/api/daily-verse/').data['streak']['current'], 1)
+
+    def test_the_widget_refreshing_is_not_a_visit(self):
+        res = self.client.get('/api/daily-verse/?via=widget')
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn('streak', res.data)
+        self.assertFalse(self.VerseDay.objects.exists())
