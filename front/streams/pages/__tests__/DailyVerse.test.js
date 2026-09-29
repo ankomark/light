@@ -200,8 +200,7 @@ const openSheet = async () => {
 
 test('Share opens a sheet whose preview is the picture, with the date, not "Today"', async () => {
   const screen = await openSheet();
-  expect(screen.getByText('verse.title')).toBeTruthy();
-  expect(screen.getByText(format(new Date(), 'd MMMM yyyy'))).toBeTruthy();
+  expect(screen.getByText(`verse.title · ${format(new Date(), 'd MMMM yyyy')}`)).toBeTruthy();
   expect(screen.getAllByText('Text of Psalms 23:1')).toHaveLength(2);   // the screen and the card
 });
 
