@@ -333,7 +333,7 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             # What they have to spend.
             'total_coins': balance,
             # A streak broken yesterday that coins can still buy back.
-            'freeze': freeze_offer(request.user),
+            'freeze': freeze_offer(request.user, balance=balance),
             'coins_earned': earned,
             'coins_spent': spent,
             'daily_coins': daily['coins'] or 0,
@@ -506,8 +506,20 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             'points_earned': earned,
             'points_breakdown': parts,
             'streak': session.streak,
-            'session': self.get_serializer(session).data,
+            # `brief`: the app already holds the questions, so only the
+            # totals come back — re-sending the whole run on every tap was
+            # most of an answer's wait. Older builds get the full run.
+            'session': (self._totals(session) if request.data.get('brief')
+                        else self.get_serializer(session).data),
         })
+
+    @staticmethod
+    def _totals(session):
+        return {
+            'id': session.id, 'score': session.score, 'answered': session.answered,
+            'points': session.points, 'streak': session.streak,
+            'longest_streak': session.longest_streak, 'is_finished': session.is_finished,
+        }
 
     @action(detail=True, methods=['post'])
     def finish(self, request, pk=None):

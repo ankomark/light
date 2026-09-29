@@ -26,7 +26,7 @@ FREEZE_COST = 150
 FREEZE_EVERY_DAYS = 7
 
 
-def freeze_offer(user, today=None):
+def freeze_offer(user, today=None, balance=None):
     """Whether yesterday can be bought back, and what it restores.
 
     {available, cost, run, balance, affordable, reason}. `run` is the streak
@@ -38,7 +38,10 @@ def freeze_offer(user, today=None):
     yesterday = today - timedelta(days=1)
     days = set(PlayDay.objects.filter(user=user, date__gte=today - timedelta(days=400))
                .values_list('date', flat=True))
-    earned, spent, balance = coin_balance(user)
+    # The caller may already know the balance (the stats endpoint does): four
+    # aggregate queries not repeated.
+    if balance is None:
+        _earned, _spent, balance = coin_balance(user)
     offer = {'available': False, 'cost': FREEZE_COST, 'run': 0, 'balance': balance,
              'affordable': balance >= FREEZE_COST, 'reason': ''}
 

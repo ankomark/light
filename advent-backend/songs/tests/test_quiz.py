@@ -17,6 +17,8 @@ from songs.quiz import QUESTIONS_PER_DAY, generate_for_date
 
 def seed_corpus(chapters=12, verses=30):
     """A corpus big enough to build a full quiz from, across several books."""
+    from songs.quiz import forget_kept_corpora
+    forget_kept_corpora()          # another test's Bible must not linger
     rows = []
     for name in ('Genesis', 'Psalms', 'Proverbs', 'John', 'Acts'):
         book = BOOKS_BY_NAME[name]
@@ -439,11 +441,15 @@ class GameModeTests(APITestCase):
         res = self.client.post('/api/quiz-sessions/', {'mode': 'tournament'}, format='json')
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_a_session_never_ships_the_answer(self):
+    def test_answered_questions_leave_the_run(self):
+        """Practice questions carry their answers so the app can judge at once
+        (see InstantPracticeTests); what has been answered is not sent again."""
         s = self._start('speed')
-        for q in s['questions']:
-            self.assertNotIn('answer_index', q)
-            self.assertNotIn('explanation', q)
+        first = s['questions'][0]
+        self.client.post(f"/api/quiz-sessions/{s['id']}/answer/",
+                         {'question_id': first['id'], 'choice': 0, 'seconds': 2}, format='json')
+        again = self.client.get(f"/api/quiz-sessions/{s['id']}/").data
+        self.assertNotIn(first['id'], [q['id'] for q in again['questions']])
 
     def test_two_runs_of_the_same_mode_differ(self):
         """A practice mode must not replay the same set — only the daily quiz is fixed."""
@@ -1098,3 +1104,51 @@ class LeaderboardPeriodTests(APITestCase):
         board = self._board()
         self.assertEqual(board['period'], 'today')
         self.assertEqual(board['results'][0]['total'], 20)
+
+
+class InstantPracticeTests(APITestCase):
+    """Practice answers are judged in the app at once; the server still scores."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_corpus()
+
+    def setUp(self):
+        cache.clear()
+        forget_recorded_plays()
+        from songs.models import User
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+
+    def test_practice_questions_carry_their_answer(self):
+        res = self.client.post('/api/quiz-sessions/', {'mode': 'speed'}, format='json')
+        from songs.models import QuizQuestion
+        for q in res.data['questions']:
+            self.assertEqual(q['answer_index'], QuizQuestion.objects.get(pk=q['id']).answer_index)
+            self.assertIn('explanation', q)
+
+    def test_the_daily_quiz_still_never_does(self):
+        for q in self.client.get('/api/quiz/today/').data['questions']:
+            self.assertNotIn('answer_index', q)
+            self.assertNotIn('explanation', q)
+
+    def test_a_brief_answer_brings_back_only_the_totals(self):
+        run = self.client.post('/api/quiz-sessions/', {'mode': 'speed'}, format='json').data
+        q = run['questions'][0]
+        res = self.client.post(f"/api/quiz-sessions/{run['id']}/answer/",
+                               {'question_id': q['id'], 'choice': q['answer_index'], 'seconds': 2, 'brief': True},
+                               format='json')
+        self.assertTrue(res.data['correct'])
+        self.assertNotIn('questions', res.data['session'])
+        self.assertEqual(res.data['session']['score'], 1)
+        self.assertGreater(res.data['session']['points'], 0)
+
+    def test_the_server_still_decides(self):
+        """A wrong choice is wrong whatever the app showed."""
+        run = self.client.post('/api/quiz-sessions/', {'mode': 'speed'}, format='json').data
+        q = run['questions'][0]
+        wrong = (q['answer_index'] + 1) % len(q['choices'])
+        res = self.client.post(f"/api/quiz-sessions/{run['id']}/answer/",
+                               {'question_id': q['id'], 'choice': wrong, 'seconds': 2, 'brief': True}, format='json')
+        self.assertFalse(res.data['correct'])
+        self.assertEqual(res.data['session']['points'], 0)

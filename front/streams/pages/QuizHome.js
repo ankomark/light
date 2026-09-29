@@ -5,13 +5,14 @@
  * Speed and Streak sit below it as practice you can return to, each showing
  * your own best so there is something to beat.
  */
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { fetchDailyQuiz, fetchQuizBests, fetchQuizStats, buyStreakFreeze } from '../services/api';
+import { fetchDailyQuiz, fetchQuizBests, fetchQuizStats, buyStreakFreeze, fetchQuizProgress } from '../services/api';
+import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
@@ -75,6 +76,15 @@ const QuizHome = ({ navigation }) => {
       statsData.reload();
     }
   };
+
+  // "Your progress" should open on its data, not a spinner: load it quietly
+  // while the hub is up, once a session.
+  useEffect(() => {
+    const key = userKey(currentUser?.id, 'quiz:progress');
+    if (peekCache(key)) return;
+    // Inside the chain, so even a failure to start is only a missed head start.
+    Promise.resolve().then(fetchQuizProgress).then((data) => writeCache(key, data)).catch(() => {});
+  }, [currentUser?.id]);
 
   const played = !!daily?.my_attempt;
   const nothingYet = !dailyData.data && !bests && !stats;

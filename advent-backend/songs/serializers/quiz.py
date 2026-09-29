@@ -86,6 +86,22 @@ class QuizAttemptSerializer(serializers.ModelSerializer):
         ]
 
 
+class PracticeQuestionSerializer(QuizQuestionSerializer):
+    """A practice question, with its answer.
+
+    Practice is told right or wrong the moment a choice is tapped — waiting
+    on a round trip for that made every answer lag. So the answer travels
+    with the question and the app judges at once; the server still scores
+    every answer itself (the app's verdict is only what is shown), and the
+    daily limit on runs caps what reading answers out of the app could earn.
+    The daily quiz, which is ranked and says nothing until submitted, never
+    sends its answers.
+    """
+
+    class Meta(QuizQuestionSerializer.Meta):
+        fields = QuizQuestionSerializer.Meta.fields + ['answer_index', 'reference', 'explanation']
+
+
 class QuizSessionSerializer(serializers.ModelSerializer):
     """A practice run. Unanswered questions travel with it; answered ones are
     dropped, so the client cannot re-read a question it has already been told
@@ -110,7 +126,7 @@ class QuizSessionSerializer(serializers.ModelSerializer):
             obj.answer_rows.values_list('question_id', flat=True)
         )
         remaining = [q for q in obj.questions.all() if q.id not in answered]
-        return QuizQuestionSerializer(remaining, many=True).data
+        return PracticeQuestionSerializer(remaining, many=True).data
 
     def get_mode_config(self, obj):
         """The dials the client needs: how long per question, how many there are."""

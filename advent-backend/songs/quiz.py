@@ -210,17 +210,8 @@ def _q_blank(rng, verse, difficulty, corpus=ENGLISH):
     idx, raw = rng.choice(candidates)
     answer = clean(raw)
 
-    # Distractors: other substantial words from the same book.
-    neighbours = (corpus.verses()
-                  .filter(book_number=verse.book_number).exclude(pk=verse.pk)
-                  .values_list('text', flat=True)[:400])
-    pool = []
-    for text in neighbours:
-        for w in text.split():
-            cw = clean(w)
-            if (len(cw) > 3 and cw.lower() not in stop
-                    and cw.lower() != answer.lower() and cw not in pool):
-                pool.append(cw)
+    # Distractors: other substantial words from the same book (kept per book).
+    pool = [w for w in _book_words(corpus, verse.book_number) if w.lower() != answer.lower()]
     rng.shuffle(pool)
     built = _shuffled_choices(rng, answer, pool)
     if not built:
@@ -273,16 +264,63 @@ BUILDERS = {
 }
 
 
+# ── kept between runs ─────────────────────────────────────────────────────────
+# A Bible does not change between one quiz and the next, so what is costly to
+# read from it — which verses are long enough to ask about, the words of each
+# book to draw wrong answers from — is read once per process and kept. Every
+# build checks the corpus's size first (one cheap query) and starts afresh if
+# an import has changed it.
+_KEPT = {}
+
+
+def _refresh(corpus):
+    from django.db.models import Count, Max
+    found = corpus.verses().aggregate(n=Count('id'), top=Max('id'))
+    signature = (found['n'], found['top'])
+    kept = _KEPT.get(corpus.language)
+    if not kept or kept['signature'] != signature:
+        _KEPT[corpus.language] = {'signature': signature, 'ids': None, 'words': {}}
+    return _KEPT[corpus.language]
+
+
+def forget_kept_corpora():
+    """Drop what is kept — for tests, which build different Bibles."""
+    _KEPT.clear()
+
+
 def _pick_verses(rng, count, corpus=ENGLISH):
     """Verses long enough to be worth asking about, spread across the corpus."""
-    ids = list(
-        corpus.verses().filter(text__regex=r'(\S+\s+){%d,}' % MIN_WORDS)
-        .values_list('id', flat=True)
-    )
-    if len(ids) < count:
-        ids = list(corpus.verses().values_list('id', flat=True))
+    kept = _refresh(corpus)
+    if kept['ids'] is None:
+        ids = list(
+            corpus.verses().filter(text__regex=r'(\S+\s+){%d,}' % MIN_WORDS)
+            .values_list('id', flat=True)
+        )
+        if len(ids) < count:
+            ids = list(corpus.verses().values_list('id', flat=True))
+        kept['ids'] = ids
+    ids = list(kept['ids'])
     rng.shuffle(ids)
     return ids
+
+
+def _book_words(corpus, book_number):
+    """The substantial words of a book, in the order they first appear —
+    read once per book, then kept."""
+    kept = _refresh(corpus) if corpus.language not in _KEPT else _KEPT[corpus.language]
+    words = kept['words'].get(book_number)
+    if words is None:
+        clean, stop = corpus.clean_word, corpus.stopwords
+        seen = {}
+        texts = corpus.verses().filter(book_number=book_number).values_list('text', flat=True)[:400]
+        for text in texts:
+            for w in text.split():
+                cw = clean(w)
+                if len(cw) > 3 and cw.lower() not in stop:
+                    seen.setdefault(cw, None)
+        words = list(seen)
+        kept['words'][book_number] = words
+    return words
 
 
 # ── the question bank ─────────────────────────────────────────────────────────
@@ -297,13 +335,16 @@ TOO_EASY_AT = 0.97
 TOO_HARD_AT = 0.10
 
 
-def _from_bank(rng, difficulty, count, language='en'):
+def _from_bank(rng, difficulty, count, language='en', bank=None):
     """Up to `count` written questions of `difficulty`, the least-asked first
-    (ties broken by `rng`), as question dicts with their choices shuffled."""
+    (ties broken by `rng`), as question dicts with their choices shuffled.
+    `bank`: the language's active questions, when already read."""
     from .models import BankQuestion
     if count <= 0:
         return []
-    pool = list(BankQuestion.objects.filter(is_active=True, language=language, difficulty=difficulty))
+    if bank is None:
+        bank = BankQuestion.objects.filter(is_active=True, language=language)
+    pool = [b for b in bank if b.difficulty == difficulty]
     rng.shuffle(pool)
     pool.sort(key=lambda b: b.times_asked)          # stable: the shuffle breaks ties
     out = []
@@ -362,7 +403,9 @@ def build_questions(rng, mix, corpus=ENGLISH):
     generated from verses. Raises ValueError when the corpus cannot supply them.
     """
     # The written ones first, so the verses are only asked to make up the rest.
-    banked = {d: _from_bank(rng, d, round(n * BANK_SHARE), corpus.language) for d, n in mix}
+    from .models import BankQuestion
+    bank = list(BankQuestion.objects.filter(is_active=True, language=corpus.language))
+    banked = {d: _from_bank(rng, d, round(n * BANK_SHARE), corpus.language, bank) for d, n in mix}
     mix = [(d, n - len(banked[d])) for d, n in mix]
     wanted_total = sum(count for _, count in mix)
     verse_ids = _pick_verses(rng, wanted_total, corpus)
@@ -371,11 +414,20 @@ def build_questions(rng, mix, corpus=ENGLISH):
             'The Bible corpus holds %d usable verses — %s.' % (len(verse_ids), corpus.import_hint)
         )
 
+    # Read the verses a batch at a time (most are used, a few are skipped).
+    loaded = {}
+
+    def verse_at(i):
+        if verse_ids[i] not in loaded:
+            batch = verse_ids[i:i + 60]
+            loaded.update(corpus.verses().in_bulk(batch))
+        return loaded.get(verse_ids[i])
+
     built, cursor = [], 0
     for difficulty, wanted in mix:
         made = 0
         while made < wanted and cursor < len(verse_ids):
-            verse = corpus.verses().filter(pk=verse_ids[cursor]).first()
+            verse = verse_at(cursor)
             cursor += 1
             if not verse or len(verse.text.split()) < MIN_WORDS:
                 continue

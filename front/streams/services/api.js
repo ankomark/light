@@ -1175,11 +1175,13 @@ export const startQuizSession = async (mode, lang) =>
 export const fetchQuizSession = async (id) =>
   apiRequest('get', `/quiz-sessions/${id}/`);
 
-export const answerQuizSession = async (id, questionId, choice, seconds) =>
+// `brief`: only the new totals come back (the app already holds the run).
+export const answerQuizSession = async (id, questionId, choice, seconds, { brief } = {}) =>
   apiRequest('post', `/quiz-sessions/${id}/answer/`, {
     question_id: questionId,
     choice,
     seconds,
+    ...(brief ? { brief: true } : {}),
   });
 
 export const finishQuizSession = async (id) =>

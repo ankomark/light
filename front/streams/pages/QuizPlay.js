@@ -58,21 +58,33 @@ const QuizPlay = ({ navigation, route }) => {
   const soundOn = preferences?.[PREF_KEYS.quizSound] !== false;
   const musicOn = preferences?.[PREF_KEYS.quizMusic] !== false;
 
-  const [session, setSession] = useState(null);
+  // The run as the server started it: its id, rules and every question —
+  // with their answers, so a tap is judged here and now (see
+  // PracticeQuestionSerializer on the server). What changes as you play lives
+  // beside it: which question you are on, and the running totals.
+  const [run, setRun] = useState(null);
+  const [qi, setQi] = useState(0);
+  const [totals, setTotals] = useState(null);
+  const [points, setPoints] = useState(0);          // coins, as the server confirms them
+  const [over, setOver] = useState(false);          // the last answer is in
+  const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [chosen, setChosen] = useState(null);
-  const [feedback, setFeedback] = useState(null);   // the server's verdict
-  const [sending, setSending] = useState(false);
+  const [feedback, setFeedback] = useState(null);   // the verdict on the question shown
   const [remaining, setRemaining] = useState(null); // speed mode only
-  // The question on screen is pinned here rather than read from the session:
-  // answering removes it from the session's list, and the feedback view still
-  // needs to show the choices it was asked about.
-  const [question, setQuestion] = useState(null);
   const shownAt = useRef(Date.now());
-  const config = session?.mode_config || {};
+  // Answers go to the server one after another, behind the play: the chain is
+  // what results wait on, so the totals shown at the end are the server's.
+  const chain = useRef(Promise.resolve());
+  const question = run?.questions?.[qi] || null;
+  const config = run?.mode_config || {};
   const limit = config.time_limit;
-  const finished = !!session?.is_finished;
+  const finished = showResults;
+  // What the rest of the screen reads: the run, with the totals as they stand.
+  const session = run && totals ? {
+    ...run, ...totals, points, is_finished: showResults,
+  } : null;
 
   const begin = useCallback(async () => {
     try {
@@ -80,9 +92,20 @@ const QuizPlay = ({ navigation, route }) => {
       setError('');
       setFeedback(null);
       setChosen(null);
+      setOver(false);
+      setShowResults(false);
+      chain.current = Promise.resolve();
       const started = await startQuizSession(mode, lang);
-      setSession(started);
-      setQuestion(started.questions?.[0] || null);
+      setRun(started);
+      setQi(0);
+      setTotals({
+        score: started.score || 0, answered: started.answered || 0,
+        streak: started.streak || 0, longest_streak: started.longest_streak || 0,
+        total_questions: started.total_questions,
+      });
+      setPoints(started.points || 0);
+      // A run already over (nothing left to ask): straight to its results.
+      if (started.is_finished || !started.questions?.length) setShowResults(true);
       shownAt.current = Date.now();
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || t('quiz.loadFailed'));
@@ -113,34 +136,78 @@ const QuizPlay = ({ navigation, route }) => {
     setRemaining(limit ?? null);
   }, [question?.id, limit]);
 
+  // Record an answer on the server, in order, behind the play. The server's
+  // coins (and, if it ever disagrees, its verdict) replace the app's when
+  // they arrive; a failed send is tried once more, then left — the run goes on.
+  const record = useCallback((qid, choice, seconds) => {
+    const post = () => answerQuizSession(run.id, qid, choice, seconds, { brief: true });
+    chain.current = chain.current
+      .then(() => post().catch(() => post()))
+      .then((res) => {
+        if (!res) return;
+        setPoints(res.session?.points ?? 0);
+        setTotals((cur) => (cur ? {
+          ...cur,
+          score: res.session?.score ?? cur.score,
+          longest_streak: res.session?.longest_streak ?? cur.longest_streak,
+        } : cur));
+        setFeedback((f) => (f && f.qid === qid
+          ? { ...f, points_earned: res.points_earned, correct: res.correct, timed_out: res.timed_out }
+          : f));
+      })
+      .catch(() => { /* offline: the run carries on; results show what the server has */ });
+  }, [run]);
+
   const send = useCallback(async (choice) => {
-    if (sending || !question || !session) return;
+    if (feedback || !question || !run) return;
     const seconds = Number(((Date.now() - shownAt.current) / 1000).toFixed(1));
-    try {
-      setSending(true);
-      setChosen(choice);
-      tapFeedback();
-      const res = await answerQuizSession(session.id, question.id, choice, seconds);
-      setFeedback(res);
-      // Driven by the server's verdict, so the sound can never contradict the
-      // score. A milestone run gets a firmer tap on top.
-      if (res.correct) {
-        correctFeedback();
-        if (res.session?.streak && res.session.streak % 5 === 0) streakFeedback();
-      } else {
-        wrongFeedback();
+    setChosen(choice);
+    tapFeedback();
+
+    // A server from before instant answers sends no answer: wait for its word.
+    if (typeof question.answer_index !== 'number') {
+      try {
+        const res = await answerQuizSession(run.id, question.id, choice, seconds);
+        setFeedback({ ...res, qid: question.id });
+        if (res.correct) correctFeedback(); else wrongFeedback();
+        setPoints(res.session?.points ?? 0);
+        setTotals((cur) => ({ ...cur, ...res.session }));
+        if (res.session?.is_finished) { finishFeedback(); setOver(true); }
+      } catch (e) {
+        setError(e?.response?.data?.error || e?.message || t('quiz.submitFailed'));
+        setChosen(null);
       }
-      if (res.session?.is_finished) finishFeedback();
-      // Session updates (points, streak, remaining questions) but `question`
-      // deliberately does not — it stays put until Next.
-      setSession(res.session);
-    } catch (e) {
-      setError(e?.response?.data?.error || e?.message || t('quiz.submitFailed'));
-      setChosen(null);
-    } finally {
-      setSending(false);
+      return;
     }
-  }, [sending, question, session, t]);
+
+    // Judged here, at once. The rules are the server's: out of time is wrong.
+    const timedOut = !!limit && (choice === null || seconds > limit);
+    const correct = !timedOut && choice !== null && choice === question.answer_index;
+    setFeedback({
+      qid: question.id, correct, timed_out: timedOut,
+      answer_index: question.answer_index,
+      reference: question.reference, explanation: question.explanation,
+      points_earned: null,                              // the server's to say
+    });
+    const streak = correct ? (totals?.streak || 0) + 1 : 0;
+    const answered = (totals?.answered || 0) + 1;
+    const ends = (config.ends_on_wrong && !correct) || answered >= (run.questions?.length || 0);
+    setTotals((cur) => ({
+      ...cur,
+      answered,
+      streak,
+      score: (cur?.score || 0) + (correct ? 1 : 0),
+      longest_streak: Math.max(cur?.longest_streak || 0, streak),
+    }));
+    if (correct) {
+      correctFeedback();
+      if (streak % 5 === 0) streakFeedback();
+    } else {
+      wrongFeedback();
+    }
+    if (ends) { finishFeedback(); setOver(true); }
+    record(question.id, choice, seconds);
+  }, [feedback, question, run, limit, totals, config.ends_on_wrong, record, t]);
 
   // Speed mode: running out of time is an answer — sent as a non-choice so the
   // server records the timeout rather than the app silently skipping ahead.
@@ -164,23 +231,32 @@ const QuizPlay = ({ navigation, route }) => {
     return () => clearInterval(id);
   }, [limit, finished, feedback, question, send]);
 
-  const next = () => {
+  const next = async () => {
+    if (over) {
+      // The results are the server's: let the last answers land first.
+      await chain.current;
+      setShowResults(true);
+      return;
+    }
     setFeedback(null);
     setChosen(null);
-    setQuestion(session?.questions?.[0] || null);
+    setQi((i) => i + 1);
     shownAt.current = Date.now();
     setRemaining(limit ?? null);
   };
 
   const quit = () => {
-    if (finished || !session) { navigation.goBack(); return; }
+    if (finished || !run) { navigation.goBack(); return; }
     Alert.alert(t('quiz.quitTitle'), t('quiz.quitBody'), [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('quiz.quitConfirm'),
         style: 'destructive',
         onPress: async () => {
-          try { await finishQuizSession(session.id); } catch { /* leaving anyway */ }
+          try {
+            await chain.current;
+            await finishQuizSession(run.id);
+          } catch { /* leaving anyway */ }
           navigation.goBack();
         },
       },
@@ -197,7 +273,7 @@ const QuizPlay = ({ navigation, route }) => {
     );
   }
 
-  if (error && !session) {
+  if (error && !run) {
     return (
       <View style={q.root}>
         <Backdrop />
@@ -417,7 +493,7 @@ const QuizPlay = ({ navigation, route }) => {
                     isMyWrong && q.choiceWrong,
                   ]}
                   onPress={() => send(i)}
-                  disabled={answered || sending}
+                  disabled={answered}
                   activeOpacity={0.85}
                 >
                   <Text style={[q.choiceLetter, (selected || isRight) && q.gold]}>
@@ -461,7 +537,7 @@ const QuizPlay = ({ navigation, route }) => {
         {answered && !finished && (
           <View style={styles.footer}>
             <TouchableOpacity style={[q.primaryBtn, styles.wide]} onPress={next} activeOpacity={0.85}>
-              <Text style={q.primaryBtnText}>{t('quiz.next')}</Text>
+              <Text style={q.primaryBtnText}>{over ? t('quiz.seeResults') : t('quiz.next')}</Text>
               <Ionicons name="arrow-forward" size={16} color={INK} />
             </TouchableOpacity>
           </View>

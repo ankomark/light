@@ -22,6 +22,8 @@ SW_NAMES = {'Genesis': 'Mwanzo', 'Psalms': 'Zaburi', 'Proverbs': 'Methali', 'Joh
 
 def seed_swahili(chapters=12, verses=30):
     """A Swahili corpus shaped like the English test one: enough for a full quiz."""
+    from songs.quiz import forget_kept_corpora
+    forget_kept_corpora()          # another test's Bible must not linger
     rows = []
     for english, name in SW_NAMES.items():
         book = BOOKS_BY_NAME[english]

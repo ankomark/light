@@ -36,7 +36,7 @@ import QuizResultCard, { resultMessage } from '../components/QuizResultCard';
 import useReducedMotion from '../utils/useReducedMotion';
 import { parseReference } from '../utils/dailyVerseText';
 import { loadDraft, saveDraft, clearDraft } from '../utils/quizDraft';
-import { peekCache, writeCache } from '../utils/screenCache';
+import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { quizKeys, quizLanguage, isToday, formatQuizDay, withAttempt } from '../utils/quizCache';
 import { fetchBibleBooks } from '../services/bible';
 import { confirmAction } from '../utils/adminConfirm';
@@ -106,15 +106,21 @@ const BibleQuiz = ({ navigation }) => {
   const [boardScope, setBoardScope] = useState('everyone');
   const boardWanted = useRef({ period: 'today', scope: 'everyone' });
   boardWanted.current = { period: boardPeriod, scope: boardScope };
+  // Each board is kept once seen: back to a tab, it is there at once, then
+  // refreshed behind it.
+  const boardKey = (w) => userKey(currentUser?.id, `quiz:board:${w.period}:${w.scope}`);
   const loadBoard = useCallback(async () => {
     const wanted = { ...boardWanted.current };
+    const kept = peekCache(boardKey(wanted));
+    if (kept) setBoard(kept);
     try {
       const data = await fetchQuizLeaderboard(undefined, wanted);
+      writeCache(boardKey(wanted), data, { persist: false });
       // A slower answer for a tab since left must not overwrite the one shown.
       const now = boardWanted.current;
       if (now.period === wanted.period && now.scope === wanted.scope) setBoard(data);
     } catch { /* a nicety, not the quiz */ }
-  }, []);
+  }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sharing the result, and a word when something happened (copied, saved).
   const [sharing, setSharing] = useState(false);
@@ -380,7 +386,7 @@ const BibleQuiz = ({ navigation }) => {
     // The first run is the mount: the board is already being fetched then.
     if (!tabsTouched.current) { tabsTouched.current = true; return; }
     if (!showingResult) return;
-    setBoard(null);
+    setBoard(peekCache(boardKey(boardWanted.current)) || null);
     loadBoard();
   }, [boardPeriod, boardScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
