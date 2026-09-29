@@ -54,26 +54,26 @@ export const copyVerse = async (verse) => {
 };
 
 /** The picture itself. Sizes follow the card's width, so the preview and the
- *  captured file are one layout at any screen size. */
+ *  captured file are one layout at any screen size.
+ *
+ *  One column, top to bottom — title, verse, name, Bible — with the book in
+ *  the flow rather than pinned over the foot, so no verse can run under it.
+ *  4:5 is the least height, not the only one: a very long verse makes the
+ *  card taller instead of being cut or covered. */
 export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
   const k = width / 320;
   const len = verse.text.length;
-  const size = (len > 210 ? 14.5 : len > 130 ? 16.5 : 19.5) * k;
+  const size = (len > 300 ? 13 : len > 210 ? 14.5 : len > 130 ? 16.5 : 19.5) * k;
   // A date, never "Today": the picture outlives the day it was made.
   const day = verse.date ? fmt(parseISO(verse.date), 'd MMMM yyyy') : '';
   return (
-    <View ref={ref} collapsable={false} style={[styles.card, { width, height: width * RATIO }]}>
+    <View ref={ref} collapsable={false} style={[styles.card, { width, minHeight: width * RATIO }]}>
       <LinearGradient
         colors={[TEAL_DEEP, TEAL, TEAL_LIFT]}
         locations={[0, 0.55, 1]}
         style={StyleSheet.absoluteFill}
       />
-      <Image
-        source={require('../assets/verse-book.png')}
-        style={[styles.cardBook, { width: width * 0.62 }]}
-        resizeMode="contain"
-      />
-      <View style={[styles.cardBody, { padding: 22 * k }]}>
+      <View style={[styles.cardBody, { paddingTop: 22 * k, paddingHorizontal: 22 * k }]}>
         <Text style={[styles.cardTitle, { fontSize: 9.5 * k, letterSpacing: 1.8 * k }]}>{title}</Text>
         {!!day && <Text style={[styles.cardDate, { fontSize: 9 * k }]}>{day}</Text>}
 
@@ -90,7 +90,12 @@ export const VerseCard = React.forwardRef(({ verse, width, title }, ref) => {
       </View>
       {/* Just above the book, on teal: the pages below are too light to
           write on in parchment, and too varied to trust with anything else. */}
-      <Text style={[styles.cardBrand, { fontSize: 8 * k, bottom: width * 0.25 + 6 * k }]}>{APP_NAME}</Text>
+      <Text style={[styles.cardBrand, { fontSize: 8 * k, marginTop: 14 * k, marginBottom: 6 * k }]}>{APP_NAME}</Text>
+      <Image
+        source={require('../assets/verse-book.png')}
+        style={[styles.cardBook, { width: width * 0.58 }]}
+        resizeMode="contain"
+      />
     </View>
   );
 });
@@ -224,20 +229,19 @@ const styles = StyleSheet.create({
   },
 
   card: { borderRadius: 18, overflow: 'hidden', backgroundColor: TEAL },
-  cardBook: {
-    position: 'absolute', bottom: 0, alignSelf: 'center', aspectRatio: 600 / 239,
-  },
-  cardBody: { flex: 1 },
+  // Below everything, flush with the bottom edge.
+  cardBook: { alignSelf: 'center', aspectRatio: 600 / 239 },
+  cardBody: { flexGrow: 1 },
   cardTitle: { fontFamily: DISPLAY_MID, color: GOLD_SOFT, textAlign: 'center', textTransform: 'uppercase' },
   cardDate: { fontFamily: SERIF, color: 'rgba(242,239,230,0.7)', textAlign: 'center', marginTop: 3 },
-  // The upper two-thirds: the book has the foot.
-  cardMiddle: { flex: 1, justifyContent: 'center', paddingBottom: '22%' },
+  // Whatever room the verse leaves, it sits centred in.
+  cardMiddle: { flexGrow: 1, justifyContent: 'center', paddingTop: 8 },
   cardQuote: { fontFamily: DISPLAY, color: 'rgba(227,196,106,0.35)', textAlign: 'center' },
   cardVerse: { fontFamily: SERIF, color: PARCHMENT, textAlign: 'center' },
   cardRule: { height: 1, opacity: 0.75, marginHorizontal: '18%' },
   cardRef: { fontFamily: DISPLAY, color: GOLD_SOFT, textAlign: 'center', letterSpacing: 1 },
   cardBrand: {
-    position: 'absolute', alignSelf: 'center', fontFamily: DISPLAY_MID,
+    alignSelf: 'center', fontFamily: DISPLAY_MID,
     color: 'rgba(242,239,230,0.55)', letterSpacing: 1.2, textTransform: 'uppercase',
   },
 
