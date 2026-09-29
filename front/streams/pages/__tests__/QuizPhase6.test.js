@@ -176,3 +176,14 @@ describe('duels', () => {
     await waitFor(() => expect(screen.getByText('quiz.duel.already_played')).toBeTruthy());
   });
 });
+
+test('the hub hosts or joins a Bible Battle', async () => {
+  mockApi.fetchQuizStats.mockResolvedValue(stats());
+  const n = nav();
+  const screen = render(<QuizHome navigation={n} />);
+  await waitFor(() => expect(screen.getByTestId('battle-card')).toBeTruthy());
+  fireEvent.press(screen.getByText('battle.host'));
+  expect(n.navigate).toHaveBeenCalledWith('Battle', { mode: 'host' });
+  fireEvent.press(screen.getByText('battle.joinShort'));
+  expect(n.navigate).toHaveBeenCalledWith('Battle', { mode: 'join' });
+});

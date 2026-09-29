@@ -84,6 +84,7 @@ import GroupList from './pages/GroupList';
 import BibleQuiz from './pages/BibleQuiz';
 import QuizHome from './pages/QuizHome';
 import QuizProgress from './pages/QuizProgress';
+import BattleScreen from './pages/BattleScreen';
 // The quiz's own backdrop (the Word Puzzle's picture), for the hub and progress too.
 import { Backdrop as QuizBackdrop } from './pages/quizTheme';
 import QuizPlay from './pages/QuizPlay';
@@ -188,6 +189,8 @@ const linking = {
       DailyVerse: 'daily-verse',
       // A friend's challenge: streams://quiz/speed?from=mark&score=180.
       QuizPlay: 'quiz/:mode',
+      // A Live Bible Battle to join: streams://battle/ABC123.
+      Battle: 'battle/:code',
     },
   },
 };
@@ -413,6 +416,7 @@ const App = () => {
                 <Stack.Screen name="BibleQuiz" component={BibleQuiz} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizHome" component={QuizHomeWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizProgress" component={QuizProgressWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="Battle" component={BattleScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizPlay" component={QuizPlay} options={{ headerShown: false }} />
                 <Stack.Screen name="PuzzlePlay" component={PuzzlePlayWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="GroupDetail" component={GroupDetail} />

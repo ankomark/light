@@ -1181,6 +1181,20 @@ export const startQuizSession = async (mode, lang, { category, of } = {}) =>
     mode, ...(lang ? { language: lang } : {}), ...(category ? { category } : {}), ...(of ? { of } : {}),
   });
 
+// ── Live Bible Battle ──────────────────────────────────────────────────────
+// Every call answers with the battle's state (see songs/battle.py → state).
+export const createBattle = async ({ title, seconds, language } = {}) =>
+  apiRequest('post', '/quiz-battles/', { title, seconds, language });
+export const joinBattle = async (code) => apiRequest('post', '/quiz-battles/join/', { code });
+export const fetchBattle = async (code) => apiRequest('get', `/quiz-battles/${code}/`);
+export const startBattle = async (code) => apiRequest('post', `/quiz-battles/${code}/start/`, {});
+export const answerBattle = async (code, index, choice) =>
+  apiRequest('post', `/quiz-battles/${code}/answer/`, { index, choice });
+export const revealBattle = async (code, index) =>
+  apiRequest('post', `/quiz-battles/${code}/reveal/`, { index });
+export const nextBattle = async (code, index) =>
+  apiRequest('post', `/quiz-battles/${code}/next/`, { index });
+
 // A duel side by side: { me, them, verdict }, each with score, points, marks.
 export const fetchQuizDuel = async (id) => apiRequest('get', `/quiz-sessions/${id}/duel/`);
 

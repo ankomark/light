@@ -269,6 +269,27 @@ const QuizHome = ({ navigation }) => {
             </View>
           </TouchableOpacity>
 
+          {/* A room where everyone answers at once: a youth night, a class. */}
+          <View style={styles.battleCard} testID="battle-card">
+            <View style={styles.battleTop}>
+              <Ionicons name="flash" size={20} color={GOLD} />
+              <Text style={styles.modeTitle}>{t('battle.title')}</Text>
+            </View>
+            <Text style={styles.modeText}>{t('battle.hubBody')}</Text>
+            <View style={styles.battleButtons}>
+              <TouchableOpacity style={styles.battleBtn} accessibilityRole="button"
+                                onPress={() => navigation.navigate('Battle', { mode: 'host' })}>
+                <Ionicons name="people" size={15} color={INK} />
+                <Text style={styles.battleBtnText}>{t('battle.host')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.battleBtn, styles.battleBtnGhost]} accessibilityRole="button"
+                                onPress={() => navigation.navigate('Battle', { mode: 'join' })}>
+                <Ionicons name="enter-outline" size={15} color={GOLD} />
+                <Text style={[styles.battleBtnText, styles.battleBtnGhostText]}>{t('battle.joinShort')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <Text style={[q.eyebrow, styles.sectionLabel]}>{t('quiz.home.practice')}</Text>
 
           <ModeCard
@@ -369,6 +390,19 @@ const ICE = '#8EC5FF';
 const styles = StyleSheet.create({
   scroll: { padding: 20, paddingBottom: 40, gap: 12 },
 
+  battleCard: {
+    padding: 16, gap: 8, borderRadius: 16, backgroundColor: '#05080E',
+    borderWidth: 1, borderColor: 'rgba(244,162,97,0.4)',
+  },
+  battleTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  battleButtons: { flexDirection: 'row', gap: 10, marginTop: 6 },
+  battleBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    minHeight: 44, borderRadius: 22, backgroundColor: GOLD,
+  },
+  battleBtnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: GOLD },
+  battleBtnText: { fontFamily: DISPLAY, fontSize: 12, letterSpacing: 0.8, color: INK },
+  battleBtnGhostText: { color: GOLD },
   reviewCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 14,
     backgroundColor: '#05080E',
