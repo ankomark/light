@@ -6,3 +6,8 @@
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
+
+// Tests have no native side, so utils/optionalNative.js would find none of its
+// modules and hide their features; use the packages' Jest mocks instead.
+// (pages/__tests__/DailyVerseOldBuild.test.js turns this off to be an old build.)
+require('./utils/optionalNative').__assumeNativePresent(true);

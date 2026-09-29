@@ -10,7 +10,12 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 jest.setTimeout(20000);
 
+// Loading one of these on an old build throws — and, worse, Metro reports the
+// error before any catch sees it. So they must not be loaded at all: each
+// records that it was, and the test checks nothing was.
+const mockLoaded = [];
 const missing = (name) => () => {
+  mockLoaded.push(name);
   throw new Error(`Invariant Violation: TurboModuleRegistry.getEnforcing(...): '${name}' could not be found.`);
 };
 jest.mock('react-native-view-shot', () => missing('RNViewShot')());
@@ -33,6 +38,26 @@ jest.mock('expo-haptics', () => ({
 jest.mock('expo-sharing', () => ({ isAvailableAsync: async () => true, shareAsync: jest.fn(async () => {}) }));
 jest.mock('expo-media-library', () => ({}));
 
+// An old build: nothing assumed, and none of these native modules registered.
+// (jest-expo's setup pre-registers RNViewShot and ExpoSpeech; take them away.)
+const ABSENT = ['RNViewShot', 'AndroidWidget', 'ExpoClipboard', 'ExpoSpeech'];
+jest.mock('expo-modules-core', () => {
+  const actual = jest.requireActual('expo-modules-core');
+  return {
+    ...actual,
+    requireOptionalNativeModule: (n) => (['ExpoClipboard', 'ExpoSpeech'].includes(n) ? null : actual.requireOptionalNativeModule(n)),
+  };
+});
+{
+  const { NativeModules, TurboModuleRegistry } = require('react-native');
+  const get = TurboModuleRegistry.get.bind(TurboModuleRegistry);
+  jest.spyOn(TurboModuleRegistry, 'get').mockImplementation((n) => (ABSENT.includes(n) ? null : get(n)));
+  ABSENT.forEach((n) => { delete NativeModules[n]; });
+}
+require('../../utils/optionalNative').__assumeNativePresent(false);
+
+afterAll(() => require('../../utils/optionalNative').__assumeNativePresent(true));
+
 const verse = {
   date: '2026-09-29', reference: 'Psalms 23:1', book: 'Psalms', chapter: 23, verse: 1,
   text: 'The LORD is my shepherd; I shall not want.', is_today: true,
@@ -44,6 +69,12 @@ test('the modules really are missing in this test', () => {
   expect(native.clipboard()).toBeNull();
   expect(native.speech()).toBeNull();
   expect(native.androidWidget()).toBeNull();
+});
+
+afterEach(() => {
+  // The heart of it: absent modules are never required, so no error is
+  // reported — not a red box in development, not a Sentry event in release.
+  expect(mockLoaded).toEqual([]);
 });
 
 test('the screen opens, without Listen, and long-press does nothing', async () => {
