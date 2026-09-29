@@ -47,7 +47,7 @@ jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file://pic.jpg' }] })),
   MediaTypeOptions: { Images: 'Images' },
 }));
-jest.mock('../../services/imageProcessing', () => ({ compressImage: jest.fn(async (uri) => ({ uri })) }));
+jest.mock('../../services/imageProcessing', () => ({ compressImage: jest.fn(async (uri) => ({ uri, width: 1080, height: 1350 })) }));
 const mockUpload = jest.fn(async () => ({ url: 'https://cdn.example/cover/n.jpg' }));
 jest.mock('../../services/cloudinary', () => ({ uploadMedia: (...a) => mockUpload(...a) }));
 
@@ -169,7 +169,7 @@ test('a manager schedules, edits (keeping the times), and sees what is scheduled
   await act(async () => { fireEvent.press(r.getByTestId('notice-edit-8')); });
   fireEvent.changeText(r.getByTestId('notice-body'), 'New body');
   await act(async () => { fireEvent.press(r.getByTestId('notice-post')); });
-  expect(mockApi.updateNotice).toHaveBeenCalledWith(8, { title: 'Notice 8', body: 'New body', is_pinned: false, category: 'general', cover_image: '' });
+  expect(mockApi.updateNotice).toHaveBeenCalledWith(8, { title: 'Notice 8', body: 'New body', is_pinned: false, category: 'general', cover_image: '', cover_width: null, cover_height: null });
 });
 
 test('my notes: read or not, and the answer; admins answer from the inbox', async () => {
@@ -218,7 +218,9 @@ test('a notice gets a kind and a picture (uploaded as a cover)', async () => {
   await act(async () => { fireEvent.press(r.getByTestId('cover-add')); });
   expect(mockUpload).toHaveBeenCalledWith(expect.objectContaining({ uri: 'file://pic.jpg' }), 'cover');
   await act(async () => { fireEvent.press(r.getByTestId('notice-post')); });
-  expect(mockApi.createNotice.mock.calls[0][0]).toMatchObject({ category: 'event', cover_image: 'https://cdn.example/cover/n.jpg' });
+  expect(mockApi.createNotice.mock.calls[0][0]).toMatchObject({
+    category: 'event', cover_image: 'https://cdn.example/cover/n.jpg', cover_width: 1080, cover_height: 1350,
+  });
 });
 
 test('links in text are split out to be tapped', () => {

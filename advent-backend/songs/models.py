@@ -994,6 +994,9 @@ class Notice(models.Model):
     edited_at = models.DateTimeField(null=True, blank=True)
     # A picture at the top (one of our uploads), and what kind of notice it is.
     cover_image = models.CharField(max_length=500, blank=True, default='')
+    # Its size in pixels, so the app lays the picture out at its shape before it loads.
+    cover_width = models.PositiveIntegerField(null=True, blank=True)
+    cover_height = models.PositiveIntegerField(null=True, blank=True)
     CATEGORIES = [('general', 'General'), ('event', 'Event'), ('urgent', 'Urgent'), ('prayer', 'Prayer')]
     category = models.CharField(max_length=12, choices=CATEGORIES, default='general', db_index=True)
 

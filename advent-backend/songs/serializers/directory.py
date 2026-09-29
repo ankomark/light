@@ -43,8 +43,12 @@ class NoticeSerializer(serializers.ModelSerializer):
             'id', 'title', 'body', 'is_pinned',
             'created_by', 'created_by_username', 'can_manage', 'is_new',
             'created_at', 'updated_at', 'publish_at', 'expires_at', 'edited_at', 'status',
-            'cover_image', 'category',
+            'cover_image', 'cover_width', 'cover_height', 'category',
         ]
+        extra_kwargs = {
+            'cover_width': {'min_value': 1, 'max_value': 20000},
+            'cover_height': {'min_value': 1, 'max_value': 20000},
+        }
         read_only_fields = ['created_by', 'created_at', 'updated_at', 'edited_at']
 
     def get_is_new(self, obj):
@@ -93,6 +97,13 @@ class NoticeSerializer(serializers.ModelSerializer):
         exp = attrs.get('expires_at', getattr(self.instance, 'expires_at', None))
         if pub and exp and exp <= pub:
             raise serializers.ValidationError({'expires_at': 'A notice must expire after it is published.'})
+        # A size belongs to a picture: none without one, and a new picture
+        # without a size mustn't keep the old picture's.
+        if 'cover_image' in attrs and not attrs['cover_image']:
+            attrs['cover_width'] = attrs['cover_height'] = None
+        elif 'cover_image' in attrs and 'cover_width' not in attrs:
+            if not self.instance or attrs['cover_image'] != self.instance.cover_image:
+                attrs['cover_width'] = attrs['cover_height'] = None
         return attrs
 
 

@@ -3,15 +3,15 @@
 // the one kept from last time), then refreshes; a shared link or a push
 // (streams://notice/<id>) opens it straight away.
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchNotice } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import LinkedText from '../components/LinkedText';
+import NoticeCover from '../components/NoticeCover';
 import { SkeletonBox } from '../components/SkeletonLoader';
 import { colors, typography, spacing, radius } from '../constants/theme';
 
@@ -20,7 +20,6 @@ export const noticeLink = (id) => `streams://notice/${id}`;
 const NoticeDetail = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
-  const { width } = useWindowDimensions();
   const id = route?.params?.id;
   const key = userKey(currentUser?.id, `notice:${id}`);
   const [notice, setNotice] = useState(() => route?.params?.notice || peekCache(key) || null);
@@ -40,8 +39,6 @@ const NoticeDetail = ({ route, navigation }) => {
     const excerpt = (notice.body || '').slice(0, 280);
     Share.share({ message: `${notice.title}\n\n${excerpt}\n\n${noticeLink(notice.id)}` }).catch(() => {});
   };
-
-  const cover = Math.min(width, 820) - spacing.md * 2;
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
@@ -68,7 +65,7 @@ const NoticeDetail = ({ route, navigation }) => {
       ) : (
         <ScrollView contentContainerStyle={styles.body}>
           {notice.cover_image ? (
-            <Image source={{ uri: notice.cover_image }} style={[styles.cover, { height: cover * 0.56 }]} contentFit="cover" transition={150} />
+            <NoticeCover uri={notice.cover_image} width={notice.cover_width} height={notice.cover_height} minRatio={9 / 16} maxRatio={3} style={styles.cover} />
           ) : null}
           <View style={styles.tags}>
             {notice.category && notice.category !== 'general' ? (
@@ -101,7 +98,7 @@ const styles = StyleSheet.create({
   },
   topTitle: { ...typography.h3, color: colors.textPrimary, flex: 1 },
   body: { padding: spacing.md, paddingBottom: spacing.xxl, width: '100%', maxWidth: 820, alignSelf: 'center' },
-  cover: { width: '100%', borderRadius: radius.lg, marginBottom: spacing.md, backgroundColor: 'rgba(255,255,255,0.05)' },
+  cover: { borderRadius: radius.lg, marginBottom: spacing.md },
   tags: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.xs },
   tag: {
     flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.full,

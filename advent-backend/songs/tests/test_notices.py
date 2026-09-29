@@ -149,6 +149,23 @@ class RichNoticeTests(Base):
         found = [n['title'] for n in self.client.get('/api/notices/', {'q': 'sick'}).json()['results']]
         self.assertEqual(found, ['Pray for the sick'])
 
+    def test_the_cover_keeps_its_size_and_the_size_follows_the_picture(self):
+        a, b = 'https://cdn.example/cover/a.jpg', 'https://cdn.example/cover/b.jpg'
+        self.assertEqual(self.post(cover_image=a, cover_width=0, cover_height=10).status_code, 400)
+        nid = self.post(cover_image=a, cover_width=1080, cover_height=1350).json()['id']
+        self.client.force_authenticate(self.reader)
+        row = self.client.get('/api/notices/').json()['results'][0]
+        self.assertEqual((row['cover_width'], row['cover_height']), (1080, 1350))
+
+        self.client.force_authenticate(self.admin)
+        edit = lambda **d: self.client.patch(f'/api/notices/{nid}/', d, format='json').json()
+        # The same picture sent back (an edit of the words) keeps its size.
+        self.assertEqual(edit(cover_image=a, body='Friday at 7')['cover_width'], 1080)
+        # A new picture without a size doesn't wear the old one's; no picture, no size.
+        self.assertIsNone(edit(cover_image=b)['cover_width'])
+        self.assertEqual(edit(cover_image=b, cover_width=1920, cover_height=1080)['cover_height'], 1080)
+        self.assertIsNone(edit(cover_image='')['cover_height'])
+
     def test_a_scheduled_notice_is_not_readable_by_its_id(self):
         nid = self.post(publish_at=(timezone.now() + timedelta(days=1)).isoformat()).json()['id']
         self.client.force_authenticate(self.reader)

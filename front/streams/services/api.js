@@ -1375,8 +1375,13 @@ export const fetchNotice = (id) => apiRequest('get', `/notices/${id}/`);
 export const markNoticesSeen = () => apiRequest('post', '/notices/seen/');
 
 // publish_at / expires_at: ISO times (null: now / never).
-export const createNotice = async ({ title, body, is_pinned = false, publish_at = null, expires_at = null }) =>
-  apiRequest('post', '/notices/', { title, body, is_pinned, publish_at, expires_at });
+export const createNotice = async ({
+  title, body, is_pinned = false, publish_at = null, expires_at = null, category = 'general',
+  cover_image = '', cover_width = null, cover_height = null,
+}) =>
+  apiRequest('post', '/notices/', {
+    title, body, is_pinned, publish_at, expires_at, category, cover_image, cover_width, cover_height,
+  });
 
 export const updateNotice = (id, changes) => apiRequest('patch', `/notices/${id}/`, changes);
 

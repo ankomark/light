@@ -21,7 +21,7 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { NoticeListSkeleton } from '../components/SkeletonLoader';
 import { announceDM } from '../services/dmSocket';
 import { hasCapability } from '../utils/roles';
-import { Image } from 'expo-image';
+import NoticeCover from '../components/NoticeCover';
 import * as ImagePicker from 'expo-image-picker';
 import { compressImage } from '../services/imageProcessing';
 import { uploadMedia } from '../services/cloudinary';
@@ -63,7 +63,7 @@ const NoticeCard = memo(({ item, onDelete, onEdit, onOpen, t }) => (
   <TouchableOpacity style={[styles.card, item.is_pinned && styles.cardPinned, item.category === 'urgent' && styles.cardUrgent]}
     testID={`notice-${item.id}`} activeOpacity={0.9} onPress={() => onOpen(item)}>
     {item.cover_image ? (
-      <Image source={{ uri: item.cover_image }} style={styles.cardCover} contentFit="cover" transition={150} />
+      <NoticeCover uri={item.cover_image} width={item.cover_width} height={item.cover_height} minRatio={4 / 5} style={styles.cardCover} />
     ) : null}
     {item.is_pinned || item.is_new || (item.category && item.category !== 'general') || (item.can_manage && item.status && item.status !== 'live') ? (
       <View style={styles.tagRow}>
@@ -158,6 +158,7 @@ const NoticeBoard = ({ route, navigation }) => {
   const [expiry, setExpiry] = useState('never');
   const [noticeCategory, setNoticeCategory] = useState('general');
   const [cover, setCover] = useState('');           // an uploaded picture's address
+  const [coverSize, setCoverSize] = useState(null); // …and its { width, height }, so it never jumps
   const [uploadingCover, setUploadingCover] = useState(false);
 
   // The notes I sent (anyone), and answering notes (admins).
@@ -233,7 +234,7 @@ const NoticeBoard = ({ route, navigation }) => {
 
   const resetCompose = () => {
     setTitle(''); setBody(''); setPinned(false); setEditing(null); setWhen('now'); setExpiry('never');
-    setNoticeCategory('general'); setCover('');
+    setNoticeCategory('general'); setCover(''); setCoverSize(null);
   };
 
   const startEdit = useCallback((item) => {
@@ -241,6 +242,7 @@ const NoticeBoard = ({ route, navigation }) => {
     setTitle(item.title); setBody(item.body); setPinned(!!item.is_pinned);
     setWhen('keep'); setExpiry('keep');
     setNoticeCategory(item.category || 'general'); setCover(item.cover_image || '');
+    setCoverSize(item.cover_width && item.cover_height ? { width: item.cover_width, height: item.cover_height } : null);
     setComposeVisible(true);
   }, []);
 
@@ -255,6 +257,7 @@ const NoticeBoard = ({ route, navigation }) => {
       const small = await compressImage(res.assets[0].uri, { width: 1280, quality: 0.7 });
       const up = await uploadMedia({ uri: small.uri, name: `notice_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'cover');
       setCover(up?.url || '');
+      setCoverSize(small.width && small.height ? { width: small.width, height: small.height } : null);
     } catch {
       notify(t('common.error'), t('notice.coverFailed'));
     } finally {
@@ -301,6 +304,7 @@ const NoticeBoard = ({ route, navigation }) => {
         : expiryTime(expiry, pub || (editing?.publish_at ? new Date(editing.publish_at) : null));
       const fields = {
         title: title.trim(), body: body.trim(), is_pinned: pinned, category: noticeCategory, cover_image: cover,
+        cover_width: cover ? coverSize?.width ?? null : null, cover_height: cover ? coverSize?.height ?? null : null,
         ...(pub !== undefined ? { publish_at: pub ? pub.toISOString() : null } : {}),
         ...(exp !== undefined ? { expires_at: exp ? exp.toISOString() : null } : {}),
       };
@@ -521,8 +525,8 @@ const NoticeBoard = ({ route, navigation }) => {
               </View>
               {cover ? (
                 <View style={styles.coverWrap}>
-                  <Image source={{ uri: cover }} style={styles.coverPreview} contentFit="cover" />
-                  <TouchableOpacity style={styles.coverRemove} onPress={() => setCover('')} accessibilityLabel={t('notice.removeCover')} testID="cover-remove">
+                  <NoticeCover uri={cover} width={coverSize?.width} height={coverSize?.height} minRatio={4 / 5} style={styles.coverPreview} />
+                  <TouchableOpacity style={styles.coverRemove} onPress={() => { setCover(''); setCoverSize(null); }} accessibilityLabel={t('notice.removeCover')} testID="cover-remove">
                     <Ionicons name="close" size={16} color={colors.white} />
                   </TouchableOpacity>
                 </View>
@@ -718,7 +722,7 @@ const NoticeBoard = ({ route, navigation }) => {
 
 const styles = StyleSheet.create({
   manageRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  cardCover: { width: '100%', height: 150, borderRadius: radius.md, marginBottom: spacing.sm, backgroundColor: 'rgba(255,255,255,0.05)' },
+  cardCover: { borderRadius: radius.md, marginBottom: spacing.sm },
   cardUrgent: { borderColor: 'rgba(229,57,53,0.55)' },
   catTag: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: radius.full, backgroundColor: 'rgba(244,162,97,0.14)' },
   catTagUrgent: { backgroundColor: 'rgba(229,57,53,0.18)' },
@@ -731,7 +735,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, color: colors.textPrimary, paddingVertical: spacing.xs, fontSize: 15 },
   catRow: { gap: spacing.xs, paddingBottom: spacing.md },
   coverWrap: { marginBottom: spacing.md },
-  coverPreview: { width: '100%', height: 150, borderRadius: radius.md },
+  coverPreview: { borderRadius: radius.md },
   coverRemove: { position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   coverAdd: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 48, marginBottom: spacing.md,
