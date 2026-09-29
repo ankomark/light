@@ -57,6 +57,7 @@ from .views import (
     CommunityViewSet,
     DailyQuizViewSet,
     QuizSessionViewSet,
+    BattleViewSet,
     PuzzleThemeViewSet,
     WordPuzzleViewSet,
     GroupJoinRequestViewSet,
@@ -119,6 +120,8 @@ router.register(r'community-categories', CommunityCategoryViewSet, basename='com
 router.register(r'quiz', DailyQuizViewSet, basename='quiz')
 # Practice modes (Speed Quiz, Streak) — personal runs, answered one at a time.
 router.register(r'quiz-sessions', QuizSessionViewSet, basename='quiz-sessions')
+# Live Bible Battle: a host's room, everyone on the same question at once.
+router.register(r'quiz-battles', BattleViewSet, basename='quiz-battles')
 # Word puzzle: themes, levels, and the coin wallet that hints spend from.
 router.register(r'puzzle-themes', PuzzleThemeViewSet, basename='puzzle-themes')
 router.register(r'puzzles', WordPuzzleViewSet, basename='puzzles')

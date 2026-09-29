@@ -2986,6 +2986,77 @@ class ReviewItem(models.Model):
         return f"{self.user.username}: {self.prompt[:40]} (due {self.due_on})"
 
 
+class Battle(models.Model):
+    """A live Bible Battle: a host's room of players, all answering the same
+    question at the same moment, the ranking changing as they go — for a youth
+    night, a Sabbath programme, a class. See songs/battle.py.
+
+    Joined by a six-letter code. The host starts it and moves it on; each
+    question has a clock the server keeps, and when it runs out (or everyone
+    has answered) the answer is shown with the ranking.
+    """
+    LOBBY, QUESTION, REVEAL, FINISHED = 'lobby', 'question', 'reveal', 'finished'
+    STATUS_CHOICES = ((LOBBY, 'Waiting to start'), (QUESTION, 'Question open'),
+                      (REVEAL, 'Answer shown'), (FINISHED, 'Finished'))
+
+    code = models.CharField(max_length=6, unique=True)
+    host = models.ForeignKey(User, on_delete=models.CASCADE, related_name='hosted_battles')
+    title = models.CharField(max_length=80, blank=True, default='')
+    language = models.CharField(max_length=5, default='en')
+    seconds = models.PositiveSmallIntegerField(default=20)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=LOBBY, db_index=True)
+    # Which question is on (-1 before the first).
+    current = models.SmallIntegerField(default=-1)
+    question_started_at = models.DateTimeField(null=True, blank=True)
+    revealed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Battle {self.code} ({self.status})"
+
+
+class BattleQuestion(models.Model):
+    battle = models.ForeignKey(Battle, on_delete=models.CASCADE, related_name='questions')
+    order = models.PositiveSmallIntegerField()
+    kind = models.CharField(max_length=12)
+    difficulty = models.CharField(max_length=10)
+    prompt = models.TextField()
+    passage = models.TextField(blank=True, default='')
+    choices = models.JSONField(default=list)
+    answer_index = models.PositiveSmallIntegerField()
+    reference = models.CharField(max_length=80, blank=True, default='')
+    explanation = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['order']
+        unique_together = ('battle', 'order')
+
+
+class BattlePlayer(models.Model):
+    battle = models.ForeignKey(Battle, on_delete=models.CASCADE, related_name='players')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='battle_places')
+    points = models.PositiveIntegerField(default=0)
+    correct = models.PositiveSmallIntegerField(default=0)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('battle', 'user')
+        ordering = ['-points', '-correct', 'joined_at']
+
+
+class BattleAnswer(models.Model):
+    player = models.ForeignKey(BattlePlayer, on_delete=models.CASCADE, related_name='answers')
+    question = models.ForeignKey(BattleQuestion, on_delete=models.CASCADE, related_name='answers')
+    choice = models.SmallIntegerField(null=True)
+    is_correct = models.BooleanField(default=False)
+    points = models.PositiveIntegerField(default=0)
+    ms = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ('player', 'question')
+
+
 class QuizAttempt(models.Model):
     """One person's run at one day's quiz. One attempt per person per day, so a
     score means the same thing for everyone on the board."""

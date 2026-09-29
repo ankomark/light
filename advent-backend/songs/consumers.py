@@ -252,3 +252,39 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
         if other is None or is_blocked_between(self.user, other):
             return None
         return other.pk
+
+
+class BattleConsumer(AsyncJsonWebsocketConsumer):
+    """A Live Bible Battle's room: the host and the players hear each step as
+    it happens — who joined, the question and its clock, how many have
+    answered, the answer and the ranking, the end. Nothing is decided over the
+    socket; answers and steps go through REST (songs/views/battle.py)."""
+
+    async def connect(self):
+        self.user = self.scope.get('user')
+        code = self.scope['url_route']['kwargs']['code'].upper()
+        if not self.user or not self.user.is_authenticated or not await self._in_it(code):
+            await self.close(code=4403)
+            return
+        from songs.battle import room
+        self.room = room(code)
+        await self.channel_layer.group_add(self.room, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, code):
+        if hasattr(self, 'room'):
+            await self.channel_layer.group_discard(self.room, self.channel_name)
+
+    async def receive_json(self, content):
+        """Nothing to receive: steps go through REST."""
+
+    async def battle_event(self, event):
+        await self.send_json(event['payload'])
+
+    @database_sync_to_async
+    def _in_it(self, code):
+        from songs.models import Battle
+        battle = Battle.objects.filter(code=code).first()
+        return bool(battle) and (battle.host_id == self.user.pk
+                                 or battle.players.filter(user=self.user).exists())
+
