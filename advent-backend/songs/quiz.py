@@ -206,13 +206,85 @@ def _pick_verses(rng, count):
     return ids
 
 
+# ── the question bank ─────────────────────────────────────────────────────────
+# About a quarter of each difficulty comes from the written bank (BankQuestion)
+# when it has enough: the rest are generated from verses as before.
+BANK_SHARE = 0.25
+# A written question's record decides whether it stays: after this many
+# answers, one that nearly everyone gets right teaches nothing, and one that
+# nearly everyone gets wrong usually has the wrong answer marked.
+RETIRE_AFTER = 40
+TOO_EASY_AT = 0.97
+TOO_HARD_AT = 0.10
+
+
+def _from_bank(rng, difficulty, count, language='en'):
+    """Up to `count` written questions of `difficulty`, the least-asked first
+    (ties broken by `rng`), as question dicts with their choices shuffled."""
+    from .models import BankQuestion
+    if count <= 0:
+        return []
+    pool = list(BankQuestion.objects.filter(is_active=True, language=language, difficulty=difficulty))
+    rng.shuffle(pool)
+    pool.sort(key=lambda b: b.times_asked)          # stable: the shuffle breaks ties
+    out = []
+    for b in pool[:count]:
+        order = list(range(len(b.choices)))
+        if b.kind != 'true_false':                  # "True, False" keeps its order
+            rng.shuffle(order)
+        out.append({
+            'kind': b.kind,
+            'prompt': b.prompt,
+            'passage': '',
+            'choices': [b.choices[i] for i in order],
+            'answer_index': order.index(b.answer_index),
+            'reference': b.reference,
+            'explanation': b.explanation,
+            'difficulty': difficulty,
+            'category': b.category,
+            'base_points': base_points_for(difficulty),
+            'bank_question_id': b.pk,
+        })
+    return out
+
+
+def record_bank_answers(results):
+    """Count answers to written questions and retire the ones that tell nobody
+    anything. `results`: iterable of (bank_question_id, is_correct)."""
+    from collections import Counter
+    from django.db.models import F
+    from .models import BankQuestion
+
+    asked, right = Counter(), Counter()
+    for bank_id, correct in results:
+        if bank_id:
+            asked[bank_id] += 1
+            right[bank_id] += 1 if correct else 0
+    for bank_id, n in asked.items():
+        BankQuestion.objects.filter(pk=bank_id).update(
+            times_asked=F('times_asked') + n, times_correct=F('times_correct') + right[bank_id],
+        )
+    if not asked:
+        return
+    for b in BankQuestion.objects.filter(pk__in=list(asked), is_active=True, times_asked__gte=RETIRE_AFTER):
+        accuracy = b.times_correct / b.times_asked
+        reason = (BankQuestion.TOO_EASY if accuracy >= TOO_EASY_AT
+                  else BankQuestion.TOO_HARD if accuracy <= TOO_HARD_AT else '')
+        if reason:
+            BankQuestion.objects.filter(pk=b.pk).update(is_active=False, retired_reason=reason)
+
+
 def build_questions(rng, mix):
     """Build question dicts for `mix` — [(difficulty, count), ...].
 
     Shared by the daily quiz and every practice mode: what a question *is*
     doesn't change between modes, only how many of each and what they pay.
-    Raises ValueError when the corpus cannot supply them.
+    A share of each difficulty comes from the written bank; the rest are
+    generated from verses. Raises ValueError when the corpus cannot supply them.
     """
+    # The written ones first, so the verses are only asked to make up the rest.
+    banked = {d: _from_bank(rng, d, round(n * BANK_SHARE)) for d, n in mix}
+    mix = [(d, n - len(banked[d])) for d, n in mix]
     wanted_total = sum(count for _, count in mix)
     verse_ids = _pick_verses(rng, wanted_total)
     if len(verse_ids) < wanted_total:
@@ -246,7 +318,13 @@ def build_questions(rng, mix):
                 'Could not build %d %s questions (got %d) — the corpus is too small.'
                 % (wanted, difficulty, made)
             )
-    return built
+    # Each difficulty's written questions mixed in among its generated ones.
+    out = []
+    for difficulty, _ in mix:
+        block = [q for q in built if q['difficulty'] == difficulty] + banked[difficulty]
+        rng.shuffle(block)
+        out.extend(block)
+    return out
 
 
 def generate_for_date(date, force=False):

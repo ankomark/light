@@ -196,3 +196,35 @@ admin.site.register(OrderItem)
 admin.site.register(ProductReview)
 admin.site.register(Wishlist)
 admin.site.register(LiveEvent)
+
+# ── The quiz's question bank ─────────────────────────────────────────────────
+# Written questions mixed into every daily quiz and practice run (songs/quiz.py).
+# `choices` is a JSON list, e.g. ["Isaiah", "Jeremiah", "Samuel", "Moses"], and
+# `answer_index` counts from 0. A question almost everyone gets right — or
+# wrong, which usually means the wrong answer is marked — retires itself; the
+# reason shows here, and "Bring back" returns it with a fresh record.
+from .models import BankQuestion  # noqa: E402
+
+
+@admin.register(BankQuestion)
+class BankQuestionAdmin(admin.ModelAdmin):
+    list_display = ('prompt', 'kind', 'language', 'difficulty', 'category',
+                    'is_active', 'retired_reason', 'times_asked', 'accuracy_shown')
+    list_filter = ('is_active', 'retired_reason', 'language', 'kind', 'difficulty', 'category')
+    search_fields = ('prompt', 'explanation', 'reference')
+    readonly_fields = ('times_asked', 'times_correct', 'retired_reason', 'created_at', 'updated_at')
+    actions = ('bring_back', 'retire')
+
+    @admin.display(description='Right')
+    def accuracy_shown(self, obj):
+        return '—' if obj.accuracy is None else f'{round(obj.accuracy * 100)}%'
+
+    @admin.action(description='Bring back (with a fresh record)')
+    def bring_back(self, request, queryset):
+        n = queryset.update(is_active=True, retired_reason='', times_asked=0, times_correct=0)
+        self.message_user(request, f'{n} question(s) back in the quiz.')
+
+    @admin.action(description='Take out of the quiz')
+    def retire(self, request, queryset):
+        n = queryset.update(is_active=False)
+        self.message_user(request, f'{n} question(s) taken out.')

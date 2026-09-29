@@ -2776,6 +2776,10 @@ class QuizQuestion(models.Model):
         ('blank', 'Missing word'),
         ('reference', 'Which reference'),
         ('order', 'Which comes first'),
+        # From the question bank (BankQuestion), written rather than generated.
+        ('who_said', 'Who said this'),
+        ('true_false', 'True or false'),
+        ('fact', 'Bible fact'),
     )
 
     # Which part of scripture this came from. Derived from the verse's book at
@@ -2815,6 +2819,11 @@ class QuizQuestion(models.Model):
     choices = models.JSONField(default=list)
     answer_index = models.PositiveSmallIntegerField()
     reference = models.CharField(max_length=80, blank=True, default='')  # revealed after answering
+    # Where a written question came from, so its answers count toward the bank
+    # question's record (and can retire it). Null for generated questions.
+    bank_question = models.ForeignKey(
+        'BankQuestion', on_delete=models.SET_NULL, null=True, blank=True, related_name='uses',
+    )
 
     class Meta:
         ordering = ['order']
@@ -2831,6 +2840,72 @@ class QuizQuestion(models.Model):
 
     def __str__(self):
         return f"[{self.difficulty}] {self.prompt[:50]}"
+
+
+class BankQuestion(models.Model):
+    """A question written by a person, not generated from a verse.
+
+    Generated questions can only ask what a verse's text gives away (its book,
+    a word, its chapter). The bank adds what a person knows: who said it,
+    what came first, true or false. Edited in the Django admin; a share of each
+    daily quiz and practice run is drawn from here (songs/quiz.py).
+
+    Every answer is counted, and a question that tells nobody anything —
+    almost everyone right, or almost everyone wrong (usually a wrong answer
+    key) — retires itself with the reason written down, for an admin to fix
+    or bring back.
+    """
+    KIND_CHOICES = (
+        ('who_said', 'Who said this'),
+        ('true_false', 'True or false'),
+        ('order', 'Which came first'),
+        ('fact', 'Bible fact'),
+    )
+    LANGUAGE_CHOICES = (('en', 'English'), ('sw', 'Kiswahili'))
+    TOO_EASY, TOO_HARD = 'too_easy', 'too_hard'
+    RETIRED_CHOICES = ((TOO_EASY, 'Almost everyone got it right'),
+                       (TOO_HARD, 'Almost everyone got it wrong — check the answer'))
+
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES)
+    language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='en', db_index=True)
+    difficulty = models.CharField(max_length=10, choices=QuizQuestion.DIFFICULTY_CHOICES, db_index=True)
+    category = models.CharField(max_length=20, choices=QuizQuestion.CATEGORY_CHOICES, blank=True, default='')
+    prompt = models.TextField()
+    # Two to four answers, in the order written; shuffled each time they are
+    # asked (except true/false, which keeps its order). `answer_index` points
+    # at the right one here.
+    choices = models.JSONField(default=list)
+    answer_index = models.PositiveSmallIntegerField()
+    # Shown after answering: a line that teaches, and where to read it.
+    explanation = models.TextField(blank=True, default='')
+    reference = models.CharField(max_length=80, blank=True, default='')
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    retired_reason = models.CharField(max_length=12, choices=RETIRED_CHOICES, blank=True, default='')
+    times_asked = models.PositiveIntegerField(default=0)
+    times_correct = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['language', 'difficulty', 'id']
+
+    def __str__(self):
+        return f"[{self.language}/{self.difficulty}] {self.prompt[:60]}"
+
+    @property
+    def accuracy(self):
+        return self.times_correct / self.times_asked if self.times_asked else None
+
+    def clean(self):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        choices = self.choices if isinstance(self.choices, list) else []
+        if not 2 <= len(choices) <= 4 or not all(isinstance(c, str) and c.strip() for c in choices):
+            raise DjangoValidationError({'choices': 'Two to four answers, each a line of text.'})
+        if self.kind == 'true_false' and len(choices) != 2:
+            raise DjangoValidationError({'choices': 'True or false takes exactly two answers.'})
+        if not 0 <= self.answer_index < len(choices):
+            raise DjangoValidationError({'answer_index': 'Must point at one of the answers (0 is the first).'})
 
 
 class QuizAttempt(models.Model):

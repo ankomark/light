@@ -74,12 +74,17 @@ class QuizGenerationTests(APITestCase):
         self.assertEqual(DailyQuiz.objects.filter(date=date(2026, 5, 5)).count(), 1)
 
     def test_every_question_is_answerable(self):
-        """Four distinct choices and an answer_index that points at one."""
+        """Distinct choices and an answer_index that points at one: four for a
+        generated question, two to four for a written one (true/false has two)."""
         quiz = generate_for_date(date(2026, 6, 6))
         for q in quiz.questions.all():
-            self.assertEqual(len(q.choices), 4, q.prompt)
-            self.assertEqual(len(set(q.choices)), 4, q.choices)
-            self.assertIn(q.answer_index, range(4), q.prompt)
+            n = len(q.choices)
+            if q.bank_question_id:
+                self.assertIn(n, (2, 3, 4), q.prompt)
+            else:
+                self.assertEqual(n, 4, q.prompt)
+            self.assertEqual(len(set(q.choices)), n, q.choices)
+            self.assertIn(q.answer_index, range(n), q.prompt)
 
     def test_the_answer_is_the_truth_about_the_verse(self):
         """The generator must never invent an answer — a 'which book' answer has

@@ -14,7 +14,7 @@ from ..models import (
     VerseDay,
 )
 from ..modes import DAILY, MODES, config
-from ..quiz import generate_for_date, start_session
+from ..quiz import generate_for_date, record_bank_answers, start_session
 from ..scoring import coin_balance, level_for, score_answer
 from ..streaks import day_streaks, streak_for
 from ..serializers.quiz import (
@@ -175,6 +175,8 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
                 row.attempt = attempt
             QuizAnswer.objects.bulk_create(rows)
         _bump_board_version()
+        # Written questions keep a record of how they are answered.
+        record_bank_answers((r.question.bank_question_id, r.is_correct) for r in rows)
 
         return Response({
             'attempt': QuizAttemptSerializer(attempt).data,
@@ -477,6 +479,7 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                 session.is_finished = True
                 session.finished_at = timezone.now()
             session.save()
+        record_bank_answers([(question.bank_question_id, correct)])
 
         return Response({
             'correct': correct,
