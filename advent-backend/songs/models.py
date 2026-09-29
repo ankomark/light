@@ -2858,6 +2858,11 @@ class QuizQuestion(models.Model):
     bank_question = models.ForeignKey(
         'BankQuestion', on_delete=models.SET_NULL, null=True, blank=True, related_name='uses',
     )
+    # A question asked again in a Review run: answering it moves that review
+    # along its schedule (songs/quiz_review.py).
+    review_item = models.ForeignKey(
+        'ReviewItem', on_delete=models.SET_NULL, null=True, blank=True, related_name='asks',
+    )
 
     class Meta:
         ordering = ['order']
@@ -2940,6 +2945,43 @@ class BankQuestion(models.Model):
             raise DjangoValidationError({'choices': 'True or false takes exactly two answers.'})
         if not 0 <= self.answer_index < len(choices):
             raise DjangoValidationError({'answer_index': 'Must point at one of the answers (0 is the first).'})
+
+
+class ReviewItem(models.Model):
+    """A question someone got wrong, coming back until they know it.
+
+    A copy of the question, not a link: practice questions are pruned a week
+    after their run, and a review may be due a month later. Due again the day
+    after a miss; each right answer in a Review run pushes it out — 3, 7, 14,
+    30 days — until it is mastered. See songs/quiz_review.py.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='review_items')
+    # One review per question per person: the same miss twice resets it, not doubles it.
+    source_key = models.CharField(max_length=64)
+    language = models.CharField(max_length=5, default='en')
+    kind = models.CharField(max_length=12)
+    difficulty = models.CharField(max_length=10)
+    category = models.CharField(max_length=20, blank=True, default='')
+    prompt = models.TextField()
+    passage = models.TextField(blank=True, default='')
+    choices = models.JSONField(default=list)
+    answer_index = models.PositiveSmallIntegerField()
+    reference = models.CharField(max_length=80, blank=True, default='')
+    explanation = models.TextField(blank=True, default='')
+    bank_question = models.ForeignKey('BankQuestion', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+
+    step = models.PositiveSmallIntegerField(default=0)
+    due_on = models.DateField(db_index=True)
+    mastered_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'source_key')
+        indexes = [models.Index(fields=['user', 'mastered_at', 'due_on'])]
+
+    def __str__(self):
+        return f"{self.user.username}: {self.prompt[:40]} (due {self.due_on})"
 
 
 class QuizAttempt(models.Model):
@@ -3028,6 +3070,8 @@ class QuizSession(models.Model):
     """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='quiz_sessions')
     mode = models.CharField(max_length=12, db_index=True)
+    # The language it was played in, so a miss comes back for review in it.
+    language = models.CharField(max_length=5, default='en')
     # Filled in as the run proceeds — a session is scored answer by answer, not
     # in one submission at the end, because Streak has to know immediately.
     score = models.PositiveSmallIntegerField(default=0)

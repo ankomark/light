@@ -51,7 +51,11 @@ export const challengeLink = (mode, username, score) =>
 const QuizPlay = ({ navigation, route }) => {
   const { t, resolvedLanguage } = useI18n();
   const { preferences, setPreference } = usePreferences();
-  const mode = route?.params?.mode === 'streak' ? 'streak' : 'speed';
+  const MODES_PLAYED = ['speed', 'streak', 'review', 'section'];
+  const mode = MODES_PLAYED.includes(route?.params?.mode) ? route.params.mode : 'speed';
+  const category = mode === 'section' ? route?.params?.category : undefined;
+  // What the run is called on screen: the section's own name, else the mode's.
+  const title = (label) => (category ? t(`quiz.section.${category}`) : t(`quiz.mode.${mode}`) || label);
   const { currentUser } = useAuth();
   const lang = quizLanguage(resolvedLanguage);
   const challenge = challengeFrom(route?.params);
@@ -95,7 +99,7 @@ const QuizPlay = ({ navigation, route }) => {
       setOver(false);
       setShowResults(false);
       chain.current = Promise.resolve();
-      const started = await startQuizSession(mode, lang);
+      const started = await startQuizSession(mode, lang, { category });
       setRun(started);
       setQi(0);
       setTotals({
@@ -108,11 +112,12 @@ const QuizPlay = ({ navigation, route }) => {
       if (started.is_finished || !started.questions?.length) setShowResults(true);
       shownAt.current = Date.now();
     } catch (e) {
-      setError(e?.response?.data?.detail || e?.message || t('quiz.loadFailed'));
+      const code = e?.response?.data?.code || e?.data?.code;
+      setError(code === 'nothing_due' ? t('quiz.reviewNothingDue') : t('quiz.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [mode, t, lang]);
+  }, [mode, t, lang, category]);
 
   useEffect(() => { begin(); }, [begin]);
 
@@ -308,9 +313,12 @@ const QuizPlay = ({ navigation, route }) => {
         <Backdrop />
         <SafeAreaView style={q.flex} edges={['top', 'bottom']}>
           <ScrollView contentContainerStyle={styles.overScroll} showsVerticalScrollIndicator={false}>
-            <Text style={q.eyebrow}>{config.label}</Text>
+            <Text style={q.eyebrow}>{title(config.label)}</Text>
             <Text style={styles.overTitle}>
-              {isStreak ? t('quiz.runEnded') : t('quiz.timeUp')}
+              {isStreak ? t('quiz.runEnded')
+                : mode === 'review' ? t('quiz.reviewDone')
+                : mode === 'section' ? t('quiz.sectionDone')
+                : t('quiz.timeUp')}
             </Text>
 
             <View style={styles.hero}>
@@ -354,7 +362,7 @@ const QuizPlay = ({ navigation, route }) => {
             <TouchableOpacity style={[q.primaryBtn, styles.wide]} onPress={begin} activeOpacity={0.85}>
               <Text style={q.primaryBtnText}>{t('quiz.playAgain')}</Text>
             </TouchableOpacity>
-            {mine > 0 && (
+            {mine > 0 && (mode === 'speed' || mode === 'streak') && (
               <TouchableOpacity style={[q.ghostBtn, styles.wide]} onPress={sendChallenge}
                                 activeOpacity={0.85} accessibilityRole="button">
                 <Text style={q.ghostBtnText}>{t('quiz.challenge.send')}</Text>
@@ -407,7 +415,7 @@ const QuizPlay = ({ navigation, route }) => {
           <TouchableOpacity onPress={quit} style={q.iconBtn} hitSlop={10}>
             <Ionicons name="close" size={22} color="#7E8DA3" />
           </TouchableOpacity>
-          <Text style={q.headerTitle}>{config.label}</Text>
+          <Text style={q.headerTitle}>{title(config.label)}</Text>
           <TouchableOpacity
             onPress={() => setPreference(PREF_KEYS.quizMusic, !musicOn)}
             style={q.iconBtn}

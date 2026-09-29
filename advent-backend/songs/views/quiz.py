@@ -13,7 +13,7 @@ from ..models import (
     DailyQuiz, PuzzleProgress, QuizAnswer, QuizAttempt, QuizQuestion, QuizSession,
     VerseDay,
 )
-from ..modes import DAILY, MODES, config
+from ..modes import BEST_MODES, DAILY, MODES, REVIEW, SECTION, config
 from ..quiz import generate_for_date, record_bank_answers, start_session
 from ..scoring import coin_balance, level_for, score_answer
 from ..streaks import day_streaks, streak_for
@@ -80,6 +80,11 @@ def _read_answer(answers, question):
     if chosen is None or not (0 <= chosen < len(question.choices)):
         chosen = None
     return chosen, seconds
+
+
+def _review_due(user):
+    from ..quiz_review import due_count
+    return due_count(user)
 
 
 BOARD_VERSION_KEY = 'quiz-board:version'
@@ -195,6 +200,11 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         _bump_board_version()
         # Written questions keep a record of how they are answered.
         record_bank_answers((r.question.bank_question_id, r.is_correct) for r in rows)
+        # And each miss comes back for review.
+        from ..quiz_review import note_miss
+        for r in rows:
+            if not r.is_correct:
+                note_miss(request.user, r.question, quiz.language)
 
         return Response({
             'attempt': QuizAttemptSerializer(attempt).data,
@@ -334,6 +344,8 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             'total_coins': balance,
             # A streak broken yesterday that coins can still buy back.
             'freeze': freeze_offer(request.user, balance=balance),
+            # Questions once missed, due to be asked again (Review).
+            'review_due': _review_due(request.user),
             'coins_earned': earned,
             'coins_spent': spent,
             'daily_coins': daily['coins'] or 0,
@@ -426,7 +438,21 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             )
 
         try:
-            session = start_session(request.user, mode, _language(request))
+            if mode == REVIEW:
+                from ..quiz_review import NothingDue, start_review
+                try:
+                    session = start_review(request.user, _language(request))
+                except NothingDue:
+                    return Response({'error': 'Nothing is due for review.', 'code': 'nothing_due'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+            else:
+                category = None
+                if mode == SECTION:
+                    from ..quiz_progress import CATEGORY_ORDER
+                    category = request.data.get('category')
+                    if category not in CATEGORY_ORDER:
+                        raise ValidationError({'category': 'Choose one of: %s.' % ', '.join(CATEGORY_ORDER)})
+                session = start_session(request.user, mode, _language(request), category)
         except ValueError as exc:
             raise APIException(str(exc))
         return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED)
@@ -496,6 +522,11 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                 session.finished_at = timezone.now()
             session.save()
         record_bank_answers([(question.bank_question_id, correct)])
+        from ..quiz_review import note_miss, note_review
+        if question.review_item_id:
+            note_review(question.review_item_id, correct)
+        elif not correct:
+            note_miss(request.user, question, session.language)
 
         return Response({
             'correct': correct,
@@ -535,15 +566,14 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
     def best(self, request):
         """Your personal bests, per mode — what a practice mode is played for."""
         out = {}
-        for mode in MODES:
-            if mode == DAILY:
-                continue
+        for mode in BEST_MODES:
             runs = QuizSession.objects.filter(user=request.user, mode=mode)
             top = runs.order_by('-points').first()
+            summary = runs.aggregate(played=Count('id'), best_streak=Max('longest_streak'))
             out[mode] = {
-                'played': runs.count(),
+                'played': summary['played'] or 0,
                 'best_points': top.points if top else 0,
-                'best_streak': max((r.longest_streak for r in runs), default=0),
+                'best_streak': summary['best_streak'] or 0,
                 'best_score': top.score if top else 0,
             }
         return Response(out)

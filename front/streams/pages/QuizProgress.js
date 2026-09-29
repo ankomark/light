@@ -172,7 +172,13 @@ const QuizProgress = ({ navigation }) => {
           {strengths.length ? (
             <>
               {strengths.map((s) => (
-                <View key={s.category} style={styles.strength}>
+                <TouchableOpacity
+                  key={s.category}
+                  style={styles.strength}
+                  onPress={() => navigation?.navigate?.('QuizPlay', { mode: 'section', category: s.category })}
+                  accessibilityRole="button"
+                  accessibilityHint={t('quiz.practiseSection')}
+                >
                   <View style={styles.strengthTop}>
                     <Text style={styles.strengthName}>{t(`quiz.section.${s.category}`)}</Text>
                     <Text style={styles.strengthPct}>{Math.round(s.accuracy * 100)}%</Text>
@@ -181,15 +187,26 @@ const QuizProgress = ({ navigation }) => {
                     <View style={[styles.fill, { width: `${s.accuracy * 100}%` }]} />
                   </View>
                   <Text style={styles.strengthCount}>{t('quiz.progress.correctOf', { correct: s.correct, answered: s.answered })}</Text>
-                </View>
+                </TouchableOpacity>
               ))}
               {!!strongest && !!weakest && strongest.category !== weakest.category && (
-                <Text style={styles.note}>
-                  {t('quiz.progress.bestAndWorst', {
-                    best: t(`quiz.section.${strongest.category}`),
-                    worst: t(`quiz.section.${weakest.category}`),
-                  })}
-                </Text>
+                <>
+                  <Text style={styles.note}>
+                    {t('quiz.progress.bestAndWorst', {
+                      best: t(`quiz.section.${strongest.category}`),
+                      worst: t(`quiz.section.${weakest.category}`),
+                    })}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.practise}
+                    onPress={() => navigation?.navigate?.('QuizPlay', { mode: 'section', category: weakest.category })}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.practiseText}>
+                      {t('quiz.practiseNow', { section: t(`quiz.section.${weakest.category}`) })}
+                    </Text>
+                  </TouchableOpacity>
+                </>
               )}
             </>
           ) : (
@@ -246,7 +263,12 @@ const styles = StyleSheet.create({
   track: { height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.10)', overflow: 'hidden' },
   fill: { height: 5, borderRadius: 3, backgroundColor: GOLD_DEEP },
 
-  strength: { gap: 5, marginBottom: 4 },
+  strength: { gap: 5, marginBottom: 4, paddingVertical: 2 },
+  practise: {
+    alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center', paddingHorizontal: 16,
+    borderRadius: 20, backgroundColor: GOLD, marginTop: 4,
+  },
+  practiseText: { fontFamily: DISPLAY, fontSize: 12, letterSpacing: 0.6, color: '#0A1628' },
   strengthTop: { flexDirection: 'row', justifyContent: 'space-between' },
   strengthName: { fontSize: 14, color: PARCHMENT },
   strengthPct: { fontFamily: DISPLAY, fontSize: 13, color: GOLD },

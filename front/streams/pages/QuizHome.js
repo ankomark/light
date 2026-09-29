@@ -86,6 +86,11 @@ const QuizHome = ({ navigation }) => {
     Promise.resolve().then(fetchQuizProgress).then((data) => writeCache(key, data)).catch(() => {});
   }, [currentUser?.id]);
 
+  // The section to recommend: the weakest where there is enough to judge,
+  // from the progress already loaded (none until then).
+  const progress = peekCache(userKey(currentUser?.id, 'quiz:progress'));
+  const weakest = weakestSection(progress?.strengths);
+
   const played = !!daily?.my_attempt;
   const nothingYet = !dailyData.data && !bests && !stats;
   const allFailed = dailyData.failed && bestsData.failed && statsData.failed;
@@ -216,6 +221,23 @@ const QuizHome = ({ navigation }) => {
             </View>
           )}
 
+          {/* Questions once missed, due to come back. */}
+          {stats?.review_due > 0 && (
+            <TouchableOpacity
+              style={styles.reviewCard}
+              onPress={() => navigation.navigate('QuizPlay', { mode: 'review' })}
+              accessibilityRole="button"
+              testID="review-card"
+            >
+              <Ionicons name="refresh-circle" size={30} color={GOLD} />
+              <View style={styles.modeBody}>
+                <Text style={styles.modeTitle}>{t('quiz.reviewTitle')}</Text>
+                <Text style={styles.modeText}>{t('quiz.reviewBody', { count: stats.review_due })}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={MUTED} />
+            </TouchableOpacity>
+          )}
+
           {/* Daily — the headline */}
           <TouchableOpacity
             style={styles.dailyCard}
@@ -272,6 +294,29 @@ const QuizHome = ({ navigation }) => {
             t={t}
           />
 
+          {/* One part of the Bible at a time; the weakest, from your progress, marked. */}
+          <Text style={[q.eyebrow, styles.sectionLabel]}>{t('quiz.sections')}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.chips} testID="section-chips">
+            {SECTIONS.map((sec) => {
+              const recommended = sec === weakest;
+              return (
+                <TouchableOpacity
+                  key={sec}
+                  style={[styles.chip, recommended && styles.chipRecommended]}
+                  onPress={() => navigation.navigate('QuizPlay', { mode: 'section', category: sec })}
+                  accessibilityRole="button"
+                  accessibilityLabel={recommended ? `${t(`quiz.section.${sec}`)}, ${t('quiz.recommended')}` : t(`quiz.section.${sec}`)}
+                >
+                  {recommended && <Ionicons name="star" size={12} color={GOLD} />}
+                  <Text style={[styles.chipText, recommended && styles.chipTextRecommended]}>
+                    {t(`quiz.section.${sec}`)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
           {/* The puzzle's coins already count in the wallet above; it
               belongs here with the rest of what earns them. */}
           <ModeCard
@@ -287,6 +332,19 @@ const QuizHome = ({ navigation }) => {
       </View>
     </View>
   );
+};
+
+export const SECTIONS = [
+  'law', 'history', 'wisdom', 'major_prophets', 'minor_prophets',
+  'gospels', 'acts', 'epistles', 'revelation',
+];
+
+/** The section most worth practising: lowest accuracy among those with at
+ *  least five answers, when there are two or more to compare. */
+export const weakestSection = (strengths) => {
+  const judged = (strengths || []).filter((s) => s.answered >= 5);
+  if (judged.length < 2) return null;
+  return [...judged].sort((a, b) => a.accuracy - b.accuracy)[0].category;
 };
 
 const ModeCard = ({ icon, title, body, best, bestLabel, bestValue, coins, onPress, t }) => (
@@ -320,6 +378,21 @@ const ICE = '#8EC5FF';
 
 const styles = StyleSheet.create({
   scroll: { padding: 20, paddingBottom: 40, gap: 12 },
+
+  reviewCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 14,
+    backgroundColor: '#05080E',
+    borderWidth: 1, borderColor: 'rgba(244,162,97,0.45)',
+  },
+  chips: { gap: 8, paddingVertical: 2 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 38, paddingHorizontal: 14,
+    borderRadius: 19, backgroundColor: '#05080E',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.16)',
+  },
+  chipRecommended: { borderColor: GOLD, backgroundColor: 'rgba(244,162,97,0.12)' },
+  chipText: { fontFamily: DISPLAY_MID, fontSize: 11.5, letterSpacing: 0.5, color: PARCHMENT },
+  chipTextRecommended: { color: GOLD },
 
   progressLink: {
     flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 16,

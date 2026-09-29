@@ -97,7 +97,7 @@ test('a Swahili reference opens in the Bible reader', async () => {
 test('practice runs are asked for in the same language', async () => {
   mockApi.startQuizSession.mockResolvedValue({ id: 1, is_finished: true, score: 0, points: 0, longest_streak: 0, total_questions: 10, questions: [], mode_config: { label: 'Speed' } });
   render(<QuizPlay navigation={{ goBack: jest.fn() }} route={{ params: { mode: 'speed' } }} />);
-  await waitFor(() => expect(mockApi.startQuizSession).toHaveBeenCalledWith('speed', 'sw'));
+  await waitFor(() => expect(mockApi.startQuizSession).toHaveBeenCalledWith('speed', 'sw', { category: undefined }));
 });
 
 test('references in other languages are placed with the names given', () => {

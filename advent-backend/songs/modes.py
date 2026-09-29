@@ -14,6 +14,13 @@ from .models import QuizQuestion
 DAILY = 'daily'
 SPEED = 'speed'
 STREAK = 'streak'
+# Questions once missed, asked again on a spaced schedule (songs/quiz_review.py).
+REVIEW = 'review'
+# One part of the Bible at a time — the Law, the Gospels… — for practice
+# where it is needed (the progress screen names the weakest).
+SECTION = 'section'
+# The modes played for a personal best (the hub's cards).
+BEST_MODES = (SPEED, STREAK)
 
 S, M, H = QuizQuestion.SIMPLE, QuizQuestion.MODERATE, QuizQuestion.HARD
 
@@ -64,6 +71,36 @@ MODES = {
         'repeatable': True,
         'ranked': False,
     },
+}
+
+MODES[REVIEW] = {
+    'label': 'Review',
+    # Up to ten of what is due; the questions come from the review, not the mix.
+    'questions': 10,
+    'mix': [],
+    'time_limit': None,
+    # Remembering is the point, not speed.
+    'speed_max': 0,
+    'speed_fast': 0.0,
+    'speed_slow': 0.0,
+    'streak_cap': 5,
+    'ends_on_wrong': False,
+    'repeatable': True,
+    'ranked': False,
+}
+
+MODES[SECTION] = {
+    'label': 'Section practice',
+    'questions': 10,
+    'mix': [(S, 4), (M, 4), (H, 2)],
+    'time_limit': None,
+    'speed_max': 3,
+    'speed_fast': 4.0,
+    'speed_slow': 20.0,
+    'streak_cap': 5,
+    'ends_on_wrong': False,
+    'repeatable': True,
+    'ranked': False,
 }
 
 MODE_CHOICES = tuple((key, cfg['label']) for key, cfg in MODES.items())

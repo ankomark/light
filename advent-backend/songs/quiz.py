@@ -54,6 +54,16 @@ CATEGORY_RANGES = (
 )
 
 
+def books_in(category):
+    """(first, last) book number of a section of scripture, or None."""
+    lower = 1
+    for upper, name in CATEGORY_RANGES:
+        if name == category:
+            return lower, upper
+        lower = upper + 1
+    return None
+
+
 def category_for(book_number):
     for upper, name in CATEGORY_RANGES:
         if book_number <= upper:
@@ -288,18 +298,22 @@ def forget_kept_corpora():
     _KEPT.clear()
 
 
-def _pick_verses(rng, count, corpus=ENGLISH):
-    """Verses long enough to be worth asking about, spread across the corpus."""
+def _pick_verses(rng, count, corpus=ENGLISH, books=None):
+    """Verses long enough to be worth asking about, spread across the corpus
+    — or across the books (first, last) of one section."""
     kept = _refresh(corpus)
-    if kept['ids'] is None:
+    slot = 'ids' if not books else 'ids:%d-%d' % books
+    if kept.get(slot) is None:
+        verses = corpus.verses()
+        if books:
+            verses = verses.filter(book_number__range=books)
         ids = list(
-            corpus.verses().filter(text__regex=r'(\S+\s+){%d,}' % MIN_WORDS)
-            .values_list('id', flat=True)
+            verses.filter(text__regex=r'(\S+\s+){%d,}' % MIN_WORDS).values_list('id', flat=True)
         )
         if len(ids) < count:
-            ids = list(corpus.verses().values_list('id', flat=True))
-        kept['ids'] = ids
-    ids = list(kept['ids'])
+            ids = list(verses.values_list('id', flat=True))
+        kept[slot] = ids
+    ids = list(kept[slot])
     rng.shuffle(ids)
     return ids
 
@@ -394,7 +408,7 @@ def record_bank_answers(results):
             BankQuestion.objects.filter(pk=b.pk).update(is_active=False, retired_reason=reason)
 
 
-def build_questions(rng, mix, corpus=ENGLISH):
+def build_questions(rng, mix, corpus=ENGLISH, category=None):
     """Build question dicts for `mix` — [(difficulty, count), ...].
 
     Shared by the daily quiz and every practice mode: what a question *is*
@@ -404,11 +418,15 @@ def build_questions(rng, mix, corpus=ENGLISH):
     """
     # The written ones first, so the verses are only asked to make up the rest.
     from .models import BankQuestion
-    bank = list(BankQuestion.objects.filter(is_active=True, language=corpus.language))
+    bank = BankQuestion.objects.filter(is_active=True, language=corpus.language)
+    books = books_in(category) if category else None
+    if category:
+        bank = bank.filter(category=category)
+    bank = list(bank)
     banked = {d: _from_bank(rng, d, round(n * BANK_SHARE), corpus.language, bank) for d, n in mix}
     mix = [(d, n - len(banked[d])) for d, n in mix]
     wanted_total = sum(count for _, count in mix)
-    verse_ids = _pick_verses(rng, wanted_total, corpus)
+    verse_ids = _pick_verses(rng, wanted_total, corpus, books)
     if len(verse_ids) < wanted_total:
         raise ValueError(
             'The Bible corpus holds %d usable verses — %s.' % (len(verse_ids), corpus.import_hint)
@@ -485,7 +503,7 @@ def generate_for_date(date, force=False, language='en'):
     return quiz
 
 
-def start_session(user, mode, language='en'):
+def start_session(user, mode, language='en', category=None):
     """Open a practice run and generate the questions it will ask.
 
     Unseeded on purpose: the daily quiz must be the same for everyone, a
@@ -495,10 +513,11 @@ def start_session(user, mode, language='en'):
     from .modes import config
 
     cfg = config(mode)
-    built = build_questions(random.Random(), cfg['mix'], corpus_for(language))
+    corpus = corpus_for(language)
+    built = build_questions(random.Random(), cfg['mix'], corpus, category)
 
     with transaction.atomic():
-        session = QuizSession.objects.create(user=user, mode=mode)
+        session = QuizSession.objects.create(user=user, mode=mode, language=corpus.language)
         QuizQuestion.objects.bulk_create([
             QuizQuestion(session=session, order=i, **q) for i, q in enumerate(built)
         ])
