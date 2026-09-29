@@ -107,12 +107,20 @@ SYSTEM = (
 
 
 def _example(word, language):
-    """(reference, text) of a verse the word appears in, as a whole word."""
-    verses = tongue(language).verses()
-    for v in verses.filter(text__icontains=word)[:30]:
+    """(reference, text) of a verse the word appears in, as a whole word.
+    A search of the whole Bible, so kept: the same word is asked about again."""
+    from django.core.cache import cache
+    key = f'puzzle:example:{language}:{word}'
+    kept = cache.get(key)
+    if kept is not None:
+        return tuple(kept)
+    found = (None, None)
+    for v in tongue(language).verses().filter(text__icontains=word)[:30]:
         if re.search(r'\b%s\b' % re.escape(word), v.text, re.I):
-            return v.reference, v.text
-    return None, None
+            found = (v.reference, v.text)
+            break
+    cache.set(key, list(found), 60 * 60 * 24)
+    return found
 
 
 def has_found(user, puzzle, word):

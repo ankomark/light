@@ -20,13 +20,6 @@ from ..puzzle import (
     LEVEL_LIMIT, WORD_HINT_WEIGHT, band_for, daily_puzzle, generate, help_used,
     language_available, next_puzzle, stars_for,
 )
-
-
-def _language(request):
-    """The language to play in: `lang` when its Bible is here, else English
-    — a Swahili speaker gets an English board rather than none."""
-    lang = request.query_params.get('lang') or 'en'
-    return lang if language_available(lang) else 'en'
 from ..scoring import (
     COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, LETTER_COST, coin_balance,
     completion_bonus,
@@ -39,6 +32,13 @@ from ..serializers.puzzle import (
 
 # The verse a finished level was drawn from (serializers/puzzle.py).
 _verse = verse_payload
+
+
+def _language(request):
+    """The language to play in: `lang` when its Bible is here, else English
+    — a Swahili speaker gets an English board rather than none."""
+    lang = request.query_params.get('lang') or 'en'
+    return lang if language_available(lang) else 'en'
 
 
 class PuzzleThemeViewSet(viewsets.ReadOnlyModelViewSet):
@@ -239,7 +239,11 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         sender = (request.query_params.get('from') or '').strip()
         if sender and sender != request.user.username:
             challenger = User.objects.filter(username=sender).first()
-            if challenger and not (progress and (progress.challenger_id or progress.is_complete)):
+            # Only someone who has played this board can have sent it: without
+            # this, any name in a link would be pushed news of a stranger.
+            sent = challenger and PuzzleProgress.objects.filter(
+                user=challenger, puzzle=puzzle).exists()
+            if sent and not (progress and (progress.challenger_id or progress.is_complete)):
                 if not progress:
                     progress = PuzzleProgress.objects.create(user=request.user, puzzle=puzzle)
                 progress.challenger = challenger
@@ -365,7 +369,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         # a single join instead of a lookup for the board and another for the
         # player's place in it.
         progress = (PuzzleProgress.objects
-                    .select_related('puzzle', 'puzzle__theme', 'puzzle__verse')
+                    .select_related('puzzle', 'puzzle__theme', 'puzzle__verse', 'puzzle__sw_verse')
                     .filter(user=request.user, puzzle_id=pk)
                     .first())
         if progress:

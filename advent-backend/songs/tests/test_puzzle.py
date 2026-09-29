@@ -1233,6 +1233,14 @@ class DailyPuzzleTests(APITestCase):
         lv = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=8').data
         self.assertNotEqual(lv['id'], daily['id'])
 
+    def test_it_does_not_count_as_a_level_of_its_theme(self):
+        daily = self.client.get('/api/puzzles/daily/').data
+        puzzle = WordPuzzle.objects.get(pk=daily['id'])
+        PuzzleProgress.objects.filter(user=self.user, puzzle=puzzle).update(
+            found=list(puzzle.words), is_complete=True, completed_at=timezone.now())
+        again = self.client.get('/api/puzzles/daily/').data
+        self.assertEqual(again['theme']['levels_completed'], 0)
+
     def test_finishing_it_counts_toward_the_streak_and_has_a_time(self):
         from songs.models import PlayDay
         daily = self.client.get('/api/puzzles/daily/').data
@@ -1350,6 +1358,7 @@ class ChallengeTests(APITestCase):
         return last
 
     def test_opening_a_challenge_link_starts_the_clock_and_names_the_sender(self):
+        PuzzleProgress.objects.create(user=self.mark, puzzle=self.puzzle)
         self.client.force_authenticate(self.ivy)
         res = self.client.get(f'/api/puzzles/{self.puzzle.id}/?from=mark')
         self.assertEqual(res.status_code, 200)
@@ -1357,6 +1366,16 @@ class ChallengeTests(APITestCase):
         self.assertIn('wallet', res.data)
         progress = PuzzleProgress.objects.get(user=self.ivy, puzzle=self.puzzle)
         self.assertEqual(progress.challenger, self.mark)
+
+    def test_a_name_that_never_played_the_board_is_not_a_challenger(self):
+        """Otherwise any link could push news to a stranger."""
+        from unittest import mock
+        self.client.force_authenticate(self.ivy)
+        self.client.get(f'/api/puzzles/{self.puzzle.id}/?from=mark')
+        self.assertFalse(PuzzleProgress.objects.filter(user=self.ivy, challenger__isnull=False).exists())
+        with mock.patch('songs.views.puzzle.notify_user') as notify:
+            self._solve(self.ivy)
+        notify.assert_not_called()
 
     def test_my_own_link_is_not_a_challenge(self):
         self.client.force_authenticate(self.mark)

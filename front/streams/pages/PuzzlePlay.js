@@ -167,6 +167,14 @@ const PuzzlePlay = ({ navigation, route }) => {
   // heard the instant the finger lifts instead of a round trip later.
   const refused = useRef(new Set());
 
+  // Finds the server never heard about (offline twice over), kept on the
+  // phone and sent again the next time their board comes from the server.
+  const unsentKey = userKey(currentUser?.id, 'puzzle:unsent');
+  // Coins shown for finds the server has not answered yet, so a total it
+  // sends meanwhile does not take them back off the screen.
+  const pendingCoins = useRef(0);
+  const recordRef = useRef(null);
+
   const shownId = useRef(kept?.id ?? null);
   const show = useCallback((data, { keep = true } = {}) => {
     // A new board gets a fresh wheel; the same board keeps its shuffle.
@@ -174,15 +182,37 @@ const PuzzlePlay = ({ navigation, route }) => {
       shownId.current = data.id;
       setOrder([...Array((data.letters || '').length).keys()]);
     }
-    setPuzzle(data);
-    if (data.wallet) {
-      setBalance(data.wallet.balance);
-      setStreak(data.wallet);
+    let board = data;
+    const resend = [];
+    if (keep) {
+      // The server's copy of this board, missing finds it never got: put them
+      // back on it and send them again.
+      const unsent = peekCache(unsentKey) || [];
+      const mine = unsent.filter((u) => u.id === data.id);
+      if (mine.length) {
+        writeCache(unsentKey, unsent.filter((u) => u.id !== data.id));
+        mine.forEach(({ word }) => {
+          if ((board.found || []).includes(word) || (board.bonus || []).includes(word)) return;
+          const out = applyFind(board, word);
+          if (out.kind === 'slot' || out.kind === 'bonus') {
+            board = out.puzzle;
+            resend.push([word, out.done]);
+          }
+        });
+      }
     }
+    setPuzzle(board);
+    if (board.wallet) {
+      setBalance(board.wallet.balance);
+      setStreak(board.wallet);
+    }
+    resend.forEach(([word, done]) => recordRef.current?.(word, done, 0, board.id));
     const key = keyFor(pickRef.current);
+    // Only the board this slot is for: the daily one in the daily slot.
+    const fits = !!pickRef.current?.daily === !!board.day;
     // The daily board is kept finished too: the themes screen shows its time.
-    if (keep && key && (!data.is_complete || pickRef.current?.daily)) writeCache(key, data);
-  }, [keyFor]);
+    if (keep && key && fits && (!board.is_complete || pickRef.current?.daily)) writeCache(key, board);
+  }, [keyFor, unsentKey]);
 
   const load = useCallback(async (choice) => {
     setError('');
@@ -410,14 +440,16 @@ const PuzzlePlay = ({ navigation, route }) => {
   // brings what only it can: the coin total and, when the board is done, the
   // verse — and it is what makes the find count. The next level is fetched as
   // soon as this one is recorded as finished.
-  const record = useCallback((attempt, finishing) => {
-    const id = puzzle?.id;
+  const record = useCallback((attempt, finishing, delta = 0, boardId) => {
+    const id = boardId ?? puzzle?.id;
     const post = () => claimPuzzleWord(id, attempt);
+    pendingCoins.current += delta;
     chain.current = chain.current
       .then(() => post().catch(() => post()))
       .then((res) => {
+        pendingCoins.current -= delta;
         if (!res) return;
-        if (res.balance != null) setBalance(res.balance);
+        if (res.balance != null) setBalance(res.balance + pendingCoins.current);
         if (res.completion_bonus) {
           setBalance((b) => (res.balance != null || b == null ? b : b + res.completion_bonus));
           setFlash({ word: t('puzzle.solved'), coins: res.completion_bonus });
@@ -434,30 +466,46 @@ const PuzzlePlay = ({ navigation, route }) => {
           fetchNextPuzzle(lang).then((next) => { upcoming.current = next; }).catch(() => {});
         }
       })
-      .catch(() => { /* offline: the board is right when the level is next read */ });
-  }, [puzzle?.id, t, lang]);
+      .catch(() => {
+        // Offline, twice: kept, and sent again when this board is next read.
+        pendingCoins.current -= delta;
+        const unsent = peekCache(unsentKey) || [];
+        if (!unsent.some((u) => u.id === id && u.word === attempt)) {
+          writeCache(unsentKey, [...unsent, { id, word: attempt }]);
+        }
+      });
+  }, [puzzle?.id, t, lang, unsentKey]);
+  recordRef.current = record;
 
   // Whatever changes on the board is kept, so reopening shows it as it stood.
   useEffect(() => {
     const key = keyFor(pickRef.current);
-    if (puzzle && key && (!puzzle.is_complete || pickRef.current?.daily)) writeCache(key, puzzle);
+    const fits = puzzle && !!pickRef.current?.daily === !!puzzle.day;
+    if (key && fits && (!puzzle.is_complete || pickRef.current?.daily)) writeCache(key, puzzle);
   }, [puzzle, keyFor]);
+
+  // A tile picked for its letter that a traced word has since filled.
+  useEffect(() => {
+    if (picked && revealedCells[picked]) setPicked(null);
+  }, [picked, revealedCells]);
 
   // The verse in its chapter, in the reader's own Bible, opened at the verse.
   const readInBible = () => {
     const v = puzzle?.verse;
     const bookId = v?.book_number ? BIBLE_BOOKS[v.book_number - 1]?.id : null;
     if (!bookId) return;
-    stopLoop();
     navigation?.push?.('bible', { bookId, chapter: v.chapter, verse: v.verse });
   };
 
-  // Back from the Bible: the music picks up where it was left.
+  // Off to the Bible or the themes: the music stops, and picks up again on
+  // the way back.
   const musicRef = useRef(musicOn);
   musicRef.current = musicOn;
-  useEffect(() => navigation?.addListener?.('focus', () => {
-    if (musicRef.current) playLoop();
-  }), [navigation]);
+  useEffect(() => {
+    const onFocus = navigation?.addListener?.('focus', () => { if (musicRef.current) playLoop(); });
+    const onBlur = navigation?.addListener?.('blur', () => stopLoop());
+    return () => { onFocus?.(); onBlur?.(); };
+  }, [navigation]);
 
   const reject = useCallback(() => {
     wrongFeedback();
@@ -499,7 +547,7 @@ const PuzzlePlay = ({ navigation, route }) => {
         setFlash({ word: attempt, coins: perWord });
         setTimeout(() => setFlash(null), 1500);
         if (done) { finishFeedback(); solvedNow(); }
-        record(attempt, done);
+        record(attempt, done, perWord || 0);
       } else if (outcome.kind === 'bonus') {
         const perBonus = streak?.coins_per_bonus_word ?? null;
         bonusFeedback();
@@ -507,7 +555,7 @@ const PuzzlePlay = ({ navigation, route }) => {
         if (perBonus != null) addCoins(null, perBonus);
         setFlash({ word: attempt, coins: perBonus, bonus: true });
         setTimeout(() => setFlash(null), 1500);
-        record(attempt, false);
+        record(attempt, false, perBonus || 0);
       } else {
         // Neither on the board nor a bonus word: nothing to ask the server.
         refused.current.add(attempt);

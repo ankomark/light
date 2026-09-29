@@ -3,7 +3,7 @@
  * won with, the next one open to play, and a few still locked beyond it.
  * Any finished level can be played again; nothing past the next can.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -42,9 +42,15 @@ const PuzzleLevels = ({ navigation, route }) => {
     }
   }, [slug, lang, key]);
 
+  const opened = useRef(false);
   useEffect(() => {
     load();
-    return navigation?.addListener?.('focus', load);
+    // Back from a level: its stars are on the list. The first focus is the
+    // opening, already loaded.
+    return navigation?.addListener?.('focus', () => {
+      if (opened.current) load();
+      opened.current = true;
+    });
   }, [load, navigation]);
 
   const levels = data?.levels || [];

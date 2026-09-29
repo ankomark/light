@@ -7,7 +7,7 @@
  * a board. Kept on the phone once seen, so it opens at once and refreshes
  * behind itself.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -57,10 +57,15 @@ const PuzzleThemes = ({ navigation }) => {
     }
   }, [key, lang, currentUser?.id]);
 
+  const opened = useRef(false);
   useEffect(() => {
     load();
-    // Back from a level: its stars are on the list.
-    return navigation?.addListener?.('focus', load);
+    // Back from a level: its stars are on the list. The first focus is the
+    // opening, already loaded.
+    return navigation?.addListener?.('focus', () => {
+      if (opened.current) load();
+      opened.current = true;
+    });
   }, [load, navigation]);
 
   return (

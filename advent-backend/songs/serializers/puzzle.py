@@ -68,8 +68,10 @@ class PuzzleThemeSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not (request and request.user.is_authenticated):
             return 0
+        # The levels of this theme in this language — never the Daily Puzzle.
         return PuzzleProgress.objects.filter(
             user=request.user, puzzle__theme=obj, is_complete=True,
+            puzzle__day__isnull=True, puzzle__language=self.context.get('lang') or 'en',
         ).count()
 
 
