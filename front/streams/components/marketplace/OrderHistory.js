@@ -1,103 +1,119 @@
-import React, { useState, useEffect } from 'react';
+// My Orders — what I bought. Opens at once from the phone's copy
+// (useCachedData) and refreshes behind it; each order's total is shown per
+// currency, never as one sum of shillings and dollars.
+import React, { useCallback } from 'react';
 import { useI18n } from '../../context/I18nContext';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchOrders } from '../../services/api';
+import { useAuth } from '../../context/useAuth';
+import useCachedData from '../../utils/useCachedData';
+import { userKey } from '../../utils/screenCache';
+import { formatTotals, orderTotals, lineTitle } from '../../utils/market';
 
-const CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', KES: 'Ksh', NGN: '₦' };
+export const STATUS_COLORS = {
+  delivered: '#2E8B57',
+  shipped: '#1D478B',
+  processing: '#FFA500',
+  cancelled: '#FF6347',
+  refunded: '#FF6347',
+  pending: '#888',
+};
 
-// total_amount/price arrive as strings (DRF serializes DecimalField that way),
-// so parse before formatting — never call .toFixed() on the raw value.
-const formatPrice = (price, currency = 'USD') => {
-  const symbol = CURRENCY_SYMBOLS[currency] || currency;
-  return `${symbol}${(parseFloat(price) || 0).toFixed(2)}`;
+export const formatDate = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+const listOf = (data) => (Array.isArray(data) ? data : (data?.results || []));
+
+// My Orders in three piles: still going, done, and called off.
+const TABS = {
+  active: ['pending', 'processing', 'shipped'],
+  completed: ['delivered'],
+  cancelled: ['cancelled', 'refunded'],
+};
+export const tabOf = (order) => {
+  const status = (order?.status || 'pending').toLowerCase();
+  return Object.keys(TABS).find((k) => TABS[k].includes(status)) || 'active';
 };
 
 const OrderHistory = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const route = useRoute();
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const { currentUser } = useAuth();
+  // "My Orders" = things I bought. Sales live in the Seller Dashboard.
+  const { data, failed, refreshing, reload } = useCachedData(
+    currentUser ? userKey(currentUser.id, 'market:orders:buyer') : null,
+    () => fetchOrders({ role: 'buyer' }),
+  );
+  const all = listOf(data);
+  const [tab, setTab] = React.useState('active');
+  const orders = all.filter((o) => tabOf(o) === tab);
 
-  useEffect(() => {
-    loadOrders();
-  }, []);
+  // Back from an order (cancelled, say): the list is read again.
+  const first = React.useRef(true);
+  useFocusEffect(useCallback(() => {
+    if (first.current) { first.current = false; return; }
+    reload();
+  }, [reload]));
 
-  useEffect(() => {
-    if (route.params?.success) {
-      Alert.alert(
-        'Order Successful', 
-        `Your order #${route.params.orderId} has been placed successfully!`,
-        [{ text: 'OK', onPress: () => loadOrders() }]
-      );
-    }
-  }, [route.params]);
-
-  const loadOrders = async () => {
-    try {
-      setRefreshing(true);
-      // "My Orders" = things I bought. Sales live in the Seller Dashboard.
-      const ordersData = await fetchOrders({ role: 'buyer' });
-      // Orders list is unpaginated today; tolerate a paginated envelope too.
-      setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
-    } catch (error) {
-      console.error('Error loading orders:', error);
-      Alert.alert(t('common.error'), t('market.orders.loadFailed'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    const options = { year: 'numeric', month: 'short', day: 'numeric' };
-    return date.toLocaleDateString(undefined, options);
-  };
-
-  const getStatusColor = (status) => {
-    switch ((status || '').toLowerCase()) {
-      case 'delivered':
-        return '#2E8B57';
-      case 'shipped':
-        return '#1D478B';
-      case 'processing':
-        return '#FFA500';
-      case 'cancelled':
-        return '#FF6347';
-      default:
-        return '#888';
-    }
-  };
-
-  if (loading) {
+  if (!data) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1D478B" />
+        {failed ? (
+          <>
+            <Icon name="wifi" size={44} color="#888" />
+            <Text style={styles.emptyText}>{t('market.orders.loadFailed')}</Text>
+            <TouchableOpacity style={styles.shopButton} onPress={reload}>
+              <Text style={styles.shopButtonText}>{t('common.retry')}</Text>
+            </TouchableOpacity>
+          </>
+        ) : <ActivityIndicator size="large" color="#1D478B" />}
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      {all.length > 0 && (
+        <View style={styles.tabs} accessibilityRole="tablist">
+          {Object.keys(TABS).map((k) => {
+            const n = all.filter((o) => tabOf(o) === k).length;
+            return (
+              <TouchableOpacity
+                key={k}
+                style={[styles.tab, tab === k && styles.tabOn]}
+                onPress={() => setTab(k)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: tab === k }}
+                testID={`orders-tab-${k}`}
+              >
+                <Text style={[styles.tabText, tab === k && styles.tabTextOn]}>
+                  {t(`market.orders.tab.${k}`)}{n ? ` (${n})` : ''}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
       {orders.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Icon name="box-open" size={50} color="#888" />
-          <Text style={styles.emptyText}>{t('market.orders.empty')}</Text>
-          <TouchableOpacity 
+          <Icon name="archive" size={50} color="#888" />
+          <Text style={styles.emptyText}>
+            {all.length ? t(`market.orders.none.${tab}`) : t('market.orders.empty')}
+          </Text>
+          <TouchableOpacity
             style={styles.shopButton}
             onPress={() => navigation.navigate('ProductList')}
           >
@@ -107,46 +123,45 @@ const OrderHistory = () => {
       ) : (
         <FlatList
           data={orders}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <TouchableOpacity 
-              style={styles.orderCard}
-              onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
-            >
-              <View style={styles.orderHeader}>
-                <Text style={styles.orderId}>Order #{item.id}</Text>
-                <Text style={styles.orderDate}>{formatDate(item.created_at)}</Text>
-              </View>
-
-              <View style={styles.orderStatusContainer}>
-                <View style={[
-                  styles.statusBadge,
-                  { backgroundColor: getStatusColor(item.status) }
-                ]}>
-                  <Text style={styles.statusText}>{item.status}</Text>
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item }) => {
+            const status = (item.status || 'pending').toLowerCase();
+            return (
+              <TouchableOpacity
+                style={styles.orderCard}
+                onPress={() => navigation.navigate('OrderDetail', { orderId: item.id, order: item })}
+                testID={`order-${item.id}`}
+              >
+                <View style={styles.orderHeader}>
+                  <Text style={styles.orderId}>{t('market.order.number', { id: item.id })}</Text>
+                  <Text style={styles.orderDate}>{formatDate(item.created_at)}</Text>
                 </View>
-                <Text style={styles.orderTotal}>
-                  {formatPrice(item.total_amount, item.items?.[0]?.product?.currency)}
-                </Text>
-              </View>
 
-              <View style={styles.orderItemsPreview}>
-                {(item.items || []).slice(0, 2).map((orderItem, index) => (
-                  <Text key={index} style={styles.orderItemText} numberOfLines={1}>
-                    {orderItem.quantity}x {orderItem.product?.title || t('market.unavailableProduct')}
-                  </Text>
-                ))}
-                {(item.items?.length || 0) > 2 && (
-                  <Text style={styles.moreItemsText}>
-                    +{item.items.length - 2} more items
-                  </Text>
-                )}
-              </View>
-            </TouchableOpacity>
-          )}
+                <View style={styles.orderStatusContainer}>
+                  <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[status] || '#888' }]}>
+                    <Text style={styles.statusText}>{t(`market.status.${status}`)}</Text>
+                  </View>
+                  <Text style={styles.orderTotal}>{formatTotals(orderTotals(item))}</Text>
+                </View>
+
+                <View style={styles.orderItemsPreview}>
+                  {(item.items || []).slice(0, 2).map((orderItem) => (
+                    <Text key={orderItem.id} style={styles.orderItemText} numberOfLines={1}>
+                      {orderItem.quantity}× {lineTitle(orderItem) || t('market.unavailableProduct')}
+                    </Text>
+                  ))}
+                  {(item.items?.length || 0) > 2 && (
+                    <Text style={styles.moreItemsText}>
+                      {t('market.orders.more', { n: item.items.length - 2 })}
+                    </Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          }}
           contentContainerStyle={styles.orderList}
-          refreshing={refreshing}
-          onRefresh={loadOrders}
+          refreshing={refreshing && !!data}
+          onRefresh={reload}
         />
       )}
     </View>
@@ -154,6 +169,14 @@ const OrderHistory = () => {
 };
 
 const styles = StyleSheet.create({
+  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
+  tab: {
+    flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  tabOn: { backgroundColor: '#FFC46B' },
+  tabText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  tabTextOn: { color: '#0A1628' },
   container: {
     flex: 1,
     backgroundColor: 'transparent',

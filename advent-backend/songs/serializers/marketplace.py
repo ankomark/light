@@ -1,22 +1,41 @@
 from .common import *  # noqa: F401,F403
+from ..models import SellerProfile
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
+    # How many products are on offer in it: the home screen shows only the
+    # categories that have something in them. Annotated in the view.
+    product_count = serializers.IntegerField(read_only=True, required=False)
+
     class Meta:
         model = ProductCategory
-        fields = '__all__'
+        fields = ['id', 'name', 'description', 'icon', 'parent', 'product_count',
+                  'created_at', 'updated_at']
+
+
+def money_totals(pairs):
+    """[(currency, amount)] → [{currency, amount}], one entry per currency.
+
+    Prices are in the seller's own currency, so a cart or an order can hold
+    shillings and dollars at once. Adding those together gives a number that
+    is not a price in anything; this keeps them apart."""
+    totals = {}
+    for currency, amount in pairs:
+        key = currency or 'USD'
+        totals[key] = totals.get(key, 0) + amount
+    return [{'currency': c, 'amount': str(a)} for c, a in totals.items()]
 
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
     image = CloudinaryFieldSerializer(read_only=True)
     image_url = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = ProductImage
         fields = ['id', 'image', 'image_url', 'is_primary', 'uploaded_at']
         read_only_fields = ['uploaded_at']
-    
+
     def get_image_url(self, obj):
         request = self.context.get('request')
         if obj.image and request:
@@ -25,8 +44,30 @@ class ProductImageSerializer(serializers.ModelSerializer):
 
 
 
+SELLER_FIELDS = [
+    'whatsapp_number', 'contact_number', 'location', 'mpesa_number', 'till_number',
+    'bank_details', 'payment_instructions',
+]
+
+
+class SellerProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SellerProfile
+        fields = SELLER_FIELDS + ['is_verified', 'updated_at']
+        read_only_fields = ['is_verified', 'updated_at']
+
+
+def seller_verified(user):
+    """The staff-given tick, read from a prefetched profile when there is one."""
+    try:
+        return bool(user.seller_profile.is_verified)
+    except (AttributeError, SellerProfile.DoesNotExist):
+        return False
+
+
 class ProductSerializer(serializers.ModelSerializer):
     seller = serializers.SerializerMethodField()
+    seller_verified = serializers.SerializerMethodField()
     currency = serializers.CharField(max_length=3)
     images = serializers.ListField(
         child=serializers.ImageField(),
@@ -44,6 +85,8 @@ class ProductSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
     is_wishlisted = serializers.SerializerMethodField()
+    # Set on a product's own page only: may the person asking review it?
+    can_review = serializers.SerializerMethodField()
     # Ids of this product's existing ProductImage rows to drop on update. Not a
     # model field — write-only, and ListField reads the repeated multipart keys
     # the client sends via getlist().
@@ -63,8 +106,15 @@ class ProductSerializer(serializers.ModelSerializer):
             'average_rating', 'review_count', 'is_wishlisted', 'track', 'currency',
             'whatsapp_number', 'contact_number', 'location',
             'mpesa_number', 'till_number', 'bank_details', 'payment_instructions',
+            'can_review', 'seller_verified',
         ]
         read_only_fields = ['seller', 'created_at', 'updated_at', 'views', 'slug']
+
+    def get_seller_verified(self, obj):
+        return seller_verified(obj.seller)
+
+    def get_can_review(self, obj):
+        return getattr(obj, '_can_review', None)
 
     def get_seller(self, obj):
         # A product card/detail only needs the seller's id + username (+ avatar).
@@ -146,13 +196,16 @@ class ProductSerializer(serializers.ModelSerializer):
         ).data
         representation['category'] = instance.category.name if instance.category else None
         return representation
-    
+
     def update(self, instance, validated_data):
         # Both are write-only helpers, not model fields — pop them before the
         # setattr loop below. ('images' is the reverse FK manager; assigning to
         # it would raise "Direct assignment to the reverse side is prohibited".)
         images = validated_data.pop('images', [])
         remove_ids = validated_data.pop('remove_images', [])
+
+        # For the wishlist alerts: what it was before this change.
+        old_price, old_quantity, old_available = instance.price, instance.quantity, instance.is_available
 
         category_name = validated_data.pop('category', None)
         if category_name:
@@ -178,6 +231,9 @@ class ProductSerializer(serializers.ModelSerializer):
                 image=r2.upload_file(image, 'products/images'),
             )
 
+        # Cheaper, or back in stock: the people who saved it hear.
+        from ..market_alerts import tell_wishers
+        tell_wishers(instance, old_price, old_quantity, old_available)
         return instance
 
 
@@ -223,12 +279,14 @@ class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)
     subtotal = serializers.SerializerMethodField()
     total_items = serializers.SerializerMethodField()
-    
+    totals = serializers.SerializerMethodField()
+
     class Meta:
         model = Cart
-        fields = ['id', 'user', 'created_at', 'updated_at', 'items', 'subtotal', 'total_items']
+        fields = ['id', 'user', 'created_at', 'updated_at', 'items', 'subtotal', 'total_items',
+                  'totals']
         read_only_fields = ['user', 'created_at', 'updated_at']
-    
+
     def get_subtotal(self, obj):
         return sum(item.product.price * item.quantity for item in obj.items.all())
 
@@ -236,41 +294,107 @@ class CartSerializer(serializers.ModelSerializer):
         # Reuse the prefetched items instead of issuing a separate COUNT query.
         return len(obj.items.all())
 
+    def get_totals(self, obj):
+        return money_totals((i.product.currency, i.product.price * i.quantity) for i in obj.items.all())
+
+
+
+class OrderLineProductSerializer(CartLineProductSerializer):
+    """A product as an order line needs it: what the cart line carries, plus
+    the seller's payment and contact details — the buyer pays each seller
+    directly, from the order. Not the description, reviews or track."""
+
+    class Meta(CartLineProductSerializer.Meta):
+        fields = CartLineProductSerializer.Meta.fields + [
+            'whatsapp_number', 'contact_number', 'location',
+            'mpesa_number', 'till_number', 'bank_details', 'payment_instructions',
+        ]
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    product = ProductSerializer(read_only=True)
+    product = OrderLineProductSerializer(read_only=True)
     total_price = serializers.SerializerMethodField()
-    
+    # As bought — still there when the product is edited or deleted.
+    title = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+    currency = serializers.SerializerMethodField()
+
     class Meta:
         model = OrderItem
         fields = [
             'id', 'product', 'quantity', 'price_at_purchase', 'total_price', 'seller',
-            'payment_confirmed_at',
+            'payment_confirmed_at', 'title', 'image_url', 'currency',
+            'shipped_at', 'delivered_at', 'cancelled_at', 'tracking_note',
         ]
         read_only_fields = ['price_at_purchase', 'seller', 'payment_confirmed_at']
-    
+
     def get_total_price(self, obj):
         return obj.price_at_purchase * obj.quantity
+
+    def get_title(self, obj):
+        return obj.title or (obj.product.title if obj.product else '')
+
+    def get_image_url(self, obj):
+        if obj.image_url:
+            return obj.image_url
+        images = list(obj.product.images.all()) if obj.product else []
+        return CloudinaryFieldSerializer().to_representation(images[0].image) if images else ''
+
+    def get_currency(self, obj):
+        return obj.currency or (obj.product.currency if obj.product else 'USD')
 
 
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
-    buyer = UserSerializer(read_only=True)
+    # Who bought it — a name and a picture. The full UserSerializer loaded the
+    # buyer's post history and counted followers for every order in a list.
+    buyer = SimpleUserSerializer(read_only=True)
+    totals = serializers.SerializerMethodField()
+    timeline = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
             'id', 'buyer', 'status', 'payment_status', 'shipping_address',
-            'payment_method', 'total_amount', 'created_at', 'updated_at',
-            'transaction_id', 'items'
+            'payment_method', 'total_amount', 'totals', 'created_at', 'updated_at',
+            'transaction_id', 'items', 'timeline',
         ]
         # Everything is read-only over the API: orders mutate only through the
         # gated checkout/set-shipping/update_status paths and the Stripe webhook,
         # never by a client writing these fields directly (payment_status/status/
         # total_amount/transaction_id are integrity-critical).
         read_only_fields = fields
+
+    def get_timeline(self, obj):
+        """Placed → paid → shipped → delivered: each step with when it was
+        reached — for a step every seller's part must have reached it, so
+        a two-seller order is "shipped" once both have sent theirs."""
+        live = [i for i in obj.items.all() if not i.cancelled_at]
+        if not live:
+            return [{'step': 'placed', 'at': obj.created_at},
+                    {'step': 'cancelled', 'at': max((i.cancelled_at for i in obj.items.all()
+                                                     if i.cancelled_at), default=None)}]
+
+        def reached(field):
+            stamps = [getattr(i, field) for i in live]
+            return max(stamps) if all(stamps) else None
+
+        return [
+            {'step': 'placed', 'at': obj.created_at},
+            {'step': 'paid', 'at': reached('payment_confirmed_at')},
+            {'step': 'shipped', 'at': reached('shipped_at') or reached('delivered_at')},
+            {'step': 'delivered', 'at': reached('delivered_at')},
+        ]
+
+    def get_totals(self, obj):
+        """What the order comes to, per currency (see money_totals).
+        `total_amount` is kept for older app builds; with mixed currencies it
+        is not a price in anything, and the app does not show it then."""
+        return money_totals(
+            (i.currency or (i.product.currency if i.product else 'USD'), i.price_at_purchase * i.quantity)
+            for i in obj.items.all()
+        )
 
 
 
@@ -282,19 +406,24 @@ class ProductReviewSerializer(serializers.ModelSerializer):
     # accept a blank/omitted comment instead of rejecting it. The model's
     # TextField stores '' fine; only serializer validation was blocking it.
     comment = serializers.CharField(required=False, allow_blank=True, default='')
+    verified = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductReview
-        fields = ['id', 'product', 'reviewer', 'rating', 'comment', 'created_at']
+        fields = ['id', 'product', 'reviewer', 'rating', 'comment', 'created_at', 'verified']
         # 'product' comes from the nested route, never the request body — a
         # writable field here would let a caller review some other product.
         read_only_fields = ['product', 'reviewer', 'created_at']
 
+    def get_verified(self, obj):
+        return bool(getattr(obj, 'verified', True))
+
 
 
 class WishlistSerializer(serializers.ModelSerializer):
-    products = ProductSerializer(many=True, read_only=True)
-    
+    # The card needs a picture, a title, a price and whether it can be bought.
+    products = CartLineProductSerializer(many=True, read_only=True)
+
     class Meta:
         model = Wishlist
         fields = ['id', 'user', 'products', 'created_at']

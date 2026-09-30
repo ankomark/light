@@ -28,6 +28,12 @@ NOTIFICATION_TITLES = {
     'service_review': '⭐ Service review',
     'service_verified': '✅ Verification',
     'service_booking': '\U0001f4c5 Booking request',
+    'market_order': '\U0001f6cd New order',
+    'market_paid': '✅ Payment confirmed',
+    'market_shipped': '\U0001f69a On its way',
+    'market_delivered': '\U0001f4e6 Delivered',
+    'market_cancelled': '✖️ Order cancelled',
+    'market_wish': '❤️ From your wishlist',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.
@@ -72,6 +78,14 @@ NOTIFICATION_CATEGORIES = {
     'service_review': 'comments',
     # Bookings and quotes: someone asking of your service, or its answer.
     'service_booking': 'messages',
+    # The marketplace, all under one switch: orders, their progress, and
+    # wishlist price drops and restocks.
+    'market_order': 'marketplace',
+    'market_paid': 'marketplace',
+    'market_shipped': 'marketplace',
+    'market_delivered': 'marketplace',
+    'market_cancelled': 'marketplace',
+    'market_wish': 'marketplace',
 }
 
 

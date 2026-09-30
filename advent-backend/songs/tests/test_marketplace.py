@@ -396,6 +396,10 @@ class ProductReviewTests(APITestCase):
             price=Decimal('15.00'), quantity=4, slug='rv-decoy',
         )
         ProductReview.objects.create(product=self.decoy, reviewer=self.other, rating=1, comment='decoy')
+        # Reviews are for people who bought the thing (and only that thing).
+        order = Order.objects.create(buyer=self.buyer, total_amount=Decimal('15.00'))
+        OrderItem.objects.create(order=order, product=self.product, quantity=1,
+                                 price_at_purchase=Decimal('15.00'), seller=self.seller)
 
     def _url(self, slug=None):
         return f'/api/marketplace/products/{slug or self.product.slug}/reviews/'
@@ -553,7 +557,9 @@ class MultiSellerCancelTests(APITestCase):
 
         self.order.refresh_from_db()
         self.pa.refresh_from_db()
-        self.assertEqual(self.order.status, 'PENDING')   # not cancelled
+        # Not cancelled. (Under way: each seller's part moves on its own, and
+        # A has been paid.)
+        self.assertEqual(self.order.status, 'PROCESSING')
         self.assertEqual(self.pa.quantity, 3)            # A's sale intact
 
     def test_seller_can_still_advance_fulfilment_on_a_multi_seller_order(self):
@@ -581,7 +587,7 @@ class MultiSellerCancelTests(APITestCase):
         res = self._status(self.buyer, 'CANCELLED')
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.order.refresh_from_db()
-        self.assertEqual(self.order.status, 'PENDING')
+        self.assertEqual(self.order.status, 'PROCESSING')   # not cancelled
 
     def test_buyer_can_cancel_a_fully_unconfirmed_order(self):
         res = self._status(self.buyer, 'CANCELLED')

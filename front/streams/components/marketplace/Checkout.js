@@ -1,147 +1,43 @@
+// After checkout: pay each seller directly. The order arrives with the cart's
+// answer, so this opens at once; it is read again behind that. One card per
+// seller (SellerPayCard) — what to pay them, in their currency, how, and a
+// WhatsApp message already written to say it has been paid.
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Linking,
+  TextInput, ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { apiRequest } from '../../services/api';
+import { fetchOrderById, apiRequest } from '../../services/api';
 import { useI18n } from '../../context/I18nContext';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
-
-const CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', KES: 'Ksh', NGN: '₦' };
-const formatPrice = (price, currency = 'USD') => {
-  const symbol = CURRENCY_SYMBOLS[currency] ?? currency;
-  return `${symbol}${(parseFloat(price) || 0).toFixed(2)}`;
-};
-
-// Group order items by their seller so the buyer can pay each seller directly.
-const groupBySeller = (items = []) => {
-  const groups = new Map();
-  for (const item of items) {
-    const seller = item.product?.seller;
-    const key = seller?.id ?? item.seller ?? 'unknown';
-    if (!groups.has(key)) {
-      groups.set(key, {
-        sellerName: seller?.username || 'Seller',
-        // Payment + contact details live on the product (open-air market).
-        product: item.product || {},
-        items: [],
-        subtotal: 0,
-      });
-    }
-    const g = groups.get(key);
-    g.items.push(item);
-    const unit = parseFloat(item.price_at_purchase ?? item.product?.price ?? 0) || 0;
-    g.subtotal += unit * item.quantity;
-  }
-  return Array.from(groups.values());
-};
-
-const hasPaymentInfo = (p) =>
-  !!(p?.mpesa_number || p?.till_number || p?.bank_details || p?.payment_instructions);
-
-const PaymentLine = ({ icon, label, value }) => (
-  <View style={styles.payLine}>
-    <Ionicons name={icon} size={18} color={colors.success ?? '#2E8B57'} style={styles.payIcon} />
-    <View style={{ flex: 1 }}>
-      <Text style={styles.payLabel}>{label}</Text>
-      <Text style={styles.payValue} selectable>{value}</Text>
-    </View>
-  </View>
-);
-
-const SellerGroup = ({ group, currency }) => {
-  const { t } = useI18n();
-  const { product } = group;
-  // Each seller sets their own product currency; never assume the order's first.
-  const gCurrency = product?.currency || currency;
-
-  const openWhatsApp = () => {
-    const num = (product.whatsapp_number || '').replace(/[^\d]/g, '');
-    if (!num) return Alert.alert(t('market.unavailable'), t('market.checkout.noWhatsapp'));
-    Linking.openURL(`https://wa.me/${num}`).catch(() =>
-      Alert.alert(t('common.error'), t('market.checkout.whatsappFailed')));
-  };
-
-  const callSeller = () => {
-    const num = product.contact_number || product.whatsapp_number;
-    if (!num) return Alert.alert(t('market.unavailable'), t('market.checkout.noPhone'));
-    Linking.openURL(`tel:${num}`).catch(() =>
-      Alert.alert(t('common.error'), t('market.checkout.callFailed')));
-  };
-
-  return (
-    <View style={styles.card}>
-      <View style={styles.sellerHeader}>
-        <Ionicons name="storefront-outline" size={18} color={colors.primary} />
-        <Text style={styles.sellerName}>{group.sellerName}</Text>
-      </View>
-
-      {group.items.map((item, i) => (
-        <View key={i} style={styles.lineItem}>
-          <Text style={styles.lineItemName} numberOfLines={1}>{item.product?.title ?? 'Product'}</Text>
-          <Text style={styles.lineItemQty}>×{item.quantity}</Text>
-          <Text style={styles.lineItemTotal}>
-            {formatPrice(item.quantity * (item.price_at_purchase ?? item.product?.price ?? 0), gCurrency)}
-          </Text>
-        </View>
-      ))}
-
-      <View style={styles.sellerSubtotalRow}>
-        <Text style={styles.sellerSubtotalLabel}>{t('market.checkout.payThisSeller')}</Text>
-        <Text style={styles.sellerSubtotalValue}>{formatPrice(group.subtotal, gCurrency)}</Text>
-      </View>
-
-      {hasPaymentInfo(product) ? (
-        <View style={styles.payBox}>
-          {product.mpesa_number ? <PaymentLine icon="phone-portrait-outline" label="M-Pesa" value={product.mpesa_number} /> : null}
-          {product.till_number ? <PaymentLine icon="card-outline" label="Till / Paybill" value={product.till_number} /> : null}
-          {product.bank_details ? <PaymentLine icon="business-outline" label="Bank" value={product.bank_details} /> : null}
-          {product.payment_instructions ? <PaymentLine icon="information-circle-outline" label="Instructions" value={product.payment_instructions} /> : null}
-        </View>
-      ) : (
-        <Text style={styles.noPayNote}>
-          This seller hasn’t listed payment details — contact them to arrange payment.
-        </Text>
-      )}
-
-      <View style={styles.contactRow}>
-        <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtn]} onPress={openWhatsApp} activeOpacity={0.85}>
-          <Ionicons name="logo-whatsapp" size={18} color="#fff" />
-          <Text style={styles.contactBtnText}>{t('market.checkout.whatsapp')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.contactBtn, styles.callBtn]} onPress={callSeller} activeOpacity={0.85}>
-          <Ionicons name="call-outline" size={18} color="#fff" />
-          <Text style={styles.contactBtnText}>{t('market.checkout.call')}</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-};
+import { formatTotals, orderTotals, groupBySeller } from '../../utils/market';
+import SellerPayCard from './SellerPayCard';
+import useMarketToast from './MarketToast';
 
 const Checkout = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const { orderId } = useRoute().params;
-  const [order, setOrder] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [address, setAddress] = useState('');
+  const { orderId, order: given } = useRoute().params ?? {};
+  const [order, setOrder] = useState(given || null);
+  const [failed, setFailed] = useState(false);
+  const [address, setAddress] = useState(given?.shipping_address || '');
   const [savingAddress, setSavingAddress] = useState(false);
+  const [toast, showToast] = useMarketToast();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await apiRequest('get', `/marketplace/orders/${orderId}/`);
-        setOrder(data);
-        setAddress(data?.shipping_address || '');
-      } catch {
-        Alert.alert(t('common.error'), t('market.checkout.loadFailed'));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [orderId, t]);
+  const load = useCallback(async () => {
+    setFailed(false);
+    try {
+      const data = await fetchOrderById(orderId);
+      setOrder(data);
+      setAddress((a) => a || data?.shipping_address || '');
+    } catch {
+      setFailed(true);
+    }
+  }, [orderId]);
+
+  useEffect(() => { load(); }, [load]);
 
   const handleDone = useCallback(async () => {
     // Optionally save a delivery note/address for the seller's reference.
@@ -157,79 +53,75 @@ const Checkout = () => {
         setSavingAddress(false);
       }
     }
-    navigation.replace('OrderHistory', { orderId });
-  }, [address, orderId, navigation]);
-
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+    navigation.replace('OrderDetail', { orderId, order });
+  }, [address, orderId, order, navigation]);
 
   if (!order) {
     return (
       <View style={styles.centered}>
-        <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
-        <Text style={styles.emptyText}>{t('market.checkout.notFound')}</Text>
+        {failed ? (
+          <>
+            <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
+            <Text style={styles.emptyText}>{t('market.checkout.loadFailed')}</Text>
+            <TouchableOpacity onPress={load}><Text style={styles.retry}>{t('common.retry')}</Text></TouchableOpacity>
+          </>
+        ) : <ActivityIndicator size="large" color={colors.primary} />}
       </View>
     );
   }
 
-  const currency = order.items?.[0]?.product?.currency ?? 'USD';
   const sellerGroups = groupBySeller(order.items);
-  // A single summed total only makes sense when every seller uses one currency.
-  const currencies = [...new Set(sellerGroups.map((g) => g.product?.currency).filter(Boolean))];
-  const mixedCurrency = currencies.length > 1;
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.banner}>
-        <Ionicons name="hand-right-outline" size={20} color={colors.primary} />
-        <Text style={styles.bannerText}>
-          Pay each seller directly using their details below, then arrange delivery with them.
-        </Text>
-      </View>
+    <View style={styles.flex}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={styles.banner}>
+          <Ionicons name="hand-right-outline" size={20} color={colors.primary} />
+          <Text style={styles.bannerText}>
+            {sellerGroups.length > 1
+              ? t('market.checkout.payEachOf', { n: sellerGroups.length })
+              : t('market.checkout.payTheSeller')}
+          </Text>
+        </View>
 
-      {sellerGroups.map((group, i) => (
-        <SellerGroup key={i} group={group} currency={currency} />
-      ))}
+        {sellerGroups.map((group) => (
+          <SellerPayCard key={String(group.sellerId)} group={group} orderId={order.id} onToast={showToast} />
+        ))}
 
-      <View style={styles.totalCard}>
-        <Text style={styles.totalLabel}>{t('market.checkout.orderTotal')}</Text>
-        {mixedCurrency ? (
-          <Text style={styles.totalNote}>{t('market.checkout.seeEachSeller')}</Text>
-        ) : (
-          <Text style={styles.totalAmount}>{formatPrice(order.total_amount, currency)}</Text>
-        )}
-      </View>
+        <View style={styles.totalCard}>
+          <Text style={styles.totalLabel}>{t('market.checkout.orderTotal')}</Text>
+          <Text style={styles.totalAmount} testID="checkout-total">{formatTotals(orderTotals(order))}</Text>
+        </View>
 
-      <Text style={styles.sectionTitle}>{t('market.checkout.deliveryNoteOptional')}</Text>
-      <TextInput
-        style={styles.input}
-        placeholder={t('market.checkout.addressPlaceholder')}
-        placeholderTextColor={colors.placeholder}
-        value={address}
-        onChangeText={setAddress}
-        multiline
-      />
+        <Text style={styles.sectionTitle}>{t('market.checkout.deliveryNoteOptional')}</Text>
+        <TextInput
+          style={styles.input}
+          placeholder={t('market.checkout.addressPlaceholder')}
+          placeholderTextColor={colors.placeholder}
+          value={address}
+          onChangeText={setAddress}
+          multiline
+        />
 
-      <TouchableOpacity style={styles.doneButton} onPress={handleDone} disabled={savingAddress} activeOpacity={0.85}>
-        {savingAddress
-          ? <ActivityIndicator color={colors.white} />
-          : <>
-              <Ionicons name="checkmark-circle-outline" size={20} color={colors.white} />
-              <Text style={styles.doneButtonText}>I’ve contacted the seller(s)</Text>
-            </>}
-      </TouchableOpacity>
+        <TouchableOpacity style={styles.doneButton} onPress={handleDone} disabled={savingAddress} activeOpacity={0.85} testID="checkout-done">
+          {savingAddress
+            ? <ActivityIndicator color={colors.white} />
+            : <>
+                <Ionicons name="checkmark-circle-outline" size={20} color={colors.white} />
+                <Text style={styles.doneButtonText}>{t('market.checkout.done')}</Text>
+              </>}
+        </TouchableOpacity>
 
-      <View style={{ height: spacing.xxl }} />
-    </ScrollView>
+        <View style={{ height: spacing.xxl }} />
+      </ScrollView>
+      {toast}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  retry: { color: colors.primary, fontWeight: '700', marginTop: spacing.sm },
   container: { flex: 1, backgroundColor: 'transparent', padding: spacing.md },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent', gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textMuted },

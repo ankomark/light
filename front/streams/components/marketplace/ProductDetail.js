@@ -1,5 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { 
+// One product. Opens at once on what the list already had (the `preview`
+// passed with the tap, or the copy kept from last time) and fills in behind
+// it. Add to cart and the wishlist heart answer at once (utils/cartStore.js);
+// Buy now makes an order of just this, skipping the cart.
+import React, { useState, useEffect, useCallback } from 'react';
+import {
   View,
   Text,
   StyleSheet,
@@ -7,7 +11,6 @@ import {
   TouchableOpacity,
   FlatList,
   Alert,
-  Share,
   ActivityIndicator,
   Linking,
   TextInput
@@ -17,62 +20,79 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import {
   fetchProductById,
-  addToCart,
-  addToWishlist,
-  removeFromWishlist,
   fetchProductReviews,
   addProductReview,
+  buyNow,
 } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import ReportModal from '../ReportModal';
 import { useI18n } from '../../context/I18nContext';
+import { peekCache, writeCache } from '../../utils/screenCache';
+import {
+  useMarket, useMarketUser, addProductToCart, toggleWish, isWished, rememberViewed,
+  refreshWishlist,
+} from '../../utils/cartStore';
+import { formatPrice, hasPaymentInfo, marketError } from '../../utils/market';
+import useMarketToast from './MarketToast';
+import CartButton from './CartButton';
+import ShareCardSheet from '../ShareCardSheet';
+import ProductShareCard from './ProductShareCard';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
+
+const normalize = (p) => (p ? {
+  ...p,
+  images: p.images || [],
+  quantity: Number.isFinite(Number(p.quantity)) ? Number(p.quantity) : 0,
+  price: typeof p.price === 'number' ? p.price : parseFloat(p.price) || 0,
+} : null);
 
 const ProductDetail = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { slug } = route.params;
-  const [product, setProduct] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { slug, preview } = route.params ?? {};
+  const key = `market:product:${slug}`;
+  const [product, setProduct] = useState(() => normalize(peekCache(key) || preview));
+  // A preview (from a list) lacks the description and the seller's details.
+  const [full, setFull] = useState(() => !!peekCache(key));
+  const [failed, setFailed] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
-  const [wishlisted, setWishlisted] = useState(false);
-  const [wishlistBusy, setWishlistBusy] = useState(false);
   const [reviews, setReviews] = useState([]);
   const [myRating, setMyRating] = useState(0);
   const [myComment, setMyComment] = useState('');
   const [postingReview, setPostingReview] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [buying, setBuying] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const { currentUser } = useAuth();
+  useMarketUser(currentUser?.id);
+  const market = useMarket();
   const { t } = useI18n();
+  const [toast, showToast] = useMarketToast();
 
+  const loadProduct = useCallback(async () => {
+    setFailed(false);
+    try {
+      const data = normalize(await fetchProductById(slug));
+      setProduct(data);
+      setFull(true);
+      writeCache(key, data, { persist: false });
+      rememberViewed(data);
+    } catch (error) {
+      setFailed(error.message === 'Product not found' ? 'gone' : 'error');
+    }
+  }, [slug, key]);
+
+  useEffect(() => { loadProduct(); }, [loadProduct]);
+
+  // The hearts everywhere read one wishlist: read it once if not yet here.
+  // By id, not the user object: each read re-renders, and a new object for
+  // the same person would read it again, and again.
+  const userId = currentUser?.id;
   useEffect(() => {
-    const loadProduct = async () => {
-      try {
-        const data = await fetchProductById(slug);
-        setProduct({
-          ...data,
-          // Ensure all numeric fields are properly formatted
-          quantity: typeof data.quantity === 'number' ? data.quantity : 0,
-          price: typeof data.price === 'number' ? data.price : parseFloat(data.price) || 0,
-        });
-        // Server state, not a local guess — the heart must survive a reopen.
-        setWishlisted(!!data.is_wishlisted);
-      } catch (error) {
-        console.error('Error loading product:', error);
-        const message = error.message === 'Product not found' 
-          ? t('market.product.noLongerAvailable')
-          : t('market.product.loadFailed');
-        Alert.alert(t('common.error'), message, [
-          { text: 'Go Back', onPress: () => navigation.goBack() }
-        ]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadProduct();
-  }, [slug, navigation, t]);
+    if (userId && !market.wishlist) refreshWishlist().catch(() => {});
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false;
@@ -81,72 +101,58 @@ const ProductDetail = () => {
         const data = await fetchProductReviews(slug);
         if (cancelled) return;
         setReviews(Array.isArray(data) ? data : (data?.results || []));
-      } catch (error) {
+      } catch {
         // Non-fatal: the product itself still renders without its reviews.
-        console.error('Error loading reviews:', error);
       }
     })();
     return () => { cancelled = true; };
   }, [slug]);
 
-  const handleAddToCart = async () => {
-    if (!currentUser) {
-      Alert.alert(t('market.loginRequired'), t('market.product.loginToCart'), [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Login', onPress: () => navigation.navigate('Login') }
-      ]);
-      return;
-    }
+  const askToLogIn = (why) => {
+    Alert.alert(t('market.loginRequired'), why, [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('market.login'), onPress: () => navigation.navigate('Login') },
+    ]);
+  };
 
+  const handleAddToCart = async () => {
+    if (!currentUser) { askToLogIn(t('market.product.loginToCart')); return; }
     try {
-      await addToCart(product.id, quantity);
-      Alert.alert(t('market.success'), t('market.product.addedToCart'));
+      showToast(t('market.product.addedToCart'));
+      await addProductToCart(product, quantity);
     } catch (error) {
-      console.error('Error adding to cart:', error);
-      // Prefer the server's message (e.g. "Only 3 in stock…") over axios's generic.
-      Alert.alert(
-        t('common.error'),
-        error.response?.data?.error || error.message || t('market.product.addToCartFailed')
-      );
+      // The server's words (e.g. "Only 3 in stock…") over a generic one.
+      showToast(marketError(error, t('market.product.addToCartFailed')), { error: true });
     }
   };
 
-  const handleToggleWishlist = async () => {
-    if (!currentUser) {
-      Alert.alert(t('market.loginRequired'), t('market.product.loginToWishlist'), [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Login', onPress: () => navigation.navigate('Login') }
-      ]);
-      return;
-    }
-    const next = !wishlisted;
+  const handleBuyNow = async () => {
+    if (!currentUser) { askToLogIn(t('market.product.loginToCart')); return; }
     try {
-      setWishlistBusy(true);
-      setWishlisted(next);  // optimistic
-      if (next) {
-        await addToWishlist(product.id);
-      } else {
-        await removeFromWishlist(product.id);
-      }
+      setBuying(true);
+      const order = await buyNow(product.id, quantity);
+      navigation.navigate('Checkout', { orderId: order.id, order });
     } catch (error) {
-      console.error('Error updating wishlist:', error);
-      setWishlisted(!next);  // revert
-      Alert.alert(t('common.error'), error.message || t('market.product.wishlistFailed'));
+      showToast(marketError(error, t('market.cart.checkoutFailed')), { error: true });
     } finally {
-      setWishlistBusy(false);
+      setBuying(false);
+    }
+  };
+
+  const wishlisted = market.wishlist ? isWished(market, product?.id) : !!product?.is_wishlisted;
+  const handleToggleWishlist = async () => {
+    if (!currentUser) { askToLogIn(t('market.product.loginToWishlist')); return; }
+    try {
+      await toggleWish(product, !wishlisted);
+    } catch (error) {
+      showToast(marketError(error, t('market.product.wishlistFailed')), { error: true });
     }
   };
 
   const handleSubmitReview = async () => {
-    if (!currentUser) {
-      Alert.alert(t('market.loginRequired'), t('market.product.loginToReview'), [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Login', onPress: () => navigation.navigate('Login') }
-      ]);
-      return;
-    }
+    if (!currentUser) { askToLogIn(t('market.product.loginToReview')); return; }
     if (!myRating) {
-      Alert.alert(t('market.product.ratingRequiredTitle'), t('market.product.ratingRequiredBody'));
+      showToast(t('market.product.ratingRequiredBody'), { error: true });
       return;
     }
     try {
@@ -158,98 +164,74 @@ const ProductDetail = () => {
         fetchProductById(slug),
       ]);
       setReviews(Array.isArray(freshReviews) ? freshReviews : (freshReviews?.results || []));
-      setProduct((prev) => ({ ...prev, ...freshProduct }));
+      setProduct((prev) => normalize({ ...prev, ...freshProduct }));
       setMyComment('');
-      Alert.alert(t('market.product.reviewThanks'), t('market.product.reviewSaved'));
+      showToast(t('market.product.reviewSaved'));
     } catch (error) {
-      console.error('Error posting review:', error);
-      Alert.alert(t('common.error'), error.response?.data?.detail || t('market.product.reviewFailed'));
+      showToast(marketError(error, t('market.product.reviewFailed')), { error: true });
     } finally {
       setPostingReview(false);
     }
   };
 
-  const hasPaymentInfo = (p) =>
-    !!(p?.mpesa_number || p?.till_number || p?.bank_details || p?.payment_instructions);
-
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        message: `Check out this product: ${product.title} - ${formatPrice(product.price, product.currency)}`,
-        url: product.images[0]?.image_url || 'https://via.placeholder.com/120',
-        title: product.title || 'Product'
-      });
-    } catch (error) {
-      console.error('Error sharing:', error);
-      Alert.alert(t('common.error'), t('market.product.shareFailed'));
-    }
-  };
+  // A picture of it (photo, price, seller) through the share sheet, with
+  // the words and a link for anyone who cannot open the picture.
+  const shareMessage = product ? `${t('market.product.shareMessage', {
+    title: product.title, price: formatPrice(product.price, product.currency),
+  })}
+streams://product/${encodeURIComponent(product.slug || '')}` : '';
+  const handleShare = () => setSharing(true);
 
   const handleWhatsAppPress = () => {
-    if (!product.whatsapp_number) {
-      Alert.alert(t('common.error'), t('market.product.noWhatsapp'));
-      return;
-    }
-    const url = `https://wa.me/${product.whatsapp_number}`;
-    Linking.openURL(url).catch(() => {
-      Alert.alert(t('common.error'), t('market.product.whatsappFailed'));
+    const num = (product.whatsapp_number || '').replace(/[^\d]/g, '');
+    if (!num) { showToast(t('market.product.noWhatsapp'), { error: true }); return; }
+    const text = encodeURIComponent(t('market.product.askAbout', { title: product.title }));
+    Linking.openURL(`https://wa.me/${num}?text=${text}`).catch(() => {
+      showToast(t('market.product.whatsappFailed'), { error: true });
     });
   };
 
   const handleCallPress = () => {
-    if (!product.contact_number) {
-      Alert.alert(t('common.error'), t('market.product.noPhone'));
-      return;
-    }
-    const url = `tel:${product.contact_number}`;
-    Linking.openURL(url).catch(() => {
-      Alert.alert(t('common.error'), t('market.product.callFailed'));
+    if (!product.contact_number) { showToast(t('market.product.noPhone'), { error: true }); return; }
+    Linking.openURL(`tel:${product.contact_number}`).catch(() => {
+      showToast(t('market.product.callFailed'), { error: true });
     });
   };
 
-  // Enhanced price formatting with fallbacks
-  const formatPrice = (price, currency) => {
-    const symbols = {
-      USD: '$',
-      EUR: '€',
-      GBP: '£',
-      KES: 'Ksh',
-      NGN: '₦',
-    };
-    
-    // Handle missing/undefined currency
-    const currencyCode = currency || 'USD';
-    const symbol = symbols[currencyCode] || currencyCode;
-    
-    // Ensure price is a number
-    const numericPrice = typeof price === 'number' ? price : parseFloat(price) || 0;
-    
-    return `${symbol}${numericPrice.toFixed(2)}`;
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FFC46B" />
-        <Text style={styles.loadingText}>{t('market.product.loading')}</Text>
-      </View>
-    );
-  }
-
   if (!product) {
     return (
-      <View style={styles.errorContainer}>
-        <Icon name="exclamation-circle" size={50} color="#888" />
-        <Text style={styles.errorText}>{t('market.product.notFound')}</Text>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.retryText}>{t('market.goBack')}</Text>
-        </TouchableOpacity>
+      <View style={failed ? styles.errorContainer : styles.loadingContainer}>
+        {failed ? (
+          <>
+            <Icon name="exclamation-circle" size={50} color="#888" />
+            <Text style={styles.errorText}>
+              {failed === 'gone' ? t('market.product.noLongerAvailable') : t('market.product.loadFailed')}
+            </Text>
+            {failed !== 'gone' && (
+              <TouchableOpacity onPress={loadProduct}>
+                <Text style={styles.retryText}>{t('common.retry')}</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Text style={styles.retryText}>{t('market.goBack')}</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <ActivityIndicator size="large" color="#FFC46B" />
+            <Text style={styles.loadingText}>{t('market.product.loading')}</Text>
+          </>
+        )}
       </View>
     );
   }
 
+  const canBuy = product.quantity > 0 && product.is_available !== false;
+
   return (
+    <View style={styles.flex}>
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+     <View style={styles.cartCorner}><CartButton color="#1D478B" /></View>
      <View style={styles.sheet}>
       <View style={styles.mainImageContainer}>
         <Image
@@ -260,7 +242,7 @@ const ProductDetail = () => {
           style={styles.mainImage}
         />
       </View>
-      
+
       {product.images.length > 1 && (
         <FlatList
           horizontal
@@ -286,21 +268,34 @@ const ProductDetail = () => {
       )}
 
       <View style={styles.infoContainer}>
-        <Text style={styles.title}>{product.title || 'Untitled Product'}</Text>
-        
+        <Text style={styles.title}>{product.title || t('market.untitled')}</Text>
+
         <View style={styles.priceContainer}>
           <Text style={styles.price}>
             {formatPrice(product.price, product.currency)}
           </Text>
           {product.quantity > 0 ? (
-            <Text style={styles.inStock}>In Stock ({product.quantity} available)</Text>
+            <Text style={styles.inStock}>{t('market.inStock', { n: product.quantity })}</Text>
           ) : (
             <Text style={styles.outOfStock}>{t('market.product.outOfStock')}</Text>
           )}
         </View>
 
         <View style={styles.sellerContainer}>
-          <Text style={styles.sellerText}>Sold by: {product.seller?.username || 'Unknown Seller'}</Text>
+          <TouchableOpacity
+            onPress={() => product.seller?.username && navigation.navigate('SellerShop', { username: product.seller.username })}
+            style={styles.sellerLink}
+            accessibilityRole="link"
+            testID="product-seller"
+          >
+            <Text style={styles.sellerText}>
+              {t('market.product.soldBy', { name: product.seller?.username || t('market.seller.label') })}
+            </Text>
+            {product.seller_verified && (
+              <Icon name="check-circle" size={14} color="#2E8B57" accessibilityLabel={t('market.shop.verified')} />
+            )}
+            <Icon name="angle-right" size={14} color="#888" />
+          </TouchableOpacity>
           {product.condition ? (
             <View style={styles.conditionBadge}>
               <Text style={styles.conditionText}>{product.condition}</Text>
@@ -311,21 +306,21 @@ const ProductDetail = () => {
         {/* Contact Information Section */}
         <View style={styles.contactInfoContainer}>
           <Text style={styles.sectionTitle}>{t('market.product.contactInfo')}</Text>
-          
+
           {product.whatsapp_number && (
             <TouchableOpacity style={styles.contactButton} onPress={handleWhatsAppPress}>
               <Icon name="whatsapp" size={20} color="#25D366" />
               <Text style={styles.contactButtonText}>{t('market.product.whatsapp')}</Text>
             </TouchableOpacity>
           )}
-          
+
           {product.contact_number && (
             <TouchableOpacity style={styles.contactButton} onPress={handleCallPress}>
               <Icon name="phone" size={20} color="#1D478B" />
               <Text style={styles.contactButtonText}>{t('market.product.call')}</Text>
             </TouchableOpacity>
           )}
-          
+
           {product.location && (
             <View style={styles.locationContainer}>
               <Icon name="map-marker" size={20} color="#FF6347" />
@@ -338,16 +333,13 @@ const ProductDetail = () => {
         {hasPaymentInfo(product) && (
           <View style={styles.paymentContainer}>
             <Text style={styles.sectionTitle}>{t('market.product.paymentDetails')}</Text>
-            <Text style={styles.paymentNote}>
-              Pay the seller directly using the details below, then arrange delivery with them.
-              Long-press a value to copy it.
-            </Text>
+            <Text style={styles.paymentNote}>{t('market.product.payNote')}</Text>
 
             {product.mpesa_number ? (
               <View style={styles.paymentRow}>
                 <Icon name="mobile" size={20} color="#2E8B57" style={styles.paymentIcon} />
                 <View style={styles.paymentTextWrap}>
-                  <Text style={styles.paymentLabel}>M-Pesa</Text>
+                  <Text style={styles.paymentLabel}>{t('market.pay.mpesa')}</Text>
                   <Text style={styles.paymentValue} selectable>{product.mpesa_number}</Text>
                 </View>
               </View>
@@ -385,13 +377,17 @@ const ProductDetail = () => {
           </View>
         )}
 
-        <Text style={styles.description}>{product.description || t('market.product.noDescription')}</Text>
+        {full
+          ? <Text style={styles.description}>{product.description || t('market.product.noDescription')}</Text>
+          : <ActivityIndicator color="#1D478B" style={styles.descLoading} />}
 
         {product.track && (
           <View style={styles.trackInfo}>
             <Text style={styles.sectionTitle}>{t('market.product.relatedTrack')}</Text>
-            <Text style={styles.trackTitle}>{product.track.title || 'Untitled Track'}</Text>
-            <Text style={styles.trackArtist}>by {product.track.artist?.username || 'Unknown Artist'}</Text>
+            <Text style={styles.trackTitle}>{product.track.title || t('market.untitled')}</Text>
+            {!!product.track.artist?.username && (
+              <Text style={styles.trackArtist}>{t('market.product.byArtist', { name: product.track.artist.username })}</Text>
+            )}
           </View>
         )}
       </View>
@@ -399,7 +395,7 @@ const ProductDetail = () => {
       <View style={styles.quantityContainer}>
         <Text style={styles.quantityLabel}>{t('market.product.quantity')}</Text>
         <View style={styles.quantityControls}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.quantityButton}
             onPress={() => setQuantity(Math.max(1, quantity - 1))}
             disabled={quantity <= 1}
@@ -407,7 +403,7 @@ const ProductDetail = () => {
             <Icon name="minus" size={16} color="#333" />
           </TouchableOpacity>
           <Text style={styles.quantityValue}>{quantity}</Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.quantityButton}
             onPress={() => setQuantity(quantity + 1)}
             disabled={quantity >= product.quantity}
@@ -417,20 +413,37 @@ const ProductDetail = () => {
         </View>
       </View>
 
+      {!product.is_owner && (
+        <TouchableOpacity
+          style={[styles.buyNowButton, (!canBuy || buying) && styles.disabledButton]}
+          onPress={handleBuyNow}
+          disabled={!canBuy || buying}
+          testID="product-buy-now"
+        >
+          {buying ? <ActivityIndicator color="#fff" /> : (
+            <>
+              <Icon name="bolt" size={18} color="#fff" />
+              <Text style={styles.cartButtonText}>{t('market.product.buyNow')}</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+
       <View style={styles.buttonContainer}>
-        <TouchableOpacity 
-          style={[styles.cartButton, product.quantity <= 0 && styles.disabledButton]}
+        <TouchableOpacity
+          style={[styles.cartButton, !canBuy && styles.disabledButton]}
           onPress={handleAddToCart}
-          disabled={product.quantity <= 0}
+          disabled={!canBuy}
+          testID="product-add-to-cart"
         >
           <Icon name="shopping-cart" size={20} color="#fff" />
           <Text style={styles.cartButtonText}>{t('market.product.addToCart')}</Text>
         </TouchableOpacity>
-        
+
         <TouchableOpacity
           style={styles.wishlistButton}
           onPress={handleToggleWishlist}
-          disabled={wishlistBusy}
+          testID="product-wish"
         >
           <Icon name={wishlisted ? 'heart' : 'heart-o'} size={20} color="#1D478B" />
           <Text style={styles.wishlistButtonText}>{wishlisted ? t('market.product.wishlisted') : t('market.wishlist.title')}</Text>
@@ -470,8 +483,7 @@ const ProductDetail = () => {
             <View style={styles.aggregateRow}>
               <Icon name="star" size={15} color="#FFC107" />
               <Text style={styles.aggregateText}>
-                {product.average_rating} · {product.review_count} review
-                {product.review_count === 1 ? '' : 's'}
+                {t('market.product.ratingSummary', { rating: product.average_rating, n: product.review_count })}
               </Text>
             </View>
           )}
@@ -484,8 +496,14 @@ const ProductDetail = () => {
             <View key={review.id} style={styles.reviewRow}>
               <View style={styles.reviewHeader}>
                 <Text style={styles.reviewAuthor}>
-                  {review.reviewer?.username || 'Someone'}
+                  {review.reviewer?.username || t('market.product.someone')}
                 </Text>
+                {review.verified && (
+                  <View style={styles.verifiedPill}>
+                    <Icon name="check" size={9} color="#2E8B57" />
+                    <Text style={styles.verifiedText}>{t('market.product.verifiedBuyer')}</Text>
+                  </View>
+                )}
                 <View style={styles.reviewStars}>
                   {[1, 2, 3, 4, 5].map((n) => (
                     <Icon
@@ -504,8 +522,12 @@ const ProductDetail = () => {
           ))
         )}
 
-        {/* Own review. Posting again updates it — one review per person. */}
-        {!product.is_owner && (
+        {/* Own review, for people who bought it. Posting again updates it —
+            one review per person. */}
+        {!product.is_owner && product.can_review === false && currentUser && (
+          <Text style={styles.noReviewsText}>{t('market.product.reviewAfterBuying')}</Text>
+        )}
+        {!product.is_owner && product.can_review !== false && (
           <View style={styles.reviewForm}>
             <Text style={styles.reviewFormLabel}>{t('market.product.rateThis')}</Text>
             <View style={styles.starPicker}>
@@ -542,10 +564,33 @@ const ProductDetail = () => {
       </View>
      </View>
     </ScrollView>
+    <ShareCardSheet
+      visible={sharing}
+      onClose={() => setSharing(false)}
+      title={t('market.product.share')}
+      message={shareMessage}
+      onToast={showToast}
+      renderCard={(ref, w) => <ProductShareCard ref={ref} width={w} product={product} />}
+    />
+    {toast}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  sellerLink: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  cartCorner: { alignItems: 'flex-end', marginBottom: 6 },
+  descLoading: { marginVertical: 16 },
+  buyNowButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#FF6B00', marginHorizontal: 16, marginTop: 8, paddingVertical: 14, borderRadius: 8,
+  },
+  verifiedPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 8,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, backgroundColor: 'rgba(46,139,87,0.12)',
+  },
+  verifiedText: { fontSize: 10, color: '#2E8B57', fontWeight: '700' },
   container: {
     flex: 1,
     backgroundColor: 'transparent',

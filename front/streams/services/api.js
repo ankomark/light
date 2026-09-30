@@ -1662,27 +1662,16 @@ export const addToCart = async (productId, quantity = 1) => {
   });
 };
 
-// services/api.js
-// services/api.js
+// The signed-in user's cart, as one object. A 404 (an older server, before
+// carts were made on first ask) is an empty cart; any other failure — offline,
+// a server error — is thrown, so it is never mistaken for an empty cart.
 export const fetchCart = async () => {
   try {
-    // Use the dedicated endpoint for current user's cart
     const response = await apiRequest('get', '/marketplace/cart/my_cart/');
-    
-    // Backend now returns a single cart object
-    return {
-      items: response.items || [],
-      ...response
-    };
+    return { ...response, items: response?.items || [] };
   } catch (error) {
-    console.error('Error fetching cart:', error);
-    
-    // Handle 404 by returning an empty cart
-    if (error.response && error.response.status === 404) {
-      return { items: [] };
-    }
-    
-    return { items: [] };
+    if (error?.response?.status === 404) return { items: [] };
+    throw error;
   }
 };
 
@@ -1700,6 +1689,39 @@ export const removeFromCart = async (itemId) => {
 // side, so an over-stock line can be dialled down in place instead of deleted.
 export const updateCartItem = async (itemId, quantity) =>
   apiRequest('patch', `/marketplace/cart/items/${itemId}/`, { quantity });
+
+// My details as a seller (contact, payment), kept once and filled into each
+// new product; `is_verified` is the staff-given tick.
+export const fetchSellerProfile = async () => apiRequest('get', '/marketplace/seller-profile/');
+export const saveSellerProfile = async (fields) => apiRequest('put', '/marketplace/seller-profile/', fields);
+
+// The dashboard's numbers: { week, all_time (per currency), awaiting_payment,
+// to_send, products, views, low_stock: [{ id, slug, title, quantity }] }.
+export const fetchSellerStats = async () => apiRequest('get', '/marketplace/orders/seller-stats/');
+
+// A quick change from the dashboard: price, stock, or on sale / not.
+export const quickUpdateProduct = async (slug, fields) =>
+  apiRequest('patch', `/marketplace/products/${slug}/`, fields);
+
+// A seller's shop front: { seller, is_verified, location, selling_since,
+// products_on_offer, sales, rating, review_count }.
+export const fetchShop = async (username) =>
+  apiRequest('get', `/marketplace/shops/${encodeURIComponent(username)}/`);
+
+// Each seller's part of an order moves on its own:
+// a seller sends theirs (with a note: the rider, the bus, a number)...
+export const shipOrderPart = async (orderId, note = '') =>
+  apiRequest('post', `/marketplace/orders/${orderId}/ship/`, { note });
+// ...the buyer says it arrived (one seller's part, or all that were sent)...
+export const markOrderReceived = async (orderId, sellerId) =>
+  apiRequest('post', `/marketplace/orders/${orderId}/received/`, sellerId ? { seller_id: sellerId } : {});
+// ...and one seller's part can be cancelled without the rest.
+export const cancelOrderPart = async (orderId, sellerId) =>
+  apiRequest('post', `/marketplace/orders/${orderId}/cancel-part/`, sellerId ? { seller_id: sellerId } : {});
+
+// An order of just this product, straight away — the cart is left alone.
+export const buyNow = async (productId, quantity = 1) =>
+  apiRequest('post', '/marketplace/cart/buy_now/', { product_id: productId, quantity });
 
 export const checkoutCart = async () => {
   return apiRequest('post', '/marketplace/cart/checkout/');
@@ -1726,7 +1748,8 @@ export const confirmOrderPayment = async (orderId) => {
   return apiRequest('post', `/marketplace/orders/${orderId}/confirm-payment/`);
 };
 
-export const createProduct = async (formData) => {
+// `onProgress(fraction)` follows the upload — the photos are most of it.
+export const createProduct = async (formData, { onProgress } = {}) => {
   try {
     if (formData.price) formData.price = parseFloat(formData.price);
     if (formData.quantity) formData.quantity = parseInt(formData.quantity);
@@ -1736,7 +1759,10 @@ export const createProduct = async (formData) => {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'multipart/form-data',
       },
-      timeout: 30000, // 30 seconds timeout
+      timeout: 120000, // photos on a slow connection take a while
+      onUploadProgress: onProgress
+        ? (e) => { if (e.total) onProgress(Math.min(1, e.loaded / e.total)); }
+        : undefined,
     });
     return response.data;
   } catch (error) {
@@ -1941,6 +1967,9 @@ export const revokeOtherSessions = async () => {
 
 export const exportMyData = () =>
   apiRequest('get', '/auth/export-data/');
+
+// A push to my own devices, to see that notifications arrive: → { devices }.
+export const sendTestPush = () => apiRequest('post', '/auth/test-push/', {});
 
 // Reversible self-deactivation (password required). Logging back in reactivates.
 export const deactivateAccount = (password) =>
@@ -2274,6 +2303,7 @@ export default {
   fetchPuzzleVersus,
   fetchPuzzleDailyBoard,
   fetchPuzzleMeaning,
+  buyNow,
   claimPuzzleWord,
   buyPuzzleHint,
   buyPuzzleLetter,

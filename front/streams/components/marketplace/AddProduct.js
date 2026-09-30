@@ -1,4 +1,9 @@
-import React, { useState, useRef } from 'react';
+// A new product. Photos are made smaller on the phone before they go up
+// (about 1280 wide, JPEG) — a phone photo is several megabytes, and on mobile
+// data that was most of the wait — and the upload shows how far it has got.
+// What is typed is kept as a draft, so leaving the form loses nothing, and
+// the contact and payment details come filled in from the seller's profile.
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,13 +13,16 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  Switch,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import { createProduct } from '../../services/api';
+import { createProduct, fetchSellerProfile, saveSellerProfile } from '../../services/api';
+import { compressImage } from '../../services/imageProcessing';
+import { readCache, writeCache, dropCache, userKey } from '../../utils/screenCache';
 import { useAuth } from '../../context/useAuth';
 import { useI18n } from '../../context/I18nContext';
 
@@ -25,6 +33,25 @@ const CURRENCIES = [
   { code: 'GBP', label: 'GBP (£)' },
   { code: 'NGN', label: 'NGN (₦)' },
 ];
+
+// Contact and payment details: filled from the seller's profile, saved back to it.
+const SELLER_FIELDS = [
+  'whatsapp_number', 'contact_number', 'location', 'mpesa_number', 'till_number',
+  'bank_details', 'payment_instructions',
+];
+const PHOTO_WIDTH = 1280;
+const PHOTO_QUALITY = 0.75;
+
+/** What the server said was wrong, whichever way the error arrived. */
+export const productError = (error, fallback) => {
+  const body = error?.response?.data
+    || (error && typeof error === 'object' && !(error instanceof Error) ? error : null);
+  if (body && typeof body === 'object') {
+    const text = Object.values(body).flat().filter((v) => typeof v === 'string').join('\n');
+    if (text) return text;
+  }
+  return fallback;
+};
 
 const AddProduct = () => {
   const { t } = useI18n();
@@ -51,7 +78,45 @@ const AddProduct = () => {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [track, setTrack] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [saveDefault, setSaveDefault] = useState(true);
   const whatsappInputRef = useRef(null);
+  const draftKey = userKey(currentUser?.id, 'market:draft:add');
+  const restored = useRef(false);
+
+  // Open on the draft left last time, else fill the seller's saved details.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const draft = await readCache(draftKey, 14 * 24 * 60 * 60 * 1000);
+      if (!live) return;
+      if (draft?.formData) {
+        setFormData((f) => ({ ...f, ...draft.formData }));
+        if (draft.currency) setCurrency(draft.currency);
+        if (draft.images?.length) setImages(draft.images);
+      }
+      restored.current = true;
+      try {
+        const profile = await fetchSellerProfile();
+        if (!live || !profile) return;
+        setFormData((f) => {
+          const next = { ...f };
+          SELLER_FIELDS.forEach((k) => { if (!next[k] && profile[k]) next[k] = profile[k]; });
+          return next;
+        });
+      } catch {
+        // No profile yet, or offline: the fields are simply empty.
+      }
+    })();
+    return () => { live = false; };
+  }, [draftKey]);
+
+  // Keep the draft as it is typed.
+  useEffect(() => {
+    if (!restored.current) return undefined;
+    const timer = setTimeout(() => writeCache(draftKey, { formData, currency, images }), 600);
+    return () => clearTimeout(timer);
+  }, [formData, currency, images, draftKey]);
 
   const handleChange = (name, value) => {
     setFormData({
@@ -71,17 +136,25 @@ const AddProduct = () => {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 0.8,
+      quality: 1,
     });
 
     if (!result.canceled && result.assets) {
-      const uri = result.assets[0].uri;
-      const fileInfo = await FileSystem.getInfoAsync(uri);
-      if (fileInfo.size > 5 * 1024 * 1024) {
-        Alert.alert(t('common.error'), t('market.form.imageTooLarge'));
-        return;
+      const asset = result.assets[0];
+      let uri = asset.uri;
+      try {
+        // Smaller before it goes anywhere: a phone photo is megabytes.
+        uri = (await compressImage(uri, {
+          maxWidth: PHOTO_WIDTH, sourceWidth: asset.width, quality: PHOTO_QUALITY,
+        })).uri;
+      } catch {
+        const fileInfo = await FileSystem.getInfoAsync(uri);
+        if (fileInfo.size > 5 * 1024 * 1024) {
+          Alert.alert(t('common.error'), t('market.form.imageTooLarge'));
+          return;
+        }
       }
-      setImages([...images, uri]);
+      setImages((prev) => [...prev, uri]);
     }
   };
 
@@ -121,9 +194,9 @@ const AddProduct = () => {
         t('market.form.invalidWhatsappTitle'),
         t('market.form.invalidWhatsappBody'),
         [
-          { 
-            text: 'OK', 
-            onPress: () => whatsappInputRef.current?.focus() 
+          {
+            text: 'OK',
+            onPress: () => whatsappInputRef.current?.focus()
           }
         ]
       );
@@ -154,32 +227,29 @@ const AddProduct = () => {
         data.append('track', track.id.toString());
       }
 
-      for (let i = 0; i < images.length; i++) {
-        const uri = images[i];
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        data.append('images', {
-          uri: `data:image/jpeg;base64,${base64}`,
-          name: `product_image_${i}.jpg`,
-          type: 'image/jpeg',
-        });
-      }
+      // The files themselves, not base64 text a third bigger.
+      images.forEach((uri, i) => {
+        data.append('images', { uri, name: `product_image_${i}.jpg`, type: 'image/jpeg' });
+      });
 
-      const response = await createProduct(data);
+      setProgress(0);
+      await createProduct(data, { onProgress: setProgress });
+      dropCache(draftKey);
+      if (saveDefault) {
+        const details = {};
+        SELLER_FIELDS.forEach((k) => { details[k] = formData[k] || ''; });
+        saveSellerProfile(details).catch(() => {});
+      }
       Alert.alert(t('market.success'), t('market.form.created'));
       navigation.goBack();
     } catch (error) {
-      console.error('Error creating product:', error);
-      let errorMessage = t('market.form.createFailed');
-      if (error.response) {
-        errorMessage = Object.values(error.response.data).flat().join('\n');
-      } else if (error.request) {
-        errorMessage = t('market.form.noResponse');
-      }
-      Alert.alert(t('common.error'), errorMessage);
+      // An Error (not the server's field errors) means no answer came back.
+      Alert.alert(t('common.error'), error instanceof Error && !error.response
+        ? t('market.form.noResponse')
+        : productError(error, t('market.form.createFailed')));
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -241,7 +311,7 @@ const AddProduct = () => {
             onChangeText={(text) => handleChange('price_value', text)}
             keyboardType="numeric"
           />
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.currencyButton}
             onPress={handleCurrencyChange}
           >
@@ -274,8 +344,8 @@ const AddProduct = () => {
           ref={whatsappInputRef}
           style={[
             styles.input,
-            formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number) 
-              ? styles.invalidInput 
+            formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number)
+              ? styles.invalidInput
               : null
           ]}
           placeholderTextColor="#888"
@@ -286,9 +356,7 @@ const AddProduct = () => {
           maxLength={13}
         />
         {formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number) && (
-          <Text style={styles.errorText}>
-            Must start with +254 and be 12 digits total (e.g., +254712345678)
-          </Text>
+          <Text style={styles.errorText}>{t('market.form.whatsappFormat')}</Text>
         )}
       </View>
 
@@ -310,9 +378,7 @@ const AddProduct = () => {
       />
 
       <Text style={styles.sectionTitle}>{t('market.form.paymentDetails')}</Text>
-      <Text style={styles.subtitle}>
-        How should buyers pay you? Buyers pay you directly — these details are shown on your listing.
-      </Text>
+      <Text style={styles.subtitle}>{t('market.form.payHowNote')}</Text>
 
       <TextInput
         style={styles.input}
@@ -349,6 +415,11 @@ const AddProduct = () => {
         multiline
         numberOfLines={3}
       />
+
+      <View style={styles.saveRow}>
+        <Text style={styles.saveLabel}>{t('market.form.saveDetails')}</Text>
+        <Switch value={saveDefault} onValueChange={setSaveDefault} testID="save-details" />
+      </View>
 
       <Text style={styles.sectionTitle}>{t('market.form.productImages')}</Text>
       <Text style={styles.subtitle}>{t('market.form.imagesHint')}</Text>
@@ -398,7 +469,7 @@ const AddProduct = () => {
         onPress={() => navigation.navigate('SelectTrack', { onSelect: setTrack })}
       >
         <Text style={styles.linkButtonText}>
-          {track ? `Linked Track: ${track.title}` : t('market.form.linkTrack')}
+          {track ? t('market.form.linkedTrack', { title: track.title }) : t('market.form.linkTrack')}
         </Text>
       </TouchableOpacity>
 
@@ -408,9 +479,18 @@ const AddProduct = () => {
         disabled={loading}
       >
         <Text style={styles.submitButtonText}>
-          {loading ? t('market.form.creating') : 'Create Product'}
+          {loading
+            ? (progress != null && progress < 1
+              ? t('market.form.uploading', { n: Math.round(progress * 100) })
+              : t('market.form.creating'))
+            : t('market.form.create')}
         </Text>
       </TouchableOpacity>
+      {progress != null && (
+        <View style={styles.progressTrack} testID="upload-progress">
+          <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+        </View>
+      )}
 
       {/* Currency picker (Android-safe; replaces a >3-button Alert) */}
       <Modal visible={currencyOpen} transparent animationType="fade" onRequestClose={() => setCurrencyOpen(false)}>
@@ -438,6 +518,13 @@ const AddProduct = () => {
 };
 
 const styles = StyleSheet.create({
+  saveRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 4, marginBottom: 8,
+  },
+  saveLabel: { flex: 1, fontSize: 14, color: '#333', marginRight: 12 },
+  progressTrack: { height: 6, borderRadius: 3, backgroundColor: '#e6e6e6', marginTop: 10, overflow: 'hidden' },
+  progressFill: { height: 6, backgroundColor: '#1D478B' },
   container: {
     flex: 1,
     backgroundColor: 'transparent',

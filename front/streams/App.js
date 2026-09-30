@@ -109,6 +109,7 @@ import Checkout from './components/marketplace/Checkout';
 import OrderHistory from './components/marketplace/OrderHistory';
 import OrderDetail from './components/marketplace/OrderDetail';
 import Wishlist from './components/marketplace/Wishlist';
+import SellerShop from './components/marketplace/SellerShop';
 import AdminDashboard from './components/admin/AdminDashboard';
 import AdminReports from './components/admin/AdminReports';
 import AdminUsers from './components/admin/AdminUsers';
@@ -195,6 +196,10 @@ const linking = {
       Battle: 'battle/:code',
       // A friend's word puzzle challenge: streams://puzzle/42?from=mark.
       PuzzlePlay: 'puzzle/:puzzleId',
+      // A seller's shop, shared: streams://shop/mark.
+      SellerShop: 'shop/:username',
+      // A product, shared: streams://product/hymnal-2.
+      ProductDetail: 'product/:slug',
     },
   },
 };
@@ -282,6 +287,12 @@ const App = () => {
       } else if (data?.type === 'quiz_duel') {
         // Someone played the duel you sent: back to the quiz.
         navigate('QuizHome');
+      } else if (String(data?.type || '').startsWith('market_') && data.order_id) {
+        // A new order, a payment confirmed, sent, delivered, cancelled: that order.
+        navigate('OrderDetail', { orderId: data.order_id });
+      } else if (data?.type === 'market_wish' && data.slug) {
+        // A wishlisted item came down in price or back in stock: that item.
+        navigate('ProductDetail', { slug: data.slug });
       } else if (data?.type === 'puzzle_challenge' && data.puzzle) {
         // A friend finished the puzzle you sent: that board, side by side.
         navigate('PuzzlePlay', { puzzleId: data.puzzle, versus: data.from, nonce: Date.now() });
@@ -444,6 +455,7 @@ const App = () => {
                 <Stack.Screen name="OrderDetail" component={OrderDetailWrapper} />
                 <Stack.Screen name="Wishlist" component={WishlistWrapper} />
                 <Stack.Screen name="SellerDashboard" component={SellerDashboardWrapper} />
+                <Stack.Screen name="SellerShop" component={SellerShopWrapper} />
                 <Stack.Screen name="AdminDashboard" component={AdminDashboardWrapper} />
                 <Stack.Screen name="AdminReports" component={AdminReportsWrapper} />
                 <Stack.Screen name="AdminUsers" component={AdminUsersWrapper} />
@@ -752,6 +764,7 @@ const OrderHistoryWrapper = marketWrap(OrderHistory);
 const OrderDetailWrapper = marketWrap(OrderDetail, 'This order couldn’t load.');
 const WishlistWrapper = marketWrap(Wishlist, 'Your wishlist couldn’t load.');
 const SellerDashboardWrapper = marketWrap(SellerDashboard);
+const SellerShopWrapper = marketWrap(SellerShop, 'This shop couldn’t load.');
 
 // Playlists share the same luxury backdrop + custom nav header as the rest of
 // the app (replacing the plain native stack header these screens used before).

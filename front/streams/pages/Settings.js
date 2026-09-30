@@ -88,6 +88,8 @@ const NOTIFICATION_CATEGORIES = [
   { key: 'verse', labelKey: 'settings.notif.verse', icon: 'book-open-variant' },
   { key: 'books', labelKey: 'settings.notif.books', icon: 'bookshelf' },
   { key: 'notices', labelKey: 'settings.notif.notices', icon: 'bulletin-board' },
+  // Orders to sellers, their progress to buyers, wishlist price drops.
+  { key: 'marketplace', labelKey: 'settings.notif.marketplace', icon: 'storefront-outline' },
 ];
 
 // Module scope: no hook here, so the caller passes t in.

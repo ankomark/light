@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,10 @@ import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts } from '../../services/api';
+import { peekCache, writeCache } from '../../utils/screenCache';
+import { formatPrice } from '../../utils/market';
+import CartButton from './CartButton';
+import { getPreference, PREF_KEYS } from '../../utils/preferences';
 import useGridColumns from '../../utils/useGridColumns';
 import { useI18n } from '../../context/I18nContext';
 
@@ -20,21 +24,6 @@ const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 // =====================
 // Helper Functions
 // =====================
-const formatPrice = (price, currency) => {
-  const symbols = {
-    USD: '$',
-    EUR: '€',
-    GBP: '£',
-    KES: 'Ksh',
-    NGN: '₦',
-  };
-  
-  const currencyCode = currency || 'USD';
-  const symbol = symbols[currencyCode] || currencyCode;
-  const numericPrice = typeof price === 'number' ? price : parseFloat(price) || 0;
-  return `${symbol}${numericPrice.toFixed(2)}`;
-};
-
 // =====================
 // Style Constants
 // =====================
@@ -79,6 +68,12 @@ const ITEM_MARGIN = SPACING.small;
 // =====================
 // Main Component
 // =====================
+// Search, category and sort are the server's work, across every product —
+// the search box used to filter only the twenty already on the phone. The
+// first page of each search is kept, so going back to one is instant.
+const SORTS = ['new', 'price_low', 'price_high', 'popular'];
+const SEARCH_WAIT_MS = 350;
+
 const ProductList = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
@@ -88,37 +83,71 @@ const ProductList = () => {
     target: 180, min: 2, max: 5, horizontalPadding: ITEM_MARGIN * 2, gap: ITEM_MARGIN,
   });
 
-  const [products, setProducts] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const categoryId = route.params?.categoryId;
+  const [searchQuery, setSearchQuery] = useState(route.params?.q || '');
+  const [query, setQuery] = useState(route.params?.q || '');
+  const [sort, setSort] = useState('new');
+  // "Near <town>": the town the weather screen knows, matched against where
+  // sellers said they are.
+  const [town, setTown] = useState(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    let live = true;
+    Promise.resolve(getPreference(PREF_KEYS.weatherPlace))
+      .then((place) => {
+        const name = (place?.name || '').split(',')[0].trim();
+        if (live && name) setTown(name);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const params = useMemo(() => ({
+    ...(categoryId ? { category: categoryId } : {}),
+    ...(query ? { q: query } : {}),
+    ...(sort !== 'new' ? { sort } : {}),
+    ...(near && town ? { near: town } : {}),
+  }), [categoryId, query, sort, near, town]);
+  const key = `market:list:${JSON.stringify(params)}`;
+
+  const [products, setProducts] = useState(() => peekCache(key)?.results || null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(() => !!peekCache(key)?.next);
   const [page, setPage] = useState(1);
   const [error, setError] = useState(null);
-  const categoryParam = route.params?.categoryId ? { category: route.params.categoryId } : {};
+  const wanted = useRef(key);
+  wanted.current = key;
+
+  // Wait for the typing to stop before asking.
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(searchQuery.trim()), SEARCH_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const loadProducts = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    const kept = peekCache(key);
+    setProducts(kept?.results || null);
+    setHasMore(!!kept?.next);
     try {
-      const data = await fetchProducts(1, categoryParam);
+      const data = await fetchProducts(1, params);
+      writeCache(key, data, { persist: false });
+      if (wanted.current !== key) return;       // a newer search meanwhile
       setProducts(data.results ?? []);
       setPage(1);
       setHasMore(!!data.next);
     } catch (err) {
-      setError(err.message || t('market.list.loadFailed'));
-    } finally {
-      setLoading(false);
+      if (wanted.current === key && !kept) setError(err.message || t('market.list.loadFailed'));
     }
-  }, [route.params?.categoryId, t]);
+  }, [key, params, t]);
 
   const loadMoreProducts = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMore || !hasMore || !products) return;
     setLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const data = await fetchProducts(nextPage, categoryParam);
-      setProducts(prev => [...prev, ...(data.results ?? [])]);
+      const data = await fetchProducts(nextPage, params);
+      if (wanted.current !== key) return;
+      setProducts((prev) => [...(prev || []), ...(data.results ?? [])]);
       setPage(nextPage);
       setHasMore(!!data.next);
     } catch {
@@ -126,67 +155,82 @@ const ProductList = () => {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, page, route.params?.categoryId]);
+  }, [loadingMore, hasMore, page, params, key, products]);
 
   useEffect(() => {
     loadProducts();
   }, [loadProducts]);
 
-  const filteredProducts = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return products;
-
-    return products.filter((product) =>
-      product.title?.toLowerCase().includes(query) ||
-      product.description?.toLowerCase().includes(query)
-    );
-  }, [searchQuery, products]);
-
-  const handleSearchChange = (text) => setSearchQuery(text);
-  const handleProductPress = (product) => navigation.navigate('ProductDetail', { 
-    slug: product.slug
+  const handleProductPress = (product) => navigation.navigate('ProductDetail', {
+    slug: product.slug, preview: product,
   });
-
-  if (loading) {
-    return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.centerContainer}>
-        <Icon name="exclamation-circle" size={50} color={COLORS.error} />
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity onPress={loadProducts}>
-          <Text style={styles.retryText}>{t('feed.retry')}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Icon name="search" size={20} color={COLORS.gray} style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder={t('market.list.searchPlaceholder')}
-          placeholderTextColor={COLORS.gray}
-          value={searchQuery}
-          onChangeText={handleSearchChange}
-          clearButtonMode="while-editing"
-        />
+      <View style={styles.topRow}>
+        <View style={[styles.searchContainer, styles.grow]}>
+          <Icon name="search" size={20} color={COLORS.gray} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder={route.params?.categoryName
+              ? t('market.list.searchIn', { name: route.params.categoryName })
+              : t('market.list.searchPlaceholder')}
+            placeholderTextColor={COLORS.gray}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            clearButtonMode="while-editing"
+            returnKeyType="search"
+            onSubmitEditing={() => setQuery(searchQuery.trim())}
+            testID="list-search"
+          />
+        </View>
+        <CartButton />
       </View>
 
-      {/* Product Grid */}
-      {filteredProducts.length > 0 ? (
+      <View style={styles.sorts}>
+        {SORTS.map((s) => (
+          <TouchableOpacity
+            key={s}
+            style={[styles.sortChip, sort === s && styles.sortChipOn]}
+            onPress={() => setSort(s)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: sort === s }}
+            testID={`sort-${s}`}
+          >
+            <Text style={[styles.sortText, sort === s && styles.sortTextOn]}>{t(`market.sort.${s}`)}</Text>
+          </TouchableOpacity>
+        ))}
+        {!!town && (
+          <TouchableOpacity
+            style={[styles.sortChip, near && styles.sortChipOn]}
+            onPress={() => setNear((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: near }}
+            testID="near-me"
+          >
+            <Text style={[styles.sortText, near && styles.sortTextOn]}>
+              {t('market.list.near', { town })}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {products == null ? (
+        <View style={styles.centerContainer}>
+          {error ? (
+            <>
+              <Icon name="exclamation-circle" size={50} color={COLORS.error} />
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={loadProducts}>
+                <Text style={styles.retryText}>{t('feed.retry')}</Text>
+              </TouchableOpacity>
+            </>
+          ) : <ActivityIndicator size="large" color={COLORS.primary} />}
+        </View>
+      ) : products.length > 0 ? (
         <FlatList
-          data={filteredProducts}
-          keyExtractor={(item) => item.id.toString()}
+          data={products}
+          keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => (
             <ProductCard
               product={item}
@@ -196,9 +240,10 @@ const ProductList = () => {
           )}
           key={`products-${cols}`}
           numColumns={cols}
-          columnWrapperStyle={styles.columnWrapper}
+          columnWrapperStyle={cols > 1 ? styles.columnWrapper : undefined}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           onEndReached={loadMoreProducts}
           onEndReachedThreshold={0.5}
           ListFooterComponent={
@@ -208,7 +253,7 @@ const ProductList = () => {
           }
         />
       ) : (
-        <EmptyState query={searchQuery} onClear={() => handleSearchChange('')} />
+        <EmptyState query={searchQuery} onClear={() => { setSearchQuery(''); setQuery(''); }} />
       )}
     </View>
   );
@@ -249,7 +294,7 @@ const ProductCard = ({ product, onPress, style }) => {
       {/* Product Details */}
       <View style={styles.cardContent}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {product.title || 'Untitled Product'}
+          {product.title || t('market.untitled')}
         </Text>
         
         {/* Price Section */}
@@ -270,7 +315,7 @@ const ProductCard = ({ product, onPress, style }) => {
             styles.stockText,
             inStock ? styles.inStockText : styles.outOfStockText
           ]}>
-            {inStock ? `${product.quantity} in stock` : 'Out of stock'}
+            {inStock ? t('market.inStock', { n: product.quantity }) : t('market.outOfStock')}
           </Text>
         </View>
         
@@ -328,6 +373,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: SPACING.large,
   },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  grow: { flex: 1 },
+  sorts: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  sortChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  sortChipOn: { backgroundColor: COLORS.primary },
+  sortText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+  sortTextOn: { color: '#FFFFFF' },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',

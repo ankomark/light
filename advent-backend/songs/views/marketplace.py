@@ -1,8 +1,124 @@
 from .common import *  # noqa: F401,F403
 from rest_framework import mixins
 from rest_framework.exceptions import APIException
-from django.db.models import Avg, Exists, OuterRef
+from decimal import Decimal, InvalidOperation
+
+from django.db.models import Sum
+from ..models import SellerProfile
+from ..serializers.marketplace import SellerProfileSerializer, money_totals
+
+from django.db.models import Avg, Exists, F, OuterRef
 from django.http import Http404
+
+from ..serializers.common import MediaReferenceField
+
+
+def _image_url(product_images):
+    """The first picture of a product, as a URL the app can load."""
+    return MediaReferenceField().to_representation(product_images[0].image) if product_images else ''
+
+
+# How a product list can be sorted: ?sort=<key>.
+PRODUCT_SORTS = {
+    'new': ('-created_at',),
+    'price_low': ('price', '-created_at'),
+    'price_high': ('-price', '-created_at'),
+    'popular': ('-views', '-created_at'),
+    'rating': ('-avg_rating', '-num_reviews', '-created_at'),
+}
+
+
+def bought(user, product):
+    """Whether `user` has ordered `product` (an order not cancelled)."""
+    if not (user and user.is_authenticated):
+        return False
+    return OrderItem.objects.filter(
+        order__buyer=user, product=product,
+    ).exclude(order__status__in=('CANCELLED', 'REFUNDED')).exists()
+
+
+def settle(order):
+    """The order's one status, read from its lines. Each seller's part moves
+    on its own (paid, shipped, delivered, cancelled); the order is as far on
+    as its slowest part, and cancelled only when every part is."""
+    items = list(order.items.all())
+    live = [i for i in items if not i.cancelled_at]
+    if order.status == 'REFUNDED':
+        return order
+    if not live:
+        status_ = 'CANCELLED'
+    elif all(i.delivered_at for i in live):
+        status_ = 'DELIVERED'
+    elif all(i.shipped_at or i.delivered_at for i in live):
+        status_ = 'SHIPPED'
+    elif any(i.payment_confirmed_at for i in live):
+        status_ = 'PROCESSING'
+    else:
+        status_ = 'PENDING'
+    payment = 'PAID' if live and all(i.payment_confirmed_at for i in live) else order.payment_status
+    if (status_, payment) != (order.status, order.payment_status):
+        order.status, order.payment_status = status_, payment
+        order.save(update_fields=['status', 'payment_status'])
+    return order
+
+
+def tell(user, kind, message, order):
+    """A marketplace push about `order` (its own switch: 'marketplace')."""
+    if not user:
+        return
+    try:
+        notify_user(user, kind, message, data={'type': kind, 'order_id': order.pk})
+    except Exception:  # noqa: BLE001 — a push never undoes an order
+        logger.warning('marketplace push failed', exc_info=True)
+
+
+def _titles(items, limit=3):
+    names = [f'{i.quantity}× {i.title or (i.product.title if i.product else "")}' for i in items]
+    more = len(names) - limit
+    return ', '.join(names[:limit]) + (f' and {more} more' if more > 0 else '')
+
+
+def tell_sellers_of_new_order(order):
+    """Each seller hears of their own part of a new order."""
+    by_seller = {}
+    for item in order.items.select_related('seller', 'product'):
+        by_seller.setdefault(item.seller, []).append(item)
+    for seller, items in by_seller.items():
+        tell(seller, 'market_order',
+             f'{order.buyer.username} ordered {_titles(items)}. Order #{order.pk}.', order)
+
+
+def place_order(user, lines):
+    """An order for `lines` [(product, quantity)], each line keeping what
+    was bought (title, picture, currency) as it was. Stock is checked here and
+    committed later, when each seller confirms they were paid."""
+    images = {p.pk: list(p.images.all()) for p in
+              Product.objects.filter(pk__in=[p.pk for p, _ in lines]).prefetch_related('images')}
+    with transaction.atomic():
+        order = Order.objects.create(
+            buyer=user, status='PENDING',
+            total_amount=sum(p.price * q for p, q in lines),
+        )
+        OrderItem.objects.bulk_create([
+            OrderItem(
+                order=order, product=product, quantity=quantity,
+                price_at_purchase=product.price, seller=product.seller,
+                title=product.title[:200],
+                image_url=_image_url(images.get(product.pk) or [])[:500],
+                currency=product.currency or 'USD',
+            )
+            for product, quantity in lines
+        ])
+        transaction.on_commit(lambda: tell_sellers_of_new_order(order))
+    return order
+
+
+def _decimal(raw):
+    try:
+        value = Decimal(str(raw))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
 
 
 class CreatePaymentIntentView(APIView):
@@ -123,7 +239,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         queryset = (
             super().get_queryset()
             .filter(is_removed=False)  # hide moderator takedowns
-            .select_related('seller', 'seller__profile', 'category')
+            .select_related('seller', 'seller__profile', 'seller__seller_profile', 'category')
             .prefetch_related('images')
             # Rating + wishlist state as annotations, so a page of products costs
             # a couple of joins instead of 3 extra queries per product.
@@ -140,14 +256,69 @@ class ProductViewSet(viewsets.ModelViewSet):
                     Wishlist.objects.filter(user=user, products=OuterRef('pk'))
                 )
             )
-        seller_id = self.request.query_params.get('seller')
+        params = self.request.query_params
+        seller_id = params.get('seller')
         if seller_id:
-            try:
-                queryset = queryset.filter(seller__id=seller_id)
-            except ValueError:
-                logger.warning(f"Invalid seller ID: {seller_id}")
+            if not str(seller_id).isdigit():
                 return queryset.none()
-        return queryset
+            queryset = queryset.filter(seller__id=seller_id)
+
+        if self.action != 'list':
+            # A link, an order or the seller's own edit screen must still open
+            # a product that has sold out or been taken down by its seller.
+            return queryset
+
+        # Near a place: the town the phone knows (the weather's), matched
+        # against where sellers said they are.
+        near = (params.get('near') or '').strip()
+        if near:
+            queryset = queryset.filter(location__icontains=near[:60])
+
+        # Browsing shows what can be bought. A seller's own list (the
+        # dashboard) shows everything of theirs, sold out or not.
+        own = seller_id and user.is_authenticated and str(user.pk) == str(seller_id)
+        if not own:
+            queryset = queryset.filter(is_available=True, quantity__gt=0)
+
+        # The category the app sends — by id, or by name.
+        category = (params.get('category') or '').strip()
+        if category:
+            queryset = (queryset.filter(category_id=category) if category.isdigit()
+                        else queryset.filter(category__name__iexact=category))
+
+        # Search the whole marketplace, not just the page already on the phone.
+        q = (params.get('q') or params.get('search') or '').strip()
+        if q:
+            for term in q.split()[:6]:
+                queryset = queryset.filter(
+                    Q(title__icontains=term) | Q(description__icontains=term)
+                    | Q(category__name__icontains=term) | Q(location__icontains=term)
+                )
+
+        low, high = _decimal(params.get('min_price')), _decimal(params.get('max_price'))
+        if low is not None:
+            queryset = queryset.filter(price__gte=low)
+        if high is not None:
+            queryset = queryset.filter(price__lte=high)
+        for field in ('condition', 'currency'):
+            value = (params.get(field) or '').strip().upper()
+            if value:
+                queryset = queryset.filter(**{field: value})
+
+        return queryset.order_by(*PRODUCT_SORTS.get(params.get('sort') or 'new', PRODUCT_SORTS['new']))
+
+    def retrieve(self, request, *args, **kwargs):
+        product = self.get_object()
+        user = request.user
+        if not (user.is_authenticated and user.pk == product.seller_id):
+            who = user.pk if user.is_authenticated else request.META.get('REMOTE_ADDR', '')
+            key = f'market:viewed:{product.pk}:{who}'
+            if cache.add(key, 1, 60 * 60):
+                Product.objects.filter(pk=product.pk).update(views=F('views') + 1)
+        # Whether I may review it: only people who bought it can.
+        product._can_review = (user.is_authenticated and user.pk != product.seller_id
+                               and bought(user, product))
+        return Response(self.get_serializer(product).data)
 
     def list(self, request, *args, **kwargs):
         try:
@@ -220,16 +391,34 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 class ProductCategoryViewSet(viewsets.ModelViewSet):
-    queryset = ProductCategory.objects.all()
+    """Anyone may read the categories; only staff may change them. Any
+    signed-in user could rename or delete a category before — every product
+    in it would have moved or lost its category. Sellers still make a new
+    category by naming it on a product (ProductSerializer.create)."""
     serializer_class = ProductCategorySerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = None
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
+
+    def get_queryset(self):
+        # With how many products are on offer in each: the home screen shows
+        # only categories that have something in them, the fullest first.
+        return ProductCategory.objects.annotate(
+            product_count=Count('products', filter=Q(
+                products__is_removed=False, products__is_available=True,
+                products__quantity__gt=0,
+            )),
+        ).order_by('-product_count', 'name')
 
 
 
 class CartViewSet(viewsets.ModelViewSet):
     serializer_class = CartSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_queryset(self):
         return Cart.objects.filter(user=self.request.user)
     def destroy(self, request, *args, **kwargs):
@@ -248,6 +437,9 @@ class CartViewSet(viewsets.ModelViewSet):
     def my_cart(self, request):
         # Prefetch each item's product graph (images + seller/profile + category)
         # so rendering the cart is a few queries rather than N+1 per line item.
+        # Made on first ask: someone who has never added anything has an empty
+        # cart, not a missing one (the app used to read a 404 as "empty").
+        Cart.objects.get_or_create(user=request.user)
         cart = get_object_or_404(
             Cart.objects.prefetch_related(
                 'items__product__images',
@@ -258,7 +450,7 @@ class CartViewSet(viewsets.ModelViewSet):
         )
         serializer = self.get_serializer(cart)
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['post'])
     def add_item(self, request):
         product_id = request.data.get('product_id')
@@ -335,17 +527,42 @@ class CartViewSet(viewsets.ModelViewSet):
         cart_item.quantity = quantity
         cart_item.save(update_fields=['quantity'])
         return Response(CartItemSerializer(cart_item, context={'request': request}).data)
-    
+
+    @action(detail=False, methods=['post'])
+    def buy_now(self, request):
+        """POST {product_id, quantity} — an order of just this, straight
+        away. The cart is left as it is."""
+        product = Product.objects.filter(pk=request.data.get('product_id'), is_removed=False).first()
+        if not product:
+            return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            quantity = int(request.data.get('quantity', 1))
+        except (TypeError, ValueError):
+            return Response({"error": "Invalid quantity"}, status=status.HTTP_400_BAD_REQUEST)
+        if quantity < 1:
+            return Response({"error": "Quantity must be at least 1"}, status=status.HTTP_400_BAD_REQUEST)
+        if product.seller_id == request.user.pk:
+            return Response({"error": "This is your own product."}, status=status.HTTP_400_BAD_REQUEST)
+        if not product.is_available or product.quantity < quantity:
+            return Response(
+                {"error": f"Only {product.quantity} in stock." if product.quantity else "This item is out of stock.",
+                 "available": product.quantity},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order = place_order(request.user, [(product, quantity)])
+        return Response(OrderSerializer(order, context={'request': request}).data,
+                        status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=['post'])
     def checkout(self, request):
         cart = get_object_or_404(Cart, user=request.user)
-        
+
         if cart.items.count() == 0:
             return Response(
                 {"error": "Your cart is empty"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         items = list(cart.items.select_related('product').all())
 
         # Validate stock up front so we don't create an order we can't fulfil.
@@ -359,23 +576,9 @@ class CartViewSet(viewsets.ModelViewSet):
                 )
 
         with transaction.atomic():
-            order = Order.objects.create(
-                buyer=request.user,
-                status='PENDING',
-                total_amount=sum(item.product.price * item.quantity for item in items)
-            )
-
-            for item in items:
-                OrderItem.objects.create(
-                    order=order,
-                    product=item.product,
-                    quantity=item.quantity,
-                    price_at_purchase=item.product.price,
-                    seller=item.product.seller
-                )
-
-            # Clear the cart. Stock is decremented later, by the Stripe webhook,
-            # so an abandoned payment never consumes inventory.
+            order = place_order(request.user, [(item.product, item.quantity) for item in items])
+            # Clear the cart. Stock is decremented later, when each seller
+            # confirms payment, so an abandoned order never consumes inventory.
             cart.items.all().delete()
 
         return Response(
@@ -383,6 +586,59 @@ class CartViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED
         )
 
+
+
+class SellerProfileView(APIView):
+    """GET/PUT /marketplace/seller-profile/ — my details as a seller, kept
+    once and filled into each new product."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        profile, _ = SellerProfile.objects.get_or_create(user=request.user)
+        return Response(SellerProfileSerializer(profile).data)
+
+    def put(self, request):
+        profile, _ = SellerProfile.objects.get_or_create(user=request.user)
+        serializer = SellerProfileSerializer(profile, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    patch = put
+
+
+class ShopView(APIView):
+    """GET /marketplace/shops/<username>/ — a seller's shop front: who
+    they are, how long they have sold here, what they have on offer, how many
+    sales they have made and how their things are rated. Their products come
+    from /marketplace/products/?seller=<id>."""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, username):
+        seller = get_object_or_404(User.objects.select_related('profile'), username=username)
+        products = Product.objects.filter(seller=seller, is_removed=False)
+        on_offer = products.filter(is_available=True, quantity__gt=0).count()
+        sales = OrderItem.objects.filter(seller=seller, payment_confirmed_at__isnull=False,
+                                         cancelled_at__isnull=True).count()
+        rating = ProductReview.objects.filter(product__seller=seller, is_removed=False).aggregate(
+            avg=Avg('rating'), n=Count('id'))
+        profile = SellerProfile.objects.filter(user=seller).first()
+        first = products.order_by('created_at').values_list('created_at', flat=True).first()
+        return Response({
+            'seller': SimpleUserSerializer(seller, context={'request': request}).data,
+            'is_verified': bool(profile and profile.is_verified),
+            'location': (profile.location if profile else '') or
+                        (products.exclude(location__isnull=True).exclude(location='')
+                         .values_list('location', flat=True).first() or ''),
+            'selling_since': first,
+            'products_on_offer': on_offer,
+            'sales': sales,
+            'rating': round(float(rating['avg']), 1) if rating['avg'] is not None else None,
+            'review_count': rating['n'],
+        })
+
+
+LOW_STOCK = 2
 
 
 class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -404,10 +660,8 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
             .distinct()
             .select_related('buyer', 'buyer__profile')
             .prefetch_related(
-                'items__seller',
                 'items__product__images',
                 'items__product__seller__profile',
-                'items__product__category',
             )
         )
         # ?role=buyer -> only orders I placed (My Orders); ?role=seller -> only
@@ -483,14 +737,140 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                     item.save(update_fields=['payment_confirmed_at'])
                     item.commit_stock()
 
-                # Only once every seller on the order has confirmed.
-                if not order.items.filter(payment_confirmed_at__isnull=True).exists():
-                    order.payment_status = 'PAID'
-                    if order.status == 'PENDING':
-                        order.status = 'PROCESSING'
-                    order.save(update_fields=['payment_status', 'status'])
+                # PAID once every seller on the order has confirmed.
+                settle(order)
+                tell(order.buyer, 'market_paid',
+                     f'{request.user.username} confirmed your payment for order #{order.pk}.', order)
 
         order.refresh_from_db()
+        return Response(OrderSerializer(order, context={'request': request}).data)
+
+    @action(detail=False, methods=['get'], url_path='seller-stats')
+    def seller_stats(self, request):
+        """The seller dashboard's numbers, in one request: sales this week and
+        all told (per currency — confirmed payments only), orders waiting for
+        me to confirm payment or to send, and what is running low."""
+        from datetime import timedelta
+        user = request.user
+        lines = OrderItem.objects.filter(seller=user, cancelled_at__isnull=True)
+        paid = lines.filter(payment_confirmed_at__isnull=False)
+        week = paid.filter(payment_confirmed_at__gte=timezone.now() - timedelta(days=7))
+
+        def totals(qs):
+            return money_totals(
+                (i.currency or 'USD', i.price_at_purchase * i.quantity)
+                for i in qs.only('currency', 'price_at_purchase', 'quantity'))
+
+        mine = Product.objects.filter(seller=user, is_removed=False)
+        low = (mine.filter(is_available=True, quantity__lte=LOW_STOCK)
+               .order_by('quantity', 'title').values('id', 'slug', 'title', 'quantity')[:10])
+        return Response({
+            'week': totals(week),
+            'all_time': totals(paid),
+            'awaiting_payment': lines.filter(payment_confirmed_at__isnull=True)
+                                     .values('order').distinct().count(),
+            'to_send': paid.filter(shipped_at__isnull=True, delivered_at__isnull=True)
+                           .values('order').distinct().count(),
+            'products': mine.count(),
+            'views': mine.aggregate(n=Sum('views'))['n'] or 0,
+            'low_stock': list(low),
+        })
+
+    # ── each seller's part, on its own ───────────────────────────────────────
+
+    @action(detail=True, methods=['post'])
+    def ship(self, request, pk=None):
+        """POST {note} — a seller sends their part: after they have been paid.
+        The note (the rider, the bus, a tracking number) goes to the buyer."""
+        order = self.get_object()
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            items = order.items.filter(seller=request.user, cancelled_at__isnull=True)
+            if not items.exists():
+                return Response({"error": "You have no items in this order", "code": "not_yours"},
+                                status=status.HTTP_403_FORBIDDEN)
+            if items.filter(payment_confirmed_at__isnull=True).exists():
+                return Response({"error": "Confirm you were paid before sending it.", "code": "not_paid"},
+                                status=status.HTTP_400_BAD_REQUEST)
+            note = str(request.data.get('note') or '').strip()[:200]
+            items.filter(shipped_at__isnull=True).update(shipped_at=timezone.now(), tracking_note=note)
+            if note:
+                items.update(tracking_note=note)
+            settle(order)
+        tell(order.buyer, 'market_shipped',
+             f'{request.user.username} has sent your order #{order.pk}.' + (f' {note}' if note else ''), order)
+        return Response(OrderSerializer(order, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def received(self, request, pk=None):
+        """POST {seller_id?} — it arrived. The buyer says so for one seller's
+        part (or all that were sent); a seller may for their own, handed over."""
+        order = self.get_object()
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            items = order.items.filter(cancelled_at__isnull=True, delivered_at__isnull=True)
+            if order.buyer_id == request.user.pk:
+                seller_id = request.data.get('seller_id')
+                if seller_id:
+                    items = items.filter(seller_id=seller_id)
+            else:
+                items = items.filter(seller=request.user)
+                if not order.items.filter(seller=request.user).exists():
+                    return Response({"error": "You have no items in this order", "code": "not_yours"},
+                                    status=status.HTTP_403_FORBIDDEN)
+            items = list(items.select_related('seller'))
+            now = timezone.now()
+            OrderItem.objects.filter(pk__in=[i.pk for i in items]).update(delivered_at=now)
+            settle(order)
+        if order.buyer_id == request.user.pk:
+            for seller in {i.seller for i in items if i.seller}:
+                tell(seller, 'market_delivered',
+                     f'{request.user.username} received their order #{order.pk}.', order)
+        elif items:
+            tell(order.buyer, 'market_delivered',
+                 f'{request.user.username} marked your order #{order.pk} delivered.', order)
+        return Response(OrderSerializer(order, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='cancel-part')
+    def cancel_part(self, request, pk=None):
+        """POST {seller_id} — cancel one seller's part and leave the rest.
+
+        The buyer can, until that seller has confirmed payment (after that,
+        money has changed hands off the app); a seller can cancel their own
+        part until it is sent, and any stock it took goes back."""
+        order = self.get_object()
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            if order.buyer_id == request.user.pk:
+                items = order.items.filter(seller_id=request.data.get('seller_id'))
+                if items.filter(payment_confirmed_at__isnull=False).exists():
+                    return Response({"error": "This seller has already confirmed your payment. "
+                                              "Contact them to sort it out.", "code": "paid"},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                other = None
+            else:
+                items = order.items.filter(seller=request.user)
+                other = order.buyer
+            items = list(items.filter(cancelled_at__isnull=True).select_related('product', 'seller'))
+            if not items:
+                return Response({"error": "Nothing to cancel", "code": "nothing"},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if any(i.shipped_at or i.delivered_at for i in items):
+                return Response({"error": "It has already been sent.", "code": "sent"},
+                                status=status.HTTP_400_BAD_REQUEST)
+            now = timezone.now()
+            for item in items:
+                item.release_stock()
+                item.cancelled_at = now
+                item.save(update_fields=['cancelled_at'])
+            settle(order)
+        if other:
+            tell(other, 'market_cancelled',
+                 f'{request.user.username} cancelled their part of order #{order.pk}.', order)
+        else:
+            for seller in {i.seller for i in items if i.seller}:
+                tell(seller, 'market_cancelled',
+                     f'{request.user.username} cancelled order #{order.pk} with you.', order)
         return Response(OrderSerializer(order, context={'request': request}).data)
 
     @action(detail=True, methods=['post'])
@@ -554,9 +934,16 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
             # Cancelling/refunding hands committed inventory back. Only the buyer
             # or a sole seller reaches this, so every released line belongs to the
             # actor — a seller can never release another seller's stock.
+            now = timezone.now()
+            mine = order.items.all() if cancelling and is_buyer else order.items.filter(seller=request.user)
             if cancelling:
                 for item in order.items.select_related('product').all():
                     item.release_stock()
+                order.items.filter(cancelled_at__isnull=True).update(cancelled_at=now)
+            elif new_status == 'SHIPPED':
+                mine.filter(shipped_at__isnull=True).update(shipped_at=now)
+            elif new_status == 'DELIVERED':
+                mine.filter(delivered_at__isnull=True).update(delivered_at=now)
             order.status = new_status
             order.save(update_fields=['status'])
 
@@ -582,6 +969,13 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
             ProductReview.objects
             .filter(is_removed=False)  # hide moderator takedowns
             .select_related('reviewer', 'reviewer__profile')
+            # "Verified buyer": the reviewer ordered it (reviews from before
+            # reviewing needed a purchase may not have).
+            .annotate(verified=Exists(
+                OrderItem.objects.filter(
+                    product=OuterRef('product'), order__buyer=OuterRef('reviewer'),
+                ).exclude(order__status__in=('CANCELLED', 'REFUNDED'))
+            ))
         )
         if slug:
             return queryset.filter(product__slug=slug)
@@ -591,6 +985,13 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         # One review per buyer per product (unique_together), so a second POST
         # updates the existing one instead of blowing up on the constraint.
         product = get_object_or_404(Product, slug=self._product_slug())
+        # Only people who bought it: a review is worth something because the
+        # person writing it had the thing in their hands.
+        if not bought(request.user, product):
+            return Response(
+                {"error": "Only people who bought this can review it.", "code": "not_a_buyer"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         existing = ProductReview.objects.filter(product=product, reviewer=request.user).first()
         if existing is not None:
             serializer = self.get_serializer(existing, data=request.data, partial=True)
@@ -608,7 +1009,7 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
 class WishlistViewSet(viewsets.ModelViewSet):
     serializer_class = WishlistSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_queryset(self):
         return Wishlist.objects.filter(user=self.request.user)
 
@@ -631,7 +1032,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def add_product(self, request):
         product_id = request.data.get('product_id')
-        
+
         try:
             product = Product.objects.get(id=product_id)
         except Product.DoesNotExist:
@@ -639,19 +1040,19 @@ class WishlistViewSet(viewsets.ModelViewSet):
                 {"error": "Product not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         wishlist, created = Wishlist.objects.get_or_create(user=request.user)
         wishlist.products.add(product)
-        
+
         return Response(
             {"status": "Product added to wishlist"},
             status=status.HTTP_200_OK
         )
-    
+
     @action(detail=False, methods=['post'])
     def remove_product(self, request):
         product_id = request.data.get('product_id')
-        
+
         try:
             product = Product.objects.get(id=product_id)
         except Product.DoesNotExist:
@@ -659,12 +1060,12 @@ class WishlistViewSet(viewsets.ModelViewSet):
                 {"error": "Product not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         # get_or_create, not get_object_or_404: removing from a wishlist the user
         # never created is a harmless no-op, not a 404.
         wishlist, _ = Wishlist.objects.get_or_create(user=request.user)
         wishlist.products.remove(product)
-        
+
         return Response(
             {"status": "Product removed from wishlist"},
             status=status.HTTP_200_OK

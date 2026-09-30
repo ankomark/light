@@ -1,4 +1,7 @@
-import React, { useState, useCallback } from 'react';
+// The wishlist: kept on the phone and shared with every heart in the
+// marketplace (utils/cartStore.js), so it opens at once and a heart taken off
+// here is off everywhere. An item can go straight into the cart from here.
+import React, { useCallback, useState } from 'react';
 import { useI18n } from '../../context/I18nContext';
 import {
   View,
@@ -7,70 +10,66 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
-import { fetchWishlist, removeFromWishlist } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
+import {
+  useMarket, useMarketUser, refreshWishlist, toggleWish, addProductToCart,
+} from '../../utils/cartStore';
+import { formatPrice, marketError } from '../../utils/market';
+import useMarketToast from './MarketToast';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
-
-const CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', KES: 'Ksh', NGN: '₦' };
-
-const formatPrice = (price, currency = 'USD') => {
-  const symbol = CURRENCY_SYMBOLS[currency] || currency;
-  return `${symbol}${(parseFloat(price) || 0).toFixed(2)}`;
-};
 
 const Wishlist = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { currentUser } = useAuth();
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  useMarketUser(currentUser?.id);
+  const { wishlist } = useMarket();
   const [refreshing, setRefreshing] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [toast, showToast] = useMarketToast();
+  const products = wishlist?.products || [];
 
-  const loadWishlist = useCallback(async () => {
-    if (!currentUser) {
-      setLoading(false);
-      return;
-    }
+  // By id: a new user object for the same person must not read it again.
+  const userId = currentUser?.id;
+  const load = useCallback(async () => {
+    if (!userId) return;
+    setFailed(false);
     try {
-      const data = await fetchWishlist();
-      setProducts(data?.products || []);
-    } catch (error) {
-      console.error('Error loading wishlist:', error);
-      Alert.alert(t('common.error'), t('market.wishlist.loadFailed'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      await refreshWishlist();
+    } catch {
+      setFailed(true);
     }
-  }, [currentUser, t]);
+  }, [userId]);
 
-  // Re-read on focus: the heart can be toggled over on the product screen.
-  useFocusEffect(
-    useCallback(() => {
-      loadWishlist();
-    }, [loadWishlist])
-  );
+  // Re-read on focus: a heart may have changed on a product screen meanwhile.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    loadWishlist();
+    await load();
+    setRefreshing(false);
   };
 
-  const handleRemove = async (productId) => {
-    const previous = products;
-    setProducts((prev) => prev.filter((p) => p.id !== productId));  // optimistic
+  const handleRemove = async (product) => {
     try {
-      await removeFromWishlist(productId);
-    } catch (error) {
-      console.error('Error removing from wishlist:', error);
-      setProducts(previous);  // revert
-      Alert.alert(t('common.error'), t('market.wishlist.removeFailed'));
+      await toggleWish(product, false);
+    } catch (e) {
+      showToast(marketError(e, t('market.wishlist.removeFailed')), { error: true });
+    }
+  };
+
+  const handleAddToCart = async (product) => {
+    try {
+      await addProductToCart(product, 1);
+      showToast(t('market.product.addedToCart'));
+    } catch (e) {
+      showToast(marketError(e, t('market.product.addToCartFailed')), { error: true });
     }
   };
 
@@ -86,10 +85,18 @@ const Wishlist = () => {
     );
   }
 
-  if (loading) {
+  if (!wishlist) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#FFC46B" />
+        {failed ? (
+          <>
+            <Icon name="wifi" size={44} color="#888" />
+            <Text style={styles.emptyText}>{t('market.wishlist.loadFailed')}</Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={load}>
+              <Text style={styles.primaryButtonText}>{t('common.retry')}</Text>
+            </TouchableOpacity>
+          </>
+        ) : <ActivityIndicator size="large" color="#FFC46B" />}
       </View>
     );
   }
@@ -102,6 +109,7 @@ const Wishlist = () => {
         <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('ProductList')}>
           <Text style={styles.primaryButtonText}>{t('market.browseProducts')}</Text>
         </TouchableOpacity>
+        {toast}
       </View>
     );
   }
@@ -110,48 +118,71 @@ const Wishlist = () => {
     <View style={styles.container}>
       <FlatList
         data={products}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#1D478B" />
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            onPress={() => navigation.navigate('ProductDetail', { slug: item.slug })}
-            activeOpacity={0.85}
-          >
-            <Image
-              source={item.images?.[0]?.image_url ? { uri: item.images[0].image_url } : PLACEHOLDER_IMAGE}
-              placeholder={PLACEHOLDER_IMAGE}
-              contentFit="cover"
-              transition={150}
-              style={styles.image}
-            />
-            <View style={styles.details}>
-              <Text style={styles.title} numberOfLines={2}>
-                {item.title || 'Untitled Product'}
-              </Text>
-              <Text style={styles.price}>{formatPrice(item.price, item.currency)}</Text>
-              <Text style={[styles.stock, item.quantity <= 0 && styles.outOfStock]}>
-                {item.quantity > 0 ? `${item.quantity} in stock` : 'Out of stock'}
-              </Text>
-            </View>
+        renderItem={({ item }) => {
+          const canBuy = item.quantity > 0 && item.is_available !== false;
+          return (
             <TouchableOpacity
-              style={styles.removeButton}
-              onPress={() => handleRemove(item.id)}
-              hitSlop={8}
+              style={styles.card}
+              onPress={() => navigation.navigate('ProductDetail', { slug: item.slug, preview: item })}
+              activeOpacity={0.85}
+              testID={`wish-${item.id}`}
             >
-              <Icon name="heart" size={20} color="#FF6347" />
+              <Image
+                source={item.images?.[0]?.image_url ? { uri: item.images[0].image_url } : PLACEHOLDER_IMAGE}
+                placeholder={PLACEHOLDER_IMAGE}
+                contentFit="cover"
+                transition={150}
+                style={styles.image}
+              />
+              <View style={styles.details}>
+                <Text style={styles.title} numberOfLines={2}>
+                  {item.title || t('market.untitled')}
+                </Text>
+                <Text style={styles.price}>{formatPrice(item.price, item.currency)}</Text>
+                <Text style={[styles.stock, !canBuy && styles.outOfStock]}>
+                  {canBuy ? t('market.inStock', { n: item.quantity }) : t('market.outOfStock')}
+                </Text>
+              </View>
+              <View style={styles.actions}>
+                <TouchableOpacity
+                  style={styles.removeButton}
+                  onPress={() => handleRemove(item)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('market.wishlist.remove')}
+                  testID={`wish-remove-${item.id}`}
+                >
+                  <Icon name="heart" size={20} color="#FF6347" />
+                </TouchableOpacity>
+                {canBuy && (
+                  <TouchableOpacity
+                    style={styles.removeButton}
+                    onPress={() => handleAddToCart(item)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('market.product.addToCart')}
+                    testID={`wish-cart-${item.id}`}
+                  >
+                    <Icon name="cart-plus" size={20} color="#1D478B" />
+                  </TouchableOpacity>
+                )}
+              </View>
             </TouchableOpacity>
-          </TouchableOpacity>
-        )}
+          );
+        }}
       />
+      {toast}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  actions: { justifyContent: 'space-between', alignItems: 'center', paddingLeft: 8 },
   container: {
     flex: 1,
     backgroundColor: 'transparent',

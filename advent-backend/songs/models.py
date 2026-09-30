@@ -205,7 +205,7 @@ class Track(models.Model):
     removed_reason = models.CharField(max_length=20, blank=True, default='')
     removed_at = models.DateTimeField(null=True, blank=True)
     removal_note = models.CharField(max_length=500, blank=True, default='')
-    # audio_file = models.FileField(upload_to='audio/')  
+    # audio_file = models.FileField(upload_to='audio/')
     # cover_image = models.ImageField(upload_to='covers/', blank=True, null=True)
     # Media references: absolute URL (R2) or legacy Cloudinary public_id.
     audio_file = models.CharField(max_length=500)
@@ -277,7 +277,7 @@ class Track(models.Model):
 
     def __str__(self):
         return f"{self.title} by {self.artist.username}"
-   
+
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -433,7 +433,7 @@ class Profile(models.Model):
     bio = models.TextField(blank=True, null=True)
     birth_date = models.DateField(blank=True, null=True)
     location = models.CharField(max_length=100, blank=True, null=True)
-    
+
     is_public = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -556,7 +556,7 @@ class SocialPost(models.Model):
         """Comprehensive validation handling Cloudinary resources"""
         try:
             logger.info(f"Starting clean() for SocialPost. Content type: {self.content_type}")
-            
+
             # Log media file details
             media_info = {
                 'media_file': str(self.media_file),
@@ -564,53 +564,53 @@ class SocialPost(models.Model):
                 'exists': bool(self.media_file)
             }
             logger.info(f"Media file info: {media_info}")
-            
+
             if self.content_type == 'video':
                 logger.info("Validating video content")
-                
+
                 # Get filename or public_id
                 filename = str(self.media_file)
-                
+
                 # Extract extension safely
                 _, ext = os.path.splitext(filename)
                 ext = (ext or '').lower()
                 logger.info(f"Detected video extension: {ext}")
-                
+
                 # Validate extension
                 if ext not in ['.mp4', '.mov', '.avi']:
                     error_msg = f"Invalid video format: {ext}. Allowed: .mp4, .mov, .avi"
                     logger.error(error_msg)
                     raise ValidationError(_(error_msg))
-                
+
                 # Validate duration
                 if self.duration and self.duration > timedelta(minutes=1):
                     error_msg = "Video cannot exceed 1 minute"
                     logger.error(error_msg)
                     raise ValidationError(_(error_msg))
-                    
+
             elif self.content_type == 'image' and self.song:
                 logger.info("Validating image with song")
-                
+
                 # Validate song audio file
                 if not hasattr(self.song, 'audio_file'):
                     error_msg = "Associated song has no audio file"
                     logger.error(error_msg)
                     raise ValidationError(_(error_msg))
-                
+
                 # Get filename or public_id for audio
                 filename = str(self.song.audio_file)
-                
+
                 # Extract extension
                 _, ext = os.path.splitext(filename)
                 ext = (ext or '').lower()
                 logger.info(f"Detected audio extension: {ext}")
-                
+
                 # Validate extension
                 if ext not in ['.mp3', '.wav', '.ogg']:
                     error_msg = f"Invalid audio format: {ext}. Allowed: .mp3, .wav, .ogg"
                     logger.error(error_msg)
                     raise ValidationError(_(error_msg))
-                    
+
         except ValidationError as ve:
             logger.exception("Validation error in SocialPost.clean()")
             raise
@@ -1084,6 +1084,9 @@ class NotificationPreference(models.Model):
     books = models.BooleanField(default=True)
     # New notices on the notice board.
     notices = models.BooleanField(default=True)
+    # The marketplace: orders to sellers, their progress to buyers, and a
+    # wishlisted item's price drop or return to stock.
+    marketplace = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -1402,9 +1405,9 @@ class Videostudio(models.Model):
         ('mixing', 'Mixing & Mastering'),
         ('voice_over', 'Voice Over Recording'),
         ('podcast', 'Podcast Production'),
-        ('documentary', 'Documentary Production'),  
+        ('documentary', 'Documentary Production'),
     )
-    
+
     SERVICE_TYPE_CHOICES = [choice[0] for choice in SERVICE_TYPES]
 
     # This directory started as media studios but is the app's general "Services"
@@ -1474,7 +1477,7 @@ class Videostudio(models.Model):
     def clean(self):
         """Validate service_types before saving"""
         super().clean()
-        
+
         if self.service_types is not None:
             # Ensure it's a list
             if not isinstance(self.service_types, list):
@@ -1745,7 +1748,7 @@ class GroupJoinRequest(models.Model):
         ('approved', 'Approved'),
         ('rejected', 'Rejected'),
     )
-    
+
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='join_requests')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_join_requests')
     message = models.TextField(blank=True)
@@ -1829,7 +1832,7 @@ class GroupPostAttachment(models.Model):
         ('audio', 'Audio'),
         ('document', 'Document'),
     )
-    
+
     post = models.ForeignKey(GroupPost, on_delete=models.CASCADE, related_name='attachments')
     # file = models.FileField(upload_to='group_posts/%Y/%m/%d/')
     # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
@@ -1873,11 +1876,11 @@ class ProductCategory(models.Model):
     created_at = models.DateTimeField(default=timezone.now)  # instead of auto_now_add
     updated_at = models.DateTimeField(auto_now=True)
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='children')
-    
+
     class Meta:
         verbose_name_plural = "Product Categories"
         ordering = ['name']
-    
+
     def __str__(self):
         return self.name
 
@@ -1891,9 +1894,9 @@ class Product(models.Model):
         ('USED', 'Used'),
         ('REFURBISHED', 'Refurbished'),
     ]
-    
+
     currency = models.CharField(
-        max_length=3, 
+        max_length=3,
         default='USD',
         choices=[
             ('USD', 'US Dollar'),
@@ -1907,8 +1910,8 @@ class Product(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
     price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
+        max_digits=10,
+        decimal_places=2,
         validators=[MinValueValidator(0)]
     )
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='NEW')
@@ -1933,13 +1936,13 @@ class Product(models.Model):
 
     # Link to tracks if this is a music-related product
     track = models.ForeignKey('Track', on_delete=models.SET_NULL, null=True, blank=True, related_name='marketplace_products')
-    
+
     class Meta:
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"{self.title} by {self.seller.username}"
-    
+
     def save(self, *args, **kwargs):
         if not self.slug:
             base_slug = slugify(self.title)
@@ -1962,7 +1965,7 @@ class ProductImage(models.Model):
 
     class Meta:
         ordering = ['is_primary', 'uploaded_at']
-    
+
     def __str__(self):
         return f"Image for {self.product.title}"
 
@@ -1971,14 +1974,14 @@ class Cart(models.Model):
     user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='shopping_cart')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     def __str__(self):
         return f"Cart of {self.user.username}"
-    
+
     @property
     def total_items(self):
         return self.items.aggregate(total=models.Sum('quantity'))['total'] or 0
-    
+
     @property
     def subtotal(self):
         return sum(item.total_price for item in self.items.all())
@@ -1989,14 +1992,14 @@ class CartItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
     added_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         unique_together = ('cart', 'product')
         ordering = ['-added_at']
-    
+
     def __str__(self):
         return f"{self.quantity} x {self.product.title}"
-    
+
     @property
     def total_price(self):
         return self.product.price * self.quantity
@@ -2011,7 +2014,7 @@ class Order(models.Model):
         ('CANCELLED', 'Cancelled'),
         ('REFUNDED', 'Refunded'),
     ]
-    
+
     PAYMENT_STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('PAID', 'Paid'),
@@ -2028,10 +2031,10 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     transaction_id = models.CharField(max_length=100, blank=True)
-    
+
     class Meta:
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"Order #{self.id} by {self.buyer.username}"
 
@@ -2042,6 +2045,20 @@ class OrderItem(models.Model):
     quantity = models.PositiveIntegerField()
     price_at_purchase = models.DecimalField(max_digits=10, decimal_places=2)
     seller = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, related_name='sales')
+    # What was bought, as it was when it was bought. The product row can be
+    # edited or deleted afterwards (product is SET_NULL); an order must still
+    # say what it was for and in which currency it was priced.
+    title = models.CharField(max_length=200, blank=True, default='')
+    image_url = models.CharField(max_length=500, blank=True, default='')
+    currency = models.CharField(max_length=3, blank=True, default='')
+    # Each seller's part of an order moves on its own: one ships while
+    # another is still waiting to be paid. The order's status is read from
+    # these (views/marketplace.py settle()).
+    shipped_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    # What the seller says when it goes out: the rider, the bus, a number.
+    tracking_note = models.CharField(max_length=200, blank=True, default='')
     # Direct-pay marketplace: buyers pay each seller off-platform (M-Pesa, till,
     # bank), so there is no payment webhook to trust. The seller confirming
     # receipt for their own lines is what marks this item paid.
@@ -2094,20 +2111,42 @@ class ProductReview(models.Model):
     rating = models.PositiveIntegerField(choices=[(i, str(i)) for i in range(1, 6)])
     comment = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         unique_together = ('product', 'reviewer')
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"Review by {self.reviewer.username} for {self.product.title}"
 
 # Wishlist Model
+class SellerProfile(models.Model):
+    """A seller's details, kept once and filled into each new product: how
+    to reach them and how to pay them. Each product still carries its own
+    copy (a seller may take M-Pesa for one thing and cash for another).
+
+    `is_verified` is set by staff in the admin, and shows as a tick on the
+    seller's products and shop."""
+    user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='seller_profile')
+    whatsapp_number = models.CharField(max_length=20, blank=True, default='')
+    contact_number = models.CharField(max_length=20, blank=True, default='')
+    location = models.CharField(max_length=200, blank=True, default='')
+    mpesa_number = models.CharField(max_length=20, blank=True, default='')
+    till_number = models.CharField(max_length=30, blank=True, default='')
+    bank_details = models.CharField(max_length=255, blank=True, default='')
+    payment_instructions = models.TextField(blank=True, default='')
+    is_verified = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Seller profile of {self.user.username}"
+
+
 class Wishlist(models.Model):
     user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='wishlist')
     products = models.ManyToManyField(Product, related_name='wishlisted_by')
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     def __str__(self):
         return f"Wishlist of {self.user.username}"
 
@@ -2115,8 +2154,8 @@ class Wishlist(models.Model):
 
 class LiveEvent(models.Model):
     user = models.ForeignKey(
-        'User', 
-        on_delete=models.CASCADE, 
+        'User',
+        on_delete=models.CASCADE,
         related_name='live_events',
         help_text="The user who created this live event"
     )
@@ -2129,12 +2168,12 @@ class LiveEvent(models.Model):
         help_text="Title of the live event"
     )
     description = models.TextField(
-        blank=True, 
+        blank=True,
         null=True,
         help_text="Detailed description of the event"
     )
     thumbnail = models.URLField(
-        blank=True, 
+        blank=True,
         null=True,
         help_text="Thumbnail image URL for the event"
     )
@@ -2147,7 +2186,7 @@ class LiveEvent(models.Model):
         help_text="When the event started"
     )
     end_time = models.DateTimeField(
-        blank=True, 
+        blank=True,
         null=True,
         help_text="When the event ended"
     )
@@ -2155,15 +2194,15 @@ class LiveEvent(models.Model):
         default=0,
         help_text="Number of viewers who watched this event"
     )
-    
+
     class Meta:
         ordering = ['-start_time']
         verbose_name = "Live Event"
         verbose_name_plural = "Live Events"
-        
+
     def __str__(self):
         return f"{self.title} by {self.user.username}"
-    
+
     def clean(self):
         """Validate the YouTube URL before saving"""
         super().clean()
@@ -2174,7 +2213,7 @@ class LiveEvent(models.Model):
                 "- https://www.youtube.com/live/VIDEO_ID\n"
                 "- https://youtu.be/VIDEO_ID"
             })
-    
+
     def is_active(self):
         """Model-level active check"""
         if self.is_live:
@@ -2189,23 +2228,23 @@ class LiveEvent(models.Model):
         """
         if url is None:
             raise ValueError("URL parameter is required when called as static method")
-            
+
         if not url:
             return None
-            
+
         patterns = [
             r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([^&]{11})',
             r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/live\/([^?]{11})',
             r'(?:https?:\/\/)?(?:www\.)?youtu\.be\/([^?]{11})',
             r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([^?]{11})'
         ]
-        
+
         for pattern in patterns:
             match = re.search(pattern, url)
             if match:
                 return match.group(1)
         return None
-    
+
     def get_embed_url(self):
         """Generate YouTube embed URL with enhanced parameters"""
         video_id = self.extract_youtube_id(self.youtube_url)  # Pass the URL here
@@ -2215,11 +2254,11 @@ class LiveEvent(models.Model):
                 "autoplay=1&rel=0&modestbranding=1"
             )
         return None
-    
+
     def save(self, *args, **kwargs):
         """Override save to ensure validation and set thumbnail"""
         self.full_clean()
-        
+
         # Always try to set thumbnail if not provided
         if not self.thumbnail:
             video_id = self.extract_youtube_id(self.youtube_url)
@@ -2231,13 +2270,13 @@ class LiveEvent(models.Model):
                     f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
                     f"https://img.youtube.com/vi/{video_id}/default.jpg"
                 ]
-                
+
                 # Set the first available thumbnail
                 for thumb_url in thumbnail_options:
                     if self.thumbnail_exists(thumb_url):
                         self.thumbnail = thumb_url
                         break
-        
+
         super().save(*args, **kwargs)
     def thumbnail_exists(self, url):
         """Check if thumbnail URL is valid"""

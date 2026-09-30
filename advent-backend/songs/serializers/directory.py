@@ -137,7 +137,7 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         model = NotificationPreference
         fields = [
             'likes', 'comments', 'follows', 'messages', 'groups', 'communities',
-            'live', 'quiz', 'weather', 'verse', 'books', 'notices', 'updated_at',
+            'live', 'quiz', 'weather', 'verse', 'books', 'notices', 'marketplace', 'updated_at',
         ]
         read_only_fields = ['updated_at']
 
@@ -352,7 +352,7 @@ class LiveEventSerializer(serializers.ModelSerializer):
     duration = serializers.SerializerMethodField()
     is_active = serializers.SerializerMethodField()
     viewers_count = serializers.IntegerField(read_only=True)
-    
+
     class Meta:
         model = LiveEvent
         fields = [
@@ -375,24 +375,24 @@ class LiveEventSerializer(serializers.ModelSerializer):
                 'help_text': "Maximum 200 characters"
             }
         }
-    
+
     def get_user(self, obj):
         return UserSerializer(obj.user, context=self.context).data
-    
+
     def get_embed_url(self, obj):
         return obj.get_embed_url()
-    
+
     def get_is_owner(self, obj):
         request = self.context.get('request')
         return request and obj.user == request.user
-    
+
     def get_duration(self, obj):
         if obj.end_time:
             return (obj.end_time - obj.start_time).total_seconds()
         elif obj.is_live:
             return (timezone.now() - obj.start_time).total_seconds()
         return 0
-    
+
     def get_is_active(self, obj):
         """Simplified active check"""
         if obj.is_live:
@@ -400,22 +400,22 @@ class LiveEventSerializer(serializers.ModelSerializer):
         if obj.end_time:
             return (timezone.now() - obj.end_time).total_seconds() < 86400  # 24 hours
         return False
-    
+
     def validate_youtube_url(self, value):
         """Comprehensive YouTube URL validation"""
         if not value:
             raise serializers.ValidationError("YouTube URL is required")
-        
+
         # Normalize URL by adding https:// if missing
         if not value.startswith(('http://', 'https://')):
             value = f'https://{value}'
-        
+
         # Validate URL structure
         if not any(domain in value for domain in ['youtube.com', 'youtu.be']):
             raise serializers.ValidationError(
                 "URL must be from youtube.com or youtu.be"
             )
-        
+
         # Extract and validate video ID
         video_id = self.extract_youtube_id(value)
         if not video_id:
@@ -425,15 +425,15 @@ class LiveEventSerializer(serializers.ModelSerializer):
                 "- https://youtu.be/VIDEO_ID\n"
                 "- https://www.youtube.com/watch?v=VIDEO_ID"
             )
-        
+
         # Additional validation for live streams
         if not self.is_live_stream_url(value):
             raise serializers.ValidationError(
                 "URL must be a YouTube live stream (should contain /live/ or livestream parameters)"
             )
-        
+
         return value
-    
+
     @staticmethod
     def extract_youtube_id(url):
         """
@@ -447,13 +447,13 @@ class LiveEventSerializer(serializers.ModelSerializer):
             r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([^?]{11})',
             r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/v\/([^?]{11})'
         ]
-        
+
         for pattern in patterns:
             match = re.search(pattern, url)
             if match:
                 return match.group(1)
         return None
-    
+
     @staticmethod
     def is_live_stream_url(url):
         """Check if URL appears to be a live stream"""
@@ -464,7 +464,7 @@ class LiveEventSerializer(serializers.ModelSerializer):
             '&live=1'
         ]
         return any(indicator in url for indicator in live_indicators)
-    
+
     def validate(self, data):
         """Final validation before saving"""
         # Ensure title is provided
@@ -472,26 +472,26 @@ class LiveEventSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'title': 'Title is required'
             })
-        
+
         # Ensure description is not too long
         if data.get('description', '').strip() and len(data['description']) > 1000:
             raise serializers.ValidationError({
                 'description': 'Description cannot exceed 1000 characters'
             })
-        
+
         return data
-    
+
     def create(self, validated_data):
         """Custom create method with all necessary fields"""
         request = self.context.get('request')
         url = validated_data['youtube_url']
         video_id = self.extract_youtube_id(url)
-        
+
         if not video_id:
             raise serializers.ValidationError({
                 'youtube_url': 'Could not extract valid video ID'
             })
-        
+
         # Create the event instance
         event = LiveEvent.objects.create(
             user=request.user,
@@ -503,7 +503,7 @@ class LiveEventSerializer(serializers.ModelSerializer):
             start_time=timezone.now(),
             viewers_count=0
         )
-        
+
         # Return the fully serialized event
         return LiveEvent.objects.get(id=event.id)
 
