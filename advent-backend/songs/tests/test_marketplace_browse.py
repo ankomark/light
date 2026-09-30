@@ -126,6 +126,12 @@ class OrderMemoryTests(APITestCase):
         totals = {t['currency']: Decimal(t['amount']) for t in res.data['totals']}
         self.assertEqual(totals, {'KES': Decimal('2400.00'), 'USD': Decimal('90.00')})
 
+    def test_a_line_taken_down_by_a_moderator_reads_as_not_for_sale(self):
+        Product.objects.filter(pk=self.dollars.pk).update(is_removed=True)
+        res = self.client.get('/api/marketplace/cart/my_cart/')
+        lines = {i['product']['title']: i['product']['is_available'] for i in res.data['items']}
+        self.assertEqual(lines, {'Hymnal': True, 'Guitar': False})
+
     def test_an_order_remembers_what_was_bought_after_it_is_deleted(self):
         order_id = self.client.post('/api/marketplace/cart/checkout/').data['id']
         self.shillings.delete()

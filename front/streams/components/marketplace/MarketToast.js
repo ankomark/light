@@ -3,27 +3,44 @@
 //
 //   const [toast, showToast] = useMarketToast();
 //   showToast('Added to cart');            // or showToast(text, { error: true })
+//   showToast('Removed', { action: { label: 'Undo', onPress } })   // a button on it
 //   return (<>…{toast}</>);
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, AccessibilityInfo } from 'react-native';
+import { View, Text, StyleSheet, AccessibilityInfo, TouchableOpacity } from 'react-native';
 
 export default function useMarketToast() {
   const [message, setMessage] = useState(null);
   const timer = useRef(null);
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const show = useCallback((text, { error = false, ms = 2400 } = {}) => {
+  const show = useCallback((text, { error = false, ms, action = null } = {}) => {
     if (!text) return;
     clearTimeout(timer.current);
-    setMessage({ text, error });
+    setMessage({ text, error, action });
     AccessibilityInfo.announceForAccessibility?.(text);
-    timer.current = setTimeout(() => setMessage(null), ms);
+    // Longer when there is something to tap on it.
+    timer.current = setTimeout(() => setMessage(null), ms ?? (action ? 5000 : 2400));
   }, []);
 
   const node = message ? (
-    <View style={styles.wrap} pointerEvents="none" testID="market-toast">
-      <View style={[styles.toast, message.error && styles.error]}>
+    <View style={styles.wrap} pointerEvents="box-none" testID="market-toast">
+      <View style={[styles.toast, message.error && styles.error, message.action && styles.withAction]}
+            pointerEvents={message.action ? 'auto' : 'none'}>
         <Text style={styles.text}>{message.text}</Text>
+        {!!message.action && (
+          <TouchableOpacity
+            onPress={() => {
+              clearTimeout(timer.current);
+              setMessage(null);
+              message.action.onPress();
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            testID="market-toast-action"
+          >
+            <Text style={styles.action}>{message.action.label}</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   ) : null;
@@ -39,5 +56,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,196,107,0.5)',
   },
   error: { borderColor: 'rgba(255,99,71,0.8)' },
+  withAction: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  action: { color: '#FFC46B', fontSize: 14, fontWeight: '800' },
   text: { color: '#FFFFFF', fontSize: 14, textAlign: 'center' },
 });

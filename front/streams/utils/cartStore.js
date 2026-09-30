@@ -73,11 +73,46 @@ export const useMarket = () => {
 
 // ── the cart ─────────────────────────────────────────────────────────────────
 
+// Changes on their way to the server. While any is, a cart read from the
+// server may predate it, so it is not shown; one more read follows the last.
+let busy = 0;
+let rereadAfter = false;
+let settled = [];
+const working = async (fn) => {
+  busy += 1;
+  try {
+    const out = await fn();
+    // It reached the server: whatever was said about being offline is over.
+    if (state.cartOffline) { state.cartOffline = false; emit(); }
+    return out;
+  } finally {
+    busy -= 1;
+    if (!busy) { settled.forEach((fn) => fn()); settled = []; }
+    if (!busy && rereadAfter) {
+      rereadAfter = false;
+      refreshCart().catch(() => {});
+    }
+  }
+};
+
+/** Whether a change to the cart is still on its way to the server. */
+export const cartBusy = () => busy > 0;
+
+/** Resolves once every change on its way to the server has got there (or
+ *  been refused), so checkout orders what the phone shows. */
+export const whenCartSettled = () => (busy ? new Promise((done) => { settled.push(done); }) : Promise.resolve());
+
 /** Ask the server for the cart. Offline, the kept one stays and says so. */
 export const refreshCart = async () => {
   try {
     const cart = await fetchCart();
     state.cartOffline = false;
+    if (busy) {
+      // Older than a change in flight: keep what is shown, read again after.
+      rereadAfter = true;
+      emit();
+      return state.cart;
+    }
     setCart(cart);
     return cart;
   } catch (e) {
@@ -93,47 +128,78 @@ const leanProduct = (p) => ({
   seller: p.seller, images: (p.images || []).slice(0, 1),
 });
 
+/** Change only the lines `fn` changes, leaving everything else as it is
+ *  now (not as it was when the change began). */
+const editLines = (fn) => setCart({ ...(state.cart || {}), items: fn(state.cart?.items || []) });
+
 /** Put `quantity` of `product` in the cart. Shown at once; throws (after
- *  taking it back) when the server refuses — the error says why. */
+ *  taking back just this) when the server refuses; the error says why. */
 export const addProductToCart = async (product, quantity = 1) => {
-  const before = state.cart;
-  const items = [...(before?.items || [])];
-  const at = items.findIndex((i) => i.product?.id === product.id);
-  if (at >= 0) items[at] = { ...items[at], quantity: items[at].quantity + quantity };
-  else items.unshift({ id: `new-${product.id}`, product: leanProduct(product), quantity, pending: true });
-  setCart({ ...(before || {}), items });
+  const had = (state.cart?.items || []).some((i) => i.product?.id === product.id);
+  editLines((items) => (had
+    ? items.map((i) => (i.product?.id === product.id ? { ...i, quantity: i.quantity + quantity } : i))
+    : [{ id: `new-${product.id}`, product: leanProduct(product), quantity, pending: true }, ...items]));
   try {
-    await addToCart(product.id, quantity);
+    await working(() => addToCart(product.id, quantity));
     // The real line (its id, the stock now) comes with the server's cart.
-    refreshCart().catch(() => {});
+    rereadAfter = true;
+    if (!busy) { rereadAfter = false; refreshCart().catch(() => {}); }
   } catch (e) {
-    setCart(before);
+    editLines((items) => items
+      .map((i) => (i.product?.id === product.id ? { ...i, quantity: i.quantity - quantity } : i))
+      .filter((i) => i.quantity > 0));
     throw e;
   }
 };
 
-export const setCartQuantity = async (item, quantity) => {
-  if (quantity < 1) return;
-  const before = state.cart;
-  setCart({
-    ...before,
-    items: (before?.items || []).map((i) => (i.id === item.id ? { ...i, quantity } : i)),
-  });
-  try {
-    await updateCartItem(item.id, quantity);
-  } catch (e) {
-    setCart(before);
-    throw e;
+// Quantity changes, per line: the newest number wins, and they go one at a
+// time, so quick taps never reach the server out of order. A refusal puts
+// back the last number the server took, for that line only.
+const sends = new Map();   // line id -> { want, confirmed, running }
+
+export const setCartQuantity = (item, quantity) => {
+  if (quantity < 1) return Promise.resolve();
+  let send = sends.get(item.id);
+  if (!send) {
+    const now = (state.cart?.items || []).find((i) => i.id === item.id);
+    send = { confirmed: now ? now.quantity : item.quantity, want: quantity, running: null };
+    sends.set(item.id, send);
   }
+  send.want = quantity;
+  editLines((items) => items.map((i) => (i.id === item.id ? { ...i, quantity } : i)));
+  if (!send.running) {
+    send.running = working(async () => {
+      try {
+        while (send.want !== send.confirmed) {
+          const value = send.want;
+          await updateCartItem(item.id, value);
+          send.confirmed = value;
+        }
+      } catch (e) {
+        const back = send.confirmed;
+        editLines((items) => items.map((i) => (i.id === item.id ? { ...i, quantity: back } : i)));
+        throw e;
+      } finally {
+        sends.delete(item.id);
+      }
+    });
+  }
+  return send.running;
 };
 
 export const removeCartLine = async (item) => {
-  const before = state.cart;
-  setCart({ ...before, items: (before?.items || []).filter((i) => i.id !== item.id) });
+  const at = (state.cart?.items || []).findIndex((i) => i.id === item.id);
+  const line = at >= 0 ? state.cart.items[at] : item;
+  editLines((items) => items.filter((i) => i.id !== item.id));
   try {
-    await removeFromCart(item.id);
+    await working(() => removeFromCart(item.id));
   } catch (e) {
-    setCart(before);
+    // Back where it was, among the lines as they are now.
+    editLines((items) => {
+      const next = [...items];
+      next.splice(Math.max(0, Math.min(at, next.length)), 0, line);
+      return next;
+    });
     throw e;
   }
 };
@@ -179,6 +245,10 @@ export const rememberViewed = (product) => {
 
 /** For tests. */
 export const resetMarketStore = () => {
+  busy = 0;
+  rereadAfter = false;
+  settled = [];
+  sends.clear();
   state.user = undefined;
   state.cart = null;
   state.cartOffline = false;

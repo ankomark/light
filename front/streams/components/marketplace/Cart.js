@@ -1,7 +1,11 @@
 // The cart: what is in it opens at once from the phone, every change shows at
 // once, and the server's answer follows (utils/cartStore.js). Offline, the
 // cart is still the cart — it says it is offline, and checkout waits.
-import React, { useEffect, useState } from 'react';
+//
+// A line that can no longer be bought (sold out, taken off sale, deleted)
+// says so and is left out of the total; checkout waits until it is removed,
+// rather than failing at the server. Removing a line can be undone.
+import React, { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../../context/I18nContext';
 import {
   View,
@@ -20,11 +24,16 @@ import { checkoutCart } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import {
   useMarket, useMarketUser, refreshCart, setCartQuantity, removeCartLine, emptyCart,
+  addProductToCart, whenCartSettled,
 } from '../../utils/cartStore';
 import { formatPrice, formatTotals, cartTotals, marketError } from '../../utils/market';
 import useMarketToast from './MarketToast';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
+
+const stockOf = (item) => item.product?.quantity ?? 0;
+/** Can this line still be bought at all? */
+const buyable = (item) => !!item.product && item.product.is_available !== false && stockOf(item) > 0;
 
 const Cart = () => {
   const { t } = useI18n();
@@ -34,6 +43,8 @@ const Cart = () => {
   const { cart, cartOffline } = useMarket();
   const [refreshing, setRefreshing] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
+  // A second tap before the first has re-rendered must not make a second order.
+  const ordering = useRef(false);
   const [toast, showToast] = useMarketToast();
   const cartItems = cart?.items || [];
 
@@ -57,7 +68,20 @@ const Cart = () => {
 
   const handleRemoveItem = async (item) => {
     try {
-      await removeCartLine(item);
+      const removal = removeCartLine(item);
+      if (item.product) {
+        showToast(t('market.cart.removed'), {
+          action: {
+            label: t('market.cart.undo'),
+            onPress: () => {
+              addProductToCart(item.product, item.quantity).catch((e) => {
+                showToast(marketError(e, t('market.product.addToCartFailed')), { error: true });
+              });
+            },
+          },
+        });
+      }
+      await removal;
     } catch (e) {
       showToast(marketError(e, t('market.cart.removeFailed')), { error: true });
     }
@@ -86,8 +110,12 @@ const Cart = () => {
       ]);
       return;
     }
+    if (ordering.current) return;
+    ordering.current = true;
     try {
       setCheckingOut(true);
+      // Quantities still on their way go first: the order is what is shown.
+      await whenCartSettled();
       const order = await checkoutCart();
       emptyCart();
       // The order comes with the answer: the next screen shows it at once.
@@ -96,8 +124,13 @@ const Cart = () => {
       showToast(marketError(error, t('market.cart.checkoutFailed')), { error: true });
       refreshCart().catch(() => {});
     } finally {
+      ordering.current = false;
       setCheckingOut(false);
     }
+  };
+
+  const openProduct = (item) => {
+    if (item.product?.slug) navigation.navigate('ProductDetail', { slug: item.product.slug, preview: item.product });
   };
 
   if (!cart && currentUser && !cartOffline) {
@@ -129,8 +162,12 @@ const Cart = () => {
     );
   }
 
-  const totals = cartTotals(cart);
-  const hasStockProblem = cartItems.some((i) => i.quantity > (i.product?.quantity ?? 0));
+  // What can be bought is what is added up.
+  const totals = cartTotals({ items: cartItems.filter(buyable) });
+  const hasGone = cartItems.some((i) => !buyable(i));
+  const hasStockProblem = cartItems.some((i) => buyable(i) && i.quantity > stockOf(i));
+  const adding = cartItems.some((i) => i.pending);
+  const blocked = cartOffline || checkingOut || hasGone || hasStockProblem || adding;
 
   return (
     <View style={styles.container}>
@@ -144,11 +181,14 @@ const Cart = () => {
         data={cartItems}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => {
-          const stock = item.product?.quantity ?? 0;
+          const stock = stockOf(item);
+          const canBuy = buyable(item);
           // A line still on its way to the server has no id to change yet.
           const settled = !item.pending;
           return (
-            <View style={styles.cartItem} testID={`cart-line-${item.product?.id}`}>
+            <View style={[styles.cartItem, !canBuy && styles.cartItemGone]} testID={`cart-line-${item.product?.id}`}>
+              <TouchableOpacity onPress={() => openProduct(item)} disabled={!item.product?.slug}
+                                accessibilityRole="link" testID={`cart-open-${item.product?.id}`}>
               <Image
                 source={item.product?.images?.[0]?.image_url ? { uri: item.product.images[0].image_url } : PLACEHOLDER_IMAGE}
                 placeholder={PLACEHOLDER_IMAGE}
@@ -156,8 +196,16 @@ const Cart = () => {
                 transition={150}
                 style={styles.productImage}
               />
+              </TouchableOpacity>
               <View style={styles.itemDetails}>
-                <Text style={styles.productTitle} numberOfLines={1}>{item.product?.title || t('market.unavailableProduct')}</Text>
+                <Text style={styles.productTitle} numberOfLines={1} onPress={() => openProduct(item)}>
+                  {item.product?.title || t('market.unavailableProduct')}
+                </Text>
+                {!!item.product?.seller?.username && (
+                  <Text style={styles.sellerName} numberOfLines={1}>
+                    {t('market.product.soldBy', { name: item.product.seller.username })}
+                  </Text>
+                )}
 
                 <View style={styles.priceContainer}>
                   <Text style={styles.price}>
@@ -179,18 +227,22 @@ const Cart = () => {
                     <TouchableOpacity
                       style={styles.qtyBtn}
                       onPress={() => handleSetQuantity(item, item.quantity + 1)}
-                      disabled={!settled || item.quantity >= stock}
+                      disabled={!settled || !canBuy || item.quantity >= stock}
                       hitSlop={6}
                       accessibilityRole="button"
                       accessibilityLabel={t('market.cart.more')}
                       testID={`cart-more-${item.product?.id}`}
                     >
-                      <Icon name="plus" size={12} color={!settled || item.quantity >= stock ? '#ccc' : '#1D478B'} />
+                      <Icon name="plus" size={12} color={!settled || !canBuy || item.quantity >= stock ? '#ccc' : '#1D478B'} />
                     </TouchableOpacity>
                   </View>
                 </View>
 
-                {item.quantity > stock && (
+                {!canBuy ? (
+                  <Text style={styles.stockWarn} testID={`cart-gone-${item.product?.id}`}>
+                    {t('market.cart.goneLine')}
+                  </Text>
+                ) : item.quantity > stock && (
                   <Text style={styles.stockWarn}>
                     {t('market.cart.exceedsStock', { n: stock })}
                   </Text>
@@ -237,15 +289,16 @@ const Cart = () => {
       </View>
 
       <TouchableOpacity
-        style={[styles.checkoutButton, (cartOffline || checkingOut || hasStockProblem) && styles.checkoutButtonDisabled]}
+        style={[styles.checkoutButton, blocked && styles.checkoutButtonDisabled]}
         onPress={handleCheckout}
-        disabled={cartOffline || checkingOut || hasStockProblem}
+        disabled={blocked}
         testID="cart-checkout"
       >
         <Text style={styles.checkoutButtonText}>
           {cartOffline ? t('market.cart.offlineButton')
-            : hasStockProblem ? t('market.cart.fixStock')
-              : t('market.cart.continueToSellers')}
+            : hasGone ? t('market.cart.removeGone')
+              : hasStockProblem ? t('market.cart.fixStock')
+                : t('market.cart.continueToSellers')}
         </Text>
       </TouchableOpacity>
 
@@ -331,6 +384,8 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     justifyContent: 'space-between',
   },
+  cartItemGone: { opacity: 0.75 },
+  sellerName: { fontSize: 12, color: '#777', marginBottom: 2 },
   productTitle: {
     fontSize: 16,
     fontWeight: '500',

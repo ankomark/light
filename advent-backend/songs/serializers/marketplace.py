@@ -257,6 +257,9 @@ class CartLineProductSerializer(serializers.ModelSerializer):
     so it adds no queries."""
     seller = serializers.SerializerMethodField()
     images = ProductImageSerializer(many=True, read_only=True)
+    # Taken down by a moderator is not for sale either: the cart says so
+    # rather than letting checkout fail on it.
+    is_available = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -270,6 +273,9 @@ class CartLineProductSerializer(serializers.ModelSerializer):
             return SimpleUserSerializer(obj.seller, context=self.context).data
         except AttributeError:
             return None
+
+    def get_is_available(self, obj):
+        return bool(obj.is_available and not obj.is_removed)
 
 
 class CartItemSerializer(serializers.ModelSerializer):
