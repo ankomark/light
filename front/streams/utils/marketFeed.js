@@ -19,23 +19,53 @@ const PHOTOS_AHEAD = 12;
 
 const listOf = (data) => (Array.isArray(data) ? data : (data?.results || []));
 
-/** { products, next, categories } — whichever of the two arrived. Throws
- *  only if neither did (so a cached page is kept rather than emptied). */
+const STRIP_SIZE = 10;
+const CATEGORY_ROWS = 3;
+
+/** { products, next, categories, popular, rows } — whatever arrived. Throws
+ *  only if the products and the categories both failed (so a kept page is
+ *  kept rather than emptied).
+ *
+ *  `popular` (most viewed) is the spotlight; `rows` are the fullest
+ *  categories, each a row of its own that scrolls sideways. */
 export const loadMarketHome = async () => {
-  const [products, categories] = await Promise.allSettled([
+  const [products, categories, popular] = await Promise.allSettled([
     fetchProducts(1, { page_size: HOME_PAGE_SIZE }),
     fetchProductCategories(),
+    fetchProducts(1, { page_size: STRIP_SIZE, sort: 'popular' }),
   ]);
   if (products.status === 'rejected' && categories.status === 'rejected') throw products.reason;
-  const cats = categories.status === 'fulfilled' ? listOf(categories.value) : null;
+  const cats = categories.status === 'fulfilled'
+    // Only categories with something in them (older servers send no count).
+    ? listOf(categories.value).filter((c) => c.product_count == null || c.product_count > 0)
+    : null;
+
+  // A row for each of the fullest categories (two or more things in them).
+  const top = (cats || []).filter((c) => (c.product_count ?? 0) >= 2).slice(0, CATEGORY_ROWS);
+  const rows = (await Promise.allSettled(
+    top.map((c) => fetchProducts(1, { page_size: STRIP_SIZE, category: c.id })),
+  )).map((r, i) => ({ category: top[i], products: r.status === 'fulfilled' ? r.value?.results || [] : [] }))
+    .filter((r) => r.products.length);
+
   return {
     products: products.status === 'fulfilled' ? products.value?.results || [] : null,
     next: products.status === 'fulfilled' ? !!products.value?.next : false,
-    // Only categories with something in them (older servers send no count).
-    categories: cats ? cats.filter((c) => c.product_count == null || c.product_count > 0) : null,
+    categories: cats,
+    popular: popular.status === 'fulfilled' ? popular.value?.results || [] : null,
+    rows: cats ? rows : null,
     at: Date.now(),
   };
 };
+
+/** A fresh load laid over the kept one: what failed this time keeps its
+ *  last copy instead of going empty. */
+export const mergeHome = (fresh, kept) => ({
+  ...fresh,
+  products: fresh.products ?? kept?.products ?? [],
+  categories: fresh.categories ?? kept?.categories ?? [],
+  popular: fresh.popular ?? kept?.popular ?? [],
+  rows: fresh.rows ?? kept?.rows ?? [],
+});
 
 /** The photos of the first products, fetched into the image cache. */
 export const prefetchPhotos = (products = []) => {
@@ -48,15 +78,9 @@ export const warmMarket = async () => {
   try {
     const kept = await readCache(MARKET_HOME_KEY, 7 * 24 * 60 * 60 * 1000);
     if (kept?.at && Date.now() - kept.at < FRESH_MS) return kept;
-    const fresh = await loadMarketHome();
-    // Keep what did not come this time from the copy already kept.
-    const merged = {
-      ...fresh,
-      products: fresh.products ?? kept?.products ?? [],
-      categories: fresh.categories ?? kept?.categories ?? [],
-    };
+    const merged = mergeHome(await loadMarketHome(), kept);
     writeCache(MARKET_HOME_KEY, merged);
-    prefetchPhotos(merged.products);
+    prefetchPhotos([...(merged.popular || []).slice(0, 4), ...merged.products]);
     return merged;
   } catch {
     return null;   // offline: the page will try again when opened

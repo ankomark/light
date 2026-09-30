@@ -21,6 +21,10 @@ jest.mock('../../../context/I18nContext', () => ({ useI18n: () => ({ t: mockT })
 const mockNav = { navigate: jest.fn(), goBack: jest.fn(), addListener: () => () => {} };
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => mockNav, useRoute: () => ({ params: {} }) }));
 jest.mock('react-native-vector-icons/FontAwesome', () => () => null);
+jest.mock('@expo/vector-icons', () => {
+  const { View } = require('react-native');
+  return { MaterialCommunityIcons: ({ name }) => <View testID={`mci-${name}`} /> };
+});
 const mockPrefetch = jest.fn(() => Promise.resolve(true));
 jest.mock('expo-image', () => {
   const { View } = require('react-native');
@@ -58,7 +62,7 @@ test('products still show when the categories fail', async () => {
   mockApi.fetchProductCategories.mockRejectedValue(new Error('500'));
   const screen = render(<MarketplaceHome />);
   await waitFor(() => expect(screen.getByTestId('home-product-1')).toBeTruthy());
-  expect(mockPrefetch).toHaveBeenCalledWith(['https://cdn/1.jpg']);
+  expect(mockPrefetch).toHaveBeenCalledWith(expect.arrayContaining(['https://cdn/1.jpg']));
 });
 
 test('the grid goes on as it is scrolled', async () => {
@@ -71,6 +75,31 @@ test('the grid goes on as it is scrolled', async () => {
   await act(async () => { fireEvent(screen.getByTestId('market-home'), 'endReached'); });
   await waitFor(() => expect(screen.getByTestId('home-product-2')).toBeTruthy());
   expect(mockApi.fetchProducts).toHaveBeenLastCalledWith(2, { page_size: 20 });
+});
+
+test('a spotlight, rows that scroll sideways and category chips with their own icons', async () => {
+  const cats = [
+    { id: 1, name: 'Electronics', product_count: 4 },
+    { id: 2, name: 'Clothing', product_count: 1 },
+  ];
+  mockApi.fetchProducts.mockImplementation(async (page, opts = {}) => {
+    if (opts.sort === 'popular') return { results: [product(50), product(51)], next: null };
+    if (opts.category === 1) return { results: [product(60), product(61)], next: null };
+    return { results: [1, 2, 3, 4, 5].map(product), next: null };
+  });
+  mockApi.fetchProductCategories.mockResolvedValue(cats);
+  const screen = render(<MarketplaceHome />);
+  await waitFor(() => expect(screen.getByTestId('spot-50')).toBeTruthy());
+  expect(screen.getByTestId('strip-new-1')).toBeTruthy();
+  expect(screen.getByTestId('strip-cat-1-60')).toBeTruthy();
+  // Only categories with two or more things get a row of their own.
+  expect(screen.queryByTestId('strip-cat-2')).toBeNull();
+  expect(mockApi.fetchProducts).not.toHaveBeenCalledWith(1, expect.objectContaining({ category: 2 }));
+  // An electronics chip shows a circuit chip; clothing a T-shirt.
+  expect(screen.getAllByTestId('mci-chip').length).toBeGreaterThan(0);
+  expect(screen.getAllByTestId('mci-tshirt-crew').length).toBeGreaterThan(0);
+  fireEvent.press(screen.getByTestId('home-category-2'));
+  expect(mockNav.navigate).toHaveBeenCalledWith('ProductList', { categoryId: 2, categoryName: 'Clothing' });
 });
 
 describe('the background warm-up', () => {
