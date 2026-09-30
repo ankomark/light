@@ -242,3 +242,32 @@ class ProductPageSpeedTests(APITestCase):
             res = self.client.get('/api/marketplace/products/?page_size=20')
         self.assertEqual(len(res.data['results']), 20)
         self.assertLessEqual(len(ctx.captured_queries), 6)
+
+
+class NewProductIsForSaleTests(APITestCase):
+    """A product made from the app is for sale. The form is multipart (it
+    carries photos), and a true/false field it leaves out used to be read as
+    an unticked box: every product was saved not for sale, and so never
+    shown to anyone browsing."""
+
+    def test_a_product_made_without_saying_is_for_sale(self):
+        seller = User.objects.create_user('ivy', 'i@x.com', 'pw')
+        self.client.force_authenticate(seller)
+        res = self.client.post('/api/marketplace/products/', {
+            'title': 'Mechadisek', 'description': 'd', 'price': '10.00', 'currency': 'KES',
+            'quantity': '80', 'condition': 'NEW', 'category': 'Music',
+        }, format='multipart')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertTrue(Product.objects.get(title='Mechadisek').is_available)
+        buyer = User.objects.create_user('mark', 'm@x.com', 'pw')
+        self.client.force_authenticate(buyer)
+        titles = [p['title'] for p in self.client.get('/api/marketplace/products/').data['results']]
+        self.assertIn('Mechadisek', titles)
+
+    def test_an_edit_that_leaves_it_out_does_not_take_it_off_sale(self):
+        seller = User.objects.create_user('ivy', 'i@x.com', 'pw')
+        p = make(seller, 'Hymnal')
+        self.client.force_authenticate(seller)
+        self.client.patch(f'/api/marketplace/products/{p.slug}/', {'title': 'Hymnal 2'}, format='multipart')
+        p.refresh_from_db()
+        self.assertTrue(p.is_available)

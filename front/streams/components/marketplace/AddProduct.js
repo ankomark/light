@@ -215,6 +215,9 @@ const AddProduct = () => {
       data.append('condition', formData.condition);
       data.append('category', formData.category.trim());
       data.append('is_digital', formData.is_digital.toString());
+      // Said outright: a multipart form that leaves a true/false field out
+      // used to save the product as not for sale.
+      data.append('is_available', 'true');
       data.append('whatsapp_number', formData.whatsapp_number);
       data.append('contact_number', formData.contact_number);
       data.append('location', formData.location);

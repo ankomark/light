@@ -85,6 +85,13 @@ class ProductSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+    # Declared, with their defaults, because the form that makes a product is
+    # multipart (it carries photos): a true/false field left out of a
+    # multipart form reads as an unticked box, so every product came out
+    # "not for sale" and was never shown to anyone browsing. Left out of a
+    # partial update (an edit), they are simply not changed.
+    is_available = serializers.BooleanField(required=False, default=True)
+    is_digital = serializers.BooleanField(required=False, default=False)
     is_owner = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
