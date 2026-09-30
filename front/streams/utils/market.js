@@ -73,10 +73,15 @@ export const groupBySeller = (items = []) => {
     group.items.push(item);
     if (!group.product?.id && item.product) group.product = item.product;
   });
-  return [...groups.values()].map((g) => ({
-    ...g,
-    totals: totalsOf(g.items.map((i) => [lineCurrency(i), lineUnit(i) * i.quantity])),
-  }));
+  return [...groups.values()].map((g) => {
+    // Lines called off are not owed; a part called off altogether keeps
+    // its old total, to say what it was.
+    const live = g.items.filter((i) => !i.cancelled_at);
+    return {
+      ...g,
+      totals: totalsOf((live.length ? live : g.items).map((i) => [lineCurrency(i), lineUnit(i) * i.quantity])),
+    };
+  });
 };
 
 export const hasPaymentInfo = (p) =>

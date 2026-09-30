@@ -98,6 +98,35 @@ class OrderProgressTests(TwoSellerOrderMixin, APITestCase):
         self.post(self.b, 'cancel-part')
         self.assertEqual(self.status_(), 'CANCELLED')
 
+    def test_a_part_called_off_is_not_in_the_total(self, notify):
+        self.post(self.buyer, 'cancel-part', {'seller_id': self.b.id})
+        res = self.client.get(f'/api/marketplace/orders/{self.order.id}/')
+        self.assertEqual(res.data['totals'], [{'currency': 'KES', 'amount': '10.00'}])
+        # All called off: it still says what it came to.
+        self.post(self.a, 'cancel-part')
+        self.client.force_authenticate(self.buyer)
+        res = self.client.get(f'/api/marketplace/orders/{self.order.id}/')
+        self.assertEqual({t['currency'] for t in res.data['totals']}, {'KES', 'USD'})
+
+    def test_a_delivery_note_reaches_the_sellers_still_to_send(self, notify):
+        self.post(self.a, 'confirm-payment')
+        self.post(self.a, 'ship')
+        notify.reset_mock()
+        res = self.post(self.buyer, 'set-shipping', {'shipping_address': 'Kisumu, Oginga Odinga St'})
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data['shipping_address'], 'Kisumu, Oginga Odinga St')
+        told = [c[0][0] for c in notify.call_args_list]
+        self.assertEqual(told, [self.b])            # A has already sent theirs
+        # The same note again is not news.
+        notify.reset_mock()
+        self.post(self.buyer, 'set-shipping', {'shipping_address': 'Kisumu, Oginga Odinga St'})
+        notify.assert_not_called()
+
+    def test_a_delivery_note_is_text_of_a_sensible_length(self, notify):
+        self.assertEqual(self.post(self.buyer, 'set-shipping', {'shipping_address': 42}).status_code, 400)
+        self.assertEqual(self.post(self.buyer, 'set-shipping', {'shipping_address': 'x' * 501}).status_code, 400)
+        self.assertEqual(self.post(self.a, 'set-shipping', {'shipping_address': 'mine'}).status_code, 403)
+
     def test_the_right_people_hear(self, notify):
         self.post(self.a, 'confirm-payment')
         notify.assert_any_call(self.buyer, 'market_paid', mock.ANY, data={'type': 'market_paid', 'order_id': self.order.id})

@@ -407,10 +407,15 @@ class OrderSerializer(serializers.ModelSerializer):
     def get_totals(self, obj):
         """What the order comes to, per currency (see money_totals).
         `total_amount` is kept for older app builds; with mixed currencies it
-        is not a price in anything, and the app does not show it then."""
+        is not a price in anything, and the app does not show it then.
+
+        Lines called off are not owed: the total is what is still live. An
+        order called off altogether keeps its old total, to say what it was."""
+        items = list(obj.items.all())
+        live = [i for i in items if not i.cancelled_at] or items
         return money_totals(
             (i.currency or (i.product.currency if i.product else 'USD'), i.price_at_purchase * i.quantity)
-            for i in obj.items.all()
+            for i in live
         )
 
 

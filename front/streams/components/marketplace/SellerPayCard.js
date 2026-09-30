@@ -21,7 +21,7 @@ const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 /** The message a buyer sends a seller after paying them. */
 export const paidMessage = (t, orderId, group) => t('market.pay.whatsappMessage', {
   id: orderId,
-  items: group.items.map((i) => `${i.quantity}× ${lineTitle(i)}`).join(', '),
+  items: group.items.filter((i) => !i.cancelled_at).map((i) => `${i.quantity}× ${lineTitle(i)}`).join(', '),
   amount: formatTotals(group.totals),
 });
 
@@ -124,24 +124,29 @@ export default function SellerPayCard({
               style={styles.lineImage}
             />
             <View style={styles.lineTextWrap}>
-              <Text style={styles.lineTitle} numberOfLines={2}>
+              <Text style={[styles.lineTitle, !!item.cancelled_at && styles.lineOff]} numberOfLines={2}>
                 {lineTitle(item) || t('market.unavailableProduct')}
               </Text>
               <Text style={styles.lineMeta}>
                 {formatPrice(lineUnit(item), currency)} × {item.quantity}
               </Text>
             </View>
-            <Text style={styles.lineTotal}>{formatPrice(lineUnit(item) * item.quantity, currency)}</Text>
+            <Text style={[styles.lineTotal, !!item.cancelled_at && styles.lineOff]}>
+              {formatPrice(lineUnit(item) * item.quantity, currency)}
+            </Text>
           </View>
         );
       })}
 
+      {state !== 'cancelled' && (
       <View style={styles.subtotalRow}>
         <Text style={styles.subtotalLabel}>{t('market.checkout.payThisSeller')}</Text>
-        <Text style={styles.subtotalValue}>{formatTotals(group.totals)}</Text>
+        <Text style={styles.subtotalValue} testID={`seller-total-${group.sellerId}`}>{formatTotals(group.totals)}</Text>
       </View>
+      )}
 
-      {hasPaymentInfo(product) ? (
+      {/* Called off: nothing to pay, and no "I've paid" message to send. */}
+      {state === 'cancelled' ? null : hasPaymentInfo(product) ? (
         <View style={styles.payBox}>
           {product.mpesa_number ? <PaymentLine icon="mobile" label={t('market.pay.mpesa')} value={product.mpesa_number} onCopy={onCopy} /> : null}
           {product.till_number ? <PaymentLine icon="credit-card" label={t('market.pay.till')} value={product.till_number} onCopy={onCopy} /> : null}
@@ -152,6 +157,7 @@ export default function SellerPayCard({
         <Text style={styles.noPayNote}>{t('market.pay.none')}</Text>
       )}
 
+      {state !== 'cancelled' && (
       <View style={styles.contactRow}>
         <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtn]} onPress={openWhatsApp} activeOpacity={0.85} testID="seller-whatsapp">
           <Icon name="whatsapp" size={16} color="#fff" />
@@ -162,6 +168,7 @@ export default function SellerPayCard({
           <Text style={styles.contactBtnText}>{t('market.checkout.call')}</Text>
         </TouchableOpacity>
       </View>
+      )}
 
       {/* Only this seller can confirm their own lines — that's what releases
           the stock, since no payment processor tells us the money landed. */}
@@ -261,6 +268,7 @@ export default function SellerPayCard({
 
 const styles = StyleSheet.create({
   copyBtn: { padding: 6, marginLeft: 6 },
+  lineOff: { textDecorationLine: 'line-through', color: '#999' },
   partState: {
     flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10,
     paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#f2f7f4',

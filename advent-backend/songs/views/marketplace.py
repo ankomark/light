@@ -78,6 +78,9 @@ def _titles(items, limit=3):
     return ', '.join(names[:limit]) + (f' and {more} more' if more > 0 else '')
 
 
+SHIPPING_MAX = 500
+
+
 def tell_sellers_of_new_order(order):
     """Each seller hears of their own part of a new order."""
     by_seller = {}
@@ -715,18 +718,31 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
 
     @action(detail=True, methods=['post'], url_path='set-shipping')
     def set_shipping(self, request, pk=None):
-        """Buyer saves/updates the shipping address for their order."""
+        """Buyer saves/updates the delivery address or note for their order.
+        The sellers still to send something hear of it: it is where to send."""
         order = self.get_object()
         if order.buyer != request.user:
             return Response(
                 {"error": "Only the buyer can set the shipping address"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        address = request.data.get('shipping_address', '').strip()
+        address = request.data.get('shipping_address', '')
+        address = address.strip() if isinstance(address, str) else ''
         if not address:
             return Response({"error": "shipping_address is required"}, status=status.HTTP_400_BAD_REQUEST)
-        order.shipping_address = address
-        order.save(update_fields=['shipping_address'])
+        if len(address) > SHIPPING_MAX:
+            return Response({"error": f"Keep the delivery note under {SHIPPING_MAX} characters."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if order.status == 'CANCELLED':
+            return Response({"error": "This order was cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+        if address != order.shipping_address:
+            order.shipping_address = address
+            order.save(update_fields=['shipping_address'])
+            waiting = {i.seller for i in order.items.select_related('seller')
+                       if not (i.cancelled_at or i.shipped_at or i.delivered_at)}
+            for seller in waiting:
+                tell(seller, 'market_order',
+                     f'{order.buyer.username} added delivery details to order #{order.pk}.', order)
         return Response(OrderSerializer(order, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='confirm-payment')

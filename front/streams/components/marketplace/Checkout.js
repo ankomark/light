@@ -2,7 +2,11 @@
 // answer, so this opens at once; it is read again behind that. One card per
 // seller (SellerPayCard) — what to pay them, in their currency, how, and a
 // WhatsApp message already written to say it has been paid.
-import React, { useState, useEffect, useCallback } from 'react';
+//
+// The delivery note goes to the sellers still to send (the server tells
+// them). If it cannot be saved the buyer is told and stays here, rather than
+// leaving believing the sellers have their address.
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator,
@@ -12,22 +16,27 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchOrderById, apiRequest } from '../../services/api';
 import { useI18n } from '../../context/I18nContext';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
-import { formatTotals, orderTotals, groupBySeller } from '../../utils/market';
+import { formatTotals, orderTotals, groupBySeller, marketError } from '../../utils/market';
 import SellerPayCard from './SellerPayCard';
 import useMarketToast from './MarketToast';
+
+const NOTE_MAX = 500;
 
 const Checkout = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const { orderId, order: given } = useRoute().params ?? {};
+  const { orderId: paramId, order: given } = useRoute().params ?? {};
+  const orderId = paramId ?? given?.id;
   const [order, setOrder] = useState(given || null);
   const [failed, setFailed] = useState(false);
   const [address, setAddress] = useState(given?.shipping_address || '');
   const [savingAddress, setSavingAddress] = useState(false);
   const [toast, showToast] = useMarketToast();
+  const leaving = useRef(false);
 
   const load = useCallback(async () => {
     setFailed(false);
+    if (orderId == null) { setFailed(true); return; }
     try {
       const data = await fetchOrderById(orderId);
       setOrder(data);
@@ -39,22 +48,37 @@ const Checkout = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  const goToOrder = useCallback((latest) => {
+    navigation.replace('OrderDetail', { orderId, order: latest });
+  }, [navigation, orderId]);
+
   const handleDone = useCallback(async () => {
-    // Optionally save a delivery note/address for the seller's reference.
-    if (address.trim()) {
-      try {
-        setSavingAddress(true);
-        await apiRequest('post', `/marketplace/orders/${orderId}/set-shipping/`, {
-          shipping_address: address.trim(),
-        });
-      } catch {
-        // Non-fatal: the order still exists; the buyer has the seller's contact.
-      } finally {
-        setSavingAddress(false);
-      }
+    // One tap, one save: a second before the first re-renders does nothing.
+    if (leaving.current) return;
+    leaving.current = true;
+    const note = address.trim();
+    // A delivery note, for the sellers: saved only when there is a new one.
+    if (!note || note === (order?.shipping_address || '').trim()) {
+      goToOrder(order);
+      return;
     }
-    navigation.replace('OrderDetail', { orderId, order });
-  }, [address, orderId, order, navigation]);
+    setSavingAddress(true);
+    try {
+      const saved = await apiRequest('post', `/marketplace/orders/${orderId}/set-shipping/`, {
+        shipping_address: note,
+      });
+      goToOrder(saved?.id ? saved : { ...order, shipping_address: note });
+    } catch (e) {
+      leaving.current = false;
+      // Said, not swallowed: the sellers do not have it yet.
+      showToast(marketError(e, t('market.checkout.noteFailed')), {
+        error: true,
+        action: { label: t('market.checkout.skipNote'), onPress: () => goToOrder(order) },
+      });
+    } finally {
+      setSavingAddress(false);
+    }
+  }, [address, orderId, order, goToOrder, showToast, t]);
 
   if (!order) {
     return (
@@ -74,7 +98,11 @@ const Checkout = () => {
 
   return (
     <View style={styles.flex}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+        <Text style={styles.orderNumber} selectable testID="checkout-number">
+          {t('market.order.number', { id: order.id ?? orderId })}
+        </Text>
         <View style={styles.banner}>
           <Ionicons name="hand-right-outline" size={20} color={colors.primary} />
           <Text style={styles.bannerText}>
@@ -100,7 +128,9 @@ const Checkout = () => {
           placeholderTextColor={colors.placeholder}
           value={address}
           onChangeText={setAddress}
+          maxLength={NOTE_MAX}
           multiline
+          testID="checkout-note"
         />
 
         <TouchableOpacity style={styles.doneButton} onPress={handleDone} disabled={savingAddress} activeOpacity={0.85} testID="checkout-done">
@@ -122,6 +152,7 @@ const Checkout = () => {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   retry: { color: colors.primary, fontWeight: '700', marginTop: spacing.sm },
+  orderNumber: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm },
   container: { flex: 1, backgroundColor: 'transparent', padding: spacing.md },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent', gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textMuted },
