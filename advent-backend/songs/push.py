@@ -34,6 +34,7 @@ NOTIFICATION_TITLES = {
     'market_delivered': '\U0001f4e6 Delivered',
     'market_cancelled': '✖️ Order cancelled',
     'market_wish': '❤️ From your wishlist',
+    'test': '\U0001f514 Test notification',
 }
 
 # Maps a notification_type to the user-facing preference category that gates it.
@@ -87,6 +88,32 @@ NOTIFICATION_CATEGORIES = {
     'market_cancelled': 'marketplace',
     'market_wish': 'marketplace',
 }
+
+
+def quiet_now(prefs, now=None):
+    """Whether `prefs` asks for quiet at this moment (on the person's clock).
+    A window that crosses midnight (22:00 to 07:00) is the usual case."""
+    from datetime import timezone as dt_tz
+    from django.utils import timezone
+    if prefs is None or prefs.quiet_from is None or prefs.quiet_to is None:
+        return False
+    if prefs.quiet_from == prefs.quiet_to:
+        return False
+    now = now or timezone.now()
+    utc = now.astimezone(dt_tz.utc) if timezone.is_aware(now) else now
+    minute = (utc.hour * 60 + utc.minute + (prefs.utc_offset or 0)) % (24 * 60)
+    start, end = prefs.quiet_from, prefs.quiet_to
+    return start <= minute < end if start < end else (minute >= start or minute < end)
+
+
+def _quiet_user_ids(user_ids):
+    """Of these people, the ones in their quiet hours now."""
+    from .models import NotificationPreference
+    rows = NotificationPreference.objects.filter(
+        quiet_from__isnull=False, quiet_to__isnull=False,
+        **({'user_id__in': user_ids} if user_ids is not None else {}),
+    )
+    return {p.user_id for p in rows if quiet_now(p)}
 
 
 def _is_category_enabled(recipient, notification_type):
@@ -174,6 +201,10 @@ def notify_many(user_ids, notification_type, message, data=None, title=None):
     category = NOTIFICATION_CATEGORIES.get(notification_type)
     if category:
         tokens = tokens.exclude(**{f'user__notification_preference__{category}': False})
+        # Quiet hours hold back what can be switched off.
+        quiet = _quiet_user_ids(user_ids)
+        if quiet:
+            tokens = tokens.exclude(user_id__in=quiet)
     tokens = list(tokens.values_list('token', flat=True).distinct())
     if not tokens:
         return 0
@@ -208,6 +239,15 @@ def notify_user(recipient, notification_type, message, data=None, title=None,
             return
     elif not _is_category_enabled(recipient, notification_type):
         return
+    # Quiet hours hold back what can be switched off; security and account
+    # messages (no category) always come through.
+    if category or NOTIFICATION_CATEGORIES.get(notification_type):
+        try:
+            prefs = recipient.notification_preference
+        except Exception:  # noqa: BLE001 — no row: no quiet hours
+            prefs = None
+        if quiet_now(prefs):
+            return
 
     tokens = list(
         DeviceToken.objects.filter(user=recipient, is_active=True)
@@ -232,6 +272,9 @@ def notify_everyone(notification_type, message, data=None, exclude_ids=(), title
     category = NOTIFICATION_CATEGORIES.get(notification_type)
     if category:
         tokens = tokens.exclude(**{f'user__notification_preference__{category}': False})
+        quiet = _quiet_user_ids(None)
+        if quiet:
+            tokens = tokens.exclude(user_id__in=quiet)
     tokens = list(tokens.values_list('token', flat=True).distinct())
     title = title or NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
     for i in range(0, len(tokens), EXPO_BATCH):

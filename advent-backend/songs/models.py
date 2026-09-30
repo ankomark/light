@@ -1087,6 +1087,13 @@ class NotificationPreference(models.Model):
     # The marketplace: orders to sellers, their progress to buyers, and a
     # wishlisted item's price drop or return to stock.
     marketplace = models.BooleanField(default=True)
+    # Quiet hours: no pushes that can be switched off between these times,
+    # each in minutes after midnight on the person's own clock (utc_offset is
+    # their phone's, in minutes). None = no quiet hours. Security and account
+    # messages still come through.
+    quiet_from = models.PositiveSmallIntegerField(null=True, blank=True)
+    quiet_to = models.PositiveSmallIntegerField(null=True, blank=True)
+    utc_offset = models.SmallIntegerField(default=180)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

@@ -44,6 +44,7 @@ from .views import (
     RevokeSessionView,
     RevokeOtherSessionsView,
     ExportDataView,
+    TestPushView,
     AuthStatusView,
     CreatePaymentIntentView,
     StoryViewSet,
@@ -178,6 +179,7 @@ urlpatterns = [
     path('auth/sessions/revoke/', RevokeSessionView.as_view(), name='session-revoke'),
     path('auth/sessions/revoke-others/', RevokeOtherSessionsView.as_view(), name='session-revoke-others'),
     path('auth/export-data/', ExportDataView.as_view(), name='export-data'),
+    path('auth/test-push/', TestPushView.as_view(), name='test-push'),
     path('notification-preferences/', NotificationPreferenceView.as_view(), name='notification-preferences'),
     # The place the morning weather briefing is sent for.
     path('weather-place/', WeatherPlaceView.as_view(), name='weather-place'),

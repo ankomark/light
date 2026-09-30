@@ -137,9 +137,20 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         model = NotificationPreference
         fields = [
             'likes', 'comments', 'follows', 'messages', 'groups', 'communities',
-            'live', 'quiz', 'weather', 'verse', 'books', 'notices', 'marketplace', 'updated_at',
+            'live', 'quiz', 'weather', 'verse', 'books', 'notices', 'marketplace',
+            'quiet_from', 'quiet_to', 'utc_offset', 'updated_at',
         ]
         read_only_fields = ['updated_at']
+
+    def validate(self, data):
+        for field in ('quiet_from', 'quiet_to'):
+            value = data.get(field)
+            if value is not None and not 0 <= value < 24 * 60:
+                raise serializers.ValidationError({field: 'Minutes after midnight, 0 to 1439.'})
+        offset = data.get('utc_offset')
+        if offset is not None and not -14 * 60 <= offset <= 14 * 60:
+            raise serializers.ValidationError({'utc_offset': 'Not a time zone.'})
+        return data
 
 
 DAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')

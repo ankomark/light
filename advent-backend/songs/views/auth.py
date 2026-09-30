@@ -300,11 +300,11 @@ class SessionsView(APIView):
     def get(self, request):
         from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
         from django.utils import timezone
-        blacklisted = set(BlacklistedToken.objects.values_list('token_id', flat=True))
+        # Only this person's tokens, joined to the blacklist — reading every
+        # revoked token of every user into memory grew with the whole app.
         rows = (
             OutstandingToken.objects
-            .filter(user=request.user, expires_at__gt=timezone.now())
-            .exclude(id__in=blacklisted)
+            .filter(user=request.user, expires_at__gt=timezone.now(), blacklistedtoken__isnull=True)
             .order_by('-created_at')
         )
         current_jti = _refresh_jti(request.query_params.get('refresh'))
@@ -392,7 +392,62 @@ class ExportDataView(APIView):
                 for t in Track.objects.filter(artist=u)
             ],
         }
+        data.update(_more_to_export(u, iso))
         return Response(data)
+
+
+def _more_to_export(u, iso):
+    """The rest of what is theirs: the marketplace (what they bought, what
+    they sell, what they saved), the games, and their notification choices."""
+    from ..models import (
+        NotificationPreference, Order, Product, PuzzleProgress, QuizAttempt, Wishlist,
+    )
+    from ..scoring import coin_balance
+    from ..streaks import streak_for
+    prefs = NotificationPreference.objects.filter(user=u).first()
+    earned, spent, balance = coin_balance(u)
+    streak, best, _ = streak_for(u)
+    wishlist = Wishlist.objects.filter(user=u).first()
+    return {
+        'orders': [{
+            'id': o.id, 'status': o.status, 'created_at': iso(o.created_at),
+            'items': [{'title': i.title, 'quantity': i.quantity, 'price': str(i.price_at_purchase),
+                       'currency': i.currency} for i in o.items.all()],
+        } for o in Order.objects.filter(buyer=u).prefetch_related('items').order_by('-created_at')[:500]],
+        'products': [{
+            'title': p.title, 'price': str(p.price), 'currency': p.currency, 'quantity': p.quantity,
+            'created_at': iso(p.created_at),
+        } for p in Product.objects.filter(seller=u).order_by('-created_at')[:500]],
+        'wishlist': [p.title for p in (wishlist.products.all() if wishlist else [])],
+        'games': {
+            'coins_earned': earned, 'coins_spent': spent, 'coins': balance,
+            'day_streak': streak, 'best_day_streak': best,
+            'daily_quizzes': QuizAttempt.objects.filter(user=u).count(),
+            'puzzle_levels_finished': PuzzleProgress.objects.filter(user=u, is_complete=True).count(),
+        },
+        'notification_preferences': None if not prefs else {
+            f.name: getattr(prefs, f.name) for f in prefs._meta.fields
+            if f.name not in ('id', 'user', 'updated_at')
+        },
+    }
+
+
+class TestPushView(APIView):
+    """POST /auth/test-push/ — a push to my own devices, to see that they
+    arrive. Not held back by quiet hours or switches: it was asked for."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from ..models import DeviceToken
+        from ..push import notify_user
+        devices = DeviceToken.objects.filter(user=request.user, is_active=True).count()
+        if not devices:
+            return Response({'devices': 0, 'code': 'no_devices'})
+        if not cache.add(f'test-push:{request.user.pk}', 1, 30):
+            return Response({'error': 'Wait a moment before sending another.', 'code': 'too_soon'},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+        notify_user(request.user, 'test', 'Notifications are working on this device.')
+        return Response({'devices': devices})
 
 
 class DeactivateAccountView(APIView):

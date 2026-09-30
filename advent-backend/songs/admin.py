@@ -6,7 +6,7 @@ from .models import (
     GroupPost, GroupPostAttachment, ProductCategory, Product, ProductImage,
     Cart, CartItem, Order, OrderItem, ProductReview, Wishlist, LiveEvent,
     Report, AdminActionLog, Appeal, Role, LiveBroadcast, CoHostRequest, Publication,
-    Organization, ServiceVerification, ServiceReview,
+    Organization, ServiceVerification, ServiceReview, SellerProfile,
 )
 
 admin.site.register(LiveBroadcast)
@@ -195,6 +195,17 @@ admin.site.register(Order)
 admin.site.register(OrderItem)
 admin.site.register(ProductReview)
 admin.site.register(Wishlist)
+
+
+@admin.register(SellerProfile)
+class SellerProfileAdmin(admin.ModelAdmin):
+    """Sellers' saved details. The verified tick on their products and shop
+    is set here, once it is known who is selling."""
+    list_display = ('user', 'location', 'mpesa_number', 'is_verified', 'updated_at')
+    list_editable = ('is_verified',)
+    list_filter = ('is_verified',)
+    search_fields = ('user__username', 'location')
+    raw_id_fields = ('user',)
 admin.site.register(LiveEvent)
 
 # ── The quiz's question bank ─────────────────────────────────────────────────

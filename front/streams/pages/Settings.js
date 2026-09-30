@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import {
   View,
   Text,
@@ -29,9 +29,16 @@ import {
   fetchNotificationPreferences,
   updateNotificationPreferences,
   fetchSessions,
+  revokeSession,
   revokeOtherSessions,
   exportMyData,
+  sendTestPush,
 } from '../services/api';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import ChoiceSheet from '../components/ChoiceSheet';
+import { peekCache, writeCache, userKey, clearAllCaches } from '../utils/screenCache';
+import { useDownloadsSummary, removeAllDownloads } from '../utils/downloads';
 import {
   registerForPushNotifications,
   unregisterPushToken,
@@ -54,21 +61,10 @@ const STORE_URL =
     : `https://play.google.com/store/apps/details?id=${PACKAGE_ID}`;
 
 // Songs come in 64 / 128 / 256 kbps versions (utils/audioQuality.js).
-const AUDIO_QUALITY_LABELS = {
-  auto: 'Automatic',
-  high: 'High',
-  standard: 'Standard',
-  data_saver: 'Data saver',
-};
+// Each choice is named through t('settings.quality.<key>').
 const AUDIO_QUALITY_CYCLE = ['auto', 'high', 'standard', 'data_saver'];
-const DOWNLOAD_QUALITY_LABELS = { standard: 'Standard', high: 'High' };
 const DOWNLOAD_QUALITY_CYCLE = ['standard', 'high'];
 
-const VIDEO_QUALITY_LABELS = {
-  auto: 'Automatic',
-  hd: 'HD',
-  data_saver: 'Data saver',
-};
 const VIDEO_QUALITY_CYCLE = ['auto', 'hd', 'data_saver'];
 
 // User-facing notification categories (key must match the serializer fields).
@@ -104,9 +100,20 @@ const openLink = async (url, fallbackMsg, t) => {
 };
 
 // ── Reusable building blocks ────────────────────────────────────────────────
+// What is typed in the search box at the top: rows that do not match hide,
+// and a section with nothing left in it hides too.
+const SettingsSearch = React.createContext('');
+const matches = (q, ...texts) => !q || texts.some((x) => typeof x === 'string'
+  && x.toLowerCase().includes(q.toLowerCase()));
+const rowsOf = (children) => React.Children.toArray(children).flatMap((el) => (
+  el?.type === React.Fragment ? rowsOf(el.props.children) : [el]
+));
+
 const Section = ({ title, children }) => {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const q = useContext(SettingsSearch);
+  if (q && !rowsOf(children).some((el) => matches(q, el?.props?.label, el?.props?.sub, title))) return null;
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title.toUpperCase()}</Text>
@@ -115,9 +122,11 @@ const Section = ({ title, children }) => {
   );
 };
 
-const Row = ({ icon, iconColor, label, sub, right, onPress, last, danger }) => {
+const Row = ({ icon, iconColor, label, sub, right, onPress, last, danger, testID }) => {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const q = useContext(SettingsSearch);
+  if (!matches(q, label, sub)) return null;
   const content = (
     <View style={[styles.row, !last && styles.rowDivider]}>
       <View style={[styles.rowIcon, danger && styles.rowIconDanger]}>
@@ -142,11 +151,23 @@ const Row = ({ icon, iconColor, label, sub, right, onPress, last, danger }) => {
   );
   if (!onPress) return content;
   return (
-    <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
+    <TouchableOpacity activeOpacity={0.7} onPress={onPress} testID={testID} accessibilityRole="button">
       {content}
     </TouchableOpacity>
   );
 };
+
+/** "12.4 MB" */
+const formatBytes = (n) => {
+  if (!n) return '0 MB';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/** "22:00" from minutes after midnight. */
+const hhmm = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+const QUIET_FROM_CHOICES = [20, 21, 22, 23].map((h) => h * 60);
+const QUIET_TO_CHOICES = [5, 6, 7, 8].map((h) => h * 60);
 
 const THEME_CYCLE = ['system', 'light', 'dark'];
 
@@ -182,11 +203,22 @@ const Settings = () => {
   const [deactivatePw, setDeactivatePw] = useState('');
   const [deactivating, setDeactivating] = useState(false);
 
-  // Notification preferences (per-category). null until loaded.
-  const [notifPrefs, setNotifPrefs] = useState(null);
+  // Notification preferences (per-category): the last copy at once, the
+  // server's behind it — the switches used to sit disabled until it came.
+  const notifKey = userKey(currentUser?.id, 'settings:notif');
+  const [notifPrefs, setNotifPrefs] = useState(() => peekCache(notifKey));
 
-  // Security & sessions
-  const [sessionCount, setSessionCount] = useState(null);
+  // What the search box holds, and which list of choices is open.
+  const [query, setQuery] = useState('');
+  const [picker, setPicker] = useState(null);
+  const downloads = useDownloadsSummary();
+
+  // Security & sessions (devices signed in), kept like the switches.
+  const sessionsKey = userKey(currentUser?.id, 'settings:sessions');
+  const [sessions, setSessions] = useState(() => peekCache(sessionsKey));
+  const sessionCount = sessions ? sessions.length : null;
+  const [devicesVisible, setDevicesVisible] = useState(false);
+  const [showPw, setShowPw] = useState(false);
   const [revokingOthers, setRevokingOthers] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -196,8 +228,31 @@ const Settings = () => {
 
   const loadSessions = () => {
     fetchSessions()
-      .then((d) => setSessionCount(typeof d?.count === 'number' ? d.count : null))
-      .catch(() => setSessionCount(null));
+      .then((d) => {
+        const list = Array.isArray(d?.sessions) ? d.sessions : null;
+        setSessions(list);
+        if (list) writeCache(sessionsKey, list);
+      })
+      .catch(() => {});
+  };
+
+  const signOutDevice = (session) => {
+    Alert.alert(t('settings.devices.signOutTitle'), t('settings.devices.signOutBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('settings.devices.signOut'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await revokeSession(session.id);
+            setSessions((list) => (list || []).filter((x) => x.id !== session.id));
+            loadSessions();
+          } catch {
+            Alert.alert(t('common.error'), t('settings.revokeFailed'));
+          }
+        },
+      },
+    ]);
   };
   useEffect(() => { loadSessions(); }, []);
 
@@ -227,14 +282,26 @@ const Settings = () => {
     );
   };
 
+  // A file, not a message: a few years of posts and orders is far too long
+  // for a chat, and a file can be kept or opened on a computer.
   const handleExportData = async () => {
     setExporting(true);
     try {
       const data = await exportMyData();
-      await Share.share({
-        title: t('settings.exportTitle'),
-        message: JSON.stringify(data, null, 2),
-      });
+      const text = JSON.stringify(data, null, 2);
+      const day = new Date().toISOString().slice(0, 10);
+      const uri = `${FileSystem.cacheDirectory}${APP_NAME.replace(/\s+/g, '-')}-my-data-${day}.json`;
+      let shared = false;
+      try {
+        if (await Sharing.isAvailableAsync()) {
+          await FileSystem.writeAsStringAsync(uri, text);
+          await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: t('settings.exportTitle') });
+          shared = true;
+        }
+      } catch {
+        shared = false;
+      }
+      if (!shared) await Share.share({ title: t('settings.exportTitle'), message: text });
     } catch {
       Alert.alert(t('common.error'), t('settings.exportFailed'));
     } finally {
@@ -242,23 +309,99 @@ const Settings = () => {
     }
   };
 
+  const handleTestPush = async () => {
+    try {
+      const res = await sendTestPush();
+      Alert.alert(
+        t('settings.testPush.title'),
+        res?.devices ? t('settings.testPush.sent', { n: res.devices }) : t('settings.testPush.noDevices'),
+      );
+    } catch (e) {
+      Alert.alert(t('common.error'), e?.response?.status === 429
+        ? t('settings.testPush.tooSoon') : t('settings.testPush.failed'));
+    }
+  };
+
   // Load per-category notification preferences once.
   useEffect(() => {
     let alive = true;
     fetchNotificationPreferences()
-      .then((data) => { if (alive) setNotifPrefs(data); })
-      .catch(() => { if (alive) setNotifPrefs(null); });
+      .then((data) => {
+        if (!alive || !data) return;
+        setNotifPrefs(data);
+        writeCache(notifKey, data);
+      })
+      .catch(() => {});
     return () => { alive = false; };
-  }, []);
+  }, [notifKey]);
 
-  const toggleNotifCategory = async (key, value) => {
-    setNotifPrefs((prev) => ({ ...(prev || {}), [key]: value }));
+  // One change (or several) to the notification choices: shown at once,
+  // taken back if the server refuses.
+  const saveNotif = useCallback(async (fields) => {
+    const before = notifPrefs;
+    const next = { ...(notifPrefs || {}), ...fields };
+    setNotifPrefs(next);
+    writeCache(notifKey, next);
     try {
-      await updateNotificationPreferences({ [key]: value });
+      await updateNotificationPreferences(fields);
     } catch {
-      setNotifPrefs((prev) => ({ ...(prev || {}), [key]: !value })); // revert
+      setNotifPrefs(before);
+      if (before) writeCache(notifKey, before);
       Alert.alert(t('common.error'), t('settings.notifPrefFailed'));
     }
+  }, [notifPrefs, notifKey, t]);
+
+  const toggleNotifCategory = (key, value) => saveNotif({ [key]: value });
+
+  // Quiet hours, on this phone's clock.
+  const quietOn = notifPrefs?.quiet_from != null && notifPrefs?.quiet_to != null;
+  const utcOffset = () => -new Date().getTimezoneOffset();
+  const toggleQuiet = (on) => saveNotif(on
+    ? { quiet_from: 22 * 60, quiet_to: 7 * 60, utc_offset: utcOffset() }
+    : { quiet_from: null, quiet_to: null });
+  const chooseQuiet = (field, choices) => setPicker({
+    title: t(`settings.quiet.${field === 'quiet_from' ? 'from' : 'to'}`),
+    options: choices.map((m) => ({
+      key: String(m),
+      label: hhmm(m),
+      icon: notifPrefs?.[field] === m ? 'check' : 'schedule',
+      onPress: () => saveNotif({ [field]: m, utc_offset: utcOffset() }),
+    })),
+  });
+
+  // A list to pick from, the current one ticked (instead of tapping through).
+  const choose = (title, keys, current, labelOf, onPick) => setPicker({
+    title,
+    options: keys.map((k) => ({
+      key: k,
+      label: labelOf(k),
+      icon: k === current ? 'radio-button-checked' : 'radio-button-unchecked',
+      onPress: () => onPick(k),
+    })),
+  });
+
+  const clearSavedPages = () => {
+    Alert.alert(t('settings.storage.clearTitle'), t('settings.storage.clearBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('settings.storage.clear'),
+        onPress: async () => {
+          await clearAllCaches();
+          Alert.alert(t('common.done'), t('settings.storage.cleared'));
+        },
+      },
+    ]);
+  };
+
+  const removeDownloads = () => {
+    Alert.alert(t('settings.storage.removeTitle'), t('settings.storage.removeBody', { n: downloads.count }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('settings.storage.remove'),
+        style: 'destructive',
+        onPress: async () => { await removeAllDownloads(); },
+      },
+    ]);
   };
 
   // Privacy: persisted server-side on the profile (is_public is the inverse).
@@ -298,36 +441,20 @@ const Settings = () => {
     }
   };
 
-  const cycleAudioQuality = () => {
-    const idx = AUDIO_QUALITY_CYCLE.indexOf(prefs[PREF_KEYS.audioQuality]);
-    const next = AUDIO_QUALITY_CYCLE[(idx + 1) % AUDIO_QUALITY_CYCLE.length];
-    updatePref(PREF_KEYS.audioQuality, next);
-  };
-
-  const cycleDownloadQuality = () => {
-    const idx = DOWNLOAD_QUALITY_CYCLE.indexOf(prefs[PREF_KEYS.downloadQuality]);
-    updatePref(PREF_KEYS.downloadQuality, DOWNLOAD_QUALITY_CYCLE[(idx + 1) % DOWNLOAD_QUALITY_CYCLE.length]);
-  };
-
-  const cycleVideoQuality = () => {
-    const idx = VIDEO_QUALITY_CYCLE.indexOf(prefs[PREF_KEYS.videoQuality]);
-    const next = VIDEO_QUALITY_CYCLE[(idx + 1) % VIDEO_QUALITY_CYCLE.length];
-    updatePref(PREF_KEYS.videoQuality, next);
-  };
-
-  const cycleTheme = () => {
-    const idx = THEME_CYCLE.indexOf(themeMode);
-    setThemeMode(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
-  };
-
-  const cycleLanguage = () => {
-    const codes = languages.map((l) => l.code);
-    const idx = codes.indexOf(language);
-    setLanguage(codes[(idx + 1) % codes.length]);
-  };
+  const qualityLabel = (k) => t(`settings.quality.${k}`);
+  const cycleAudioQuality = () => choose(t('settings.playback.audioQuality'), AUDIO_QUALITY_CYCLE,
+    prefs[PREF_KEYS.audioQuality] || 'auto', qualityLabel, (k) => updatePref(PREF_KEYS.audioQuality, k));
+  const cycleDownloadQuality = () => choose(t('settings.playback.downloadQuality'), DOWNLOAD_QUALITY_CYCLE,
+    prefs[PREF_KEYS.downloadQuality] || 'standard', qualityLabel, (k) => updatePref(PREF_KEYS.downloadQuality, k));
+  const cycleVideoQuality = () => choose(t('settings.playback.videoQuality'), VIDEO_QUALITY_CYCLE,
+    prefs[PREF_KEYS.videoQuality] || 'auto', qualityLabel, (k) => updatePref(PREF_KEYS.videoQuality, k));
+  const cycleTheme = () => choose(t('settings.appearance.theme'), THEME_CYCLE, themeMode,
+    (k) => t(`settings.theme.${k}`), setThemeMode);
+  const cycleLanguage = () => choose(t('settings.appearance.language'), languages.map((l) => l.code), language,
+    (k) => languages.find((l) => l.code === k)?.label || k, setLanguage);
 
   const themeLabel = t(`settings.theme.${themeMode}`);
-  const languageLabel = languages.find((l) => l.code === language)?.label || 'System default';
+  const languageLabel = languages.find((l) => l.code === language)?.label || t('settings.systemDefault');
 
   const resetPwForm = () => { setCurrentPw(''); setNewPw(''); setConfirmPw(''); };
 
@@ -438,9 +565,9 @@ const Settings = () => {
 
   const handleLogout = () => {
     Alert.alert(t('settings.logoutTitle'), t('settings.logoutConfirm'), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Log out',
+        text: t('settings.session.logout'),
         style: 'destructive',
         onPress: async () => {
           try { await logout(); }
@@ -464,12 +591,30 @@ const Settings = () => {
         <View style={styles.backBtn} />
       </SafeAreaView>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <SettingsSearch.Provider value={query.trim()}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled">
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder={t('settings.search')}
+            placeholderTextColor={colors.placeholder}
+            value={query}
+            onChangeText={setQuery}
+            testID="settings-search"
+          />
+          {!!query && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={8} accessibilityLabel={t('common.close')}>
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
         {/* ── Account ───────────────────────────────────────────── */}
         <Section title={t('settings.section.account')}>
           <Row
             icon="account-circle-outline"
-            label={currentUser?.username || 'Your profile'}
+            label={currentUser?.username || t('settings.yourProfile')}
             sub={currentUser?.email || t('settings.tapToEdit')}
             onPress={() => navigation.navigate('Profile')}
           />
@@ -560,6 +705,13 @@ const Settings = () => {
         <Section title={t('settings.section.security')}>
           <Row
             icon="cellphone-lock"
+            label={t('settings.devices.label')}
+            sub={sessionCount != null ? t('settings.devices.count', { n: sessionCount }) : undefined}
+            onPress={() => { loadSessions(); setDevicesVisible(true); }}
+            testID="devices"
+          />
+          <Row
+            icon="logout-variant"
             label={t('settings.security.logoutOthers')}
             sub={sessionCount != null ? `${sessionCount} active session${sessionCount === 1 ? '' : 's'}` : undefined}
             onPress={handleLogoutOthers}
@@ -601,13 +753,50 @@ const Settings = () => {
                 <Switch
                   value={notifPrefs ? notifPrefs[cat.key] !== false : true}
                   onValueChange={(v) => toggleNotifCategory(cat.key, v)}
-                  disabled={notifPrefs === null}
+                  disabled={!notifPrefs}
                   trackColor={{ false: colors.border, true: colors.primary }}
                   thumbColor={colors.white}
                 />
               }
             />
           ))}
+
+          {!!prefs[PREF_KEYS.pushEnabled] && (
+            <>
+              <Row
+                icon="moon-waning-crescent"
+                label={t('settings.quiet.label')}
+                sub={quietOn
+                  ? t('settings.quiet.on', { from: hhmm(notifPrefs.quiet_from), to: hhmm(notifPrefs.quiet_to) })
+                  : t('settings.quiet.sub')}
+                right={
+                  <Switch
+                    value={quietOn}
+                    onValueChange={toggleQuiet}
+                    disabled={!notifPrefs}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor={colors.white}
+                    testID="quiet-switch"
+                  />
+                }
+              />
+              {quietOn && (
+                <>
+                  <Row icon="clock-start" label={t('settings.quiet.from')} onPress={() => chooseQuiet('quiet_from', QUIET_FROM_CHOICES)}
+                       right={<View style={styles.valuePill}><Text style={styles.valuePillText}>{hhmm(notifPrefs.quiet_from)}</Text></View>} />
+                  <Row icon="clock-end" label={t('settings.quiet.to')} onPress={() => chooseQuiet('quiet_to', QUIET_TO_CHOICES)}
+                       right={<View style={styles.valuePill}><Text style={styles.valuePillText}>{hhmm(notifPrefs.quiet_to)}</Text></View>} />
+                </>
+              )}
+              <Row
+                icon="bell-ring-outline"
+                label={t('settings.testPush.label')}
+                sub={t('settings.testPush.sub')}
+                onPress={handleTestPush}
+                testID="test-push"
+              />
+            </>
+          )}
 
           {/* Calendar reminders are scheduled by this phone rather than sent
               from the server, so they survive having no signal — and they are
@@ -696,7 +885,7 @@ const Settings = () => {
             right={
               <View style={styles.valuePill}>
                 <Text style={styles.valuePillText}>
-                  {VIDEO_QUALITY_LABELS[prefs[PREF_KEYS.videoQuality]] || 'Automatic'}
+                  {qualityLabel(prefs[PREF_KEYS.videoQuality] || 'auto')}
                 </Text>
               </View>
             }
@@ -714,7 +903,7 @@ const Settings = () => {
                 right={
                   <View style={styles.valuePill}>
                     <Text style={styles.valuePillText}>
-                      {AUDIO_QUALITY_LABELS[prefs[PREF_KEYS.audioQuality]] || 'Automatic'}
+                      {qualityLabel(prefs[PREF_KEYS.audioQuality] || 'auto')}
                     </Text>
                   </View>
                 }
@@ -727,7 +916,7 @@ const Settings = () => {
                 right={
                   <View style={styles.valuePill}>
                     <Text style={styles.valuePillText}>
-                      {DOWNLOAD_QUALITY_LABELS[prefs[PREF_KEYS.downloadQuality]] || 'Standard'}
+                      {qualityLabel(prefs[PREF_KEYS.downloadQuality] || 'standard')}
                     </Text>
                   </View>
                 }
@@ -748,6 +937,26 @@ const Settings = () => {
               />
             </>
           )}
+        </Section>
+
+        {/* ── Storage ───────────────────────────────────────────── */}
+        <Section title={t('settings.section.storage')}>
+          <Row
+            icon="download-circle-outline"
+            label={t('settings.storage.downloads')}
+            sub={t('settings.storage.downloadsSub', { n: downloads.count, size: formatBytes(downloads.bytes) })}
+            onPress={downloads.count ? removeDownloads : undefined}
+            right={downloads.count ? undefined : null}
+            testID="storage-downloads"
+          />
+          <Row
+            icon="broom"
+            label={t('settings.storage.saved')}
+            sub={t('settings.storage.savedSub')}
+            onPress={clearSavedPages}
+            last
+            testID="storage-clear"
+          />
         </Section>
 
         {/* ── Support ───────────────────────────────────────────── */}
@@ -781,6 +990,52 @@ const Settings = () => {
         <Text style={styles.version}>{APP_NAME} v{APP_VERSION}</Text>
         <View style={{ height: spacing.xl }} />
       </ScrollView>
+      </SettingsSearch.Provider>
+
+      <ChoiceSheet
+        visible={!!picker}
+        title={picker?.title}
+        options={picker?.options || []}
+        onClose={() => setPicker(null)}
+        cancelLabel={t('common.cancel')}
+      />
+
+      {/* Devices signed in to this account */}
+      <Modal visible={devicesVisible} animationType="slide" transparent onRequestClose={() => setDevicesVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('settings.devices.label')}</Text>
+              <TouchableOpacity onPress={() => setDevicesVisible(false)} accessibilityLabel={t('common.close')}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.privacyHintText}>{t('settings.devices.note')}</Text>
+            <ScrollView style={{ maxHeight: 380 }}>
+              {(sessions || []).map((sess) => (
+                <View key={sess.id} style={styles.deviceRow} testID={`device-${sess.id}`}>
+                  <MaterialCommunityIcons name={sess.current ? 'cellphone-check' : 'cellphone'} size={20} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowLabel}>
+                      {sess.current ? t('settings.devices.this') : t('settings.devices.other')}
+                    </Text>
+                    <Text style={styles.rowSub}>
+                      {t('settings.devices.since', { date: new Date(sess.created_at).toLocaleDateString() })}
+                    </Text>
+                  </View>
+                  {!sess.current && (
+                    <TouchableOpacity onPress={() => signOutDevice(sess)} testID={`device-out-${sess.id}`}>
+                      <Text style={styles.deviceOut}>{t('settings.devices.signOut')}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+              {sessions && !sessions.length && <Text style={styles.rowSub}>{t('settings.devices.none')}</Text>}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Contact-admins modal (reuses the AdminNote channel) */}
       <Modal
@@ -860,7 +1115,7 @@ const Settings = () => {
               placeholderTextColor={colors.placeholder}
               value={currentPw}
               onChangeText={setCurrentPw}
-              secureTextEntry
+              secureTextEntry={!showPw}
               autoCapitalize="none"
             />
             <TextInput
@@ -869,18 +1124,28 @@ const Settings = () => {
               placeholderTextColor={colors.placeholder}
               value={newPw}
               onChangeText={setNewPw}
-              secureTextEntry
+              secureTextEntry={!showPw}
               autoCapitalize="none"
+              testID="pw-new"
             />
+            {!!newPw && (
+              <Text style={[styles.rowSub, { marginBottom: spacing.sm }]} testID="pw-strength">
+                {t(`settings.pw.strength.${newPw.length < 8 ? 'short' : (/[0-9]/.test(newPw) && /[^A-Za-z0-9]/.test(newPw) && newPw.length >= 12) ? 'strong' : 'fair'}`)}
+              </Text>
+            )}
             <TextInput
               style={styles.pwInput}
               placeholder={t('settings.pw.confirmPlaceholder')}
               placeholderTextColor={colors.placeholder}
               value={confirmPw}
               onChangeText={setConfirmPw}
-              secureTextEntry
+              secureTextEntry={!showPw}
               autoCapitalize="none"
             />
+            <TouchableOpacity onPress={() => setShowPw((v) => !v)} style={styles.showPw} testID="pw-show">
+              <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textSecondary} />
+              <Text style={styles.rowSub}>{showPw ? t('settings.pw.hide') : t('settings.pw.show')}</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.sendBtn, changingPw && { opacity: 0.6 }]}
@@ -1011,6 +1276,18 @@ const Settings = () => {
 };
 
 const makeStyles = (colors) => StyleSheet.create({
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.card, borderRadius: radius.lg, paddingHorizontal: spacing.md,
+    height: 44, marginBottom: spacing.md,
+  },
+  searchInput: { flex: 1, fontSize: 15, color: colors.textPrimary },
+  deviceRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+  },
+  deviceOut: { color: colors.error, fontWeight: '700', fontSize: 13 },
+  showPw: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginBottom: spacing.md },
   root: { flex: 1, backgroundColor: colors.bg },
 
   header: {

@@ -159,6 +159,13 @@ export const removeDownload = async (trackId) => {
   if (entry.coverUri) FileSystem.deleteAsync(entry.coverUri, { idempotent: true }).catch(() => {});
 };
 
+/** Delete every downloaded track (Settings → Storage). */
+export const removeAllDownloads = async () => {
+  const ids = Object.keys(index);
+  await Promise.all(ids.map((id) => removeDownload(id)));
+  return ids.length;
+};
+
 export const subscribeDownloads = (fn) => { subs.add(fn); return () => subs.delete(fn); };
 const getSnapshot = () => snapshot;
 
@@ -176,6 +183,13 @@ export const useDownloadedTracks = () => {
   return Object.values(snap.index)
     .sort((a, b) => b.savedAt - a.savedAt)
     .map((e) => ({ ...e.track, cover_image: e.coverUri || e.track.cover_image, _offline: true }));
+};
+
+/** { count, bytes } of what is downloaded — for the storage row in Settings. */
+export const useDownloadsSummary = () => {
+  const snap = useSyncExternalStore(subscribeDownloads, getSnapshot, getSnapshot);
+  const entries = Object.values(snap.index);
+  return { count: entries.length, bytes: entries.reduce((n, e) => n + (e.bytes || 0), 0) };
 };
 
 // Test-only reset.
