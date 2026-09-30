@@ -2,7 +2,10 @@
 // passed with the tap, or the copy kept from last time) and fills in behind
 // it. Add to cart and the wishlist heart answer at once (utils/cartStore.js);
 // Buy now makes an order of just this, skipping the cart.
-import React, { useState, useEffect, useCallback } from 'react';
+//
+// The photos swipe (with the thumbnails to jump); below, more like it from
+// the same category (or the same seller), which also swipe sideways.
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,7 +16,7 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
-  TextInput
+  TextInput,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -23,6 +26,7 @@ import {
   fetchProductReviews,
   addProductReview,
   buyNow,
+  fetchProducts,
 } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import ReportModal from '../ReportModal';
@@ -47,7 +51,64 @@ const normalize = (p) => (p ? {
   price: typeof p.price === 'number' ? p.price : parseFloat(p.price) || 0,
 } : null);
 
+const listOf = (data) => (Array.isArray(data) ? data : (data?.results || []));
+const CONDITIONS = ['NEW', 'USED', 'REFURBISHED'];
+
+/** More like this: the same category, else the same seller; never itself. */
+const MoreLikeThis = ({ product, onOpen, t }) => {
+  const [items, setItems] = useState([]);
+  const category = typeof product.category === 'string' ? product.category : product.category?.name;
+  const sellerId = product.seller?.id;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const pick = async (params) => listOf(await fetchProducts(1, { page_size: 11, ...params }))
+          .filter((p) => p.id !== product.id);
+        let found = category ? await pick({ category }) : [];
+        if (!found.length && sellerId) found = await pick({ seller: sellerId });
+        if (!cancelled) setItems(found.slice(0, 10));
+      } catch {
+        // Only an extra: the product stands without it.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [product.id, category, sellerId]);
+  if (!items.length) return null;
+  return (
+    <View style={styles.moreSection} testID="more-like-this">
+      <Text style={styles.sectionTitle}>{t('market.product.moreLikeThis')}</Text>
+      <FlatList
+        horizontal
+        data={items}
+        keyExtractor={(item) => String(item.id)}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.moreList}
+        renderItem={({ item }) => (
+          <TouchableOpacity style={styles.moreCard} onPress={() => onOpen(item)} testID={`more-${item.id}`}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${item.title}, ${formatPrice(item.price, item.currency)}`}>
+            <Image source={item.images?.[0]?.image_url ? { uri: item.images[0].image_url } : PLACEHOLDER_IMAGE}
+                   placeholder={PLACEHOLDER_IMAGE} contentFit="cover" transition={120}
+                   recyclingKey={String(item.id)} style={styles.moreImage} />
+            <Text style={styles.moreTitle} numberOfLines={1}>{item.title}</Text>
+            <Text style={styles.morePrice}>{formatPrice(item.price, item.currency)}</Text>
+          </TouchableOpacity>
+        )}
+      />
+    </View>
+  );
+};
+
+// The same screen can be handed another product (a notification, a link, or
+// navigate() to the screen already open): it starts afresh for it, rather
+// than showing the last one's photo, quantity, reviews and half-typed review.
 const ProductDetail = () => {
+  const slug = useRoute().params?.slug;
+  return <ProductPage key={slug || ''} />;
+};
+
+const ProductPage = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { slug, preview } = route.params ?? {};
@@ -65,6 +126,8 @@ const ProductDetail = () => {
   const [reportVisible, setReportVisible] = useState(false);
   const [buying, setBuying] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [galleryW, setGalleryW] = useState(0);
+  const gallery = useRef(null);
   const { currentUser } = useAuth();
   useMarketUser(currentUser?.id);
   const market = useMarket();
@@ -100,7 +163,13 @@ const ProductDetail = () => {
       try {
         const data = await fetchProductReviews(slug);
         if (cancelled) return;
-        setReviews(Array.isArray(data) ? data : (data?.results || []));
+        const list = listOf(data);
+        setReviews(list);
+        const mine = list.find((r) => r.reviewer?.id != null && r.reviewer.id === currentUser?.id);
+        if (mine) {
+          setMyRating((r) => r || mine.rating || 0);
+          setMyComment((c) => c || mine.comment || '');
+        }
       } catch {
         // Non-fatal: the product itself still renders without its reviews.
       }
@@ -115,11 +184,16 @@ const ProductDetail = () => {
     ]);
   };
 
+  // What was picked, never more than is left (the stock may have been
+  // re-read since, lower).
+  const stock = product?.quantity ?? 0;
+  const qty = Math.max(1, Math.min(quantity, stock || 1));
+
   const handleAddToCart = async () => {
     if (!currentUser) { askToLogIn(t('market.product.loginToCart')); return; }
     try {
       showToast(t('market.product.addedToCart'));
-      await addProductToCart(product, quantity);
+      await addProductToCart(product, qty);
     } catch (error) {
       // The server's words (e.g. "Only 3 in stock…") over a generic one.
       showToast(marketError(error, t('market.product.addToCartFailed')), { error: true });
@@ -130,7 +204,7 @@ const ProductDetail = () => {
     if (!currentUser) { askToLogIn(t('market.product.loginToCart')); return; }
     try {
       setBuying(true);
-      const order = await buyNow(product.id, quantity);
+      const order = await buyNow(product.id, qty);
       navigation.navigate('Checkout', { orderId: order.id, order });
     } catch (error) {
       showToast(marketError(error, t('market.cart.checkoutFailed')), { error: true });
@@ -163,8 +237,12 @@ const ProductDetail = () => {
         fetchProductReviews(slug),
         fetchProductById(slug),
       ]);
-      setReviews(Array.isArray(freshReviews) ? freshReviews : (freshReviews?.results || []));
-      setProduct((prev) => normalize({ ...prev, ...freshProduct }));
+      setReviews(listOf(freshReviews));
+      setProduct((prev) => {
+        const next = normalize({ ...prev, ...freshProduct });
+        writeCache(key, next, { persist: false });
+        return next;
+      });
       setMyComment('');
       showToast(t('market.product.reviewSaved'));
     } catch (error) {
@@ -226,30 +304,69 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
     );
   }
 
-  const canBuy = product.quantity > 0 && product.is_available !== false;
+  const gone = failed === 'gone';
+  const canBuy = !gone && product.quantity > 0 && product.is_available !== false;
+  const images = product.images.length ? product.images : [{ id: 'none', image_url: null }];
+  const photo = Math.min(selectedImage, images.length - 1);
+  const showPhoto = (i) => {
+    setSelectedImage(i);
+    if (galleryW) gallery.current?.scrollToOffset?.({ offset: i * galleryW, animated: true });
+  };
+  // Pushed, so Back comes back here (navigate would swap this page out).
+  const openOther = (p) => {
+    const params = { slug: p.slug, preview: p };
+    if (navigation.push) navigation.push('ProductDetail', params);
+    else navigation.navigate('ProductDetail', params);
+  };
+  const hasContact = !!(product.whatsapp_number || product.contact_number || product.location);
 
   return (
     <View style={styles.flex}>
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}
+                keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
      <View style={styles.cartCorner}><CartButton color="#1D478B" /></View>
      <View style={styles.sheet}>
-      <View style={styles.mainImageContainer}>
-        <Image
-          source={product.images?.[selectedImage]?.image_url ? { uri: product.images[selectedImage].image_url } : PLACEHOLDER_IMAGE}
-          placeholder={PLACEHOLDER_IMAGE}
-          contentFit="contain"
-          transition={150}
-          style={styles.mainImage}
-        />
+      <View style={styles.mainImageContainer} onLayout={(e) => setGalleryW(e.nativeEvent.layout.width)}
+            testID="product-gallery">
+        {galleryW > 0 && (
+          <FlatList
+            ref={gallery}
+            horizontal
+            pagingEnabled
+            data={images}
+            keyExtractor={(item, i) => String(item.id ?? i)}
+            showsHorizontalScrollIndicator={false}
+            getItemLayout={(_, i) => ({ length: galleryW, offset: galleryW * i, index: i })}
+            onScroll={(e) => {
+              const i = Math.round(e.nativeEvent.contentOffset.x / galleryW);
+              if (i !== photo && i >= 0 && i < images.length) setSelectedImage(i);
+            }}
+            scrollEventThrottle={32}
+            renderItem={({ item }) => (
+              <Image
+                source={item.image_url ? { uri: item.image_url } : PLACEHOLDER_IMAGE}
+                placeholder={PLACEHOLDER_IMAGE}
+                contentFit="contain"
+                transition={150}
+                style={{ width: galleryW, height: '100%' }}
+              />
+            )}
+          />
+        )}
+        {images.length > 1 && (
+          <View style={styles.photoCount}>
+            <Text style={styles.photoCountText}>{`${photo + 1}/${images.length}`}</Text>
+          </View>
+        )}
       </View>
 
       {product.images.length > 1 && (
         <FlatList
           horizontal
           data={product.images}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item, index) => String(item.id ?? index)}
           renderItem={({ item, index }) => (
-            <TouchableOpacity onPress={() => setSelectedImage(index)}>
+            <TouchableOpacity onPress={() => showPhoto(index)} testID={`thumb-${index}`}>
               <Image
                 source={item.image_url ? { uri: item.image_url } : PLACEHOLDER_IMAGE}
                 placeholder={PLACEHOLDER_IMAGE}
@@ -257,7 +374,7 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
                 transition={120}
                 style={[
                   styles.thumbnailImage,
-                  index === selectedImage && styles.selectedThumbnail
+                  index === photo && styles.selectedThumbnail
                 ]}
               />
             </TouchableOpacity>
@@ -268,6 +385,12 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
       )}
 
       <View style={styles.infoContainer}>
+        {gone && (
+          <View style={styles.goneBanner} testID="product-gone">
+            <Icon name="exclamation-circle" size={14} color="#B00020" />
+            <Text style={styles.goneText}>{t('market.product.noLongerAvailable')}</Text>
+          </View>
+        )}
         <Text style={styles.title}>{product.title || t('market.untitled')}</Text>
 
         <View style={styles.priceContainer}>
@@ -298,36 +421,40 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
           </TouchableOpacity>
           {product.condition ? (
             <View style={styles.conditionBadge}>
-              <Text style={styles.conditionText}>{product.condition}</Text>
+              <Text style={styles.conditionText}>
+                {CONDITIONS.includes(product.condition) ? t(`market.condition.${product.condition}`) : product.condition}
+              </Text>
             </View>
           ) : null}
         </View>
 
         {/* Contact Information Section */}
+        {hasContact && (
         <View style={styles.contactInfoContainer}>
           <Text style={styles.sectionTitle}>{t('market.product.contactInfo')}</Text>
 
-          {product.whatsapp_number && (
+          {!!product.whatsapp_number && (
             <TouchableOpacity style={styles.contactButton} onPress={handleWhatsAppPress}>
               <Icon name="whatsapp" size={20} color="#25D366" />
               <Text style={styles.contactButtonText}>{t('market.product.whatsapp')}</Text>
             </TouchableOpacity>
           )}
 
-          {product.contact_number && (
+          {!!product.contact_number && (
             <TouchableOpacity style={styles.contactButton} onPress={handleCallPress}>
               <Icon name="phone" size={20} color="#1D478B" />
               <Text style={styles.contactButtonText}>{t('market.product.call')}</Text>
             </TouchableOpacity>
           )}
 
-          {product.location && (
+          {!!product.location && (
             <View style={styles.locationContainer}>
               <Icon name="map-marker" size={20} color="#FF6347" />
               <Text style={styles.locationText}>{product.location}</Text>
             </View>
           )}
         </View>
+        )}
 
         {/* Payment Details — buyer pays the seller directly */}
         {hasPaymentInfo(product) && (
@@ -377,11 +504,16 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
           </View>
         )}
 
-        {full
-          ? <Text style={styles.description}>{product.description || t('market.product.noDescription')}</Text>
-          : <ActivityIndicator color="#1D478B" style={styles.descLoading} />}
+        {full ? (
+          <Text style={styles.description}>{product.description || t('market.product.noDescription')}</Text>
+        ) : failed === 'error' ? (
+          <TouchableOpacity onPress={loadProduct} style={styles.descLoading} testID="product-retry">
+            <Text style={styles.descFailed}>{t('market.product.loadFailed')}</Text>
+            <Text style={styles.retryText}>{t('common.retry')}</Text>
+          </TouchableOpacity>
+        ) : <ActivityIndicator color="#1D478B" style={styles.descLoading} />}
 
-        {product.track && (
+        {!!product.track && (
           <View style={styles.trackInfo}>
             <Text style={styles.sectionTitle}>{t('market.product.relatedTrack')}</Text>
             <Text style={styles.trackTitle}>{product.track.title || t('market.untitled')}</Text>
@@ -392,26 +524,32 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
         )}
       </View>
 
+      {canBuy && !product.is_owner && (
       <View style={styles.quantityContainer}>
         <Text style={styles.quantityLabel}>{t('market.product.quantity')}</Text>
         <View style={styles.quantityControls}>
           <TouchableOpacity
             style={styles.quantityButton}
-            onPress={() => setQuantity(Math.max(1, quantity - 1))}
-            disabled={quantity <= 1}
+            onPress={() => setQuantity(Math.max(1, qty - 1))}
+            disabled={qty <= 1}
+            accessibilityLabel="-"
+            testID="product-less"
           >
-            <Icon name="minus" size={16} color="#333" />
+            <Icon name="minus" size={16} color={qty <= 1 ? '#bbb' : '#333'} />
           </TouchableOpacity>
-          <Text style={styles.quantityValue}>{quantity}</Text>
+          <Text style={styles.quantityValue} testID="product-qty">{qty}</Text>
           <TouchableOpacity
             style={styles.quantityButton}
-            onPress={() => setQuantity(quantity + 1)}
-            disabled={quantity >= product.quantity}
+            onPress={() => setQuantity(Math.min(stock, qty + 1))}
+            disabled={qty >= stock}
+            accessibilityLabel="+"
+            testID="product-more"
           >
-            <Icon name="plus" size={16} color="#333" />
+            <Icon name="plus" size={16} color={qty >= stock ? '#bbb' : '#333'} />
           </TouchableOpacity>
         </View>
       </View>
+      )}
 
       {!product.is_owner && (
         <TouchableOpacity
@@ -429,6 +567,16 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
         </TouchableOpacity>
       )}
 
+      {product.is_owner ? (
+        <TouchableOpacity
+          style={[styles.cartButton, styles.editButton]}
+          onPress={() => navigation.navigate('EditProduct', { slug: product.slug })}
+          testID="product-edit"
+        >
+          <Icon name="pencil" size={18} color="#fff" />
+          <Text style={styles.cartButtonText}>{t('common.edit')}</Text>
+        </TouchableOpacity>
+      ) : (
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={[styles.cartButton, !canBuy && styles.disabledButton]}
@@ -449,6 +597,7 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
           <Text style={styles.wishlistButtonText}>{wishlisted ? t('market.product.wishlisted') : t('market.wishlist.title')}</Text>
         </TouchableOpacity>
       </View>
+      )}
 
       <TouchableOpacity
         style={styles.shareButton}
@@ -527,7 +676,7 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
         {!product.is_owner && product.can_review === false && currentUser && (
           <Text style={styles.noReviewsText}>{t('market.product.reviewAfterBuying')}</Text>
         )}
-        {!product.is_owner && product.can_review !== false && (
+        {full && !product.is_owner && product.can_review !== false && (
           <View style={styles.reviewForm}>
             <Text style={styles.reviewFormLabel}>{t('market.product.rateThis')}</Text>
             <View style={styles.starPicker}>
@@ -562,6 +711,7 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
           </View>
         )}
       </View>
+      {full && <MoreLikeThis product={product} onOpen={openOther} t={t} />}
      </View>
     </ScrollView>
     <ShareCardSheet
@@ -581,7 +731,25 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   sellerLink: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   cartCorner: { alignItems: 'flex-end', marginBottom: 6 },
-  descLoading: { marginVertical: 16 },
+  descLoading: { marginVertical: 16, alignItems: 'center' },
+  descFailed: { color: '#666', fontSize: 14, textAlign: 'center' },
+  photoCount: {
+    position: 'absolute', right: 10, bottom: 10, paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  photoCountText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  goneBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, marginBottom: 10,
+    borderRadius: 8, backgroundColor: 'rgba(176,0,32,0.08)',
+  },
+  goneText: { color: '#B00020', fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  editButton: { marginLeft: 16, marginRight: 16, marginTop: 12, flex: 0 },
+  moreSection: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
+  moreList: { gap: 10, paddingRight: 16 },
+  moreCard: { width: 120, borderRadius: 10, overflow: 'hidden', backgroundColor: '#f4f6f9' },
+  moreImage: { width: 120, height: 110, backgroundColor: '#eef1f5' },
+  moreTitle: { fontSize: 12.5, color: '#222', paddingHorizontal: 7, paddingTop: 5 },
+  morePrice: { fontSize: 13, color: '#1D478B', fontWeight: '800', paddingHorizontal: 7, paddingBottom: 7 },
   buyNowButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: '#FF6B00', marginHorizontal: 16, marginTop: 8, paddingVertical: 14, borderRadius: 8,
@@ -634,12 +802,6 @@ const styles = StyleSheet.create({
   mainImageContainer: {
     height: 300,
     backgroundColor: '#f9f9f9',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mainImage: {
-    width: '100%',
-    height: '100%',
   },
   thumbnailList: {
     paddingHorizontal: 16,
