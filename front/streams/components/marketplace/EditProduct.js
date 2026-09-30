@@ -14,6 +14,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchProductById, updateProduct, fetchProductCategories } from '../../services/api';
+import { compressImage } from '../../services/imageProcessing';
+import { productError } from './AddProduct';
 import { useI18n } from '../../context/I18nContext';
 import { useAuth } from '../../context/useAuth';
 
@@ -83,7 +85,7 @@ const EditProduct = () => {
       const currentUserId = currentUser.id;
 
       if (!sellerId || sellerId !== currentUserId) {
-        throw new Error(`You can only edit your own products. Seller ID: ${sellerId}, Your ID: ${currentUserId}`);
+        throw new Error(t('market.form.notYours'));
       }
 
       // Populate form data
@@ -118,7 +120,9 @@ const EditProduct = () => {
   };
 
   loadData();
-}, [slug, currentUser, t]);
+  // By id: a new user object for the same person must not reload the form
+  // (and throw away what has been typed).
+}, [slug, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const handleChange = (name, value) => {
@@ -139,12 +143,21 @@ const EditProduct = () => {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 0.8,
+      quality: 1,
     });
 
-    if (!result.canceled) {
-      setNewImages([...newImages, result.uri]);
+    // The picked photo is result.assets[0] — result.uri is gone from the
+    // picker, and every new photo used to go up as `undefined`.
+    const asset = !result.canceled && result.assets?.[0];
+    if (!asset) return;
+    let uri = asset.uri;
+    try {
+      // Smaller before it goes anywhere (as on the add form).
+      uri = (await compressImage(uri, { maxWidth: 1280, sourceWidth: asset.width, quality: 0.75 })).uri;
+    } catch {
+      // The original will do.
     }
+    setNewImages((prev) => [...prev, uri]);
   };
 
   const removeExistingImage = (imageId) => {
@@ -164,7 +177,8 @@ const EditProduct = () => {
       return;
     }
 
-    if (existingImages.length + newImages.length - removedImages.length === 0) {
+    // existingImages already has the removed ones taken out.
+    if (existingImages.length + newImages.length === 0) {
       Alert.alert(t('common.error'), t('market.form.needKeepImage'));
       return;
     }
@@ -209,7 +223,7 @@ const EditProduct = () => {
       navigation.goBack();
     } catch (error) {
       console.error('Error updating product:', error);
-      Alert.alert(t('common.error'), error.response?.data?.detail || t('market.form.updateFailed'));
+      Alert.alert(t('common.error'), productError(error, t('market.form.updateFailed')));
     } finally {
       setUpdating(false);
     }
@@ -355,6 +369,7 @@ const EditProduct = () => {
             <TouchableOpacity 
               style={styles.removeImageButton}
               onPress={() => removeExistingImage(image.id)}
+              testID={`edit-remove-${image.id}`}
             >
               <Icon name="times" size={16} color="#fff" />
             </TouchableOpacity>
@@ -382,6 +397,7 @@ const EditProduct = () => {
           <TouchableOpacity 
             style={styles.addImageButton} 
             onPress={pickImage}
+            testID="edit-add-photo"
           >
             <Icon name="plus" size={24} color={COLORS.gray} />
           </TouchableOpacity>
@@ -423,6 +439,7 @@ const EditProduct = () => {
       <TouchableOpacity 
         style={styles.submitButton}
         onPress={handleSubmit}
+        testID="edit-save"
         disabled={updating}
       >
         {updating ? (

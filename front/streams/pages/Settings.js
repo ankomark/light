@@ -356,6 +356,16 @@ const Settings = () => {
   // Quiet hours, on this phone's clock.
   const quietOn = notifPrefs?.quiet_from != null && notifPrefs?.quiet_to != null;
   const utcOffset = () => -new Date().getTimezoneOffset();
+  // Moved to another time zone since quiet hours were set: keep them on this
+  // phone's clock, quietly.
+  const savedOffset = notifPrefs?.utc_offset;
+  useEffect(() => {
+    if (!quietOn || savedOffset == null || savedOffset === utcOffset()) return;
+    const next = { ...(notifPrefs || {}), utc_offset: utcOffset() };
+    setNotifPrefs(next);
+    writeCache(notifKey, next);
+    updateNotificationPreferences({ utc_offset: utcOffset() }).catch(() => {});
+  }, [quietOn, savedOffset]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleQuiet = (on) => saveNotif(on
     ? { quiet_from: 22 * 60, quiet_to: 7 * 60, utc_offset: utcOffset() }
     : { quiet_from: null, quiet_to: null });

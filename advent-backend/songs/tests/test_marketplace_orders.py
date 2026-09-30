@@ -193,11 +193,11 @@ class TrustTests(APITestCase):
     def patch(self, **fields):
         return self.client.patch(f'/api/marketplace/products/{self.product.slug}/', fields, format='json')
 
-    @mock.patch('songs.market_alerts.notify_user')
+    @mock.patch('songs.market_alerts.notify_many')
     def test_back_in_stock_then_cheaper_each_told_once_a_day(self, notify):
         self.patch(quantity=3)
         notify.assert_called_once()
-        self.assertEqual(notify.call_args[0][:2], (self.fan, 'market_wish'))
+        self.assertEqual(notify.call_args[0][:2], ([self.fan.id], 'market_wish'))
         self.assertIn('back in stock', notify.call_args[0][2])
         self.assertEqual(notify.call_args[1]['data']['slug'], self.product.slug)
         self.patch(price='15.00')
@@ -206,7 +206,7 @@ class TrustTests(APITestCase):
         self.patch(price='12.00')
         self.assertIn('was 15.00', notify.call_args[0][2])
 
-    @mock.patch('songs.market_alerts.notify_user')
+    @mock.patch('songs.market_alerts.notify_many')
     def test_dearer_or_still_sold_out_is_not_news(self, notify):
         self.patch(price='10.00')                               # still sold out
         self.patch(quantity=2)
@@ -215,8 +215,69 @@ class TrustTests(APITestCase):
         self.patch(price='30.00')                               # dearer
         notify.assert_not_called()
 
+    def test_near_me_is_not_the_only_filter(self):
+        self.assertEqual(self.client.get('/api/marketplace/products/?near=').status_code, 200)
+
     def test_near_me(self):
         make(self.seller, 'Kisumu thing', location='Kisumu, Kenya')
         make(self.seller, 'Nairobi thing', location='Nairobi')
         res = self.client.get('/api/marketplace/products/?near=kisumu')
         self.assertEqual([p['title'] for p in res.data['results']], ['Kisumu thing'])
+
+
+class ScanFixTests(TwoSellerOrderMixin, APITestCase):
+    """What the deep scan found: only what can be bought gets bought, a
+    cancelled part is never confirmed, the card charge is in the order's own
+    currency, and orders come a page at a time."""
+
+    def test_cannot_put_the_unbuyable_in_a_cart(self):
+        self.client.force_authenticate(self.buyer)
+        gone = make(self.a, 'Withdrawn', is_available=False)
+        taken = make(self.a, 'Taken down', is_removed=True)
+        for p in (gone, taken):
+            res = self.client.post('/api/marketplace/cart/add_item/', {'product_id': p.id}, format='json')
+            self.assertEqual(res.status_code, 400, p.title)
+        self.client.force_authenticate(self.a)
+        res = self.client.post('/api/marketplace/cart/add_item/', {'product_id': self.pa.id}, format='json')
+        self.assertEqual(res.data['error'], 'This is your own product.')
+
+    def test_checkout_refuses_a_line_withdrawn_since(self):
+        from songs.models import Cart, CartItem
+        self.client.force_authenticate(self.buyer)
+        cart = Cart.objects.create(user=self.buyer)
+        CartItem.objects.create(cart=cart, product=self.pa, quantity=1)
+        Product.objects.filter(pk=self.pa.pk).update(is_available=False)
+        res = self.client.post('/api/marketplace/cart/checkout/')
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(Order.objects.filter(buyer=self.buyer).count(), 1)   # only the fixture's
+
+    @mock.patch('songs.views.marketplace.notify_user')
+    def test_a_cancelled_part_is_never_confirmed(self, notify):
+        self.post(self.a, 'cancel-part')
+        before = Product.objects.get(pk=self.pa.pk).quantity
+        res = self.post(self.a, 'confirm-payment')
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data['code'], 'cancelled')
+        self.assertEqual(Product.objects.get(pk=self.pa.pk).quantity, before)
+
+    @mock.patch('stripe.PaymentIntent.create')
+    def test_the_card_charge_is_in_the_orders_own_currency(self, create):
+        from django.test import override_settings
+        create.return_value = mock.Mock(id='pi_1', client_secret='s')
+        self.client.force_authenticate(self.buyer)
+        with override_settings(STRIPE_SECRET_KEY='sk_test'):
+            res = self.client.post('/api/marketplace/create-payment-intent/', {'order_id': self.order.id})
+            self.assertEqual(res.status_code, 400)            # KES and USD: no single charge
+            self.ib.delete()
+            Order.objects.filter(pk=self.order.pk).update(total_amount=Decimal('10.00'))
+            res = self.client.post('/api/marketplace/create-payment-intent/',
+                                   {'order_id': self.order.id, 'currency': 'usd'})
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(create.call_args[1]['currency'], 'kes')    # not what the client said
+        self.assertEqual(create.call_args[1]['amount'], 1000)
+
+    def test_orders_come_a_page_at_a_time(self):
+        self.client.force_authenticate(self.buyer)
+        res = self.client.get('/api/marketplace/orders/?role=buyer')
+        self.assertIn('results', res.data)
+        self.assertEqual(res.data['results'][0]['id'], self.order.id)

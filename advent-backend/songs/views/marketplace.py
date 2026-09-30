@@ -113,6 +113,17 @@ def place_order(user, lines):
     return order
 
 
+def cannot_buy(user, product):
+    """Why `user` cannot put `product` in an order, or None if they can."""
+    if product is None or product.is_removed:
+        return 'This item is no longer for sale.'
+    if product.seller_id == getattr(user, 'pk', None):
+        return 'This is your own product.'
+    if not product.is_available:
+        return f"'{product.title}' is not for sale just now."
+    return None
+
+
 def _decimal(raw):
     try:
         value = Decimal(str(raw))
@@ -145,9 +156,17 @@ class CreatePaymentIntentView(APIView):
         if order.payment_status == 'PAID':
             return Response({'error': 'This order has already been paid'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Convert to smallest currency unit (cents for USD/EUR, etc.)
-        amount_cents = int(float(order.total_amount) * 100)
-        currency = request.data.get('currency', 'usd').lower()
+        # The order's own currency, never one the client names: the amount is
+        # the order's, and paying a dollar total in shillings must not be
+        # possible. An order priced in more than one currency cannot be paid
+        # as a single charge.
+        currencies = {i.currency or (i.product.currency if i.product else 'USD')
+                      for i in order.items.select_related('product')}
+        if len(currencies) != 1:
+            return Response({'error': 'This order is priced in more than one currency; pay each seller directly.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        currency = currencies.pop().lower()
+        amount_cents = int((order.total_amount * 100).quantize(Decimal('1')))
 
         intent = stripe.PaymentIntent.create(
             amount=amount_cents,
@@ -463,11 +482,14 @@ class CartViewSet(viewsets.ModelViewSet):
 
         try:
             product = Product.objects.get(id=product_id)
-        except Product.DoesNotExist:
+        except (Product.DoesNotExist, ValueError, TypeError):
             return Response(
                 {"error": "Product not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
+        why = cannot_buy(request.user, product)
+        if why:
+            return Response({"error": why}, status=status.HTTP_400_BAD_REQUEST)
 
         cart, _ = Cart.objects.get_or_create(user=request.user)
         cart_item = CartItem.objects.filter(cart=cart, product=product).first()
@@ -541,9 +563,10 @@ class CartViewSet(viewsets.ModelViewSet):
             return Response({"error": "Invalid quantity"}, status=status.HTTP_400_BAD_REQUEST)
         if quantity < 1:
             return Response({"error": "Quantity must be at least 1"}, status=status.HTTP_400_BAD_REQUEST)
-        if product.seller_id == request.user.pk:
-            return Response({"error": "This is your own product."}, status=status.HTTP_400_BAD_REQUEST)
-        if not product.is_available or product.quantity < quantity:
+        why = cannot_buy(request.user, product)
+        if why:
+            return Response({"error": why}, status=status.HTTP_400_BAD_REQUEST)
+        if product.quantity < quantity:
             return Response(
                 {"error": f"Only {product.quantity} in stock." if product.quantity else "This item is out of stock.",
                  "available": product.quantity},
@@ -566,8 +589,11 @@ class CartViewSet(viewsets.ModelViewSet):
         items = list(cart.items.select_related('product').all())
 
         # Validate stock up front so we don't create an order we can't fulfil.
-        # (Inventory is only committed once payment is confirmed by the webhook.)
+        # (Inventory is only committed once each seller confirms payment.)
         for item in items:
+            why = cannot_buy(request.user, item.product)
+            if why:
+                return Response({"error": why, "item": item.id}, status=status.HTTP_400_BAD_REQUEST)
             if item.quantity > item.product.quantity:
                 return Response(
                     {"error": f"Not enough stock for '{item.product.title}' "
@@ -641,6 +667,14 @@ class ShopView(APIView):
 LOW_STOCK = 2
 
 
+class OrderPagination(PageNumberPagination):
+    """Orders a page at a time: an active seller's whole history, every line
+    with its product, came back in one response."""
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     # List/retrieve only — NOT a full ModelViewSet. Orders are created via
     # cart checkout, shipping via set-shipping, and status via update_status
@@ -649,6 +683,7 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
     # checks; payment_status must only ever change via the Stripe webhook.
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = OrderPagination
 
     def get_queryset(self):
         # Prefetch the item → product graph (and buyer) so order lists/details
@@ -663,6 +698,7 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                 'items__product__images',
                 'items__product__seller__profile',
             )
+            .order_by('-created_at')
         )
         # ?role=buyer -> only orders I placed (My Orders); ?role=seller -> only
         # orders containing something I sell (Seller Dashboard). Without it, a
@@ -718,6 +754,12 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                     {"error": "You have no items in this order"},
                     status=status.HTTP_403_FORBIDDEN
                 )
+            # A cancelled part is over: confirming it would take stock back
+            # out for something nobody is buying.
+            items = [i for i in items if not i.cancelled_at]
+            if not items:
+                return Response({"error": "Your part of this order was cancelled.", "code": "cancelled"},
+                                status=status.HTTP_400_BAD_REQUEST)
 
             pending = [i for i in items if i.payment_confirmed_at is None]
             if pending:
@@ -757,9 +799,11 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
         week = paid.filter(payment_confirmed_at__gte=timezone.now() - timedelta(days=7))
 
         def totals(qs):
-            return money_totals(
-                (i.currency or 'USD', i.price_at_purchase * i.quantity)
-                for i in qs.only('currency', 'price_at_purchase', 'quantity'))
+            # Summed by the database, per currency — not every line read back.
+            rows = (qs.values('currency')
+                    .annotate(amount=Sum(F('price_at_purchase') * F('quantity')))
+                    .order_by('currency'))
+            return money_totals((r['currency'], r['amount'] or 0) for r in rows)
 
         mine = Product.objects.filter(seller=user, is_removed=False)
         low = (mine.filter(is_available=True, quantity__lte=LOW_STOCK)

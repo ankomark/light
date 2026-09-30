@@ -179,7 +179,26 @@ const SellerDashboard = () => {
     () => fetchProducts(1, { seller: uid, page_size: 50 }));
   const ordersData = useCachedData(uid ? userKey(uid, 'market:seller:orders') : null,
     () => fetchOrders({ role: 'seller' }));
-  const products = productsData.data?.results || [];
+  // Past the first fifty: further pages, fetched as the list is scrolled.
+  const [more, setMore] = useState({ items: [], page: 1, next: undefined, loading: false });
+  const products = [...(productsData.data?.results || []), ...more.items];
+  const hasMore = more.next === undefined ? !!productsData.data?.next : !!more.next;
+  const loadMoreProducts = async () => {
+    if (!hasMore || more.loading || !uid) return;
+    setMore((m) => ({ ...m, loading: true }));
+    try {
+      const data = await fetchProducts(more.page + 1, { seller: uid, page_size: 50 });
+      setMore((m) => {
+        const have = new Set([...(productsData.data?.results || []), ...m.items].map((p) => p.id));
+        return {
+          items: [...m.items, ...(data?.results || []).filter((p) => !have.has(p.id))],
+          page: m.page + 1, next: data?.next || null, loading: false,
+        };
+      });
+    } catch {
+      setMore((m) => ({ ...m, loading: false }));
+    }
+  };
   const orders = listOf(ordersData.data);
 
   // Back from an order or a product: the numbers may have moved.
@@ -191,7 +210,10 @@ const SellerDashboard = () => {
     ordersData.reload();
   }, [])); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const reloadAll = () => { stats.reload(); productsData.reload(); ordersData.reload(); };
+  const reloadAll = () => {
+    setMore({ items: [], page: 1, next: undefined, loading: false });
+    stats.reload(); productsData.reload(); ordersData.reload();
+  };
 
   const handleDeleteProduct = (slug) => {
     Alert.alert(
@@ -206,6 +228,7 @@ const SellerDashboard = () => {
             try {
               await deleteProduct(slug);
               productsData.setData((d) => ({ ...(d || {}), results: (d?.results || []).filter((p) => p.slug !== slug) }));
+              setMore((m) => ({ ...m, items: m.items.filter((p) => p.slug !== slug) }));
               showToast(t('market.seller.deleted'));
               stats.reload();
             } catch {
@@ -218,10 +241,9 @@ const SellerDashboard = () => {
   };
 
   const onQuickSaved = (fresh) => {
-    productsData.setData((d) => ({
-      ...(d || {}),
-      results: (d?.results || []).map((p) => (p.slug === fresh.slug ? { ...p, ...fresh } : p)),
-    }));
+    const swap = (p) => (p.slug === fresh.slug ? { ...p, ...fresh } : p);
+    productsData.setData((d) => ({ ...(d || {}), results: (d?.results || []).map(swap) }));
+    setMore((m) => ({ ...m, items: m.items.map(swap) }));
     setEditing(null);
     showToast(t('market.seller.quickSaved'));
     stats.reload();
@@ -417,6 +439,11 @@ const SellerDashboard = () => {
         contentContainerStyle={styles.contentContainer}
         refreshing={!!(stats.refreshing && stats.data)}
         onRefresh={reloadAll}
+        onEndReached={activeTab === 'products' ? loadMoreProducts : undefined}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={activeTab === 'products' && more.loading
+          ? <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 16 }} />
+          : null}
       />
 
       {activeTab === 'products' && (

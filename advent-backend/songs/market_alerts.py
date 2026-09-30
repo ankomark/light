@@ -8,7 +8,7 @@ product, and never the seller themself.
 from django.core.cache import cache
 
 from .models import User
-from .push import notify_user
+from .push import notify_many
 
 ONCE_PER = 24 * 60 * 60
 MAX_TOLD = 500
@@ -34,16 +34,17 @@ def tell_wishers(product, old_price, old_quantity, old_available):
     else:
         message = f'"{product.title}" is back in stock.'
 
-    told = 0
+    # Who has not heard about this product today — then one batched send
+    # (two queries, off the request thread) rather than a lookup and a thread
+    # per person inside the seller's save.
     wishers = (User.objects.filter(wishlist__products=product)
-               .exclude(pk=product.seller_id).distinct()[:MAX_TOLD])
-    for user in wishers:
-        if not cache.add(f'market:wish:{product.pk}:{user.pk}', 1, ONCE_PER):
-            continue
-        try:
-            notify_user(user, 'market_wish', message,
-                        data={'type': 'market_wish', 'slug': product.slug})
-            told += 1
-        except Exception:  # noqa: BLE001 — an alert never undoes an edit
-            pass
-    return told
+               .exclude(pk=product.seller_id).values_list('pk', flat=True).distinct()[:MAX_TOLD])
+    fresh = [uid for uid in wishers if cache.add(f'market:wish:{product.pk}:{uid}', 1, ONCE_PER)]
+    if not fresh:
+        return 0
+    try:
+        notify_many(fresh, 'market_wish', message,
+                    data={'type': 'market_wish', 'slug': product.slug})
+    except Exception:  # noqa: BLE001 — an alert never undoes an edit
+        return 0
+    return len(fresh)

@@ -23,7 +23,11 @@ def money_totals(pairs):
     for currency, amount in pairs:
         key = currency or 'USD'
         totals[key] = totals.get(key, 0) + amount
-    return [{'currency': c, 'amount': str(a)} for c, a in totals.items()]
+    from decimal import Decimal
+    # Always to the cent, whatever the database hands back (a sum can lose
+    # its decimal places on the way).
+    return [{'currency': c, 'amount': str(Decimal(str(a)).quantize(Decimal('0.01')))}
+            for c, a in totals.items()]
 
 
 
