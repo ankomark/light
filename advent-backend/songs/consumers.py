@@ -10,7 +10,7 @@ all live there); this consumer is the realtime fan-out layer:
 Membership is re-checked on connect — a non-member can't open the socket even if
 they guess the URL (mirrors the members-only REST gate).
 """
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.layers import get_channel_layer
@@ -97,15 +97,16 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
                     'user_id': self.user.id, 'username': self.user.username,
                 })
 
-    @database_sync_to_async
-    def _came_online(self):
+    # Presence is counts in the cache, not the database: run off Django's one
+    # database thread, so a closing socket never waits behind slow queries
+    # (Daphne kills a close that takes over ~10 s, and the count went wrong).
+    async def _came_online(self):
         from songs.group_live import came_online
-        return came_online(self.slug, self.user.id)
+        return await sync_to_async(came_online, thread_sensitive=False)(self.slug, self.user.id)
 
-    @database_sync_to_async
-    def _went_offline(self):
+    async def _went_offline(self):
         from songs.group_live import went_offline
-        return went_offline(self.slug, self.user.id)
+        return await sync_to_async(went_offline, thread_sensitive=False)(self.slug, self.user.id)
 
     @database_sync_to_async
     def _can_access(self):
@@ -184,21 +185,32 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
         if not self.user or not self.user.is_authenticated or not await self._allowed():
             await self.close(code=4401)
             return
-        from songs.messaging import dm_room
+        from songs.messaging import dm_room, went_online
         self.room = dm_room(self.user.id)
         await self.channel_layer.group_add(self.room, self.channel_name)
         await self.accept()
-        first, partners = await self._came_online()
+        first = await sync_to_async(went_online, thread_sensitive=False)(self.user.id)
+        self.counted = True
+        # Who to tell, looked up once while connecting and kept: a closing
+        # socket must not wait on the database (Daphne kills a close that
+        # takes over ~10 s, and the person stayed "online" for hours).
+        self.partners = await self._partners()
         if first:
-            await self._tell_partners(partners, True)
+            await self._tell_partners(self.partners, True)
 
     async def disconnect(self, code):
         if not hasattr(self, 'room'):
             return
         await self.channel_layer.group_discard(self.room, self.channel_name)
-        last, partners = await self._went_offline()
+        if not getattr(self, 'counted', False):
+            return   # closed before it was counted online: nothing to take back
+        from songs.messaging import left
+        # First the part that must happen (the cache, no database) ...
+        last = await sync_to_async(left, thread_sensitive=False)(self.user.id)
         if last:
-            await self._tell_partners(partners, False)
+            await self._tell_partners(getattr(self, 'partners', []), False)
+            # ... then "last seen", the one database write, which may be slow.
+            await self._stamp_last_seen()
 
     async def receive_json(self, content):
         if content.get('type') != 'typing':
@@ -231,14 +243,14 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
         return bool(u and u['is_active'] and not u['is_deactivated'])
 
     @database_sync_to_async
-    def _came_online(self):
-        from songs.messaging import went_online, partner_ids
-        return went_online(self.user.id), partner_ids(self.user)
+    def _partners(self):
+        from songs.messaging import partner_ids
+        return partner_ids(self.user)
 
     @database_sync_to_async
-    def _went_offline(self):
-        from songs.messaging import went_offline, partner_ids
-        return went_offline(self.user.id), partner_ids(self.user)
+    def _stamp_last_seen(self):
+        from songs.messaging import stamp_last_seen
+        stamp_last_seen(self.user.id)
 
     @database_sync_to_async
     def _other_in(self, conv_id):

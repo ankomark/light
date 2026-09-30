@@ -52,11 +52,23 @@ def went_online(uid):
     return n == 1
 
 
-def went_offline(uid):
+def left(uid):
+    """A device of theirs went away: the count only, in the cache — no
+    database, so a socket closing never waits on it. True if it was their
+    last device (they are offline now)."""
     n = max(0, (cache.get(_online_key(uid)) or 0) - 1)
     cache.set(_online_key(uid), n, ONLINE_TTL)
-    if n == 0:
-        User.objects.filter(pk=uid).update(last_seen_at=timezone.now())
+    return n == 0
+
+
+def stamp_last_seen(uid):
+    User.objects.filter(pk=uid).update(last_seen_at=timezone.now())
+
+
+def went_offline(uid):
+    """left(), and when it was their last device, "last seen" now."""
+    if left(uid):
+        stamp_last_seen(uid)
         return True
     return False
 

@@ -266,3 +266,43 @@ class LiveSocketTests(TransactionTestCase):
             await c.disconnect()
             await ann.disconnect()
         async_to_sync(run)()
+
+    def test_closing_goes_offline_without_asking_the_database_who_to_tell(self):
+        from unittest import mock
+        real = dm.partner_ids
+        calls = []
+
+        def counted(user, *a, **k):
+            calls.append(user.pk)
+            return real(user, *a, **k)
+
+        async def run():
+            bob = self.connect(self.bob)
+            await bob.connect()
+            ann = self.connect(self.ann)
+            await ann.connect()
+            await bob.receive_json_from(timeout=3)                    # ann online
+            await ann.disconnect()
+            gone = await bob.receive_json_from(timeout=3)
+            assert gone == {'type': 'presence', 'user_id': self.ann.id, 'online': False}, gone
+            await bob.disconnect()
+
+        with mock.patch('songs.messaging.partner_ids', side_effect=counted):
+            async_to_sync(run)()
+        # Looked up once per connection, when it opened; never while closing.
+        self.assertEqual(sorted(calls), sorted([self.bob.pk, self.ann.pk]))
+        self.assertFalse(dm.is_online(self.ann.id))
+        self.ann.refresh_from_db()
+        self.assertIsNotNone(self.ann.last_seen_at)
+
+    def test_one_device_closing_leaves_the_other_online(self):
+        async def run():
+            a1 = self.connect(self.ann)
+            await a1.connect()
+            a2 = self.connect(self.ann)
+            await a2.connect()
+            await a1.disconnect()
+            assert dm.is_online(self.ann.id)
+            await a2.disconnect()
+            assert not dm.is_online(self.ann.id)
+        async_to_sync(run)()
