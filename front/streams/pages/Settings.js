@@ -170,6 +170,9 @@ const QUIET_FROM_CHOICES = [20, 21, 22, 23].map((h) => h * 60);
 const QUIET_TO_CHOICES = [5, 6, 7, 8].map((h) => h * 60);
 
 const THEME_CYCLE = ['system', 'light', 'dark'];
+// The most an export may be as a plain shared message, when no file can be
+// shared: Android refuses (and crashes on) much more.
+const SHARE_TEXT_MAX = 200 * 1024;
 
 const Settings = () => {
   const navigation = useNavigation();
@@ -301,7 +304,10 @@ const Settings = () => {
       } catch {
         shared = false;
       }
-      if (!shared) await Share.share({ title: t('settings.exportTitle'), message: text });
+      if (!shared) {
+        if (text.length > SHARE_TEXT_MAX) throw new Error('too big to share as text');
+        await Share.share({ title: t('settings.exportTitle'), message: text });
+      }
     } catch {
       Alert.alert(t('common.error'), t('settings.exportFailed'));
     } finally {
@@ -337,19 +343,29 @@ const Settings = () => {
 
   // One change (or several) to the notification choices: shown at once,
   // taken back if the server refuses.
+  // Each change stands on its own: two switches flipped quickly are two
+  // changes, and a refusal takes back only its own fields (and only while
+  // nothing newer has changed them), never the other switch.
   const saveNotif = useCallback(async (fields) => {
-    const before = notifPrefs;
-    const next = { ...(notifPrefs || {}), ...fields };
-    setNotifPrefs(next);
-    writeCache(notifKey, next);
+    let before = {};
+    setNotifPrefs((prev) => {
+      before = Object.fromEntries(Object.keys(fields).map((k) => [k, prev?.[k]]));
+      const next = { ...(prev || {}), ...fields };
+      writeCache(notifKey, next);
+      return next;
+    });
     try {
       await updateNotificationPreferences(fields);
     } catch {
-      setNotifPrefs(before);
-      if (before) writeCache(notifKey, before);
+      setNotifPrefs((prev) => {
+        const next = { ...(prev || {}) };
+        Object.keys(fields).forEach((k) => { if (next[k] === fields[k]) next[k] = before[k]; });
+        writeCache(notifKey, next);
+        return next;
+      });
       Alert.alert(t('common.error'), t('settings.notifPrefFailed'));
     }
-  }, [notifPrefs, notifKey, t]);
+  }, [notifKey, t]);
 
   const toggleNotifCategory = (key, value) => saveNotif({ [key]: value });
 
@@ -431,6 +447,8 @@ const Settings = () => {
 
   // Push master switch: ask the OS + (un)register the device token, and cache
   // the choice locally so the UI is correct on next launch.
+  // A failure is said and the switch goes back: "off" while the server still
+  // sends to this phone, or "on" with no way to reach it, would both lie.
   const handleTogglePush = async (next) => {
     await updatePref(PREF_KEYS.pushEnabled, next);
     try {
@@ -447,7 +465,8 @@ const Settings = () => {
         await unregisterPushToken();
       }
     } catch {
-      // Best-effort — the cached preference still reflects the user's intent.
+      await updatePref(PREF_KEYS.pushEnabled, !next);
+      Alert.alert(t('common.error'), next ? t('settings.notif.onFailed') : t('settings.notif.offFailed'));
     }
   };
 
@@ -483,15 +502,31 @@ const Settings = () => {
     }
     try {
       setChangingPw(true);
-      await changePassword(currentPw, newPw);
+      const res = await changePassword(currentPw, newPw);
       setPwVisible(false);
       resetPwForm();
-      Alert.alert(t('common.done'), t('settings.pw.changed'));
+      loadSessions();
+      Alert.alert(t('common.done'), res?.sessions_revoked
+        ? t('settings.pw.changedSignedOut', { n: res.sessions_revoked })
+        : t('settings.pw.changed'));
     } catch (error) {
       Alert.alert(t('common.error'), error.response?.data?.error || t('settings.pw.changeFailed'));
     } finally {
       setChangingPw(false);
     }
+  };
+
+  // The server will not let an account go while a marketplace order is under
+  // way (a buyer who paid would be left with no seller, or the reverse).
+  const refusedForOrders = (error) => {
+    if (error?.response?.data?.code !== 'open_orders') return false;
+    setDeleteVisible(false);
+    setDeactivateVisible(false);
+    Alert.alert(t('settings.openOrders.title'), t('settings.openOrders.body', { n: error.response.data.open_orders }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('settings.openOrders.see'), onPress: () => navigation.navigate('OrderHistory') },
+    ]);
+    return true;
   };
 
   const handleDeleteAccount = async () => {
@@ -508,7 +543,9 @@ const Settings = () => {
       try { await logout(); } catch {}
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } catch (error) {
-      Alert.alert(t('common.error'), error.response?.data?.error || t('settings.deleteAccountFailed'));
+      if (refusedForOrders(error)) return;
+      Alert.alert(t('common.error'), error.response?.status === 429
+        ? t('settings.tooManyTries') : error.response?.data?.error || t('settings.deleteAccountFailed'));
     } finally {
       setDeleting(false);
     }
@@ -527,7 +564,9 @@ const Settings = () => {
       try { await logout(); } catch {}
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } catch (error) {
-      Alert.alert(t('common.error'), error.response?.data?.error || t('settings.deactivateFailed'));
+      if (refusedForOrders(error)) return;
+      Alert.alert(t('common.error'), error.response?.status === 429
+        ? t('settings.tooManyTries') : error.response?.data?.error || t('settings.deactivateFailed'));
     } finally {
       setDeactivating(false);
     }
@@ -723,7 +762,7 @@ const Settings = () => {
           <Row
             icon="logout-variant"
             label={t('settings.security.logoutOthers')}
-            sub={sessionCount != null ? `${sessionCount} active session${sessionCount === 1 ? '' : 's'}` : undefined}
+            sub={sessionCount != null ? t('settings.devices.count', { n: sessionCount }) : undefined}
             onPress={handleLogoutOthers}
             right={revokingOthers ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
           />
@@ -731,6 +770,7 @@ const Settings = () => {
             icon="download-outline"
             label={t('settings.security.export')}
             onPress={handleExportData}
+            testID="export-data"
             last
             right={exporting ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
           />
@@ -747,6 +787,7 @@ const Settings = () => {
               <Switch
                 value={!!prefs[PREF_KEYS.pushEnabled]}
                 onValueChange={handleTogglePush}
+                testID="push-switch"
                 trackColor={{ false: colors.border, true: colors.primary }}
                 thumbColor={colors.white}
               />
@@ -764,6 +805,7 @@ const Settings = () => {
                   value={notifPrefs ? notifPrefs[cat.key] !== false : true}
                   onValueChange={(v) => toggleNotifCategory(cat.key, v)}
                   disabled={!notifPrefs}
+                  testID={`notif-${cat.key}`}
                   trackColor={{ false: colors.border, true: colors.primary }}
                   thumbColor={colors.white}
                 />
@@ -994,7 +1036,8 @@ const Settings = () => {
         <Section title={t('settings.section.session')}>
           <Row icon="logout" label={t('settings.session.logout')} danger onPress={handleLogout} right={null} />
           <Row icon="account-off-outline" label={t('settings.session.deactivate')} onPress={confirmDeactivate} right={null} />
-          <Row icon="trash-can-outline" label={t('settings.session.delete')} danger onPress={confirmDeleteAccount} last right={null} />
+          <Row icon="trash-can-outline" label={t('settings.session.delete')} danger onPress={confirmDeleteAccount} last right={null}
+               testID="delete-account" />
         </Section>
 
         <Text style={styles.version}>{APP_NAME} v{APP_VERSION}</Text>
@@ -1207,6 +1250,7 @@ const Settings = () => {
               placeholderTextColor={colors.placeholder}
               value={deletePw}
               onChangeText={setDeletePw}
+              testID="delete-password"
               secureTextEntry
               autoCapitalize="none"
             />
@@ -1215,6 +1259,7 @@ const Settings = () => {
               style={[styles.deleteBtn, deleting && { opacity: 0.6 }]}
               onPress={handleDeleteAccount}
               disabled={deleting}
+              testID="delete-confirm"
               activeOpacity={0.85}
             >
               {deleting

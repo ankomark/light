@@ -16,9 +16,15 @@ const mockApi = {
   createAdminNote: jest.fn(), changePassword: jest.fn(), deactivateAccount: jest.fn(), deleteAccount: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
+const mockPush = { registerForPushNotifications: jest.fn(), unregisterPushToken: jest.fn() };
 jest.mock('../../services/pushNotifications', () => ({
-  registerForPushNotifications: jest.fn(), unregisterPushToken: jest.fn(),
+  registerForPushNotifications: (...a) => mockPush.registerForPushNotifications(...a),
+  unregisterPushToken: (...a) => mockPush.unregisterPushToken(...a),
 }));
+const mockFs = { writeAsStringAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/' };
+jest.mock('expo-file-system/legacy', () => mockFs);
+const mockSharing = { isAvailableAsync: jest.fn(async () => false), shareAsync: jest.fn() };
+jest.mock('expo-sharing', () => mockSharing);
 jest.mock('../../context/useAuth', () => ({
   useAuth: () => ({
     currentUser: { id: 7, username: 'mark', is_public: true },
@@ -45,7 +51,8 @@ jest.mock('../../context/I18nContext', () => ({
 jest.mock('../../utils/preferences', () => ({
   PREF_KEYS: new Proxy({}, { get: (_, k) => k }), AUDIO_QUALITY_TIERS_AVAILABLE: false,
 }));
-jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn(), reset: jest.fn() }) }));
+const mockNav = { navigate: jest.fn(), goBack: jest.fn(), reset: jest.fn() };
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => mockNav }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialCommunityIcons: () => null, MaterialIcons: () => null }));
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
@@ -122,7 +129,7 @@ test('a test notification says where it went', async () => {
 test('the devices signed in, and signing one out', async () => {
   const alert = jest.spyOn(Alert, 'alert').mockImplementation((t1, b, buttons) => buttons?.[1]?.onPress?.());
   const screen = render(<Settings />);
-  await waitFor(() => expect(screen.getByText('settings.devices.count:2')).toBeTruthy());
+  await waitFor(() => expect(screen.getAllByText('settings.devices.count:2').length).toBe(2));
   fireEvent.press(screen.getByTestId('devices'));
   expect(screen.getByText('settings.devices.this')).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByTestId('device-out-2')); });
@@ -137,4 +144,93 @@ test('storage: what downloads take, and removing them all', async () => {
   await act(async () => { fireEvent.press(screen.getByTestId('storage-downloads')); });
   expect(mockRemoveAll).toHaveBeenCalled();
   alert.mockRestore();
+});
+
+test('two switches flipped quickly: a refusal takes back only its own', async () => {
+  writeCache('u7:settings:notif', { likes: true, comments: true, quiet_from: null, quiet_to: null });
+  let refuse;
+  mockApi.updateNotificationPreferences.mockImplementation((fields) => ('likes' in fields
+    ? new Promise((_, rej) => { refuse = rej; }) : Promise.resolve({})));
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  const screen = render(<Settings />);
+  fireEvent(screen.getByTestId('notif-likes'), 'valueChange', false);
+  await act(async () => { fireEvent(screen.getByTestId('notif-comments'), 'valueChange', false); });
+  await act(async () => { refuse(new Error('500')); });
+  expect(screen.getByTestId('notif-likes').props.value).toBe(true);
+  expect(screen.getByTestId('notif-comments').props.value).toBe(false);
+  expect(alert).toHaveBeenCalledWith('common.error', 'settings.notifPrefFailed');
+  alert.mockRestore();
+  mockApi.updateNotificationPreferences.mockImplementation(async () => ({}));
+});
+
+test('turning notifications off that does not reach the server says so and stays on', async () => {
+  mockPush.unregisterPushToken.mockRejectedValueOnce(new Error('offline'));
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  const screen = render(<Settings />);
+  await act(async () => { fireEvent(screen.getByTestId('push-switch'), 'valueChange', false); });
+  expect(mockSetPref).toHaveBeenLastCalledWith('pushEnabled', true);
+  expect(alert).toHaveBeenCalledWith('common.error', 'settings.notif.offFailed');
+  alert.mockRestore();
+});
+
+test('an export too big to share as a message says so instead of crashing', async () => {
+  mockApi.exportMyData.mockResolvedValue({ posts: 'x'.repeat(300 * 1024) });
+  const share = jest.spyOn(require('react-native').Share, 'share').mockImplementation(async () => ({}));
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  const screen = render(<Settings />);
+  await act(async () => { fireEvent.press(screen.getByTestId('export-data')); });
+  expect(share).not.toHaveBeenCalled();
+  expect(alert).toHaveBeenCalledWith('common.error', 'settings.exportFailed');
+  share.mockRestore();
+  alert.mockRestore();
+});
+
+test('an account with orders under way is not deleted; the orders are one tap away', async () => {
+  mockApi.deleteAccount.mockRejectedValue({ response: { status: 409, data: { code: 'open_orders', open_orders: 2 } } });
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation((title, body, buttons) => {
+    if (title === 'settings.deleteTitle') buttons?.[1]?.onPress?.();
+  });
+  const screen = render(<Settings />);
+  fireEvent.press(screen.getByTestId('delete-account'));
+  fireEvent.changeText(screen.getByTestId('delete-password'), 'secret');
+  await act(async () => { fireEvent.press(screen.getByTestId('delete-confirm')); });
+  const call = alert.mock.calls.find((c) => c[0] === 'settings.openOrders.title');
+  expect(call[1]).toBe('settings.openOrders.body:2');
+  call[2][1].onPress();
+  expect(mockNav.navigate).toHaveBeenCalledWith('OrderHistory');
+  expect(mockNav.reset).not.toHaveBeenCalled();
+  alert.mockRestore();
+});
+
+describe('blocked accounts', () => {
+  const mockBlocked = { fetchBlockedUsers: jest.fn(), unblockUser: jest.fn() };
+  beforeEach(() => {
+    mockApi.fetchBlockedUsers = mockBlocked.fetchBlockedUsers;
+    mockApi.unblockUser = mockBlocked.unblockUser;
+    mockBlocked.fetchBlockedUsers.mockReset();
+    mockBlocked.unblockUser.mockReset();
+  });
+  const BlockedUsers = require('../BlockedUsers').default;
+
+  test('a list that could not be read says so, not "no one blocked"', async () => {
+    mockBlocked.fetchBlockedUsers.mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce([{ id: 4, username: 'troll' }]);
+    const screen = render(<BlockedUsers />);
+    await waitFor(() => expect(screen.getByTestId('blocked-failed')).toBeTruthy());
+    expect(screen.queryByText('blocked.empty')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByTestId('blocked-retry')); });
+    await waitFor(() => expect(screen.getByText('@troll')).toBeTruthy());
+  });
+
+  test('a refused unblock puts the account back where it was', async () => {
+    mockBlocked.fetchBlockedUsers.mockResolvedValue([{ id: 4, username: 'a' }, { id: 5, username: 'b' }]);
+    mockBlocked.unblockUser.mockRejectedValue(new Error('500'));
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation((t1, b, buttons) => buttons?.[1]?.onPress?.());
+    const screen = render(<BlockedUsers />);
+    await waitFor(() => expect(screen.getByTestId('unblock-4')).toBeTruthy());
+    await act(async () => { fireEvent.press(screen.getByTestId('unblock-4')); });
+    expect(screen.getByText('@a')).toBeTruthy();
+    expect(alert).toHaveBeenCalledWith('common.error', 'blocked.unblockFailed');
+    alert.mockRestore();
+  });
 });

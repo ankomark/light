@@ -450,11 +450,36 @@ class TestPushView(APIView):
         return Response({'devices': devices})
 
 
+def open_orders_of(user):
+    """Marketplace orders still under way that `user` is in, as buyer or as a
+    seller with a part not yet delivered or called off. Leaving with one open
+    strands the other side: a buyer who may have paid, with no seller; or a
+    seller whose sale vanishes with the buyer's account."""
+    from ..models import Order, OrderItem
+    buying = Order.objects.filter(buyer=user).exclude(status__in=('DELIVERED', 'CANCELLED', 'REFUNDED'))
+    selling = (OrderItem.objects.filter(seller=user, cancelled_at__isnull=True, delivered_at__isnull=True)
+               .exclude(order__status__in=('DELIVERED', 'CANCELLED', 'REFUNDED')))
+    return buying.count() + selling.values('order').distinct().count()
+
+
+def _refuse_with_open_orders(user):
+    n = open_orders_of(user)
+    if not n:
+        return None
+    return Response({
+        'error': f'You have {n} marketplace order(s) still under way. Finish or cancel them first, '
+                 'so no buyer or seller is left waiting.',
+        'code': 'open_orders', 'open_orders': n,
+    }, status=status.HTTP_409_CONFLICT)
+
+
 class DeactivateAccountView(APIView):
     """Reversible self-deactivation: hides the user's content/profile while
     letting them sign back in to reactivate. Password-confirmed; revokes other
     sessions so the account goes dark everywhere."""
     permission_classes = [IsAuthenticated]
+    # A password check: not to be guessed at, even with a stolen session.
+    throttle_scope = 'account_leave'
 
     def post(self, request):
         from django.utils import timezone
@@ -463,6 +488,9 @@ class DeactivateAccountView(APIView):
             return Response({'error': 'password is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not request.user.check_password(password):
             return Response({'error': 'Password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+        refused = _refuse_with_open_orders(request.user)
+        if refused:
+            return refused
 
         request.user.is_deactivated = True
         request.user.deactivated_at = timezone.now()
@@ -476,6 +504,7 @@ class DeleteAccountView(APIView):
     confirmation, then permanently removes the account (cascades to the user's
     content via the related models' on_delete rules)."""
     permission_classes = [IsAuthenticated]
+    throttle_scope = 'account_leave'
 
     def post(self, request):
         password = request.data.get('password', '')
@@ -483,6 +512,9 @@ class DeleteAccountView(APIView):
             return Response({'error': 'password is required to delete your account'}, status=status.HTTP_400_BAD_REQUEST)
         if not request.user.check_password(password):
             return Response({'error': 'Password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+        refused = _refuse_with_open_orders(request.user)
+        if refused:
+            return refused
 
         request.user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

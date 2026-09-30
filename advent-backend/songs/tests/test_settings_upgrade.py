@@ -102,3 +102,41 @@ class DevicesAndDataTests(APITestCase):
         self.assertEqual(res.data['devices'], 1)
         notify.assert_called_once()
         self.assertEqual(self.client.post('/api/auth/test-push/').status_code, 429)
+
+
+class LeavingWithOpenOrdersTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.buyer = User.objects.create_user('mark', 'm@x.com', 'pw12345!x')
+        self.seller = User.objects.create_user('ivy', 'i@x.com', 'pw12345!y')
+        self.product = Product.objects.create(seller=self.seller, title='Hymnal', description='d',
+                                              price=Decimal('5'), quantity=3)
+        self.order = Order.objects.create(buyer=self.buyer, total_amount=Decimal('5'))
+        self.line = OrderItem.objects.create(order=self.order, product=self.product, quantity=1,
+                                             price_at_purchase=Decimal('5'), seller=self.seller,
+                                             title='Hymnal', currency='KES')
+
+    def leave(self, user, password, how='delete-account'):
+        self.client.force_authenticate(user)
+        return self.client.post(f'/api/auth/{how}/', {'password': password}, format='json')
+
+    def test_neither_side_can_leave_an_order_under_way(self):
+        for user, pw in ((self.buyer, 'pw12345!x'), (self.seller, 'pw12345!y')):
+            for how in ('delete-account', 'deactivate'):
+                res = self.leave(user, pw, how)
+                self.assertEqual(res.status_code, 409, (user.username, how))
+                self.assertEqual(res.data['code'], 'open_orders')
+        self.assertTrue(User.objects.filter(pk=self.seller.pk).exists())
+
+    def test_once_it_is_over_they_can(self):
+        from django.utils import timezone
+        self.line.delivered_at = timezone.now()
+        self.line.save()
+        self.order.status = 'DELIVERED'
+        self.order.save()
+        self.assertEqual(self.leave(self.seller, 'pw12345!y').status_code, 204)
+        self.assertFalse(User.objects.filter(pk=self.seller.pk).exists())
+
+    def test_a_wrong_password_is_not_guessed_at_for_ever(self):
+        codes = [self.leave(self.buyer, f'guess{i}').status_code for i in range(12)]
+        self.assertIn(429, codes)

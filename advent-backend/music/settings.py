@@ -224,6 +224,8 @@ REST_FRAMEWORK = {
         'user': '300/min',
         'auth': '10/min',
         'password_reset': '5/hour',
+        # Deleting or deactivating an account: a password check, not to be guessed at.
+        'account_leave': '10/hour',
         'email_verify': '10/hour',
         # Abuse guards: appeal/report submission and admin bulk actions.
         # Quiz reads are cheap; the submit is one per day anyway.

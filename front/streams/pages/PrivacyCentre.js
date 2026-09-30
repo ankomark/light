@@ -19,7 +19,7 @@ const PrivacyCentre = () => {
 
   const controls = [
     { icon: 'lock-outline', key: 'privateAccount', to: () => navigation.navigate('Settings') },
-    { icon: 'account-cancel-outline', key: 'blocked', to: () => navigation.navigate('Settings') },
+    { icon: 'account-cancel-outline', key: 'blocked', to: () => navigation.navigate('BlockedUsers') },
     { icon: 'bell-outline', key: 'notifications', to: () => navigation.navigate('Settings') },
     { icon: 'account-remove-outline', key: 'account', to: () => navigation.navigate('Settings') },
   ];

@@ -27,13 +27,18 @@ const BlockedUsers = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  // A list that could not be read is not an empty one: "no one blocked"
+  // would be wrong, and the people blocked would seem free to reach you.
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
+    setFailed(false);
+    setLoading(true);
     try {
       const data = await fetchBlockedUsers();
       setUsers(Array.isArray(data) ? data : []);
     } catch {
-      setUsers([]);
+      setFailed(true);
     } finally {
       setLoading(false);
     }
@@ -43,17 +48,22 @@ const BlockedUsers = () => {
 
   const handleUnblock = (item) => {
     Alert.alert(t('blocked.unblockTitle'), t('blocked.unblockConfirm', { name: item.username }), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Unblock',
+        text: t('blocked.unblock'),
         onPress: async () => {
           setBusyId(item.id);
-          const prev = users;
+          const at = users.findIndex((u) => u.id === item.id);
           setUsers((cur) => cur.filter((u) => u.id !== item.id)); // optimistic
           try {
             await unblockUser(item.id);
           } catch {
-            setUsers(prev); // revert
+            // Back where it was, among the list as it is now.
+            setUsers((cur) => {
+              const next = cur.filter((u) => u.id !== item.id);
+              next.splice(Math.max(0, Math.min(at, next.length)), 0, item);
+              return next;
+            });
             Alert.alert(t('common.error'), t('blocked.unblockFailed'));
           } finally {
             setBusyId(null);
@@ -74,6 +84,7 @@ const BlockedUsers = () => {
       <TouchableOpacity
         style={styles.unblockBtn}
         onPress={() => handleUnblock(item)}
+        testID={`unblock-${item.id}`}
         disabled={busyId === item.id}
         activeOpacity={0.8}
       >
@@ -101,6 +112,14 @@ const BlockedUsers = () => {
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : failed ? (
+        <View style={styles.empty} testID="blocked-failed">
+          <MaterialCommunityIcons name="wifi-off" size={48} color={colors.border} />
+          <Text style={styles.emptyTitle}>{t('blocked.loadFailed')}</Text>
+          <TouchableOpacity onPress={load} style={styles.unblockBtn} testID="blocked-retry">
+            <Text style={styles.unblockText}>{t('common.retry')}</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList

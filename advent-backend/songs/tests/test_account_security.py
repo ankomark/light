@@ -8,6 +8,7 @@ action through without the password gate.
 from datetime import timedelta
 
 from django.utils import timezone
+from django.core.cache import cache
 from rest_framework.test import APITestCase
 
 from songs.models import User, SocialPost, NotificationPreference
@@ -42,6 +43,7 @@ class ChangePasswordTests(APITestCase):
 
 class DeleteAndDeactivateTests(APITestCase):
     def setUp(self):
+        cache.clear()   # the leave throttle counts per user id, which tests reuse
         self.user = User.objects.create_user('del_user', 'del@x.com', 'mypass123')
         self.client.force_authenticate(self.user)
 
