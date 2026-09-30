@@ -83,14 +83,21 @@ test('a spotlight, rows that scroll sideways and category chips with their own i
     { id: 2, name: 'Clothing', product_count: 1 },
   ];
   mockApi.fetchProducts.mockImplementation(async (page, opts = {}) => {
-    if (opts.sort === 'popular') return { results: [product(50), product(51)], next: null };
+    if (opts.sort === 'popular') {
+      return { results: [{ ...product(50), views: 9 }, { ...product(51), views: 0 }], next: null };
+    }
     if (opts.category === 1) return { results: [product(60), product(61)], next: null };
-    return { results: [1, 2, 3, 4, 5].map(product), next: null };
+    return { results: Array.from({ length: 14 }, (_, i) => product(i + 1)), next: null };
   });
   mockApi.fetchProductCategories.mockResolvedValue(cats);
   const screen = render(<MarketplaceHome />);
   await waitFor(() => expect(screen.getByTestId('spot-50')).toBeTruthy());
+  // Nothing looked at yet is no spotlight: it would only repeat the newest.
+  expect(screen.queryByTestId('spot-51')).toBeNull();
+  // The newest ten go sideways; the grid goes on after them, nothing twice.
   expect(screen.getByTestId('strip-new-1')).toBeTruthy();
+  expect(screen.queryByTestId('home-product-1')).toBeNull();
+  expect(screen.getByTestId('home-product-11')).toBeTruthy();
   expect(screen.getByTestId('strip-cat-1-60')).toBeTruthy();
   // Only categories with two or more things get a row of their own.
   expect(screen.queryByTestId('strip-cat-2')).toBeNull();
@@ -100,6 +107,24 @@ test('a spotlight, rows that scroll sideways and category chips with their own i
   expect(screen.getAllByTestId('mci-tshirt-crew').length).toBeGreaterThan(0);
   fireEvent.press(screen.getByTestId('home-category-2'));
   expect(mockNav.navigate).toHaveBeenCalledWith('ProductList', { categoryId: 2, categoryName: 'Clothing' });
+});
+
+test('with only a few products, the grid shows them all and no strip repeats them', async () => {
+  mockApi.fetchProducts.mockResolvedValue({ results: [1, 2, 3].map(product), next: null });
+  mockApi.fetchProductCategories.mockResolvedValue([]);
+  const screen = render(<MarketplaceHome />);
+  await waitFor(() => expect(screen.getByTestId('home-product-3')).toBeTruthy());
+  expect(screen.queryByTestId('strip-new')).toBeNull();
+});
+
+test('category rows are asked for as soon as the categories arrive, not after the products', async () => {
+  mockApi.fetchProducts.mockImplementation((page, opts = {}) => (opts.category
+    ? Promise.resolve({ results: [product(60)], next: null })
+    : new Promise(() => {})));
+  mockApi.fetchProductCategories.mockResolvedValue([{ id: 1, name: 'Shoes', product_count: 3 }]);
+  render(<MarketplaceHome />);
+  await waitFor(() => expect(mockApi.fetchProducts)
+    .toHaveBeenCalledWith(1, expect.objectContaining({ category: 1 })));
 });
 
 describe('the background warm-up', () => {

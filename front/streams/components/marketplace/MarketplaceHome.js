@@ -10,7 +10,7 @@
 // Opens at once on the phone's copy, which the app fills in the background
 // soon after it starts (utils/marketFeed.js warmMarket), then refreshes behind
 // it. Pull down to refresh by hand.
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator,
   RefreshControl, useWindowDimensions,
@@ -37,6 +37,9 @@ const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 const GAP = 10;
 const PAD = 16;
 const SPOTLIGHT_MS = 4500;
+const SPOTLIGHT_REST_MS = 10000;   // after a swipe, left alone this long
+const SPOTLIGHT_MAX_W = 520;
+const NEW_STRIP = 10;
 const photoOf = (p) => (p?.images?.[0]?.image_url ? { uri: p.images[0].image_url } : PLACEHOLDER_IMAGE);
 
 // A refresh that half-failed keeps the half it did not get from the copy.
@@ -61,14 +64,17 @@ const RowTitle = ({ title, icon, onAll, t }) => (
   </View>
 );
 
+const priceLabel = (p) => `${p.title}, ${formatPrice(p.price, p.currency)}`;
+
 /** A row of products that scrolls sideways. */
-const Strip = ({ products, onOpen, testID }) => (
+const Strip = React.memo(({ products, onOpen, testID }) => (
   <FlatList
     horizontal
     data={products}
     keyExtractor={(item) => String(item.id)}
     renderItem={({ item }) => (
       <TouchableOpacity style={styles.stripCard} onPress={() => onOpen(item)} activeOpacity={0.85}
+                        accessibilityRole="button" accessibilityLabel={priceLabel(item)}
                         testID={`${testID}-${item.id}`}>
         <Image source={photoOf(item)} placeholder={PLACEHOLDER_IMAGE} contentFit="cover"
                transition={120} recyclingKey={String(item.id)} style={styles.stripImage} />
@@ -78,31 +84,63 @@ const Strip = ({ products, onOpen, testID }) => (
     )}
     showsHorizontalScrollIndicator={false}
     contentContainerStyle={styles.stripList}
+    initialNumToRender={4}
     testID={testID}
   />
-);
+));
 
-/** What people look at most, a card at a time; moves on by itself until
- *  touched, with dots to say where it is. */
-const Spotlight = ({ products, width, onOpen, t }) => {
+/** What people look at most, a card at a time. Moves on by itself (not
+ *  while the screen is out of sight, and not for a while after a swipe),
+ *  with dots to say where it is. */
+const Spotlight = React.memo(({ products, width, onOpen, t }) => {
+  const navigation = useNavigation();
   const listRef = useRef(null);
   const [index, setIndex] = useState(0);
-  const touched = useRef(false);
-  const cardW = width - PAD * 2;
+  const at = useRef(0);
+  const touchedAt = useRef(0);
+  const [shown, setShown] = useState(true);
+  // No wider than a big phone, so a tablet does not get a thin stripe.
+  const cardW = Math.min(width - PAD * 2, SPOTLIGHT_MAX_W);
   const step = cardW + GAP;
+  const count = products.length;
+
+  const goTo = (i) => {
+    at.current = i;
+    setIndex(i);
+  };
+
+  // A refresh with fewer cards: back to the first.
+  useEffect(() => {
+    if (at.current >= count) {
+      goTo(0);
+      listRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    }
+  }, [count]);
 
   useEffect(() => {
-    if (products.length < 2) return undefined;
+    const offs = [
+      navigation.addListener?.('focus', () => setShown(true)),
+      navigation.addListener?.('blur', () => setShown(false)),
+    ];
+    return () => offs.forEach((off) => typeof off === 'function' && off());
+  }, [navigation]);
+
+  useEffect(() => {
+    if (count < 2 || !shown) return undefined;
     const timer = setInterval(() => {
-      if (touched.current) return;
-      setIndex((i) => {
-        const next = (i + 1) % products.length;
-        listRef.current?.scrollToOffset?.({ offset: next * step, animated: true });
-        return next;
-      });
+      if (Date.now() - touchedAt.current < SPOTLIGHT_REST_MS) return;
+      const next = (at.current + 1) % count;
+      goTo(next);
+      listRef.current?.scrollToOffset?.({ offset: next * step, animated: true });
     }, SPOTLIGHT_MS);
     return () => clearInterval(timer);
-  }, [products.length, step]);
+  }, [count, step, shown]);
+
+  // The dots follow the finger (onScroll, which the web fires too).
+  const onScroll = (e) => {
+    const i = Math.max(0, Math.min(count - 1, Math.round(e.nativeEvent.contentOffset.x / step)));
+    if (i !== at.current) goTo(i);
+  };
 
   return (
     <View style={styles.spotlightWrap} testID="spotlight">
@@ -114,12 +152,14 @@ const Spotlight = ({ products, width, onOpen, t }) => {
         showsHorizontalScrollIndicator={false}
         snapToInterval={step}
         decelerationRate="fast"
-        onScrollBeginDrag={() => { touched.current = true; }}
-        onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / step))}
+        onScrollBeginDrag={() => { touchedAt.current = Date.now(); }}
+        onScroll={onScroll}
+        scrollEventThrottle={32}
         getItemLayout={(_, i) => ({ length: step, offset: step * i, index: i })}
         renderItem={({ item }) => (
           <TouchableOpacity style={[styles.spotCard, { width: cardW }]} onPress={() => onOpen(item)}
-                            activeOpacity={0.9} testID={`spot-${item.id}`}>
+                            activeOpacity={0.9} accessibilityRole="button"
+                            accessibilityLabel={priceLabel(item)} testID={`spot-${item.id}`}>
             <Image source={photoOf(item)} placeholder={PLACEHOLDER_IMAGE} contentFit="cover"
                    transition={150} style={StyleSheet.absoluteFill} />
             <View style={styles.spotShade} />
@@ -131,17 +171,18 @@ const Spotlight = ({ products, width, onOpen, t }) => {
           </TouchableOpacity>
         )}
       />
-      {products.length > 1 && (
+      {count > 1 && (
         <View style={styles.dots}>
           {products.map((p, i) => <View key={p.id} style={[styles.dot, i === index && styles.dotOn]} />)}
         </View>
       )}
     </View>
   );
-};
+});
 
 const Tile = React.memo(({ item, width, onOpen, t }) => (
   <TouchableOpacity style={[styles.tile, { width }]} onPress={() => onOpen(item)} activeOpacity={0.85}
+                    accessibilityRole="button" accessibilityLabel={priceLabel(item)}
                     testID={`home-product-${item.id}`}>
     <Image source={photoOf(item)} placeholder={PLACEHOLDER_IMAGE} contentFit="cover"
            transition={120} recyclingKey={String(item.id)} style={[styles.tileImage, { height: width }]} />
@@ -167,12 +208,15 @@ const MarketplaceHome = () => {
   const { cols, tileSize } = useGridColumns({ target: 170, min: 2, max: 5, horizontalPadding: PAD * 2, gap: GAP });
   const { data, failed, refreshing, reload } = useCachedData(MARKET_HOME_KEY, loadHome);
   const categories = data?.categories || [];
-  const popular = data?.popular || [];
   const rows = data?.rows || [];
+  // The spotlight is for what people have looked at; with nothing looked at
+  // yet it would only repeat "just listed".
+  const popular = useMemo(() => (data?.popular || [])
+    .filter((p) => p.views == null || p.views > 0).slice(0, 6), [data?.popular]);
 
   // Pages past the first, as the grid is scrolled.
   const [more, setMore] = useState({ items: [], page: 1, next: null, loading: false });
-  const firstPage = data?.products || [];
+  const firstPage = useMemo(() => data?.products || [], [data?.products]);
   const firstId = firstPage[0]?.id;
   const lastFirst = useRef(firstId);
   useEffect(() => {
@@ -182,8 +226,15 @@ const MarketplaceHome = () => {
       setMore({ items: [], page: 1, next: null, loading: false });
     }
   }, [firstId]);
-  const seen = new Set(firstPage.map((p) => p.id));
-  const products = [...firstPage, ...more.items.filter((p) => !seen.has(p.id))];
+  // "Just listed" takes the newest when there are plenty; the grid then goes
+  // on from after them, so nothing shows twice one above the other.
+  const newest = useMemo(() => (firstPage.length > NEW_STRIP + 1 ? firstPage.slice(0, NEW_STRIP) : []),
+    [firstPage]);
+  const products = useMemo(() => {
+    const skip = new Set(newest.map((p) => p.id));
+    const seen = new Set(firstPage.map((p) => p.id));
+    return [...firstPage.filter((p) => !skip.has(p.id)), ...more.items.filter((p) => !seen.has(p.id))];
+  }, [firstPage, newest, more.items]);
   const hasMore = more.page === 1 ? !!data?.next : !!more.next;
 
   const loadMore = useCallback(async () => {
@@ -265,12 +316,12 @@ const MarketplaceHome = () => {
         />
       )}
 
-      {popular.length > 0 && <Spotlight products={popular.slice(0, 6)} width={width} onOpen={open} t={t} />}
+      {popular.length > 0 && <Spotlight products={popular} width={width} onOpen={open} t={t} />}
 
-      {firstPage.length > 3 && (
+      {newest.length > 0 && (
         <View style={styles.section}>
           <RowTitle title={t('market.home.justListed')} t={t} onAll={() => navigation.navigate('ProductList')} />
-          <Strip products={firstPage.slice(0, 10)} onOpen={open} testID="strip-new" />
+          <Strip products={newest} onOpen={open} testID="strip-new" />
         </View>
       )}
 

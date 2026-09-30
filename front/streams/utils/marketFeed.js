@@ -29,30 +29,33 @@ const CATEGORY_ROWS = 3;
  *  `popular` (most viewed) is the spotlight; `rows` are the fullest
  *  categories, each a row of its own that scrolls sideways. */
 export const loadMarketHome = async () => {
+  // The rows follow the categories straight away, alongside the products,
+  // rather than after everything else (a whole extra round trip).
+  const categoriesAndRows = fetchProductCategories().then(async (data) => {
+    // Only categories with something in them (older servers send no count).
+    const cats = listOf(data).filter((c) => c.product_count == null || c.product_count > 0);
+    // A row for each of the fullest categories (two or more things in them).
+    const top = cats.filter((c) => (c.product_count ?? 0) >= 2).slice(0, CATEGORY_ROWS);
+    const rows = (await Promise.allSettled(
+      top.map((c) => fetchProducts(1, { page_size: STRIP_SIZE, category: c.id })),
+    )).map((r, i) => ({ category: top[i], products: r.status === 'fulfilled' ? r.value?.results || [] : [] }))
+      .filter((r) => r.products.length);
+    return { cats, rows };
+  });
   const [products, categories, popular] = await Promise.allSettled([
     fetchProducts(1, { page_size: HOME_PAGE_SIZE }),
-    fetchProductCategories(),
+    categoriesAndRows,
     fetchProducts(1, { page_size: STRIP_SIZE, sort: 'popular' }),
   ]);
   if (products.status === 'rejected' && categories.status === 'rejected') throw products.reason;
-  const cats = categories.status === 'fulfilled'
-    // Only categories with something in them (older servers send no count).
-    ? listOf(categories.value).filter((c) => c.product_count == null || c.product_count > 0)
-    : null;
-
-  // A row for each of the fullest categories (two or more things in them).
-  const top = (cats || []).filter((c) => (c.product_count ?? 0) >= 2).slice(0, CATEGORY_ROWS);
-  const rows = (await Promise.allSettled(
-    top.map((c) => fetchProducts(1, { page_size: STRIP_SIZE, category: c.id })),
-  )).map((r, i) => ({ category: top[i], products: r.status === 'fulfilled' ? r.value?.results || [] : [] }))
-    .filter((r) => r.products.length);
+  const ok = (r) => r.status === 'fulfilled';
 
   return {
-    products: products.status === 'fulfilled' ? products.value?.results || [] : null,
-    next: products.status === 'fulfilled' ? !!products.value?.next : false,
-    categories: cats,
-    popular: popular.status === 'fulfilled' ? popular.value?.results || [] : null,
-    rows: cats ? rows : null,
+    products: ok(products) ? products.value?.results || [] : null,
+    next: ok(products) ? !!products.value?.next : false,
+    categories: ok(categories) ? categories.value.cats : null,
+    popular: ok(popular) ? popular.value?.results || [] : null,
+    rows: ok(categories) ? categories.value.rows : null,
     at: Date.now(),
   };
 };
