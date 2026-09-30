@@ -13,6 +13,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { fetchProducts } from '../../services/api';
 import { peekCache, writeCache } from '../../utils/screenCache';
+import { MARKET_HOME_KEY } from '../../utils/marketFeed';
 import { formatPrice } from '../../utils/market';
 import CartButton from './CartButton';
 import { getPreference, PREF_KEYS } from '../../utils/preferences';
@@ -109,7 +110,12 @@ const ProductList = () => {
   }), [categoryId, query, sort, near, town]);
   const key = `market:list:${JSON.stringify(params)}`;
 
-  const [products, setProducts] = useState(() => peekCache(key)?.results || null);
+  // Unfiltered and unsorted, "browse all" is the marketplace page's own
+  // list: start from that copy rather than a spinner.
+  const plain = !Object.keys(params).length;
+  const startFrom = () => peekCache(key)?.results
+    || (plain ? peekCache(MARKET_HOME_KEY)?.products : null) || null;
+  const [products, setProducts] = useState(startFrom);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(() => !!peekCache(key)?.next);
   const [page, setPage] = useState(1);
@@ -126,7 +132,8 @@ const ProductList = () => {
   const loadProducts = useCallback(async () => {
     setError(null);
     const kept = peekCache(key);
-    setProducts(kept?.results || null);
+    const shown = startFrom();
+    setProducts(shown);
     setHasMore(!!kept?.next);
     try {
       const data = await fetchProducts(1, params);
@@ -136,7 +143,7 @@ const ProductList = () => {
       setPage(1);
       setHasMore(!!data.next);
     } catch (err) {
-      if (wanted.current === key && !kept) setError(err.message || t('market.list.loadFailed'));
+      if (wanted.current === key && !shown) setError(err.message || t('market.list.loadFailed'));
     }
   }, [key, params, t]);
 

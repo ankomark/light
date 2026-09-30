@@ -1,35 +1,45 @@
-// The marketplace's front: search, the way to the cart, wishlist, orders and
-// selling, the categories that have something in them, what is new, and what
-// was looked at lately. Opens at once on the last copy (useCachedData).
-import React, { useState } from 'react';
+// The marketplace's front: what people are selling, straight away — newest
+// first, a grid that goes on as it is scrolled — with search, the way to the
+// cart, wishlist, orders and selling, the categories that have something in
+// them, and what was looked at lately above it.
+//
+// Opens at once on the phone's copy, which the app fills in the background
+// soon after it starts (utils/marketFeed.js warmMarket), then refreshes
+// behind it. Pull down to refresh by hand.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../../context/I18nContext';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, TextInput, ActivityIndicator,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useNavigation } from '@react-navigation/native';
-import { fetchProducts, fetchProductCategories } from '../../services/api';
+import { fetchProducts } from '../../services/api';
 import useCachedData from '../../utils/useCachedData';
+import useGridColumns from '../../utils/useGridColumns';
+import { peekCache } from '../../utils/screenCache';
 import { useAuth } from '../../context/useAuth';
 import { useMarket, useMarketUser } from '../../utils/cartStore';
 import { formatPrice } from '../../utils/market';
+import {
+  MARKET_HOME_KEY, HOME_PAGE_SIZE, loadMarketHome, prefetchPhotos,
+} from '../../utils/marketFeed';
 import CartButton from './CartButton';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
+const GAP = 10;
 
+// A refresh that half-failed keeps the half it did not get from the copy.
 const loadHome = async () => {
-  const [categoriesData, productsData] = await Promise.all([
-    fetchProductCategories(),
-    // Featured strip shows 8 — fetch exactly 8 instead of the default 20.
-    fetchProducts(1, { page_size: 8 }),
-  ]);
-  const categories = Array.isArray(categoriesData) ? categoriesData : (categoriesData?.results || []);
-  return {
-    // Only categories with something in them (older servers send no count).
-    categories: categories.filter((c) => c.product_count == null || c.product_count > 0),
-    featured: (productsData?.results || []).slice(0, 8),
+  const fresh = await loadMarketHome();
+  const kept = peekCache(MARKET_HOME_KEY);
+  const merged = {
+    ...fresh,
+    products: fresh.products ?? kept?.products ?? [],
+    categories: fresh.categories ?? kept?.categories ?? [],
   };
+  prefetchPhotos(merged.products);
+  return merged;
 };
 
 const ProductStrip = ({ products, onOpen }) => (
@@ -38,7 +48,7 @@ const ProductStrip = ({ products, onOpen }) => (
     data={products}
     keyExtractor={(item) => String(item.id)}
     renderItem={({ item }) => (
-      <TouchableOpacity style={styles.productCard} onPress={() => onOpen(item)} testID={`home-product-${item.id}`}>
+      <TouchableOpacity style={styles.productCard} onPress={() => onOpen(item)} testID={`home-recent-${item.id}`}>
         <Image
           source={item.images?.[0]?.image_url ? { uri: item.images[0].image_url } : PLACEHOLDER_IMAGE}
           placeholder={PLACEHOLDER_IMAGE}
@@ -55,6 +65,28 @@ const ProductStrip = ({ products, onOpen }) => (
   />
 );
 
+const Tile = React.memo(({ item, width, onOpen, t }) => (
+  <TouchableOpacity style={[styles.tile, { width }]} onPress={() => onOpen(item)} activeOpacity={0.85}
+                    testID={`home-product-${item.id}`}>
+    <Image
+      source={item.images?.[0]?.image_url ? { uri: item.images[0].image_url } : PLACEHOLDER_IMAGE}
+      placeholder={PLACEHOLDER_IMAGE}
+      contentFit="cover"
+      transition={120}
+      recyclingKey={String(item.id)}
+      style={[styles.tileImage, { height: width }]}
+    />
+    <View style={styles.tileBody}>
+      <Text style={styles.tileTitle} numberOfLines={2}>{item.title}</Text>
+      <Text style={styles.tilePrice}>{formatPrice(item.price, item.currency)}</Text>
+      <Text style={styles.tileMeta} numberOfLines={1}>
+        {[item.seller?.username, item.location].filter(Boolean).join(' · ')
+          || t('market.inStock', { n: item.quantity })}
+      </Text>
+    </View>
+  </TouchableOpacity>
+));
+
 const MarketplaceHome = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
@@ -62,10 +94,42 @@ const MarketplaceHome = () => {
   useMarketUser(currentUser?.id);
   const { recent } = useMarket();
   const [query, setQuery] = useState('');
-  const { data, failed, reload } = useCachedData('market:home', loadHome);
+  const { cols, tileSize } = useGridColumns({ target: 170, min: 2, max: 5, horizontalPadding: 32, gap: GAP });
+  const { data, failed, refreshing, reload } = useCachedData(MARKET_HOME_KEY, loadHome);
   const categories = data?.categories || [];
-  const featured = data?.featured || [];
-  const open = (product) => navigation.navigate('ProductDetail', { slug: product.slug, preview: product });
+
+  // Pages past the first, as the grid is scrolled.
+  const [more, setMore] = useState({ items: [], page: 1, next: null, loading: false });
+  const firstPage = data?.products || [];
+  const firstId = firstPage[0]?.id;
+  const lastFirst = useRef(firstId);
+  useEffect(() => {
+    // A new first page (a refresh): what was loaded after it starts again.
+    if (lastFirst.current !== firstId) {
+      lastFirst.current = firstId;
+      setMore({ items: [], page: 1, next: null, loading: false });
+    }
+  }, [firstId]);
+  const seen = new Set(firstPage.map((p) => p.id));
+  const products = [...firstPage, ...more.items.filter((p) => !seen.has(p.id))];
+  const hasMore = more.page === 1 ? !!data?.next : !!more.next;
+
+  const loadMore = useCallback(async () => {
+    if (!hasMore || more.loading) return;
+    setMore((m) => ({ ...m, loading: true }));
+    try {
+      const res = await fetchProducts(more.page + 1, { page_size: HOME_PAGE_SIZE });
+      prefetchPhotos(res?.results);
+      setMore((m) => ({
+        items: [...m.items, ...(res?.results || [])], page: m.page + 1, next: !!res?.next, loading: false,
+      }));
+    } catch {
+      setMore((m) => ({ ...m, loading: false }));
+    }
+  }, [hasMore, more.loading, more.page]);
+
+  const open = useCallback((product) => navigation.navigate('ProductDetail', { slug: product.slug, preview: product }),
+    [navigation]);
   const search = () => {
     if (query.trim()) navigation.navigate('ProductList', { q: query.trim() });
   };
@@ -76,8 +140,8 @@ const MarketplaceHome = () => {
     { key: 'SellerDashboard', icon: 'tag', label: t('market.home.sellShort') },
   ];
 
-  return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+  const header = (
+    <View>
       <View style={styles.topRow}>
         <View style={styles.searchBox}>
           <Icon name="search" size={16} color="#888" />
@@ -105,16 +169,6 @@ const MarketplaceHome = () => {
         ))}
       </View>
 
-      {!data && (
-        <View style={styles.loadingContainer}>
-          {failed ? (
-            <TouchableOpacity onPress={reload}>
-              <Text style={styles.loadingText}>{t('market.home.loadFailed')}</Text>
-            </TouchableOpacity>
-          ) : <ActivityIndicator color="#FFC46B" />}
-        </View>
-      )}
-
       {categories.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('market.home.shopByCategory')}</Text>
@@ -140,13 +194,6 @@ const MarketplaceHome = () => {
         </View>
       )}
 
-      {featured.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('market.home.featured')}</Text>
-          <ProductStrip products={featured} onOpen={open} />
-        </View>
-      )}
-
       {recent.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('market.home.recent')}</Text>
@@ -154,12 +201,48 @@ const MarketplaceHome = () => {
         </View>
       )}
 
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('ProductList')}>
-          <Text style={styles.primaryButtonText}>{t('market.home.browseAll')}</Text>
+      <Text style={styles.sectionTitle}>{t('market.home.justListed')}</Text>
+    </View>
+  );
+
+  const empty = !data ? (
+    <View style={styles.loadingContainer}>
+      {failed ? (
+        <TouchableOpacity onPress={reload}>
+          <Text style={styles.loadingText}>{t('market.home.loadFailed')}</Text>
         </TouchableOpacity>
-      </View>
-    </ScrollView>
+      ) : <ActivityIndicator color="#FFC46B" />}
+    </View>
+  ) : (
+    <View style={styles.loadingContainer}>
+      <Text style={styles.loadingText}>{t('market.list.none')}</Text>
+    </View>
+  );
+
+  return (
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      data={products}
+      key={`home-${cols}`}
+      numColumns={cols}
+      columnWrapperStyle={cols > 1 ? styles.columns : undefined}
+      keyExtractor={(item) => String(item.id)}
+      renderItem={({ item }) => <Tile item={item} width={tileSize} onOpen={open} t={t} />}
+      ListHeaderComponent={header}
+      ListEmptyComponent={empty}
+      ListFooterComponent={more.loading ? <ActivityIndicator color="#FFC46B" style={styles.footer} /> : null}
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.6}
+      keyboardShouldPersistTaps="handled"
+      initialNumToRender={8}
+      windowSize={7}
+      removeClippedSubviews
+      refreshControl={(
+        <RefreshControl refreshing={!!(refreshing && data)} onRefresh={reload} tintColor="#FFC46B" />
+      )}
+      testID="market-home"
+    />
   );
 };
 
@@ -167,8 +250,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'transparent',
-    padding: 16,
   },
+  content: { padding: 16, paddingBottom: 32 },
+  columns: { gap: GAP },
+  footer: { marginVertical: 16 },
+  tile: {
+    backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden', marginBottom: GAP,
+  },
+  tileImage: { width: '100%', backgroundColor: '#eef1f5' },
+  tileBody: { padding: 8 },
+  tileTitle: { fontSize: 13, color: '#222', fontWeight: '500', minHeight: 34 },
+  tilePrice: { fontSize: 15, color: '#1D478B', fontWeight: '800', marginTop: 2 },
+  tileMeta: { fontSize: 11, color: '#888', marginTop: 2 },
   loadingContainer: {
     paddingVertical: 32,
     justifyContent: 'center',

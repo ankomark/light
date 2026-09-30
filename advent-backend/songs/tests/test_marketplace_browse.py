@@ -224,3 +224,21 @@ class BuyingTests(APITestCase):
         self.client.get(url)
         self.hymnal.refresh_from_db()
         self.assertEqual(self.hymnal.views, 1)
+
+
+class ProductPageSpeedTests(APITestCase):
+    """A page of what people are selling is a handful of queries, however
+    many products, pictures and reviews are on it."""
+
+    def test_twenty_products_in_a_few_queries(self):
+        cache.clear()
+        buyer = User.objects.create_user('b', 'b@x.com', 'pw')
+        sellers = [User.objects.create_user(f's{i}', f's{i}@x.com', 'pw') for i in range(5)]
+        for i in range(20):
+            p = make(sellers[i % 5], f'Thing {i}')
+            ProductImage.objects.create(product=p, image=f'https://cdn.example/{i}.jpg')
+        self.client.force_authenticate(buyer)
+        with CaptureQueriesContext(connection) as ctx:
+            res = self.client.get('/api/marketplace/products/?page_size=20')
+        self.assertEqual(len(res.data['results']), 20)
+        self.assertLessEqual(len(ctx.captured_queries), 6)

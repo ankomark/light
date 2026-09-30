@@ -122,6 +122,7 @@ import AdminRoles from './components/admin/AdminRoles';
 import AdminWallpapers from './components/admin/AdminWallpapers';
 import VideoFeed from './components/VideoFeed';
 import VideoModeStart from './components/VideoModeStart';
+import MarketWarmup from './components/MarketWarmup';
 import LiveHub from './components/Live/LiveHub';
 import GoLive from './components/Live/GoLive';
 import LiveRoom from './components/Live/LiveRoom';
@@ -487,6 +488,8 @@ const App = () => {
             </Stack.Navigator>
             {/* Video mode: open in the Videos feed when the user chose it. */}
             <VideoModeStart />
+            {/* The marketplace, ready before it is opened. */}
+            <MarketWarmup />
             <MiniPlayer />
             {/* Background uploads: progress pill on every screen. */}
             <UploadStatus />
