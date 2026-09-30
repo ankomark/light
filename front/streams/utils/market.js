@@ -84,6 +84,23 @@ export const groupBySeller = (items = []) => {
   });
 };
 
+/** Open a chat with `user` ({ id, username }) about order `orderId`, with a
+ *  first line already written. Returns false when it could not. */
+export const chatAboutOrder = async (navigation, getOrCreateConversation, user, orderId, draft) => {
+  if (!user?.id) return false;
+  try {
+    const conversation = await getOrCreateConversation(user.id);
+    navigation.navigate('Chat', {
+      conversationId: conversation.id,
+      otherUser: conversation.other_participant ?? user,
+      draft,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const hasPaymentInfo = (p) =>
   !!(p?.mpesa_number || p?.till_number || p?.bank_details || p?.payment_instructions);
 

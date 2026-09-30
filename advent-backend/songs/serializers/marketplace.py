@@ -363,7 +363,9 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    items = OrderItemSerializer(many=True, read_only=True)
+    # A seller sees their own part of an order: not what the buyer bought
+    # from other sellers, nor those sellers' payment and contact details.
+    items = serializers.SerializerMethodField()
     # Who bought it — a name and a picture. The full UserSerializer loaded the
     # buyer's post history and counted followers for every order in a list.
     buyer = SimpleUserSerializer(read_only=True)
@@ -383,14 +385,28 @@ class OrderSerializer(serializers.ModelSerializer):
         # total_amount/transaction_id are integrity-critical).
         read_only_fields = fields
 
+    def lines(self, obj):
+        """The lines the person asking may see: all of them for the buyer
+        (and staff); a seller's own for a seller."""
+        items = list(obj.items.all())
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is not None and user.is_authenticated and obj.buyer_id != user.pk and not user.is_staff:
+            items = [i for i in items if i.seller_id == user.pk]
+        return items
+
+    def get_items(self, obj):
+        return OrderItemSerializer(self.lines(obj), many=True, context=self.context).data
+
     def get_timeline(self, obj):
         """Placed → paid → shipped → delivered: each step with when it was
         reached — for a step every seller's part must have reached it, so
         a two-seller order is "shipped" once both have sent theirs."""
-        live = [i for i in obj.items.all() if not i.cancelled_at]
+        items = self.lines(obj)
+        live = [i for i in items if not i.cancelled_at]
         if not live:
             return [{'step': 'placed', 'at': obj.created_at},
-                    {'step': 'cancelled', 'at': max((i.cancelled_at for i in obj.items.all()
+                    {'step': 'cancelled', 'at': max((i.cancelled_at for i in items
                                                      if i.cancelled_at), default=None)}]
 
         def reached(field):
@@ -411,7 +427,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
         Lines called off are not owed: the total is what is still live. An
         order called off altogether keeps its old total, to say what it was."""
-        items = list(obj.items.all())
+        items = self.lines(obj)
         live = [i for i in items if not i.cancelled_at] or items
         return money_totals(
             (i.currency or (i.product.currency if i.product else 'USD'), i.price_at_purchase * i.quantity)

@@ -13,10 +13,12 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { fetchOrderById, apiRequest } from '../../services/api';
+import { fetchOrderById, apiRequest, getOrCreateConversation } from '../../services/api';
 import { useI18n } from '../../context/I18nContext';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
-import { formatTotals, orderTotals, groupBySeller, marketError } from '../../utils/market';
+import {
+  formatTotals, orderTotals, groupBySeller, marketError, chatAboutOrder,
+} from '../../utils/market';
 import SellerPayCard from './SellerPayCard';
 import useMarketToast from './MarketToast';
 
@@ -113,7 +115,18 @@ const Checkout = () => {
         </View>
 
         {sellerGroups.map((group) => (
-          <SellerPayCard key={String(group.sellerId)} group={group} orderId={order.id} onToast={showToast} />
+          <SellerPayCard
+            key={String(group.sellerId)}
+            group={group}
+            orderId={order.id}
+            onToast={showToast}
+            onMessage={group.sellerId ? async () => {
+              const ok = await chatAboutOrder(navigation, getOrCreateConversation,
+                { id: group.sellerId, username: group.sellerName }, order.id,
+                t('market.order.chatDraft', { id: order.id }));
+              if (!ok) showToast(t('market.order.chatFailed'), { error: true });
+            } : undefined}
+          />
         ))}
 
         <View style={styles.totalCard}>

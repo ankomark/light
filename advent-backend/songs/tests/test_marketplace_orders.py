@@ -98,6 +98,24 @@ class OrderProgressTests(TwoSellerOrderMixin, APITestCase):
         self.post(self.b, 'cancel-part')
         self.assertEqual(self.status_(), 'CANCELLED')
 
+    def test_a_seller_sees_their_own_part_not_the_other_sellers(self, notify):
+        self.pb.mpesa_number = '0799 B-ONLY'
+        self.pb.save()
+        self.client.force_authenticate(self.a)
+        res = self.client.get(f'/api/marketplace/orders/{self.order.id}/')
+        self.assertEqual([i['title'] for i in res.data['items']], ['Hymnal'])
+        self.assertEqual(res.data['totals'], [{'currency': 'KES', 'amount': '10.00'}])
+        self.assertNotIn('0799 B-ONLY', str(res.data))
+        # And in their list of sales, and in the answer to their own action.
+        res = self.client.get('/api/marketplace/orders/?role=seller')
+        self.assertEqual([i['title'] for i in res.data['results'][0]['items']], ['Hymnal'])
+        res = self.post(self.a, 'confirm-payment')
+        self.assertEqual([i['title'] for i in res.data['items']], ['Hymnal'])
+        # The buyer still sees the whole order.
+        self.client.force_authenticate(self.buyer)
+        res = self.client.get(f'/api/marketplace/orders/{self.order.id}/')
+        self.assertEqual(sorted(i['title'] for i in res.data['items']), ['Guitar', 'Hymnal'])
+
     def test_a_part_called_off_is_not_in_the_total(self, notify):
         self.post(self.buyer, 'cancel-part', {'seller_id': self.b.id})
         res = self.client.get(f'/api/marketplace/orders/{self.order.id}/')

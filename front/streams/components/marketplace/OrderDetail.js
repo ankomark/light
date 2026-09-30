@@ -1,7 +1,12 @@
 // One order. Opens at once on the copy the list already had (route param or
 // the phone's cache) and refreshes behind it. Lines show what was bought as
 // it was bought — the product may since have been edited or deleted.
-import React, { useState, useEffect, useCallback } from 'react';
+//
+// Read again when it comes back into view and on a pull, since the other
+// side moves it on (a seller confirms, a buyer says it arrived). The buyer
+// sees every seller's part; a seller sees only their own (the server sends
+// no more), with the buyer to message.
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,18 +15,20 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import {
   fetchOrderById, confirmOrderPayment, shipOrderPart, markOrderReceived, cancelOrderPart,
+  getOrCreateConversation,
 } from '../../services/api';
 import { addProductToCart } from '../../utils/cartStore';
 import { useAuth } from '../../context/useAuth';
 import { useI18n } from '../../context/I18nContext';
 import { peekCache, writeCache, userKey } from '../../utils/screenCache';
 import {
-  formatTotals, orderTotals, groupBySeller, marketError,
+  formatTotals, orderTotals, groupBySeller, marketError, chatAboutOrder,
 } from '../../utils/market';
 import SellerPayCard from './SellerPayCard';
 import { STATUS_COLORS, formatDate } from './OrderHistory';
@@ -46,7 +53,16 @@ const Timeline = ({ steps, t }) => (
   </View>
 );
 
+const AGAIN_AFTER_MS = 5000;   // back in view sooner than this: not read again
+
+// Handed another order while open (a push about a different order), the page
+// starts afresh: never one order's buttons acting on another's number.
 const OrderDetail = () => {
+  const orderId = useRoute().params?.orderId;
+  return <OrderPage key={String(orderId ?? '')} />;
+};
+
+const OrderPage = () => {
   const navigation = useNavigation();
   const params = useRoute().params ?? {};
   const { orderId } = params;
@@ -57,6 +73,9 @@ const OrderDetail = () => {
   const [error, setError] = useState(null);
   const [confirmingSeller, setConfirmingSeller] = useState(null);
   const [actingSeller, setActingSeller] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [rebuying, setRebuying] = useState(false);
+  const loadedAt = useRef(0);
   const [toast, showToast] = useMarketToast();
 
   const keep = useCallback((data) => {
@@ -66,6 +85,7 @@ const OrderDetail = () => {
 
   const loadOrder = useCallback(async () => {
     setError(null);
+    loadedAt.current = Date.now();
     try {
       keep(await fetchOrderById(orderId));
     } catch (err) {
@@ -77,6 +97,22 @@ const OrderDetail = () => {
 
   useEffect(() => { loadOrder(); }, [loadOrder]);
 
+  // Back in view (from the chat, WhatsApp, a push): read again.
+  useEffect(() => navigation.addListener?.('focus', () => {
+    if (Date.now() - loadedAt.current > AGAIN_AFTER_MS) loadOrder();
+  }), [navigation, loadOrder]);
+
+  const onPull = useCallback(async () => {
+    setRefreshing(true);
+    await loadOrder();
+    setRefreshing(false);
+  }, [loadOrder]);
+
+  const message = useCallback(async (user) => {
+    const ok = await chatAboutOrder(navigation, getOrCreateConversation, user, orderId,
+      t('market.order.chatDraft', { id: orderId }));
+    if (!ok) showToast(t('market.order.chatFailed'), { error: true });
+  }, [navigation, orderId, showToast, t]);
   const handleConfirm = useCallback((sellerId) => {
     Alert.alert(
       t('market.order.confirmTitle'),
@@ -131,18 +167,27 @@ const OrderDetail = () => {
     );
   }, [act, orderId, t]);
 
-  // A finished order's things, back in the cart — those still for sale.
+  // A finished order's things, back in the cart: those still for sale, as
+  // many as were bought (or as are left), not what was called off.
   const buyAgain = useCallback(async () => {
-    const products = (order?.items || []).map((i) => i.product)
-      .filter((p) => p && p.is_available !== false && p.quantity > 0);
-    if (!products.length) { showToast(t('market.order.nothingToRebuy'), { error: true }); return; }
+    if (rebuying) return;
+    const wanted = new Map();
+    (order?.items || []).forEach((i) => {
+      const p = i.product;
+      if (i.cancelled_at || !p || p.is_available === false || !(p.quantity > 0)) return;
+      const had = wanted.get(p.id);
+      wanted.set(p.id, { product: p, quantity: Math.min(p.quantity, (had?.quantity || 0) + (i.quantity || 1)) });
+    });
+    if (!wanted.size) { showToast(t('market.order.nothingToRebuy'), { error: true }); return; }
+    setRebuying(true);
     let added = 0;
-    for (const p of products) {
-      try { await addProductToCart(p, 1); added += 1; } catch { /* sold out since */ }
+    for (const { product, quantity } of wanted.values()) {
+      try { await addProductToCart(product, quantity); added += 1; } catch { /* sold out since */ }
     }
+    setRebuying(false);
     showToast(t('market.order.addedAgain', { n: added }));
     if (added) navigation.navigate('Cart');
-  }, [order, navigation, showToast, t]);
+  }, [order, rebuying, navigation, showToast, t]);
 
   if (!order) {
     return (
@@ -169,7 +214,17 @@ const OrderDetail = () => {
 
   return (
     <View style={styles.flex}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPull} tintColor="#FFC46B" />}
+      >
+        {!!error && (
+          <TouchableOpacity style={styles.staleBanner} onPress={loadOrder} testID="order-stale">
+            <Icon name="refresh" size={13} color="#FFC46B" />
+            <Text style={styles.staleText}>{t('market.order.staleRetry')}</Text>
+          </TouchableOpacity>
+        )}
         <View style={styles.card}>
           <View style={styles.headerRow}>
             <Text style={styles.orderId}>{t('market.order.number', { id: order.id })}</Text>
@@ -208,13 +263,18 @@ const OrderDetail = () => {
               onReceived={() => act(group.sellerId, () => markOrderReceived(orderId, group.sellerId),
                 t('market.part.receivedDone'))}
               onCancelPart={() => cancelPart(group.sellerId, mine)}
+              buyerName={order.buyer?.username}
+              onMessage={mine
+                ? (order.buyer?.id ? () => message(order.buyer) : undefined)
+                : (isBuyer && group.sellerId ? () => message({ id: group.sellerId, username: group.sellerName }) : undefined)}
             />
           );
         })}
 
         {isBuyer && status === 'delivered' && (
-          <TouchableOpacity style={styles.buyAgain} onPress={buyAgain} testID="order-buy-again">
-            <Icon name="repeat" size={15} color="#fff" />
+          <TouchableOpacity style={[styles.buyAgain, rebuying && styles.busy]} onPress={buyAgain}
+                            disabled={rebuying} testID="order-buy-again">
+            {rebuying ? <ActivityIndicator color="#fff" /> : <Icon name="repeat" size={15} color="#fff" />}
             <Text style={styles.buyAgainText}>{t('market.order.buyAgain')}</Text>
           </TouchableOpacity>
         )}
@@ -243,6 +303,12 @@ const OrderDetail = () => {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  busy: { opacity: 0.7 },
+  staleBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: 'rgba(255,196,107,0.14)',
+  },
+  staleText: { color: '#FFC46B', fontSize: 13, flex: 1 },
   timeline: {
     flexDirection: 'row', justifyContent: 'space-between',
     backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12,

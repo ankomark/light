@@ -61,7 +61,7 @@ export const partState = (group) => {
 
 export default function SellerPayCard({
   group, orderId, isMySale = false, isBuyer = false, orderOpen = true, onConfirm, confirming = false,
-  onToast, onShip, onReceived, onCancelPart, acting = false,
+  onToast, onShip, onReceived, onCancelPart, acting = false, onMessage, buyerName = '',
 }) {
   const { t } = useI18n();
   const { product } = group;
@@ -145,8 +145,25 @@ export default function SellerPayCard({
       </View>
       )}
 
-      {/* Called off: nothing to pay, and no "I've paid" message to send. */}
-      {state === 'cancelled' ? null : hasPaymentInfo(product) ? (
+      {isMySale && (
+        <View style={styles.buyerRow} testID="order-buyer">
+          <Icon name="user" size={14} color="#1D478B" />
+          <Text style={styles.buyerText} numberOfLines={1}>
+            {t('market.order.boughtBy', { name: buyerName || t('market.product.someone') })}
+          </Text>
+          {!!onMessage && (
+            <TouchableOpacity onPress={onMessage} style={styles.messageLink} testID="message-buyer"
+                              accessibilityRole="button">
+              <Icon name="comment" size={13} color="#fff" />
+              <Text style={styles.messageLinkText}>{t('market.order.message')}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* Called off: nothing to pay, and no "I've paid" message to send.
+          The seller's own card does not show them their own details. */}
+      {state === 'cancelled' || isMySale ? null : hasPaymentInfo(product) ? (
         <View style={styles.payBox}>
           {product.mpesa_number ? <PaymentLine icon="mobile" label={t('market.pay.mpesa')} value={product.mpesa_number} onCopy={onCopy} /> : null}
           {product.till_number ? <PaymentLine icon="credit-card" label={t('market.pay.till')} value={product.till_number} onCopy={onCopy} /> : null}
@@ -157,7 +174,7 @@ export default function SellerPayCard({
         <Text style={styles.noPayNote}>{t('market.pay.none')}</Text>
       )}
 
-      {state !== 'cancelled' && (
+      {state !== 'cancelled' && !isMySale && (
       <View style={styles.contactRow}>
         <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtn]} onPress={openWhatsApp} activeOpacity={0.85} testID="seller-whatsapp">
           <Icon name="whatsapp" size={16} color="#fff" />
@@ -167,6 +184,13 @@ export default function SellerPayCard({
           <Icon name="phone" size={16} color="#fff" />
           <Text style={styles.contactBtnText}>{t('market.checkout.call')}</Text>
         </TouchableOpacity>
+        {!!onMessage && (
+          <TouchableOpacity style={[styles.contactBtn, styles.chatBtn]} onPress={onMessage} activeOpacity={0.85}
+                            testID="message-seller">
+            <Icon name="comment" size={16} color="#fff" />
+            <Text style={styles.contactBtnText}>{t('market.order.message')}</Text>
+          </TouchableOpacity>
+        )}
       </View>
       )}
 
@@ -269,6 +293,17 @@ export default function SellerPayCard({
 const styles = StyleSheet.create({
   copyBtn: { padding: 6, marginLeft: 6 },
   lineOff: { textDecorationLine: 'line-through', color: '#999' },
+  buyerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12,
+    padding: 10, borderRadius: 8, backgroundColor: '#f2f5fa',
+  },
+  buyerText: { flex: 1, fontSize: 14, color: '#333', fontWeight: '600' },
+  messageLink: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 16, backgroundColor: '#1D478B',
+  },
+  messageLinkText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  chatBtn: { backgroundColor: '#5C6BC0', marginLeft: 8 },
   partState: {
     flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10,
     paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#f2f7f4',
