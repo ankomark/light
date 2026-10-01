@@ -3268,6 +3268,7 @@ export const STRINGS = {
     'auth.passwordsNoMatch': 'Passwords do not match',
 
     'settings.title': 'Settings',
+    'settings.verified': 'Verified',
     'settings.section.account': 'Account',
     'settings.section.privacy': 'Privacy',
     'settings.section.notifications': 'Notifications',
@@ -6651,6 +6652,7 @@ export const STRINGS = {
     'auth.passwordsNoMatch': 'Nywila hazilingani',
 
     'settings.title': 'Mipangilio',
+    'settings.verified': 'Imethibitishwa',
     'settings.section.account': 'Akaunti',
     'settings.section.privacy': 'Faragha',
     'settings.section.notifications': 'Arifa',

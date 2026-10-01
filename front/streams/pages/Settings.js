@@ -50,6 +50,30 @@ import { useI18n } from '../context/I18nContext';
 import { typography, spacing, radius, shadows } from '../constants/theme';
 
 const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
+
+// Settings has one look, whatever the theme (as the Weather page does): black
+// ground, the Weather page's faint glass panels and hairlines, and the app's
+// gold for headings, icons, values and what is switched on.
+const SETTINGS_COLORS = {
+  bg: '#000000',
+  card: 'rgba(255,255,255,0.055)',
+  border: 'rgba(255,255,255,0.11)',
+  inputBg: 'rgba(255,255,255,0.08)',
+  sheet: '#111316',
+  overlay: 'rgba(0,0,0,0.72)',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#C9D3E0',
+  textMuted: '#8E99A8',
+  placeholder: '#6B7686',
+  primary: '#FFC46B',          // gold
+  onPrimary: '#0A0A0A',
+  iconTile: 'rgba(255,196,107,0.12)',
+  switchOff: 'rgba(255,255,255,0.18)',
+  error: '#FF7A6B',
+  success: '#5FD39A',
+  warning: '#FFB547',
+  white: '#FFFFFF',
+};
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 const PACKAGE_ID =
   Constants.expoConfig?.android?.package ||
@@ -110,7 +134,7 @@ const rowsOf = (children) => React.Children.toArray(children).flatMap((el) => (
 ));
 
 const Section = ({ title, children }) => {
-  const { colors } = useTheme();
+  const colors = SETTINGS_COLORS;
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const q = useContext(SettingsSearch);
   if (q && !rowsOf(children).some((el) => matches(q, el?.props?.label, el?.props?.sub, title))) return null;
@@ -123,7 +147,7 @@ const Section = ({ title, children }) => {
 };
 
 const Row = ({ icon, iconColor, label, sub, right, onPress, last, danger, testID }) => {
-  const { colors } = useTheme();
+  const colors = SETTINGS_COLORS;
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const q = useContext(SettingsSearch);
   if (!matches(q, label, sub)) return null;
@@ -170,6 +194,13 @@ const QUIET_FROM_CHOICES = [20, 21, 22, 23].map((h) => h * 60);
 const QUIET_TO_CHOICES = [5, 6, 7, 8].map((h) => h * 60);
 
 const THEME_CYCLE = ['system', 'light', 'dark'];
+
+/** "mark" → "MA", "Mary Atieno" → "MA": the avatar's letters. */
+const initialsOf = (name = '') => {
+  const words = String(name).trim().split(/[\s._-]+/).filter(Boolean);
+  if (!words.length) return '?';
+  return (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
+};
 // The most an export may be as a plain shared message, when no file can be
 // shared: Android refuses (and crashes on) much more.
 const SHARE_TEXT_MAX = 200 * 1024;
@@ -178,7 +209,8 @@ const Settings = () => {
   const navigation = useNavigation();
   const { currentUser, isEmailVerified, logout, updateUser } = useAuth();
   const { preferences: prefs, setPreference: updatePref } = usePreferences();
-  const { colors, mode: themeMode, setMode: setThemeMode } = useTheme();
+  const { mode: themeMode, setMode: setThemeMode } = useTheme();
+  const colors = SETTINGS_COLORS;
   const { t, language, setLanguage, languages } = useI18n();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -631,10 +663,11 @@ const Settings = () => {
       <SafeAreaView edges={['top']} style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          style={styles.backBtn}
+          style={[styles.backBtn, styles.backRound]}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel={t('common.back')}
         >
-          <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
+          <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('settings.title')}</Text>
         <View style={styles.backBtn} />
@@ -643,8 +676,8 @@ const Settings = () => {
       <SettingsSearch.Provider value={query.trim()}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled">
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={18} color={colors.textMuted} />
+        <View style={[styles.searchBox, { marginHorizontal: spacing.md }]}>
+          <Ionicons name="search" size={16} color={colors.textMuted} />
           <TextInput
             style={styles.searchInput}
             placeholder={t('settings.search')}
@@ -659,24 +692,47 @@ const Settings = () => {
             </TouchableOpacity>
           )}
         </View>
+        {/* ── Who is signed in ──────────────────────────────────── */}
+        {!query.trim() && (
+          <TouchableOpacity style={styles.profileCard} onPress={() => navigation.navigate('Profile')}
+                            activeOpacity={0.85} accessibilityRole="button" testID="settings-profile">
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initialsOf(currentUser?.username)}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.profileName} numberOfLines={1}>{currentUser?.username || t('settings.yourProfile')}</Text>
+              <Text style={styles.profileEmail} numberOfLines={1}>{currentUser?.email || t('settings.tapToEdit')}</Text>
+            </View>
+            {isEmailVerified ? (
+              <View style={styles.verifiedChip}>
+                <Text style={styles.verifiedText}>{t('settings.verified')}</Text>
+              </View>
+            ) : (
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            )}
+          </TouchableOpacity>
+        )}
+
         {/* ── Account ───────────────────────────────────────────── */}
         <Section title={t('settings.section.account')}>
-          <Row
-            icon="account-circle-outline"
-            label={currentUser?.username || t('settings.yourProfile')}
-            sub={currentUser?.email || t('settings.tapToEdit')}
-            onPress={() => navigation.navigate('Profile')}
-          />
-          <Row
-            icon={isEmailVerified ? 'email-check-outline' : 'email-alert-outline'}
-            iconColor={isEmailVerified ? colors.success : colors.warning}
-            label={t('settings.emailLabel')}
-            sub={isEmailVerified ? t('settings.account.emailVerified') : t('settings.account.emailUnverified')}
-            onPress={isEmailVerified ? undefined : () => navigation.navigate('EmailVerification')}
-            right={isEmailVerified ? (
-              <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-            ) : undefined}
-          />
+          {/* Found by search too: the profile card hides while searching. */}
+          {!!query.trim() && (
+            <Row
+              icon="account-circle-outline"
+              label={currentUser?.username || t('settings.yourProfile')}
+              sub={currentUser?.email || t('settings.tapToEdit')}
+              onPress={() => navigation.navigate('Profile')}
+            />
+          )}
+          {!isEmailVerified && (
+            <Row
+              icon="email-alert-outline"
+              iconColor={colors.warning}
+              label={t('settings.emailLabel')}
+              sub={t('settings.account.emailUnverified')}
+              onPress={() => navigation.navigate('EmailVerification')}
+            />
+          )}
           <Row
             icon="lock-reset"
             label={t('settings.account.changePassword')}
@@ -698,7 +754,7 @@ const Settings = () => {
                   value={isPrivate}
                   onValueChange={handleTogglePrivate}
                   disabled={savingPrivacy}
-                  trackColor={{ false: colors.border, true: colors.primary }}
+                  trackColor={{ false: colors.switchOff, true: colors.primary }}
                   thumbColor={colors.white}
                 />
               </View>
@@ -788,7 +844,7 @@ const Settings = () => {
                 value={!!prefs[PREF_KEYS.pushEnabled]}
                 onValueChange={handleTogglePush}
                 testID="push-switch"
-                trackColor={{ false: colors.border, true: colors.primary }}
+                trackColor={{ false: colors.switchOff, true: colors.primary }}
                 thumbColor={colors.white}
               />
             }
@@ -806,7 +862,7 @@ const Settings = () => {
                   onValueChange={(v) => toggleNotifCategory(cat.key, v)}
                   disabled={!notifPrefs}
                   testID={`notif-${cat.key}`}
-                  trackColor={{ false: colors.border, true: colors.primary }}
+                  trackColor={{ false: colors.switchOff, true: colors.primary }}
                   thumbColor={colors.white}
                 />
               }
@@ -826,7 +882,7 @@ const Settings = () => {
                     value={quietOn}
                     onValueChange={toggleQuiet}
                     disabled={!notifPrefs}
-                    trackColor={{ false: colors.border, true: colors.primary }}
+                    trackColor={{ false: colors.switchOff, true: colors.primary }}
                     thumbColor={colors.white}
                     testID="quiet-switch"
                   />
@@ -863,7 +919,7 @@ const Settings = () => {
               <Switch
                 value={prefs[PREF_KEYS.calendarReminders] !== false}
                 onValueChange={(v) => updatePref(PREF_KEYS.calendarReminders, v)}
-                trackColor={{ false: colors.border, true: colors.primary }}
+                trackColor={{ false: colors.switchOff, true: colors.primary }}
                 thumbColor={colors.white}
               />
             }
@@ -881,7 +937,7 @@ const Settings = () => {
               <Switch
                 value={!!prefs[PREF_KEYS.videoMode]}
                 onValueChange={(v) => updatePref(PREF_KEYS.videoMode, v)}
-                trackColor={{ false: colors.border, true: colors.primary }}
+                trackColor={{ false: colors.switchOff, true: colors.primary }}
                 thumbColor={colors.white}
                 accessibilityLabel={t('video.mode.label')}
               />
@@ -895,7 +951,7 @@ const Settings = () => {
               <Switch
                 value={!!prefs[PREF_KEYS.autoplayVideo]}
                 onValueChange={(v) => updatePref(PREF_KEYS.autoplayVideo, v)}
-                trackColor={{ false: colors.border, true: colors.primary }}
+                trackColor={{ false: colors.switchOff, true: colors.primary }}
                 thumbColor={colors.white}
               />
             }
@@ -908,7 +964,7 @@ const Settings = () => {
               <Switch
                 value={!!prefs[PREF_KEYS.dataSaver]}
                 onValueChange={(v) => updatePref(PREF_KEYS.dataSaver, v)}
-                trackColor={{ false: colors.border, true: colors.primary }}
+                trackColor={{ false: colors.switchOff, true: colors.primary }}
                 thumbColor={colors.white}
               />
             }
@@ -923,7 +979,7 @@ const Settings = () => {
               <Switch
                 value={!!prefs[PREF_KEYS.quizSound]}
                 onValueChange={(v) => updatePref(PREF_KEYS.quizSound, v)}
-                trackColor={{ false: colors.border, true: colors.primary }}
+                trackColor={{ false: colors.switchOff, true: colors.primary }}
                 thumbColor={colors.white}
               />
             }
@@ -982,7 +1038,7 @@ const Settings = () => {
                   <Switch
                     value={!!prefs[PREF_KEYS.downloadWifiOnly]}
                     onValueChange={(v) => updatePref(PREF_KEYS.downloadWifiOnly, v)}
-                    trackColor={{ false: colors.border, true: colors.primary }}
+                    trackColor={{ false: colors.switchOff, true: colors.primary }}
                     thumbColor={colors.white}
                   />
                 }
@@ -1034,12 +1090,17 @@ const Settings = () => {
 
         {/* ── Session ───────────────────────────────────────────── */}
         <Section title={t('settings.section.session')}>
-          <Row icon="logout" label={t('settings.session.logout')} danger onPress={handleLogout} right={null} />
           <Row icon="account-off-outline" label={t('settings.session.deactivate')} onPress={confirmDeactivate} right={null} />
           <Row icon="trash-can-outline" label={t('settings.session.delete')} danger onPress={confirmDeleteAccount} last right={null}
                testID="delete-account" />
         </Section>
 
+        {!query.trim() && (
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} accessibilityRole="button" testID="settings-logout">
+            <MaterialCommunityIcons name="logout" size={18} color={colors.error} />
+            <Text style={styles.logoutText}>{t('settings.session.logout')}</Text>
+          </TouchableOpacity>
+        )}
         <Text style={styles.version}>{APP_NAME} v{APP_VERSION}</Text>
         <View style={{ height: spacing.xl }} />
       </ScrollView>
@@ -1132,9 +1193,9 @@ const Settings = () => {
               activeOpacity={0.85}
             >
               {sendingContact
-                ? <ActivityIndicator color={colors.white} />
+                ? <ActivityIndicator color={colors.onPrimary} />
                 : <>
-                    <Ionicons name="send-outline" size={18} color={colors.white} />
+                    <Ionicons name="send-outline" size={18} color={colors.onPrimary} />
                     <Text style={styles.sendBtnText}>{t('settings.contact.send')}</Text>
                   </>}
             </TouchableOpacity>
@@ -1207,9 +1268,9 @@ const Settings = () => {
               activeOpacity={0.85}
             >
               {changingPw
-                ? <ActivityIndicator color={colors.white} />
+                ? <ActivityIndicator color={colors.onPrimary} />
                 : <>
-                    <Ionicons name="lock-closed-outline" size={18} color={colors.white} />
+                    <Ionicons name="lock-closed-outline" size={18} color={colors.onPrimary} />
                     <Text style={styles.sendBtnText}>{t('settings.pw.update')}</Text>
                   </>}
             </TouchableOpacity>
@@ -1266,7 +1327,7 @@ const Settings = () => {
                 ? <ActivityIndicator color={colors.white} />
                 : <>
                     <Ionicons name="trash-outline" size={18} color={colors.white} />
-                    <Text style={styles.sendBtnText}>{t('settings.deleteButton')}</Text>
+                    <Text style={[styles.sendBtnText, { color: colors.white }]}>{t('settings.deleteButton')}</Text>
                   </>}
             </TouchableOpacity>
           </View>
@@ -1317,9 +1378,9 @@ const Settings = () => {
               activeOpacity={0.85}
             >
               {deactivating
-                ? <ActivityIndicator color={colors.white} />
+                ? <ActivityIndicator color={colors.onPrimary} />
                 : <>
-                    <MaterialCommunityIcons name="account-off-outline" size={18} color={colors.white} />
+                    <MaterialCommunityIcons name="account-off-outline" size={18} color={colors.onPrimary} />
                     <Text style={styles.sendBtnText}>{t('settings.deactivateButton')}</Text>
                   </>}
             </TouchableOpacity>
@@ -1333,8 +1394,9 @@ const Settings = () => {
 const makeStyles = (colors) => StyleSheet.create({
   searchBox: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    backgroundColor: colors.card, borderRadius: radius.lg, paddingHorizontal: spacing.md,
-    height: 44, marginBottom: spacing.md,
+    backgroundColor: colors.card, borderRadius: 20, paddingHorizontal: 14,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+    height: 40, marginBottom: spacing.md,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.textPrimary },
   deviceRow: {
@@ -1351,31 +1413,52 @@ const makeStyles = (colors) => StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
   },
-  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { ...typography.h2, color: colors.textPrimary },
+  backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+  backRound: { borderRadius: 22, backgroundColor: colors.card },
+  headerTitle: { fontSize: 18, fontWeight: '800', letterSpacing: 0.3, color: colors.textPrimary },
 
-  scroll: { paddingTop: spacing.sm },
+  scroll: { paddingTop: spacing.sm, paddingBottom: spacing.lg },
+  profileCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: spacing.md, padding: 14,
+    borderRadius: 18, backgroundColor: colors.card,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,196,107,0.28)',
+  },
+  avatar: {
+    width: 52, height: 52, borderRadius: 26, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarText: { color: colors.onPrimary, fontSize: 18, fontWeight: '800' },
+  profileName: { color: colors.textPrimary, fontSize: 16, fontWeight: '800' },
+  profileEmail: { color: colors.textSecondary, fontSize: 13, marginTop: 3 },
+  verifiedChip: {
+    paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: 'rgba(95,211,154,0.16)',
+  },
+  verifiedText: { color: colors.success, fontSize: 11, fontWeight: '800' },
+  logoutBtn: {
+    height: 50, borderRadius: 16, marginHorizontal: spacing.md, marginTop: spacing.lg,
+    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8,
+    borderWidth: 1, borderColor: 'rgba(255,122,107,0.45)', backgroundColor: 'rgba(255,122,107,0.08)',
+  },
+  logoutText: { color: colors.error, fontSize: 15, fontWeight: '800' },
 
   section: { marginTop: spacing.md },
   sectionTitle: {
-    ...typography.caption,
-    color: colors.textMuted,
-    letterSpacing: 1.2,
-    fontWeight: '700',
-    marginLeft: spacing.lg,
-    marginBottom: spacing.xs,
+    fontSize: 11.5,
+    color: colors.primary,
+    letterSpacing: 1.4,
+    fontWeight: '800',
+    marginLeft: spacing.lg + 2,
+    marginBottom: spacing.sm,
   },
   group: {
     backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
     marginHorizontal: spacing.md,
     overflow: 'hidden',
-    ...shadows.sm,
   },
 
   row: {
@@ -1387,14 +1470,14 @@ const makeStyles = (colors) => StyleSheet.create({
   },
   rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   rowIcon: {
-    width: 36, height: 36, borderRadius: radius.md,
-    backgroundColor: colors.inputBg,
+    width: 34, height: 34, borderRadius: 11,
+    backgroundColor: colors.iconTile,
     justifyContent: 'center', alignItems: 'center',
     marginRight: spacing.md,
   },
-  rowIconDanger: { backgroundColor: 'rgba(229,57,53,0.12)' },
+  rowIconDanger: { backgroundColor: 'rgba(255,122,107,0.14)' },
   rowTextWrap: { flex: 1, marginRight: spacing.sm },
-  rowLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '500' },
+  rowLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '700' },
   rowSub: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
 
   switchWrap: { flexDirection: 'row', alignItems: 'center' },
@@ -1404,7 +1487,7 @@ const makeStyles = (colors) => StyleSheet.create({
     paddingVertical: 5,
     paddingHorizontal: 12,
   },
-  valuePillText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
+  valuePillText: { ...typography.caption, color: colors.primary, fontWeight: '800' },
 
   version: {
     ...typography.caption,
@@ -1417,7 +1500,9 @@ const makeStyles = (colors) => StyleSheet.create({
   // Contact modal
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: colors.bg,
+    backgroundColor: colors.sheet,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     padding: spacing.md,
@@ -1462,7 +1547,7 @@ const makeStyles = (colors) => StyleSheet.create({
     borderRadius: radius.md,
     ...shadows.md,
   },
-  sendBtnText: { ...typography.button, color: colors.white, fontSize: 16 },
+  sendBtnText: { ...typography.button, color: colors.onPrimary, fontSize: 16 },
   deleteBtn: {
     flexDirection: 'row',
     justifyContent: 'center',

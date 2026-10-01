@@ -234,3 +234,30 @@ describe('blocked accounts', () => {
     alert.mockRestore();
   });
 });
+
+describe('the black look (design A)', () => {
+  test('the profile card on top: initials, name, Verified', () => {
+    const screen = render(<Settings />);
+    const card = screen.getByTestId('settings-profile');
+    expect(card).toHaveTextContent(/^MA/);
+    expect(card).toHaveTextContent(/mark/);
+    expect(card).toHaveTextContent(/settings\.verified$/);
+    fireEvent.press(card);
+    expect(mockNav.navigate).toHaveBeenCalledWith('Profile');
+  });
+
+  test('log out is its own button, and asks first', () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const screen = render(<Settings />);
+    fireEvent.press(screen.getByTestId('settings-logout'));
+    expect(alert).toHaveBeenCalledWith('settings.logoutTitle', 'settings.logoutConfirm', expect.any(Array));
+    alert.mockRestore();
+  });
+
+  test('while searching, the card steps aside and the profile is a row to find', () => {
+    const screen = render(<Settings />);
+    fireEvent.changeText(screen.getByTestId('settings-search'), 'mark');
+    expect(screen.queryByTestId('settings-profile')).toBeNull();
+    expect(screen.getByText('mark')).toBeTruthy();
+  });
+});
