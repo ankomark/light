@@ -3,14 +3,15 @@
 // sign-up and report trend, why people report, the busiest hours, what people
 // shared and who is most followed, then what needs an admin now. The charts
 // need the analytics power; without it an admin sees the counts and the queue.
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminDashboard, fetchAdminPulse } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
-import { peekCache, writeCache, userKey } from '../../utils/screenCache';
+import { peekCache, readCache, writeCache, userKey } from '../../utils/screenCache';
+import { adminMemo } from '../../utils/adminSession';
 import { useAdminMe } from './AdminKit';
 import { WIDE } from './AdminTabs';
 import {
@@ -66,45 +67,56 @@ export default function AdminDashboard({ navigation }) {
   const dashKey = userKey(currentUser?.id, 'admin:dashboard');
   const [days, setDays] = useState(14);
   const pulseKey = userKey(currentUser?.id, `admin:pulse:${days}`);
+  // The counts and the charts (totals, never anyone's words) are kept on the
+  // phone like the home feed, so the dashboard opens on its last copy; the
+  // reports waiting are kept in memory only. All of it goes at sign-out.
   const [dash, setDash] = useState(() => peekCache(dashKey));
+  const [queue, setQueue] = useState(() => adminMemo.get('dash:queue') || null);
   const [pulseState, setPulse] = useState(() => peekCache(pulseKey));
   // Charts only while the server says this admin may see them (a cached copy
   // outlives a power taken away).
   const pulse = canCharts ? pulseState : null;
-  const [loading, setLoading] = useState(!dash);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+
+  // Cold start: the copy on disk, if the memory has none.
+  useEffect(() => {
+    let alive = true;
+    if (!peekCache(dashKey)) readCache(dashKey).then((c) => { if (alive && c) setDash((d) => d || c); });
+    if (!peekCache(pulseKey)) readCache(pulseKey).then((c) => { if (alive && c) setPulse((p) => p || c); });
+    return () => { alive = false; };
+  }, [dashKey, pulseKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [d, p] = await Promise.all([
-        fetchAdminDashboard(),
-        canCharts ? fetchAdminPulse(days) : Promise.resolve(null),
-      ]);
-      setDash(d);
-      writeCache(dashKey, d, { persist: false });
-      if (p) {
-        setPulse(p);
-        writeCache(pulseKey, p, { persist: false });
-      }
-      setErr(null);
-    } catch (e) {
+    const failed = (e) => {
       const status = e?.response?.status || e?.status;
       setErr(status ? t('admin.dashboardLoadFailedStatus', { status }) : t('adminPulse.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
+    };
+    // Each part shows as soon as it comes: the counts do not wait for the charts.
+    const counts = fetchAdminDashboard().then((d) => {
+      const { recent_reports: recent = [], ...rest } = d || {};
+      setDash(rest);
+      writeCache(dashKey, rest);
+      setQueue(recent);
+      adminMemo.set('dash:queue', recent);
+    });
+    const charts = canCharts
+      ? fetchAdminPulse(days).then((p) => { setPulse(p); writeCache(pulseKey, p); })
+      : Promise.resolve();
+    const results = await Promise.allSettled([counts, charts]);
+    const bad = results.find((r) => r.status === 'rejected');
+    if (bad) failed(bad.reason);
+    else setErr(null);
+    setLoading(false);
   }, [t, canCharts, days, dashKey, pulseKey]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  if (loading && !dash && !pulse) {
-    return <View style={styles.centered}><ActivityIndicator size="large" color={PULSE.teal} /></View>;
-  }
-
   const rings = pulse?.rings;
   const mixTotal = MIX.reduce((s, [k]) => s + (pulse?.mix?.[k] || 0), 0);
-  const waiting = (dash?.recent_reports || []).filter((r) => r.status === 'pending').slice(0, 5);
+  const waiting = (queue || []).filter((r) => r.status === 'pending').slice(0, 5);
+  const blank = !dash && !pulse;   // the very first open: shapes, not a spinner
   const row = wide ? styles.row : styles.col;
 
   return (
@@ -139,7 +151,17 @@ export default function AdminDashboard({ navigation }) {
 
       {!!err && <View style={styles.err}><Text style={styles.errText}>{err}</Text></View>}
 
-      {rings ? (
+      {blank && (
+        <View style={{ gap: 14 }} testID="pulse-skeleton">
+          <View style={styles.rings}>
+            {[0, 1, 2, 3].map((i) => <View key={i} style={[styles.card, styles.kpi, styles.ghost]} />)}
+          </View>
+          <View style={[styles.card, styles.ghostTall]} />
+          <View style={[styles.card, styles.ghostTall]} />
+        </View>
+      )}
+
+      {blank ? null : rings ? (
         <View style={styles.rings} testID="pulse-rings">
           <Ring wide={wide} color={PULSE.teal} pct={rings.active.pct} label={t('adminPulse.active')}
             value={fmt(rings.active.value)} sub={t('adminPulse.activeSub', { total: fmt(rings.active.of) })} />
@@ -212,7 +234,7 @@ export default function AdminDashboard({ navigation }) {
         </>
       )}
 
-      {canReports && (
+      {canReports && queue && (
         <Card title={t('adminPulse.needs')} testID="pulse-needs">
           {waiting.length ? waiting.map((r) => (
             <TouchableOpacity key={r.id} style={styles.needRow} onPress={() => navigation.replace('AdminReports')}>
@@ -263,6 +285,8 @@ const styles = StyleSheet.create({
   ringValue: { color: PULSE.text, fontSize: 20, fontWeight: '700', fontVariant: ['tabular-nums'] },
   ringSub: { color: PULSE.muted, fontSize: 11 },
   kpi: { flexBasis: '46%', flexGrow: 1, gap: 6 },
+  ghost: { height: 120, opacity: 0.6 },
+  ghostTall: { height: 220, opacity: 0.6 },
   kpiValue: { color: PULSE.text, fontSize: 26, fontWeight: '700', fontVariant: ['tabular-nums'] },
   row: { flexDirection: 'row', gap: 16, alignItems: 'stretch' },
   col: { gap: 14 },

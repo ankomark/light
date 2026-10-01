@@ -66,6 +66,17 @@ test('the next admin screen opens at once on the last verdict, and is still chec
   expect(session.adminToken()).toBeNull();
 });
 
+test('a session kept from an earlier visit opens at once, before the server answers', async () => {
+  await session.setAdminSession('tok-kept', '2099-01-01T00:00:00Z');
+  await session.rememberAdminVerdict(me({ session_valid: true }));
+  mockApi.fetchAdminSecurity.mockReturnValue(new Promise(() => {}));   // a slow network
+  const screen = gate();
+  await waitFor(() => expect(screen.getByText('inside')).toBeTruthy());
+  // Signing out of admin forgets it.
+  await session.clearAdminSession();
+  expect(session.adminVerdict()).toBeNull();
+});
+
 test('a code opens the admin session; a wrong one does not', async () => {
   mockApi.fetchAdminSecurity.mockResolvedValue(me());
   mockApi.verifyAdminCode

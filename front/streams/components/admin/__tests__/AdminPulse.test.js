@@ -69,6 +69,18 @@ test('with analytics: rings, charts, most followed and the queue', async () => {
   await waitFor(() => expect(mockApi.fetchAdminPulse).toHaveBeenLastCalledWith(30));
 });
 
+test('the counts show before the charts arrive, and shapes before either', async () => {
+  await require('../../../utils/screenCache').clearAllCaches();   // no copy from the test before
+  let sendCharts;
+  mockApi.fetchAdminDashboard.mockResolvedValue(DASH);
+  mockApi.fetchAdminPulse.mockReturnValue(new Promise((r) => { sendCharts = r; }));
+  const screen = asAdmin(<AdminDashboard navigation={mockNav} />, { capabilities: ['handle_reports', 'view_analytics'] });
+  expect(screen.getByTestId('pulse-skeleton')).toBeTruthy();
+  await waitFor(() => expect(screen.getByText('adminPulse.members')).toBeTruthy());   // counts, charts still coming
+  await act(async () => { sendCharts(PULSE_DATA); });
+  expect(screen.getByTestId('pulse-rings')).toBeTruthy();
+});
+
 test('without analytics: counts only, the charts never asked for', async () => {
   mockApi.fetchAdminDashboard.mockResolvedValue(DASH);
   const screen = asAdmin(<AdminDashboard navigation={mockNav} />, { capabilities: ['handle_reports'] });

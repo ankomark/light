@@ -16,6 +16,7 @@ import {
 } from '../../services/api';
 import {
   restoreAdminSession, setAdminSession, clearAdminSession, adminToken, adminMemo,
+  adminVerdict, rememberAdminVerdict,
 } from '../../utils/adminSession';
 
 // How long the gate's last "yes" lets the next admin screen open at once (the
@@ -23,7 +24,7 @@ import {
 const VERDICT_MS = 5 * 60 * 1000;
 const freshVerdict = () => {
   const v = adminMemo.get('gate');
-  return v && Date.now() - v.at < VERDICT_MS && adminToken() ? v.me : null;
+  return (v && Date.now() - v.at < VERDICT_MS && adminToken() ? v.me : null) || adminVerdict();
 };
 import { clipboard } from '../../utils/optionalNative';
 import { AdminMe } from './AdminKit';
@@ -91,12 +92,22 @@ export default function AdminGate({ navigation, children }) {
     if (!freshVerdict()) setPhase('checking');
     setError('');
     await restoreAdminSession();
+    // A session kept from an earlier visit, with the verdict it was opened
+    // on: in at once (the secure store, not the network), asked again below.
+    const kept = adminVerdict();
+    if (kept && live.current) {
+      setMe((m) => m || kept);
+      setPhase((ph) => (ph === 'checking' ? 'open' : ph));
+    }
     try {
       const status = await fetchAdminSecurity();
       if (!live.current) return;
       setMe(status);
       const open = !status.two_factor_required || (status.two_factor_enabled && status.session_valid);
-      if (open) adminMemo.set('gate', { me: status, at: Date.now() });
+      if (open) {
+        adminMemo.set('gate', { me: status, at: Date.now() });
+        rememberAdminVerdict(status);
+      }
       if (!status.two_factor_required) setPhase('open');
       else if (!status.two_factor_enabled) setPhase('setup');
       else setPhase(status.session_valid ? 'open' : 'code');

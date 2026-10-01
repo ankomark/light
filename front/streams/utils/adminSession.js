@@ -9,7 +9,7 @@
 import * as SecureStore from '../services/secureStorage';
 
 const KEY = 'adminSession';
-let current = null;          // { token, expiresAt }
+let current = null;          // { token, expiresAt, me? } (me: the gate's last verdict)
 let asker = null;            // (reason) => Promise<boolean>
 let asking = null;           // one question at a time, however many requests wait
 
@@ -43,6 +43,21 @@ export const setAdminSession = async (token, expiresAt) => {
 };
 
 export const clearAdminSession = () => setAdminSession(null);
+
+/** The server's last word on who this is as an admin, kept with the session
+ *  in the secure store, so the admin area opens at once on the next visit
+ *  (and is asked again behind it). Gone when the session goes. */
+export const adminVerdict = () => (adminToken() ? current?.me || null : null);
+
+export const rememberAdminVerdict = async (me) => {
+  if (!current) return;
+  current = { ...current, me };
+  try {
+    await SecureStore.setItemAsync(KEY, JSON.stringify(current));
+  } catch {
+    // kept for this run of the app
+  }
+};
 
 /** The session kept from before, if it has not expired. */
 export const restoreAdminSession = async () => {
