@@ -10,6 +10,7 @@ import { useI18n } from '../context/I18nContext';
 import { fetchUnreadMessageCount } from '../services/api';
 import { subscribeDM } from '../services/dmSocket';
 import { isAdmin, isSuperAdmin, hasCapability } from '../utils/roles';
+import { useAppStatus } from '../context/AppStatusContext';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
 // The menu is a deliberately dark, wallpaper-backed drawer, so it keeps the
@@ -57,7 +58,7 @@ const SECTIONS = [
     // (its cart, wishlist, orders and selling are all on the marketplace page).
     items: [
       { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
-      { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true },
+      { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true, feature: 'live' },
     ],
   },
   {
@@ -77,8 +78,8 @@ const SECTIONS = [
       { label: 'Notice Board', route: 'NoticeBoard', art: NOTICE_ART },
       { label: 'Verse of the Day', route: 'DailyVerse', set: 'mci', icon: 'book-open-variant',
         tint: VERSE_TEAL },
-      { label: 'Bible Quiz', route: 'QuizHome', art: QUIZ_ART },
-      { label: 'Word Puzzle', route: 'PuzzlePlay', art: PUZZLE_ART },
+      { label: 'Bible Quiz', route: 'QuizHome', art: QUIZ_ART, feature: 'quiz' },
+      { label: 'Word Puzzle', route: 'PuzzlePlay', art: PUZZLE_ART, feature: 'puzzle' },
     ],
   },
   {
@@ -121,6 +122,11 @@ const ADMIN_ITEMS = [
   { label: 'Appeals', route: 'AdminAppeals', set: 'mci', icon: 'gavel', cap: 'manage_appeals' },
   { label: 'Audit Log', route: 'AdminLogs', set: 'mci', icon: 'history', cap: 'view_audit_log' },
   { label: 'Wallpapers', route: 'AdminWallpapers', set: 'mci', icon: 'image-multiple-outline', cap: 'manage_wallpapers' },
+  { label: 'Quiz questions', route: 'AdminQuizBank', set: 'mci', icon: 'head-question-outline', cap: 'manage_quiz' },
+  { label: 'Puzzle themes', route: 'AdminPuzzleThemes', set: 'mci', icon: 'puzzle-outline', cap: 'manage_puzzles' },
+  { label: 'Verified ticks', route: 'AdminVerify', set: 'mci', icon: 'check-decagram-outline', cap: 'verify_accounts' },
+  { label: 'Broadcast', route: 'AdminBroadcast', set: 'mci', icon: 'bullhorn-outline', cap: 'broadcast' },
+  { label: 'App control', route: 'AdminAppControl', set: 'mci', icon: 'toggle-switch-outline', cap: 'manage_app' },
   { label: 'Roles', route: 'AdminRoles', set: 'mci', icon: 'shield-key-outline', superOnly: true },
 ];
 
@@ -220,6 +226,7 @@ function HamburgerMenu() {
 export function MenuScreen() {
   const navigation = useNavigation();
   const { isAuthenticated, currentUser, logout } = useAuth();
+  const { features } = useAppStatus();
   const { t } = useI18n();
   const unread = useUnread({ poll: false });
   const badgeFor = { Inbox: unread.messages, Groups: unread.groups, Communities: unread.communities, NoticeBoard: unread.notices };
@@ -302,8 +309,12 @@ export function MenuScreen() {
                 return true; // dashboard — any admin
               })
             : [];
+          // Parts switched off by an admin leave the menu (admin phase 4).
+          const visible = SECTIONS
+            .map((sec) => ({ ...sec, items: sec.items.filter((it) => !it.feature || features?.[it.feature] !== false) }))
+            .filter((sec) => sec.items.length);
           return [
-            ...SECTIONS,
+            ...visible,
             ...(currentUser?.is_suspended ? [APPEAL_SECTION] : []),
             ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
           ];

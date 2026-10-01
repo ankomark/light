@@ -121,6 +121,13 @@ import AppealScreen from './components/admin/AppealScreen';
 import AdminRoles from './components/admin/AdminRoles';
 import AdminWallpapers from './components/admin/AdminWallpapers';
 import AdminGate from './components/admin/AdminGate';
+import AdminQuizBank from './components/admin/AdminQuizBank';
+import AdminPuzzleThemes from './components/admin/AdminPuzzleThemes';
+import AdminVerify from './components/admin/AdminVerify';
+import AdminAppControl from './components/admin/AdminAppControl';
+import AdminBroadcast from './components/admin/AdminBroadcast';
+import { AppStatusProvider } from './context/AppStatusContext';
+import MaintenanceGate from './components/MaintenanceGate';
 import VideoFeed from './components/VideoFeed';
 import VideoModeStart from './components/VideoModeStart';
 import MarketWarmup from './components/MarketWarmup';
@@ -347,7 +354,9 @@ const App = () => {
       <ThemeProvider>
       <I18nProvider>
       <WallpaperProvider>
+      <AppStatusProvider>
       <PlayerProvider>
+      <MaintenanceGate>
 
         <NavigationContainer ref={navigationRef} linking={linking} theme={navTheme}>
             <Stack.Navigator
@@ -468,6 +477,11 @@ const App = () => {
                 <Stack.Screen name="Appeal" component={AppealWrapper} />
                 <Stack.Screen name="AdminRoles" component={AdminRolesWrapper} />
                 <Stack.Screen name="AdminWallpapers" component={AdminWallpapersWrapper} />
+                <Stack.Screen name="AdminQuizBank" component={AdminQuizBankWrapper} />
+                <Stack.Screen name="AdminPuzzleThemes" component={AdminPuzzleThemesWrapper} />
+                <Stack.Screen name="AdminVerify" component={AdminVerifyWrapper} />
+                <Stack.Screen name="AdminAppControl" component={AdminAppControlWrapper} />
+                <Stack.Screen name="AdminBroadcast" component={AdminBroadcastWrapper} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxWrapper} />
@@ -495,7 +509,9 @@ const App = () => {
             {/* Background uploads: progress pill on every screen. */}
             <UploadStatus />
         </NavigationContainer>
+      </MaintenanceGate>
       </PlayerProvider>
+      </AppStatusProvider>
       </WallpaperProvider>
       </I18nProvider>
       </ThemeProvider>
@@ -868,6 +884,11 @@ const adminWrap = (Screen) => ({ navigation }) => (
 );
 
 const AdminDashboardWrapper = adminWrap(AdminDashboard);
+const AdminQuizBankWrapper = adminWrap(AdminQuizBank);
+const AdminPuzzleThemesWrapper = adminWrap(AdminPuzzleThemes);
+const AdminVerifyWrapper = adminWrap(AdminVerify);
+const AdminAppControlWrapper = adminWrap(AdminAppControl);
+const AdminBroadcastWrapper = adminWrap(AdminBroadcast);
 const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);

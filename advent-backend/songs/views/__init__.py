@@ -12,3 +12,5 @@ from .live import *  # noqa: F401,F403
 from .quiz import *  # noqa: F401,F403
 from .battle import BattleViewSet  # noqa: F401
 from .puzzle import *  # noqa: F401,F403
+from .admin_tools import *  # noqa: F401,F403
+from .admin_ops import *  # noqa: F401,F403

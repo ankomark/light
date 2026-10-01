@@ -88,6 +88,14 @@ from .views import (
     AdminAppealViewSet,
     AdminRoleViewSet,
     AdminSecurityViewSet,
+    AdminQuizBankViewSet,
+    AdminPuzzleThemeViewSet,
+    AdminVerifyViewSet,
+    AdminBroadcastViewSet,
+    AppStatusView,
+    AdminAppSettingsView,
+    AdminUserHistoryView,
+    AdminInsightsView,
     LiveBroadcastViewSet,
     LiveKitWebhookView,
 )
@@ -151,6 +159,10 @@ router.register(r'admin/logs', AdminLogViewSet, basename='admin-logs')
 router.register(r'admin/appeals', AdminAppealViewSet, basename='admin-appeals')
 router.register(r'admin/roles', AdminRoleViewSet, basename='admin-roles')
 router.register(r'admin/security', AdminSecurityViewSet, basename='admin-security')
+router.register(r'admin/quiz-bank', AdminQuizBankViewSet, basename='admin-quiz-bank')
+router.register(r'admin/puzzle-themes', AdminPuzzleThemeViewSet, basename='admin-puzzle-themes')
+router.register(r'admin/verify', AdminVerifyViewSet, basename='admin-verify')
+router.register(r'admin/broadcasts', AdminBroadcastViewSet, basename='admin-broadcasts')
 router.register(r'live/broadcasts', LiveBroadcastViewSet, basename='live-broadcasts')
 
 # Nested routers
@@ -189,6 +201,10 @@ urlpatterns = [
     path('daily-verse/', DailyVerseView.as_view(), name='daily-verse'),
     path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
     path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
+    path('app-status/', AppStatusView.as_view(), name='app-status'),
+    path('admin/app-settings/', AdminAppSettingsView.as_view(), name='admin-app-settings'),
+    path('admin/users/<int:pk>/history/', AdminUserHistoryView.as_view(), name='admin-user-history'),
+    path('admin/insights/', AdminInsightsView.as_view(), name='admin-insights'),
     path('live/webhook/', LiveKitWebhookView.as_view(), name='livekit-webhook'),
     path('admin/analytics/', AdminAnalyticsView.as_view(), name='admin-analytics'),
     path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),

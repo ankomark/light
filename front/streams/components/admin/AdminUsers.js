@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   fetchAdminUsers, fetchAdminByUrl, suspendUser, unsuspendUser, banUser, unbanUser, warnUser,
-  fetchRoles, setUserSuperAdmin, assignUserRole, resetAdminTwoFactor,
+  fetchRoles, setUserSuperAdmin, assignUserRole, resetAdminTwoFactor, fetchUserHistory,
 } from '../../services/api';
 import { useAdminMe, useReasonSheet, ErrorState } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
@@ -38,6 +38,7 @@ const AdminUsers = () => {
   const [selected, setSelected] = useState(null); // user in the manage sheet
   const [busy, setBusy] = useState(false);
   const [suspendFor, setSuspendFor] = useState(null); // user pending a suspension-duration pick
+  const [history, setHistory] = useState(null);       // { forId, data } | { forId, loading } | { forId, failed }
   const debounceRef = useRef(null);
 
   const load = useCallback(async (q, st = '') => {
@@ -120,6 +121,16 @@ const AdminUsers = () => {
       confirmLabel: t('adminUsers.roleConfirm'),
     });
     if (ok) run(fn);
+  };
+
+  const showHistory = async () => {
+    const forId = selected.id;
+    setHistory({ forId, loading: true });
+    try {
+      setHistory({ forId, data: await fetchUserHistory(forId) });
+    } catch {
+      setHistory({ forId, failed: true });
+    }
   };
 
   const resetTwoStep = async () => {
@@ -255,6 +266,25 @@ const AdminUsers = () => {
 
                 {busy && <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.sm }} />}
 
+                {history?.forId === selected.id && history.data ? (
+                  <View style={styles.history} testID="users-history">
+                    <Text style={styles.historyLine}>
+                      {t('adminUsers.historyReports', { n: history.data.reports_against.total, p: history.data.reports_against.pending })}
+                    </Text>
+                    <Text style={styles.historyLine}>
+                      {t('adminUsers.historyMore', { made: history.data.reports_made, devices: history.data.devices_signed_in, posts: history.data.posts })}
+                    </Text>
+                    {history.data.admin_actions.slice(0, 5).map((a) => (
+                      <Text key={a.id} style={styles.historyAction} numberOfLines={2}>
+                        {new Date(a.created_at).toLocaleDateString()} · {a.action.replace(/_/g, ' ')} · @{a.by}{a.reason ? ` — ${a.reason}` : ''}
+                      </Text>
+                    ))}
+                  </View>
+                ) : (
+                  <SheetBtn icon="time-outline" label={history?.forId === selected.id && history.failed ? t('adminKit.loadFailed') : t('adminUsers.history')}
+                    onPress={showHistory} disabled={busy || (history?.forId === selected.id && history.loading)} testID="users-history-open" />
+                )}
+
                 {selected.can_act === false && (
                   <Text style={styles.rankNote} testID="users-rank-note">{t('adminUsers.rankNote')}</Text>
                 )}
@@ -377,6 +407,9 @@ const styles = StyleSheet.create({
   stateText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
   stateTextOn: { color: '#0A1628' },
   rankNote: { ...typography.caption, color: colors.textSecondary, fontStyle: 'italic', paddingVertical: spacing.sm },
+  history: { gap: 4, padding: spacing.sm, borderRadius: radius.md, backgroundColor: 'rgba(255,255,255,0.04)' },
+  historyLine: { ...typography.caption, color: colors.textPrimary, fontWeight: '600' },
+  historyAction: { ...typography.caption, color: colors.textSecondary },
   list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

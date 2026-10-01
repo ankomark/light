@@ -325,6 +325,10 @@ class AdminReportViewSet(viewsets.GenericViewSet):
             qs = qs.filter(status=status_f)
         if self.request.query_params.get('assigned') == 'me':
             qs = qs.filter(assigned_to=self.request.user)
+        if self.request.query_params.get('order') == 'priority':
+            # The most reported first: many people saying the same is the
+            # strongest sign something needs seeing.
+            qs = qs.order_by('-dup_count', '-created_at')
         return qs
 
     def list(self, request):
@@ -334,6 +338,15 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         # Batch every target on the page into one query per content type.
         ctx = {'request': request, 'report_targets': build_report_targets(rows)}
         data = AdminReportSerializer(rows, many=True, context=ctx).data
+        # Repeat offenders: the strikes of whoever posted each reported thing,
+        # in one query for the page.
+        author_ids = {d['target']['author']['id'] for d in data
+                      if isinstance(d.get('target'), dict) and isinstance(d['target'].get('author'), dict)
+                      and d['target']['author'].get('id')}
+        strikes = dict(User.objects.filter(pk__in=author_ids).values_list('pk', 'strikes')) if author_ids else {}
+        for d in data:
+            author = (d.get('target') or {}).get('author') if isinstance(d.get('target'), dict) else None
+            d['author_strikes'] = strikes.get(author.get('id'), 0) if isinstance(author, dict) else 0
         return self.get_paginated_response(data) if page is not None else Response(data)
 
     def retrieve(self, request, pk=None):
@@ -572,9 +585,12 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user.save(update_fields=['is_active'])
         from ..admin_security import cut_off
         cut_off(user, 'banned')
+        _after_ban = request.user
         notify_moderation(user, 'Account banned',
                           'Your account has been banned and you can no longer sign in.' + (f" Reason: {reason}" if reason else ''))
         log_admin_action(request.user, 'ban_user', 'user', user.id, reason=reason)
+        from ..admin_alerts import on_ban
+        on_ban(_after_ban)
         return Response(self.get_serializer(user).data)
 
     @action(detail=True, methods=['post'])
@@ -1032,6 +1048,9 @@ class AdminSecurityViewSet(viewsets.ViewSet):
             return Response({'admin_session': None, 'expires_at': current.expires_at, 'refreshed': True})
         token, expires = open_session(request.user, request)
         log_admin_action(request.user, 'admin_sign_in', 'user', request.user.id)
+        from ..admin_alerts import on_admin_sign_in
+        from ..admin_security import client_ip
+        on_admin_sign_in(request.user, client_ip(request), request.META.get('HTTP_USER_AGENT', '')[:255])
         return Response({'admin_session': token, 'expires_at': expires,
                          'backup_codes_left': len(tf.backup_hashes or [])})
 

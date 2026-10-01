@@ -45,3 +45,7 @@ sentry_sdk.init(dsn='')
 # Admin tests sign in with force_authenticate; the two-step admin session has
 # its own tests, which switch this on (override_settings).
 ADMIN_2FA_REQUIRED = False
+
+# The maintenance check reads the app's switches (one query on a cold cache),
+# which would unsettle the query-count tests; its own tests switch it on.
+MAINTENANCE_CHECK = False

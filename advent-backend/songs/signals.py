@@ -15,7 +15,7 @@ from django.dispatch import receiver
 
 from .models import (
     Like, LiveBroadcast, PostLike, PostComment, CommentReaction, Comment, TrackCommentReaction, PublicationLike,
-    Publication, PuzzleProgress, QuizAttempt, QuizSession, SocialPost, Track, User,
+    Publication, PuzzleProgress, QuizAttempt, QuizSession, Report, SocialPost, Track, User,
 )
 from .streaks import record_play
 
@@ -302,3 +302,15 @@ def forget_super_admins(sender, **kwargs):
     change to someone's record — a role granted or taken — forgets it."""
     from django.core.cache import cache
     cache.delete('super_admin_ids')
+
+
+
+@receiver(post_save, sender=Report)
+def watch_report_bursts(sender, instance, created, **kwargs):
+    """A burst of reports on one thing is told to the super admins."""
+    if created:
+        from .admin_alerts import on_report
+        try:
+            on_report(instance)
+        except Exception:  # noqa: BLE001 — a report is never refused for an alert
+            pass

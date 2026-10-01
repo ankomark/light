@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useWallpapersOn } from '../context/WallpaperContext';
+import { useFeature } from '../context/AppStatusContext';
 
 const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the image
 // Wallpaper behind the header — re-hosted on our Cloudinary CDN, optimized.
@@ -51,6 +52,8 @@ const Header = ({ transparentBg = false }) => {
   const { t } = useI18n();
   // Wallpapers off (Settings): the plain navy instead of its picture.
   const headerImage = useWallpapersOn() ? HEADER_IMAGE : null;
+  // A part of the app an admin has switched off has no button (admin phase 4).
+  const marketOn = useFeature('marketplace');
 
   // Responsive brand sizing: recomputes on rotation / different devices so the
   // title never wraps or crowds the icons on small phones, and scales up a
@@ -154,10 +157,12 @@ const Header = ({ transparentBg = false }) => {
           />
           {/* The marketplace, one tap from anywhere. (Explore lives on the
               home feed now, beside For You.) */}
-          <NavItem
-            art={MARKET_ART} label={t('header.market')} testID="nav-market"
-            isActive={isOn('MarketplaceHome')} onPress={() => navigation.navigate('MarketplaceHome')}
-          />
+          {marketOn && (
+            <NavItem
+              art={MARKET_ART} label={t('header.market')} testID="nav-market"
+              isActive={isOn('MarketplaceHome')} onPress={() => navigation.navigate('MarketplaceHome')}
+            />
+          )}
           <NavItem
             active="book" inactive="book-outline" label="Bible"
             isActive={isOn('bible')} onPress={() => navigation.navigate('bible')}

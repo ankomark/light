@@ -198,6 +198,8 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # Remembers the request being served, for the admin audit log's IP/device.
     'songs.admin_security.AdminRequestMiddleware',
+    # Maintenance mode (Settings > admin): members wait, admins carry on.
+    'songs.app_settings.MaintenanceMiddleware',
 ]
 
 # Admin tools need a two-step admin session (an authenticator code) on top of

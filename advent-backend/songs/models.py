@@ -28,7 +28,12 @@ ADMIN_CAPABILITIES = (
     ('view_audit_log', 'View audit log'),
     ('manage_wallpapers', 'Manage app wallpapers'),
     ('manage_notices', 'Post notices & answer notes to admins'),
-    ('manage_marketplace', 'Marketplace categories & seller ticks'),
+    ('manage_marketplace', 'Marketplace categories'),
+    ('manage_quiz', 'Write & edit quiz questions'),
+    ('manage_puzzles', 'Word puzzle themes'),
+    ('verify_accounts', 'Give the verified tick (artists, sellers, services, organizations)'),
+    ('broadcast', 'Send a notification to everyone or a group'),
+    ('manage_app', 'Maintenance mode & switching parts of the app off'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 
@@ -810,6 +815,37 @@ class AdminActionLog(models.Model):
             self.target_id or '', self.reason, self.ip, self.user_agent,
             self.created_at.isoformat() if self.created_at else '',
         ))
+
+
+class SiteSetting(models.Model):
+    """A switch for the whole app, set by admins: 'maintenance'
+    ({on, message}) and 'features' ({marketplace, quiz, puzzle, live}).
+    Read through songs/app_settings.py (cached), never directly."""
+    key = models.CharField(max_length=40, unique=True)
+    value = models.JSONField(default=dict)
+    updated_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.key
+
+
+class Broadcast(models.Model):
+    """A notification an admin sent to everyone, or to a group."""
+    AUDIENCES = (
+        ('all', 'Everyone'), ('active', 'Active this week'), ('sellers', 'Sellers'),
+        ('artists', 'Artists'), ('admins', 'Admins'),
+    )
+    sent_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    sent_by_name = models.CharField(max_length=150, blank=True, default='')
+    title = models.CharField(max_length=80)
+    message = models.CharField(max_length=300)
+    audience = models.CharField(max_length=12, choices=AUDIENCES, default='all')
+    recipients = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class AdminTwoFactor(models.Model):

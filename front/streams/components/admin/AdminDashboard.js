@@ -102,6 +102,11 @@ const AdminDashboard = ({ navigation }) => {
   const canAudit = can('view_audit_log');
   const canWallpapers = can('manage_wallpapers');
   const canNotices = can('manage_notices');
+  const canQuiz = can('manage_quiz');
+  const canPuzzles = can('manage_puzzles');
+  const canVerify = can('verify_accounts');
+  const canBroadcast = can('broadcast');
+  const canAppControl = can('manage_app');
 
   return (
     <ScrollView
@@ -147,6 +152,26 @@ const AdminDashboard = ({ navigation }) => {
       {canNotices && (
         <QuickLink icon="bulletin-board" label={tr('adminDash.link.notices')} sub={tr('adminDash.link.noticesSub')}
           onPress={() => navigation.navigate('NoticeBoard')} />
+      )}
+      {canBroadcast && (
+        <QuickLink icon="bullhorn-outline" label={tr('adminDash.link.broadcast')} sub={tr('adminDash.link.broadcastSub')}
+          onPress={() => navigation.navigate('AdminBroadcast')} />
+      )}
+      {canAppControl && (
+        <QuickLink icon="toggle-switch-outline" label={tr('adminDash.link.app')} sub={tr('adminDash.link.appSub')}
+          onPress={() => navigation.navigate('AdminAppControl')} />
+      )}
+      {canVerify && (
+        <QuickLink icon="check-decagram-outline" label={tr('adminDash.link.verify')} sub={tr('adminDash.link.verifySub')}
+          onPress={() => navigation.navigate('AdminVerify')} />
+      )}
+      {canQuiz && (
+        <QuickLink icon="head-question-outline" label={tr('adminDash.link.quiz')} sub={tr('adminDash.link.quizSub')}
+          onPress={() => navigation.navigate('AdminQuizBank')} />
+      )}
+      {canPuzzles && (
+        <QuickLink icon="puzzle-outline" label={tr('adminDash.link.puzzles')} sub={tr('adminDash.link.puzzlesSub')}
+          onPress={() => navigation.navigate('AdminPuzzleThemes')} />
       )}
       {canWallpapers && (
         <QuickLink icon="image-multiple-outline" label={tr('adminDash.link.wallpapers')} sub={tr('adminDash.link.wallpapersSub')}

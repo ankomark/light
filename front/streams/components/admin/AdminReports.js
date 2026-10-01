@@ -70,12 +70,13 @@ const AdminReports = () => {
   const [nextUrl, setNextUrl] = useState(null);
   const [failed, setFailed] = useState(false);
   const [reasonSheet, askReason] = useReasonSheet();
+  const [priority, setPriority] = useState(true);    // the most reported first
 
-  const load = useCallback(async (status) => {
+  const load = useCallback(async (status, byPriority = true) => {
     setLoading(true);
     setFailed(false);
     try {
-      const res = await fetchAdminReports(status);
+      const res = await fetchAdminReports(status, byPriority ? 'priority' : '');
       setReports(res?.results || (Array.isArray(res) ? res : []));
       setNextUrl(res?.next || null);
     } catch {
@@ -104,7 +105,7 @@ const AdminReports = () => {
     }
   }, [loadingMore, nextUrl]);
 
-  useFocusEffect(useCallback(() => { load(filter); }, [load, filter]));
+  useFocusEffect(useCallback(() => { load(filter, priority); }, [load, filter, priority]));
 
   // Resolve/dismiss/remove drop the row from this status-filtered list.
   const act = async (id, fn) => {
@@ -196,6 +197,11 @@ const AdminReports = () => {
           )}
           <Text style={styles.metaText}>{item.content_type} #{item.object_id}</Text>
         </View>
+        {item.author_strikes > 0 && (
+          <Text style={styles.repeat} testID={`report-repeat-${item.id}`}>
+            {t('adminReports.repeat', { n: item.author_strikes })}
+          </Text>
+        )}
 
         <TargetPreview target={item.target} />
 
@@ -254,6 +260,10 @@ const AdminReports = () => {
           <Text style={styles.selectToggle}>{selectMode ? 'Cancel' : 'Select'}</Text>
         </TouchableOpacity>
       </View>
+      <TouchableOpacity style={styles.orderToggle} onPress={() => setPriority((v) => !v)} testID="reports-priority">
+        <Ionicons name={priority ? 'flame' : 'time-outline'} size={14} color={colors.accent} />
+        <Text style={styles.orderText}>{priority ? t('adminReports.byPriority') : t('adminReports.byNewest')}</Text>
+      </TouchableOpacity>
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
@@ -269,7 +279,7 @@ const AdminReports = () => {
       {loading ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
       ) : failed ? (
-        <ErrorState onRetry={() => load(filter)} />
+        <ErrorState onRetry={() => load(filter, priority)} />
       ) : (
         <FlatList
           data={reports}
@@ -277,7 +287,7 @@ const AdminReports = () => {
           renderItem={renderItem}
           contentContainerStyle={[styles.list, selectMode && selected.size > 0 && { paddingBottom: 96 }]}
           showsVerticalScrollIndicator={false}
-          onRefresh={() => load(filter)}
+          onRefresh={() => load(filter, priority)}
           refreshing={loading}
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
@@ -338,6 +348,9 @@ const AdminReports = () => {
 };
 
 const styles = StyleSheet.create({
+  repeat: { color: '#FFB547', fontSize: 12, fontWeight: '700', marginTop: 4 },
+  orderToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginLeft: 16, marginTop: 6 },
+  orderText: { color: colors.accent, fontWeight: '700', fontSize: 12.5 },
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   titleRow: {

@@ -3,7 +3,10 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminAnalytics } from '../../services/api';
+import { fetchAdminInsights, fetchAdminInsightsCsv } from '../../services/api';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { notify } from '../../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 
@@ -53,22 +56,49 @@ const ChartCard = ({ title, data, tint }) => (
   </View>
 );
 
+// The insights' parallel lists ({dates, series: {name: [n, ...]}}) as the
+// [{date, count}] each chart draws.
+const seriesOf = (data, name) => (data?.dates || []).map((date, i) => ({ date, count: data.series?.[name]?.[i] || 0 }));
+
+const Active = ({ label, value }) => (
+  <View style={styles.active}>
+    <Text style={styles.activeValue}>{value ?? 0}</Text>
+    <Text style={styles.activeLabel}>{label}</Text>
+  </View>
+);
+
 const AdminAnalytics = () => {
   const { t } = useI18n();
   const [days, setDays] = useState(14);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async (d) => {
     setLoading(true);
     try {
-      setData(await fetchAdminAnalytics(d));
+      setData(await fetchAdminInsights(d));
     } catch {
       setData(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // The numbers as a spreadsheet file, through the phone's share sheet.
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const text = await fetchAdminInsightsCsv(days);
+      const uri = `${FileSystem.cacheDirectory}insights-${days}d-${new Date().toISOString().slice(0, 10)}.csv`;
+      await FileSystem.writeAsStringAsync(uri, typeof text === 'string' ? text : String(text));
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'text/csv' });
+    } catch {
+      notify(t('common.error'), t('adminInsights.exportFailed'));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useFocusEffect(useCallback(() => { load(days); }, [load, days]));
 
@@ -97,9 +127,21 @@ const AdminAnalytics = () => {
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
       ) : data ? (
         <>
-          <ChartCard title="New signups" data={data.signups} tint="rgba(46,204,113,0.55)" />
-          <ChartCard title="New posts" data={data.posts} tint="rgba(29,161,242,0.55)" />
-          <ChartCard title="Reports filed" data={data.reports} tint="rgba(224,36,94,0.55)" />
+          <View style={styles.activeRow} testID="insights-active">
+            <Active label={t('adminInsights.today')} value={data.active?.today} />
+            <Active label={t('adminInsights.week')} value={data.active?.week} />
+            <Active label={t('adminInsights.month')} value={data.active?.month} />
+          </View>
+          <ChartCard title={t('adminInsights.signups')} data={seriesOf(data, 'signups')} tint="rgba(46,204,113,0.55)" />
+          <ChartCard title={t('adminInsights.posts')} data={seriesOf(data, 'posts')} tint="rgba(29,161,242,0.55)" />
+          <ChartCard title={t('adminInsights.orders')} data={seriesOf(data, 'orders')} tint="rgba(255,196,107,0.55)" />
+          <ChartCard title={t('adminInsights.quiz')} data={seriesOf(data, 'quiz_games')} tint="rgba(155,89,182,0.55)" />
+          <ChartCard title={t('adminInsights.puzzles')} data={seriesOf(data, 'puzzles_done')} tint="rgba(26,188,156,0.55)" />
+          <ChartCard title={t('adminInsights.reports')} data={seriesOf(data, 'reports')} tint="rgba(224,36,94,0.55)" />
+          <TouchableOpacity style={styles.exportBtn} onPress={exportCsv} disabled={exporting} testID="insights-export">
+            {exporting ? <ActivityIndicator color="#0A1628" />
+              : <Text style={styles.exportText}>{t('adminInsights.export')}</Text>}
+          </TouchableOpacity>
           <View style={{ height: spacing.xxl }} />
         </>
       ) : (
@@ -145,6 +187,15 @@ const styles = StyleSheet.create({
   bar: { width: '100%', borderRadius: 3, minHeight: 2 },
   axisRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs },
   axisLabel: { ...typography.caption, color: colors.textMuted, fontSize: 10 },
+  activeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  active: {
+    flex: 1, alignItems: 'center', paddingVertical: spacing.md, borderRadius: radius.lg,
+    backgroundColor: 'rgba(16,28,46,0.82)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',
+  },
+  activeValue: { ...typography.h2, color: colors.textPrimary, fontWeight: '800' },
+  activeLabel: { ...typography.caption, color: colors.textSecondary, marginTop: 2, textAlign: 'center' },
+  exportBtn: { height: 48, borderRadius: radius.lg, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  exportText: { color: '#0A1628', fontWeight: '800', fontSize: 15 },
 });
 
 export default AdminAnalytics;

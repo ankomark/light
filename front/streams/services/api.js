@@ -187,6 +187,10 @@ axios.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config;
+    if (error.response?.status === 503 && error.response?.data?.code === 'maintenance') {
+      // The app has gone down for maintenance since it last asked.
+      require('../context/AppStatusContext').reportMaintenance(error.response.data.message);
+    }
     const code = error.response?.status === 403 ? error.response?.data?.code : null;
     if ((code === 'admin_session_required' || code === 'reauth_required') && config && !config._adminRetry) {
       if (code === 'admin_session_required') await clearAdminSession();
@@ -2179,6 +2183,43 @@ export const endAdminSession = () => apiRequest('post', '/admin/security/logout/
 export const resetAdminTwoFactor = (userId) => apiRequest('post', `/admin/users/${userId}/reset_two_factor/`, {});
 export const verifyAdminLog = () => apiRequest('get', '/admin/logs/verify/');
 
+// ── Admin tools (phase 3) ────────────────────────────────────────────────────
+const only = (params) => Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v != null));
+// The quiz's written questions: filters { language, difficulty, state, q }.
+export const fetchQuizBank = (filters = {}) => apiRequest('get', '/admin/quiz-bank/', null, { params: only(filters) });
+export const saveQuizQuestion = (question) => (question.id
+  ? apiRequest('patch', `/admin/quiz-bank/${question.id}/`, question)
+  : apiRequest('post', '/admin/quiz-bank/', question));
+export const retireQuizQuestion = (id) => apiRequest('delete', `/admin/quiz-bank/${id}/`);
+export const activateQuizQuestion = (id) => apiRequest('post', `/admin/quiz-bank/${id}/activate/`, {});
+// The word puzzle's themes.
+export const fetchPuzzleThemesAdmin = () => apiRequest('get', '/admin/puzzle-themes/');
+export const savePuzzleTheme = (theme) => (theme.id
+  ? apiRequest('patch', `/admin/puzzle-themes/${theme.id}/`, theme)
+  : apiRequest('post', '/admin/puzzle-themes/', theme));
+export const reorderPuzzleThemes = (ids) => apiRequest('post', '/admin/puzzle-themes/reorder/', { ids });
+// The verified tick: kind 'artist' | 'seller' | 'service' | 'organization'.
+export const fetchVerifyList = (kind, filters = {}) =>
+  apiRequest('get', '/admin/verify/', null, { params: only({ kind, ...filters }) });
+export const setVerified = (kind, id, verified, reason = '') =>
+  apiRequest('post', '/admin/verify/set/', { kind, id, verified, reason });
+
+// ── Admin phase 4 ────────────────────────────────────────────────────────────
+// Maintenance and the parts of the app switched off: { maintenance: {on, message}, features: {...} }.
+export const fetchAppSettings = () => apiRequest('get', '/admin/app-settings/');
+export const saveAppSettings = (changes) => apiRequest('patch', '/admin/app-settings/', changes);
+// Broadcasts: audience 'all' | 'active' | 'sellers' | 'artists' | 'admins'.
+export const fetchAdminBroadcasts = () => apiRequest('get', '/admin/broadcasts/');
+export const previewBroadcast = (audience) => apiRequest('post', '/admin/broadcasts/preview/', { audience });
+export const sendBroadcast = (title, message, audience) =>
+  apiRequest('post', '/admin/broadcasts/', { title, message, audience });
+// One account as moderation sees it.
+export const fetchUserHistory = (id) => apiRequest('get', `/admin/users/${id}/history/`);
+// Activity, sales and games over time; csv: the same as a file's text.
+export const fetchAdminInsights = (days = 30) => apiRequest('get', '/admin/insights/', null, { params: { days } });
+export const fetchAdminInsightsCsv = (days = 30) =>
+  apiRequest('get', '/admin/insights/', null, { params: { days, export: 'csv' }, responseType: 'text' });
+
 // Follow a paginated `next` link (preserves path + query) for the admin
 // queues' infinite scroll. Shared by every admin list screen.
 export const fetchAdminByUrl = (nextUrl) => {
@@ -2197,8 +2238,9 @@ export const fetchAdminByUrl = (nextUrl) => {
 export const fetchAdminAnalytics = (days = 14) =>
   apiRequest('get', '/admin/analytics/', null, { params: { days } });
 
-export const fetchAdminReports = (status = '') =>
-  apiRequest('get', '/admin/reports/', null, { params: status ? { status } : {} });
+// order 'priority': the most reported first.
+export const fetchAdminReports = (status = '', order = '') =>
+  apiRequest('get', '/admin/reports/', null, { params: { ...(status ? { status } : {}), ...(order ? { order } : {}) } });
 
 export const resolveReport = (id) =>
   apiRequest('post', `/admin/reports/${id}/resolve/`);
