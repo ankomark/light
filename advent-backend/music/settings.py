@@ -196,7 +196,19 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Remembers the request being served, for the admin audit log's IP/device.
+    'songs.admin_security.AdminRequestMiddleware',
 ]
+
+# Admin tools need a two-step admin session (an authenticator code) on top of
+# the sign-in (songs/admin_security.py). Never turn this off in production.
+ADMIN_2FA_REQUIRED = os.getenv('ADMIN_2FA_REQUIRED', 'True') == 'True'
+# Key material for encrypting admins' authenticator secrets; falls back to
+# SECRET_KEY. Set its own value in production so rotating one is not both.
+ADMIN_SECRET_KEY = os.getenv('ADMIN_SECRET_KEY', '')
+# Django's own /admin/ site: off unless asked for (it signs in with a password
+# alone). When on, only an active superuser gets in.
+DJANGO_ADMIN_ENABLED = os.getenv('DJANGO_ADMIN_ENABLED', 'True' if DEBUG else 'False') == 'True'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -224,6 +236,8 @@ REST_FRAMEWORK = {
         'user': '300/min',
         'auth': '10/min',
         'password_reset': '5/hour',
+        # Admin authenticator codes: 6 digits are not to be guessed at.
+        'admin_2fa': '10/min',
         # Deleting or deactivating an account: a password check, not to be guessed at.
         'account_leave': '10/hour',
         'email_verify': '10/hour',

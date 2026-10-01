@@ -32,17 +32,23 @@ STRIKE_SUSPEND_DAYS = 7
 
 
 # ── Permissions ──────────────────────────────────────────────────────────────
+# All through admin_gate (views/common.py): standing, the power itself read
+# fresh, and a two-step admin session (songs/admin_security.py).
 class IsModerator(BasePermission):
-    """Moderator or Super Admin (or Django superuser)."""
+    """Any staff power (super admin, moderator, a role with capabilities)."""
     def has_permission(self, request, view):
-        u = request.user
-        return bool(u and u.is_authenticated and u.is_platform_admin)
+        return admin_gate(request, lambda u: u.is_platform_admin)
 
 
 class IsSuperAdmin(BasePermission):
     def has_permission(self, request, view):
-        u = request.user
-        return bool(u and u.is_authenticated and u.is_super_admin)
+        return admin_gate(request, lambda u: u.is_super_admin)
+
+
+class RecentSuperAdmin(BasePermission):
+    """A super admin who entered a code in the last few minutes (roles)."""
+    def has_permission(self, request, view):
+        return admin_gate(request, lambda u: u.is_super_admin, recent=True)
 
 
 # Cap() now lives in views/common.py so non-admin modules (which import before
@@ -76,13 +82,60 @@ _CONTENT_MODELS = {
 
 
 def log_admin_action(actor, action, target_type='', target_id=None, reason=''):
+    """One entry in the tamper-evident trail: who (by name too), what, to
+    what, why, from which IP and device, chained to the entry before."""
+    import hashlib
+    from django.db import transaction
+    from ..admin_security import current_request, client_ip
+    req = current_request.get()
     try:
-        AdminActionLog.objects.create(
-            actor=actor, action=action, target_type=target_type or '',
-            target_id=target_id, reason=reason or '',
-        )
+        with transaction.atomic():
+            last = (AdminActionLog.objects.select_for_update().exclude(entry_hash='')
+                    .order_by('-id').values_list('entry_hash', flat=True).first())
+            entry = AdminActionLog.objects.create(
+                actor=actor if getattr(actor, 'pk', None) else None,
+                actor_name=(getattr(actor, 'username', '') or '')[:150],
+                action=action[:40], target_type=(target_type or '')[:20],
+                target_id=target_id, reason=reason or '',
+                ip=client_ip(req) or '',
+                user_agent=(req.META.get('HTTP_USER_AGENT', '')[:255] if req else ''),
+                prev_hash=last or '',
+            )
+            entry.entry_hash = hashlib.sha256(entry.chain_text().encode()).hexdigest()
+            entry.save(update_fields=['entry_hash'])
     except Exception:
         logger.exception('Failed to write AdminActionLog')
+
+
+def verify_audit_chain():
+    """(ok, first_broken_id, checked): whether every chained entry still says
+    what it said when written, and none between has gone."""
+    import hashlib
+    prev = None
+    checked = 0
+    for entry in AdminActionLog.objects.exclude(entry_hash='').order_by('id').iterator():
+        if prev is not None and entry.prev_hash != prev:
+            return False, entry.id, checked
+        if hashlib.sha256(entry.chain_text().encode()).hexdigest() != entry.entry_hash:
+            return False, entry.id, checked
+        prev = entry.entry_hash
+        checked += 1
+    return True, None, checked
+
+
+def clean_ids(raw, limit=200):
+    """A bulk action's ids: whole numbers only, at most `limit`, else None."""
+    if not isinstance(raw, list) or not raw or len(raw) > limit:
+        return None
+    ids = []
+    for value in raw:
+        if isinstance(value, bool):
+            return None
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            return None
+    return ids
 
 
 def notify_moderation(user, subject, message):
@@ -226,6 +279,8 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         # Taking down the reported content needs the content-removal capability.
         if self.action == 'remove_target':
             return [Cap('handle_reports', 'remove_content')()]
+        if self.action == 'bulk':
+            return [Cap('handle_reports', recent=True)()]
         return super().get_permissions()
 
     def get_queryset(self):
@@ -305,10 +360,10 @@ class AdminReportViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['post'])
     def bulk(self, request):
         """Resolve or dismiss many reports at once."""
-        ids = request.data.get('ids') or []
+        ids = clean_ids(request.data.get('ids'))
         op = request.data.get('action')
-        if not isinstance(ids, list) or not ids:
-            return Response({'error': 'ids (a non-empty list) is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if ids is None:
+            return Response({'error': 'ids: a list of 1 to 200 whole numbers'}, status=status.HTTP_400_BAD_REQUEST)
         if op not in ('resolve', 'dismiss'):
             return Response({'error': "action must be 'resolve' or 'dismiss'"}, status=status.HTTP_400_BAD_REQUEST)
         new_status = 'resolved' if op == 'resolve' else 'dismissed'
@@ -354,14 +409,26 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
     def get_permissions(self):
         a = self.action
-        if a == 'set_role':
-            return [IsSuperAdmin()]
+        if a in ('set_role', 'reset_two_factor'):
+            return [RecentSuperAdmin()]
         if a in ('ban', 'unban'):
-            return [Cap('ban_users')()]
+            return [Cap('ban_users', recent=True)()]
         if a in ('suspend', 'unsuspend', 'warn'):
             return [Cap('manage_users')()]
         # list / retrieve: any user-facing moderation capability can browse users
         return [Cap('manage_users', 'ban_users')()]
+
+    def _target(self, request, pk, verb):
+        """The account acted on, or a refusal: never yourself, never an admin
+        of your rank or above (a moderator cannot ban a moderator)."""
+        from ..admin_security import outranks
+        user = get_object_or_404(User, pk=pk)
+        if user.id == request.user.id:
+            return None, Response({'error': f"You can't {verb} yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        if not outranks(request.user, user):
+            return None, Response({'error': f"You can't {verb} an admin of your rank or above.", 'code': 'rank'},
+                                  status=status.HTTP_403_FORBIDDEN)
+        return user, None
 
     def get_queryset(self):
         # Annotate the per-row counts the serializer shows (posts + followers) so
@@ -392,12 +459,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['post'])
     def suspend(self, request, pk=None):
-        user = get_object_or_404(User, pk=pk)
-        if user.id == request.user.id:
-            return Response({'error': "You can't suspend yourself."}, status=status.HTTP_400_BAD_REQUEST)
-        # Super admins are untouchable by moderation actions (mirrors ban).
-        if user.is_super_admin:
-            return Response({'error': "You can't suspend a super admin."}, status=status.HTTP_400_BAD_REQUEST)
+        user, refused = self._target(request, pk, 'suspend')
+        if refused:
+            return refused
         reason = (request.data.get('reason') or '')[:255]
         # Optional ?days=N for a temporary suspension; omitted/0 => indefinite.
         try:
@@ -409,6 +473,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user.suspended_at = timezone.now()
         user.suspended_until = (timezone.now() + timedelta(days=days)) if days > 0 else None
         user.save(update_fields=['is_suspended', 'suspension_reason', 'suspended_at', 'suspended_until'])
+        if user.is_platform_admin:
+            from ..admin_security import cut_off
+            cut_off(user, 'suspended')
         span = f"for {days} day(s)" if days > 0 else "indefinitely"
         notify_moderation(user, 'Account suspended',
                           f"Your account has been suspended {span}." + (f" Reason: {reason}" if reason else ''))
@@ -417,7 +484,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['post'])
     def unsuspend(self, request, pk=None):
-        user = get_object_or_404(User, pk=pk)
+        user, refused = self._target(request, pk, 'lift a suspension on')
+        if refused:
+            return refused
         user.is_suspended = False
         user.suspension_reason = ''
         user.suspended_at = None
@@ -431,12 +500,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
     def warn(self, request, pk=None):
         """Issue a warning (strike). Auto-escalates to a temporary suspension at
         the strike threshold."""
-        user = get_object_or_404(User, pk=pk)
-        if user.id == request.user.id:
-            return Response({'error': "You can't warn yourself."}, status=status.HTTP_400_BAD_REQUEST)
-        # Super admins are untouchable — a warning can auto-escalate to a suspension.
-        if user.is_super_admin:
-            return Response({'error': "You can't warn a super admin."}, status=status.HTTP_400_BAD_REQUEST)
+        user, refused = self._target(request, pk, 'warn')
+        if refused:
+            return refused
         reason = (request.data.get('reason') or '')[:255]
         user.strikes = (user.strikes or 0) + 1
         fields = ['strikes']
@@ -459,14 +525,14 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['post'])
     def ban(self, request, pk=None):
-        user = get_object_or_404(User, pk=pk)
-        if user.id == request.user.id:
-            return Response({'error': "You can't ban yourself."}, status=status.HTTP_400_BAD_REQUEST)
-        if user.is_super_admin:
-            return Response({'error': "You can't ban a super admin."}, status=status.HTTP_400_BAD_REQUEST)
+        user, refused = self._target(request, pk, 'ban')
+        if refused:
+            return refused
         user.is_active = False
         user.save(update_fields=['is_active'])
-        reason = request.data.get('reason', '')
+        from ..admin_security import cut_off
+        cut_off(user, 'banned')
+        reason = (request.data.get('reason') or '')[:255]
         notify_moderation(user, 'Account banned',
                           'Your account has been banned and you can no longer sign in.' + (f" Reason: {reason}" if reason else ''))
         log_admin_action(request.user, 'ban_user', 'user', user.id, reason=reason)
@@ -474,7 +540,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['post'])
     def unban(self, request, pk=None):
-        user = get_object_or_404(User, pk=pk)
+        user, refused = self._target(request, pk, 'unban')
+        if refused:
+            return refused
         user.is_active = True
         user.save(update_fields=['is_active'])
         log_admin_action(request.user, 'unban_user', 'user', user.id)
@@ -487,6 +555,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         mutually exclusive."""
         user = get_object_or_404(User, pk=pk)
         data = request.data
+        was_admin = user.is_platform_admin
+        if user.id == request.user.id and not (user.is_super_admin and data.get('super_admin') is False):
+            return Response({'error': "You can't change your own role."}, status=status.HTTP_400_BAD_REQUEST)
 
         def _other_super_admins():
             return User.objects.filter(
@@ -500,8 +571,10 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                                 status=status.HTTP_400_BAD_REQUEST)
             user.admin_role = 'super_admin' if make_super else ''
             user.is_superuser = make_super
+            # Django's staff flag goes with super admin and with nothing else:
+            # left behind, it opened staff-only doors after a demotion.
+            user.is_staff = make_super
             if make_super:
-                user.is_staff = True
                 user.role = None
 
         if 'role_id' in data:
@@ -519,11 +592,31 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 user.role = role
                 user.admin_role = ''
                 user.is_superuser = False
+                user.is_staff = False
 
         user.save(update_fields=['admin_role', 'is_superuser', 'is_staff', 'role'])
+        user.refresh_from_db()
+        if was_admin and not user.is_platform_admin:
+            # Removed from the admins: every admin session ended and every
+            # device signed out, so no old token is a way back in.
+            from ..admin_security import cut_off
+            cut_off(user, 'removed from admins')
         log_admin_action(request.user, 'set_role', 'user', user.id,
                          reason=(user.role.name if user.role_id else ('super_admin' if user.is_super_admin else 'none')))
         return Response(self.get_serializer(user).data)
+
+
+    @action(detail=True, methods=['post'])
+    def reset_two_factor(self, request, pk=None):
+        """Super admin, for an admin who lost their phone: their authenticator
+        is forgotten and their admin sessions end; they set it up again."""
+        from ..models import AdminTwoFactor
+        from ..admin_security import end_sessions
+        user = get_object_or_404(User, pk=pk)
+        AdminTwoFactor.objects.filter(user=user).delete()
+        end_sessions(user, 'two-step reset')
+        log_admin_action(request.user, 'reset_two_factor', 'user', user.id)
+        return Response({'status': 'reset'})
 
 
 # ── Content management ───────────────────────────────────────────────────────
@@ -531,6 +624,11 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     permission_classes = [Cap('remove_content')]
     pagination_class = StandardPagination
     serializer_class = AdminContentPostSerializer
+
+    def get_permissions(self):
+        if self.action == 'bulk':
+            return [Cap('remove_content', recent=True)()]
+        return super().get_permissions()
 
     # type -> (select_related field, serializer, [search lookups])
     _CONFIG = {
@@ -604,13 +702,13 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     def bulk(self, request):
         """Remove or restore many items of one type at once."""
         ctype = request.data.get('type')
-        ids = request.data.get('ids') or []
+        ids = clean_ids(request.data.get('ids'))
         op = request.data.get('action')
         Model = _CONTENT_MODELS.get(ctype)
         if not Model:
             return Response({'error': f'type must be one of {list(_CONTENT_MODELS)}'}, status=status.HTTP_400_BAD_REQUEST)
-        if not isinstance(ids, list) or not ids:
-            return Response({'error': 'ids (a non-empty list) is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if ids is None:
+            return Response({'error': 'ids: a list of 1 to 200 whole numbers'}, status=status.HTTP_400_BAD_REQUEST)
         if op not in ('remove', 'restore'):
             return Response({'error': "action must be 'remove' or 'restore'"}, status=status.HTTP_400_BAD_REQUEST)
         # .update() fires no signals, so the profile-total adjustment is explicit
@@ -704,13 +802,29 @@ class AdminLogViewSet(viewsets.GenericViewSet):
 
     def get_queryset(self):
         qs = AdminActionLog.objects.select_related('actor').order_by('-created_at')
-        action_f = self.request.query_params.get('action')
-        if action_f:
-            qs = qs.filter(action=action_f)
+        p = self.request.query_params
+        if p.get('action'):
+            qs = qs.filter(action=p['action'])
+        if p.get('actor'):
+            qs = qs.filter(Q(actor_name__iexact=p['actor']) | Q(actor__username__iexact=p['actor']))
+        if p.get('target_type'):
+            qs = qs.filter(target_type=p['target_type'])
+        if str(p.get('target_id') or '').isdigit():
+            qs = qs.filter(target_id=int(p['target_id']))
+        for key, lookup in (('since', 'created_at__date__gte'), ('until', 'created_at__date__lte')):
+            value = (p.get(key) or '')[:10]
+            if len(value) == 10:
+                qs = qs.filter(**{lookup: value})
         return qs
 
     def list(self, request):
         return _paginated(self, self.get_queryset(), AdminActionLogSerializer)
+
+    @action(detail=False, methods=['get'])
+    def verify(self, request):
+        """Whether the trail is as written: every entry unchanged, none gone."""
+        ok, broken, checked = verify_audit_chain()
+        return Response({'ok': ok, 'first_broken_id': broken, 'checked': checked})
 
 
 # ── Roles (super-admin manages capability bundles) ───────────────────────────
@@ -719,6 +833,19 @@ class AdminRoleViewSet(viewsets.ModelViewSet):
     serializer_class = RoleSerializer
     permission_classes = [IsSuperAdmin]
     pagination_class = None
+
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [RecentSuperAdmin()]
+        return super().get_permissions()
+
+    @staticmethod
+    def _cut_off_powerless(users):
+        from ..admin_security import cut_off
+        for u in users:
+            u.refresh_from_db()
+            if not u.is_platform_admin:
+                cut_off(u, 'role changed')
 
     @action(detail=False, methods=['get'])
     def capabilities(self, request):
@@ -732,7 +859,142 @@ class AdminRoleViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         role = serializer.save()
         log_admin_action(self.request.user, 'update_role', 'role', role.id, reason=role.name)
+        self._cut_off_powerless(list(role.users.all()))
 
     def perform_destroy(self, instance):
+        holders = list(instance.users.all())
         log_admin_action(self.request.user, 'delete_role', 'role', instance.id, reason=instance.name)
         instance.delete()
+        self._cut_off_powerless(holders)
+
+
+# ── Two-step sign-in for admins ──────────────────────────────────────────────
+class IsAdminInGoodStanding(BasePermission):
+    """An admin whose account may use admin tools: the doors to setting up
+    and using two-step sign-in (no admin session needed to reach them)."""
+    message = 'You do not have permission for this action.'
+
+    def has_permission(self, request, view):
+        from ..admin_security import in_good_standing
+        u = request.user
+        return bool(u and u.is_authenticated and u.is_platform_admin and in_good_standing(u))
+
+
+class AdminSecurityViewSet(viewsets.ViewSet):
+    """/admin/security/: status, set up the authenticator app, confirm it,
+    open an admin session with a code (or a backup code), and close it."""
+    permission_classes = [IsAdminInGoodStanding]
+
+    def get_throttles(self):
+        if self.action in ('setup', 'confirm', 'verify'):
+            self.throttle_scope = 'admin_2fa'
+        return super().get_throttles()
+
+    def _two_factor(self, user):
+        from ..models import AdminTwoFactor
+        return AdminTwoFactor.objects.filter(user=user).first()
+
+    @action(detail=False, methods=['get'])
+    def status(self, request):
+        from ..admin_security import session_for, two_factor_required
+        u = request.user
+        tf = self._two_factor(u)
+        session = session_for(request)
+        return Response({
+            'is_admin': True,
+            'is_super_admin': u.is_super_admin,
+            'capabilities': u.capabilities,
+            'two_factor_required': two_factor_required(),
+            'two_factor_enabled': bool(tf and tf.enabled),
+            'session_valid': bool(session),
+            'session_expires_at': session.expires_at if session else None,
+        })
+
+    @action(detail=False, methods=['post'])
+    def setup(self, request):
+        """A new secret for the authenticator app (replacing one not yet
+        confirmed). Once confirmed, only a super admin can reset it."""
+        from ..models import AdminTwoFactor
+        from ..admin_security import new_secret, encrypt, otpauth_url
+        tf = self._two_factor(request.user)
+        if tf and tf.enabled:
+            return Response({'error': 'Two-step sign-in is already set up.', 'code': 'already_enabled'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        secret = new_secret()
+        AdminTwoFactor.objects.update_or_create(
+            user=request.user, defaults={'secret_encrypted': encrypt(secret), 'confirmed_at': None,
+                                         'last_step': 0, 'backup_hashes': []})
+        account = request.user.email or request.user.username
+        return Response({'secret': secret, 'otpauth_url': otpauth_url(secret, account)})
+
+    @action(detail=False, methods=['post'])
+    def confirm(self, request):
+        """The first code from the app: two-step sign-in is on, the backup
+        codes are given (once), and an admin session opens."""
+        from ..admin_security import decrypt, check_code, new_backup_codes, open_session
+        tf = self._two_factor(request.user)
+        if not tf or tf.enabled:
+            return Response({'error': 'Start the set-up first.', 'code': 'no_setup'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        step = check_code(decrypt(tf.secret_encrypted), request.data.get('code'), tf.last_step)
+        if step is None:
+            return Response({'error': 'That code is not right. Try the one showing now.', 'code': 'bad_code'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        codes, hashes = new_backup_codes()
+        tf.confirmed_at = timezone.now()
+        tf.last_step = step
+        tf.backup_hashes = hashes
+        tf.save(update_fields=['confirmed_at', 'last_step', 'backup_hashes'])
+        token, expires = open_session(request.user, request)
+        log_admin_action(request.user, 'enable_two_factor', 'user', request.user.id)
+        return Response({'backup_codes': codes, 'admin_session': token, 'expires_at': expires})
+
+    @action(detail=False, methods=['post'])
+    def verify(self, request):
+        """A code (or a backup code, used once): an admin session opens, or the
+        one sent along is confirmed afresh (for the dangerous actions)."""
+        from ..admin_security import decrypt, check_code, digest, open_session, session_for
+        tf = self._two_factor(request.user)
+        if not tf or not tf.enabled:
+            return Response({'error': 'Set up two-step sign-in first.', 'code': 'not_enabled'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        code = str(request.data.get('code') or '').strip()
+        backup = str(request.data.get('backup_code') or '').strip().lower()
+        ok = False
+        if backup:
+            h = digest(backup)
+            if h in (tf.backup_hashes or []):
+                tf.backup_hashes = [x for x in tf.backup_hashes if x != h]
+                tf.save(update_fields=['backup_hashes'])
+                ok = True
+                log_admin_action(request.user, 'used_backup_code', 'user', request.user.id,
+                                 reason=f'{len(tf.backup_hashes)} left')
+        else:
+            step = check_code(decrypt(tf.secret_encrypted), code, tf.last_step)
+            if step is not None:
+                tf.last_step = step
+                tf.save(update_fields=['last_step'])
+                ok = True
+        if not ok:
+            log_admin_action(request.user, 'failed_two_factor', 'user', request.user.id)
+            return Response({'error': 'That code is not right.', 'code': 'bad_code'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        current = session_for(request)
+        if current:
+            current.verified_at = timezone.now()
+            current.save(update_fields=['verified_at'])
+            return Response({'admin_session': None, 'expires_at': current.expires_at, 'refreshed': True})
+        token, expires = open_session(request.user, request)
+        log_admin_action(request.user, 'admin_sign_in', 'user', request.user.id)
+        return Response({'admin_session': token, 'expires_at': expires,
+                         'backup_codes_left': len(tf.backup_hashes or [])})
+
+    @action(detail=False, methods=['post'])
+    def logout(self, request):
+        from ..admin_security import session_for
+        current = session_for(request)
+        if current:
+            current.revoked_at = timezone.now()
+            current.revoked_reason = 'signed out'
+            current.save(update_fields=['revoked_at', 'revoked_reason'])
+        return Response({'status': 'signed_out'})

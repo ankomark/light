@@ -3,6 +3,7 @@ import * as SecureStore from './secureStorage'; // web-safe shim (expo-secure-st
 import Constants from 'expo-constants';
 import { extractYoutubeId } from '../utils/youtubeUtils';
 import { parseSpectrum } from '../utils/spectrum';
+import { adminToken, askForCode, clearAdminSession } from '../utils/adminSession';
 
 const PROD_API_BASE = 'https://web-production-f266.up.railway.app';
 
@@ -80,6 +81,8 @@ export const clearTokens = async () => {
   await Promise.all([
     SecureStore.deleteItemAsync('accessToken').catch(() => {}),
     SecureStore.deleteItemAsync('refreshToken').catch(() => {}),
+    // Signed out: the admin session goes with the sign-in.
+    clearAdminSession().catch(() => {}),
   ]);
 };
 
@@ -138,6 +141,9 @@ axios.interceptors.request.use(async (config) => {
     try {
       const token = await getAuthToken();
       config.headers.Authorization = `Bearer ${token}`;
+      // The two-step admin session, when there is one (admin tools need it).
+      const admin = adminToken();
+      if (admin) config.headers['X-Admin-Session'] = admin;
     } catch (error) {
       console.debug('No token for request', config.url);
       return Promise.reject(error);
@@ -171,6 +177,29 @@ axios.interceptors.response.use(
     }
     return Promise.reject(error);
   }
+);
+
+// Admin tools: the server asks for an authenticator code when the admin
+// session has ended (admin_session_required) or a dangerous action wants a
+// fresh one (reauth_required). The admin area asks the person, then the
+// request goes again, once.
+axios.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    const code = error.response?.status === 403 ? error.response?.data?.code : null;
+    if ((code === 'admin_session_required' || code === 'reauth_required') && config && !config._adminRetry) {
+      if (code === 'admin_session_required') await clearAdminSession();
+      const ok = await askForCode(code);
+      if (ok) {
+        config._adminRetry = true;
+        const admin = adminToken();
+        if (admin) config.headers['X-Admin-Session'] = admin;
+        return axios(config);
+      }
+    }
+    return Promise.reject(error);
+  },
 );
 
 // Best-effort, human-readable hint for a request that got no server response.
@@ -2134,6 +2163,21 @@ export const fetchPresence = (conversationId) =>
 // ── Admin / moderation panel (gated server-side by IsModerator/IsSuperAdmin) ──
 export const fetchAdminDashboard = () =>
   apiRequest('get', '/admin/dashboard/');
+
+// ── Two-step sign-in for admins (/admin/security/) ───────────────────────────
+// Who I am as an admin, read fresh: { is_admin, capabilities, two_factor_enabled,
+// session_valid, ... } — a 403 means not an admin (any more).
+export const fetchAdminSecurity = () => apiRequest('get', '/admin/security/status/');
+// A new authenticator secret: { secret, otpauth_url }.
+export const startAdminTwoFactor = () => apiRequest('post', '/admin/security/setup/', {});
+// The first code: { backup_codes, admin_session, expires_at }.
+export const confirmAdminTwoFactor = (code) => apiRequest('post', '/admin/security/confirm/', { code });
+// A code or a backup code: { admin_session, expires_at } (or refreshed).
+export const verifyAdminCode = ({ code, backupCode } = {}) =>
+  apiRequest('post', '/admin/security/verify/', backupCode ? { backup_code: backupCode } : { code });
+export const endAdminSession = () => apiRequest('post', '/admin/security/logout/', {});
+export const resetAdminTwoFactor = (userId) => apiRequest('post', `/admin/users/${userId}/reset_two_factor/`, {});
+export const verifyAdminLog = () => apiRequest('get', '/admin/logs/verify/');
 
 // Follow a paginated `next` link (preserves path + query) for the admin
 // queues' infinite scroll. Shared by every admin list screen.

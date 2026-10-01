@@ -28,6 +28,7 @@ ADMIN_CAPABILITIES = (
     ('view_audit_log', 'View audit log'),
     ('manage_wallpapers', 'Manage app wallpapers'),
     ('manage_notices', 'Post notices & answer notes to admins'),
+    ('manage_marketplace', 'Marketplace categories & seller ticks'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 
@@ -776,21 +777,71 @@ class Report(models.Model):
 
 
 class AdminActionLog(models.Model):
-    """Audit trail for every moderation action taken from the admin panel."""
+    """Audit trail for every moderation action taken from the admin panel.
+
+    Tamper-evident: each entry carries the hash of the one before it and of
+    itself, so an entry edited or deleted afterwards breaks the chain, and
+    /admin/logs/verify/ says where. Who acted is kept by name as well, so the
+    trail still reads when an account is gone."""
     actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='admin_actions')
+    actor_name = models.CharField(max_length=150, blank=True, default='')
     action = models.CharField(max_length=40)  # e.g. resolve_report, remove_post, suspend_user, set_role
     target_type = models.CharField(max_length=20, blank=True, default='')
     target_id = models.PositiveIntegerField(null=True, blank=True)
     reason = models.TextField(blank=True, default='')
+    ip = models.CharField(max_length=45, blank=True, default='')
+    user_agent = models.CharField(max_length=255, blank=True, default='')
+    prev_hash = models.CharField(max_length=64, blank=True, default='')
+    entry_hash = models.CharField(max_length=64, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['-created_at'])]
+        indexes = [models.Index(fields=['-created_at']), models.Index(fields=['target_type', 'target_id'])]
 
     def __str__(self):
-        actor = self.actor.username if self.actor else 'system'
+        actor = self.actor_name or (self.actor.username if self.actor else 'system')
         return f"{actor} {self.action} {self.target_type}#{self.target_id}"
+
+    def chain_text(self):
+        """What the entry's hash covers: everything said about the action."""
+        return '|'.join(str(v) for v in (
+            self.prev_hash, self.actor_id or '', self.actor_name, self.action, self.target_type,
+            self.target_id or '', self.reason, self.ip, self.user_agent,
+            self.created_at.isoformat() if self.created_at else '',
+        ))
+
+
+class AdminTwoFactor(models.Model):
+    """An admin's authenticator app: the secret (encrypted), whether it has
+    been confirmed with a first code, and the backup codes (hashes)."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='admin_two_factor')
+    secret_encrypted = models.TextField()
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    last_step = models.BigIntegerField(default=0)       # the last code's time step: none used twice
+    backup_hashes = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def enabled(self):
+        return self.confirmed_at is not None
+
+
+class AdminSession(models.Model):
+    """A short-lived admin session, opened with a two-step code. Only the
+    token's hash is kept."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='admin_sessions')
+    token_hash = models.CharField(max_length=64, unique=True)
+    verified_at = models.DateTimeField()               # the last code: dangerous actions want it recent
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=60, blank=True, default='')
+    ip = models.CharField(max_length=45, blank=True, null=True)
+    user_agent = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'expires_at'])]
 
 
 class Appeal(models.Model):

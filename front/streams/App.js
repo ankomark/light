@@ -120,6 +120,7 @@ import AdminAppeals from './components/admin/AdminAppeals';
 import AppealScreen from './components/admin/AppealScreen';
 import AdminRoles from './components/admin/AdminRoles';
 import AdminWallpapers from './components/admin/AdminWallpapers';
+import AdminGate from './components/admin/AdminGate';
 import VideoFeed from './components/VideoFeed';
 import VideoModeStart from './components/VideoModeStart';
 import MarketWarmup from './components/MarketWarmup';
@@ -841,15 +842,17 @@ const ArtistStudioWrapper = ({ navigation }) => (
   </View>
 );
 
-// Role gate: non-admins are bounced Home. The API is also gated server-side, so
-// this is purely UX (hides screens that would 403 anyway).
+// The admin area's door (components/admin/AdminGate.js): asks the server who
+// this is as an admin every time, sets up or asks for two-step sign-in, and
+// sends anyone who is not (or no longer) an admin Home. The server checks
+// everything again on every request; this is what the person sees.
 const RequireAdmin = ({ navigation, children }) => {
   const { currentUser } = useAuth();
-  const allowed = isAdmin(currentUser);
+  const looksAdmin = isAdmin(currentUser);
   React.useEffect(() => {
-    if (!allowed) navigation.replace('Home');
-  }, [allowed, navigation]);
-  return allowed ? children : null;
+    if (!looksAdmin) navigation.replace('Home');
+  }, [looksAdmin, navigation]);
+  return looksAdmin ? <AdminGate navigation={navigation}>{children}</AdminGate> : null;
 };
 
 // Shared luxury backdrop (rotating wallpaper + transparent nav bar) for all

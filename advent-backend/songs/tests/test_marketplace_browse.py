@@ -78,7 +78,7 @@ class BrowseTests(APITestCase):
 class CategoryTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user('u', 'u@x.com', 'pw')
-        self.admin = User.objects.create_user('a', 'a@x.com', 'pw', is_staff=True)
+        self.admin = User.objects.create_user('a', 'a@x.com', 'pw', admin_role='moderator')
         self.books = ProductCategory.objects.create(name='Books')
         ProductCategory.objects.create(name='Empty')
         make(self.user, 'Hymnal', category=self.books)

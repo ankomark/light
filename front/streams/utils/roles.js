@@ -8,10 +8,11 @@ export const isSuperAdmin = (user) =>
 export const hasCapability = (user, cap) =>
   !!user && (isSuperAdmin(user) || (Array.isArray(user.capabilities) && user.capabilities.includes(cap)));
 
-// Any staff member: super admin, a role with capabilities, or legacy is_staff.
+// Any staff member: super admin or a role with capabilities. (Django's staff
+// flag is no sign of it: the server grants nothing on it.) Only for what to
+// show: the admin area asks the server itself (AdminGate).
 export const isAdmin = (user) =>
   !!user && (
     isSuperAdmin(user) ||
-    (Array.isArray(user.capabilities) && user.capabilities.length > 0) ||
-    user.is_staff === true
+    (Array.isArray(user.capabilities) && user.capabilities.length > 0)
   );

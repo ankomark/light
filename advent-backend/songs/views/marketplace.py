@@ -423,7 +423,7 @@ class ProductCategoryViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
             return [permissions.AllowAny()]
-        return [permissions.IsAdminUser()]
+        return [Cap('manage_marketplace')()]
 
     def get_queryset(self):
         # With how many products are on offer in each: the home screen shows

@@ -18,8 +18,8 @@ def _t(h):
 class NoticeBoardOrderingTests(APITestCase):
     def setUp(self):
         self.admin = User.objects.create_user('nb_admin', 'nba@x.com', 'x')
-        self.admin.is_staff = True
-        self.admin.save(update_fields=['is_staff'])
+        self.admin.admin_role = 'moderator'   # an admin by role; the staff flag opens nothing
+        self.admin.save(update_fields=['admin_role'])
         self.reader = User.objects.create_user('nb_reader', 'nbr@x.com', 'x')
 
     def _notice(self, title, when, pinned=False):
@@ -60,8 +60,8 @@ class NoticeBoardOrderingTests(APITestCase):
 class AdminInboxOrderingTests(APITestCase):
     def setUp(self):
         self.admin = User.objects.create_user('ai_admin', 'aia@x.com', 'x')
-        self.admin.is_staff = True
-        self.admin.save(update_fields=['is_staff'])
+        self.admin.admin_role = 'moderator'   # an admin by role; the staff flag opens nothing
+        self.admin.save(update_fields=['admin_role'])
         self.user = User.objects.create_user('ai_user', 'aiu@x.com', 'x')
 
     def _note(self, body, when):

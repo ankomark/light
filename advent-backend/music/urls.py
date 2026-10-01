@@ -9,9 +9,14 @@ from rest_framework_simplejwt.views import (
 from songs.views.directory import service_share_page
 from songs.views import SignUpView, ThrottledTokenObtainPairView, LogoutView, health_check, post_share_page, share_brand_image
 
+# Django's own admin signs in with a password alone, so it is off unless
+# DJANGO_ADMIN_ENABLED, and then only an active superuser gets in (Django's
+# default lets any is_staff account in).
+admin.site.has_permission = lambda request: bool(
+    request.user.is_active and request.user.is_superuser)
+
 urlpatterns = [
     path('', health_check, name='health-root'),
-    path('admin/', admin.site.urls),
 
     # Public share/preview page for a post (rich link card + deep link into app).
     path('post/<int:post_id>/', post_share_page, name='post-share-page'),
@@ -38,3 +43,5 @@ urlpatterns = [
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+if settings.DJANGO_ADMIN_ENABLED:
+    urlpatterns = [path('admin/', admin.site.urls)] + urlpatterns

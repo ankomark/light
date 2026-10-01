@@ -113,9 +113,23 @@ class IsNotSuspended(BasePermission):
         return not (u and u.is_authenticated and getattr(u, 'is_currently_suspended', False))
 
 
-def Cap(*caps):
+def admin_gate(request, allowed, recent=False):
+    """True if the request may use the admin power `allowed(user)` grants:
+    standing, the power read fresh, and a two-step admin session (a recent
+    code for the dangerous actions). Otherwise a 403 that says which, so the
+    app can ask for the code (songs/admin_security.py)."""
+    from ..admin_security import AdminDenied, check_admin
+    try:
+        check_admin(request, allowed, recent=recent)
+    except AdminDenied as denied:
+        raise PermissionDenied({'detail': denied.message, 'code': denied.code})
+    return True
+
+
+def Cap(*caps, recent=False):
     """Permission factory: allow if the user has ANY of the given capabilities
-    (super admins implicitly have all).
+    (super admins implicitly have all), through admin_gate. `recent=True`
+    for the dangerous ones.
 
     Lives here rather than in views/admin.py so modules imported earlier (e.g.
     directory) can gate on a capability without a forward import."""
@@ -123,8 +137,7 @@ def Cap(*caps):
         message = 'You do not have permission for this action.'
 
         def has_permission(self, request, view):
-            u = request.user
-            return bool(u and u.is_authenticated and any(u.has_capability(c) for c in caps))
+            return admin_gate(request, lambda u: any(u.has_capability(c) for c in caps), recent=recent)
     return _CapPermission
 
 

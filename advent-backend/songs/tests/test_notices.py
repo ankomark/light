@@ -15,7 +15,7 @@ from songs.models import User, Notice, DeviceToken, NotificationPreference
 class Base(APITestCase):
     def setUp(self):
         cache.clear()
-        self.admin = User.objects.create_user('nadmin', 'na@x.com', 'x', is_staff=True)
+        self.admin = User.objects.create_user('nadmin', 'na@x.com', 'x', admin_role='moderator')
         self.reader = User.objects.create_user('nreader', 'nr@x.com', 'x')
         self.quiet = User.objects.create_user('nquiet', 'nq@x.com', 'x')
         for u in (self.admin, self.reader, self.quiet):

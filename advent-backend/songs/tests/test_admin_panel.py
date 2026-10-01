@@ -73,14 +73,14 @@ class AdminPrivilegeTests(APITestCase):
     def test_cannot_suspend_super_admin(self):
         self.client.force_authenticate(self.mod)
         r = self.client.post(f'/api/admin/users/{self.other_boss.id}/suspend/', {}, format='json')
-        self.assertEqual(r.status_code, 400, r.content[:300])
+        self.assertEqual(r.status_code, 403, r.content[:300])
         self.other_boss.refresh_from_db()
         self.assertFalse(self.other_boss.is_suspended)
 
     def test_cannot_warn_super_admin(self):
         self.client.force_authenticate(self.mod)
         r = self.client.post(f'/api/admin/users/{self.other_boss.id}/warn/', {}, format='json')
-        self.assertEqual(r.status_code, 400, r.content[:300])
+        self.assertEqual(r.status_code, 403, r.content[:300])
 
     def test_moderator_cannot_set_role(self):
         # set_role is super-admin only.

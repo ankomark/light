@@ -87,6 +87,7 @@ from .views import (
     AdminLogViewSet,
     AdminAppealViewSet,
     AdminRoleViewSet,
+    AdminSecurityViewSet,
     LiveBroadcastViewSet,
     LiveKitWebhookView,
 )
@@ -149,6 +150,7 @@ router.register(r'admin/content', AdminContentViewSet, basename='admin-content')
 router.register(r'admin/logs', AdminLogViewSet, basename='admin-logs')
 router.register(r'admin/appeals', AdminAppealViewSet, basename='admin-appeals')
 router.register(r'admin/roles', AdminRoleViewSet, basename='admin-roles')
+router.register(r'admin/security', AdminSecurityViewSet, basename='admin-security')
 router.register(r'live/broadcasts', LiveBroadcastViewSet, basename='live-broadcasts')
 
 # Nested routers

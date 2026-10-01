@@ -41,3 +41,7 @@ FEED_CACHE_SECONDS = 0
 # Don't let Sentry phone home during tests.
 import sentry_sdk  # noqa: E402
 sentry_sdk.init(dsn='')
+
+# Admin tests sign in with force_authenticate; the two-step admin session has
+# its own tests, which switch this on (override_settings).
+ADMIN_2FA_REQUIRED = False

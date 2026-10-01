@@ -391,7 +391,8 @@ class OrderSerializer(serializers.ModelSerializer):
         items = list(obj.items.all())
         request = self.context.get('request')
         user = getattr(request, 'user', None)
-        if user is not None and user.is_authenticated and obj.buyer_id != user.pk and not user.is_staff:
+        if (user is not None and user.is_authenticated and obj.buyer_id != user.pk
+                and not user.has_capability('handle_reports')):
             items = [i for i in items if i.seller_id == user.pk]
         return items
 

@@ -53,7 +53,7 @@ class MediaStationViewSet(viewsets.ModelViewSet):
 def can_manage_notices(user):
     """Who posts notices and answers notes: staff, or anyone whose role grants
     `manage_notices` (super admins hold every capability)."""
-    return bool(user and user.is_authenticated and (user.is_staff or user.has_capability('manage_notices')))
+    return bool(user and user.is_authenticated and user.has_capability('manage_notices'))
 
 
 class CanManageNotices(permissions.BasePermission):

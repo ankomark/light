@@ -228,7 +228,8 @@ class AdminActionLogSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AdminActionLog
-        fields = ['id', 'actor', 'action', 'target_type', 'target_id', 'reason', 'created_at']
+        fields = ['id', 'actor', 'actor_name', 'action', 'target_type', 'target_id', 'reason',
+                  'ip', 'user_agent', 'entry_hash', 'created_at']
 
 
 class AppealSerializer(serializers.ModelSerializer):
