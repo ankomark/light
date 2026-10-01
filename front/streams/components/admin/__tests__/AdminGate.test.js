@@ -137,6 +137,20 @@ test('cancelled, the action is not sent again', async () => {
   await expect(answer).resolves.toBe(false);
 });
 
+test('the set-up key can be copied, through the share sheet when there is no clipboard', async () => {
+  const { Share } = require('react-native');
+  const shared = jest.spyOn(Share, 'share').mockResolvedValue({});
+  mockApi.fetchAdminSecurity.mockResolvedValue(me({ two_factor_enabled: false }));
+  mockApi.startAdminTwoFactor.mockResolvedValue({ secret: 'ABCDEFGHIJKLMNOP', otpauth_url: 'otpauth://totp/x' });
+  const screen = gate();
+  await waitFor(() => expect(screen.getByTestId('admin-setup-start')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('admin-setup-start')); });
+  // This test's build has no clipboard module (optionalNative mocked to null).
+  await act(async () => { fireEvent.press(screen.getByTestId('admin-setup-copy')); });
+  expect(shared).toHaveBeenCalledWith({ message: 'ABCDEFGHIJKLMNOP' });
+  shared.mockRestore();
+});
+
 test('the session kept on the phone ends when it expires', async () => {
   await session.setAdminSession('old', '2000-01-01T00:00:00Z');
   expect(session.adminToken()).toBeNull();

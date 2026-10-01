@@ -7,7 +7,7 @@
 // AdminCodeHost, on any screen, not only in here.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Linking, ScrollView,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Linking, ScrollView, Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -160,7 +160,24 @@ export default function AdminGate({ navigation, children }) {
     }
   };
 
-  const copy = (text) => clipboard()?.setStringAsync?.(text).catch(() => {});
+  // Copy to the clipboard; on a build without the clipboard module (the
+  // phone's build can lag the app's code) the share sheet opens instead, and
+  // its Copy puts the text on the clipboard just the same.
+  const [copied, setCopied] = useState('');
+  const copy = async (text, what) => {
+    const board = clipboard();
+    if (board?.setStringAsync) {
+      try {
+        await board.setStringAsync(text);
+        setCopied(what);
+        setTimeout(() => { if (live.current) setCopied(''); }, 2500);
+        return;
+      } catch {
+        // falls through to the share sheet
+      }
+    }
+    try { await Share.share({ message: text }); } catch { /* closed */ }
+  };
 
 
   if (phase === 'open') {
@@ -209,9 +226,14 @@ export default function AdminGate({ navigation, children }) {
                 <Text style={styles.secondaryText}>{t('admin.gate.openApp')}</Text>
               </TouchableOpacity>
               <Text style={styles.muted}>{t('admin.gate.orKey')}</Text>
-              <TouchableOpacity style={styles.keyBox} onPress={() => copy(setup.secret)} testID="admin-setup-key">
+              {/* A plain box (not a button), so a long press selects the key too. */}
+              <View style={styles.keyBox} testID="admin-setup-key">
                 <Text style={styles.key} selectable>{setup.secret.replace(/(.{4})/g, '$1 ').trim()}</Text>
-                <Ionicons name="copy-outline" size={16} color={C.muted} />
+              </View>
+              <TouchableOpacity style={styles.secondary} onPress={() => copy(setup.secret, 'key')}
+                                testID="admin-setup-copy">
+                <Ionicons name={copied === 'key' ? 'checkmark' : 'copy-outline'} size={16} color={C.gold} />
+                <Text style={styles.secondaryText}>{copied === 'key' ? t('admin.gate.copied') : t('admin.gate.copyKey')}</Text>
               </TouchableOpacity>
               <Text style={styles.step}>{t('admin.gate.step2')}</Text>
               <CodeBox t={t} busy={busy} error={error} onSubmit={confirm} testID="admin-setup-code" />
@@ -228,9 +250,9 @@ export default function AdminGate({ navigation, children }) {
           <View style={styles.codes}>
             {backupCodes.map((c) => <Text key={c} style={styles.codeItem} selectable>{c}</Text>)}
           </View>
-          <TouchableOpacity style={styles.secondary} onPress={() => copy(backupCodes.join('\n'))}>
-            <Ionicons name="copy-outline" size={16} color={C.gold} />
-            <Text style={styles.secondaryText}>{t('admin.gate.copyCodes')}</Text>
+          <TouchableOpacity style={styles.secondary} onPress={() => copy(backupCodes.join('\n'), 'codes')}>
+            <Ionicons name={copied === 'codes' ? 'checkmark' : 'copy-outline'} size={16} color={C.gold} />
+            <Text style={styles.secondaryText}>{copied === 'codes' ? t('admin.gate.copied') : t('admin.gate.copyCodes')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.primary} onPress={() => { setBackupCodes(null); setPhase('open'); }}
                             testID="admin-backup-done">

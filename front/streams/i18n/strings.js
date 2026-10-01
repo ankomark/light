@@ -3269,6 +3269,8 @@ export const STRINGS = {
 
     'settings.title': 'Settings',
     'settings.verified': 'Verified',
+    'admin.gate.copyKey': 'Copy key',
+    'admin.gate.copied': 'Copied',
     'adminContent.skippedTitle': 'Some were left',
     'adminContent.skippedRank': '{n} item(s) were posted by an admin of your rank or above and were left as they are.',
     'adminTabs.pulse': 'Pulse',
@@ -6978,6 +6980,8 @@ export const STRINGS = {
 
     'settings.title': 'Mipangilio',
     'settings.verified': 'Imethibitishwa',
+    'admin.gate.copyKey': 'Nakili ufunguo',
+    'admin.gate.copied': 'Imenakiliwa',
     'adminContent.skippedTitle': 'Baadhi viliachwa',
     'adminContent.skippedRank': 'Vitu {n} vilichapishwa na msimamizi wa cheo chako au zaidi na vimeachwa kama vilivyo.',
     'adminTabs.pulse': 'Mapigo',
