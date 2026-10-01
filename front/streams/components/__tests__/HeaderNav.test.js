@@ -27,8 +27,8 @@ jest.mock('react-native-safe-area-context', () => {
 });
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 1 }, isAuthenticated: true }) }));
 jest.mock('../../context/I18nContext', () => ({ useI18n: () => ({ t: (k) => k }) }));
-let mockWall = { on: true, one: null, rows: [] };
-jest.mock('../../context/WallpaperContext', () => ({ useWallpaperChoice: () => mockWall }));
+let mockWallOn = true;
+jest.mock('../../context/WallpaperContext', () => ({ useWallpapersOn: () => mockWallOn }));
 
 const Header = require('../Header').default;
 
@@ -51,13 +51,11 @@ test('Market wears the coloured marketplace picture, and is lit on the marketpla
   expect(screen.queryByText(/icon:storefront/)).toBeNull();   // a picture, not a glyph
 });
 
-test('the header follows the wallpaper choice: off is plain, one chosen is that one', () => {
+test('wallpapers off: the header drops its picture for the plain navy', () => {
   const { Image } = require('react-native');
-  mockWall = { on: false, one: null, rows: [] };
-  let screen = render(<Header />);
-  expect(screen.UNSAFE_queryAllByType(Image).filter((i) => i.props.source?.uri)).toHaveLength(0);
-  mockWall = { on: true, one: 'https://cdn/w1.jpg', rows: [] };
-  screen = render(<Header />);
-  expect(screen.UNSAFE_queryAllByType(Image).some((i) => i.props.source?.uri === 'https://cdn/w1.jpg')).toBe(true);
-  mockWall = { on: true, one: null, rows: [] };
+  const pictures = (screen) => screen.UNSAFE_queryAllByType(Image).filter((i) => /wallpapers\//.test(i.props.source?.uri || ''));
+  mockWallOn = false;
+  expect(pictures(render(<Header />))).toHaveLength(0);
+  mockWallOn = true;
+  expect(pictures(render(<Header />))).toHaveLength(1);
 });

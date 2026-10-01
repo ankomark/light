@@ -26,7 +26,6 @@ import { usePreferences } from './PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 
 const CACHE_KEY = 'wallpapers:byScope';
-const ROWS_KEY = 'wallpapers:rows';
 
 // First-launch bootstrap only. These same URLs are seeded into the database by
 // migration 0078, so once the device syncs they arrive as ordinary rows the
@@ -58,23 +57,14 @@ const groupByScope = (rows) => {
   return grouped;
 };
 
-/** Every wallpaper once, with its title, for choosing one in Settings. */
-const rowsOf = (rows) => {
-  const seen = new Set();
-  return rows.filter((r) => r?.image_url && !seen.has(r.image_url) && seen.add(r.image_url))
-    .map((r) => ({ url: r.image_url, title: r.title || '', scope: r.scope || 'general' }));
-};
-
 const WallpaperContext = createContext({
   wallpapersByScope: null,
-  rows: [],
   refresh: async () => {},
 });
 
 export const WallpaperProvider = ({ children }) => {
   // null = never resolved. {} = resolved, admin has none.
   const [byScope, setByScope] = useState(null);
-  const [rows, setRows] = useState([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -82,9 +72,7 @@ export const WallpaperProvider = ({ children }) => {
       const rows = Array.isArray(data) ? data : data?.results || [];
       const grouped = groupByScope(rows);
       setByScope(grouped);
-      setRows(rowsOf(rows));
       AsyncStorage.setItem(CACHE_KEY, JSON.stringify(grouped)).catch(() => {});
-      AsyncStorage.setItem(ROWS_KEY, JSON.stringify(rowsOf(rows))).catch(() => {});
     } catch {
       // Offline or server error — whatever is cached (or the bootstrap) stands.
       // Deliberately NOT treated as "no wallpapers": a flaky network must never
@@ -99,8 +87,6 @@ export const WallpaperProvider = ({ children }) => {
         const raw = await AsyncStorage.getItem(CACHE_KEY);
         const cached = raw ? JSON.parse(raw) : null;
         if (alive && cached && typeof cached === 'object') setByScope(cached);
-        const keptRows = JSON.parse((await AsyncStorage.getItem(ROWS_KEY)) || 'null');
-        if (alive && Array.isArray(keptRows)) setRows(keptRows);
       } catch {
         // Ignore a corrupt cache entry; the fetch below settles it.
       }
@@ -109,40 +95,33 @@ export const WallpaperProvider = ({ children }) => {
     return () => { alive = false; };
   }, [refresh]);
 
-  const value = useMemo(() => ({ wallpapersByScope: byScope, rows, refresh }), [byScope, rows, refresh]);
+  const value = useMemo(() => ({ wallpapersByScope: byScope, refresh }), [byScope, refresh]);
 
   return <WallpaperContext.Provider value={value}>{children}</WallpaperContext.Provider>;
 };
 
-/** What the person chose in Settings: wallpapers on or off, and which. A
- *  chosen wallpaper an admin has since removed counts as "all, in turn". */
-export const useWallpaperChoice = () => {
-  const { rows } = useContext(WallpaperContext);
+/** Wallpapers on (the admins' set, in turn, as designed) or off (the app's
+ *  plain background): the person's one say in it, from Settings. */
+export const useWallpapersOn = () => {
   const { preferences } = usePreferences();
-  const on = preferences[PREF_KEYS.wallpaperOn] !== false;
-  const wanted = preferences[PREF_KEYS.wallpaper];
-  const one = on && wanted && wanted !== 'rotate' && (!rows.length || rows.some((r) => r.url === wanted))
-    ? wanted : null;
-  return { on, one, rows };
+  return preferences[PREF_KEYS.wallpaperOn] !== false;
 };
 
 /**
  * Wallpapers for one surface. Returns [] once the server has confirmed the
  * admin curated none — callers render their plain background in that case —
- * and when the person has turned wallpapers off. One chosen wallpaper stands
- * on every surface (music's too).
+ * and when the person has turned wallpapers off.
  */
 export const useWallpapers = (scope = 'general') => {
   const { wallpapersByScope, refresh } = useContext(WallpaperContext);
-  const { on, one } = useWallpaperChoice();
+  const on = useWallpapersOn();
   const wallpapers = useMemo(() => {
     if (!on) return [];
-    if (one) return [one];
     // Never reached the server on this device yet — bootstrap so a first cold
     // launch isn't a blank screen.
     if (wallpapersByScope === null) return BOOTSTRAP_WALLPAPERS[scope] || [];
     return wallpapersByScope[scope] || [];
-  }, [wallpapersByScope, scope, on, one]);
+  }, [wallpapersByScope, scope, on]);
   return { wallpapers, refresh };
 };
 

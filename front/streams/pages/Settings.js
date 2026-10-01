@@ -47,7 +47,7 @@ import {
 import { PREF_KEYS, AUDIO_QUALITY_TIERS_AVAILABLE } from '../utils/preferences';
 import { usePreferences } from '../context/PreferencesContext';
 import { useI18n } from '../context/I18nContext';
-import { useWallpaperChoice } from '../context/WallpaperContext';
+import { useWallpapersOn } from '../context/WallpaperContext';
 import { typography, spacing, radius, shadows } from '../constants/theme';
 
 const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
@@ -562,15 +562,9 @@ const Settings = () => {
   const languageOptions = languages.map((l) => ({ key: l.code, label: l.label }));
   const quietOptions = (choices) => choices.map((m) => ({ key: String(m), label: hhmm(m) }));
 
-  // Wallpapers: on (the admins' pictures, all in turn or one chosen) or off
-  // (the app's own plain background), for every page that has one.
-  const wallpaper = useWallpaperChoice();
-  const wallpaperOptions = [
-    { key: 'rotate', label: t('settings.wallpaper.rotate') },
-    ...wallpaper.rows.map((w, i) => ({
-      key: w.url, label: w.title || t('settings.wallpaper.numbered', { n: i + 1 }), thumb: w.url,
-    })),
-  ];
+  // Wallpapers on (the admins' pictures, changing as designed) or off (the
+  // app's own plain background), for every page that has one.
+  const wallpaperOn = useWallpapersOn();
 
   const resetPwForm = () => { setCurrentPw(''); setNewPw(''); setConfirmPw(''); };
 
@@ -854,10 +848,10 @@ const Settings = () => {
           <Row
             icon="image-outline"
             label={t('settings.wallpaper.label')}
-            sub={wallpaper.on ? t('settings.wallpaper.onSub') : t('settings.wallpaper.offSub')}
+            sub={wallpaperOn ? t('settings.wallpaper.onSub') : t('settings.wallpaper.offSub')}
             right={
               <Switch
-                value={wallpaper.on}
+                value={wallpaperOn}
                 onValueChange={(v) => updatePref(PREF_KEYS.wallpaperOn, v)}
                 trackColor={{ false: colors.switchOff, true: colors.primary }}
                 ios_backgroundColor={colors.switchOff}
@@ -866,16 +860,6 @@ const Settings = () => {
               />
             }
           />
-          {wallpaper.on && (
-            <DropdownRow
-              icon="image-multiple-outline"
-              label={t('settings.wallpaper.choose')}
-              value={wallpaper.one || 'rotate'}
-              options={wallpaperOptions}
-              onChange={(k) => updatePref(PREF_KEYS.wallpaper, k)}
-              testID="wallpaper-pick"
-            />
-          )}
           <DropdownRow
             icon="translate"
             label={t('settings.appearance.language')}

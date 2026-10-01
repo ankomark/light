@@ -64,8 +64,8 @@ jest.mock('../../components/GlassView', () => {
 });
 const mockDownloads = { count: 3, bytes: 12 * 1024 * 1024 };
 const mockRemoveAll = jest.fn(async () => 3);
-let mockWall = { on: true, one: null, rows: [] };
-jest.mock('../../context/WallpaperContext', () => ({ useWallpaperChoice: () => mockWall }));
+let mockWallOn = true;
+jest.mock('../../context/WallpaperContext', () => ({ useWallpapersOn: () => mockWallOn }));
 jest.mock('../../utils/downloads', () => ({
   useDownloadsSummary: () => mockDownloads, removeAllDownloads: (...a) => mockRemoveAll(...a),
 }));
@@ -301,28 +301,20 @@ describe('deep scan', () => {
 });
 
 describe('wallpapers', () => {
-  const rows = [
-    { url: 'https://cdn/w1.jpg', title: 'Sunrise', scope: 'general' },
-    { url: 'https://cdn/w2.jpg', title: '', scope: 'music' },
-  ];
-  beforeEach(() => { mockWall = { on: true, one: null, rows }; });
+  afterEach(() => { mockWallOn = true; });
 
-  test('choose one of the admin wallpapers, or all of them in turn', () => {
+  test('only on or off: no wallpaper to pick', () => {
     const screen = render(<Settings />);
-    expect(screen.getByTestId('wallpaper-pick')).toHaveTextContent(/settings\.wallpaper\.rotate/);
-    fireEvent.press(screen.getByTestId('wallpaper-pick'));
-    expect(screen.getByTestId('wallpaper-pick-https://cdn/w1.jpg')).toHaveTextContent(/Sunrise/);
-    expect(screen.getByTestId('wallpaper-pick-https://cdn/w2.jpg')).toHaveTextContent(/settings\.wallpaper\.numbered:2/);
-    fireEvent.press(screen.getByTestId('wallpaper-pick-https://cdn/w1.jpg'));
-    expect(mockSetPref).toHaveBeenCalledWith('wallpaper', 'https://cdn/w1.jpg');
+    expect(screen.getByText('settings.wallpaper.onSub')).toBeTruthy();
+    expect(screen.queryByTestId('wallpaper-pick')).toBeNull();
+    fireEvent(screen.getByTestId('wallpaper-switch'), 'valueChange', false);
+    expect(mockSetPref).toHaveBeenCalledWith('wallpaperOn', false);
   });
 
-  test('turned off: the plain background, and nothing to choose', () => {
-    mockWall = { on: false, one: null, rows };
+  test('off says the plain background is used', () => {
+    mockWallOn = false;
     const screen = render(<Settings />);
-    expect(screen.queryByTestId('wallpaper-pick')).toBeNull();
     expect(screen.getByText('settings.wallpaper.offSub')).toBeTruthy();
-    fireEvent(screen.getByTestId('wallpaper-switch'), 'valueChange', true);
-    expect(mockSetPref).toHaveBeenCalledWith('wallpaperOn', true);
+    expect(screen.getByTestId('wallpaper-switch').props.value).toBe(false);
   });
 });

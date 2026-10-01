@@ -11,7 +11,7 @@ import ScreenVignette from './ScreenVignette';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
-import { useWallpaperChoice } from '../context/WallpaperContext';
+import { useWallpapersOn } from '../context/WallpaperContext';
 
 const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the image
 // Wallpaper behind the header — re-hosted on our Cloudinary CDN, optimized.
@@ -49,9 +49,8 @@ const Header = ({ transparentBg = false }) => {
   const navigation = useNavigation();
   const { currentUser, isAuthenticated } = useAuth();
   const { t } = useI18n();
-  // Wallpapers off: the plain navy. One chosen: that one here too.
-  const { on: wallpaperOn, one: chosenWallpaper } = useWallpaperChoice();
-  const headerImage = wallpaperOn ? (chosenWallpaper || HEADER_IMAGE) : null;
+  // Wallpapers off (Settings): the plain navy instead of its picture.
+  const headerImage = useWallpapersOn() ? HEADER_IMAGE : null;
 
   // Responsive brand sizing: recomputes on rotation / different devices so the
   // title never wraps or crowds the icons on small phones, and scales up a
