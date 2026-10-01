@@ -27,6 +27,8 @@ export const PREF_KEYS = {
   hymnFavSort: 'hymnFavSort',   // favourite hymns: 'recent' | 'number' | 'title' | 'hymnal'
   bibleVersion: 'bibleVersion', // the Bible version the reader opens in (utils/bibleVersions.js)
   bibleTextSize: 'bibleTextSize', // the Bible's reading size (px)
+  wallpaperOn: 'wallpaperOn',   // pictures behind the pages, or the app's plain background
+  wallpaper: 'wallpaper',       // 'rotate' (all of them, in turn) or one wallpaper's url
 };
 
 export const DEFAULT_PREFERENCES = {
@@ -53,6 +55,9 @@ export const DEFAULT_PREFERENCES = {
   [PREF_KEYS.hymnFavSort]: 'recent',
   [PREF_KEYS.bibleVersion]: 'eng_kjv',
   [PREF_KEYS.bibleTextSize]: 18,
+  // As the app has always looked: the admins' wallpapers, in turn.
+  [PREF_KEYS.wallpaperOn]: true,
+  [PREF_KEYS.wallpaper]: 'rotate',
 };
 
 const serialize = (value) => JSON.stringify(value);

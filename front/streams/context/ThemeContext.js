@@ -20,8 +20,10 @@ import { paletteFor } from '../constants/theme';
 const ThemeContext = createContext(null);
 
 export const ThemeProvider = ({ children }) => {
-  const { preferences, setPreference } = usePreferences();
-  const mode = preferences[PREF_KEYS.themeMode] || 'dark';
+  const { setPreference } = usePreferences();
+  // Light and dark are no longer offered in Settings (wallpapers are), so the
+  // app keeps its own dark look; a light mode chosen before is not stranded.
+  const mode = 'dark';
 
   // Track the OS scheme so 'system' mode follows it live.
   const [systemScheme, setSystemScheme] = useState(Appearance.getColorScheme() || 'dark');

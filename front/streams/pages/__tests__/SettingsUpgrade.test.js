@@ -64,6 +64,8 @@ jest.mock('../../components/GlassView', () => {
 });
 const mockDownloads = { count: 3, bytes: 12 * 1024 * 1024 };
 const mockRemoveAll = jest.fn(async () => 3);
+let mockWall = { on: true, one: null, rows: [] };
+jest.mock('../../context/WallpaperContext', () => ({ useWallpaperChoice: () => mockWall }));
 jest.mock('../../utils/downloads', () => ({
   useDownloadsSummary: () => mockDownloads, removeAllDownloads: (...a) => mockRemoveAll(...a),
 }));
@@ -107,16 +109,16 @@ test('quiet hours turn on as 22:00 to 07:00 on this phone’s clock', async () =
   expect(screen.getByText('settings.quiet.on:22:00,07:00')).toBeTruthy();
 });
 
-test('the language is chosen from a list', async () => {
-  // setImmediate stays real: the StatusBar queues its updates on it, and a
-  // faked one left behind stalls every test after this.
-  jest.useFakeTimers({ doNotFake: ['setImmediate', 'clearImmediate'] });
+test('the language is chosen from a dropdown', () => {
   const screen = render(<Settings />);
-  fireEvent.press(screen.getByText('settings.appearance.language'));
-  fireEvent.press(screen.getByText('Kiswahili'));
-  act(() => { jest.runAllTimers(); });
+  // Shut: the current value in its box, no list.
+  expect(screen.getByTestId('language-pick')).toHaveTextContent(/English/);
+  expect(screen.queryByTestId('language-pick-sw')).toBeNull();
+  fireEvent.press(screen.getByTestId('language-pick'));
+  expect(screen.getByTestId('language-pick-en').props.accessibilityState).toEqual({ selected: true });
+  fireEvent.press(screen.getByTestId('language-pick-sw'));
   expect(mockSetLanguage).toHaveBeenCalledWith('sw');
-  jest.useRealTimers();
+  expect(screen.queryByTestId('language-pick-sw')).toBeNull();   // closes once chosen
 });
 
 test('a test notification says where it went', async () => {
@@ -273,11 +275,11 @@ describe('deep scan', () => {
     expect(screen.getByTestId('storage-clear')).toBeTruthy();
   });
 
-  test('the theme is found by its value, though shown only in its pill', () => {
+  test('a dropdown is found by its choices too', () => {
     const screen = render(<Settings />);
-    fireEvent.changeText(screen.getByTestId('settings-search'), 'settings.theme.dark');
-    expect(screen.getByText('settings.appearance.theme')).toBeTruthy();
-    expect(screen.getAllByText('settings.theme.dark')).toHaveLength(1);
+    fireEvent.changeText(screen.getByTestId('settings-search'), 'kiswa');
+    expect(screen.getByTestId('language-pick')).toBeTruthy();
+    expect(screen.queryByText('settings.appearance.theme')).toBeNull();   // light/dark is gone
   });
 
   test('two quick taps change the password once', async () => {
@@ -295,5 +297,32 @@ describe('deep scan', () => {
     expect(mockApi.changePassword).toHaveBeenCalledTimes(1);
     expect(alert).toHaveBeenCalledWith('common.done', 'settings.pw.changedSignedOut:1');
     alert.mockRestore();
+  });
+});
+
+describe('wallpapers', () => {
+  const rows = [
+    { url: 'https://cdn/w1.jpg', title: 'Sunrise', scope: 'general' },
+    { url: 'https://cdn/w2.jpg', title: '', scope: 'music' },
+  ];
+  beforeEach(() => { mockWall = { on: true, one: null, rows }; });
+
+  test('choose one of the admin wallpapers, or all of them in turn', () => {
+    const screen = render(<Settings />);
+    expect(screen.getByTestId('wallpaper-pick')).toHaveTextContent(/settings\.wallpaper\.rotate/);
+    fireEvent.press(screen.getByTestId('wallpaper-pick'));
+    expect(screen.getByTestId('wallpaper-pick-https://cdn/w1.jpg')).toHaveTextContent(/Sunrise/);
+    expect(screen.getByTestId('wallpaper-pick-https://cdn/w2.jpg')).toHaveTextContent(/settings\.wallpaper\.numbered:2/);
+    fireEvent.press(screen.getByTestId('wallpaper-pick-https://cdn/w1.jpg'));
+    expect(mockSetPref).toHaveBeenCalledWith('wallpaper', 'https://cdn/w1.jpg');
+  });
+
+  test('turned off: the plain background, and nothing to choose', () => {
+    mockWall = { on: false, one: null, rows };
+    const screen = render(<Settings />);
+    expect(screen.queryByTestId('wallpaper-pick')).toBeNull();
+    expect(screen.getByText('settings.wallpaper.offSub')).toBeTruthy();
+    fireEvent(screen.getByTestId('wallpaper-switch'), 'valueChange', true);
+    expect(mockSetPref).toHaveBeenCalledWith('wallpaperOn', true);
   });
 });

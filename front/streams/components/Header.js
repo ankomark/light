@@ -11,6 +11,7 @@ import ScreenVignette from './ScreenVignette';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useWallpaperChoice } from '../context/WallpaperContext';
 
 const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the image
 // Wallpaper behind the header — re-hosted on our Cloudinary CDN, optimized.
@@ -48,6 +49,9 @@ const Header = ({ transparentBg = false }) => {
   const navigation = useNavigation();
   const { currentUser, isAuthenticated } = useAuth();
   const { t } = useI18n();
+  // Wallpapers off: the plain navy. One chosen: that one here too.
+  const { on: wallpaperOn, one: chosenWallpaper } = useWallpaperChoice();
+  const headerImage = wallpaperOn ? (chosenWallpaper || HEADER_IMAGE) : null;
 
   // Responsive brand sizing: recomputes on rotation / different devices so the
   // title never wraps or crowds the icons on small phones, and scales up a
@@ -69,8 +73,8 @@ const Header = ({ transparentBg = false }) => {
           transparentBg is set, a parent supplies a shared wallpaper that spans
           the nav bar and the screen below, so we skip our own image and let it
           show through the glass instead. */}
-      {!transparentBg && (
-        <Image source={{ uri: HEADER_IMAGE }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      {!transparentBg && !!headerImage && (
+        <Image source={{ uri: headerImage }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       )}
       <GlassView
         intensity={24}

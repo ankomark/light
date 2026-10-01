@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { Image } from 'expo-image';
 import { useAuth } from '../context/useAuth';
 import {
   updateProfileFields,
@@ -37,7 +38,6 @@ import {
 } from '../services/api';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import ChoiceSheet from '../components/ChoiceSheet';
 import { peekCache, writeCache, userKey, clearAllCaches } from '../utils/screenCache';
 import { useDownloadsSummary, removeAllDownloads } from '../utils/downloads';
 import {
@@ -46,21 +46,21 @@ import {
 } from '../services/pushNotifications';
 import { PREF_KEYS, AUDIO_QUALITY_TIERS_AVAILABLE } from '../utils/preferences';
 import { usePreferences } from '../context/PreferencesContext';
-import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
+import { useWallpaperChoice } from '../context/WallpaperContext';
 import { typography, spacing, radius, shadows } from '../constants/theme';
 
 const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
 
-// Settings has one look, whatever the theme (as the Weather page does): black
-// ground, the Weather page's faint glass panels and hairlines, and the app's
-// gold for headings, icons, values and what is switched on.
+// Settings has one look (design A): a black ground, as the Weather page has,
+// with navy cards on it, and the app's gold for headings, icons, values and
+// what is switched on.
 const SETTINGS_COLORS = {
   bg: '#000000',
-  card: 'rgba(255,255,255,0.055)',
-  border: 'rgba(255,255,255,0.11)',
-  inputBg: 'rgba(255,255,255,0.08)',
-  sheet: '#111316',
+  card: '#13233B',
+  border: '#1E3150',
+  inputBg: '#1E3150',
+  sheet: '#0F1C30',
   overlay: 'rgba(0,0,0,0.72)',
   textPrimary: '#FFFFFF',
   textSecondary: '#C9D3E0',
@@ -69,7 +69,7 @@ const SETTINGS_COLORS = {
   primary: '#FFC46B',          // gold
   onPrimary: '#0A0A0A',
   iconTile: 'rgba(255,196,107,0.12)',
-  switchOff: 'rgba(255,255,255,0.18)',
+  switchOff: '#2A3E5E',
   error: '#FF7A6B',
   success: '#5FD39A',
   warning: '#FFB547',
@@ -143,6 +143,7 @@ const Section = ({ title, children }) => {
   const titleMatches = !!q && matches(q, title);
   if (q && !titleMatches && !rowsOf(children).some((el) => matches(
     q, el?.props?.label, el?.props?.sub, el?.props?.keywords,
+    ...(el?.props?.options || []).map((o) => o.label),
   ))) return null;
   return (
     <SectionMatched.Provider value={titleMatches}>
@@ -190,6 +191,67 @@ const Row = ({ icon, iconColor, label, sub, keywords, right, onPress, last, dang
   );
 };
 
+/** A setting chosen from a few: its current value in a box with an arrow;
+ *  tapped, the choices open under it, the current one ticked. (Choosing from
+ *  a list is plainer than tapping a value to change it.) Options are
+ *  { key, label, thumb? }. Found by search like a Row, its choices too. */
+const DropdownRow = ({ icon, label, sub, value, options, onChange, last, testID }) => {
+  const colors = SETTINGS_COLORS;
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const q = useContext(SettingsSearch);
+  const sectionMatched = useContext(SectionMatched);
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.key === value) || options[0];
+  if (!sectionMatched && !matches(q, label, sub, ...options.map((o) => o.label))) return null;
+  return (
+    <View style={[styles.dropRow, !last && styles.rowDivider]}>
+      <View style={styles.dropHead}>
+        <View style={styles.rowIcon}>
+          <MaterialCommunityIcons name={icon} size={20} color={colors.primary} />
+        </View>
+        <View style={styles.rowTextWrap}>
+          <Text style={styles.rowLabel} numberOfLines={1}>{label}</Text>
+          {sub ? <Text style={styles.rowSub} numberOfLines={2}>{sub}</Text> : null}
+        </View>
+      </View>
+      <TouchableOpacity
+        style={[styles.dropField, open && styles.dropFieldOpen]}
+        onPress={() => setOpen((o) => !o)}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${current?.label || ''}`}
+        accessibilityState={{ expanded: open }}
+        testID={testID}
+      >
+        {!!current?.thumb && <Image source={{ uri: current.thumb }} style={styles.dropThumb} contentFit="cover" />}
+        <Text style={styles.dropValue} numberOfLines={1}>{current?.label}</Text>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.primary} />
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.dropList} accessibilityRole="radiogroup">
+          {options.map((o, i) => {
+            const on = o.key === current?.key;
+            return (
+              <TouchableOpacity
+                key={o.key}
+                style={[styles.dropOption, i < options.length - 1 && styles.dropOptionDivider, on && styles.dropOptionOn]}
+                onPress={() => { setOpen(false); if (!on) onChange(o.key); }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                testID={testID ? `${testID}-${o.key}` : undefined}
+              >
+                {!!o.thumb && <Image source={{ uri: o.thumb }} style={styles.dropThumb} contentFit="cover" />}
+                <Text style={[styles.dropOptionText, on && styles.dropOptionTextOn]} numberOfLines={1}>{o.label}</Text>
+                {on && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+};
+
 /** "12.4 MB" */
 const formatBytes = (n) => {
   if (!n) return '0 MB';
@@ -202,7 +264,6 @@ const hhmm = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:
 const QUIET_FROM_CHOICES = [20, 21, 22, 23].map((h) => h * 60);
 const QUIET_TO_CHOICES = [5, 6, 7, 8].map((h) => h * 60);
 
-const THEME_CYCLE = ['system', 'light', 'dark'];
 
 /** "mark" → "MA", "Mary Atieno" → "MA": the avatar's letters. */
 const initialsOf = (name = '') => {
@@ -218,7 +279,6 @@ const Settings = () => {
   const navigation = useNavigation();
   const { currentUser, isEmailVerified, logout, updateUser } = useAuth();
   const { preferences: prefs, setPreference: updatePref } = usePreferences();
-  const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const colors = SETTINGS_COLORS;
   const { t, language, setLanguage, languages } = useI18n();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -254,7 +314,6 @@ const Settings = () => {
 
   // What the search box holds, and which list of choices is open.
   const [query, setQuery] = useState('');
-  const [picker, setPicker] = useState(null);
   const downloads = useDownloadsSummary();
 
   // Security & sessions (devices signed in), kept like the switches.
@@ -432,26 +491,7 @@ const Settings = () => {
   const toggleQuiet = (on) => saveNotif(on
     ? { quiet_from: 22 * 60, quiet_to: 7 * 60, utc_offset: utcOffset() }
     : { quiet_from: null, quiet_to: null });
-  const chooseQuiet = (field, choices) => setPicker({
-    title: t(`settings.quiet.${field === 'quiet_from' ? 'from' : 'to'}`),
-    options: choices.map((m) => ({
-      key: String(m),
-      label: hhmm(m),
-      icon: notifPrefs?.[field] === m ? 'check' : 'schedule',
-      onPress: () => saveNotif({ [field]: m, utc_offset: utcOffset() }),
-    })),
-  });
 
-  // A list to pick from, the current one ticked (instead of tapping through).
-  const choose = (title, keys, current, labelOf, onPick) => setPicker({
-    title,
-    options: keys.map((k) => ({
-      key: k,
-      label: labelOf(k),
-      icon: k === current ? 'radio-button-checked' : 'radio-button-unchecked',
-      onPress: () => onPick(k),
-    })),
-  });
 
   const clearSavedPages = () => {
     Alert.alert(t('settings.storage.clearTitle'), t('settings.storage.clearBody'), [
@@ -518,19 +558,19 @@ const Settings = () => {
   };
 
   const qualityLabel = (k) => t(`settings.quality.${k}`);
-  const cycleAudioQuality = () => choose(t('settings.playback.audioQuality'), AUDIO_QUALITY_CYCLE,
-    prefs[PREF_KEYS.audioQuality] || 'auto', qualityLabel, (k) => updatePref(PREF_KEYS.audioQuality, k));
-  const cycleDownloadQuality = () => choose(t('settings.playback.downloadQuality'), DOWNLOAD_QUALITY_CYCLE,
-    prefs[PREF_KEYS.downloadQuality] || 'standard', qualityLabel, (k) => updatePref(PREF_KEYS.downloadQuality, k));
-  const cycleVideoQuality = () => choose(t('settings.playback.videoQuality'), VIDEO_QUALITY_CYCLE,
-    prefs[PREF_KEYS.videoQuality] || 'auto', qualityLabel, (k) => updatePref(PREF_KEYS.videoQuality, k));
-  const cycleTheme = () => choose(t('settings.appearance.theme'), THEME_CYCLE, themeMode,
-    (k) => t(`settings.theme.${k}`), setThemeMode);
-  const cycleLanguage = () => choose(t('settings.appearance.language'), languages.map((l) => l.code), language,
-    (k) => languages.find((l) => l.code === k)?.label || k, setLanguage);
+  const qualityOptions = (keys) => keys.map((k) => ({ key: k, label: qualityLabel(k) }));
+  const languageOptions = languages.map((l) => ({ key: l.code, label: l.label }));
+  const quietOptions = (choices) => choices.map((m) => ({ key: String(m), label: hhmm(m) }));
 
-  const themeLabel = t(`settings.theme.${themeMode}`);
-  const languageLabel = languages.find((l) => l.code === language)?.label || t('settings.systemDefault');
+  // Wallpapers: on (the admins' pictures, all in turn or one chosen) or off
+  // (the app's own plain background), for every page that has one.
+  const wallpaper = useWallpaperChoice();
+  const wallpaperOptions = [
+    { key: 'rotate', label: t('settings.wallpaper.rotate') },
+    ...wallpaper.rows.map((w, i) => ({
+      key: w.url, label: w.title || t('settings.wallpaper.numbered', { n: i + 1 }), thumb: w.url,
+    })),
+  ];
 
   const resetPwForm = () => { setCurrentPw(''); setNewPw(''); setConfirmPw(''); };
 
@@ -812,27 +852,38 @@ const Settings = () => {
         {/* ── Appearance ────────────────────────────────────────── */}
         <Section title={t('settings.section.appearance')}>
           <Row
-            icon="theme-light-dark"
-            label={t('settings.appearance.theme')}
-            keywords={themeLabel}
-            onPress={cycleTheme}
+            icon="image-outline"
+            label={t('settings.wallpaper.label')}
+            sub={wallpaper.on ? t('settings.wallpaper.onSub') : t('settings.wallpaper.offSub')}
             right={
-              <View style={styles.valuePill}>
-                <Text style={styles.valuePillText}>{themeLabel}</Text>
-              </View>
+              <Switch
+                value={wallpaper.on}
+                onValueChange={(v) => updatePref(PREF_KEYS.wallpaperOn, v)}
+                trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
+                thumbColor={colors.white}
+                testID="wallpaper-switch"
+              />
             }
           />
-          <Row
+          {wallpaper.on && (
+            <DropdownRow
+              icon="image-multiple-outline"
+              label={t('settings.wallpaper.choose')}
+              value={wallpaper.one || 'rotate'}
+              options={wallpaperOptions}
+              onChange={(k) => updatePref(PREF_KEYS.wallpaper, k)}
+              testID="wallpaper-pick"
+            />
+          )}
+          <DropdownRow
             icon="translate"
             label={t('settings.appearance.language')}
-            keywords={languageLabel}
-            onPress={cycleLanguage}
+            value={language}
+            options={languageOptions}
+            onChange={setLanguage}
             last
-            right={
-              <View style={styles.valuePill}>
-                <Text style={styles.valuePillText}>{languageLabel}</Text>
-              </View>
-            }
+            testID="language-pick"
           />
         </Section>
 
@@ -923,10 +974,22 @@ const Settings = () => {
               />
               {quietOn && (
                 <>
-                  <Row icon="clock-start" label={t('settings.quiet.from')} onPress={() => chooseQuiet('quiet_from', QUIET_FROM_CHOICES)}
-                       right={<View style={styles.valuePill}><Text style={styles.valuePillText}>{hhmm(notifPrefs.quiet_from)}</Text></View>} />
-                  <Row icon="clock-end" label={t('settings.quiet.to')} onPress={() => chooseQuiet('quiet_to', QUIET_TO_CHOICES)}
-                       right={<View style={styles.valuePill}><Text style={styles.valuePillText}>{hhmm(notifPrefs.quiet_to)}</Text></View>} />
+                  <DropdownRow
+                    icon="clock-start"
+                    label={t('settings.quiet.from')}
+                    value={String(notifPrefs.quiet_from)}
+                    options={quietOptions(QUIET_FROM_CHOICES)}
+                    onChange={(k) => saveNotif({ quiet_from: Number(k), utc_offset: utcOffset() })}
+                    testID="quiet-from"
+                  />
+                  <DropdownRow
+                    icon="clock-end"
+                    label={t('settings.quiet.to')}
+                    value={String(notifPrefs.quiet_to)}
+                    options={quietOptions(QUIET_TO_CHOICES)}
+                    onChange={(k) => saveNotif({ quiet_to: Number(k), utc_offset: utcOffset() })}
+                    testID="quiet-to"
+                  />
                 </>
               )}
               <Row
@@ -1022,50 +1085,38 @@ const Settings = () => {
               />
             }
           />
-          <Row
+          <DropdownRow
             icon="video-outline"
             label={t('settings.playback.videoQuality')}
             sub={t('settings.videoQualitySub')}
-            onPress={cycleVideoQuality}
+            value={prefs[PREF_KEYS.videoQuality] || 'auto'}
+            options={qualityOptions(VIDEO_QUALITY_CYCLE)}
+            onChange={(k) => updatePref(PREF_KEYS.videoQuality, k)}
             last={!AUDIO_QUALITY_TIERS_AVAILABLE}
-            right={
-              <View style={styles.valuePill}>
-                <Text style={styles.valuePillText}>
-                  {qualityLabel(prefs[PREF_KEYS.videoQuality] || 'auto')}
-                </Text>
-              </View>
-            }
+            testID="video-quality"
           />
           {/* Songs are processed into 64 / 128 / 256 kbps versions, so these
               choices are real: streaming quality, and what offline downloads
               save (and whether they wait for Wi-Fi). */}
           {AUDIO_QUALITY_TIERS_AVAILABLE && (
             <>
-              <Row
+              <DropdownRow
                 icon="music-note-outline"
                 label={t('settings.playback.audioQuality')}
                 sub={t('settings.audioQualitySub')}
-                onPress={cycleAudioQuality}
-                right={
-                  <View style={styles.valuePill}>
-                    <Text style={styles.valuePillText}>
-                      {qualityLabel(prefs[PREF_KEYS.audioQuality] || 'auto')}
-                    </Text>
-                  </View>
-                }
+                value={prefs[PREF_KEYS.audioQuality] || 'auto'}
+                options={qualityOptions(AUDIO_QUALITY_CYCLE)}
+                onChange={(k) => updatePref(PREF_KEYS.audioQuality, k)}
+                testID="audio-quality"
               />
-              <Row
+              <DropdownRow
                 icon="download-outline"
                 label={t('settings.playback.downloadQuality')}
                 sub={t('settings.downloadQualitySub')}
-                onPress={cycleDownloadQuality}
-                right={
-                  <View style={styles.valuePill}>
-                    <Text style={styles.valuePillText}>
-                      {qualityLabel(prefs[PREF_KEYS.downloadQuality] || 'standard')}
-                    </Text>
-                  </View>
-                }
+                value={prefs[PREF_KEYS.downloadQuality] || 'standard'}
+                options={qualityOptions(DOWNLOAD_QUALITY_CYCLE)}
+                onChange={(k) => updatePref(PREF_KEYS.downloadQuality, k)}
+                testID="download-quality"
               />
               <Row
                 icon="wifi"
@@ -1145,13 +1196,6 @@ const Settings = () => {
       </ScrollView>
       </SettingsSearch.Provider>
 
-      <ChoiceSheet
-        visible={!!picker}
-        title={picker?.title}
-        options={picker?.options || []}
-        onClose={() => setPicker(null)}
-        cancelLabel={t('common.cancel')}
-      />
 
       {/* Devices signed in to this account */}
       <Modal visible={devicesVisible} animationType="slide" transparent onRequestClose={() => setDevicesVisible(false)}>
@@ -1522,6 +1566,25 @@ const makeStyles = (colors) => StyleSheet.create({
   rowSub: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
 
   switchWrap: { flexDirection: 'row', alignItems: 'center' },
+  dropRow: { paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  dropHead: { flexDirection: 'row', alignItems: 'center' },
+  dropField: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, marginLeft: 46,
+    height: 44, paddingHorizontal: 12, borderRadius: 12,
+    backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border,
+  },
+  dropFieldOpen: { borderColor: colors.primary },
+  dropValue: { flex: 1, color: colors.textPrimary, fontSize: 14.5, fontWeight: '700' },
+  dropThumb: { width: 30, height: 30, borderRadius: 7, backgroundColor: colors.border },
+  dropList: {
+    marginTop: 6, marginLeft: 46, borderRadius: 12, overflow: 'hidden',
+    backgroundColor: '#0F1C30', borderWidth: 1, borderColor: colors.border,
+  },
+  dropOption: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 46, paddingHorizontal: 12 },
+  dropOptionDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  dropOptionOn: { backgroundColor: 'rgba(255,196,107,0.08)' },
+  dropOptionText: { flex: 1, color: colors.textSecondary, fontSize: 14.5, fontWeight: '600' },
+  dropOptionTextOn: { color: colors.primary, fontWeight: '800' },
   valuePill: {
     backgroundColor: colors.inputBg,
     borderRadius: radius.full,
