@@ -81,7 +81,8 @@ class TwoStepTests(APITestCase):
         secret, done = self.enrol()
         token = done['admin_session']
         AdminSession.objects.update(verified_at=timezone.now() - timedelta(minutes=30))
-        res = self.client.post(f'/api/admin/users/{self.member.id}/ban/', HTTP_X_ADMIN_SESSION=token)
+        res = self.client.post(f'/api/admin/users/{self.member.id}/ban/', {'reason': 'spam'}, format='json',
+                               HTTP_X_ADMIN_SESSION=token)
         self.assertEqual(res.status_code, 403)
         self.assertEqual(res.data['code'], 'reauth_required')
         # Everyday tools still open.
@@ -91,7 +92,8 @@ class TwoStepTests(APITestCase):
         step = sec.check_code(secret, sec.code_for(secret, at=later), tf.last_step, at=later)
         self.assertIsNotNone(step)
         AdminSession.objects.update(verified_at=timezone.now())
-        res = self.client.post(f'/api/admin/users/{self.member.id}/ban/', HTTP_X_ADMIN_SESSION=token)
+        res = self.client.post(f'/api/admin/users/{self.member.id}/ban/', {'reason': 'spam'}, format='json',
+                               HTTP_X_ADMIN_SESSION=token)
         self.assertEqual(res.status_code, 200, res.data)
 
     def test_a_member_cannot_reach_even_the_two_step_doors(self):

@@ -7,7 +7,8 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminContent, fetchAdminByUrl, removeContent, restoreContent, bulkContent } from '../../services/api';
-import { confirmAction, notify } from '../../utils/adminConfirm';
+import { notify } from '../../utils/adminConfirm';
+import { useReasonSheet, ErrorState } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 
@@ -41,21 +42,43 @@ const AdminContent = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [reasonSheet, askReason] = useReasonSheet();
   const debounceRef = useRef(null);
+  const latest = useRef(0);       // only the newest search's answer is shown
 
-  const load = useCallback(async (t, q, removed) => {
+  const load = useCallback(async (tp, q, removed) => {
+    const mine = ++latest.current;
     setLoading(true);
+    setFailed(false);
     try {
-      const res = await fetchAdminContent(t, q, removed ? 'true' : '');
+      const res = await fetchAdminContent(tp, q, removed ? 'true' : '');
+      if (mine !== latest.current) return;
       setItems(res?.results || (Array.isArray(res) ? res : []));
       setNextUrl(res?.next || null);
     } catch {
-      setItems([]);
+      if (mine !== latest.current) return;
+      setFailed(true);
       setNextUrl(null);
     } finally {
-      setLoading(false);
+      if (mine === latest.current) setLoading(false);
     }
   }, []);
+
+  // Taking something down says why (the author is told, the audit log keeps
+  // it); a song says too whether it is for copyright or for the rules.
+  const askWhy = (message) => askReason({
+    title: t('admin.removeContentTitle'),
+    message,
+    confirmLabel: t('common.remove'),
+    destructive: true,
+    extra: type === 'track' ? [
+      { key: 'policy', label: t('adminContent.forRules') },
+      { key: 'copyright', label: t('adminContent.forCopyright') },
+    ] : undefined,
+  });
+  const split = (answer) => (typeof answer === 'string'
+    ? { reason: answer, removalReason: '' } : { reason: answer.reason, removalReason: answer.extra });
 
   // nextUrl already encodes the active type/query/removed filters, so loadMore
   // just follows it — no need to thread the current filters through here.
@@ -95,52 +118,44 @@ const AdminContent = () => {
     return n;
   });
 
-  const runBulk = async (action) => {
+  const runBulk = async (action, why = { reason: '', removalReason: '' }) => {
     if (selected.size === 0) return;
     const ids = [...selected];
     setBulkBusy(true);
     try {
-      await bulkContent(type, ids, action);
+      await bulkContent(type, ids, action, why.reason, why.removalReason);
       setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, is_removed: action === 'remove' } : it)));
       exitSelect();
-    } catch {
-      notify(t('common.error'), t('admin.bulkFailed'));
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.bulkFailed'));
     } finally {
       setBulkBusy(false);
     }
   };
 
   const confirmBulkRemove = async () => {
-    if (await confirmAction({
-      title: t('admin.removeContentTitle'),
-      message: t('admin.removeBulkConfirm', { count: selected.size, type }),
-      confirmLabel: 'Remove',
-      destructive: true,
-    })) runBulk('remove');
+    const answer = await askWhy(t('admin.removeBulkConfirm', { count: selected.size, type }));
+    if (answer) runBulk('remove', split(answer));
   };
 
   const toggle = async (item) => {
     const willRemove = !item.is_removed;
-    const doIt = async () => {
+    const doIt = async (why) => {
       setBusyId(item.id);
       try {
-        await (willRemove ? removeContent(type, item.id) : restoreContent(type, item.id));
+        await (willRemove ? removeContent(type, item.id, why.reason, why.removalReason) : restoreContent(type, item.id));
         setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, is_removed: willRemove } : it)));
-      } catch {
-        notify(t('common.error'), t('admin.actionFailedShort'));
+      } catch (e) {
+        notify(t('common.error'), e?.data?.error || t('admin.actionFailedShort'));
       } finally {
         setBusyId(null);
       }
     };
     if (willRemove) {
-      if (await confirmAction({
-        title: t('admin.removeContentTitle'),
-        message: t('admin.removeOneConfirm', { type }),
-        confirmLabel: 'Remove',
-        destructive: true,
-      })) doIt();
+      const answer = await askWhy(t('admin.removeOneConfirm', { type }));
+      if (answer) doIt(split(answer));
     } else {
-      doIt();
+      doIt({ reason: '', removalReason: '' });
     }
   };
 
@@ -238,8 +253,10 @@ const AdminContent = () => {
         </TouchableOpacity>
       </View>
 
-      {loading ? (
+      {loading && !items.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+      ) : failed ? (
+        <ErrorState onRetry={() => load(type, query.trim(), removedOnly)} />
       ) : (
         <FlatList
           data={items}
@@ -255,6 +272,8 @@ const AdminContent = () => {
           ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{t('admin.nothingHere')}</Text></View>}
         />
       )}
+
+      {reasonSheet}
 
       {/* Bulk action bar */}
       {selectMode && selected.size > 0 && (

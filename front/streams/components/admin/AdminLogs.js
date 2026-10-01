@@ -1,11 +1,16 @@
-import React, { useState, useCallback } from 'react';
+// The audit trail: every admin action, who (by name, kept even when the
+// account is gone), to what, why, and from which IP and device. Searchable by
+// who acted; and "Check the trail" asks the server whether any entry has been
+// changed or taken out since it was written (each is chained to the last).
+import React, { useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, ActivityIndicator,
+  View, Text, StyleSheet, FlatList, ActivityIndicator, TextInput, TouchableOpacity,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminLogs, fetchAdminByUrl } from '../../services/api';
+import { fetchAdminLogs, fetchAdminByUrl, verifyAdminLog } from '../../services/api';
+import { ErrorState } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 
@@ -37,20 +42,40 @@ const AdminLogs = () => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [actor, setActor] = useState('');
+  const [check, setCheck] = useState(null);       // null | 'checking' | { ok, first_broken_id, checked }
+  const debounce = useRef(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (who = '') => {
     setLoading(true);
+    setFailed(false);
     try {
-      const res = await fetchAdminLogs();
+      const res = await fetchAdminLogs(who ? { actor: who } : {});
       setLogs(res?.results || (Array.isArray(res) ? res : []));
       setNextUrl(res?.next || null);
     } catch {
-      setLogs([]);
+      setFailed(true);
       setNextUrl(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const onActor = (text) => {
+    setActor(text);
+    clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => load(text.trim().replace(/^@/, '')), 400);
+  };
+
+  const verify = async () => {
+    setCheck('checking');
+    try {
+      setCheck(await verifyAdminLog());
+    } catch {
+      setCheck({ error: true });
+    }
+  };
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !nextUrl) return;
@@ -69,7 +94,7 @@ const AdminLogs = () => {
     }
   }, [loadingMore, nextUrl]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(actor.trim().replace(/^@/, '')); }, [load]));  // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderItem = ({ item }) => {
     const meta = ACTION_META(item.action);
@@ -90,11 +115,16 @@ const AdminLogs = () => {
               style={styles.actorAvatar}
             />
             <Text style={styles.actor} numberOfLines={1}>
-              {item.actor ? `@${item.actor.username}` : 'system'}
+              {item.actor ? `@${item.actor.username}` : item.actor_name ? `@${item.actor_name}` : 'system'}
               {item.target_type ? `  ·  ${item.target_type} #${item.target_id}` : ''}
             </Text>
           </View>
           {item.reason ? <Text style={styles.reason} numberOfLines={2}>{item.reason}</Text> : null}
+          {(item.ip || item.user_agent) ? (
+            <Text style={styles.device} numberOfLines={1}>
+              {[item.ip, item.user_agent].filter(Boolean).join('  ·  ')}
+            </Text>
+          ) : null}
         </View>
         <Text style={styles.time}>{timeAgo(item.created_at)}</Text>
       </View>
@@ -104,8 +134,39 @@ const AdminLogs = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('admin.auditLog')}</Text>
-      {loading ? (
+      <View style={styles.tools}>
+        <TextInput
+          style={styles.search}
+          value={actor}
+          onChangeText={onActor}
+          placeholder={t('adminLogs.byWho')}
+          placeholderTextColor={colors.placeholder}
+          autoCapitalize="none"
+          autoCorrect={false}
+          testID="logs-actor"
+        />
+        <TouchableOpacity style={styles.checkBtn} onPress={verify} disabled={check === 'checking'} testID="logs-verify">
+          {check === 'checking'
+            ? <ActivityIndicator size="small" color="#0A1628" />
+            : <MaterialCommunityIcons name="shield-check-outline" size={16} color="#0A1628" />}
+          <Text style={styles.checkText}>{t('adminLogs.check')}</Text>
+        </TouchableOpacity>
+      </View>
+      {check && check !== 'checking' && (
+        <View style={[styles.verdict, check.ok ? styles.verdictOk : styles.verdictBad]} testID="logs-verdict">
+          <MaterialCommunityIcons name={check.ok ? 'check-decagram' : 'alert-decagram'} size={18}
+            color={check.ok ? '#5FD39A' : '#FF7A6B'} />
+          <Text style={styles.verdictText}>
+            {check.error ? t('adminLogs.checkFailed')
+              : check.ok ? t('adminLogs.intact', { n: check.checked })
+                : t('adminLogs.broken', { id: check.first_broken_id })}
+          </Text>
+        </View>
+      )}
+      {loading && !logs.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+      ) : failed ? (
+        <ErrorState onRetry={() => load(actor.trim().replace(/^@/, ''))} />
       ) : (
         <FlatList
           data={logs}
@@ -113,7 +174,7 @@ const AdminLogs = () => {
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-          onRefresh={load}
+          onRefresh={() => load(actor.trim().replace(/^@/, ''))}
           refreshing={loading}
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
@@ -149,6 +210,24 @@ const styles = StyleSheet.create({
   actor: { ...typography.caption, color: colors.textSecondary, flex: 1 },
   reason: { ...typography.caption, color: colors.textMuted, fontStyle: 'italic', marginTop: 3 },
   time: { ...typography.caption, color: colors.textMuted },
+  device: { ...typography.caption, fontSize: 11, color: '#6F829C', marginTop: 3 },
+  tools: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: spacing.sm },
+  search: {
+    flex: 1, height: 42, borderRadius: radius.full, paddingHorizontal: spacing.md, color: colors.textPrimary,
+    backgroundColor: 'rgba(13,35,64,0.78)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  checkBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.md, height: 42,
+    borderRadius: radius.full, backgroundColor: colors.accent,
+  },
+  checkText: { color: '#0A1628', fontWeight: '800', fontSize: 13 },
+  verdict: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: spacing.md, marginTop: spacing.sm,
+    padding: spacing.sm, borderRadius: radius.md, borderWidth: 1,
+  },
+  verdictOk: { borderColor: 'rgba(95,211,154,0.5)', backgroundColor: 'rgba(95,211,154,0.10)' },
+  verdictBad: { borderColor: 'rgba(255,122,107,0.6)', backgroundColor: 'rgba(255,122,107,0.12)' },
+  verdictText: { ...typography.caption, color: colors.textPrimary, flex: 1 },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textSecondary },
 });

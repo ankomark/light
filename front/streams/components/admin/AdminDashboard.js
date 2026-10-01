@@ -5,9 +5,11 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminDashboard } from '../../services/api';
+import { fetchAdminDashboard, endAdminSession } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
-import { isSuperAdmin, hasCapability } from '../../utils/roles';
+import { peekCache, writeCache, userKey } from '../../utils/screenCache';
+import { clearAdminSession } from '../../utils/adminSession';
+import { useAdminMe } from './AdminKit';
 import useGridColumns from '../../utils/useGridColumns';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
@@ -42,8 +44,11 @@ const QuickLink = ({ icon, label, sub, onPress, badge }) => (
 const AdminDashboard = ({ navigation }) => {
   const { t: tr } = useI18n();
   const { currentUser } = useAuth();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { can, superAdmin } = useAdminMe();
+  // Opens on the last copy (this admin's own), refreshed behind it.
+  const cacheKey = userKey(currentUser?.id, 'admin:dashboard');
+  const [data, setData] = useState(() => peekCache(cacheKey));
+  const [loading, setLoading] = useState(!data);
   const [err, setErr] = useState(null);
   // Responsive stat grid: 2 cards per row on a phone, more on tablets / landscape.
   const { tileSize: cardW } = useGridColumns({
@@ -54,6 +59,7 @@ const AdminDashboard = ({ navigation }) => {
     try {
       const res = await fetchAdminDashboard();
       setData(res);
+      writeCache(cacheKey, res, { persist: false });
       setErr(null);
     } catch (e) {
       // Surface the reason instead of silently showing zeros. A 403 means the
@@ -65,7 +71,14 @@ const AdminDashboard = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  }, [tr]);
+  }, [tr, cacheKey]);
+
+  // Leave the admin tools: the admin session ends here and on the server.
+  const signOutOfAdmin = async () => {
+    try { await endAdminSession(); } catch { /* it ends on its own soon */ }
+    await clearAdminSession();
+    navigation.navigate('Home');
+  };
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -79,14 +92,16 @@ const AdminDashboard = ({ navigation }) => {
   const m = data?.moderation || {};
   const ap = data?.appeals || {};
 
-  // Gate each quick link by the capability its page needs, mirroring the
-  // hamburger menu, so admins don't tap into a page that 403s server-side.
-  const canAnalytics = hasCapability(currentUser, 'view_analytics');
-  const canReports = hasCapability(currentUser, 'handle_reports');
-  const canAppeals = hasCapability(currentUser, 'manage_appeals');
-  const canUsers = hasCapability(currentUser, 'manage_users') || hasCapability(currentUser, 'ban_users');
-  const canContent = hasCapability(currentUser, 'remove_content');
-  const canAudit = hasCapability(currentUser, 'view_audit_log');
+  // Each tool shown only to whom the server says may use it (useAdminMe:
+  // the server's word when the admin area opened, not the phone's profile).
+  const canAnalytics = can('view_analytics');
+  const canReports = can('handle_reports');
+  const canAppeals = can('manage_appeals');
+  const canUsers = can('manage_users') || can('ban_users');
+  const canContent = can('remove_content');
+  const canAudit = can('view_audit_log');
+  const canWallpapers = can('manage_wallpapers');
+  const canNotices = can('manage_notices');
 
   return (
     <ScrollView
@@ -102,43 +117,51 @@ const AdminDashboard = ({ navigation }) => {
       ) : null}
 
       <View style={styles.grid}>
-        <StatCard width={cardW} icon="people" label="Users" value={t.users} tint="#1DA1F2" />
-        <StatCard width={cardW} icon="images" label="Posts" value={t.posts} tint="#17BF63" />
-        <StatCard width={cardW} icon="musical-notes" label="Tracks" value={t.tracks} tint="#F4A261" />
-        <StatCard width={cardW} icon="chatbubbles" label="Comments" value={t.comments} tint="#9B59B6" />
-        <StatCard width={cardW} icon="flag" label="Pending reports" value={r.pending} tint="#E0245E" />
-        <StatCard width={cardW} icon="person-add" label="New · 24h" value={s.last_24h} tint="#2ECC71" />
-        <StatCard width={cardW} set={MaterialCommunityIcons} icon="account-off" label="Suspended" value={m.suspended} tint="#FB8C00" />
-        <StatCard width={cardW} set={MaterialCommunityIcons} icon="cancel" label="Banned" value={m.banned} tint="#E53935" />
+        <StatCard width={cardW} icon="people" label={tr('adminDash.stat.users')} value={t.users} tint="#1DA1F2" />
+        <StatCard width={cardW} icon="images" label={tr('adminDash.stat.posts')} value={t.posts} tint="#17BF63" />
+        <StatCard width={cardW} icon="musical-notes" label={tr('adminDash.stat.tracks')} value={t.tracks} tint="#F4A261" />
+        <StatCard width={cardW} icon="chatbubbles" label={tr('adminDash.stat.comments')} value={t.comments} tint="#9B59B6" />
+        <StatCard width={cardW} icon="flag" label={tr('adminDash.stat.pendingReports')} value={r.pending} tint="#E0245E" />
+        <StatCard width={cardW} icon="person-add" label={tr('adminDash.stat.new24h')} value={s.last_24h} tint="#2ECC71" />
+        <StatCard width={cardW} set={MaterialCommunityIcons} icon="account-off" label={tr('adminDash.stat.suspended')} value={m.suspended} tint="#FB8C00" />
+        <StatCard width={cardW} set={MaterialCommunityIcons} icon="cancel" label={tr('adminDash.stat.banned')} value={m.banned} tint="#E53935" />
       </View>
 
       <Text style={styles.sectionTitle}>{tr('adminDash.manage')}</Text>
-      {canAnalytics && (
-        <QuickLink icon="chart-line" label="Analytics" sub="Signups, posts & reports over time"
-          onPress={() => navigation.navigate('AdminAnalytics')} />
-      )}
       {canReports && (
-        <QuickLink icon="flag-outline" label="Reports" sub="Review reported content"
+        <QuickLink icon="flag-outline" label={tr('adminDash.link.reports')} sub={tr('adminDash.link.reportsSub')}
           badge={r.pending} onPress={() => navigation.navigate('AdminReports')} />
       )}
       {canAppeals && (
-        <QuickLink icon="gavel" label="Appeals" sub="Review suspension appeals"
+        <QuickLink icon="gavel" label={tr('adminDash.link.appeals')} sub={tr('adminDash.link.appealsSub')}
           badge={ap.pending} onPress={() => navigation.navigate('AdminAppeals')} />
       )}
       {canUsers && (
-        <QuickLink icon="account-cog-outline" label="Users" sub="Suspend, ban, assign roles"
+        <QuickLink icon="account-cog-outline" label={tr('adminDash.link.users')} sub={tr('adminDash.link.usersSub')}
           onPress={() => navigation.navigate('AdminUsers')} />
       )}
       {canContent && (
-        <QuickLink icon="file-document-multiple-outline" label="Content" sub="Browse & remove posts, tracks, comments"
+        <QuickLink icon="file-document-multiple-outline" label={tr('adminDash.link.content')} sub={tr('adminDash.link.contentSub')}
           onPress={() => navigation.navigate('AdminContent')} />
       )}
+      {canNotices && (
+        <QuickLink icon="bulletin-board" label={tr('adminDash.link.notices')} sub={tr('adminDash.link.noticesSub')}
+          onPress={() => navigation.navigate('NoticeBoard')} />
+      )}
+      {canWallpapers && (
+        <QuickLink icon="image-multiple-outline" label={tr('adminDash.link.wallpapers')} sub={tr('adminDash.link.wallpapersSub')}
+          onPress={() => navigation.navigate('AdminWallpapers')} />
+      )}
+      {canAnalytics && (
+        <QuickLink icon="chart-line" label={tr('adminDash.link.analytics')} sub={tr('adminDash.link.analyticsSub')}
+          onPress={() => navigation.navigate('AdminAnalytics')} />
+      )}
       {canAudit && (
-        <QuickLink icon="history" label="Audit log" sub="Every moderation action, logged"
+        <QuickLink icon="history" label={tr('adminDash.link.audit')} sub={tr('adminDash.link.auditSub')}
           onPress={() => navigation.navigate('AdminLogs')} />
       )}
-      {isSuperAdmin(currentUser) && (
-        <QuickLink icon="shield-key-outline" label="Roles" sub="Create roles & set staff permissions"
+      {superAdmin && (
+        <QuickLink icon="shield-key-outline" label={tr('adminDash.link.roles')} sub={tr('adminDash.link.rolesSub')}
           onPress={() => navigation.navigate('AdminRoles')} />
       )}
 
@@ -158,6 +181,11 @@ const AdminDashboard = ({ navigation }) => {
           ))}
         </>
       )}
+
+      <TouchableOpacity style={styles.signOut} onPress={signOutOfAdmin} testID="admin-sign-out">
+        <Ionicons name="log-out-outline" size={18} color="#FF8A7D" />
+        <Text style={styles.signOutText}>{tr('adminDash.signOut')}</Text>
+      </TouchableOpacity>
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
   );
@@ -228,6 +256,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.md,
   },
   errText: { ...typography.caption, color: '#FF6B6B' },
+  signOut: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, marginTop: spacing.lg,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: 'rgba(255,122,107,0.45)', backgroundColor: 'rgba(255,122,107,0.08)',
+  },
+  signOutText: { color: '#FF8A7D', fontWeight: '800', fontSize: 15 },
 });
 
 export default AdminDashboard;

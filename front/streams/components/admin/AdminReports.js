@@ -12,7 +12,8 @@ import {
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
-import { confirmAction, notify } from '../../utils/adminConfirm';
+import { notify } from '../../utils/adminConfirm';
+import { useReasonSheet, ErrorState } from './AdminKit';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -23,14 +24,10 @@ const FILTERS = [
   { key: 'dismissed', label: 'Dismissed' },
 ];
 
-// Targets we can soft-remove (users are handled via suspend/ban on the Users tab).
-// Every content type the backend can soft-remove from a report. Must stay in
-// step with _CONTENT_MODELS on the server.
-const REMOVABLE = new Set([
-  'post', 'comment', 'track', 'trackcomment', 'group', 'story',
-  'publication', 'product', 'productreview', 'grouppost',
-  'videostudio', 'mediastation',
-]);
+// Whether a report's content can be taken down comes from the server
+// (report.can_remove): this list used to live here too, fell out of step with
+// the server's, and reported chapters, reviews and messages could not be
+// taken down from their reports.
 
 const TargetPreview = ({ target }) => {
   const { t } = useI18n();
@@ -71,15 +68,19 @@ const AdminReports = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [reasonSheet, askReason] = useReasonSheet();
 
   const load = useCallback(async (status) => {
     setLoading(true);
+    setFailed(false);
     try {
       const res = await fetchAdminReports(status);
       setReports(res?.results || (Array.isArray(res) ? res : []));
       setNextUrl(res?.next || null);
     } catch {
-      setReports([]);
+      // Said, not shown as an empty queue.
+      setFailed(true);
       setNextUrl(null);
     } finally {
       setLoading(false);
@@ -111,8 +112,8 @@ const AdminReports = () => {
     try {
       await fn();
       setReports((prev) => prev.filter((r) => r.id !== id));
-    } catch {
-      notify(t('common.error'), t('admin.actionFailed'));
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailed'));
     } finally {
       setBusyId(null);
     }
@@ -131,13 +132,15 @@ const AdminReports = () => {
     }
   };
 
+  // Taking it down says why: the author is told, the audit log keeps it.
   const confirmRemove = async (item) => {
-    if (await confirmAction({
-      title: 'Remove content',
-      message: `This hides the reported ${item.content_type} from everyone. You can restore it later from the Content tab.`,
-      confirmLabel: 'Remove',
+    const reason = await askReason({
+      title: t('adminReports.removeTitle'),
+      message: t('adminReports.removeBody', { type: item.content_type }),
+      confirmLabel: t('common.remove'),
       destructive: true,
-    })) act(item.id, () => removeReportTarget(item.id));
+    });
+    if (reason) act(item.id, () => removeReportTarget(item.id, reason));
   };
 
   const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
@@ -170,7 +173,7 @@ const AdminReports = () => {
 
   const renderItem = ({ item }) => {
     const busy = busyId === item.id;
-    const canRemove = REMOVABLE.has(item.content_type) && !item.target?.is_removed;
+    const canRemove = !!item.can_remove;
     const dup = item.duplicate_count || 1;
     const checked = selected.has(item.id);
     return (
@@ -265,6 +268,8 @@ const AdminReports = () => {
 
       {loading ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+      ) : failed ? (
+        <ErrorState onRetry={() => load(filter)} />
       ) : (
         <FlatList
           data={reports}
@@ -285,6 +290,8 @@ const AdminReports = () => {
           }
         />
       )}
+
+      {reasonSheet}
 
       {/* Bulk action bar */}
       {selectMode && selected.size > 0 && (

@@ -65,21 +65,21 @@ class AdminPrivilegeTests(APITestCase):
 
     def test_regular_user_suspend_works(self):
         self.client.force_authenticate(self.boss)
-        r = self.client.post(f'/api/admin/users/{self.victim.id}/suspend/', {'reason': 'x'}, format='json')
+        r = self.client.post(f'/api/admin/users/{self.victim.id}/suspend/', {'reason': 'spam'}, format='json')
         self.assertEqual(r.status_code, 200, r.content[:300])
         self.victim.refresh_from_db()
         self.assertTrue(self.victim.is_suspended)
 
     def test_cannot_suspend_super_admin(self):
         self.client.force_authenticate(self.mod)
-        r = self.client.post(f'/api/admin/users/{self.other_boss.id}/suspend/', {}, format='json')
+        r = self.client.post(f'/api/admin/users/{self.other_boss.id}/suspend/', {'reason': 'spam'}, format='json')
         self.assertEqual(r.status_code, 403, r.content[:300])
         self.other_boss.refresh_from_db()
         self.assertFalse(self.other_boss.is_suspended)
 
     def test_cannot_warn_super_admin(self):
         self.client.force_authenticate(self.mod)
-        r = self.client.post(f'/api/admin/users/{self.other_boss.id}/warn/', {}, format='json')
+        r = self.client.post(f'/api/admin/users/{self.other_boss.id}/warn/', {'reason': 'spam'}, format='json')
         self.assertEqual(r.status_code, 403, r.content[:300])
 
     def test_moderator_cannot_set_role(self):

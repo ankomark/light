@@ -176,10 +176,24 @@ def _soft_remove(content_type, object_id, removed=True):
 
 
 def _paginated(view, qs, serializer_cls):
+    ctx = {'request': view.request}
     page = view.paginate_queryset(qs)
     if page is not None:
-        return view.get_paginated_response(serializer_cls(page, many=True).data)
-    return Response(serializer_cls(qs, many=True).data)
+        return view.get_paginated_response(serializer_cls(page, many=True, context=ctx).data)
+    return Response(serializer_cls(qs, many=True, context=ctx).data)
+
+
+MIN_REASON = 3
+
+
+def reason_of(request, required=True):
+    """The reason given for an action, or a 400 when one is needed and none
+    came: the person acted on is told why, and the trail says why."""
+    reason = (request.data.get('reason') or '').strip()[:255]
+    if required and len(reason) < MIN_REASON:
+        return None, Response({'error': 'Give a reason (it is shown to the person and kept in the audit log).',
+                               'code': 'reason_required'}, status=status.HTTP_400_BAD_REQUEST)
+    return reason, None
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
@@ -190,11 +204,13 @@ class AdminDashboardView(APIView):
         now = timezone.now()
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
+        me = request.user
+        can = me.has_capability
         recent_reports = (
             Report.objects
             .select_related('reporter__profile', 'assigned_to__profile', 'resolved_by__profile')
             .order_by('-created_at')[:10]
-        )
+        ) if can('handle_reports') else []
         recent_users = (
             User.objects
             .select_related('role', 'profile')
@@ -203,7 +219,7 @@ class AdminDashboardView(APIView):
                 anno_followers_count=Count('followers', distinct=True),
             )
             .order_by('-date_joined')[:10]
-        )
+        ) if (can('manage_users') or can('ban_users')) else []
         return Response({
             'totals': {
                 'users': User.objects.count(),
@@ -227,11 +243,13 @@ class AdminDashboardView(APIView):
                 'banned': User.objects.filter(is_active=False).count(),
                 'removed_posts': SocialPost.objects.filter(is_removed=True).count(),
             },
+            # A staff member sees the people and reports their role covers.
             'recent_reports': AdminReportSerializer(
                 recent_reports, many=True,
                 context={'request': request, 'report_targets': build_report_targets(list(recent_reports))},
             ).data,
-            'recent_users': AdminUserSerializer(recent_users, many=True).data,
+            'recent_users': AdminUserSerializer(recent_users, many=True, context={'request': request}).data,
+            'me': {'capabilities': me.capabilities, 'is_super_admin': me.is_super_admin},
         })
 
 
@@ -384,6 +402,9 @@ class AdminReportViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def remove_target(self, request, pk=None):
         report = get_object_or_404(Report, pk=pk)
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
         if not _soft_remove(report.content_type, report.object_id, True):
             return Response({'error': 'Target not found or not removable'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -394,10 +415,9 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         if report.content_type == 'track':
             # Record why, and tell the uploader how to dispute it.
             rights.track_removed([report.object_id], reason=report.reason,
-                                 note=request.data.get('reason', ''), actor=request.user)
+                                 note=reason, actor=request.user)
         log_admin_action(request.user, f'remove_{report.content_type}',
-                         report.content_type, report.object_id,
-                         reason=request.data.get('reason', ''))
+                         report.content_type, report.object_id, reason=reason)
         return Response(self.get_serializer(report).data)
 
 
@@ -448,21 +468,36 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         role = self.request.query_params.get('role')
         if role in ('moderator', 'super_admin'):
             qs = qs.filter(admin_role=role)
-        return qs
+        state = self.request.query_params.get('status')
+        if state == 'admins':
+            qs = qs.filter(Q(admin_role__in=('moderator', 'super_admin')) | Q(is_superuser=True) | Q(role__isnull=False))
+        elif state == 'suspended':
+            qs = qs.filter(is_suspended=True).filter(
+                Q(suspended_until__isnull=True) | Q(suspended_until__gt=timezone.now()))
+        elif state == 'banned':
+            qs = qs.filter(is_active=False)
+        elif state == 'warned':
+            qs = qs.filter(strikes__gt=0)
+        return qs.select_related('admin_two_factor')
 
     def list(self, request):
         return _paginated(self, self.get_queryset(), AdminUserSerializer)
 
     def retrieve(self, request, pk=None):
         user = get_object_or_404(User, pk=pk)
-        return Response(self.get_serializer(user).data)
+        return Response(AdminUserSerializer(user, context={'request': request}).data)
+
+    def get_serializer_context(self):
+        return {'request': self.request}
 
     @action(detail=True, methods=['post'])
     def suspend(self, request, pk=None):
         user, refused = self._target(request, pk, 'suspend')
         if refused:
             return refused
-        reason = (request.data.get('reason') or '')[:255]
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
         # Optional ?days=N for a temporary suspension; omitted/0 => indefinite.
         try:
             days = int(request.data.get('days') or 0)
@@ -503,7 +538,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user, refused = self._target(request, pk, 'warn')
         if refused:
             return refused
-        reason = (request.data.get('reason') or '')[:255]
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
         user.strikes = (user.strikes or 0) + 1
         fields = ['strikes']
         escalated = False
@@ -528,11 +565,13 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user, refused = self._target(request, pk, 'ban')
         if refused:
             return refused
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
         user.is_active = False
         user.save(update_fields=['is_active'])
         from ..admin_security import cut_off
         cut_off(user, 'banned')
-        reason = (request.data.get('reason') or '')[:255]
         notify_moderation(user, 'Account banned',
                           'Your account has been banned and you can no longer sign in.' + (f" Reason: {reason}" if reason else ''))
         log_admin_action(request.user, 'ban_user', 'user', user.id, reason=reason)
@@ -673,13 +712,16 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     def remove(self, request):
         ctype = request.data.get('type')
         oid = request.data.get('id')
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
         if not _soft_remove(ctype, oid, True):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         if ctype == 'track':
             # removal_reason: 'copyright' | 'policy' (the default).
             rights.track_removed([oid], reason=request.data.get('removal_reason', 'policy'),
-                                 note=request.data.get('reason', ''), actor=request.user)
-        log_admin_action(request.user, f'remove_{ctype}', ctype, oid, reason=request.data.get('reason', ''))
+                                 note=reason, actor=request.user)
+        log_admin_action(request.user, f'remove_{ctype}', ctype, oid, reason=reason)
         return Response({'status': 'removed'})
 
     @action(detail=False, methods=['post'])
@@ -711,6 +753,9 @@ class AdminContentViewSet(viewsets.GenericViewSet):
             return Response({'error': 'ids: a list of 1 to 200 whole numbers'}, status=status.HTTP_400_BAD_REQUEST)
         if op not in ('remove', 'restore'):
             return Response({'error': "action must be 'remove' or 'restore'"}, status=status.HTTP_400_BAD_REQUEST)
+        reason, refused = reason_of(request, required=(op == 'remove'))
+        if refused:
+            return refused
         # .update() fires no signals, so the profile-total adjustment is explicit
         # here as well — and must precede the flip (it selects on the old state).
         sync_removal_likes(Model, ids, op == 'remove')
@@ -722,7 +767,8 @@ class AdminContentViewSet(viewsets.GenericViewSet):
                                      note=request.data.get('reason', ''), actor=request.user)
             else:
                 rights.track_restored(changing, actor=request.user)
-        log_admin_action(request.user, f'bulk_{op}_{ctype}', ctype, None, reason=f'{count} items')
+        log_admin_action(request.user, f'bulk_{op}_{ctype}', ctype, None,
+                         reason=f'{count} items' + (f' — {reason}' if reason else ''))
         return Response({'updated': count})
 
 

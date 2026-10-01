@@ -95,8 +95,8 @@ class TakedownTests(Base):
         a, b = song(self.artist, 'A'), song(self.artist, 'B')
         self.client.force_authenticate(self.admin)
         with mock.patch('songs.views.admin.notify_user'):
-            self.client.post('/api/admin/content/remove/', {'type': 'track', 'id': a.id}, format='json')
-            self.client.post('/api/admin/content/bulk/', {'type': 'track', 'ids': [a.id, b.id], 'action': 'remove',
+            self.client.post('/api/admin/content/remove/', {'type': 'track', 'id': a.id, 'reason': 'policy'}, format='json')
+            self.client.post('/api/admin/content/bulk/', {'type': 'track', 'ids': [a.id, b.id], 'action': 'remove', 'reason': 'policy',
                                                           'removal_reason': 'copyright'}, format='json')
         a.refresh_from_db(); b.refresh_from_db()
         self.assertEqual((a.removed_reason, b.removed_reason), ('policy', 'copyright'))   # a was already down

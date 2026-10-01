@@ -50,7 +50,7 @@ class ContentModerationTests(APITestCase):
         ]
 
     def _remove(self, ctype, obj):
-        return self.client.post('/api/admin/content/remove/', {'type': ctype, 'id': obj.id})
+        return self.client.post('/api/admin/content/remove/', {'type': ctype, 'id': obj.id, 'reason': 'policy'})
 
     def _restore(self, ctype, obj):
         return self.client.post('/api/admin/content/restore/', {'type': ctype, 'id': obj.id})
@@ -150,7 +150,7 @@ class ProfileGridTakedownTests(APITestCase):
 
     def _take_down(self):
         self.client.force_authenticate(self.admin)
-        res = self.client.post('/api/admin/content/remove/', {'type': 'post', 'id': self.taken.id})
+        res = self.client.post('/api/admin/content/remove/', {'type': 'post', 'id': self.taken.id, 'reason': 'policy'})
         self.assertEqual(res.status_code, status.HTTP_200_OK)
 
     def test_serializer_grid_hides_a_takedown(self):
@@ -223,7 +223,7 @@ class ReportModerationTests(APITestCase):
         row = next(x for x in _rows(lst) if x['id'] == report_id)
         self.assertIsNotNone(row.get('target'), 'product report has no preview')
 
-        res = self.client.post(f'/api/admin/reports/{report_id}/remove_target/')
+        res = self.client.post(f'/api/admin/reports/{report_id}/remove_target/', {'reason': 'policy'})
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.product.refresh_from_db()
         self.assertTrue(self.product.is_removed)

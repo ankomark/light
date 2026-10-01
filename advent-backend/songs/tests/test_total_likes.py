@@ -209,7 +209,7 @@ class RemovedContentLikesTests(APITestCase):
         self.client.force_authenticate(self.admin)
 
     def _remove(self, ctype, obj):
-        return self.client.post('/api/admin/content/remove/', {'type': ctype, 'id': obj.id})
+        return self.client.post('/api/admin/content/remove/', {'type': ctype, 'id': obj.id, 'reason': 'policy'})
 
     def _restore(self, ctype, obj):
         return self.client.post('/api/admin/content/restore/', {'type': ctype, 'id': obj.id})
@@ -299,7 +299,7 @@ class RemovedContentLikesTests(APITestCase):
         # .update() fires no signals, so this is the path most likely to drift.
         self.client.post(
             '/api/admin/content/bulk/',
-            {'type': 'post', 'ids': ids, 'action': 'remove'}, format='json',
+            {'type': 'post', 'ids': ids, 'action': 'remove', 'reason': 'policy'}, format='json',
         )
         self.assertEqual(total(self.author), 0)
 
@@ -319,7 +319,7 @@ class RemovedContentLikesTests(APITestCase):
 
         self.client.post(
             '/api/admin/content/bulk/',
-            {'type': 'post', 'ids': [self.post.id, mine.id], 'action': 'remove'},
+            {'type': 'post', 'ids': [self.post.id, mine.id], 'action': 'remove', 'reason': 'policy'},
             format='json',
         )
         self.assertEqual(total(self.author), 0)
@@ -335,7 +335,7 @@ class RemovedContentLikesTests(APITestCase):
         # subtract the one that actually changes state.
         self.client.post(
             '/api/admin/content/bulk/',
-            {'type': 'post', 'ids': [self.post.id, second.id], 'action': 'remove'},
+            {'type': 'post', 'ids': [self.post.id, second.id], 'action': 'remove', 'reason': 'policy'},
             format='json',
         )
         self.assertEqual(total(self.author), 0)

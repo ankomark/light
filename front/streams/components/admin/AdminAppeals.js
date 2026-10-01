@@ -9,6 +9,7 @@ import { fetchAdminAppeals, fetchAdminByUrl, approveAppeal, rejectAppeal } from 
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 import { confirmAction, notify } from '../../utils/adminConfirm';
+import { ErrorState } from './AdminKit';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -21,6 +22,7 @@ const FILTERS = [
 const AdminAppeals = () => {
   const { t } = useI18n();
   const [filter, setFilter] = useState('pending');
+  const [failed, setFailed] = useState(false);
   const [appeals, setAppeals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -29,12 +31,13 @@ const AdminAppeals = () => {
 
   const load = useCallback(async (status) => {
     setLoading(true);
+    setFailed(false);
     try {
       const res = await fetchAdminAppeals(status);
       setAppeals(res?.results || (Array.isArray(res) ? res : []));
       setNextUrl(res?.next || null);
     } catch {
-      setAppeals([]);
+      setFailed(true);   // said, not shown as "no appeals"
       setNextUrl(null);
     } finally {
       setLoading(false);
@@ -150,6 +153,8 @@ const AdminAppeals = () => {
 
       {loading ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+      ) : failed ? (
+        <ErrorState onRetry={() => load(filter)} />
       ) : (
         <FlatList
           data={appeals}

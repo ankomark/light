@@ -18,6 +18,7 @@ import {
   restoreAdminSession, setAdminSession, clearAdminSession, setCodeAsker,
 } from '../../utils/adminSession';
 import { clipboard } from '../../utils/optionalNative';
+import { AdminMe } from './AdminKit';
 
 const C = {
   card: '#13233B', border: '#1E3150', field: '#0F1C30', text: '#FFFFFF', muted: '#9FB0C8',
@@ -74,6 +75,7 @@ export default function AdminGate({ navigation, children }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [ask, setAsk] = useState(null);             // { reason, resolve } while the code box is over a screen
+  const [me, setMe] = useState(null);               // the server's word on who this is as an admin
   const live = useRef(true);
 
   const check = useCallback(async () => {
@@ -81,11 +83,12 @@ export default function AdminGate({ navigation, children }) {
     setError('');
     await restoreAdminSession();
     try {
-      const me = await fetchAdminSecurity();
+      const status = await fetchAdminSecurity();
       if (!live.current) return;
-      if (!me.two_factor_required) setPhase('open');
-      else if (!me.two_factor_enabled) setPhase('setup');
-      else setPhase(me.session_valid ? 'open' : 'code');
+      setMe(status);
+      if (!status.two_factor_required) setPhase('open');
+      else if (!status.two_factor_enabled) setPhase('setup');
+      else setPhase(status.session_valid ? 'open' : 'code');
     } catch (e) {
       if (!live.current) return;
       if (e?.status === 403 || e?.status === 401) {
@@ -173,7 +176,7 @@ export default function AdminGate({ navigation, children }) {
   );
 
   if (phase === 'open') {
-    return <>{children}{askBox}</>;
+    return <AdminMe.Provider value={me}>{children}{askBox}</AdminMe.Provider>;
   }
 
   return (

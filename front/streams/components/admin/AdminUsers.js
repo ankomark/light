@@ -6,24 +6,29 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useAuth } from '../../context/useAuth';
-import { isSuperAdmin, hasCapability } from '../../utils/roles';
 import {
   fetchAdminUsers, fetchAdminByUrl, suspendUser, unsuspendUser, banUser, unbanUser, warnUser,
-  fetchRoles, setUserSuperAdmin, assignUserRole,
+  fetchRoles, setUserSuperAdmin, assignUserRole, resetAdminTwoFactor,
 } from '../../services/api';
+import { useAdminMe, useReasonSheet, ErrorState } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
-import { notify } from '../../utils/adminConfirm';
+import { notify, confirmAction } from '../../utils/adminConfirm';
+
+// Who to show: everyone, or one kind (the server filters).
+const STATES = ['', 'admins', 'suspended', 'banned', 'warned'];
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
 const AdminUsers = () => {
   const { t } = useI18n();
-  const { currentUser } = useAuth();
-  const superAdmin = isSuperAdmin(currentUser);
-  const canManage = hasCapability(currentUser, 'manage_users');
-  const canBan = hasCapability(currentUser, 'ban_users');
+  const { can, superAdmin } = useAdminMe();
+  const canManage = can('manage_users');
+  const canBan = can('ban_users');
+  const [reasonSheet, askReason] = useReasonSheet();
+  const [state, setState] = useState('');
+  const [failed, setFailed] = useState(false);
+  const latest = useRef(0);       // only the newest search's answer is shown
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -35,17 +40,21 @@ const AdminUsers = () => {
   const [suspendFor, setSuspendFor] = useState(null); // user pending a suspension-duration pick
   const debounceRef = useRef(null);
 
-  const load = useCallback(async (q) => {
+  const load = useCallback(async (q, st = '') => {
+    const mine = ++latest.current;
     setLoading(true);
+    setFailed(false);
     try {
-      const res = await fetchAdminUsers(q);
+      const res = await fetchAdminUsers(q, '', st);
+      if (mine !== latest.current) return;   // a newer search has answered
       setUsers(res?.results || (Array.isArray(res) ? res : []));
       setNextUrl(res?.next || null);
     } catch {
-      setUsers([]);
+      if (mine !== latest.current) return;
+      setFailed(true);
       setNextUrl(null);
     } finally {
-      setLoading(false);
+      if (mine === latest.current) setLoading(false);
     }
   }, []);
 
@@ -67,15 +76,16 @@ const AdminUsers = () => {
   }, [loadingMore, nextUrl]);
 
   useFocusEffect(useCallback(() => {
-    load(query.trim());
+    load(query.trim(), state);
     if (superAdmin) fetchRoles().then((r) => setRoles(Array.isArray(r) ? r : (r?.results || []))).catch(() => {});
   }, [load]));  // eslint-disable-line react-hooks/exhaustive-deps
 
   const onChangeQuery = (text) => {
     setQuery(text);
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => load(text.trim()), 400);
+    debounceRef.current = setTimeout(() => load(text.trim(), state), 400);
   };
+  const pickState = (st) => { setState(st); load(query.trim(), st); };
 
   // Run an action, refresh the selected user from the response, keep the list in sync.
   const run = async (fn) => {
@@ -86,7 +96,48 @@ const AdminUsers = () => {
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
       setSelected(updated);
     } catch (e) {
-      notify(t('common.error'), e?.response?.data?.error || t('admin.actionFailedShort'));
+      notify(t('common.error'), e?.response?.data?.error || e?.data?.error || t('admin.actionFailedShort'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Acting on someone asks why: they are told, and the audit log keeps it.
+  const withReason = async (titleKey, confirmKey, destructive, fn) => {
+    const reason = await askReason({
+      title: t(titleKey, { name: selected.username }),
+      confirmLabel: t(confirmKey),
+      destructive,
+    });
+    if (reason) run((id) => fn(id, reason));
+  };
+
+  // A role is a lot of power: said plainly before it is given or taken.
+  const changeRole = async (label, fn) => {
+    const ok = await confirmAction({
+      title: t('adminUsers.roleTitle', { name: selected.username }),
+      message: t('adminUsers.roleBody', { role: label }),
+      confirmLabel: t('adminUsers.roleConfirm'),
+    });
+    if (ok) run(fn);
+  };
+
+  const resetTwoStep = async () => {
+    const ok = await confirmAction({
+      title: t('adminUsers.reset2faTitle', { name: selected.username }),
+      message: t('adminUsers.reset2faBody'),
+      confirmLabel: t('adminUsers.reset2faConfirm'),
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await resetAdminTwoFactor(selected.id);
+      const updated = { ...selected, two_factor_enabled: false };
+      setSelected(updated);
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailedShort'));
     } finally {
       setBusy(false);
     }
@@ -95,9 +146,14 @@ const AdminUsers = () => {
   // A custom duration picker — Android's Alert only renders 3 buttons, so the
   // four duration options + Cancel can't live in an Alert.
   const promptSuspend = () => setSuspendFor(selected);
-  const doSuspend = (days) => {
+  const doSuspend = async (days) => {
     setSuspendFor(null);
-    run((id) => suspendUser(id, '', days));
+    const reason = await askReason({
+      title: t('adminUsers.suspendTitle', { name: selected.username }),
+      confirmLabel: t('adminUsers.suspendConfirm'),
+      destructive: true,
+    });
+    if (reason) run((id) => suspendUser(id, reason, days));
   };
 
   const renderItem = ({ item }) => (
@@ -127,6 +183,14 @@ const AdminUsers = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('admin.users')}</Text>
+      <View style={styles.stateRow}>
+        {STATES.map((st) => (
+          <TouchableOpacity key={st || 'all'} style={[styles.stateChip, state === st && styles.stateChipOn]}
+                            onPress={() => pickState(st)} testID={`users-filter-${st || 'all'}`}>
+            <Text style={[styles.stateText, state === st && styles.stateTextOn]}>{t(`adminUsers.filter.${st || 'all'}`)}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <View style={styles.searchBar}>
         <Ionicons name="search" size={18} color={colors.placeholder} />
         <TextInput
@@ -140,8 +204,10 @@ const AdminUsers = () => {
         />
       </View>
 
-      {loading ? (
+      {loading && !users.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
+      ) : failed ? (
+        <ErrorState onRetry={() => load(query.trim(), state)} />
       ) : (
         <FlatList
           data={users}
@@ -149,7 +215,7 @@ const AdminUsers = () => {
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-          onRefresh={() => load(query.trim())}
+          onRefresh={() => load(query.trim(), state)}
           refreshing={loading}
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
@@ -189,19 +255,27 @@ const AdminUsers = () => {
 
                 {busy && <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.sm }} />}
 
-                {canManage && (
-                  <SheetBtn icon="alert-circle-outline" label="Warn (add strike)" onPress={() => run((id) => warnUser(id, ''))} disabled={busy} />
+                {selected.can_act === false && (
+                  <Text style={styles.rankNote} testID="users-rank-note">{t('adminUsers.rankNote')}</Text>
                 )}
-                {canManage && (selected.is_suspended ? (
-                  <SheetBtn icon="play-circle-outline" label="Unsuspend" onPress={() => run(unsuspendUser)} disabled={busy} />
+                {selected.can_act !== false && canManage && (
+                  <SheetBtn icon="alert-circle-outline" label={t('adminUsers.warn')} testID="users-warn"
+                    onPress={() => withReason('adminUsers.warnTitle', 'adminUsers.warnConfirm', false, warnUser)} disabled={busy} />
+                )}
+                {selected.can_act !== false && canManage && (selected.is_suspended ? (
+                  <SheetBtn icon="play-circle-outline" label={t('adminUsers.unsuspend')} onPress={() => run(unsuspendUser)} disabled={busy} />
                 ) : (
-                  <SheetBtn icon="pause-circle-outline" label="Suspend…" onPress={promptSuspend} disabled={busy} />
+                  <SheetBtn icon="pause-circle-outline" label={t('adminUsers.suspend')} onPress={promptSuspend} disabled={busy} testID="users-suspend" />
                 ))}
-                {canBan && (selected.is_active ? (
-                  <SheetBtn icon="ban-outline" label="Ban (disable login)" danger onPress={() => run((id) => banUser(id, ''))} disabled={busy} />
+                {selected.can_act !== false && canBan && (selected.is_active ? (
+                  <SheetBtn icon="ban-outline" label={t('adminUsers.ban')} danger testID="users-ban"
+                    onPress={() => withReason('adminUsers.banTitle', 'adminUsers.banConfirm', true, banUser)} disabled={busy} />
                 ) : (
-                  <SheetBtn icon="checkmark-circle-outline" label="Unban" onPress={() => run(unbanUser)} disabled={busy} />
+                  <SheetBtn icon="checkmark-circle-outline" label={t('adminUsers.unban')} onPress={() => run(unbanUser)} disabled={busy} />
                 ))}
+                {superAdmin && selected.two_factor_enabled && (
+                  <SheetBtn icon="key-outline" label={t('adminUsers.reset2fa')} onPress={resetTwoStep} disabled={busy} testID="users-reset-2fa" />
+                )}
 
                 {/* Role assignment (super-admin only) */}
                 {superAdmin && (
@@ -210,7 +284,8 @@ const AdminUsers = () => {
                     <View style={styles.roleChips}>
                       <TouchableOpacity
                         style={[styles.roleChip, selected.is_super_admin && styles.roleChipOn]}
-                        onPress={() => run((id) => setUserSuperAdmin(id, true))} disabled={busy}>
+                        onPress={() => !selected.is_super_admin && changeRole(t('admin.superAdmin'), (id) => setUserSuperAdmin(id, true))}
+                        disabled={busy} testID="users-role-super">
                         <Text style={[styles.roleChipText, selected.is_super_admin && styles.roleChipTextOn]}>{t('admin.superAdmin')}</Text>
                       </TouchableOpacity>
                       {roles.map((r) => {
@@ -218,14 +293,17 @@ const AdminUsers = () => {
                         return (
                           <TouchableOpacity key={r.id}
                             style={[styles.roleChip, on && styles.roleChipOn]}
-                            onPress={() => run((id) => assignUserRole(id, r.id))} disabled={busy}>
+                            onPress={() => !on && changeRole(r.name, (id) => assignUserRole(id, r.id))}
+                            disabled={busy} testID={`users-role-${r.id}`}>
                             <Text style={[styles.roleChipText, on && styles.roleChipTextOn]}>{r.name}</Text>
                           </TouchableOpacity>
                         );
                       })}
                       <TouchableOpacity
                         style={[styles.roleChip, !selected.is_super_admin && !selected.role && styles.roleChipOn]}
-                        onPress={() => run((id) => (selected.is_super_admin ? setUserSuperAdmin(id, false) : assignUserRole(id, null)))} disabled={busy}>
+                        onPress={() => (selected.is_super_admin || selected.role) && changeRole(t('admin.noAccess'),
+                          (id) => (selected.is_super_admin ? setUserSuperAdmin(id, false) : assignUserRole(id, null)))}
+                        disabled={busy} testID="users-role-none">
                         <Text style={[styles.roleChipText, !selected.is_super_admin && !selected.role && styles.roleChipTextOn]}>{t('admin.noAccess')}</Text>
                       </TouchableOpacity>
                     </View>
@@ -240,6 +318,8 @@ const AdminUsers = () => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {reasonSheet}
 
       {/* Suspension duration picker (Android-safe; replaces a >3-button Alert) */}
       <Modal visible={!!suspendFor} transparent animationType="fade" onRequestClose={() => setSuspendFor(null)}>
@@ -267,8 +347,8 @@ const AdminUsers = () => {
   );
 };
 
-const SheetBtn = ({ icon, label, onPress, danger, disabled }) => (
-  <TouchableOpacity style={styles.sheetBtn} onPress={onPress} disabled={disabled} activeOpacity={0.85}>
+const SheetBtn = ({ icon, label, onPress, danger, disabled, testID }) => (
+  <TouchableOpacity style={styles.sheetBtn} onPress={onPress} disabled={disabled} activeOpacity={0.85} testID={testID}>
     <Ionicons name={icon} size={20} color={danger ? colors.error : colors.accent} />
     <Text style={[styles.sheetBtnText, danger && { color: colors.error }]}>{label}</Text>
   </TouchableOpacity>
@@ -288,6 +368,15 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md, marginVertical: spacing.sm, paddingHorizontal: spacing.md, height: 44,
   },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
+  stateRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: spacing.md, marginTop: spacing.sm },
+  stateChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14,
+    backgroundColor: 'rgba(16,28,46,0.82)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  stateChipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  stateText: { ...typography.caption, color: colors.textSecondary, fontWeight: '700' },
+  stateTextOn: { color: '#0A1628' },
+  rankNote: { ...typography.caption, color: colors.textSecondary, fontStyle: 'italic', paddingVertical: spacing.sm },
   list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

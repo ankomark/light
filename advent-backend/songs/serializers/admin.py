@@ -142,6 +142,10 @@ class AdminUserSerializer(serializers.ModelSerializer):
     is_super_admin = serializers.ReadOnlyField()
     role = serializers.SerializerMethodField()
     capabilities = serializers.ReadOnlyField()
+    # Whether the admin asking may warn / suspend / ban this account: not
+    # themselves, never someone of their rank or above.
+    can_act = serializers.SerializerMethodField()
+    two_factor_enabled = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -152,7 +156,20 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'suspension_reason', 'suspended_at', 'suspended_until', 'strikes',
             'is_email_verified', 'is_superuser',
             'posts_count', 'followers_count', 'profile_picture', 'date_joined',
+            'can_act', 'two_factor_enabled',
         ]
+
+    def get_can_act(self, obj):
+        from ..admin_security import outranks
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        return bool(actor and actor.is_authenticated and actor.pk != obj.pk and outranks(actor, obj))
+
+    def get_two_factor_enabled(self, obj):
+        if not obj.is_platform_admin:
+            return None
+        tf = getattr(obj, 'admin_two_factor', None)
+        return bool(tf and tf.confirmed_at)
 
     def get_role(self, obj):
         return {'id': obj.role_id, 'name': obj.role.name} if obj.role_id else None
@@ -184,6 +201,9 @@ class AdminReportSerializer(serializers.ModelSerializer):
     resolved_by = SimpleUserSerializer(read_only=True)
     target = serializers.SerializerMethodField()
     duplicate_count = serializers.SerializerMethodField()
+    # Whether the reported thing can be taken down from the report: the
+    # server's own list, so the app never falls out of step with it.
+    can_remove = serializers.SerializerMethodField()
 
     class Meta:
         model = Report
@@ -191,8 +211,13 @@ class AdminReportSerializer(serializers.ModelSerializer):
             'id', 'reporter', 'content_type', 'object_id', 'reason',
             'description', 'status', 'created_at', 'target',
             'assigned_to', 'moderator_notes', 'resolved_by', 'resolved_at',
-            'duplicate_count',
+            'duplicate_count', 'can_remove',
         ]
+
+    def get_can_remove(self, obj):
+        from ..views.admin import _CONTENT_MODELS
+        target = self.get_target(obj)
+        return obj.content_type in _CONTENT_MODELS and bool(target) and not target.get('is_removed')
 
     def get_duplicate_count(self, obj):
         # How many reports (incl. this one) target the same content — surfaces

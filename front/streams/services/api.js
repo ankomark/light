@@ -2215,14 +2215,21 @@ export const assignReport = (id) =>
 export const bulkReports = (ids, action) =>
   apiRequest('post', '/admin/reports/bulk/', { ids, action });
 
-export const bulkContent = (type, ids, action) =>
-  apiRequest('post', '/admin/content/bulk/', { type, ids, action });
+export const bulkContent = (type, ids, action, reason = '', removalReason = '') =>
+  apiRequest('post', '/admin/content/bulk/', {
+    type, ids, action, reason, ...(removalReason ? { removal_reason: removalReason } : {}),
+  });
 
 export const addReportNote = (id, note) =>
   apiRequest('post', `/admin/reports/${id}/add_note/`, { note });
 
-export const fetchAdminLogs = (action = '') =>
-  apiRequest('get', '/admin/logs/', null, { params: action ? { action } : {} });
+// filters: { action, actor, target_type, target_id, since, until } (any of them)
+export const fetchAdminLogs = (filters = {}) => {
+  const params = typeof filters === 'string' ? (filters ? { action: filters } : {}) : filters;
+  return apiRequest('get', '/admin/logs/', null, {
+    params: Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v != null)),
+  });
+};
 
 // Appeals — user-facing
 export const submitAppeal = (message) =>
@@ -2241,9 +2248,10 @@ export const approveAppeal = (id, notes = '') =>
 export const rejectAppeal = (id, notes = '') =>
   apiRequest('post', `/admin/appeals/${id}/reject/`, { notes });
 
-export const fetchAdminUsers = (q = '', role = '') =>
+// status: '' | 'admins' | 'suspended' | 'banned' | 'warned'
+export const fetchAdminUsers = (q = '', role = '', status = '') =>
   apiRequest('get', '/admin/users/', null, {
-    params: { ...(q ? { q } : {}), ...(role ? { role } : {}) },
+    params: { ...(q ? { q } : {}), ...(role ? { role } : {}), ...(status ? { status } : {}) },
   });
 
 export const suspendUser = (id, reason = '', days = 0) =>
@@ -2288,8 +2296,10 @@ export const fetchAdminContent = (type = 'post', q = '', removed = '') =>
     params: { type, ...(q ? { q } : {}), ...(removed ? { removed } : {}) },
   });
 
-export const removeContent = (type, id, reason = '') =>
-  apiRequest('post', '/admin/content/remove/', { type, id, reason });
+export const removeContent = (type, id, reason = '', removalReason = '') =>
+  apiRequest('post', '/admin/content/remove/', {
+    type, id, reason, ...(removalReason ? { removal_reason: removalReason } : {}),
+  });
 
 export const restoreContent = (type, id) =>
   apiRequest('post', '/admin/content/restore/', { type, id });
