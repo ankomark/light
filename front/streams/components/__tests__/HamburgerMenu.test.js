@@ -131,3 +131,12 @@ test('a live message counts again', async () => {
   await act(async () => { mockDM({ type: 'typing' }); mockDM({ type: 'message' }); mockDM({ type: 'message' }); });
   await waitFor(() => expect(api.fetchUnreadMessageCount.mock.calls.length).toBe(before + 1));
 });
+
+test('Explore (on the home feed) and Favorites (on the profile) are not in the menu', async () => {
+  const r = render(<App />);
+  await openMenu(r);
+  expect(r.queryByLabelText('Explore')).toBeNull();
+  expect(r.queryByLabelText('Favorites')).toBeNull();
+  expect(r.getByLabelText('Playlists')).toBeTruthy();
+  expect(r.getByLabelText('Publishing')).toBeTruthy();
+});

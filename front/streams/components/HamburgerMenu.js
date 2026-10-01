@@ -22,9 +22,7 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 // Some rows carry artwork instead of a glyph, and keep their own colours —
 // tinting a multicolour mark to a single grey throws away the reason to use
 // it. Declared above SECTIONS, which reads them as the module loads.
-const EXPLORE_ART = require('../assets/explore-icon.png');
 const PUBLISHING_ART = require('../assets/publishing-icon.png');
-const FAVORITES_ART = require('../assets/favorites-icon.png');
 const PLAYLISTS_ART = require('../assets/playlists-icon.png');
 const SERVICES_ART = require('../assets/services-icon.png');
 const MESSAGES_ART = require('../assets/messages-icon.png');
@@ -59,8 +57,8 @@ const VERSE_TEAL = '#2E9E96';
 const SECTIONS = [
   {
     title: 'Discover',
+    // Explore is on the home feed (beside For You); Favorites is on the profile.
     items: [
-      { label: 'Explore', route: 'Explore', art: EXPLORE_ART },
       { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
       { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true },
     ],
@@ -68,7 +66,6 @@ const SECTIONS = [
   {
     title: 'Media',
     items: [
-      { label: 'Favorites', route: 'Favorites', art: FAVORITES_ART },
       { label: 'Playlists', route: 'Playlists', art: PLAYLISTS_ART },
       { label: 'Services', route: 'Studios', art: SERVICES_ART },
     ],
