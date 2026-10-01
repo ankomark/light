@@ -324,7 +324,7 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
     <View style={styles.flex}>
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}
                 keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-     <View style={styles.cartCorner}><CartButton color="#1D478B" /></View>
+     <View style={styles.cartCorner}><CartButton /></View>
      <View style={styles.sheet}>
       <View style={styles.mainImageContainer} onLayout={(e) => setGalleryW(e.nativeEvent.layout.width)}
             testID="product-gallery">

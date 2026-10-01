@@ -34,6 +34,9 @@ import {
 import CartButton from './CartButton';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
+// The coloured artwork these had in the menu, kept in their own colours.
+const ORDERS_ART = require('../../assets/orders-icon.png');
+const SELL_ART = require('../../assets/sell-icon.png');
 const GAP = 10;
 const PAD = 16;
 const SPOTLIGHT_MS = 4500;
@@ -260,8 +263,8 @@ const MarketplaceHome = () => {
 
   const shortcuts = [
     { key: 'Wishlist', icon: 'heart-o', label: t('market.home.wishlist') },
-    { key: 'OrderHistory', icon: 'archive', label: t('market.home.orders') },
-    { key: 'SellerDashboard', icon: 'tag', label: t('market.home.sellShort') },
+    { key: 'OrderHistory', art: ORDERS_ART, label: t('market.home.orders') },
+    { key: 'SellerDashboard', art: SELL_ART, label: t('market.home.sellShort') },
   ];
 
   const header = (
@@ -287,7 +290,9 @@ const MarketplaceHome = () => {
         {shortcuts.map((s) => (
           <TouchableOpacity key={s.key} style={styles.shortcut} onPress={() => navigation.navigate(s.key)}
                             accessibilityRole="button" testID={`home-${s.key}`}>
-            <Icon name={s.icon} size={13} color="#FFC46B" />
+            {s.art
+              ? <Image source={s.art} style={styles.shortcutArt} contentFit="contain" testID={`home-${s.key}-art`} />
+              : <Icon name={s.icon} size={13} color="#FFC46B" />}
             <Text style={styles.shortcutText} numberOfLines={1}>{s.label}</Text>
           </TouchableOpacity>
         ))}
@@ -406,6 +411,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,196,107,0.35)',
   },
   shortcutText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+  shortcutArt: { width: 18, height: 18 },
 
   // Categories: small chips, each with its own picture and colour.
   chipsRow: { flexGrow: 0, marginBottom: 14 },

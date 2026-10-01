@@ -127,6 +127,18 @@ test('category rows are asked for as soon as the categories arrive, not after th
     .toHaveBeenCalledWith(1, expect.objectContaining({ category: 1 })));
 });
 
+test('the cart, My orders and Sell wear their coloured artwork', () => {
+  writeCache(MARKET_HOME_KEY, { products: [product(1)], categories: [], next: false, at: Date.now() });
+  mockApi.fetchProducts.mockImplementation(() => new Promise(() => {}));
+  mockApi.fetchProductCategories.mockImplementation(() => new Promise(() => {}));
+  const screen = render(<MarketplaceHome />);
+  expect(screen.getByTestId('cart-art')).toBeTruthy();
+  expect(screen.getByTestId('home-OrderHistory-art')).toBeTruthy();
+  expect(screen.getByTestId('home-SellerDashboard-art')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('home-SellerDashboard'));
+  expect(mockNav.navigate).toHaveBeenCalledWith('SellerDashboard');
+});
+
 describe('the background warm-up', () => {
   test('fills the copy, with photos, when there is none', async () => {
     mockApi.fetchProducts.mockResolvedValue({ results: [product(1)], next: null });
