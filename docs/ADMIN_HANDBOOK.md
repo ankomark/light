@@ -11,7 +11,7 @@ For everyone who runs the app: super admins, moderators and staff with a role.
    - Enter the 6-digit code it shows. You get **ten backup codes**: save them somewhere safe; each opens the admin tools once if you lose your phone. They are shown only once.
 3. **Every time after**, enter the code from your authenticator app. Your admin session lasts **12 hours**.
 4. **Dangerous actions** (giving or taking roles, banning, bulk changes, broadcasts, maintenance and switches) ask for a **fresh code** if you have not entered one in the last 10 minutes.
-5. When you are done, tap **Sign out of admin** at the bottom of the dashboard.
+5. When you are done, open **More** and tap **Sign out of admin**.
 
 Lost your phone? Ask a super admin to **Reset two-step sign-in** on your account (Users → your account), then set it up again.
 
@@ -46,7 +46,22 @@ Lost your phone? Ask a super admin to **Reset two-step sign-in** on your account
 | Broadcast | A notification to everyone or a group |
 | Maintenance & switches | Maintenance mode, parts of the app on/off |
 
-## 3. Everyday moderation
+## 3. Finding your way: Pulse and the tabs
+
+The tabs **Pulse, Reports, Users, Content, Appeals** and **More** sit along the top on a phone and down the left on a wide screen; you see only the ones your powers cover. Every other tool (notices, broadcast, app control, ticks, quiz, puzzles, wallpapers, the detailed analytics, the audit log, roles) is under **More**.
+
+**Pulse** is the dashboard. With the analytics power it shows, for the period you pick (7, 14, 30 or 90 days):
+- how many people are online now;
+- four rings: members active this week, reports handled within a day, appeals answered, and admins with two-step sign-in (red when someone has not set it up);
+- sign-ups and reports day by day;
+- why people report;
+- the busiest hours for new posts (East Africa time);
+- what people shared (posts, tracks, products, stories);
+- the most followed accounts.
+
+Without the analytics power it shows the counts. Either way, **Needs you now** lists the reports waiting.
+
+## 4. Everyday moderation
 
 **Reports.** Shown most-reported first (tap to switch to newest first). A report marked **Repeat offender** is on something by someone who already has strikes.
 - **Resolve** when you have dealt with it, **Dismiss** when nothing is wrong, **Remove** to take the content down.
@@ -64,7 +79,7 @@ Actions do not appear on admins of your rank or above.
 
 **Appeals.** Approving a suspension appeal lifts the suspension; approving a song dispute restores the song. Either way the person is told.
 
-## 4. Running the app
+## 5. Running the app
 
 - **Broadcast**: pick who (everyone, active this week, sellers, artists, admins); the reach is shown before sending. One broadcast every 30 minutes. People who turned off notices are not sent it.
 - **App control**:
@@ -75,20 +90,20 @@ Actions do not appear on admins of your rank or above.
 - **Verified ticks**: give only once you are sure who runs the account; taking a tick asks why and the owner is told.
 - **Notice board** and **Wallpapers**: from the dashboard.
 
-## 5. The audit log
+## 6. The audit log
 
 Every admin action is written down: who (kept by name even if the account is deleted), what, to what, why, and from which IP address and device.
 
 Each entry is **chained** to the one before it. **Check the trail** confirms nothing has been changed or deleted since it was written; if something has, it shows the first entry where the chain breaks. Report that to the super admins at once.
 
-## 6. Alerts
+## 7. Alerts
 
 Super admins get a push (at most once an hour for the same thing) when:
 - one item gets **5 or more reports within an hour**;
 - one admin **bans 10 or more accounts within an hour**;
 - an admin opens the admin tools **from a new device or place**.
 
-## 7. Good practice
+## 8. Good practice
 
 - Give a clear, kind reason: the person reads it.
 - Prefer a warning before a suspension, and a suspension before a ban, unless the content is dangerous.
@@ -96,7 +111,7 @@ Super admins get a push (at most once an hour for the same thing) when:
 - Sign out of admin on shared devices.
 - Use roles with only the powers someone needs.
 
-## 8. For the technical team (deploying)
+## 9. For the technical team (deploying)
 
 - Migrations up to `0170` (two-step sign-in, admin sessions, the audit chain, app settings, broadcasts).
 - Set `ADMIN_SECRET_KEY` (encrypts the authenticator secrets; changing it later means every admin sets up two-step sign-in again).

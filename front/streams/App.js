@@ -122,6 +122,9 @@ import AdminRoles from './components/admin/AdminRoles';
 import AdminWallpapers from './components/admin/AdminWallpapers';
 import AdminGate from './components/admin/AdminGate';
 import AdminCodeHost from './components/admin/AdminCodeHost';
+import AdminTabs from './components/admin/AdminTabs';
+import AdminMore from './components/admin/AdminMore';
+import { PULSE } from './components/admin/PulseCharts';
 import AdminQuizBank from './components/admin/AdminQuizBank';
 import AdminPuzzleThemes from './components/admin/AdminPuzzleThemes';
 import AdminVerify from './components/admin/AdminVerify';
@@ -469,6 +472,7 @@ const App = () => {
                 <Stack.Screen name="SellerDashboard" component={SellerDashboardWrapper} />
                 <Stack.Screen name="SellerShop" component={SellerShopWrapper} />
                 <Stack.Screen name="AdminDashboard" component={AdminDashboardWrapper} />
+                <Stack.Screen name="AdminMore" component={AdminMoreWrapper} />
                 <Stack.Screen name="AdminReports" component={AdminReportsWrapper} />
                 <Stack.Screen name="AdminUsers" component={AdminUsersWrapper} />
                 <Stack.Screen name="AdminContent" component={AdminContentWrapper} />
@@ -874,19 +878,21 @@ const RequireAdmin = ({ navigation, children }) => {
   return looksAdmin ? <AdminGate navigation={navigation}>{children}</AdminGate> : null;
 };
 
-// Shared luxury backdrop (rotating wallpaper + transparent nav bar) for all
-// admin screens, matching Explore/Bible/Hymns.
-const adminWrap = (Screen) => ({ navigation }) => (
-  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.6)" />
+// Every admin screen: the Pulse look (dark slate), the app header, the door,
+// and the admin tabs (top on a phone, a rail on a wide screen).
+const adminWrap = (Screen) => ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: PULSE.bg }}>
     <Header navigation={navigation} transparentBg />
     <RequireAdmin navigation={navigation}>
-      <Screen navigation={navigation} />
+      <AdminTabs navigation={navigation} current={route?.name}>
+        <Screen navigation={navigation} />
+      </AdminTabs>
     </RequireAdmin>
   </View>
 );
 
 const AdminDashboardWrapper = adminWrap(AdminDashboard);
+const AdminMoreWrapper = adminWrap(AdminMore);
 const AdminQuizBankWrapper = adminWrap(AdminQuizBank);
 const AdminPuzzleThemesWrapper = adminWrap(AdminPuzzleThemes);
 const AdminVerifyWrapper = adminWrap(AdminVerify);

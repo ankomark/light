@@ -1,291 +1,284 @@
+// Pulse: the admin dashboard. Rings for how the app is doing (who is active,
+// how fast reports and appeals are handled, admins with two-step sign-in), the
+// sign-up and report trend, why people report, the busiest hours, what people
+// shared and who is most followed, then what needs an admin now. The charts
+// need the analytics power; without it an admin sees the counts and the queue.
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions,
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchAdminDashboard, endAdminSession } from '../../services/api';
+import { fetchAdminDashboard, fetchAdminPulse } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import { peekCache, writeCache, userKey } from '../../utils/screenCache';
-import { clearAdminSession } from '../../utils/adminSession';
 import { useAdminMe } from './AdminKit';
-import useGridColumns from '../../utils/useGridColumns';
-import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
+import { WIDE } from './AdminTabs';
+import {
+  PULSE, TickRing, PartsRing, TrendChart, HourBars, BarList, Legend,
+} from './PulseCharts';
 import { useI18n } from '../../context/I18nContext';
 
-const StatCard = ({ icon, set: Set = Ionicons, label, value, tint, width }) => (
-  <View style={[styles.statCard, { width }]}>
-    <View style={[styles.statIcon, { backgroundColor: `${tint}22` }]}>
-      <Set name={icon} size={20} color={tint} />
-    </View>
-    <Text style={styles.statValue}>{value ?? 0}</Text>
-    <Text style={styles.statLabel}>{label}</Text>
+const PERIODS = [7, 14, 30, 90];
+const REASON_COLOR = { spam: PULSE.coral, hate: PULSE.coral, violence: PULSE.coral, copyright: PULSE.yellow };
+const MIX = [['posts', PULSE.teal], ['tracks', PULSE.violet], ['products', PULSE.yellow], ['stories', PULSE.coral]];
+const fmt = (n) => (n ?? 0).toLocaleString();
+
+const Card = ({ title, sub, children, style, testID }) => (
+  <View style={[styles.card, style]} testID={testID}>
+    {(title || sub) && (
+      <View style={styles.cardHead}>
+        {!!title && <Text style={styles.cardTitle}>{title}</Text>}
+        {!!sub && <Text style={styles.cardSub}>{sub}</Text>}
+      </View>
+    )}
+    {children}
   </View>
 );
 
-const QuickLink = ({ icon, label, sub, onPress, badge }) => (
-  <TouchableOpacity style={styles.linkCard} onPress={onPress} activeOpacity={0.85}>
-    <View style={styles.linkIcon}>
-      <MaterialCommunityIcons name={icon} size={22} color={colors.accent} />
+const Ring = ({ label, pct, value, sub, color, wide }) => (
+  <View style={[styles.card, wide ? styles.ringWide : styles.ringPhone]}>
+    <TickRing pct={pct} color={color} size={wide ? 84 : 76} />
+    <View style={wide ? styles.ringTextWide : styles.ringTextPhone}>
+      <Text style={styles.ringLabel}>{label}</Text>
+      <Text style={styles.ringValue}>{value}</Text>
+      {!!sub && <Text style={styles.ringSub}>{sub}</Text>}
     </View>
-    <View style={{ flex: 1 }}>
-      <Text style={styles.linkLabel}>{label}</Text>
-      <Text style={styles.linkSub}>{sub}</Text>
-    </View>
-    {badge > 0 ? (
-      <View style={styles.badge}><Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text></View>
-    ) : (
-      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-    )}
-  </TouchableOpacity>
+  </View>
 );
 
-const AdminDashboard = ({ navigation }) => {
-  const { t: tr } = useI18n();
+const Kpi = ({ label, value }) => (
+  <View style={[styles.card, styles.kpi]}>
+    <Text style={styles.ringLabel}>{label}</Text>
+    <Text style={styles.kpiValue}>{fmt(value)}</Text>
+  </View>
+);
+
+export default function AdminDashboard({ navigation }) {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
-  const { can, superAdmin } = useAdminMe();
+  const { can } = useAdminMe();
+  const { width } = useWindowDimensions();
+  const wide = width >= WIDE;
+  const canCharts = can('view_analytics');
+  const canReports = can('handle_reports');
+
   // Opens on the last copy (this admin's own), refreshed behind it.
-  const cacheKey = userKey(currentUser?.id, 'admin:dashboard');
-  const [data, setData] = useState(() => peekCache(cacheKey));
-  const [loading, setLoading] = useState(!data);
+  const dashKey = userKey(currentUser?.id, 'admin:dashboard');
+  const [days, setDays] = useState(14);
+  const pulseKey = userKey(currentUser?.id, `admin:pulse:${days}`);
+  const [dash, setDash] = useState(() => peekCache(dashKey));
+  const [pulseState, setPulse] = useState(() => peekCache(pulseKey));
+  // Charts only while the server says this admin may see them (a cached copy
+  // outlives a power taken away).
+  const pulse = canCharts ? pulseState : null;
+  const [loading, setLoading] = useState(!dash);
   const [err, setErr] = useState(null);
-  // Responsive stat grid: 2 cards per row on a phone, more on tablets / landscape.
-  const { tileSize: cardW } = useGridColumns({
-    target: 150, min: 2, max: 4, horizontalPadding: spacing.md * 2, gap: spacing.sm,
-  });
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await fetchAdminDashboard();
-      setData(res);
-      writeCache(cacheKey, res, { persist: false });
+      const [d, p] = await Promise.all([
+        fetchAdminDashboard(),
+        canCharts ? fetchAdminPulse(days) : Promise.resolve(null),
+      ]);
+      setDash(d);
+      writeCache(dashKey, d, { persist: false });
+      if (p) {
+        setPulse(p);
+        writeCache(pulseKey, p, { persist: false });
+      }
       setErr(null);
     } catch (e) {
-      // Surface the reason instead of silently showing zeros. A 403 means the
-      // account isn't a platform admin (super_admin / moderator / has capabilities).
-      const status = e?.response?.status;
-      setErr(status
-        ? tr('admin.dashboardLoadFailedStatus', { status })
-        : (e?.message || tr('admin.dashboardLoadFailed')));
+      const status = e?.response?.status || e?.status;
+      setErr(status ? t('admin.dashboardLoadFailedStatus', { status }) : t('adminPulse.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [tr, cacheKey]);
-
-  // Leave the admin tools: the admin session ends here and on the server.
-  const signOutOfAdmin = async () => {
-    try { await endAdminSession(); } catch { /* it ends on its own soon */ }
-    await clearAdminSession();
-    navigation.navigate('Home');
-  };
+  }, [t, canCharts, days, dashKey, pulseKey]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  if (loading && !data) {
-    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>;
+  if (loading && !dash && !pulse) {
+    return <View style={styles.centered}><ActivityIndicator size="large" color={PULSE.teal} /></View>;
   }
 
-  const t = data?.totals || {};
-  const s = data?.signups || {};
-  const r = data?.reports || {};
-  const m = data?.moderation || {};
-  const ap = data?.appeals || {};
-
-  // Each tool shown only to whom the server says may use it (useAdminMe:
-  // the server's word when the admin area opened, not the phone's profile).
-  const canAnalytics = can('view_analytics');
-  const canReports = can('handle_reports');
-  const canAppeals = can('manage_appeals');
-  const canUsers = can('manage_users') || can('ban_users');
-  const canContent = can('remove_content');
-  const canAudit = can('view_audit_log');
-  const canWallpapers = can('manage_wallpapers');
-  const canNotices = can('manage_notices');
-  const canQuiz = can('manage_quiz');
-  const canPuzzles = can('manage_puzzles');
-  const canVerify = can('verify_accounts');
-  const canBroadcast = can('broadcast');
-  const canAppControl = can('manage_app');
+  const rings = pulse?.rings;
+  const mixTotal = MIX.reduce((s, [k]) => s + (pulse?.mix?.[k] || 0), 0);
+  const waiting = (dash?.recent_reports || []).filter((r) => r.status === 'pending').slice(0, 5);
+  const row = wide ? styles.row : styles.col;
 
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, wide && styles.contentWide]}
       showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.accent} />}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={PULSE.teal} />}
     >
-      <Text style={styles.title}>{tr('adminDash.title')}</Text>
-
-      {err ? (
-        <View style={styles.errBanner}><Text style={styles.errText}>{err}</Text></View>
-      ) : null}
-
-      <View style={styles.grid}>
-        <StatCard width={cardW} icon="people" label={tr('adminDash.stat.users')} value={t.users} tint="#1DA1F2" />
-        <StatCard width={cardW} icon="images" label={tr('adminDash.stat.posts')} value={t.posts} tint="#17BF63" />
-        <StatCard width={cardW} icon="musical-notes" label={tr('adminDash.stat.tracks')} value={t.tracks} tint="#F4A261" />
-        <StatCard width={cardW} icon="chatbubbles" label={tr('adminDash.stat.comments')} value={t.comments} tint="#9B59B6" />
-        <StatCard width={cardW} icon="flag" label={tr('adminDash.stat.pendingReports')} value={r.pending} tint="#E0245E" />
-        <StatCard width={cardW} icon="person-add" label={tr('adminDash.stat.new24h')} value={s.last_24h} tint="#2ECC71" />
-        <StatCard width={cardW} set={MaterialCommunityIcons} icon="account-off" label={tr('adminDash.stat.suspended')} value={m.suspended} tint="#FB8C00" />
-        <StatCard width={cardW} set={MaterialCommunityIcons} icon="cancel" label={tr('adminDash.stat.banned')} value={m.banned} tint="#E53935" />
+      <View style={styles.header}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={styles.title}>{t('adminPulse.title')}</Text>
+          {pulse && (
+            <View style={styles.online}>
+              <View style={styles.liveDot} />
+              <Text style={styles.onlineText} testID="pulse-online">{t('adminPulse.online', { n: fmt(pulse.online_now) })}</Text>
+            </View>
+          )}
+        </View>
+        {canCharts && (
+          <View style={styles.periods}>
+            {PERIODS.map((d) => (
+              <TouchableOpacity key={d} onPress={() => setDays(d)} testID={`pulse-days-${d}`}
+                accessibilityRole="button" accessibilityState={{ selected: d === days }}
+                style={[styles.period, d === days && styles.periodOn]}>
+                <Text style={[styles.periodText, d === days && styles.periodTextOn]}>{t('adminPulse.days', { n: d })}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
-      <Text style={styles.sectionTitle}>{tr('adminDash.manage')}</Text>
-      {canReports && (
-        <QuickLink icon="flag-outline" label={tr('adminDash.link.reports')} sub={tr('adminDash.link.reportsSub')}
-          badge={r.pending} onPress={() => navigation.navigate('AdminReports')} />
-      )}
-      {canAppeals && (
-        <QuickLink icon="gavel" label={tr('adminDash.link.appeals')} sub={tr('adminDash.link.appealsSub')}
-          badge={ap.pending} onPress={() => navigation.navigate('AdminAppeals')} />
-      )}
-      {canUsers && (
-        <QuickLink icon="account-cog-outline" label={tr('adminDash.link.users')} sub={tr('adminDash.link.usersSub')}
-          onPress={() => navigation.navigate('AdminUsers')} />
-      )}
-      {canContent && (
-        <QuickLink icon="file-document-multiple-outline" label={tr('adminDash.link.content')} sub={tr('adminDash.link.contentSub')}
-          onPress={() => navigation.navigate('AdminContent')} />
-      )}
-      {canNotices && (
-        <QuickLink icon="bulletin-board" label={tr('adminDash.link.notices')} sub={tr('adminDash.link.noticesSub')}
-          onPress={() => navigation.navigate('NoticeBoard')} />
-      )}
-      {canBroadcast && (
-        <QuickLink icon="bullhorn-outline" label={tr('adminDash.link.broadcast')} sub={tr('adminDash.link.broadcastSub')}
-          onPress={() => navigation.navigate('AdminBroadcast')} />
-      )}
-      {canAppControl && (
-        <QuickLink icon="toggle-switch-outline" label={tr('adminDash.link.app')} sub={tr('adminDash.link.appSub')}
-          onPress={() => navigation.navigate('AdminAppControl')} />
-      )}
-      {canVerify && (
-        <QuickLink icon="check-decagram-outline" label={tr('adminDash.link.verify')} sub={tr('adminDash.link.verifySub')}
-          onPress={() => navigation.navigate('AdminVerify')} />
-      )}
-      {canQuiz && (
-        <QuickLink icon="head-question-outline" label={tr('adminDash.link.quiz')} sub={tr('adminDash.link.quizSub')}
-          onPress={() => navigation.navigate('AdminQuizBank')} />
-      )}
-      {canPuzzles && (
-        <QuickLink icon="puzzle-outline" label={tr('adminDash.link.puzzles')} sub={tr('adminDash.link.puzzlesSub')}
-          onPress={() => navigation.navigate('AdminPuzzleThemes')} />
-      )}
-      {canWallpapers && (
-        <QuickLink icon="image-multiple-outline" label={tr('adminDash.link.wallpapers')} sub={tr('adminDash.link.wallpapersSub')}
-          onPress={() => navigation.navigate('AdminWallpapers')} />
-      )}
-      {canAnalytics && (
-        <QuickLink icon="chart-line" label={tr('adminDash.link.analytics')} sub={tr('adminDash.link.analyticsSub')}
-          onPress={() => navigation.navigate('AdminAnalytics')} />
-      )}
-      {canAudit && (
-        <QuickLink icon="history" label={tr('adminDash.link.audit')} sub={tr('adminDash.link.auditSub')}
-          onPress={() => navigation.navigate('AdminLogs')} />
-      )}
-      {superAdmin && (
-        <QuickLink icon="shield-key-outline" label={tr('adminDash.link.roles')} sub={tr('adminDash.link.rolesSub')}
-          onPress={() => navigation.navigate('AdminRoles')} />
+      {!!err && <View style={styles.err}><Text style={styles.errText}>{err}</Text></View>}
+
+      {rings ? (
+        <View style={styles.rings} testID="pulse-rings">
+          <Ring wide={wide} color={PULSE.teal} pct={rings.active.pct} label={t('adminPulse.active')}
+            value={fmt(rings.active.value)} sub={t('adminPulse.activeSub', { total: fmt(rings.active.of) })} />
+          <Ring wide={wide} color={PULSE.yellow} pct={rings.reports.pct} label={t('adminPulse.fast')}
+            value={fmt(rings.reports.value)} sub={t('adminPulse.fastSub', { n: fmt(rings.reports.open) })} />
+          <Ring wide={wide} color={PULSE.violet} pct={rings.appeals.pct} label={t('adminPulse.appeals')}
+            value={fmt(rings.appeals.value)} sub={t('adminPulse.appealsSub', { n: fmt(rings.appeals.waiting) })} />
+          <Ring wide={wide} color={rings.two_factor.pct === 100 ? PULSE.teal : PULSE.coral} pct={rings.two_factor.pct}
+            label={t('adminPulse.twoFactor')} value={`${rings.two_factor.value} / ${rings.two_factor.of}`}
+            sub={rings.two_factor.pct === 100 ? t('adminPulse.allProtected')
+              : t('adminPulse.unprotected', { n: rings.two_factor.of - rings.two_factor.value })} />
+        </View>
+      ) : (
+        <View style={styles.rings}>
+          <Kpi label={t('adminPulse.members')} value={dash?.totals?.users} />
+          <Kpi label={t('adminPulse.new24h')} value={dash?.signups?.last_24h} />
+          <Kpi label={t('adminPulse.reportsOpen')} value={dash?.reports?.pending} />
+          <Kpi label={t('adminPulse.appealsWaiting')} value={dash?.appeals?.pending} />
+        </View>
       )}
 
-      {canReports && data?.recent_reports?.length > 0 && (
+      {pulse && (
         <>
-          <Text style={styles.sectionTitle}>{tr('adminDash.recentReports')}</Text>
-          {data.recent_reports.slice(0, 5).map((rep) => (
-            <TouchableOpacity key={rep.id} style={styles.recentRow}
-              onPress={() => navigation.navigate('AdminReports')} activeOpacity={0.85}>
-              <View style={styles.recentDot} />
-              <Text style={styles.recentText} numberOfLines={1}>
-                <Text style={{ fontWeight: '700' }}>{rep.reason}</Text>
-                {'  ·  '}{rep.content_type} #{rep.object_id}
-              </Text>
-              <Text style={styles.recentStatus}>{rep.status}</Text>
-            </TouchableOpacity>
-          ))}
+          <View style={row}>
+            <Card style={wide && { flex: 2 }} title={t('adminPulse.trend')}>
+              <Legend items={[
+                { label: t('adminPulse.signups'), color: PULSE.teal },
+                { label: t('adminPulse.reports'), color: PULSE.coral },
+              ]} />
+              <TrendChart dates={pulse.dates} height={wide ? 210 : 150} series={[
+                { data: pulse.trend.signups, color: PULSE.teal, fill: true },
+                { data: pulse.trend.reports, color: PULSE.coral },
+              ]} />
+            </Card>
+            <Card style={wide && { flex: 1 }} title={t('adminPulse.reasons')} testID="pulse-reasons">
+              {pulse.reasons.length ? (
+                <BarList rows={pulse.reasons.slice(0, 6).map((r) => ({
+                  label: t(`report.reason.${r.reason}`), value: r.count, color: REASON_COLOR[r.reason] || PULSE.yellow,
+                }))} />
+              ) : <Text style={styles.none}>{t('adminPulse.noReports')}</Text>}
+            </Card>
+          </View>
+
+          <View style={row}>
+            <Card style={wide && { flex: 1.4 }} title={t('adminPulse.hours')} sub={t('adminPulse.hoursSub')}>
+              <HourBars hours={pulse.hours} height={wide ? 140 : 100} />
+            </Card>
+            <Card style={wide && { flex: 1 }} title={t('adminPulse.mix')} testID="pulse-mix">
+              <View style={{ alignItems: 'center' }}>
+                <PartsRing size={150} parts={MIX.map(([k, color]) => ({ value: pulse.mix[k] || 0, color }))}>
+                  <Text style={styles.mixTotal}>{fmt(mixTotal)}</Text>
+                  <Text style={styles.ringSub}>{t('adminPulse.items')}</Text>
+                </PartsRing>
+              </View>
+              <Legend items={MIX.map(([k, color]) => ({
+                label: t(`adminPulse.mix.${k}`), color,
+                value: mixTotal ? `${Math.round((100 * (pulse.mix[k] || 0)) / mixTotal)}%` : '0%',
+              }))} />
+            </Card>
+            <Card style={wide && { flex: 1 }} title={t('adminPulse.top')}>
+              {pulse.top.length ? pulse.top.map((u) => (
+                <View key={u.id} style={styles.topRow}>
+                  <View style={styles.avatar}><Text style={styles.avatarText}>{(u.name || '?')[0].toUpperCase()}</Text></View>
+                  <Text style={styles.topName} numberOfLines={1}>{u.name}</Text>
+                  <Text style={styles.topCount}>{fmt(u.followers)}</Text>
+                </View>
+              )) : <Text style={styles.none}>{t('adminPulse.noTop')}</Text>}
+            </Card>
+          </View>
         </>
       )}
 
-      <TouchableOpacity style={styles.signOut} onPress={signOutOfAdmin} testID="admin-sign-out">
-        <Ionicons name="log-out-outline" size={18} color="#FF8A7D" />
-        <Text style={styles.signOutText}>{tr('adminDash.signOut')}</Text>
-      </TouchableOpacity>
-      <View style={{ height: spacing.xxl }} />
+      {canReports && (
+        <Card title={t('adminPulse.needs')} testID="pulse-needs">
+          {waiting.length ? waiting.map((r) => (
+            <TouchableOpacity key={r.id} style={styles.needRow} onPress={() => navigation.replace('AdminReports')}>
+              <Text style={styles.needPill}>{r.dup_count > 1 ? t('adminPulse.reportsN', { n: r.dup_count }) : t(`report.reason.${r.reason}`)}</Text>
+              <Text style={styles.needText} numberOfLines={1}>
+                {r.target?.title || r.target?.caption || r.target?.content || r.target?.name || `${r.content_type} #${r.object_id}`}
+              </Text>
+            </TouchableOpacity>
+          )) : <Text style={styles.none}>{t('adminPulse.nothing')}</Text>}
+          {waiting.length > 0 && (
+            <TouchableOpacity onPress={() => navigation.replace('AdminReports')} style={styles.allLink}>
+              <Text style={styles.allLinkText}>{t('adminPulse.allReports')} →</Text>
+            </TouchableOpacity>
+          )}
+        </Card>
+      )}
     </ScrollView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'transparent' },
-  content: { padding: spacing.md },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
-  title: {
-    ...typography.h1, color: colors.textPrimary, marginBottom: spacing.md,
-    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  container: { flex: 1 },
+  content: { padding: 18, paddingBottom: 48, gap: 14 },
+  contentWide: { paddingHorizontal: 36, paddingTop: 28, gap: 18, maxWidth: 1400, width: '100%', alignSelf: 'center' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12 },
+  title: { color: PULSE.text, fontSize: 26, fontWeight: '700' },
+  online: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: PULSE.teal, borderWidth: 3, borderColor: 'rgba(46,196,182,0.25)' },
+  onlineText: { color: PULSE.muted, fontSize: 13 },
+  periods: { flexDirection: 'row', gap: 4, backgroundColor: PULSE.card, borderRadius: 12, padding: 4, borderWidth: 1, borderColor: PULSE.line },
+  period: { paddingHorizontal: 10, minHeight: 36, justifyContent: 'center', borderRadius: 9 },
+  periodOn: { backgroundColor: PULSE.tealSoft },
+  periodText: { color: PULSE.muted, fontSize: 12, fontWeight: '600' },
+  periodTextOn: { color: PULSE.teal },
+  err: { backgroundColor: 'rgba(255,122,89,0.12)', borderWidth: 1, borderColor: 'rgba(255,122,89,0.45)', borderRadius: 12, padding: 10 },
+  errText: { color: PULSE.coral, fontSize: 13 },
+  rings: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  card: { backgroundColor: PULSE.card, borderWidth: 1, borderColor: PULSE.line, borderRadius: 18, padding: 18, gap: 12 },
+  cardHead: { flexDirection: 'row', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' },
+  cardTitle: { color: PULSE.text, fontSize: 16, fontWeight: '600', flex: 1 },
+  cardSub: { color: PULSE.muted, fontSize: 12 },
+  ringPhone: { flexBasis: '46%', flexGrow: 1, alignItems: 'center', padding: 14, gap: 8 },
+  ringWide: { flexBasis: '22%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 16 },
+  ringTextPhone: { alignItems: 'center', gap: 2 },
+  ringTextWide: { flex: 1, gap: 3, minWidth: 0 },
+  ringLabel: { color: PULSE.muted, fontSize: 12, textAlign: 'center' },
+  ringValue: { color: PULSE.text, fontSize: 20, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  ringSub: { color: PULSE.muted, fontSize: 11 },
+  kpi: { flexBasis: '46%', flexGrow: 1, gap: 6 },
+  kpiValue: { color: PULSE.text, fontSize: 26, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  row: { flexDirection: 'row', gap: 16, alignItems: 'stretch' },
+  col: { gap: 14 },
+  none: { color: PULSE.muted, fontSize: 13 },
+  mixTotal: { color: PULSE.text, fontSize: 22, fontWeight: '700' },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: PULSE.line, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: PULSE.muted, fontSize: 12, fontWeight: '700' },
+  topName: { flex: 1, color: PULSE.text, fontSize: 14 },
+  topCount: { color: PULSE.teal, fontSize: 12, fontVariant: ['tabular-nums'] },
+  needRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, borderTopWidth: 1, borderTopColor: PULSE.line },
+  needPill: {
+    color: PULSE.coral, backgroundColor: 'rgba(255,122,89,0.14)', fontSize: 11, fontWeight: '700',
+    paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, overflow: 'hidden',
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  statCard: {
-    backgroundColor: 'rgba(16,28,46,0.82)',
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    padding: spacing.md,
-    ...shadows.sm,
-  },
-  statIcon: {
-    width: 40, height: 40, borderRadius: radius.md,
-    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm,
-  },
-  statValue: { ...typography.h1, color: colors.textPrimary, fontWeight: '800' },
-  statLabel: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
-  sectionTitle: {
-    ...typography.label, color: colors.accent, fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 0.8,
-    marginTop: spacing.lg, marginBottom: spacing.sm,
-    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
-  },
-  linkCard: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    backgroundColor: 'rgba(16,28,46,0.82)',
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    padding: spacing.md, marginBottom: spacing.sm,
-    ...shadows.sm,
-  },
-  linkIcon: {
-    width: 42, height: 42, borderRadius: radius.md,
-    backgroundColor: 'rgba(244,162,97,0.15)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  linkLabel: { ...typography.label, color: colors.textPrimary, fontWeight: '700' },
-  linkSub: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
-  badge: {
-    minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 7,
-    backgroundColor: colors.error, alignItems: 'center', justifyContent: 'center',
-  },
-  badgeText: { color: colors.white, fontSize: 11, fontWeight: '800' },
-  recentRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    backgroundColor: 'rgba(16,28,46,0.7)',
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginBottom: spacing.xs,
-  },
-  recentDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.error },
-  recentText: { flex: 1, ...typography.caption, color: colors.textPrimary },
-  recentStatus: { ...typography.caption, color: colors.textMuted, textTransform: 'capitalize' },
-  errBanner: {
-    backgroundColor: 'rgba(224,36,94,0.15)', borderWidth: 1, borderColor: 'rgba(224,36,94,0.5)',
-    borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.md,
-  },
-  errText: { ...typography.caption, color: '#FF6B6B' },
-  signOut: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, marginTop: spacing.lg,
-    borderRadius: radius.lg, borderWidth: 1, borderColor: 'rgba(255,122,107,0.45)', backgroundColor: 'rgba(255,122,107,0.08)',
-  },
-  signOutText: { color: '#FF8A7D', fontWeight: '800', fontSize: 15 },
+  needText: { flex: 1, color: PULSE.text, fontSize: 14 },
+  allLink: { alignSelf: 'flex-end', paddingVertical: 6 },
+  allLinkText: { color: PULSE.teal, fontSize: 13, fontWeight: '600' },
 });
-
-export default AdminDashboard;

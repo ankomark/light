@@ -10,9 +10,10 @@
 import csv
 import io
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
-from django.db.models import Count, Q
-from django.db.models.functions import TruncDate
+from django.db.models import Count, F, Q
+from django.db.models.functions import ExtractHour, TruncDate
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -24,8 +25,8 @@ from rest_framework.views import APIView
 
 from .. import app_settings
 from ..models import (
-    AdminActionLog, Broadcast, Order, PostComment, Product, PuzzleProgress, QuizAttempt, Report,
-    SellerProfile, SocialPost, Track, User,
+    AdminActionLog, Appeal, Broadcast, Order, PostComment, Product, PuzzleProgress, QuizAttempt, Report,
+    SellerProfile, SocialPost, Story, Track, User,
 )
 from .common import Cap, StandardPagination, admin_gate
 from .admin import log_admin_action
@@ -228,4 +229,92 @@ class AdminInsightsView(APIView):
                 'sellers': SellerProfile.objects.count(),
                 'orders': Order.objects.count(),
             },
+        })
+
+
+# ── Pulse: the dashboard's charts ───────────────────────────────────────────
+PULSE_TZ = ZoneInfo('Africa/Nairobi')
+
+
+class AdminPulseView(APIView):
+    """Everything the Pulse dashboard draws, in one request: who is here,
+    how fast reports and appeals are handled, the trend, why people report,
+    the busiest hours, what people share and who is most followed."""
+
+    def get_permissions(self):
+        return [Cap('view_analytics')()]
+
+    def get(self, request):
+        try:
+            days = max(7, min(int(request.query_params.get('days') or 14), 90))
+        except (TypeError, ValueError):
+            days = 14
+        now = timezone.now()
+        start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        dates = [(start + timedelta(days=i)).date() for i in range(days)]
+
+        def series(qs, field):
+            rows = (qs.filter(**{f'{field}__gte': start}).annotate(d=TruncDate(field)).values('d')
+                    .annotate(c=Count('id')).order_by('d'))
+            by = {r['d']: r['c'] for r in rows}
+            return [by.get(d, 0) for d in dates]
+
+        pct = lambda part, whole: round(100 * part / whole) if whole else 0
+
+        handled = Report.objects.filter(resolved_at__gte=start)
+        handled_n = handled.count()
+        fast_n = handled.filter(resolved_at__lte=F('created_at') + timedelta(hours=24)).count()
+        appeals = Appeal.objects.filter(created_at__gte=start)
+        appeals_n = appeals.count()
+        answered_n = appeals.exclude(status='pending').count()
+        admins = User.objects.filter(is_active=True).filter(
+            Q(admin_role__in=('moderator', 'super_admin')) | Q(is_superuser=True) | Q(role__isnull=False))
+        admins_n = admins.count()
+        protected_n = admins.filter(admin_two_factor__confirmed_at__isnull=False).count()
+        members_n = User.objects.filter(is_active=True).count()
+        active_n = User.objects.filter(is_active=True, last_seen_at__gte=now - timedelta(days=7)).count()
+
+        labels = dict(Report.REASON_CHOICES)
+        reasons = [
+            {'reason': r['reason'], 'label': labels.get(r['reason'], r['reason']), 'count': r['c']}
+            for r in (Report.objects.filter(created_at__gte=start).values('reason')
+                      .annotate(c=Count('id')).order_by('-c', 'reason'))
+        ]
+
+        by_hour = {r['h']: r['c'] for r in (
+            SocialPost.objects.filter(created_at__gte=start)
+            .annotate(h=ExtractHour('created_at', tzinfo=PULSE_TZ)).values('h').annotate(c=Count('id')))}
+
+        top = (User.objects.filter(is_active=True).annotate(n=Count('followers', distinct=True))
+               .filter(n__gt=0).order_by('-n', 'id').values('id', 'username', 'first_name', 'last_name', 'n')[:5])
+
+        return Response({
+            'days': days,
+            'dates': [d.isoformat() for d in dates],
+            'online_now': User.objects.filter(is_active=True, last_seen_at__gte=now - timedelta(minutes=5)).count(),
+            'rings': {
+                'active': {'pct': pct(active_n, members_n), 'value': active_n, 'of': members_n},
+                'reports': {'pct': pct(fast_n, handled_n), 'value': handled_n, 'fast': fast_n,
+                            'open': Report.objects.filter(status__in=('pending', 'reviewed')).count()},
+                'appeals': {'pct': pct(answered_n, appeals_n), 'value': answered_n,
+                            'waiting': Appeal.objects.filter(status='pending').count()},
+                'two_factor': {'pct': pct(protected_n, admins_n), 'value': protected_n, 'of': admins_n},
+            },
+            'trend': {
+                'signups': series(User.objects.all(), 'date_joined'),
+                'reports': series(Report.objects.all(), 'created_at'),
+            },
+            'reasons': reasons,
+            'hours': [by_hour.get(h, 0) for h in range(24)],
+            'mix': {
+                'posts': SocialPost.objects.filter(created_at__gte=start).count(),
+                'tracks': Track.objects.filter(created_at__gte=start).count(),
+                'products': Product.objects.filter(created_at__gte=start).count(),
+                'stories': Story.objects.filter(created_at__gte=start).count(),
+            },
+            'top': [
+                {'id': u['id'], 'username': u['username'],
+                 'name': f"{u['first_name']} {u['last_name']}".strip() or u['username'], 'followers': u['n']}
+                for u in top
+            ],
         })

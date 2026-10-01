@@ -96,6 +96,7 @@ from .views import (
     AdminAppSettingsView,
     AdminUserHistoryView,
     AdminInsightsView,
+    AdminPulseView,
     LiveBroadcastViewSet,
     LiveKitWebhookView,
 )
@@ -205,6 +206,7 @@ urlpatterns = [
     path('admin/app-settings/', AdminAppSettingsView.as_view(), name='admin-app-settings'),
     path('admin/users/<int:pk>/history/', AdminUserHistoryView.as_view(), name='admin-user-history'),
     path('admin/insights/', AdminInsightsView.as_view(), name='admin-insights'),
+    path('admin/pulse/', AdminPulseView.as_view(), name='admin-pulse'),
     path('live/webhook/', LiveKitWebhookView.as_view(), name='livekit-webhook'),
     path('admin/analytics/', AdminAnalyticsView.as_view(), name='admin-analytics'),
     path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),

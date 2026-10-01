@@ -35,7 +35,7 @@ const AdminUsers = require('../AdminUsers').default;
 const AdminReports = require('../AdminReports').default;
 const AdminContent = require('../AdminContent').default;
 const AdminLogs = require('../AdminLogs').default;
-const AdminDashboard = require('../AdminDashboard').default;
+const AdminMore = require('../AdminMore').default;
 
 const asAdmin = (ui, me = { is_super_admin: true, capabilities: [] }) => render(<AdminMe.Provider value={me}>{ui}</AdminMe.Provider>);
 
@@ -167,10 +167,9 @@ test('audit log: who acted and from where, and the trail checked', async () => {
   expect(screen.getByTestId('logs-verdict')).toHaveTextContent('adminLogs.broken:42');
 });
 
-test('dashboard: only the tools the server allows, and a way out of admin', async () => {
-  mockApi.fetchAdminDashboard.mockResolvedValue({ totals: {}, reports: { pending: 2 } });
+test('more: only the tools the server allows, and a way out of admin', async () => {
   mockApi.endAdminSession.mockResolvedValue({});
-  const screen = asAdmin(<AdminDashboard navigation={mockNav} />, { capabilities: ['manage_wallpapers'] });
+  const screen = asAdmin(<AdminMore navigation={mockNav} />, { capabilities: ['manage_wallpapers'] });
   await waitFor(() => expect(screen.getByText('adminDash.link.wallpapers')).toBeTruthy());
   expect(screen.queryByText('adminDash.link.reports')).toBeNull();
   expect(screen.queryByText('adminDash.link.roles')).toBeNull();

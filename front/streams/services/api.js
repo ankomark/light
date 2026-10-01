@@ -2235,6 +2235,8 @@ export const fetchAdminByUrl = (nextUrl) => {
   return apiRequest('get', path, null, { params });
 };
 
+// Everything the Pulse dashboard draws (rings, trend, reasons, hours, mix, most followed).
+export const fetchAdminPulse = (days = 14) => apiRequest('get', '/admin/pulse/', null, { params: { days } });
 export const fetchAdminAnalytics = (days = 14) =>
   apiRequest('get', '/admin/analytics/', null, { params: { days } });
 
