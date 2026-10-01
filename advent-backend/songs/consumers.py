@@ -10,6 +10,8 @@ all live there); this consumer is the realtime fan-out layer:
 Membership is re-checked on connect — a non-member can't open the socket even if
 they guess the URL (mirrors the members-only REST gate).
 """
+import asyncio
+
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -171,6 +173,19 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=4403)
 
 
+# Writes left running after a socket closed (kept so they are not collected).
+_background = set()
+
+
+def _stamp_last_seen_now(uid):
+    from django.db import close_old_connections
+    from songs.messaging import stamp_last_seen
+    try:
+        stamp_last_seen(uid)
+    finally:
+        close_old_connections()
+
+
 class DMConsumer(AsyncJsonWebsocketConsumer):
     """Direct messages, live: one socket per device, joined to the person's
     own room (songs/messaging.py tells it about new messages, edits,
@@ -209,8 +224,12 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
         last = await sync_to_async(left, thread_sensitive=False)(self.user.id)
         if last:
             await self._tell_partners(getattr(self, 'partners', []), False)
-            # ... then "last seen", the one database write, which may be slow.
-            await self._stamp_last_seen()
+            # ... then "last seen", the one database write, which may be slow
+            # (a remote database, the sync thread busy): left to finish on its
+            # own, so the socket closes at once and Daphne never has to kill it.
+            _background.add(task := asyncio.ensure_future(
+                sync_to_async(_stamp_last_seen_now, thread_sensitive=False)(self.user.id)))
+            task.add_done_callback(_background.discard)
 
     async def receive_json(self, content):
         if content.get('type') != 'typing':
@@ -247,10 +266,6 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
         from songs.messaging import partner_ids
         return partner_ids(self.user)
 
-    @database_sync_to_async
-    def _stamp_last_seen(self):
-        from songs.messaging import stamp_last_seen
-        stamp_last_seen(self.user.id)
 
     @database_sync_to_async
     def _other_in(self, conv_id):
