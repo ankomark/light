@@ -28,6 +28,9 @@ import { useContentWidth, FONT_SCALE } from '../utils/layout';
 import { colors } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
+// The playlists' own coloured artwork (it was the menu's Playlists row).
+const PLAYLISTS_ART = require('../assets/playlists-icon.png');
+
 // The library changes slowly — new uploads, not per-second churn — so an
 // hour-old first page is a perfectly good thing to open on while we revalidate.
 const TRACKS_MAX_AGE_MS = 60 * 60 * 1000;
@@ -300,10 +303,11 @@ const TrackList = () => {
             style={[styles.sideBtn, roomyBar && styles.sideBtnLabelled]}
             onPress={() => navigation.navigate('Playlists')}
             activeOpacity={0.85}
+            testID="music-library"
             accessibilityRole="button"
             accessibilityLabel={t('library.button')}
           >
-            <MaterialCommunityIcons name="bookshelf" size={18} color={colors.primary} />
+            <Image source={PLAYLISTS_ART} style={styles.libraryArt} contentFit="contain" testID="library-art" />
             {roomyBar && (
               <Text style={styles.shuffleBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('library.button')}</Text>
             )}
@@ -429,6 +433,7 @@ const styles = StyleSheet.create({
     gap: 8,
     flexShrink: 0,
   },
+  libraryArt: { width: 20, height: 20 },
   sideBtn: {
     height: 36,
     minWidth: 36,

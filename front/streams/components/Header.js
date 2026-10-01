@@ -17,19 +17,27 @@ const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the
 const HEADER_IMAGE = 'https://pub-9c5a2f0a7a2244be84e39a116c2dc4d5.r2.dev/wallpapers/bpqz33r3njhwouungnli.jpg';
 const INACTIVE = 'rgba(255,255,255,0.62)';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
+// The marketplace's own coloured artwork (it was the menu's Marketplace row).
+const MARKET_ART = require('../assets/marketplace-icon.png');
 
-/** A single bottom-row destination: filled icon + accent when on that screen. */
-const NavItem = ({ set: Set = Ionicons, active, inactive, label, isActive, onPress }) => (
+/** A single bottom-row destination: filled icon + accent when on that screen.
+ *  With `art`, a coloured picture in its own colours instead of a glyph (the
+ *  label still lights up when on that screen). */
+const NavItem = ({ set: Set = Ionicons, active, inactive, art, label, isActive, onPress, testID }) => (
   <TouchableOpacity
     style={styles.navItem}
     onPress={onPress}
-    testID={`nav-${inactive}`}
+    testID={testID || `nav-${inactive}`}
     activeOpacity={0.7}
     accessibilityRole="button"
     accessibilityLabel={label}
     accessibilityState={{ selected: isActive }}
   >
-    <Set name={isActive ? active : inactive} size={22} color={isActive ? colors.accent : INACTIVE} />
+    {art ? (
+      <Image source={art} style={[styles.navArt, isActive && styles.navArtActive]} resizeMode="contain" />
+    ) : (
+      <Set name={isActive ? active : inactive} size={22} color={isActive ? colors.accent : INACTIVE} />
+    )}
     <Text style={[styles.navLabel, isActive && styles.navLabelActive]} numberOfLines={1}>
       {label}
     </Text>
@@ -144,7 +152,7 @@ const Header = ({ transparentBg = false }) => {
           {/* The marketplace, one tap from anywhere. (Explore lives on the
               home feed now, beside For You.) */}
           <NavItem
-            active="storefront" inactive="storefront-outline" label={t('header.market')}
+            art={MARKET_ART} label={t('header.market')} testID="nav-market"
             isActive={isOn('MarketplaceHome')} onPress={() => navigation.navigate('MarketplaceHome')}
           />
           <NavItem
@@ -276,6 +284,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingVertical: 2,
   },
+  navArt: { width: 24, height: 24 },
+  // On the marketplace: a touch larger, as the glyphs fill in when active.
+  navArtActive: { transform: [{ scale: 1.12 }] },
   navLabel: {
     fontSize: 9.5,
     color: INACTIVE,

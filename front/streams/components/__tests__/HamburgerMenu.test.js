@@ -132,11 +132,14 @@ test('a live message counts again', async () => {
   await waitFor(() => expect(api.fetchUnreadMessageCount.mock.calls.length).toBe(before + 1));
 });
 
-test('Explore (on the home feed) and Favorites (on the profile) are not in the menu', async () => {
+test('what lives elsewhere now is not in the menu', async () => {
   const r = render(<App />);
   await openMenu(r);
   expect(r.queryByLabelText('Explore')).toBeNull();
   expect(r.queryByLabelText('Favorites')).toBeNull();
-  expect(r.getByLabelText('Playlists')).toBeTruthy();
+  // Playlists (on the Music page) and Marketplace (in the header) neither.
+  expect(r.queryByLabelText('Playlists')).toBeNull();
+  expect(r.queryByLabelText('Marketplace')).toBeNull();
+  expect(r.getByLabelText('Cart')).toBeTruthy();
   expect(r.getByLabelText('Publishing')).toBeTruthy();
 });

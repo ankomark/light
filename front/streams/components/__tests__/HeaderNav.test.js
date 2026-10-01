@@ -37,12 +37,14 @@ test('Market is third in the row, where Explore was, and opens the marketplace',
   const labels = screen.getAllByRole('button').map((b) => b.props.accessibilityLabel).filter(Boolean);
   expect(labels.slice(1, 5)).toEqual(['Home', 'Music', 'header.market', 'Bible']);
   expect(labels).not.toContain('Explore');
-  fireEvent.press(screen.getByTestId('nav-storefront-outline'));
+  fireEvent.press(screen.getByTestId('nav-market'));
   expect(mockNav.navigate).toHaveBeenCalledWith('MarketplaceHome');
 });
 
-test('on the marketplace, Market is lit', () => {
+test('Market wears the coloured marketplace picture, and is lit on the marketplace', () => {
   mockRoute = 'MarketplaceHome';
   const screen = render(<Header />);
-  expect(screen.getByText('icon:storefront')).toBeTruthy();
+  const market = screen.getByTestId('nav-market');
+  expect(market.props.accessibilityState).toEqual({ selected: true });
+  expect(screen.queryByText(/icon:storefront/)).toBeNull();   // a picture, not a glyph
 });

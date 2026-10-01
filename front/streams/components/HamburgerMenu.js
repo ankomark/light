@@ -23,7 +23,6 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 // tinting a multicolour mark to a single grey throws away the reason to use
 // it. Declared above SECTIONS, which reads them as the module loads.
 const PUBLISHING_ART = require('../assets/publishing-icon.png');
-const PLAYLISTS_ART = require('../assets/playlists-icon.png');
 const SERVICES_ART = require('../assets/services-icon.png');
 const MESSAGES_ART = require('../assets/messages-icon.png');
 const COMMUNITIES_ART = require('../assets/communities-icon.png');
@@ -31,7 +30,6 @@ const GROUPS_ART = require('../assets/groups-icon.png');
 const NOTICE_ART = require('../assets/noticeboard-icon.png');
 const QUIZ_ART = require('../assets/quiz-icon.png');
 const PUZZLE_ART = require('../assets/puzzle-icon.png');
-const MARKET_ART = require('../assets/marketplace-icon.png');
 const CART_ART = require('../assets/cart-icon.png');
 const SELL_ART = require('../assets/sell-icon.png');
 const SETTINGS_ART = require('../assets/settings-icon.png');
@@ -57,7 +55,8 @@ const VERSE_TEAL = '#2E9E96';
 const SECTIONS = [
   {
     title: 'Discover',
-    // Explore is on the home feed (beside For You); Favorites is on the profile.
+    // Explore is on the home feed (beside For You), Favorites on the profile,
+    // Playlists on the Music page and the marketplace in the header's nav row.
     items: [
       { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
       { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true },
@@ -66,7 +65,6 @@ const SECTIONS = [
   {
     title: 'Media',
     items: [
-      { label: 'Playlists', route: 'Playlists', art: PLAYLISTS_ART },
       { label: 'Services', route: 'Studios', art: SERVICES_ART },
     ],
   },
@@ -88,7 +86,6 @@ const SECTIONS = [
   {
     title: 'Marketplace',
     items: [
-      { label: 'Marketplace', route: 'MarketplaceHome', art: MARKET_ART },
       { label: 'Cart', route: 'Cart', art: CART_ART },
       { label: 'Wishlist', route: 'Wishlist', set: 'mci', icon: 'heart-outline' },
       { label: 'My Orders', route: 'OrderHistory', art: ORDERS_ART },
