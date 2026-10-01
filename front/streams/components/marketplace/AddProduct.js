@@ -3,6 +3,9 @@
 // data that was most of the wait — and the upload shows how far it has got.
 // What is typed is kept as a draft, so leaving the form loses nothing, and
 // the contact and payment details come filled in from the seller's profile.
+//
+// Dark, in sections (photos, details, contact, payment), and the category is
+// picked from the marketplace's list, never typed (CategoryPicker).
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -14,6 +17,7 @@ import {
   Alert,
   Modal,
   Switch,
+  ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -25,6 +29,10 @@ import { compressImage } from '../../services/imageProcessing';
 import { readCache, writeCache, dropCache, userKey } from '../../utils/screenCache';
 import { useAuth } from '../../context/useAuth';
 import { useI18n } from '../../context/I18nContext';
+import { MARKET_CATEGORIES } from '../../utils/categoryIcons';
+import CategoryPicker from './CategoryPicker';
+import { FormSection, Field, FormInput, Choices, formStyles } from './FormParts';
+import { formTheme as F } from './formTheme';
 
 const CURRENCIES = [
   { code: 'KES', label: 'KES (Ksh)' },
@@ -40,6 +48,8 @@ const SELLER_FIELDS = [
   'bank_details', 'payment_instructions',
 ];
 const PHOTO_WIDTH = 1280;
+// A draft from before the list may hold a typed category: it must be chosen again.
+const isListed = (name) => MARKET_CATEGORIES.includes(name);
 const PHOTO_QUALITY = 0.75;
 
 /** What the server said was wrong, whichever way the error arrived. */
@@ -91,7 +101,9 @@ const AddProduct = () => {
       const draft = await readCache(draftKey, 14 * 24 * 60 * 60 * 1000);
       if (!live) return;
       if (draft?.formData) {
-        setFormData((f) => ({ ...f, ...draft.formData }));
+        // A category typed before there was a list is chosen again.
+        const category = isListed(draft.formData.category) ? draft.formData.category : '';
+        setFormData((f) => ({ ...f, ...draft.formData, category }));
         if (draft.currency) setCurrency(draft.currency);
         if (draft.images?.length) setImages(draft.images);
       }
@@ -282,206 +294,202 @@ const AddProduct = () => {
     }
   };
 
+  const conditionOptions = ['NEW', 'USED', 'REFURBISHED'].map((v) => ({ value: v, label: t(`market.condition.${v}`) }));
+  const whatsappBad = !!formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number);
+  const optional = t('market.form2.optional');
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.sectionTitle}>{t('market.form.productInfo')}</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.title')}
-        value={formData.title}
-        onChangeText={(text) => handleChange('title', text)}
-      />
-
-      <TextInput
-        style={[styles.input, styles.textArea]}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.description')}
-        value={formData.description}
-        onChangeText={(text) => handleChange('description', text)}
-        multiline
-        numberOfLines={4}
-      />
-
-      <View style={styles.row}>
-        <View style={styles.priceInputContainer}>
-          <TextInput
-            style={[styles.input, styles.priceInput]}
-            placeholderTextColor="#888"
-            placeholder={t('market.form.price')}
-            value={formData.price_value}
-            onChangeText={(text) => handleChange('price_value', text)}
-            keyboardType="numeric"
-          />
-          <TouchableOpacity
-            style={styles.currencyButton}
-            onPress={handleCurrencyChange}
-          >
-            <Text style={styles.currencyText}>{getCurrencySymbol()}</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TextInput
-          style={[styles.input, styles.quantityInput]}
-          placeholderTextColor="#888"
-          placeholder={t('market.form.quantity')}
-          value={formData.quantity}
-          onChangeText={(text) => handleChange('quantity', text)}
-          keyboardType="numeric"
-        />
-      </View>
-
-      <TextInput
-        style={styles.input}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.category')}
-        value={formData.category}
-        onChangeText={(text) => handleChange('category', text)}
-      />
-
-      <Text style={styles.sectionTitle}>{t('market.form.contactInfo')}</Text>
-
-      <View>
-        <TextInput
-          ref={whatsappInputRef}
-          style={[
-            styles.input,
-            formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number)
-              ? styles.invalidInput
-              : null
-          ]}
-          placeholderTextColor="#888"
-          placeholder={t('market.form.whatsapp')}
-          value={formData.whatsapp_number}
-          onChangeText={handleWhatsAppNumberChange}
-          keyboardType="phone-pad"
-          maxLength={13}
-        />
-        {formData.whatsapp_number && !validateWhatsAppNumber(formData.whatsapp_number) && (
-          <Text style={styles.errorText}>{t('market.form.whatsappFormat')}</Text>
-        )}
-      </View>
-
-      <TextInput
-        style={styles.input}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.contactNumber')}
-        value={formData.contact_number}
-        onChangeText={(text) => handleChange('contact_number', text)}
-        keyboardType="phone-pad"
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.location')}
-        value={formData.location}
-        onChangeText={(text) => handleChange('location', text)}
-      />
-
-      <Text style={styles.sectionTitle}>{t('market.form.paymentDetails')}</Text>
-      <Text style={styles.subtitle}>{t('market.form.payHowNote')}</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.mpesa')}
-        value={formData.mpesa_number}
-        onChangeText={(text) => handleChange('mpesa_number', text)}
-        keyboardType="phone-pad"
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.tillNumber')}
-        value={formData.till_number}
-        onChangeText={(text) => handleChange('till_number', text)}
-        keyboardType="numbers-and-punctuation"
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.bankDetails')}
-        value={formData.bank_details}
-        onChangeText={(text) => handleChange('bank_details', text)}
-      />
-
-      <TextInput
-        style={[styles.input, styles.textArea]}
-        placeholderTextColor="#888"
-        placeholder={t('market.form.otherInstructions')}
-        value={formData.payment_instructions}
-        onChangeText={(text) => handleChange('payment_instructions', text)}
-        multiline
-        numberOfLines={3}
-      />
-
-      <View style={styles.saveRow}>
-        <Text style={styles.saveLabel}>{t('market.form.saveDetails')}</Text>
-        <Switch value={saveDefault} onValueChange={setSaveDefault} testID="save-details" />
-      </View>
-
-      <Text style={styles.sectionTitle}>{t('market.form.productImages')}</Text>
-      <Text style={styles.subtitle}>{t('market.form.imagesHint')}</Text>
-
-      <View style={styles.imageContainer}>
-        {images.map((uri, index) => (
-          <View key={index} style={styles.imageWrapper}>
-            <Image source={{ uri }} style={styles.image} contentFit="cover" transition={120} />
-            <TouchableOpacity
-              style={styles.removeImageButton}
-              onPress={() => removeImage(index)}
-            >
-              <Icon name="times" size={16} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        ))}
-
-        {images.length < 5 && (
-          <TouchableOpacity style={styles.addImageButton} onPress={pickImage}>
-            <Icon name="plus" size={24} color="#888" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <Text style={styles.sectionTitle}>{t('market.form.additionalInfo')}</Text>
-
-      <View style={styles.radioGroup}>
-        <Text style={styles.radioLabel}>{t('market.form.condition')}</Text>
-        <View style={styles.radioOptions}>
-          {['NEW', 'USED', 'REFURBISHED'].map((option) => (
-            <TouchableOpacity
-              key={option}
-              style={styles.radioOption}
-              onPress={() => handleChange('condition', option)}
-            >
-              <View style={styles.radioCircle}>
-                {formData.condition === option && <View style={styles.radioDot} />}
-              </View>
-              <Text style={styles.radioText}>{option}</Text>
-            </TouchableOpacity>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets
+      testID="add-product"
+    >
+      {/* Photos first: what a buyer looks at before anything else. */}
+      <FormSection icon="camera" title={t('market.form2.photos')} hint={t('market.form2.photosHint')}>
+        <View style={styles.photos}>
+          {images.map((uri, index) => (
+            <View key={`${index}-${uri}`} style={styles.photo}>
+              <Image source={{ uri }} style={styles.photoImage} contentFit="cover" transition={120} />
+              {index === 0 && (
+                <View style={styles.coverTag}>
+                  <Text style={styles.coverText}>{t('market.form2.cover')}</Text>
+                </View>
+              )}
+              <TouchableOpacity
+                style={styles.photoRemove}
+                onPress={() => removeImage(index)}
+                hitSlop={6}
+                accessibilityLabel={t('common.remove')}
+                testID={`add-remove-${index}`}
+              >
+                <Icon name="times" size={12} color="#fff" />
+              </TouchableOpacity>
+            </View>
           ))}
+          {images.length < 5 && (
+            <TouchableOpacity style={styles.addPhoto} onPress={pickImage} testID="add-photo">
+              <Icon name="plus" size={20} color={F.accent} />
+              <Text style={styles.addPhotoText}>{t('market.form2.addPhoto')}</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      </View>
+      </FormSection>
+
+      <FormSection icon="tag" title={t('market.form2.details')}>
+        <Field label={t('market.form2.title')}>
+          <FormInput
+            placeholder={t('market.form2.titlePh')}
+            value={formData.title}
+            onChangeText={(text) => handleChange('title', text)}
+            maxLength={200}
+            testID="add-title"
+          />
+        </Field>
+        <Field label={t('market.form2.description')}>
+          <FormInput
+            placeholder={t('market.form2.descriptionPh')}
+            value={formData.description}
+            onChangeText={(text) => handleChange('description', text)}
+            multiline
+            testID="add-description"
+          />
+        </Field>
+
+        <View style={styles.pair}>
+          <Field label={t('market.form2.price')} style={styles.pairWide}>
+            <View style={styles.priceRow}>
+              <TouchableOpacity style={styles.currency} onPress={handleCurrencyChange} testID="add-currency">
+                <Text style={styles.currencyText}>{getCurrencySymbol()}</Text>
+                <Icon name="caret-down" size={12} color={F.muted} />
+              </TouchableOpacity>
+              <FormInput
+                style={styles.priceInput}
+                placeholder="0.00"
+                value={formData.price_value}
+                onChangeText={(text) => handleChange('price_value', text)}
+                keyboardType="decimal-pad"
+                testID="add-price"
+              />
+            </View>
+          </Field>
+          <Field label={t('market.form2.quantity')} style={styles.pairNarrow}>
+            <FormInput
+              value={formData.quantity}
+              onChangeText={(text) => handleChange('quantity', text.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              testID="add-quantity"
+            />
+          </Field>
+        </View>
+
+        <Field label={t('market.form2.condition')}>
+          <Choices
+            options={conditionOptions}
+            value={formData.condition}
+            onChange={(v) => handleChange('condition', v)}
+            testIDPrefix="add-condition"
+          />
+        </Field>
+
+        <Field label={t('market.form2.category')} note={t('market.form2.categoryHint')}>
+          <CategoryPicker value={formData.category} onChange={(v) => handleChange('category', v)} />
+        </Field>
+      </FormSection>
+
+      <FormSection icon="phone" title={t('market.form2.contact')} hint={t('market.form2.contactHint')}>
+        <Field label={t('market.form2.whatsapp')} error={whatsappBad ? t('market.form.whatsappFormat') : null}>
+          <FormInput
+            ref={whatsappInputRef}
+            invalid={whatsappBad}
+            placeholder="+254712345678"
+            value={formData.whatsapp_number}
+            onChangeText={handleWhatsAppNumberChange}
+            keyboardType="phone-pad"
+            maxLength={13}
+            testID="add-whatsapp"
+          />
+        </Field>
+        <Field label={t('market.form2.phone')} note={optional}>
+          <FormInput
+            placeholder="0712345678"
+            value={formData.contact_number}
+            onChangeText={(text) => handleChange('contact_number', text)}
+            keyboardType="phone-pad"
+          />
+        </Field>
+        <Field label={t('market.form2.location')} note={optional}>
+          <FormInput
+            placeholder={t('market.form2.locationPh')}
+            value={formData.location}
+            onChangeText={(text) => handleChange('location', text)}
+          />
+        </Field>
+      </FormSection>
+
+      <FormSection icon="money" title={t('market.form2.payment')} hint={t('market.form.payHowNote')}>
+        <Field label={t('market.form2.mpesa')}>
+          <FormInput
+            placeholder="0712345678"
+            value={formData.mpesa_number}
+            onChangeText={(text) => handleChange('mpesa_number', text)}
+            keyboardType="phone-pad"
+          />
+        </Field>
+        <Field label={t('market.form2.till')} note={optional}>
+          <FormInput
+            value={formData.till_number}
+            onChangeText={(text) => handleChange('till_number', text)}
+            keyboardType="numbers-and-punctuation"
+          />
+        </Field>
+        <Field label={t('market.form2.bank')} note={optional}>
+          <FormInput
+            value={formData.bank_details}
+            onChangeText={(text) => handleChange('bank_details', text)}
+          />
+        </Field>
+        <Field label={t('market.form2.otherPay')} note={optional}>
+          <FormInput
+            value={formData.payment_instructions}
+            onChangeText={(text) => handleChange('payment_instructions', text)}
+            multiline
+          />
+        </Field>
+        <View style={styles.saveRow}>
+          <Text style={styles.saveLabel}>{t('market.form.saveDetails')}</Text>
+          <Switch
+            value={saveDefault}
+            onValueChange={setSaveDefault}
+            trackColor={{ false: F.border, true: F.accent }}
+            thumbColor="#fff"
+            testID="save-details"
+          />
+        </View>
+      </FormSection>
+
+      <FormSection icon="music" title={t('market.form2.extra')}>
+        <TouchableOpacity
+          style={styles.trackLink}
+          onPress={() => navigation.navigate('SelectTrack', { onSelect: setTrack })}
+          testID="add-track"
+        >
+          <Icon name={track ? 'check-circle' : 'link'} size={15} color={track ? F.ok : F.accent} />
+          <Text style={styles.trackText} numberOfLines={1}>
+            {track ? t('market.form.linkedTrack', { title: track.title }) : t('market.form.linkTrack')}
+          </Text>
+        </TouchableOpacity>
+      </FormSection>
 
       <TouchableOpacity
-        style={styles.linkButton}
-        onPress={() => navigation.navigate('SelectTrack', { onSelect: setTrack })}
-      >
-        <Text style={styles.linkButtonText}>
-          {track ? t('market.form.linkedTrack', { title: track.title }) : t('market.form.linkTrack')}
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+        style={[formStyles.submit, loading && formStyles.submitBusy]}
         onPress={handleSubmit}
         disabled={loading}
+        testID="add-submit"
       >
-        <Text style={styles.submitButtonText}>
+        {loading ? <ActivityIndicator color={F.onAccent} /> : <Icon name="check" size={16} color={F.onAccent} />}
+        <Text style={formStyles.submitText}>
           {loading
             ? (progress != null && progress < 1
               ? t('market.form.uploading', { n: Math.round(progress * 100) })
@@ -490,8 +498,8 @@ const AddProduct = () => {
         </Text>
       </TouchableOpacity>
       {progress != null && (
-        <View style={styles.progressTrack} testID="upload-progress">
-          <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+        <View style={formStyles.progressTrack} testID="upload-progress">
+          <View style={[formStyles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
         </View>
       )}
 
@@ -505,9 +513,10 @@ const AddProduct = () => {
                 key={c.code}
                 style={[styles.pickerRow, currency === c.code && styles.pickerRowActive]}
                 onPress={() => { setCurrency(c.code); setCurrencyOpen(false); }}
+                testID={`currency-${c.code}`}
               >
-                <Text style={styles.pickerRowText}>{c.label}</Text>
-                {currency === c.code && <Icon name="check" size={16} color="#2e7d32" />}
+                <Text style={[styles.pickerRowText, currency === c.code && styles.pickerRowTextActive]}>{c.label}</Text>
+                {currency === c.code && <Icon name="check" size={16} color={F.onAccent} />}
               </TouchableOpacity>
             ))}
             <TouchableOpacity style={styles.pickerCancel} onPress={() => setCurrencyOpen(false)}>
@@ -521,211 +530,70 @@ const AddProduct = () => {
 };
 
 const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: 'transparent' },
+  content: { padding: 14, paddingBottom: 40 },
+
+  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  photo: { width: 92, height: 92 },
+  photoImage: { width: '100%', height: '100%', borderRadius: 12, backgroundColor: F.field },
+  coverTag: {
+    position: 'absolute', left: 6, bottom: 6, paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 6, backgroundColor: F.accent,
+  },
+  coverText: { color: F.onAccent, fontSize: 10, fontWeight: '800' },
+  photoRemove: {
+    position: 'absolute', top: -6, right: -6, width: 24, height: 24, borderRadius: 12,
+    backgroundColor: F.danger, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#0A1628',
+  },
+  addPhoto: {
+    width: 92, height: 92, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,196,107,0.55)',
+    backgroundColor: 'rgba(255,196,107,0.06)',
+  },
+  addPhotoText: { color: F.accent, fontSize: 11.5, fontWeight: '700' },
+
+  pair: { flexDirection: 'row', gap: 10 },
+  pairWide: { flex: 1.6 },
+  pairNarrow: { flex: 1 },
+  priceRow: { flexDirection: 'row' },
+  currency: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12,
+    backgroundColor: '#1C2E49', borderWidth: 1, borderColor: F.border, borderRightWidth: 0,
+    borderTopLeftRadius: 12, borderBottomLeftRadius: 12,
+  },
+  currencyText: { color: F.accent, fontSize: 15, fontWeight: '800' },
+  priceInput: { flex: 1, borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
+
   saveRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: 4, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    marginTop: 16, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: F.border,
   },
-  saveLabel: { flex: 1, fontSize: 14, color: '#333', marginRight: 12 },
-  progressTrack: { height: 6, borderRadius: 3, backgroundColor: '#e6e6e6', marginTop: 10, overflow: 'hidden' },
-  progressFill: { height: 6, backgroundColor: '#1D478B' },
-  container: {
-    flex: 1,
-    backgroundColor: 'transparent',
+  saveLabel: { flex: 1, fontSize: 13.5, color: F.label, lineHeight: 19 },
+
+  trackLink: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14,
+    padding: 14, borderRadius: 12, backgroundColor: F.field, borderWidth: 1, borderColor: F.border,
   },
-  contentContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    margin: 12,
-    padding: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 16,
-    marginBottom: 8,
-    color: '#333',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    fontSize: 16,
-    color: '#111', // explicit dark text so it's never white-on-light in dark mode
-  },
-  invalidInput: {
-    borderColor: '#FF6347',
-    borderWidth: 1,
-    backgroundColor: '#FFF0F0',
-  },
-  errorText: {
-    color: '#FF6347',
-    fontSize: 12,
-    marginTop: -8,
-    marginBottom: 12,
-    marginLeft: 4,
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  priceInputContainer: {
-    flexDirection: 'row',
-    width: '48%',
-  },
-  priceInput: {
-    flex: 1,
-    borderTopRightRadius: 0,
-    borderBottomRightRadius: 0,
-    marginBottom: 0,
-  },
-  currencyButton: {
-    width: 50,
-    backgroundColor: '#e9ecef',
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderLeftWidth: 1,
-    borderColor: '#ced4da',
-  },
-  currencyText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#495057',
-  },
-  quantityInput: {
-    width: '48%',
-  },
-  imageContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 16,
-  },
-  imageWrapper: {
-    width: 80,
-    height: 80,
-    marginRight: 8,
-    marginBottom: 8,
-    position: 'relative',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#FF6347',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  addImageButton: {
-    width: 80,
-    height: 80,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  radioGroup: {
-    marginBottom: 16,
-  },
-  radioLabel: {
-    fontSize: 16,
-    marginBottom: 8,
-    color: '#555',
-  },
-  radioOptions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  radioOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  radioCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#888',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  radioDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#1D478B',
-  },
-  radioText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  linkButton: {
-    backgroundColor: '#f0f7ff',
-    borderWidth: 1,
-    borderColor: '#1D478B',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-  },
-  linkButtonText: {
-    color: '#1D478B',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  submitButton: {
-    backgroundColor: '#1D478B',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 32,
-  },
-  submitButtonDisabled: {
-    backgroundColor: '#a0c4ff',
-  },
-  submitButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
+  trackText: { flex: 1, color: F.text, fontSize: 14.5, fontWeight: '600' },
+
   pickerBackdrop: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center', justifyContent: 'center', padding: 24,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: 24,
   },
   pickerCard: {
-    width: '100%', maxWidth: 340, backgroundColor: '#fff',
-    borderRadius: 14, padding: 16,
+    width: '100%', maxWidth: 340, backgroundColor: '#0F1C30', borderRadius: 18, padding: 16,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: F.cardBorder,
   },
-  pickerTitle: { fontSize: 16, fontWeight: '700', color: '#111', textAlign: 'center', marginBottom: 8 },
+  pickerTitle: { fontSize: 16, fontWeight: '800', color: F.text, textAlign: 'center', marginBottom: 8 },
   pickerRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10, marginTop: 4,
-    backgroundColor: '#f5f5f5',
+    paddingVertical: 14, paddingHorizontal: 14, borderRadius: 12, marginTop: 6, backgroundColor: F.field,
   },
-  pickerRowActive: { backgroundColor: '#e8f5e9' },
-  pickerRowText: { fontSize: 15, color: '#222', fontWeight: '600' },
+  pickerRowActive: { backgroundColor: F.accent },
+  pickerRowText: { fontSize: 15, color: F.text, fontWeight: '700' },
+  pickerRowTextActive: { color: F.onAccent },
   pickerCancel: { paddingVertical: 14, alignItems: 'center', marginTop: 6 },
-  pickerCancelText: { fontSize: 15, color: '#888', fontWeight: '700' },
+  pickerCancelText: { fontSize: 15, color: F.muted, fontWeight: '700' },
 });
 
 export default AddProduct;

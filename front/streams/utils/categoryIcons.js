@@ -50,3 +50,25 @@ export const categoryIcon = (name = '') => {
   )));
   return hit ? { icon: hit[0], color: hit[1] } : FALLBACK;
 };
+
+// ── The marketplace's categories ─────────────────────────────────────────────
+// The fixed list a seller picks from (the server's songs/market_categories.py:
+// keep the two the same). Sellers used to type one, and every spelling made a
+// new category; now there is this list, and nothing else.
+export const MARKET_CATEGORIES = [
+  'Phones & Tablets', 'Computers & Laptops', 'Electronics', 'Shoes', 'Bags & Accessories',
+  'Jewellery & Watches', 'Clothing & Fashion', 'Health & Beauty', 'Books & Bibles',
+  'Music & Instruments', 'Furniture', 'Farming & Agriculture', 'Food & Drinks', 'Home & Kitchen',
+  'Vehicles & Parts', 'Baby & Kids', 'Sports & Fitness', 'Art & Crafts', 'Services', 'Other',
+];
+
+/** 'Phones & Tablets' → 'phones_tablets', the key its name is translated by. */
+export const categoryKey = (name = '') => String(name).toLowerCase().replace(/[^a-z]+/g, '_').replace(/^_|_$/g, '');
+
+/** A category's name in the reader's language (as it is, for one not on the list). */
+export const categoryLabel = (name, t) => {
+  if (!name) return '';
+  const key = `market.cat.${categoryKey(name)}`;
+  const said = t ? t(key) : key;
+  return said && said !== key ? said : name;
+};

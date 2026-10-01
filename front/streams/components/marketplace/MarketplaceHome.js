@@ -27,7 +27,7 @@ import { peekCache } from '../../utils/screenCache';
 import { useAuth } from '../../context/useAuth';
 import { useMarket, useMarketUser } from '../../utils/cartStore';
 import { formatPrice } from '../../utils/market';
-import { categoryIcon } from '../../utils/categoryIcons';
+import { categoryIcon, categoryLabel } from '../../utils/categoryIcons';
 import {
   MARKET_HOME_KEY, HOME_PAGE_SIZE, loadMarketHome, mergeHome, prefetchPhotos,
 } from '../../utils/marketFeed';
@@ -256,7 +256,7 @@ const MarketplaceHome = () => {
 
   const open = useCallback((product) => navigation.navigate('ProductDetail', { slug: product.slug, preview: product }),
     [navigation]);
-  const openCategory = (c) => navigation.navigate('ProductList', { categoryId: c.id, categoryName: c.name });
+  const openCategory = (c) => navigation.navigate('ProductList', { categoryId: c.id, categoryName: categoryLabel(c.name, t) });
   const search = () => {
     if (query.trim()) navigation.navigate('ProductList', { q: query.trim() });
   };
@@ -306,7 +306,7 @@ const MarketplaceHome = () => {
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.chip} onPress={() => openCategory(item)}
                               accessibilityRole="button" testID={`home-category-${item.id}`}>
-              <Text style={styles.chipText} numberOfLines={1}>{item.name}</Text>
+              <Text style={styles.chipText} numberOfLines={1}>{categoryLabel(item.name, t)}</Text>
             </TouchableOpacity>
           )}
           showsHorizontalScrollIndicator={false}
@@ -326,7 +326,7 @@ const MarketplaceHome = () => {
 
       {rows.map((row) => (
         <View style={styles.section} key={row.category.id}>
-          <RowTitle title={row.category.name} icon={categoryIcon(row.category.name)} t={t}
+          <RowTitle title={categoryLabel(row.category.name, t)} icon={categoryIcon(row.category.name)} t={t}
                     onAll={() => openCategory(row.category)} />
           <Strip products={row.products} onOpen={open} testID={`strip-cat-${row.category.id}`} />
         </View>

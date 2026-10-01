@@ -161,12 +161,20 @@ class ProductSerializer(serializers.ModelSerializer):
         return bool(getattr(obj, 'wishlisted_by_me', False))
 
     def validate_category(self, value):
+        """One of the marketplace's categories (songs/market_categories.py),
+        never a new one. A name from the list is taken as it is; anything else
+        (an older app build still lets the seller type) is read as the
+        category it belongs to, so the list cannot grow by typing."""
+        from ..market_categories import major_for
         value = value.strip()
         if not value:
-            raise serializers.ValidationError("Category name cannot be empty.")
-        if len(value) > 100:
-            raise serializers.ValidationError("Category name cannot exceed 100 characters.")
-        return value
+            raise serializers.ValidationError("Choose a category.")
+        found = ProductCategory.objects.filter(name__iexact=value[:100]).first()
+        if found:
+            return found
+        name = major_for(value)
+        category, _ = ProductCategory.objects.get_or_create(name=name)
+        return category
 
     def validate(self, data):
         request = self.context.get('request')
@@ -178,11 +186,7 @@ class ProductSerializer(serializers.ModelSerializer):
         images = validated_data.pop('images', [])
         # Meaningless on create, but must not survive into Product(**validated_data).
         validated_data.pop('remove_images', None)
-        category_name = validated_data.pop('category')
-        category, _ = ProductCategory.objects.get_or_create(
-            name=category_name,
-            defaults={'description': f'Category for {category_name}'}
-        )
+        category = validated_data.pop('category')   # a ProductCategory (validate_category)
         # Remove seller from validated_data to avoid duplication
         validated_data.pop('seller', None)
         # Use the authenticated user from the request context
@@ -218,12 +222,8 @@ class ProductSerializer(serializers.ModelSerializer):
         # For the wishlist alerts: what it was before this change.
         old_price, old_quantity, old_available = instance.price, instance.quantity, instance.is_available
 
-        category_name = validated_data.pop('category', None)
-        if category_name:
-            category, _ = ProductCategory.objects.get_or_create(
-                name=category_name,
-                defaults={'description': f'Category for {category_name}'}
-            )
+        category = validated_data.pop('category', None)   # a ProductCategory
+        if category:
             instance.category = category
 
         # Apply the rest of the updates
