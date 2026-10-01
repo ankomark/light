@@ -46,6 +46,10 @@ import { on, EVENTS } from '../utils/appEvents';
 import { useContentWidth, useMaxMediaHeight, FONT_SCALE } from '../utils/layout';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
+// The menu's own coloured Explore artwork, kept in its colours (not tinted
+// grey) so the tab reads at a glance.
+const EXPLORE_ART = require('../assets/explore-icon.png');
+
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const AVATAR_FAILED = '__failed__';
 
@@ -1457,7 +1461,7 @@ const SocialFeed = ({ showBackground = true }) => {
               accessibilityRole="button"
               testID="feed-explore"
             >
-              <MaterialIcons name="explore" size={15} color={colors.textSecondary} />
+              <Image source={EXPLORE_ART} style={styles.exploreArt} contentFit="contain" testID="feed-explore-art" />
               <Text style={styles.tabText} maxFontSizeMultiplier={FONT_SCALE.chrome}>
                 {t('feed.explore')}
               </Text>
@@ -1593,6 +1597,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   exploreTab: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  exploreArt: { width: 18, height: 18 },
   tabText: {
     ...typography.label,
     color: colors.textSecondary,
