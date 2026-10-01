@@ -9,7 +9,7 @@ import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import { fetchUnreadMessageCount } from '../services/api';
 import { subscribeDM } from '../services/dmSocket';
-import { isAdmin, isSuperAdmin, hasCapability } from '../utils/roles';
+import { isAdmin } from '../utils/roles';
 import { useAppStatus } from '../context/AppStatusContext';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -111,23 +111,11 @@ const SECTIONS = [
   },
 ];
 
-// Admin destinations, each gated by the capability it needs (dashboard is shown
-// to any admin; Roles is super-admin only). Filtered per user in the render.
+// The admin area has one door in the menu: the dashboard. Its tabs (Pulse,
+// Reports, Users, Content, Appeals) and More lead to every other tool, each
+// shown only to whom the server says may use it.
 const ADMIN_ITEMS = [
   { label: 'Admin Dashboard', route: 'AdminDashboard', set: 'mci', icon: 'shield-crown-outline' },
-  { label: 'Analytics', route: 'AdminAnalytics', set: 'mci', icon: 'chart-line', cap: 'view_analytics' },
-  { label: 'Reports', route: 'AdminReports', set: 'mci', icon: 'flag-outline', cap: 'handle_reports' },
-  { label: 'Users', route: 'AdminUsers', set: 'mci', icon: 'account-cog-outline', anyCap: ['manage_users', 'ban_users'] },
-  { label: 'Content', route: 'AdminContent', set: 'mci', icon: 'file-document-multiple-outline', cap: 'remove_content' },
-  { label: 'Appeals', route: 'AdminAppeals', set: 'mci', icon: 'gavel', cap: 'manage_appeals' },
-  { label: 'Audit Log', route: 'AdminLogs', set: 'mci', icon: 'history', cap: 'view_audit_log' },
-  { label: 'Wallpapers', route: 'AdminWallpapers', set: 'mci', icon: 'image-multiple-outline', cap: 'manage_wallpapers' },
-  { label: 'Quiz questions', route: 'AdminQuizBank', set: 'mci', icon: 'head-question-outline', cap: 'manage_quiz' },
-  { label: 'Puzzle themes', route: 'AdminPuzzleThemes', set: 'mci', icon: 'puzzle-outline', cap: 'manage_puzzles' },
-  { label: 'Verified ticks', route: 'AdminVerify', set: 'mci', icon: 'check-decagram-outline', cap: 'verify_accounts' },
-  { label: 'Broadcast', route: 'AdminBroadcast', set: 'mci', icon: 'bullhorn-outline', cap: 'broadcast' },
-  { label: 'App control', route: 'AdminAppControl', set: 'mci', icon: 'toggle-switch-outline', cap: 'manage_app' },
-  { label: 'Roles', route: 'AdminRoles', set: 'mci', icon: 'shield-key-outline', superOnly: true },
 ];
 
 // Shown only to a user whose own account is suspended.
@@ -300,15 +288,8 @@ export function MenuScreen() {
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {(() => {
-          // Show only the admin items the user's capabilities allow.
-          const adminItems = isAdmin(currentUser)
-            ? ADMIN_ITEMS.filter((it) => {
-                if (it.superOnly) return isSuperAdmin(currentUser);
-                if (it.cap) return hasCapability(currentUser, it.cap);
-                if (it.anyCap) return it.anyCap.some((c) => hasCapability(currentUser, c));
-                return true; // dashboard — any admin
-              })
-            : [];
+          // Any admin: the one way into the admin area.
+          const adminItems = isAdmin(currentUser) ? ADMIN_ITEMS : [];
           // Parts switched off by an admin leave the menu (admin phase 4).
           const visible = SECTIONS
             .map((sec) => ({ ...sec, items: sec.items.filter((it) => !it.feature || features?.[it.feature] !== false) }))
