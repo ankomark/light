@@ -3302,6 +3302,7 @@ export const STRINGS = {
     'settings.playback.downloadWifiOnly': 'Download on Wi-Fi only',
 
     'settings.security.logoutOthers': 'Log out other devices',
+    'settings.security.logoutOthersSub': 'Keep only this phone signed in',
     'settings.security.export': 'Download my data',
 
     'settings.support.contact': 'Contact admins',
@@ -6686,6 +6687,7 @@ export const STRINGS = {
     'settings.playback.downloadWifiOnly': 'Pakua kwenye Wi-Fi pekee',
 
     'settings.security.logoutOthers': 'Toka kwenye vifaa vingine',
+    'settings.security.logoutOthersSub': 'Baki umeingia kwenye simu hii tu',
     'settings.security.export': 'Pakua data yangu',
 
     'settings.support.contact': 'Wasiliana na wasimamizi',

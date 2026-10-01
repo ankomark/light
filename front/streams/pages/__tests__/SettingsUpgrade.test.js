@@ -108,7 +108,9 @@ test('quiet hours turn on as 22:00 to 07:00 on this phone’s clock', async () =
 });
 
 test('the language is chosen from a list', async () => {
-  jest.useFakeTimers();
+  // setImmediate stays real: the StatusBar queues its updates on it, and a
+  // faked one left behind stalls every test after this.
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'clearImmediate'] });
   const screen = render(<Settings />);
   fireEvent.press(screen.getByText('settings.appearance.language'));
   fireEvent.press(screen.getByText('Kiswahili'));
@@ -129,7 +131,8 @@ test('a test notification says where it went', async () => {
 test('the devices signed in, and signing one out', async () => {
   const alert = jest.spyOn(Alert, 'alert').mockImplementation((t1, b, buttons) => buttons?.[1]?.onPress?.());
   const screen = render(<Settings />);
-  await waitFor(() => expect(screen.getAllByText('settings.devices.count:2').length).toBe(2));
+  // Said once, on the devices row (not again under "log out other devices").
+  await waitFor(() => expect(screen.getAllByText('settings.devices.count:2').length).toBe(1));
   fireEvent.press(screen.getByTestId('devices'));
   expect(screen.getByText('settings.devices.this')).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByTestId('device-out-2')); });
@@ -259,5 +262,38 @@ describe('the black look (design A)', () => {
     fireEvent.changeText(screen.getByTestId('settings-search'), 'mark');
     expect(screen.queryByTestId('settings-profile')).toBeNull();
     expect(screen.getByText('mark')).toBeTruthy();
+  });
+});
+
+describe('deep scan', () => {
+  test('a section found by its name shows its rows, not an empty card', () => {
+    const screen = render(<Settings />);
+    fireEvent.changeText(screen.getByTestId('settings-search'), 'settings.section.storage');
+    expect(screen.getByTestId('storage-downloads')).toBeTruthy();
+    expect(screen.getByTestId('storage-clear')).toBeTruthy();
+  });
+
+  test('the theme is found by its value, though shown only in its pill', () => {
+    const screen = render(<Settings />);
+    fireEvent.changeText(screen.getByTestId('settings-search'), 'settings.theme.dark');
+    expect(screen.getByText('settings.appearance.theme')).toBeTruthy();
+    expect(screen.getAllByText('settings.theme.dark')).toHaveLength(1);
+  });
+
+  test('two quick taps change the password once', async () => {
+    let answer;
+    mockApi.changePassword.mockImplementation(() => new Promise((res) => { answer = res; }));
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const screen = render(<Settings />);
+    fireEvent.press(screen.getByText('settings.account.changePassword'));
+    fireEvent.changeText(screen.getByPlaceholderText('settings.pw.currentPlaceholder'), 'old-pass-1');
+    fireEvent.changeText(screen.getByTestId('pw-new'), 'new-pass-123');
+    fireEvent.changeText(screen.getByPlaceholderText('settings.pw.confirmPlaceholder'), 'new-pass-123');
+    fireEvent.press(screen.getByTestId('pw-update'));
+    fireEvent.press(screen.getByTestId('pw-update'));
+    await act(async () => { answer({ sessions_revoked: 1 }); });
+    expect(mockApi.changePassword).toHaveBeenCalledTimes(1);
+    expect(alert).toHaveBeenCalledWith('common.done', 'settings.pw.changedSignedOut:1');
+    alert.mockRestore();
   });
 });

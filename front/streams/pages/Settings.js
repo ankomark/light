@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useContext, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useContext, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   ActivityIndicator,
   Share,
+  StatusBar,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -127,6 +128,8 @@ const openLink = async (url, fallbackMsg, t) => {
 // What is typed in the search box at the top: rows that do not match hide,
 // and a section with nothing left in it hides too.
 const SettingsSearch = React.createContext('');
+// Set by a section whose own title matches the search: then all its rows show.
+const SectionMatched = React.createContext(false);
 const matches = (q, ...texts) => !q || texts.some((x) => typeof x === 'string'
   && x.toLowerCase().includes(q.toLowerCase()));
 const rowsOf = (children) => React.Children.toArray(children).flatMap((el) => (
@@ -137,20 +140,26 @@ const Section = ({ title, children }) => {
   const colors = SETTINGS_COLORS;
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const q = useContext(SettingsSearch);
-  if (q && !rowsOf(children).some((el) => matches(q, el?.props?.label, el?.props?.sub, title))) return null;
+  const titleMatches = !!q && matches(q, title);
+  if (q && !titleMatches && !rowsOf(children).some((el) => matches(
+    q, el?.props?.label, el?.props?.sub, el?.props?.keywords,
+  ))) return null;
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title.toUpperCase()}</Text>
-      <View style={styles.group}>{children}</View>
-    </View>
+    <SectionMatched.Provider value={titleMatches}>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>{title.toUpperCase()}</Text>
+        <View style={styles.group}>{children}</View>
+      </View>
+    </SectionMatched.Provider>
   );
 };
 
-const Row = ({ icon, iconColor, label, sub, right, onPress, last, danger, testID }) => {
+const Row = ({ icon, iconColor, label, sub, keywords, right, onPress, last, danger, testID }) => {
   const colors = SETTINGS_COLORS;
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const q = useContext(SettingsSearch);
-  if (!matches(q, label, sub)) return null;
+  const sectionMatched = useContext(SectionMatched);
+  if (!sectionMatched && !matches(q, label, sub, keywords)) return null;
   const content = (
     <View style={[styles.row, !last && styles.rowDivider]}>
       <View style={[styles.rowIcon, danger && styles.rowIconDanger]}>
@@ -256,6 +265,9 @@ const Settings = () => {
   const [showPw, setShowPw] = useState(false);
   const [revokingOthers, setRevokingOthers] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // What is under way, read at once (state is a render late): a second tap
+  // must not send a password change, an export or a deletion twice.
+  const busy = useRef({});
 
   useEffect(() => {
     setIsPrivate(!currentUser?.is_public);
@@ -320,6 +332,8 @@ const Settings = () => {
   // A file, not a message: a few years of posts and orders is far too long
   // for a chat, and a file can be kept or opened on a computer.
   const handleExportData = async () => {
+    if (busy.current.export) return;
+    busy.current.export = true;
     setExporting(true);
     try {
       const data = await exportMyData();
@@ -343,6 +357,7 @@ const Settings = () => {
     } catch {
       Alert.alert(t('common.error'), t('settings.exportFailed'));
     } finally {
+      busy.current.export = false;
       setExporting(false);
     }
   };
@@ -532,6 +547,8 @@ const Settings = () => {
       Alert.alert(t('settings.pw.mismatchTitle'), t('settings.pw.mismatchBody'));
       return;
     }
+    if (busy.current.pw) return;
+    busy.current.pw = true;
     try {
       setChangingPw(true);
       const res = await changePassword(currentPw, newPw);
@@ -544,6 +561,7 @@ const Settings = () => {
     } catch (error) {
       Alert.alert(t('common.error'), error.response?.data?.error || t('settings.pw.changeFailed'));
     } finally {
+      busy.current.pw = false;
       setChangingPw(false);
     }
   };
@@ -566,6 +584,8 @@ const Settings = () => {
       Alert.alert(t('settings.pwRequiredTitle'), t('settings.pwRequiredDelete'));
       return;
     }
+    if (busy.current.del) return;
+    busy.current.del = true;
     try {
       setDeleting(true);
       await deleteAccount(deletePw);
@@ -579,6 +599,7 @@ const Settings = () => {
       Alert.alert(t('common.error'), error.response?.status === 429
         ? t('settings.tooManyTries') : error.response?.data?.error || t('settings.deleteAccountFailed'));
     } finally {
+      busy.current.del = false;
       setDeleting(false);
     }
   };
@@ -588,6 +609,8 @@ const Settings = () => {
       Alert.alert(t('settings.pwRequiredTitle'), t('settings.pwRequiredConfirm'));
       return;
     }
+    if (busy.current.deact) return;
+    busy.current.deact = true;
     try {
       setDeactivating(true);
       await deactivateAccount(deactivatePw);
@@ -600,6 +623,7 @@ const Settings = () => {
       Alert.alert(t('common.error'), error.response?.status === 429
         ? t('settings.tooManyTries') : error.response?.data?.error || t('settings.deactivateFailed'));
     } finally {
+      busy.current.deact = false;
       setDeactivating(false);
     }
   };
@@ -631,6 +655,8 @@ const Settings = () => {
       Alert.alert(t('settings.contact.emptyTitle'), t('settings.contact.emptyBody'));
       return;
     }
+    if (busy.current.contact) return;
+    busy.current.contact = true;
     try {
       setSendingContact(true);
       await createAdminNote(contactText.trim());
@@ -640,6 +666,7 @@ const Settings = () => {
     } catch (error) {
       Alert.alert(t('common.error'), error.response?.data?.detail || t('settings.contact.sendFailed'));
     } finally {
+      busy.current.contact = false;
       setSendingContact(false);
     }
   };
@@ -660,6 +687,8 @@ const Settings = () => {
 
   return (
     <View style={styles.root}>
+      {/* Light clock and battery on the black page, even in the light theme. */}
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <SafeAreaView edges={['top']} style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -755,6 +784,7 @@ const Settings = () => {
                   onValueChange={handleTogglePrivate}
                   disabled={savingPrivacy}
                   trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                   thumbColor={colors.white}
                 />
               </View>
@@ -784,7 +814,7 @@ const Settings = () => {
           <Row
             icon="theme-light-dark"
             label={t('settings.appearance.theme')}
-            sub={themeLabel}
+            keywords={themeLabel}
             onPress={cycleTheme}
             right={
               <View style={styles.valuePill}>
@@ -795,7 +825,7 @@ const Settings = () => {
           <Row
             icon="translate"
             label={t('settings.appearance.language')}
-            sub={languageLabel}
+            keywords={languageLabel}
             onPress={cycleLanguage}
             last
             right={
@@ -818,7 +848,7 @@ const Settings = () => {
           <Row
             icon="logout-variant"
             label={t('settings.security.logoutOthers')}
-            sub={sessionCount != null ? t('settings.devices.count', { n: sessionCount }) : undefined}
+            sub={t('settings.security.logoutOthersSub')}
             onPress={handleLogoutOthers}
             right={revokingOthers ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
           />
@@ -845,6 +875,7 @@ const Settings = () => {
                 onValueChange={handleTogglePush}
                 testID="push-switch"
                 trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                 thumbColor={colors.white}
               />
             }
@@ -863,6 +894,7 @@ const Settings = () => {
                   disabled={!notifPrefs}
                   testID={`notif-${cat.key}`}
                   trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                   thumbColor={colors.white}
                 />
               }
@@ -883,6 +915,7 @@ const Settings = () => {
                     onValueChange={toggleQuiet}
                     disabled={!notifPrefs}
                     trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                     thumbColor={colors.white}
                     testID="quiet-switch"
                   />
@@ -920,6 +953,7 @@ const Settings = () => {
                 value={prefs[PREF_KEYS.calendarReminders] !== false}
                 onValueChange={(v) => updatePref(PREF_KEYS.calendarReminders, v)}
                 trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                 thumbColor={colors.white}
               />
             }
@@ -938,6 +972,7 @@ const Settings = () => {
                 value={!!prefs[PREF_KEYS.videoMode]}
                 onValueChange={(v) => updatePref(PREF_KEYS.videoMode, v)}
                 trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                 thumbColor={colors.white}
                 accessibilityLabel={t('video.mode.label')}
               />
@@ -952,6 +987,7 @@ const Settings = () => {
                 value={!!prefs[PREF_KEYS.autoplayVideo]}
                 onValueChange={(v) => updatePref(PREF_KEYS.autoplayVideo, v)}
                 trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                 thumbColor={colors.white}
               />
             }
@@ -965,6 +1001,7 @@ const Settings = () => {
                 value={!!prefs[PREF_KEYS.dataSaver]}
                 onValueChange={(v) => updatePref(PREF_KEYS.dataSaver, v)}
                 trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                 thumbColor={colors.white}
               />
             }
@@ -980,6 +1017,7 @@ const Settings = () => {
                 value={!!prefs[PREF_KEYS.quizSound]}
                 onValueChange={(v) => updatePref(PREF_KEYS.quizSound, v)}
                 trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                 thumbColor={colors.white}
               />
             }
@@ -1039,6 +1077,7 @@ const Settings = () => {
                     value={!!prefs[PREF_KEYS.downloadWifiOnly]}
                     onValueChange={(v) => updatePref(PREF_KEYS.downloadWifiOnly, v)}
                     trackColor={{ false: colors.switchOff, true: colors.primary }}
+                ios_backgroundColor={colors.switchOff}
                     thumbColor={colors.white}
                   />
                 }
@@ -1182,6 +1221,7 @@ const Settings = () => {
               placeholderTextColor={colors.placeholder}
               value={contactText}
               onChangeText={setContactText}
+              maxLength={2000}
               multiline
               textAlignVertical="top"
             />
@@ -1208,7 +1248,7 @@ const Settings = () => {
         visible={pwVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setPwVisible(false)}
+        onRequestClose={() => { setPwVisible(false); resetPwForm(); }}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
@@ -1263,6 +1303,7 @@ const Settings = () => {
 
             <TouchableOpacity
               style={[styles.sendBtn, changingPw && { opacity: 0.6 }]}
+              testID="pw-update"
               onPress={handleChangePassword}
               disabled={changingPw}
               activeOpacity={0.85}
@@ -1283,7 +1324,7 @@ const Settings = () => {
         visible={deleteVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setDeleteVisible(false)}
+        onRequestClose={() => { setDeleteVisible(false); setDeletePw(''); }}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
@@ -1339,7 +1380,7 @@ const Settings = () => {
         visible={deactivateVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setDeactivateVisible(false)}
+        onRequestClose={() => { setDeactivateVisible(false); setDeactivatePw(''); }}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
