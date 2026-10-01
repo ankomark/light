@@ -140,6 +140,7 @@ test('what lives elsewhere now is not in the menu', async () => {
   // Playlists (on the Music page) and Marketplace (in the header) neither.
   expect(r.queryByLabelText('Playlists')).toBeNull();
   expect(r.queryByLabelText('Marketplace')).toBeNull();
-  expect(r.getByLabelText('Cart')).toBeTruthy();
+  // Nor the marketplace's own pages: they are all on the marketplace page.
+  ['Cart', 'Wishlist', 'My Orders', 'Sell'].forEach((l) => expect(r.queryByLabelText(l)).toBeNull());
   expect(r.getByLabelText('Publishing')).toBeTruthy();
 });

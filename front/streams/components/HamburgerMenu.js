@@ -30,10 +30,7 @@ const GROUPS_ART = require('../assets/groups-icon.png');
 const NOTICE_ART = require('../assets/noticeboard-icon.png');
 const QUIZ_ART = require('../assets/quiz-icon.png');
 const PUZZLE_ART = require('../assets/puzzle-icon.png');
-const CART_ART = require('../assets/cart-icon.png');
-const SELL_ART = require('../assets/sell-icon.png');
 const SETTINGS_ART = require('../assets/settings-icon.png');
-const ORDERS_ART = require('../assets/orders-icon.png');
 const HELP_ART = require('../assets/help-icon.png');
 const ABOUT_ART = require('../assets/about-icon.png');
 const GUIDE_ART = require('../assets/userguide-icon.png');
@@ -56,7 +53,8 @@ const SECTIONS = [
   {
     title: 'Discover',
     // Explore is on the home feed (beside For You), Favorites on the profile,
-    // Playlists on the Music page and the marketplace in the header's nav row.
+    // Playlists on the Music page and the marketplace in the header's nav row
+    // (its cart, wishlist, orders and selling are all on the marketplace page).
     items: [
       { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
       { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true },
@@ -81,15 +79,6 @@ const SECTIONS = [
         tint: VERSE_TEAL },
       { label: 'Bible Quiz', route: 'QuizHome', art: QUIZ_ART },
       { label: 'Word Puzzle', route: 'PuzzlePlay', art: PUZZLE_ART },
-    ],
-  },
-  {
-    title: 'Marketplace',
-    items: [
-      { label: 'Cart', route: 'Cart', art: CART_ART },
-      { label: 'Wishlist', route: 'Wishlist', set: 'mci', icon: 'heart-outline' },
-      { label: 'My Orders', route: 'OrderHistory', art: ORDERS_ART },
-      { label: 'Sell', route: 'SellerDashboard', art: SELL_ART },
     ],
   },
   {
