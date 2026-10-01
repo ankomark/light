@@ -2,7 +2,9 @@
 
 - a burst of reports on one thing (5 within the hour),
 - one admin banning many people (10 within the hour),
-- an admin opening the admin tools from a device and place not seen before.
+- an admin opening the admin tools from a device and place not seen before,
+- an admin's code box locked after too many wrong codes,
+- an admin's two-step sign-in reset by a super admin.
 
 Each alert goes once per hour per subject (cached), as a push, and is written
 in the audit log, so a quiet night is not a phone full of the same alert.
@@ -66,6 +68,17 @@ def on_admin_sign_in(user, ip, user_agent):
     from .models import AdminSession
     seen = AdminSession.objects.filter(user=user, ip=ip, user_agent=user_agent).count()
     if seen <= 1:   # the one just opened
-        alert(f'device:{user.pk}:{ip}:{hash(user_agent)}',
+        from .admin_security import digest
+        alert(f'device:{user.pk}:{ip}:{digest(user_agent or "")[:16]}',
               f'@{user.username} opened the admin tools from a new device ({ip or "unknown address"}).',
               exclude=user)
+
+
+def on_lockout(user):
+    """Too many wrong codes for one admin: someone may be guessing."""
+    alert(f'lockout:{user.pk}', f'Too many wrong codes for @{user.username}: their admin sign-in is locked for a while.')
+
+
+def on_two_factor_reset(actor, user):
+    """A super admin reset someone's two-step sign-in: the others are told."""
+    alert(f'reset2fa:{user.pk}', f'@{actor.username} reset two-step sign-in for @{user.username}.', exclude=actor)

@@ -3269,6 +3269,8 @@ export const STRINGS = {
 
     'settings.title': 'Settings',
     'settings.verified': 'Verified',
+    'adminContent.skippedTitle': 'Some were left',
+    'adminContent.skippedRank': '{n} item(s) were posted by an admin of your rank or above and were left as they are.',
     'adminTabs.pulse': 'Pulse',
     'adminTabs.reports': 'Reports',
     'adminTabs.users': 'Users',
@@ -6976,6 +6978,8 @@ export const STRINGS = {
 
     'settings.title': 'Mipangilio',
     'settings.verified': 'Imethibitishwa',
+    'adminContent.skippedTitle': 'Baadhi viliachwa',
+    'adminContent.skippedRank': 'Vitu {n} vilichapishwa na msimamizi wa cheo chako au zaidi na vimeachwa kama vilivyo.',
     'adminTabs.pulse': 'Mapigo',
     'adminTabs.reports': 'Ripoti',
     'adminTabs.users': 'Watumiaji',

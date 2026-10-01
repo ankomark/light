@@ -35,6 +35,10 @@ REAUTH_MINUTES = 10
 TOTP_STEP = 30
 TOTP_DIGITS = 6
 BACKUP_CODES = 10
+# Wrong codes: after this many in LOCK_MINUTES the account's code box is shut
+# for LOCK_MINUTES (a 6-digit code must not be guessable at 10 a minute).
+MAX_FAILURES = 5
+LOCK_MINUTES = 15
 ISSUER = 'Adventist Life'
 
 # The request being served, for the audit log's IP and device (set by
@@ -177,6 +181,28 @@ def session_for(request):
     ).first()
 
 
+def claim_step(two_factor, step):
+    """Record `step` as used, unless a request at the same moment already used
+    it (or a later one): one code opens one session."""
+    from .models import AdminTwoFactor
+    return AdminTwoFactor.objects.filter(pk=two_factor.pk, last_step__lt=step).update(last_step=step) == 1
+
+
+def claim_backup_code(two_factor, code_hash):
+    """Take a backup code off the list, unless it is not there (or another
+    request took it this instant). True when this request used it."""
+    from django.db import transaction
+    from .models import AdminTwoFactor
+    with transaction.atomic():
+        tf = AdminTwoFactor.objects.select_for_update().get(pk=two_factor.pk)
+        if code_hash not in (tf.backup_hashes or []):
+            return False
+        tf.backup_hashes = [h for h in tf.backup_hashes if h != code_hash]
+        tf.save(update_fields=['backup_hashes'])
+    two_factor.backup_hashes = tf.backup_hashes
+    return True
+
+
 def end_sessions(user, reason=''):
     """Every admin session of `user` ended now."""
     from .models import AdminSession
@@ -196,11 +222,57 @@ def cut_off(user, reason):
 
 
 def client_ip(request):
+    """The caller's address. X-Forwarded-For is written by the caller too, so
+    only the hops our own proxies added are believed: with TRUSTED_PROXY_COUNT
+    proxies in front (nginx: 1), the address the outermost one saw."""
     if not request:
         return None
-    fwd = request.META.get('HTTP_X_FORWARDED_FOR', '')
-    ip = (fwd.split(',')[0].strip() if fwd else request.META.get('REMOTE_ADDR')) or None
+    hops = getattr(settings, 'TRUSTED_PROXY_COUNT', 0)
+    ip = request.META.get('REMOTE_ADDR')
+    if hops:
+        chain = [p.strip() for p in request.META.get('HTTP_X_FORWARDED_FOR', '').split(',') if p.strip()]
+        if len(chain) >= hops:
+            ip = chain[-hops]
     return ip[:45] if ip else None
+
+
+# ── Wrong codes ─────────────────────────────────────────────────────────────
+
+def _fail_key(user):
+    return f'admin2fa:fails:{user.pk}'
+
+
+def _lock_key(user):
+    return f'admin2fa:lock:{user.pk}'
+
+
+def locked_out(user):
+    """Seconds left on a lock after too many wrong codes, else 0."""
+    from django.core.cache import cache
+    until = cache.get(_lock_key(user))
+    return max(0, int(until - time.time())) if until else 0
+
+
+def code_failed(user):
+    """Count a wrong code; True when this one locked the account."""
+    from django.core.cache import cache
+    key = _fail_key(user)
+    cache.add(key, 0, LOCK_MINUTES * 60)
+    try:
+        fails = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, LOCK_MINUTES * 60)
+        fails = 1
+    if fails >= MAX_FAILURES:
+        cache.set(_lock_key(user), time.time() + LOCK_MINUTES * 60, LOCK_MINUTES * 60)
+        cache.delete(key)
+        return True
+    return False
+
+
+def code_passed(user):
+    from django.core.cache import cache
+    cache.delete(_fail_key(user))
 
 
 # ── The gate every admin permission goes through ────────────────────────────

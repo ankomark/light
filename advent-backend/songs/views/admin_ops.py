@@ -120,15 +120,23 @@ class AdminBroadcastViewSet(viewsets.ViewSet):
         if len(title) < 3 or len(message) < 5:
             return Response({'error': 'A title and a message, please.', 'code': 'too_short'},
                             status=status.HTTP_400_BAD_REQUEST)
-        since = timezone.now() - timedelta(minutes=BROADCAST_GAP_MINUTES)
-        if Broadcast.objects.filter(created_at__gte=since).exists():
-            return Response({'error': f'One broadcast every {BROADCAST_GAP_MINUTES} minutes.', 'code': 'too_soon'},
+        from django.core.cache import cache
+        too_soon = Response({'error': f'One broadcast every {BROADCAST_GAP_MINUTES} minutes.', 'code': 'too_soon'},
                             status=status.HTTP_429_TOO_MANY_REQUESTS)
-        ids = audience_ids(audience)
-        from ..push import notify_many
-        notify_many(ids, 'notice', message, title=title)
-        b = Broadcast.objects.create(sent_by=request.user, sent_by_name=request.user.username, title=title,
-                                     message=message, audience=audience, recipients=len(ids))
+        # Two admins pressing Send at once: one goes, the other is told.
+        if not cache.add('admin-broadcast-sending', 1, 120):
+            return too_soon
+        try:
+            since = timezone.now() - timedelta(minutes=BROADCAST_GAP_MINUTES)
+            if Broadcast.objects.filter(created_at__gte=since).exists():
+                return too_soon
+            ids = audience_ids(audience)
+            b = Broadcast.objects.create(sent_by=request.user, sent_by_name=request.user.username, title=title,
+                                         message=message, audience=audience, recipients=len(ids))
+            from ..push import notify_many
+            notify_many(ids, 'notice', message, title=title)
+        finally:
+            cache.delete('admin-broadcast-sending')
         log_admin_action(request.user, 'broadcast', 'broadcast', b.id, reason=f'{audience}, {len(ids)}: {title}')
         return Response({'id': b.id, 'recipients': len(ids)}, status=status.HTTP_201_CREATED)
 
@@ -234,6 +242,7 @@ class AdminInsightsView(APIView):
 
 # ── Pulse: the dashboard's charts ───────────────────────────────────────────
 PULSE_TZ = ZoneInfo('Africa/Nairobi')
+PULSE_SECONDS = 60
 
 
 class AdminPulseView(APIView):
@@ -249,6 +258,17 @@ class AdminPulseView(APIView):
             days = max(7, min(int(request.query_params.get('days') or 14), 90))
         except (TypeError, ValueError):
             days = 14
+        # The same for every admin and fine a minute old: worked out once a
+        # minute per period, not per open.
+        from django.core.cache import cache
+        key = f'admin:pulse:{days}'
+        data = cache.get(key)
+        if data is None:
+            data = self._pulse(days)
+            cache.set(key, data, PULSE_SECONDS)
+        return Response(data)
+
+    def _pulse(self, days):
         now = timezone.now()
         start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
         dates = [(start + timedelta(days=i)).date() for i in range(days)]
@@ -285,10 +305,9 @@ class AdminPulseView(APIView):
             SocialPost.objects.filter(created_at__gte=start)
             .annotate(h=ExtractHour('created_at', tzinfo=PULSE_TZ)).values('h').annotate(c=Count('id')))}
 
-        top = (User.objects.filter(is_active=True).annotate(n=Count('followers', distinct=True))
-               .filter(n__gt=0).order_by('-n', 'id').values('id', 'username', 'first_name', 'last_name', 'n')[:5])
+        top = self._top()
 
-        return Response({
+        return {
             'days': days,
             'dates': [d.isoformat() for d in dates],
             'online_now': User.objects.filter(is_active=True, last_seen_at__gte=now - timedelta(minutes=5)).count(),
@@ -312,9 +331,20 @@ class AdminPulseView(APIView):
                 'products': Product.objects.filter(created_at__gte=start).count(),
                 'stories': Story.objects.filter(created_at__gte=start).count(),
             },
-            'top': [
-                {'id': u['id'], 'username': u['username'],
-                 'name': f"{u['first_name']} {u['last_name']}".strip() or u['username'], 'followers': u['n']}
-                for u in top
-            ],
-        })
+            'top': top,
+        }
+
+    @staticmethod
+    def _top():
+        """The five most followed: counting every account's followers is the
+        heaviest part, and it changes slowly, so it is kept ten minutes."""
+        from django.core.cache import cache
+        top = cache.get('admin:pulse:top')
+        if top is None:
+            rows = (User.objects.filter(is_active=True).annotate(n=Count('followers', distinct=True))
+                    .filter(n__gt=0).order_by('-n', 'id').values('id', 'username', 'first_name', 'last_name', 'n')[:5])
+            top = [{'id': u['id'], 'username': u['username'],
+                    'name': f"{u['first_name']} {u['last_name']}".strip() or u['username'], 'followers': u['n']}
+                   for u in rows]
+            cache.set('admin:pulse:top', top, 600)
+        return top

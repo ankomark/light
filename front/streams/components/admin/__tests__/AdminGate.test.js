@@ -51,6 +51,21 @@ test('a live admin session: straight in', async () => {
   await waitFor(() => expect(screen.getByText('inside')).toBeTruthy());
 });
 
+test('the next admin screen opens at once on the last verdict, and is still checked', async () => {
+  await session.setAdminSession('tok-live', '2099-01-01T00:00:00Z');
+  mockApi.fetchAdminSecurity.mockResolvedValue(me({ session_valid: true }));
+  const first = gate();
+  await waitFor(() => expect(first.getByText('inside')).toBeTruthy());
+  first.unmount();
+  // A tab later: in on the first frame, no waiting on the server.
+  mockApi.fetchAdminSecurity.mockRejectedValue({ status: 403 });
+  const second = gate();
+  expect(second.getByText('inside')).toBeTruthy();
+  // ... and a removed admin is still sent Home by the check behind it.
+  await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('Home'));
+  expect(session.adminToken()).toBeNull();
+});
+
 test('a code opens the admin session; a wrong one does not', async () => {
   mockApi.fetchAdminSecurity.mockResolvedValue(me());
   mockApi.verifyAdminCode

@@ -13,6 +13,7 @@ import {
 import { useAdminMe, useReasonSheet, ErrorState } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { adminMemo } from '../../utils/adminSession';
 import { notify, confirmAction } from '../../utils/adminConfirm';
 
 // Who to show: everyone, or one kind (the server filters).
@@ -30,9 +31,9 @@ const AdminUsers = () => {
   const [failed, setFailed] = useState(false);
   const latest = useRef(0);       // only the newest search's answer is shown
   const [query, setQuery] = useState('');
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState(() => adminMemo.get('users::')?.results || []);
   const [roles, setRoles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !adminMemo.get('users::'));
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
   const [selected, setSelected] = useState(null); // user in the manage sheet
@@ -43,13 +44,18 @@ const AdminUsers = () => {
 
   const load = useCallback(async (q, st = '') => {
     const mine = ++latest.current;
+    const key = `users:${q || ''}:${st || ''}`;
+    const hit = adminMemo.get(key);
+    if (hit) { setUsers(hit.results); setNextUrl(hit.next); }
     setLoading(true);
     setFailed(false);
     try {
       const res = await fetchAdminUsers(q, '', st);
       if (mine !== latest.current) return;   // a newer search has answered
-      setUsers(res?.results || (Array.isArray(res) ? res : []));
+      const rows = res?.results || (Array.isArray(res) ? res : []);
+      setUsers(rows);
       setNextUrl(res?.next || null);
+      if (!q) adminMemo.set(key, { results: rows, next: res?.next || null });
     } catch {
       if (mine !== latest.current) return;
       setFailed(true);

@@ -1,4 +1,5 @@
 from .common import *  # noqa: F401,F403  (DRF symbols, models, StandardPagination, Q, timezone, timedelta)
+from django.core.cache import cache
 from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
@@ -79,6 +80,64 @@ _CONTENT_MODELS = {
     'servicereview': ServiceReview,   # a review of a service
     'message': Message,               # a direct message (reported by someone in the chat)
 }
+
+
+# Who wrote each kind of content (a chapter: its book's author).
+_AUTHOR_FIELD = {
+    'post': 'user', 'comment': 'user', 'track': 'artist', 'trackcomment': 'user', 'group': 'creator',
+    'story': 'user', 'publication': 'author', 'chapter': 'publication__author', 'bookreview': 'user',
+    'chaptercomment': 'user', 'product': 'seller', 'productreview': 'reviewer', 'grouppost': 'user',
+    'videostudio': 'created_by', 'mediastation': 'created_by', 'servicereview': 'user', 'message': 'sender',
+}
+_CONTENT_WORD = {
+    'post': 'post', 'comment': 'comment', 'trackcomment': 'comment', 'group': 'group', 'story': 'story',
+    'publication': 'publication', 'chapter': 'chapter', 'bookreview': 'review', 'chaptercomment': 'comment',
+    'product': 'listing', 'productreview': 'review', 'grouppost': 'group message', 'videostudio': 'studio',
+    'mediastation': 'media station', 'servicereview': 'review', 'message': 'message',
+}
+
+
+def _authors(ctype, ids):
+    """{object id: author id} for content of one kind."""
+    Model, field = _CONTENT_MODELS.get(ctype), _AUTHOR_FIELD.get(ctype)
+    if not Model or not field:
+        return {}
+    return {oid: aid for oid, aid in Model.objects.filter(id__in=ids).values_list('id', field) if aid}
+
+
+def _protected_ids(actor, ctype, ids):
+    """The items written by an admin of the actor's rank or above (not the
+    actor's own): those an admin may not take down, as with accounts."""
+    from ..admin_security import outranks
+    by = _authors(ctype, ids)
+    authors = {u.pk: u for u in User.objects.filter(pk__in=set(by.values())).select_related('role')}
+    return {oid for oid, aid in by.items()
+            if aid != actor.pk and aid in authors and not outranks(actor, authors[aid])}
+
+
+def _tell_authors(ctype, ids, removed, reason='', actor=None):
+    """The authors of content taken down (with why) or brought back are told,
+    one message each. Songs are told by songs.rights."""
+    if ctype == 'track' or not ids:
+        return
+    counts = {}
+    for aid in _authors(ctype, ids).values():
+        if not actor or aid != actor.pk:
+            counts[aid] = counts.get(aid, 0) + 1
+    word = _CONTENT_WORD.get(ctype, 'item')
+    for user in User.objects.filter(pk__in=counts):
+        n = counts[user.pk]
+        what = f'Your {word}' if n == 1 else f'{n} of your {word}s'
+        if removed:
+            notify_moderation(user, 'Content removed', f'{what} {"was" if n == 1 else "were"} removed by our moderators.'
+                              + (f' Reason: {reason}' if reason else ''))
+        else:
+            notify_moderation(user, 'Content restored', f'{what} {"is" if n == 1 else "are"} back up after review.')
+
+
+def _rank_refusal():
+    return Response({'error': 'That was posted by an admin of your rank or above.', 'code': 'rank'},
+                    status=status.HTTP_403_FORBIDDEN)
 
 
 def log_admin_action(actor, action, target_type='', target_id=None, reason=''):
@@ -197,6 +256,9 @@ def reason_of(request, required=True):
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
+DASH_COUNTS_KEY = 'admin:dash-counts'
+DASH_COUNTS_SECONDS = 30
+
 class AdminDashboardView(APIView):
     permission_classes = [IsModerator]
 
@@ -215,44 +277,44 @@ class AdminDashboardView(APIView):
             .annotate(dup_count=Subquery(dup))
             .order_by('-created_at')[:10]
         ) if can('handle_reports') else []
-        recent_users = (
-            User.objects
-            .select_related('role', 'profile', 'admin_two_factor')
-            .annotate(
-                anno_posts_count=Count('social_posts', distinct=True),
-                anno_followers_count=Count('followers', distinct=True),
-            )
-            .order_by('-date_joined')[:10]
-        ) if (can('manage_users') or can('ban_users')) else []
+        # The counts are the same for every admin and a few seconds old is
+        # fine: worked out at most every DASH_COUNTS_SECONDS, not per open.
+        counts = cache.get(DASH_COUNTS_KEY)
+        if counts is None:
+            counts = {
+                'totals': {
+                    'users': User.objects.count(),
+                    'posts': SocialPost.objects.count(),
+                    'tracks': Track.objects.count(),
+                    'comments': PostComment.objects.count(),
+                },
+                'signups': {
+                    'last_24h': User.objects.filter(date_joined__gte=day_ago).count(),
+                    'last_7d': User.objects.filter(date_joined__gte=week_ago).count(),
+                },
+                'reports': {
+                    'pending': Report.objects.filter(status='pending').count(),
+                    'total': Report.objects.count(),
+                },
+                'appeals': {
+                    'pending': Appeal.objects.filter(status='pending').count(),
+                },
+                'moderation': {
+                    'suspended': User.objects.filter(is_suspended=True).count(),
+                    'banned': User.objects.filter(is_active=False).count(),
+                    'removed_posts': SocialPost.objects.filter(is_removed=True).count(),
+                },
+            }
+            cache.set(DASH_COUNTS_KEY, counts, DASH_COUNTS_SECONDS)
         return Response({
-            'totals': {
-                'users': User.objects.count(),
-                'posts': SocialPost.objects.count(),
-                'tracks': Track.objects.count(),
-                'comments': PostComment.objects.count(),
-            },
-            'signups': {
-                'last_24h': User.objects.filter(date_joined__gte=day_ago).count(),
-                'last_7d': User.objects.filter(date_joined__gte=week_ago).count(),
-            },
-            'reports': {
-                'pending': Report.objects.filter(status='pending').count(),
-                'total': Report.objects.count(),
-            },
-            'appeals': {
-                'pending': Appeal.objects.filter(status='pending').count(),
-            },
-            'moderation': {
-                'suspended': User.objects.filter(is_suspended=True).count(),
-                'banned': User.objects.filter(is_active=False).count(),
-                'removed_posts': SocialPost.objects.filter(is_removed=True).count(),
-            },
+            **counts,
             # A staff member sees the people and reports their role covers.
             'recent_reports': AdminReportSerializer(
                 recent_reports, many=True,
                 context={'request': request, 'report_targets': build_report_targets(list(recent_reports))},
             ).data,
-            'recent_users': AdminUserSerializer(recent_users, many=True, context={'request': request}).data,
+            # The newest accounts are in Users now; kept empty for older apps.
+            'recent_users': [],
             'me': {'capabilities': me.capabilities, 'is_super_admin': me.is_super_admin},
         })
 
@@ -360,6 +422,9 @@ class AdminReportViewSet(viewsets.GenericViewSet):
 
     def _set_status(self, request, pk, new_status, action_name):
         report = get_object_or_404(Report, pk=pk)
+        if report.status in ('resolved', 'dismissed'):
+            return Response({'error': f'This report was already {report.status}.', 'code': 'already_decided'},
+                            status=status.HTTP_409_CONFLICT)
         report.status = new_status
         report.resolved_by = request.user
         report.resolved_at = timezone.now()
@@ -402,7 +467,8 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         if op not in ('resolve', 'dismiss'):
             return Response({'error': "action must be 'resolve' or 'dismiss'"}, status=status.HTTP_400_BAD_REQUEST)
         new_status = 'resolved' if op == 'resolve' else 'dismissed'
-        count = Report.objects.filter(id__in=ids).update(
+        # Only the open ones: a decided report keeps who decided it.
+        count = Report.objects.filter(id__in=ids, status__in=('pending', 'reviewed')).update(
             status=new_status, resolved_by=request.user, resolved_at=timezone.now(),
         )
         log_admin_action(request.user, f'bulk_{op}_reports', 'report', None, reason=f'{count} reports')
@@ -422,9 +488,12 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         reason, refused = reason_of(request)
         if refused:
             return refused
+        if _protected_ids(request.user, report.content_type, [report.object_id]):
+            return _rank_refusal()
         if not _soft_remove(report.content_type, report.object_id, True):
             return Response({'error': 'Target not found or not removable'},
                             status=status.HTTP_400_BAD_REQUEST)
+        _tell_authors(report.content_type, [report.object_id], True, reason, request.user)
         report.status = 'resolved'
         report.resolved_by = request.user
         report.resolved_at = timezone.now()
@@ -675,6 +744,11 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         AdminTwoFactor.objects.filter(user=user).delete()
         end_sessions(user, 'two-step reset')
         log_admin_action(request.user, 'reset_two_factor', 'user', user.id)
+        from ..admin_alerts import on_two_factor_reset
+        on_two_factor_reset(request.user, user)
+        notify_moderation(user, 'Two-step sign-in reset',
+                          'Your two-step sign-in for the admin tools was reset. Set it up again the next time '
+                          'you open them. If you did not ask for this, tell a super admin at once.')
         return Response({'status': 'reset'})
 
 
@@ -736,8 +810,11 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         reason, refused = reason_of(request)
         if refused:
             return refused
+        if _protected_ids(request.user, ctype, [oid]):
+            return _rank_refusal()
         if not _soft_remove(ctype, oid, True):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        _tell_authors(ctype, [oid], True, reason, request.user)
         if ctype == 'track':
             # removal_reason: 'copyright' | 'policy' (the default).
             rights.track_removed([oid], reason=request.data.get('removal_reason', 'policy'),
@@ -749,8 +826,11 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     def restore(self, request):
         ctype = request.data.get('type')
         oid = request.data.get('id')
+        if _protected_ids(request.user, ctype, [oid]):
+            return _rank_refusal()
         if not _soft_remove(ctype, oid, False):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        _tell_authors(ctype, [oid], False, actor=request.user)
         if ctype == 'track':
             rights.track_restored([oid], actor=request.user)
         log_admin_action(request.user, f'restore_{ctype}', ctype, oid)
@@ -777,11 +857,15 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         reason, refused = reason_of(request, required=(op == 'remove'))
         if refused:
             return refused
+        # Content by an admin of the actor's rank or above is left as it is.
+        protected = _protected_ids(request.user, ctype, ids)
+        ids = [i for i in ids if i not in protected]
         # .update() fires no signals, so the profile-total adjustment is explicit
         # here as well — and must precede the flip (it selects on the old state).
         sync_removal_likes(Model, ids, op == 'remove')
         changing = list(Model.objects.filter(id__in=ids, is_removed=(op != 'remove')).values_list('id', flat=True))
-        count = Model.objects.filter(id__in=ids).update(is_removed=(op == 'remove'))
+        count = Model.objects.filter(id__in=changing).update(is_removed=(op == 'remove'))
+        _tell_authors(ctype, changing, op == 'remove', reason, request.user)
         if ctype == 'track' and changing:
             if op == 'remove':
                 rights.track_removed(changing, reason=request.data.get('removal_reason', 'policy'),
@@ -790,7 +874,7 @@ class AdminContentViewSet(viewsets.GenericViewSet):
                 rights.track_restored(changing, actor=request.user)
         log_admin_action(request.user, f'bulk_{op}_{ctype}', ctype, None,
                          reason=f'{count} items' + (f' — {reason}' if reason else ''))
-        return Response({'updated': count})
+        return Response({'updated': count, 'skipped_rank': len(protected)})
 
 
 # ── Appeals queue ────────────────────────────────────────────────────────────
@@ -814,6 +898,8 @@ class AdminAppealViewSet(viewsets.GenericViewSet):
 
     def _resolve(self, request, pk, new_status):
         appeal = get_object_or_404(Appeal, pk=pk)
+        if appeal.status != 'pending':
+            return None
         appeal.status = new_status
         appeal.reviewed_by = request.user
         appeal.reviewed_at = timezone.now()
@@ -824,6 +910,9 @@ class AdminAppealViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         appeal = self._resolve(request, pk, 'approved')
+        if appeal is None:
+            return Response({'error': 'This appeal was already decided.', 'code': 'already_decided'},
+                            status=status.HTTP_409_CONFLICT)
         if appeal.kind == Appeal.KIND_COPYRIGHT:
             # A song takedown overturned: the song comes back (the uploader is
             # told by track_restored).
@@ -846,6 +935,9 @@ class AdminAppealViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         appeal = self._resolve(request, pk, 'rejected')
+        if appeal is None:
+            return Response({'error': 'This appeal was already decided.', 'code': 'already_decided'},
+                            status=status.HTTP_409_CONFLICT)
         if appeal.kind == Appeal.KIND_COPYRIGHT:
             title = appeal.track.title if appeal.track_id else 'your song'
             notify_moderation(appeal.user, 'Dispute reviewed',
@@ -962,6 +1054,28 @@ class AdminSecurityViewSet(viewsets.ViewSet):
         from ..models import AdminTwoFactor
         return AdminTwoFactor.objects.filter(user=user).first()
 
+    @staticmethod
+    def _locked(user):
+        """A refusal while the code box is locked after too many wrong codes."""
+        from ..admin_security import locked_out
+        left = locked_out(user)
+        if not left:
+            return None
+        minutes = max(1, (left + 59) // 60)
+        return Response({'error': f'Too many wrong codes. Try again in {minutes} minute(s).',
+                         'code': 'locked', 'retry_after': left}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+    @staticmethod
+    def _wrong(user, message):
+        """A wrong code counted; the one that locks the box tells the super admins."""
+        from ..admin_security import code_failed
+        if code_failed(user):
+            log_admin_action(user, 'two_factor_locked', 'user', user.id)
+            from ..admin_alerts import on_lockout
+            on_lockout(user)
+            return AdminSecurityViewSet._locked(user)
+        return Response({'error': message, 'code': 'bad_code'}, status=status.HTTP_400_BAD_REQUEST)
+
     @action(detail=False, methods=['get'])
     def status(self, request):
         from ..admin_security import session_for, two_factor_required
@@ -999,15 +1113,17 @@ class AdminSecurityViewSet(viewsets.ViewSet):
     def confirm(self, request):
         """The first code from the app: two-step sign-in is on, the backup
         codes are given (once), and an admin session opens."""
-        from ..admin_security import decrypt, check_code, new_backup_codes, open_session
+        from ..admin_security import decrypt, check_code, claim_step, new_backup_codes, open_session
         tf = self._two_factor(request.user)
         if not tf or tf.enabled:
             return Response({'error': 'Start the set-up first.', 'code': 'no_setup'},
                             status=status.HTTP_400_BAD_REQUEST)
+        refused = self._locked(request.user)
+        if refused:
+            return refused
         step = check_code(decrypt(tf.secret_encrypted), request.data.get('code'), tf.last_step)
-        if step is None:
-            return Response({'error': 'That code is not right. Try the one showing now.', 'code': 'bad_code'},
-                            status=status.HTTP_400_BAD_REQUEST)
+        if step is None or not claim_step(tf, step):
+            return self._wrong(request.user, 'That code is not right. Try the one showing now.')
         codes, hashes = new_backup_codes()
         tf.confirmed_at = timezone.now()
         tf.last_step = step
@@ -1021,32 +1137,32 @@ class AdminSecurityViewSet(viewsets.ViewSet):
     def verify(self, request):
         """A code (or a backup code, used once): an admin session opens, or the
         one sent along is confirmed afresh (for the dangerous actions)."""
-        from ..admin_security import decrypt, check_code, digest, open_session, session_for
+        from ..admin_security import (
+            check_code, claim_backup_code, claim_step, code_passed, decrypt, digest, open_session, session_for,
+        )
         tf = self._two_factor(request.user)
         if not tf or not tf.enabled:
             return Response({'error': 'Set up two-step sign-in first.', 'code': 'not_enabled'},
                             status=status.HTTP_400_BAD_REQUEST)
+        refused = self._locked(request.user)
+        if refused:
+            return refused
         code = str(request.data.get('code') or '').strip()
         backup = str(request.data.get('backup_code') or '').strip().lower()
         ok = False
         if backup:
-            h = digest(backup)
-            if h in (tf.backup_hashes or []):
-                tf.backup_hashes = [x for x in tf.backup_hashes if x != h]
-                tf.save(update_fields=['backup_hashes'])
+            if claim_backup_code(tf, digest(backup)):
                 ok = True
                 log_admin_action(request.user, 'used_backup_code', 'user', request.user.id,
                                  reason=f'{len(tf.backup_hashes)} left')
         else:
             step = check_code(decrypt(tf.secret_encrypted), code, tf.last_step)
-            if step is not None:
-                tf.last_step = step
-                tf.save(update_fields=['last_step'])
-                ok = True
+            # claim_step: the same code sent twice at once opens one session.
+            ok = step is not None and claim_step(tf, step)
         if not ok:
             log_admin_action(request.user, 'failed_two_factor', 'user', request.user.id)
-            return Response({'error': 'That code is not right.', 'code': 'bad_code'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return self._wrong(request.user, 'That code is not right.')
+        code_passed(request.user)
         current = session_for(request)
         if current:
             current.verified_at = timezone.now()

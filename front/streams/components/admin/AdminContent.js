@@ -11,6 +11,7 @@ import { notify } from '../../utils/adminConfirm';
 import { useReasonSheet, ErrorState } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { adminMemo } from '../../utils/adminSession';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -34,8 +35,8 @@ const AdminContent = () => {
   const [type, setType] = useState('post');
   const [query, setQuery] = useState('');
   const [removedOnly, setRemovedOnly] = useState(false);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState(() => adminMemo.get('content:post:false')?.results || []);
+  const [loading, setLoading] = useState(() => !adminMemo.get('content:post:false'));
   const [busyId, setBusyId] = useState(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
@@ -49,13 +50,18 @@ const AdminContent = () => {
 
   const load = useCallback(async (tp, q, removed) => {
     const mine = ++latest.current;
+    const key = `content:${tp}:${!!removed}`;
+    const hit = !q && adminMemo.get(key);
+    if (hit) { setItems(hit.results); setNextUrl(hit.next); }
     setLoading(true);
     setFailed(false);
     try {
       const res = await fetchAdminContent(tp, q, removed ? 'true' : '');
       if (mine !== latest.current) return;
-      setItems(res?.results || (Array.isArray(res) ? res : []));
+      const rows = res?.results || (Array.isArray(res) ? res : []);
+      setItems(rows);
       setNextUrl(res?.next || null);
+      if (!q) adminMemo.set(key, { results: rows, next: res?.next || null });
     } catch {
       if (mine !== latest.current) return;
       setFailed(true);
@@ -123,9 +129,16 @@ const AdminContent = () => {
     const ids = [...selected];
     setBulkBusy(true);
     try {
-      await bulkContent(type, ids, action, why.reason, why.removalReason);
-      setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, is_removed: action === 'remove' } : it)));
+      const res = await bulkContent(type, ids, action, why.reason, why.removalReason);
       exitSelect();
+      if (res?.skipped_rank) {
+        // Some were by an admin of this admin's rank or above: the list is read
+        // again rather than guessed.
+        notify(t('adminContent.skippedTitle'), t('adminContent.skippedRank', { n: res.skipped_rank }));
+        load(type, query.trim(), removedOnly);
+      } else {
+        setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, is_removed: action === 'remove' } : it)));
+      }
     } catch (e) {
       notify(t('common.error'), e?.data?.error || t('admin.bulkFailed'));
     } finally {

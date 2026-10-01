@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminAppeals, fetchAdminByUrl, approveAppeal, rejectAppeal } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { adminMemo } from '../../utils/adminSession';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { ErrorState } from './AdminKit';
 
@@ -23,19 +24,25 @@ const AdminAppeals = () => {
   const { t } = useI18n();
   const [filter, setFilter] = useState('pending');
   const [failed, setFailed] = useState(false);
-  const [appeals, setAppeals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [appeals, setAppeals] = useState(() => adminMemo.get('appeals:pending')?.results || []);
+  const [loading, setLoading] = useState(() => !adminMemo.get('appeals:pending'));
   const [busyId, setBusyId] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
 
   const load = useCallback(async (status) => {
+    const key = `appeals:${status}`;
+    const hit = adminMemo.get(key);
+    setAppeals(hit?.results || []);
+    setNextUrl(hit?.next || null);
     setLoading(true);
     setFailed(false);
     try {
       const res = await fetchAdminAppeals(status);
-      setAppeals(res?.results || (Array.isArray(res) ? res : []));
+      const rows = res?.results || (Array.isArray(res) ? res : []);
+      setAppeals(rows);
       setNextUrl(res?.next || null);
+      adminMemo.set(key, { results: rows, next: res?.next || null });
     } catch {
       setFailed(true);   // said, not shown as "no appeals"
       setNextUrl(null);
@@ -68,8 +75,10 @@ const AdminAppeals = () => {
     try {
       await fn();
       setAppeals((prev) => prev.filter((a) => a.id !== id));
-    } catch {
-      notify(t('common.error'), t('admin.actionFailedShort'));
+    } catch (e) {
+      // Another admin decided it first: it leaves the list either way.
+      if (e?.status === 409) setAppeals((prev) => prev.filter((a) => a.id !== id));
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailedShort'));
     } finally {
       setBusyId(null);
     }
@@ -151,7 +160,7 @@ const AdminAppeals = () => {
         })}
       </View>
 
-      {loading ? (
+      {loading && !appeals.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
       ) : failed ? (
         <ErrorState onRetry={() => load(filter)} />

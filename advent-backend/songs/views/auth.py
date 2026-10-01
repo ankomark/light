@@ -247,9 +247,12 @@ def _revoke_other_sessions(user, keep_jti=None):
     """Blacklist every active refresh token for `user` except the one matching
     keep_jti (so the calling device stays signed in). Returns the count revoked."""
     from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
-    blacklisted = set(BlacklistedToken.objects.values_list('token_id', flat=True))
+    from ..admin_security import end_sessions
+    # Signed out elsewhere (a new password, "sign out everywhere"): the admin
+    # tools ask for a code again too.
+    end_sessions(user, 'signed out elsewhere')
     revoked = 0
-    for ot in OutstandingToken.objects.filter(user=user).exclude(id__in=blacklisted):
+    for ot in OutstandingToken.objects.filter(user=user, blacklistedtoken__isnull=True):
         if keep_jti and ot.jti == keep_jti:
             continue
         BlacklistedToken.objects.get_or_create(token=ot)

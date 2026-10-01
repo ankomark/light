@@ -13,6 +13,15 @@ let current = null;          // { token, expiresAt }
 let asker = null;            // (reason) => Promise<boolean>
 let asking = null;           // one question at a time, however many requests wait
 
+// What the admin area last showed (the gate's verdict, each list's first
+// page), so a tab opens at once on the last copy while the server is asked
+// again. In memory only, never on disk, and gone when the admin session ends.
+const memo = new Map();
+export const adminMemo = {
+  get: (key) => memo.get(key),
+  set: (key, value) => { memo.set(key, value); },
+};
+
 export const adminToken = () => {
   if (!current) return null;
   if (current.expiresAt && new Date(current.expiresAt).getTime() <= Date.now()) {
@@ -24,6 +33,7 @@ export const adminToken = () => {
 
 export const setAdminSession = async (token, expiresAt) => {
   current = token ? { token, expiresAt } : null;
+  if (!current) memo.clear();
   try {
     if (current) await SecureStore.setItemAsync(KEY, JSON.stringify(current));
     else await SecureStore.deleteItemAsync(KEY);

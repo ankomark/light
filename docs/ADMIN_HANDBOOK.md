@@ -13,6 +13,8 @@ For everyone who runs the app: super admins, moderators and staff with a role.
 4. **Dangerous actions** (giving or taking roles, banning, bulk changes, broadcasts, maintenance and switches) ask for a **fresh code** if you have not entered one in the last 10 minutes.
 5. When you are done, open **More** and tap **Sign out of admin**.
 
+Five wrong codes in a row lock the code box for 15 minutes, and the super admins are told.
+
 Lost your phone? Ask a super admin to **Reset two-step sign-in** on your account (Users → your account), then set it up again.
 
 ## 2. Ranks and roles
@@ -75,7 +77,7 @@ Without the analytics power it shows the counts. Either way, **Needs you now** l
 - **History**: reports against them, reports they made, every admin action on them, devices signed in.
 Actions do not appear on admins of your rank or above.
 
-**Content.** Browse any kind of content, search, show taken-down items, take down or restore (singly or in bulk). A song can be taken down for **copyright** or for **breaking the rules**; the uploader is told which and may dispute it (Appeals).
+**Content.** Content posted by an admin of your rank or above cannot be taken down by you (in bulk it is skipped). The author is told when something is taken down, with the reason, and when it comes back. Browse any kind of content, search, show taken-down items, take down or restore (singly or in bulk). A song can be taken down for **copyright** or for **breaking the rules**; the uploader is told which and may dispute it (Appeals).
 
 **Appeals.** Approving a suspension appeal lifts the suspension; approving a song dispute restores the song. Either way the person is told.
 
@@ -101,7 +103,9 @@ Each entry is **chained** to the one before it. **Check the trail** confirms not
 Super admins get a push (at most once an hour for the same thing) when:
 - one item gets **5 or more reports within an hour**;
 - one admin **bans 10 or more accounts within an hour**;
-- an admin opens the admin tools **from a new device or place**.
+- an admin opens the admin tools **from a new device or place**;
+- an admin's code box is **locked after too many wrong codes**;
+- a super admin **resets someone's two-step sign-in** (that admin is told as well).
 
 ## 8. Good practice
 
@@ -118,3 +122,4 @@ Super admins get a push (at most once an hour for the same thing) when:
 - Leave `DJANGO_ADMIN_ENABLED` off in production (Django's own `/admin/` site signs in with a password alone); when on, only superusers get in.
 - Use a shared cache (`REDIS_URL`) so maintenance mode and admin-code limits apply across all server workers at once.
 - `ADMIN_2FA_REQUIRED` must stay `True` in production.
+- Set `TRUSTED_PROXY_COUNT` to the number of proxies in front of the server (nginx alone: `1`). The audit log's IP addresses and the new-device alert believe only the addresses those proxies add.

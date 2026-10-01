@@ -39,7 +39,7 @@ export default function AdminCodeHost() {
       done(true);
     } catch (e) {
       const code = e?.data?.code || e?.response?.data?.code;
-      setError(e?.status === 429 ? t('admin.gate.tooMany')
+      setError(e?.status === 429 ? errorOf(e, t('admin.gate.tooMany'))
         : code === 'not_enabled' ? t('admin.gate.setupFirst')
           : errorOf(e, t('admin.gate.wrong')));
     } finally {

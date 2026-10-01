@@ -37,9 +37,12 @@ class FlatListTests(APITestCase):
         return len(ctx)
 
     def assert_flat(self, url, params=None):
+        # Each measured cold: the dashboard's shared counts are cached.
         self.grow(5)
+        cache.clear()
         few = self.queries(url, params)
         self.grow(20)
+        cache.clear()
         many = self.queries(url, params)
         self.assertEqual(few, many, f'{url}: {few} queries for 5 rows, {many} for 25')
 
@@ -63,3 +66,10 @@ class FlatListTests(APITestCase):
 
     def test_dashboard(self):
         self.assert_flat('/api/admin/dashboard/')
+
+    def test_dashboard_counts_are_shared_a_moment(self):
+        self.grow(5)
+        cache.clear()
+        cold = self.queries('/api/admin/dashboard/')
+        warm = self.queries('/api/admin/dashboard/')
+        self.assertLess(warm, cold)

@@ -12,6 +12,7 @@ import {
 } from '../../services/api';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
+import { adminMemo } from '../../utils/adminSession';
 import { notify } from '../../utils/adminConfirm';
 import { useReasonSheet, ErrorState } from './AdminKit';
 
@@ -58,8 +59,8 @@ const TargetPreview = ({ target }) => {
 const AdminReports = () => {
   const { t } = useI18n();
   const [filter, setFilter] = useState('pending');
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [reports, setReports] = useState(() => adminMemo.get('reports:pending:true')?.results || []);
+  const [loading, setLoading] = useState(() => !adminMemo.get('reports:pending:true'));
   const [busyId, setBusyId] = useState(null);
   const [noteFor, setNoteFor] = useState(null);   // report being annotated
   const [noteText, setNoteText] = useState('');
@@ -73,12 +74,18 @@ const AdminReports = () => {
   const [priority, setPriority] = useState(true);    // the most reported first
 
   const load = useCallback(async (status, byPriority = true) => {
+    const key = `reports:${status}:${byPriority}`;
+    const hit = adminMemo.get(key);
+    setReports(hit?.results || []);
+    setNextUrl(hit?.next || null);
     setLoading(true);
     setFailed(false);
     try {
       const res = await fetchAdminReports(status, byPriority ? 'priority' : '');
-      setReports(res?.results || (Array.isArray(res) ? res : []));
+      const rows = res?.results || (Array.isArray(res) ? res : []);
+      setReports(rows);
       setNextUrl(res?.next || null);
+      adminMemo.set(key, { results: rows, next: res?.next || null });
     } catch {
       // Said, not shown as an empty queue.
       setFailed(true);
@@ -126,8 +133,8 @@ const AdminReports = () => {
     try {
       const updated = await fn();
       setReports((prev) => prev.map((r) => (r.id === id ? updated : r)));
-    } catch {
-      notify(t('common.error'), t('admin.actionFailed'));
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailed'));
     } finally {
       setBusyId(null);
     }
@@ -276,7 +283,7 @@ const AdminReports = () => {
         })}
       </View>
 
-      {loading ? (
+      {loading && !reports.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
       ) : failed ? (
         <ErrorState onRetry={() => load(filter, priority)} />

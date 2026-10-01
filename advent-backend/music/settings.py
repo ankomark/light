@@ -505,6 +505,10 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
 
+# Proxies in front of the server that add X-Forwarded-For (nginx: 1). The
+# audit log's IP addresses believe only those hops (songs/admin_security.py).
+TRUSTED_PROXY_COUNT = int(os.environ.get('TRUSTED_PROXY_COUNT', '0') or 0)
+
 # The window the daily quiz reminder judges "morning" in. The server runs on
 # UTC but the audience does not, so the cron fires at 04:00 UTC for 07:00 here.
 QUIZ_REMINDER_TZ = os.getenv('QUIZ_REMINDER_TZ', 'Africa/Nairobi')

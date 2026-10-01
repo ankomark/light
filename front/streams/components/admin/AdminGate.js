@@ -15,8 +15,16 @@ import {
   fetchAdminSecurity, startAdminTwoFactor, confirmAdminTwoFactor, verifyAdminCode,
 } from '../../services/api';
 import {
-  restoreAdminSession, setAdminSession, clearAdminSession,
+  restoreAdminSession, setAdminSession, clearAdminSession, adminToken, adminMemo,
 } from '../../utils/adminSession';
+
+// How long the gate's last "yes" lets the next admin screen open at once (the
+// server is still asked, behind it, and every request is checked anyway).
+const VERDICT_MS = 5 * 60 * 1000;
+const freshVerdict = () => {
+  const v = adminMemo.get('gate');
+  return v && Date.now() - v.at < VERDICT_MS && adminToken() ? v.me : null;
+};
 import { clipboard } from '../../utils/optionalNative';
 import { AdminMe } from './AdminKit';
 
@@ -69,22 +77,26 @@ export const CodeBox = ({ t, onSubmit, busy, error, testID = 'admin-code' }) => 
 
 export default function AdminGate({ navigation, children }) {
   const { t } = useI18n();
-  const [phase, setPhase] = useState('checking');   // checking | setup | code | open | error
+  // Moving between admin tabs: open on the last verdict, no spinner.
+  const [phase, setPhase] = useState(() => (freshVerdict() ? 'open' : 'checking'));   // checking | setup | code | open | error
   const [setup, setSetup] = useState(null);         // { secret, otpauth_url }
   const [backupCodes, setBackupCodes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [me, setMe] = useState(null);               // the server's word on who this is as an admin
+  const [me, setMe] = useState(freshVerdict);       // the server's word on who this is as an admin
   const live = useRef(true);
 
   const check = useCallback(async () => {
-    setPhase('checking');
+    // Already open on the last verdict: asked again quietly behind it.
+    if (!freshVerdict()) setPhase('checking');
     setError('');
     await restoreAdminSession();
     try {
       const status = await fetchAdminSecurity();
       if (!live.current) return;
       setMe(status);
+      const open = !status.two_factor_required || (status.two_factor_enabled && status.session_valid);
+      if (open) adminMemo.set('gate', { me: status, at: Date.now() });
       if (!status.two_factor_required) setPhase('open');
       else if (!status.two_factor_enabled) setPhase('setup');
       else setPhase(status.session_valid ? 'open' : 'code');
@@ -115,7 +127,7 @@ export default function AdminGate({ navigation, children }) {
       after?.(true);
       return true;
     } catch (e) {
-      setError(e?.status === 429 ? t('admin.gate.tooMany') : errorOf(e, t('admin.gate.wrong')));
+      setError(e?.status === 429 ? errorOf(e, t('admin.gate.tooMany')) : errorOf(e, t('admin.gate.wrong')));
       return false;
     } finally {
       setBusy(false);
