@@ -15,18 +15,18 @@ import { useI18n } from '../../context/I18nContext';
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
 const TYPES = [
-  { key: 'post', label: 'Posts' },
-  { key: 'track', label: 'Tracks' },
-  { key: 'comment', label: 'Post comments' },
-  { key: 'trackcomment', label: 'Track comments' },
-  { key: 'group', label: 'Groups' },
-  { key: 'story', label: 'Stories' },
-  { key: 'publication', label: 'Publications' },
-  { key: 'product', label: 'Products' },
-  { key: 'productreview', label: 'Product reviews' },
-  { key: 'grouppost', label: 'Group messages' },
-  { key: 'videostudio', label: 'Studios' },
-  { key: 'mediastation', label: 'Media stations' },
+  { key: 'post', label: 'adminContent.type.post' },
+  { key: 'track', label: 'adminContent.type.track' },
+  { key: 'comment', label: 'adminContent.type.comment' },
+  { key: 'trackcomment', label: 'adminContent.type.trackcomment' },
+  { key: 'group', label: 'adminContent.type.group' },
+  { key: 'story', label: 'adminContent.type.story' },
+  { key: 'publication', label: 'adminContent.type.publication' },
+  { key: 'product', label: 'adminContent.type.product' },
+  { key: 'productreview', label: 'adminContent.type.productreview' },
+  { key: 'grouppost', label: 'adminContent.type.grouppost' },
+  { key: 'videostudio', label: 'adminContent.type.videostudio' },
+  { key: 'mediastation', label: 'adminContent.type.mediastation' },
 ];
 
 const AdminContent = () => {
@@ -109,7 +109,7 @@ const AdminContent = () => {
     debounceRef.current = setTimeout(() => load(type, text.trim(), removedOnly), 400);
   };
 
-  const switchType = (t) => { setType(t); setQuery(''); exitSelect(); load(t, '', removedOnly); };
+  const switchType = (next) => { setType(next); setQuery(''); exitSelect(); load(next, '', removedOnly); };
   const toggleRemoved = () => { const v = !removedOnly; setRemovedOnly(v); exitSelect(); load(type, query.trim(), v); };
 
   const toggleSelect = (id) => setSelected((prev) => {
@@ -197,7 +197,7 @@ const AdminContent = () => {
             <Ionicons name={item.is_removed ? 'refresh-outline' : 'trash-outline'} size={16}
               color={item.is_removed ? '#0A1628' : colors.white} />
             <Text style={item.is_removed ? styles.btnTextDark : styles.btnTextLight}>
-              {item.is_removed ? 'Restore' : 'Remove'}
+              {item.is_removed ? t('adminContent.restore') : t('common.remove')}
             </Text>
           </TouchableOpacity>
         ))}
@@ -210,7 +210,7 @@ const AdminContent = () => {
       <View style={styles.titleRow}>
         <Text style={styles.title}>{t('admin.content')}</Text>
         <TouchableOpacity onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
-          <Text style={styles.selectToggle}>{selectMode ? 'Cancel' : 'Select'}</Text>
+          <Text style={styles.selectToggle}>{selectMode ? t('common.cancel') : t('adminKit.select')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -227,7 +227,7 @@ const AdminContent = () => {
           return (
             <TouchableOpacity key={tp.key} style={[styles.pill, active && styles.pillActive]}
               onPress={() => switchType(tp.key)} activeOpacity={0.85}>
-              <Text style={[styles.pillText, active && styles.pillTextActive]}>{tp.label}</Text>
+              <Text style={[styles.pillText, active && styles.pillTextActive]}>{t(tp.label)}</Text>
             </TouchableOpacity>
           );
         })}
@@ -278,7 +278,7 @@ const AdminContent = () => {
       {/* Bulk action bar */}
       {selectMode && selected.size > 0 && (
         <View style={styles.bulkBar}>
-          <Text style={styles.bulkCount}>{selected.size} selected</Text>
+          <Text style={styles.bulkCount}>{t('adminKit.selected', { n: selected.size })}</Text>
           {bulkBusy ? (
             <ActivityIndicator color={colors.accent} />
           ) : (

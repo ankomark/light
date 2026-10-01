@@ -2,12 +2,12 @@
 // an admin (never the profile kept on the phone): not an admin (or no longer
 // one) is sent away; an admin without two-step sign-in sets it up here (an
 // authenticator app, a first code, ten backup codes); an admin with it enters
-// a code to open a short admin session. While inside, when the server wants a
-// code (the session ended, or a dangerous action wants a fresh one), the same
-// code box opens over the screen, and the action goes on once it is given.
+// a code to open a short admin session. A code the server asks for later (the
+// session ended, or a dangerous action wants a fresh one) is asked by
+// AdminCodeHost, on any screen, not only in here.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Linking, Modal, ScrollView,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Linking, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -15,7 +15,7 @@ import {
   fetchAdminSecurity, startAdminTwoFactor, confirmAdminTwoFactor, verifyAdminCode,
 } from '../../services/api';
 import {
-  restoreAdminSession, setAdminSession, clearAdminSession, setCodeAsker,
+  restoreAdminSession, setAdminSession, clearAdminSession,
 } from '../../utils/adminSession';
 import { clipboard } from '../../utils/optionalNative';
 import { AdminMe } from './AdminKit';
@@ -28,7 +28,7 @@ const C = {
 const errorOf = (e, fallback) => e?.data?.error || e?.response?.data?.error || fallback;
 
 /** Six digits, or a backup code (xxxx-xxxx); gives back { code } or { backupCode }. */
-const CodeBox = ({ t, onSubmit, busy, error, testID = 'admin-code' }) => {
+export const CodeBox = ({ t, onSubmit, busy, error, testID = 'admin-code' }) => {
   const [value, setValue] = useState('');
   const [backup, setBackup] = useState(false);
   const submit = () => onSubmit(backup ? { backupCode: value.trim() } : { code: value.replace(/\D/g, '') });
@@ -74,7 +74,6 @@ export default function AdminGate({ navigation, children }) {
   const [backupCodes, setBackupCodes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [ask, setAsk] = useState(null);             // { reason, resolve } while the code box is over a screen
   const [me, setMe] = useState(null);               // the server's word on who this is as an admin
   const live = useRef(true);
 
@@ -104,9 +103,7 @@ export default function AdminGate({ navigation, children }) {
   useEffect(() => {
     live.current = true;
     check();
-    // While inside, the server can ask for a code: the code box opens.
-    setCodeAsker((reason) => new Promise((resolve) => setAsk({ reason, resolve })));
-    return () => { live.current = false; setCodeAsker(null); };
+    return () => { live.current = false; };
   }, [check]);
 
   const verify = async (entry, after) => {
@@ -153,30 +150,9 @@ export default function AdminGate({ navigation, children }) {
 
   const copy = (text) => clipboard()?.setStringAsync?.(text).catch(() => {});
 
-  // The code box over a screen, when the server wants a code.
-  const askBox = (
-    <Modal visible={!!ask} transparent animationType="fade" onRequestClose={() => { ask?.resolve(false); setAsk(null); }}>
-      <View style={styles.backdrop}>
-        <View style={styles.card} testID="admin-reauth">
-          <Ionicons name="shield-checkmark-outline" size={30} color={C.gold} />
-          <Text style={styles.title}>
-            {ask?.reason === 'reauth_required' ? t('admin.gate.confirmTitle') : t('admin.gate.codeTitle')}
-          </Text>
-          <Text style={styles.body}>
-            {ask?.reason === 'reauth_required' ? t('admin.gate.confirmBody') : t('admin.gate.codeBody')}
-          </Text>
-          <CodeBox t={t} busy={busy} error={error} testID="admin-reauth-code"
-                   onSubmit={(entry) => verify(entry, (ok) => { ask?.resolve(ok); setAsk(null); })} />
-          <TouchableOpacity onPress={() => { ask?.resolve(false); setAsk(null); setError(''); }} style={styles.linkBtn}>
-            <Text style={styles.muted}>{t('common.cancel')}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
 
   if (phase === 'open') {
-    return <AdminMe.Provider value={me}>{children}{askBox}</AdminMe.Provider>;
+    return <AdminMe.Provider value={me}>{children}</AdminMe.Provider>;
   }
 
   return (

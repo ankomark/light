@@ -14,9 +14,9 @@ import { ErrorState } from './AdminKit';
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
 const FILTERS = [
-  { key: 'pending', label: 'Pending' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'rejected', label: 'Rejected' },
+  { key: 'pending', label: 'adminAppeals.filter.pending' },
+  { key: 'approved', label: 'adminAppeals.filter.approved' },
+  { key: 'rejected', label: 'adminAppeals.filter.rejected' },
 ];
 
 const AdminAppeals = () => {
@@ -145,7 +145,7 @@ const AdminAppeals = () => {
           return (
             <TouchableOpacity key={f.key} style={[styles.pill, active && styles.pillActive]}
               onPress={() => setFilter(f.key)} activeOpacity={0.85}>
-              <Text style={[styles.pillText, active && styles.pillTextActive]}>{f.label}</Text>
+              <Text style={[styles.pillText, active && styles.pillTextActive]}>{t(f.label)}</Text>
             </TouchableOpacity>
           );
         })}

@@ -121,6 +121,7 @@ import AppealScreen from './components/admin/AppealScreen';
 import AdminRoles from './components/admin/AdminRoles';
 import AdminWallpapers from './components/admin/AdminWallpapers';
 import AdminGate from './components/admin/AdminGate';
+import AdminCodeHost from './components/admin/AdminCodeHost';
 import AdminQuizBank from './components/admin/AdminQuizBank';
 import AdminPuzzleThemes from './components/admin/AdminPuzzleThemes';
 import AdminVerify from './components/admin/AdminVerify';
@@ -508,6 +509,8 @@ const App = () => {
             <MiniPlayer />
             {/* Background uploads: progress pill on every screen. */}
             <UploadStatus />
+            {/* An admin's authenticator code, asked on whatever screen needs it. */}
+            <AdminCodeHost />
         </NavigationContainer>
       </MaintenanceGate>
       </PlayerProvider>

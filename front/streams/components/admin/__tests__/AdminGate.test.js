@@ -98,11 +98,10 @@ test('first time: set up the authenticator, then the backup codes, then in', asy
   expect(screen.getByText('inside')).toBeTruthy();
 });
 
-test('inside, a fresh code asked for by the server opens over the screen', async () => {
-  mockApi.fetchAdminSecurity.mockResolvedValue(me({ session_valid: true }));
-  mockApi.verifyAdminCode.mockResolvedValue({ admin_session: null, refreshed: true });
-  const screen = gate();
-  await waitFor(() => expect(screen.getByText('inside')).toBeTruthy());
+test('a code asked for by the server opens over any screen (AdminCodeHost)', async () => {
+  const AdminCodeHost = require('../AdminCodeHost').default;
+  mockApi.verifyAdminCode.mockResolvedValue({ admin_session: 'tok-9', expires_at: '2099-01-01T00:00:00Z' });
+  const screen = render(<><Text>notice board</Text><AdminCodeHost /></>);
   let answer;
   await act(async () => { answer = session.askForCode('reauth_required'); });
   expect(screen.getByTestId('admin-reauth')).toBeTruthy();
@@ -110,7 +109,17 @@ test('inside, a fresh code asked for by the server opens over the screen', async
   fireEvent.changeText(screen.getByTestId('admin-reauth-code'), '222222');
   await act(async () => { fireEvent.press(screen.getByTestId('admin-reauth-code-submit')); });
   await expect(answer).resolves.toBe(true);
+  expect(session.adminToken()).toBe('tok-9');
   expect(screen.queryByTestId('admin-reauth')).toBeNull();
+});
+
+test('cancelled, the action is not sent again', async () => {
+  const AdminCodeHost = require('../AdminCodeHost').default;
+  const screen = render(<AdminCodeHost />);
+  let answer;
+  await act(async () => { answer = session.askForCode('admin_session_required'); });
+  await act(async () => { fireEvent.press(screen.getByTestId('admin-reauth-cancel')); });
+  await expect(answer).resolves.toBe(false);
 });
 
 test('the session kept on the phone ends when it expires', async () => {

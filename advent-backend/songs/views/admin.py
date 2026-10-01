@@ -206,14 +206,18 @@ class AdminDashboardView(APIView):
         week_ago = now - timedelta(days=7)
         me = request.user
         can = me.has_capability
+        # The "N people reported this" count, in the same query (not one each).
+        dup = (Report.objects.filter(content_type=OuterRef('content_type'), object_id=OuterRef('object_id'))
+               .order_by().values('content_type', 'object_id').annotate(c=Count('*')).values('c')[:1])
         recent_reports = (
             Report.objects
             .select_related('reporter__profile', 'assigned_to__profile', 'resolved_by__profile')
+            .annotate(dup_count=Subquery(dup))
             .order_by('-created_at')[:10]
         ) if can('handle_reports') else []
         recent_users = (
             User.objects
-            .select_related('role', 'profile')
+            .select_related('role', 'profile', 'admin_two_factor')
             .annotate(
                 anno_posts_count=Count('social_posts', distinct=True),
                 anno_followers_count=Count('followers', distinct=True),
@@ -707,7 +711,8 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         if not cfg:
             return Response({'error': f'type must be one of {list(self._CONFIG)}'}, status=status.HTTP_400_BAD_REQUEST)
         rel, ser_cls, search_fields = cfg
-        qs = _CONTENT_MODELS[ctype].objects.select_related(rel).order_by('-created_at')
+        # rel__profile: the author's picture, read with the row (not one query each).
+        qs = _CONTENT_MODELS[ctype].objects.select_related(rel, f'{rel}__profile').order_by('-created_at')
 
         removed = request.query_params.get('removed')
         if removed == 'true':
@@ -863,7 +868,8 @@ class AdminLogViewSet(viewsets.GenericViewSet):
     serializer_class = AdminActionLogSerializer
 
     def get_queryset(self):
-        qs = AdminActionLog.objects.select_related('actor').order_by('-created_at')
+        # actor__profile: the actor's picture, read with the row (not one query each).
+        qs = AdminActionLog.objects.select_related('actor__profile').order_by('-created_at')
         p = self.request.query_params
         if p.get('action'):
             qs = qs.filter(action=p['action'])

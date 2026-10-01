@@ -18,10 +18,10 @@ import { useReasonSheet, ErrorState } from './AdminKit';
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
 const FILTERS = [
-  { key: 'pending', label: 'Pending' },
-  { key: 'reviewed', label: 'Reviewed' },
-  { key: 'resolved', label: 'Resolved' },
-  { key: 'dismissed', label: 'Dismissed' },
+  { key: 'pending', label: 'adminReports.filter.pending' },
+  { key: 'reviewed', label: 'adminReports.filter.reviewed' },
+  { key: 'resolved', label: 'adminReports.filter.resolved' },
+  { key: 'dismissed', label: 'adminReports.filter.dismissed' },
 ];
 
 // Whether a report's content can be taken down comes from the server
@@ -208,7 +208,7 @@ const AdminReports = () => {
         {item.description ? <Text style={styles.desc}>“{item.description}”</Text> : null}
 
         <View style={styles.subRow}>
-          <Text style={styles.reporter}>Reported by @{item.reporter?.username || 'unknown'}</Text>
+          <Text style={styles.reporter}>{t('adminReports.reportedBy', { name: item.reporter?.username || '?' })}</Text>
           {item.assigned_to && (
             <Text style={styles.assigned}>· assigned @{item.assigned_to.username}</Text>
           )}
@@ -239,11 +239,11 @@ const AdminReports = () => {
             <View style={styles.actionsSecondary}>
               <TouchableOpacity style={styles.linkBtn} onPress={() => update(item.id, () => assignReport(item.id))}>
                 <Ionicons name="person-outline" size={14} color={colors.accent} />
-                <Text style={styles.linkText}>{item.assigned_to ? 'Unassign' : 'Assign to me'}</Text>
+                <Text style={styles.linkText}>{item.assigned_to ? t('adminReports.unassign') : t('adminReports.assignMe')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.linkBtn} onPress={() => openNote(item)}>
                 <Ionicons name="create-outline" size={14} color={colors.accent} />
-                <Text style={styles.linkText}>{item.moderator_notes ? 'Edit note' : 'Add note'}</Text>
+                <Text style={styles.linkText}>{item.moderator_notes ? t('adminReports.editNote') : t('adminReports.addNote')}</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -257,7 +257,7 @@ const AdminReports = () => {
       <View style={styles.titleRow}>
         <Text style={styles.title}>{t('admin.reports')}</Text>
         <TouchableOpacity onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
-          <Text style={styles.selectToggle}>{selectMode ? 'Cancel' : 'Select'}</Text>
+          <Text style={styles.selectToggle}>{selectMode ? t('common.cancel') : t('adminKit.select')}</Text>
         </TouchableOpacity>
       </View>
       <TouchableOpacity style={styles.orderToggle} onPress={() => setPriority((v) => !v)} testID="reports-priority">
@@ -270,7 +270,7 @@ const AdminReports = () => {
           return (
             <TouchableOpacity key={f.key} style={[styles.pill, active && styles.pillActive]}
               onPress={() => { exitSelect(); setFilter(f.key); }} activeOpacity={0.85}>
-              <Text style={[styles.pillText, active && styles.pillTextActive]}>{f.label}</Text>
+              <Text style={[styles.pillText, active && styles.pillTextActive]}>{t(f.label)}</Text>
             </TouchableOpacity>
           );
         })}
@@ -295,7 +295,7 @@ const AdminReports = () => {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="shield-checkmark-outline" size={48} color={colors.textSecondary} />
-              <Text style={styles.emptyText}>No {filter} reports</Text>
+              <Text style={styles.emptyText}>{t(`adminReports.none.${filter}`)}</Text>
             </View>
           }
         />
@@ -306,7 +306,7 @@ const AdminReports = () => {
       {/* Bulk action bar */}
       {selectMode && selected.size > 0 && (
         <View style={styles.bulkBar}>
-          <Text style={styles.bulkCount}>{selected.size} selected</Text>
+          <Text style={styles.bulkCount}>{t('adminKit.selected', { n: selected.size })}</Text>
           {bulkBusy ? (
             <ActivityIndicator color={colors.accent} />
           ) : (

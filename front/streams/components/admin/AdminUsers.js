@@ -254,11 +254,11 @@ const AdminUsers = () => {
                     <Text style={styles.sheetName}>@{selected.username}</Text>
                     <Text style={styles.sheetEmail}>{selected.email}</Text>
                     <Text style={styles.sheetMeta}>
-                      {selected.strikes || 0} strike{selected.strikes === 1 ? '' : 's'}
+                      {t('adminUsers.strikes', { n: selected.strikes || 0 })}
                       {selected.is_currently_suspended
                         ? selected.suspended_until
-                          ? ` · suspended until ${new Date(selected.suspended_until).toLocaleDateString()}`
-                          : ' · suspended (indefinite)'
+                          ? ` · ${t('adminUsers.suspendedUntil', { date: new Date(selected.suspended_until).toLocaleDateString() })}`
+                          : ` · ${t('adminUsers.suspendedIndefinitely')}`
                         : ''}
                     </Text>
                   </View>
@@ -355,13 +355,13 @@ const AdminUsers = () => {
       <Modal visible={!!suspendFor} transparent animationType="fade" onRequestClose={() => setSuspendFor(null)}>
         <TouchableOpacity style={styles.durBackdrop} activeOpacity={1} onPress={() => setSuspendFor(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.durCard}>
-            <Text style={styles.durTitle}>Suspend @{suspendFor?.username}</Text>
+            <Text style={styles.durTitle}>{t('adminUsers.suspendTitle', { name: suspendFor?.username })}</Text>
             <Text style={styles.durSub}>{t('admin.suspensionLength')}</Text>
             {[
-              { label: '1 day', days: 1 },
-              { label: '7 days', days: 7 },
-              { label: '30 days', days: 30 },
-              { label: 'Indefinite', days: 0 },
+              { label: t('adminUsers.days', { n: 1 }), days: 1 },
+              { label: t('adminUsers.days', { n: 7 }), days: 7 },
+              { label: t('adminUsers.days', { n: 30 }), days: 30 },
+              { label: t('adminUsers.indefinite'), days: 0 },
             ].map((opt) => (
               <TouchableOpacity key={opt.label} style={styles.durBtn} onPress={() => doSuspend(opt.days)} activeOpacity={0.85}>
                 <Text style={styles.durBtnText}>{opt.label}</Text>

@@ -144,10 +144,10 @@ test('content: a song taken down for copyright says so', async () => {
   mockApi.removeContent.mockResolvedValue({});
   const screen = asAdmin(<AdminContent />);
   await waitFor(() => expect(screen.getByText('Song')).toBeTruthy());
-  await act(async () => { fireEvent.press(screen.getByText('Tracks')); });
+  await act(async () => { fireEvent.press(screen.getByText('adminContent.type.track')); });
   await waitFor(() => expect(mockApi.fetchAdminContent).toHaveBeenLastCalledWith('track', '', ''));
-  await waitFor(() => expect(screen.getByText('Remove')).toBeTruthy());
-  fireEvent.press(screen.getByText('Remove'));
+  await waitFor(() => expect(screen.getByText('common.remove')).toBeTruthy());
+  fireEvent.press(screen.getByText('common.remove'));
   await waitFor(() => expect(screen.getByTestId('reason-extra-copyright')).toBeTruthy());
   fireEvent.press(screen.getByTestId('reason-extra-copyright'));
   await pickReason(screen, 'copyright');

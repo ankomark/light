@@ -51,14 +51,20 @@ class MediaStationViewSet(viewsets.ModelViewSet):
 
 
 def can_manage_notices(user):
-    """Who posts notices and answers notes: staff, or anyone whose role grants
-    `manage_notices` (super admins hold every capability)."""
-    return bool(user and user.is_authenticated and user.has_capability('manage_notices'))
+    """Who posts notices and answers notes: anyone whose role grants
+    `manage_notices` (super admins hold every capability), in good standing
+    (a suspended admin sees the board as a member does)."""
+    from ..admin_security import in_good_standing
+    return bool(user and user.is_authenticated and user.has_capability('manage_notices')
+                and in_good_standing(user))
 
 
 class CanManageNotices(permissions.BasePermission):
+    """Posting notices and reading people's notes to the admins: an admin
+    power like any other, so through admin_gate (standing, the power read
+    fresh, a two-step admin session)."""
     def has_permission(self, request, view):
-        return can_manage_notices(request.user)
+        return admin_gate(request, lambda u: u.has_capability('manage_notices'))
 
 
 def live_notices_q(now=None):
