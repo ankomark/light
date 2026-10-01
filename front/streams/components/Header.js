@@ -23,6 +23,7 @@ const NavItem = ({ set: Set = Ionicons, active, inactive, label, isActive, onPre
   <TouchableOpacity
     style={styles.navItem}
     onPress={onPress}
+    testID={`nav-${inactive}`}
     activeOpacity={0.7}
     accessibilityRole="button"
     accessibilityLabel={label}
@@ -140,9 +141,11 @@ const Header = ({ transparentBg = false }) => {
             active="musical-notes" inactive="musical-notes-outline" label="Music"
             isActive={isOn('Music')} onPress={() => navigation.navigate('Music')}
           />
+          {/* The marketplace, one tap from anywhere. (Explore lives on the
+              home feed now, beside For You.) */}
           <NavItem
-            active="search" inactive="search-outline" label="Explore"
-            isActive={isOn('Explore')} onPress={() => navigation.navigate('Explore')}
+            active="storefront" inactive="storefront-outline" label={t('header.market')}
+            isActive={isOn('MarketplaceHome')} onPress={() => navigation.navigate('MarketplaceHome')}
           />
           <NavItem
             active="book" inactive="book-outline" label="Bible"

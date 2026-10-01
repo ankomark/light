@@ -1448,6 +1448,20 @@ const SocialFeed = ({ showBackground = true }) => {
                 For You
               </Text>
             </TouchableOpacity>
+            {/* Explore: people, posts and places to discover. It was in the
+                header's nav row; it sits with the feeds now. */}
+            <TouchableOpacity
+              style={[styles.tab, styles.exploreTab]}
+              onPress={() => navigation.navigate('Explore')}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              testID="feed-explore"
+            >
+              <MaterialIcons name="explore" size={15} color={colors.textSecondary} />
+              <Text style={styles.tabText} maxFontSizeMultiplier={FONT_SCALE.chrome}>
+                {t('feed.explore')}
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
       </GlassView>
@@ -1578,6 +1592,7 @@ const styles = StyleSheet.create({
   tabActive: {
     backgroundColor: colors.primary,
   },
+  exploreTab: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   tabText: {
     ...typography.label,
     color: colors.textSecondary,

@@ -706,6 +706,7 @@ export const STRINGS = {
     'common.blocked': 'Blocked',
 
     'header.alerts': 'Alerts',
+    'header.market': 'Market',
 
     'comments.title': 'Comments',
     'comments.empty': 'No comments yet',
@@ -751,6 +752,7 @@ export const STRINGS = {
     'feed.followingQuiet': 'Your following feed is quiet',
     'feed.followingQuietSub': "Follow people, or see what everyone's posting.",
     'feed.exploreForYou': 'Explore For You',
+    'feed.explore': 'Explore',
     'feed.noPosts': 'No posts yet',
     'feed.shareSomething': 'Share Something',
     'feed.searchPlaceholder': 'Search posts, users, locations...',
@@ -4042,6 +4044,7 @@ export const STRINGS = {
     'common.blocked': 'Amezuiwa',
 
     'header.alerts': 'Arifa',
+    'header.market': 'Soko',
 
     'comments.title': 'Maoni',
     'comments.empty': 'Hakuna maoni bado',
@@ -4087,6 +4090,7 @@ export const STRINGS = {
     'feed.followingQuiet': 'Mlisho wa unaowafuata ni kimya',
     'feed.followingQuietSub': 'Fuata watu, au ona kile wengine wanachochapisha.',
     'feed.exploreForYou': 'Gundua Kwa Ajili Yako',
+    'feed.explore': 'Gundua',
     'feed.noPosts': 'Hakuna machapisho bado',
     'feed.shareSomething': 'Chapisha Kitu',
     'feed.searchPlaceholder': 'Tafuta machapisho, watumiaji, maeneo...',
