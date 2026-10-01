@@ -1,7 +1,7 @@
 // The marketplace's front, to browse by hand as much as by search:
 //
 //   a slim search bar and the cart;           shortcuts as small pills;
-//   categories as small chips, each with an icon that says what it is;
+//   categories as small named chips, dark like the shortcuts above them;
 //   a spotlight of what people look at most — swipes by itself, with dots;
 //   rows that scroll sideways: just listed, each of the fullest categories
 //   (with "see all"), recently viewed;
@@ -283,7 +283,7 @@ const MarketplaceHome = () => {
             testID="home-search"
           />
         </View>
-        <CartButton size={20} />
+        <CartButton size={16} labelled />
       </View>
 
       <View style={styles.shortcuts}>
@@ -303,18 +303,12 @@ const MarketplaceHome = () => {
           horizontal
           data={categories}
           keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => {
-            const { icon, color } = categoryIcon(item.name);
-            return (
-              <TouchableOpacity style={styles.chip} onPress={() => openCategory(item)}
-                                accessibilityRole="button" testID={`home-category-${item.id}`}>
-                <View style={[styles.chipIcon, { backgroundColor: `${color}22` }]}>
-                  <MaterialCommunityIcons name={icon} size={16} color={color} />
-                </View>
-                <Text style={styles.chipText} numberOfLines={1}>{item.name}</Text>
-              </TouchableOpacity>
-            );
-          }}
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.chip} onPress={() => openCategory(item)}
+                              accessibilityRole="button" testID={`home-category-${item.id}`}>
+              <Text style={styles.chipText} numberOfLines={1}>{item.name}</Text>
+            </TouchableOpacity>
+          )}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chips}
           style={styles.chipsRow}
@@ -413,15 +407,15 @@ const styles = StyleSheet.create({
   shortcutText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
   shortcutArt: { width: 18, height: 18 },
 
-  // Categories: small chips, each with its own picture and colour.
+  // Categories: named chips, dark like the shortcuts (Wishlist, My orders, Sell).
   chipsRow: { flexGrow: 0, marginBottom: 14 },
   chips: { gap: 8, paddingRight: PAD },
   chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, paddingLeft: 4, paddingRight: 12,
-    borderRadius: 17, backgroundColor: '#fff',
+    height: 32, paddingHorizontal: 14, borderRadius: 16, justifyContent: 'center',
+    backgroundColor: 'rgba(10,22,40,0.7)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,196,107,0.35)',
   },
-  chipIcon: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  chipText: { fontSize: 12.5, fontWeight: '600', color: '#243447', maxWidth: 120 },
+  chipText: { fontSize: 12, fontWeight: '600', color: '#FFFFFF', maxWidth: 140 },
 
   spotlightWrap: { marginBottom: 16 },
   spotCard: { height: 170, borderRadius: 16, overflow: 'hidden', marginRight: GAP, backgroundColor: '#1D2B40' },

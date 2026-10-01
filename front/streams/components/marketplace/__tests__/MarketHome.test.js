@@ -77,7 +77,7 @@ test('the grid goes on as it is scrolled', async () => {
   expect(mockApi.fetchProducts).toHaveBeenLastCalledWith(2, { page_size: 20 });
 });
 
-test('a spotlight, rows that scroll sideways and category chips with their own icons', async () => {
+test('a spotlight, rows that scroll sideways and named category chips', async () => {
   const cats = [
     { id: 1, name: 'Electronics', product_count: 4 },
     { id: 2, name: 'Clothing', product_count: 1 },
@@ -102,9 +102,10 @@ test('a spotlight, rows that scroll sideways and category chips with their own i
   // Only categories with two or more things get a row of their own.
   expect(screen.queryByTestId('strip-cat-2')).toBeNull();
   expect(mockApi.fetchProducts).not.toHaveBeenCalledWith(1, expect.objectContaining({ category: 2 }));
-  // An electronics chip shows a circuit chip; clothing a T-shirt.
-  expect(screen.getAllByTestId('mci-chip').length).toBeGreaterThan(0);
-  expect(screen.getAllByTestId('mci-tshirt-crew').length).toBeGreaterThan(0);
+  // The chips are names, no icons; the Electronics row's title keeps its own.
+  expect(screen.getByTestId('home-category-2')).toHaveTextContent('Clothing');
+  expect(screen.queryByTestId('mci-tshirt-crew')).toBeNull();
+  expect(screen.getAllByTestId('mci-chip')).toHaveLength(1);
   fireEvent.press(screen.getByTestId('home-category-2'));
   expect(mockNav.navigate).toHaveBeenCalledWith('ProductList', { categoryId: 2, categoryName: 'Clothing' });
 });
@@ -133,6 +134,7 @@ test('the cart, My orders and Sell wear their coloured artwork', () => {
   mockApi.fetchProductCategories.mockImplementation(() => new Promise(() => {}));
   const screen = render(<MarketplaceHome />);
   expect(screen.getByTestId('cart-art')).toBeTruthy();
+  expect(screen.getByTestId('cart-button')).toHaveTextContent('market.cart.title');
   expect(screen.getByTestId('home-OrderHistory-art')).toBeTruthy();
   expect(screen.getByTestId('home-SellerDashboard-art')).toBeTruthy();
   fireEvent.press(screen.getByTestId('home-SellerDashboard'));

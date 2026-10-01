@@ -15,7 +15,9 @@ import { cartCount } from '../../utils/market';
 
 const CART_ART = require('../../assets/cart-icon.png');
 
-export default function CartButton({ size = 22, style }) {
+/** `labelled`: the word "Cart" beside the picture, in a dark pill like the
+ *  marketplace page's Wishlist / My orders / Sell buttons. */
+export default function CartButton({ size = 22, style, labelled = false }) {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { currentUser } = useAuth();
@@ -32,7 +34,7 @@ export default function CartButton({ size = 22, style }) {
   return (
     <TouchableOpacity
       onPress={() => navigation.navigate('Cart')}
-      style={[styles.button, style]}
+      style={[styles.button, labelled && styles.pill, style]}
       hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={count ? t('market.cart.withCount', { n: count }) : t('market.cart.title')}
@@ -40,6 +42,7 @@ export default function CartButton({ size = 22, style }) {
     >
       <Image source={CART_ART} style={{ width: size + 6, height: size + 6 }} contentFit="contain"
              testID="cart-art" />
+      {labelled && <Text style={styles.label} numberOfLines={1}>{t('market.cart.title')}</Text>}
       {count > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText} testID="cart-count">{count > 99 ? '99+' : count}</Text>
@@ -51,6 +54,12 @@ export default function CartButton({ size = 22, style }) {
 
 const styles = StyleSheet.create({
   button: { padding: 6 },
+  pill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingVertical: 0,
+    paddingHorizontal: 12, borderRadius: 18, backgroundColor: 'rgba(10,22,40,0.7)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,196,107,0.35)',
+  },
+  label: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
   badge: {
     position: 'absolute', top: -2, right: -4, minWidth: 18, height: 18, borderRadius: 9,
     paddingHorizontal: 4, backgroundColor: '#FF6347', alignItems: 'center', justifyContent: 'center',
