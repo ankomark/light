@@ -137,8 +137,33 @@ export const GUIDELINES = P(
 );
 
 // Map used by the generic renderer + navigation.
+// "At a glance": each document in a few plain lines, shown above the full
+// text (the full text is what applies).
+const SUMMARY = {
+  privacy: [
+    'We collect what you give us (account, profile, posts, messages, listings) and what the app needs to run.',
+    'We use it to run the app, keep it safe and send the notifications you chose. We do not sell it.',
+    'You can make your account private, block people, edit or delete what you post, and delete your account.',
+  ],
+  terms: [
+    'Be at least the minimum age, keep your account secure and tell the truth about who you are.',
+    'What you post stays yours; you let us show it in the app so others can see it.',
+    'Follow the Community Guidelines; we may remove content or accounts that break them.',
+    'Marketplace deals are between buyer and seller.',
+  ],
+  guidelines: [
+    'Be kind and respectful, even when you disagree.',
+    'Nothing hateful, violent, explicit, deceptive or illegal.',
+    'No spam, scams or fake accounts; post only what you have the right to share.',
+    'Report what breaks the rules; moderators review every report.',
+  ],
+};
+
+// True while a [BRACKETED] placeholder above has not been filled in.
+export const isPlaceholder = (text) => /^\[.*\]$/.test(String(text || '').trim());
+
 export const LEGAL_DOCS = {
-  privacy: { titleKey: 'legal.privacyTitle', doc: PRIVACY },
-  terms: { titleKey: 'legal.termsTitle', doc: TERMS },
-  guidelines: { titleKey: 'legal.guidelinesTitle', doc: GUIDELINES },
+  privacy: { titleKey: 'legal.privacyTitle', icon: 'shield-check-outline', doc: PRIVACY, summary: SUMMARY.privacy },
+  terms: { titleKey: 'legal.termsTitle', icon: 'file-document-outline', doc: TERMS, summary: SUMMARY.terms },
+  guidelines: { titleKey: 'legal.guidelinesTitle', icon: 'account-group-outline', doc: GUIDELINES, summary: SUMMARY.guidelines },
 };

@@ -24,6 +24,8 @@ import DownloadsScreen from './components/DownloadsScreen';
 import TrackDetailScreen from './components/TrackDetailScreen';
 import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold } from '@expo-google-fonts/cinzel';
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
+import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
+import { Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from '@expo-google-fonts/manrope';
 import CreatePost from './components/CreatePost';
 import CameraCapture from './components/CameraCapture';
 import Music from './components/Music';
@@ -254,8 +256,13 @@ const AuthInitializer = ({ children }) => {
 
 
 const App = () => {
-  // Load the Cinzel display font used for the app's brand title.
-  const [fontsLoaded] = useFonts({ Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold, Lora_400Regular, Lora_700Bold });
+  // Load the Cinzel display font used for the app's brand title, and Sora
+  // and Manrope for the information pages (components/info/InfoKit).
+  const [fontsLoaded] = useFonts({
+    Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold, Lora_400Regular, Lora_700Bold,
+    Sora_600SemiBold, Sora_700Bold,
+    Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold,
+  });
 
   // App is portrait by default; only the Live room opts into rotation (it
   // unlocks on mount and relocks portrait on leave). Guarded so it no-ops until

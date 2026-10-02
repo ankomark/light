@@ -1,137 +1,139 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+// The user guide: each part of the app as a tile; the one you open moves to
+// the top and says how it works, with a button that takes you there. A
+// search narrows the tiles. The words live in i18n/strings.js
+// (guide.<key>.title / .body, en + sw).
+import React, { useMemo, useState } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, LayoutAnimation, Platform, UIManager,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { typography, spacing, radius, shadows } from '../constants/theme';
-import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
+import { useAppStatus } from '../context/AppStatusContext';
+import {
+  INFO, FONT, RADIUS, InfoScreen, Section, SearchField, InfoButton, Para, useGrid,
+} from '../components/info/InfoKit';
 
-// Each section pairs an icon with an i18n key; the prose (title + body) lives in
-// i18n/strings.js under guide.<key>.title / guide.<key>.body (en + sw). Ordered
-// as requested: social feed and music first, then everything else.
-const SECTIONS = [
-  { icon: 'heart-multiple-outline', key: 'feed' },
-  { icon: 'headphones', key: 'music' },
-  { icon: 'account-group-outline', key: 'communities' },
-  { icon: 'chat-outline', key: 'messages' },
-  { icon: 'broadcast', key: 'live' },
-  { icon: 'book-open-variant', key: 'bible' },
-  { icon: 'storefront-outline', key: 'market' },
-  { icon: 'bulletin-board', key: 'notices' },
-  { icon: 'account-cog-outline', key: 'account' },
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Feed and music first, then everything else; `to` is where "Open" goes.
+// A part with `feature` leaves the guide while an admin has switched it off,
+// as it leaves the menu.
+const PARTS = [
+  { key: 'feed', icon: 'heart-multiple-outline', to: 'Home' },
+  { key: 'music', icon: 'headphones', to: 'Music' },
+  { key: 'hymns', icon: 'book-music-outline', to: 'Hymns' },
+  { key: 'bible', icon: 'book-cross', to: 'bible' },
+  { key: 'verse', icon: 'format-quote-open', to: 'DailyVerse' },
+  { key: 'publishing', icon: 'feather', to: 'Publishing' },
+  { key: 'quiz', icon: 'head-question-outline', to: 'QuizHome', feature: 'quiz' },
+  { key: 'puzzle', icon: 'puzzle-outline', to: 'PuzzlePlay', feature: 'puzzle' },
+  { key: 'communities', icon: 'account-group-outline', to: 'Communities' },
+  { key: 'groups', icon: 'account-multiple-outline', to: 'Groups' },
+  { key: 'messages', icon: 'chat-outline', to: 'Inbox' },
+  { key: 'live', icon: 'broadcast', to: 'LiveHub', feature: 'live' },
+  { key: 'services', icon: 'briefcase-outline', to: 'Studios' },
+  { key: 'market', icon: 'storefront-outline', to: 'MarketplaceHome', feature: 'marketplace' },
+  { key: 'notices', icon: 'bulletin-board', to: 'NoticeBoard' },
+  { key: 'tools', icon: 'calendar-month-outline', to: 'Calendar' },
+  { key: 'account', icon: 'account-cog-outline', to: 'Settings' },
 ];
 
 const UserGuide = () => {
   const navigation = useNavigation();
-  const { colors } = useTheme();
   const { t } = useI18n();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const [open, setOpen] = useState(null);
+  const [query, setQuery] = useState('');
+  const { features } = useAppStatus();
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const on = PARTS.filter((p) => !p.feature || features?.[p.feature] !== false);
+    return q
+      ? on.filter((p) => `${t(`guide.${p.key}.title`)} ${t(`guide.${p.key}.body`)}`.toLowerCase().includes(q))
+      : on;
+  }, [query, t, features]);
+
+  const toggle = (k) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setOpen((cur) => (cur === k ? null : k));
+  };
+
+  const { half } = useGrid();
+  const opened = shown.find((p) => p.key === open);
+  const rest = shown.filter((p) => p !== opened);
 
   return (
-    <View style={styles.root}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {/* Hero */}
-        <LinearGradient
-          colors={[colors.primary, colors.primaryDark, colors.surface]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.hero}
-        >
-          <SafeAreaView edges={['top']} style={styles.heroSafe}>
-            <TouchableOpacity
-              style={styles.backBtn}
-              onPress={() => navigation.goBack()}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
-              <Ionicons name="chevron-back" size={26} color={colors.white} />
+    <InfoScreen title={t('guide.title')} eyebrow={t('guide.eyebrow')} subtitle={t('guide.subtitle')}
+      icon="compass-outline" testID="guide-screen">
+      <Para style={{ marginTop: 10, textAlign: 'center' }}>{t('guide.intro')}</Para>
+
+      <SearchField value={query} onChangeText={setQuery} placeholder={t('guide.searchPlaceholder')} testID="guide-search" />
+
+      <Section label={t('guide.parts')} plain>
+        {!!opened && (
+          <View style={styles.open}>
+            <TouchableOpacity style={styles.openHead} onPress={() => toggle(opened.key)} accessibilityRole="button"
+              accessibilityState={{ expanded: true }} testID={`guide-${opened.key}`}>
+              <View style={styles.openIcon}><MaterialCommunityIcons name={opened.icon} size={22} color={INFO.onAccent} /></View>
+              <Text style={styles.openTitle}>{t(`guide.${opened.key}.title`)}</Text>
+              <Ionicons name="chevron-up" size={18} color={INFO.muted} />
             </TouchableOpacity>
-            <View style={styles.heroIcon}>
-              <MaterialCommunityIcons name="compass-outline" size={34} color={colors.white} />
-            </View>
-            <Text style={styles.heroTitle}>{t('guide.title')}</Text>
-            <Text style={styles.heroSub}>{t('guide.subtitle')}</Text>
-          </SafeAreaView>
-        </LinearGradient>
-
-        <View style={styles.body}>
-          <Text style={styles.intro}>{t('guide.intro')}</Text>
-
-          {SECTIONS.map((s, i) => (
-            <View key={s.key} style={styles.card}>
-              <View style={styles.cardHead}>
-                <View style={styles.stepBadge}>
-                  <Text style={styles.stepNum}>{i + 1}</Text>
-                </View>
-                <View style={styles.cardIcon}>
-                  <MaterialCommunityIcons name={s.icon} size={22} color={colors.primary} />
-                </View>
-                <Text style={styles.cardTitle}>{t(`guide.${s.key}.title`)}</Text>
-              </View>
-              <Text style={styles.cardBody}>{t(`guide.${s.key}.body`)}</Text>
-            </View>
-          ))}
-
-          <View style={styles.tip}>
-            <Ionicons name="bulb-outline" size={18} color={colors.accent} />
-            <Text style={styles.tipText}>{t('guide.footerTip')}</Text>
+            <Para style={{ fontSize: 14.5, lineHeight: 22 }}>{t(`guide.${opened.key}.body`)}</Para>
+            <InfoButton icon="arrow-forward" label={t('guide.open', { name: t(`guide.${opened.key}.title`) })}
+              onPress={() => navigation.navigate(opened.to)} testID={`guide-open-${opened.key}`} />
           </View>
+        )}
+        <View style={styles.grid}>
+          {rest.map((p, i) => (
+            <TouchableOpacity key={p.key} onPress={() => toggle(p.key)} activeOpacity={0.8}
+              accessibilityRole="button" accessibilityState={{ expanded: false }} testID={`guide-${p.key}`}
+              style={[styles.tile, { width: rest.length % 2 === 1 && i === rest.length - 1 ? '100%' : half }]}>
+              <View style={styles.tileIcon}><MaterialCommunityIcons name={p.icon} size={20} color={INFO.accent} /></View>
+              <Text style={styles.tileTitle}>{t(`guide.${p.key}.title`)}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </ScrollView>
-    </View>
+        {!shown.length && <Text style={styles.none}>{t('help.noMatch')}</Text>}
+      </Section>
+
+      <View style={styles.tip}>
+        <Ionicons name="bulb-outline" size={20} color={INFO.accent} />
+        <Text style={styles.tipText}>{t('guide.footerTip')}</Text>
+      </View>
+    </InfoScreen>
   );
 };
 
-const makeStyles = (colors) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingBottom: spacing.xxl },
-
-  hero: {
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
-    paddingBottom: spacing.xl,
+const styles = StyleSheet.create({
+  open: {
+    backgroundColor: INFO.cardDeep, borderRadius: RADIUS, borderWidth: 1, borderColor: INFO.accent,
+    padding: 18, gap: 12, marginBottom: 10,
   },
-  heroSafe: { alignItems: 'center', paddingHorizontal: spacing.lg },
-  backBtn: {
-    alignSelf: 'flex-start', marginTop: spacing.sm, marginBottom: spacing.sm,
-    width: 40, height: 40, borderRadius: radius.full,
-    backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center',
+  openHead: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
+  openIcon: {
+    width: 44, height: 44, borderRadius: 14, backgroundColor: INFO.accent,
+    alignItems: 'center', justifyContent: 'center',
   },
-  heroIcon: {
-    width: 72, height: 72, borderRadius: radius.full,
-    backgroundColor: 'rgba(255,255,255,0.18)', justifyContent: 'center', alignItems: 'center',
-    marginTop: spacing.sm,
+  openTitle: { flex: 1, color: INFO.text, fontSize: 17, fontFamily: FONT.title },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
+  tile: {
+    backgroundColor: INFO.card, borderRadius: 20, borderWidth: 1, borderColor: INFO.border,
+    padding: 14, gap: 12, minHeight: 104,
   },
-  heroTitle: { ...typography.h1, color: colors.white, marginTop: spacing.md, textAlign: 'center' },
-  heroSub: { ...typography.body, color: 'rgba(255,255,255,0.85)', marginTop: spacing.xs, textAlign: 'center' },
-
-  body: { padding: spacing.md },
-  intro: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md, lineHeight: 22 },
-
-  card: {
-    backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.md,
-    borderWidth: 1, borderColor: colors.border, marginBottom: spacing.md, ...shadows.sm,
+  tileIcon: {
+    width: 38, height: 38, borderRadius: 12, backgroundColor: INFO.accentSoft,
+    alignItems: 'center', justifyContent: 'center',
   },
-  cardHead: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
-  stepBadge: {
-    width: 24, height: 24, borderRadius: 12, backgroundColor: colors.accent,
-    justifyContent: 'center', alignItems: 'center', marginRight: spacing.sm,
-  },
-  stepNum: { color: '#0A1628', fontSize: 12, fontWeight: '800' },
-  cardIcon: {
-    width: 38, height: 38, borderRadius: radius.md, backgroundColor: colors.inputBg,
-    justifyContent: 'center', alignItems: 'center', marginRight: spacing.sm,
-  },
-  cardTitle: { ...typography.h3, color: colors.textPrimary, flex: 1 },
-  cardBody: { ...typography.body, color: colors.textSecondary, lineHeight: 22 },
-
+  tileTitle: { color: INFO.text, fontSize: 14, fontFamily: FONT.bold, lineHeight: 19 },
+  none: { color: INFO.muted, fontSize: 14, fontFamily: FONT.body, paddingHorizontal: 4 },
   tip: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm,
-    backgroundColor: colors.inputBg, borderRadius: radius.md, padding: spacing.md,
-    borderWidth: 1, borderColor: colors.border,
+    flexDirection: 'row', gap: 12, marginTop: 24, padding: 16, borderRadius: 20,
+    backgroundColor: INFO.cardDeep, borderWidth: 1, borderColor: INFO.border,
   },
-  tipText: { ...typography.caption, color: colors.textSecondary, flex: 1, lineHeight: 18 },
+  tipText: { flex: 1, color: INFO.sub, fontSize: 13.5, fontFamily: FONT.body, lineHeight: 20 },
 });
 
 export default UserGuide;
