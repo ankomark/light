@@ -26,6 +26,8 @@
     "@date-io/date-fns": "^3.2.1",
     "@expo-google-fonts/atkinson-hyperlegible": "^0.4.1",
     "@expo-google-fonts/cinzel": "^0.4.2",
+    "@expo-google-fonts/cormorant-garamond": "^0.4.1",
+    "@expo-google-fonts/figtree": "^0.4.1",
     "@expo-google-fonts/lora": "^0.4.2",
     "@expo-google-fonts/manrope": "^0.4.2",
     "@expo-google-fonts/sora": "^0.4.2",

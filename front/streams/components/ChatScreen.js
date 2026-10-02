@@ -222,6 +222,8 @@ const ChatScreen = ({ route, navigation }) => {
   const [isRequest, setIsRequest] = useState(!!route.params.isRequest);
   const [muted, setMuted] = useState(!!route.params.muted);
   const [archived, setArchived] = useState(!!route.params.archived);
+  // A Single & Searching chat whose match has ended: read-only.
+  const [closed, setClosed] = useState(!!route.params.closed);
   // The other person, live.
   const [presence, setPresence] = useState({ online: false, lastSeen: null });
   const [otherTyping, setOtherTyping] = useState(false);
@@ -498,7 +500,10 @@ const ChatScreen = ({ route, navigation }) => {
       return true;
     } catch (e) {
       setMessages((prev) => markFailed(prev, tempId));
-      if (e?.response?.status === 403) notify(t('dm.cantMessage'));
+      if ((e?.data || e?.response?.data)?.code === 'unmatched') {
+        setClosed(true);
+        notify(t('singles.chatClosed'));
+      } else if (e?.response?.status === 403) notify(t('dm.cantMessage'));
       return false;
     }
   }, [conversationId, t]);
@@ -1107,7 +1112,13 @@ const ChatScreen = ({ route, navigation }) => {
       ) : null}
 
       {/* Input bar */}
-      {!searchOpen ? (
+      {closed && !searchOpen ? (
+        <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.requestBanner} testID="chat-closed">
+          <Text style={styles.requestTitle}>{t('singles.chatClosed')}</Text>
+          <Text style={styles.requestBody}>{t('singles.chatClosedBody')}</Text>
+        </SafeAreaView>
+      ) : null}
+      {!searchOpen && !closed ? (
       <SafeAreaView edges={kbHeight > 0 ? ['left', 'right'] : ['left', 'right', 'bottom']} style={styles.inputSafe}>
       <View style={styles.inputBar}>
         {isRecording ? (

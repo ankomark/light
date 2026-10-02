@@ -3,7 +3,7 @@ turned off. Read often (every app start asks), so cached briefly; a change
 forgets the cache at once."""
 from django.core.cache import cache
 
-FEATURES = ('marketplace', 'quiz', 'puzzle', 'live')
+FEATURES = ('marketplace', 'quiz', 'puzzle', 'live', 'singles')
 DEFAULTS = {
     'maintenance': {'on': False, 'message': ''},
     'features': {name: True for name in FEATURES},

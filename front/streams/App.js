@@ -26,6 +26,8 @@ import { useFonts, Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold } fro
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
 import { Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from '@expo-google-fonts/manrope';
+import { CormorantGaramond_600SemiBold, CormorantGaramond_700Bold } from '@expo-google-fonts/cormorant-garamond';
+import { Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, Figtree_800ExtraBold } from '@expo-google-fonts/figtree';
 import CreatePost from './components/CreatePost';
 import CameraCapture from './components/CameraCapture';
 import Music from './components/Music';
@@ -132,6 +134,10 @@ import AdminPuzzleThemes from './components/admin/AdminPuzzleThemes';
 import AdminVerify from './components/admin/AdminVerify';
 import AdminAppControl from './components/admin/AdminAppControl';
 import AdminBroadcast from './components/admin/AdminBroadcast';
+import AdminSingles from './components/admin/AdminSingles';
+import SinglesHome from './pages/singles/SinglesHome';
+import SinglesEdit from './pages/singles/SinglesEdit';
+import SinglesPerson from './pages/singles/SinglesPerson';
 import { AppStatusProvider } from './context/AppStatusContext';
 import MaintenanceGate from './components/MaintenanceGate';
 import VideoFeed from './components/VideoFeed';
@@ -256,12 +262,16 @@ const AuthInitializer = ({ children }) => {
 
 
 const App = () => {
-  // Load the Cinzel display font used for the app's brand title, and Sora
-  // and Manrope for the information pages (components/info/InfoKit).
+  // Load the Cinzel display font used for the app's brand title, Sora and
+  // Manrope for the information pages (components/info/InfoKit), and
+  // Cormorant Garamond and Figtree for Single & Searching.
   const [fontsLoaded] = useFonts({
     Cinzel_600SemiBold, Cinzel_700Bold, Cinzel_800ExtraBold, Lora_400Regular, Lora_700Bold,
     Sora_600SemiBold, Sora_700Bold,
     Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold,
+    // Single & Searching (components/singles/SinglesKit).
+    CormorantGaramond_600SemiBold, CormorantGaramond_700Bold,
+    Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, Figtree_800ExtraBold,
   });
 
   // App is portrait by default; only the Live room opts into rotation (it
@@ -304,6 +314,9 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.type === 'singles_match' || data?.screen === 'Singles' || data?.screen === 'SinglesMatches') {
+        // Single & Searching: a new match, or word about your profile's review.
+        navigate('Singles');
       } else if (data?.type === 'quiz_duel') {
         // Someone played the duel you sent: back to the quiz.
         navigate('QuizHome');
@@ -494,6 +507,11 @@ const App = () => {
                 <Stack.Screen name="AdminVerify" component={AdminVerifyWrapper} />
                 <Stack.Screen name="AdminAppControl" component={AdminAppControlWrapper} />
                 <Stack.Screen name="AdminBroadcast" component={AdminBroadcastWrapper} />
+                <Stack.Screen name="AdminSingles" component={AdminSinglesWrapper} />
+                {/* Single & Searching: its own headers (components/singles/SinglesKit). */}
+                <Stack.Screen name="Singles" component={SinglesHome} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesEdit" component={SinglesEdit} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesPerson" component={SinglesPerson} options={{ headerShown: false }} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxWrapper} />
@@ -905,6 +923,7 @@ const AdminPuzzleThemesWrapper = adminWrap(AdminPuzzleThemes);
 const AdminVerifyWrapper = adminWrap(AdminVerify);
 const AdminAppControlWrapper = adminWrap(AdminAppControl);
 const AdminBroadcastWrapper = adminWrap(AdminBroadcast);
+const AdminSinglesWrapper = adminWrap(AdminSingles);
 const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);

@@ -2,6 +2,12 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
 from .views.organizations import OrganizationViewSet
+from .views.singles import (
+    SinglesMeView, SinglesSubmitView, SinglesPauseView, SinglesPhotosView, SinglesPhotoDetailView,
+    SinglesPhotoOrderView, AdminSinglesViewSet,
+    SinglesDiscoverView, SinglesProfileView, SinglesInterestView, SinglesMatchesView, SinglesUnmatchView,
+    SinglesReportView, SinglesBlockView,
+)
 from .views import (
     UserViewSet,
     AppealViewSet,
@@ -164,6 +170,7 @@ router.register(r'admin/quiz-bank', AdminQuizBankViewSet, basename='admin-quiz-b
 router.register(r'admin/puzzle-themes', AdminPuzzleThemeViewSet, basename='admin-puzzle-themes')
 router.register(r'admin/verify', AdminVerifyViewSet, basename='admin-verify')
 router.register(r'admin/broadcasts', AdminBroadcastViewSet, basename='admin-broadcasts')
+router.register(r'admin/singles', AdminSinglesViewSet, basename='admin-singles')
 router.register(r'live/broadcasts', LiveBroadcastViewSet, basename='live-broadcasts')
 
 # Nested routers
@@ -275,6 +282,20 @@ urlpatterns = [
      path('live-events/featured/',
          LiveEventViewSet.as_view({'get': 'featured'}),
          name='live-event-featured'),
+    # Single & Searching (views/singles.py).
+    path('singles/me/', SinglesMeView.as_view(), name='singles-me'),
+    path('singles/me/submit/', SinglesSubmitView.as_view(), name='singles-submit'),
+    path('singles/me/pause/', SinglesPauseView.as_view(), name='singles-pause'),
+    path('singles/me/photos/', SinglesPhotosView.as_view(), name='singles-photos'),
+    path('singles/me/photos/order/', SinglesPhotoOrderView.as_view(), name='singles-photo-order'),
+    path('singles/me/photos/<int:pk>/', SinglesPhotoDetailView.as_view(), name='singles-photo'),
+    path('singles/discover/', SinglesDiscoverView.as_view(), name='singles-discover'),
+    path('singles/profiles/<int:pk>/', SinglesProfileView.as_view(), name='singles-profile'),
+    path('singles/profiles/<int:pk>/interest/', SinglesInterestView.as_view(), name='singles-interest'),
+    path('singles/profiles/<int:pk>/report/', SinglesReportView.as_view(), name='singles-report'),
+    path('singles/profiles/<int:pk>/block/', SinglesBlockView.as_view(), name='singles-block'),
+    path('singles/matches/', SinglesMatchesView.as_view(), name='singles-matches'),
+    path('singles/matches/<int:pk>/unmatch/', SinglesUnmatchView.as_view(), name='singles-unmatch'),
     path('api/upload/avatar/', AvatarUploadView.as_view(), name='avatar-upload'),
     path('api/upload/track/', TrackUploadView.as_view(), name='track-upload'),
     path('api/upload/post/', SocialPostUploadView.as_view(), name='post-upload'),

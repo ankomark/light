@@ -144,3 +144,14 @@ test('what lives elsewhere now is not in the menu', async () => {
   ['Cart', 'Wishlist', 'My Orders', 'Sell'].forEach((l) => expect(r.queryByLabelText(l)).toBeNull());
   expect(r.getByLabelText('Publishing')).toBeTruthy();
 });
+
+test('the menu lists the most used parts first, in their groups', async () => {
+  const r = render(<App />);
+  await openMenu(r);
+  const titles = r.getAllByText(/^[A-Z][A-Z &]+$/).map((n) => n.props.children);
+  expect(titles).toEqual(['CONNECT', 'CREATE & SHARE', 'DAILY FAITH', 'TOOLS', 'SETTINGS & SUPPORT', 'PRIVACY & LEGAL']);
+  const rows = r.getAllByRole('button').map((b) => b.props.accessibilityLabel);
+  expect(rows.indexOf('Messages')).toBeLessThan(rows.indexOf('Go Live'));
+  expect(rows.indexOf('Services')).toBeLessThan(rows.indexOf('Verse of the Day'));
+  expect(rows.indexOf('Calculator')).toBeLessThan(rows.indexOf('Settings'));
+});

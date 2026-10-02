@@ -32,6 +32,7 @@ const PARTS = [
   { key: 'puzzle', icon: 'puzzle-outline', to: 'PuzzlePlay', feature: 'puzzle' },
   { key: 'communities', icon: 'account-group-outline', to: 'Communities' },
   { key: 'groups', icon: 'account-multiple-outline', to: 'Groups' },
+  { key: 'singles', icon: 'ring', to: 'Singles', feature: 'singles' },
   { key: 'messages', icon: 'chat-outline', to: 'Inbox' },
   { key: 'live', icon: 'broadcast', to: 'LiveHub', feature: 'live' },
   { key: 'services', icon: 'briefcase-outline', to: 'Studios' },

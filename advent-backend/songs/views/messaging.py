@@ -1,12 +1,12 @@
 from .common import *  # noqa: F401,F403
-from django.db.models import OuterRef, Subquery, Count, IntegerField, F, Q, Value
+from django.db.models import OuterRef, Subquery, Count, IntegerField, F, Q, Value, Case, When, CharField
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
 from .. import messaging as dm
-from ..models import ConversationState
+from ..models import ConversationState, SinglesMatch
 
 # Base64 of a ~6 MB binary is ~8 MB of text; allow a little headroom. The client
 # caps uploads at 6 MB, but the server enforces its own bound (clients lie).
@@ -80,6 +80,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 last_msg_sender=Subquery(last.values('sender_id')[:1]),
                 last_msg_at=Subquery(last.values('created_at')[:1]),
                 last_msg_deleted=Subquery(last.values('is_deleted')[:1]),
+                singles_state=Case(
+                    When(singles_match__ended_at__isnull=False, then=Value('ended')),
+                    When(singles_match__isnull=False, then=Value('open')),
+                    default=Value(None), output_field=CharField()),
                 unread_n=Subquery(unread, output_field=IntegerField()),
             )
             # A chat with nothing in it (just opened, or cleared) isn't listed.
@@ -177,6 +181,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
         other = conversation.participants.exclude(id=me.id).first()
         if other and (is_blocked_between(me, other) or other.is_deactivated or not other.is_active):
             return Response({'error': 'You cannot message this user.'}, status=status.HTTP_403_FORBIDDEN)
+        # A Single & Searching chat closes when either of them unmatches.
+        if SinglesMatch.objects.filter(conversation=conversation, ended_at__isnull=False).exists():
+            return Response({'error': 'This match has ended.', 'code': 'unmatched'},
+                            status=status.HTTP_403_FORBIDDEN)
 
         # A retried send (a flaky network) is the same message, not another.
         client_id = (str(request.data.get('client_id') or '').strip() or None)

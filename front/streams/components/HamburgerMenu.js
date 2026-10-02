@@ -50,32 +50,36 @@ const CALENDAR_RED = '#EA4335';
 const VERSE_TEAL = '#2E9E96';
 
 // label = what the user sees; route = the registered screen name; set/icon = glyph.
+// Most used first: the conversations people return to every day (and the
+// only rows with unread badges), then going live, publishing and services,
+// the daily devotions and games, the tools, and last the settings, support and
+// policies people open rarely. The feed, Music, Market, Bible and Hymns are
+// in the header, so they are not repeated here.
 const SECTIONS = [
   {
-    title: 'Discover',
-    // Explore is on the home feed (beside For You), Favorites on the profile,
-    // Playlists on the Music page and the marketplace in the header's nav row
-    // (its cart, wishlist, orders and selling are all on the marketplace page).
+    title: 'Connect',
     items: [
-      { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
-      { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true, feature: 'live' },
+      { label: 'Messages', route: 'Inbox', art: MESSAGES_ART },
+      { label: 'Groups', route: 'Groups', art: GROUPS_ART },
+      // Adults only, opt-in, reviewed (pages/singles).
+      { label: 'Single & Searching', route: 'Singles', set: 'mci', icon: 'ring', tint: '#FFC46B', feature: 'singles' },
+      // Churches and choirs are no longer separate entries — they are
+      // categories inside Community, alongside any kind someone starts.
+      { label: 'Communities', route: 'Communities', art: COMMUNITIES_ART },
+      { label: 'Notice Board', route: 'NoticeBoard', art: NOTICE_ART },
     ],
   },
   {
-    title: 'Media',
+    title: 'Create & Share',
     items: [
+      { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true, feature: 'live' },
+      { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
       { label: 'Services', route: 'Studios', art: SERVICES_ART },
     ],
   },
   {
-    title: 'Community',
+    title: 'Daily Faith',
     items: [
-      { label: 'Messages', route: 'Inbox', art: MESSAGES_ART },
-      // Churches and choirs are no longer separate entries — they are
-      // categories inside Community, alongside any kind someone starts.
-      { label: 'Communities', route: 'Communities', art: COMMUNITIES_ART },
-      { label: 'Groups', route: 'Groups', art: GROUPS_ART },
-      { label: 'Notice Board', route: 'NoticeBoard', art: NOTICE_ART },
       { label: 'Verse of the Day', route: 'DailyVerse', set: 'mci', icon: 'book-open-variant',
         tint: VERSE_TEAL },
       { label: 'Bible Quiz', route: 'QuizHome', art: QUIZ_ART, feature: 'quiz' },
@@ -85,23 +89,23 @@ const SECTIONS = [
   {
     title: 'Tools',
     items: [
-      { label: 'Calculator', route: 'Calculator', art: CALC_ART },
       { label: 'Calendar', route: 'Calendar', set: 'mci', icon: 'calendar-month-outline',
         tint: CALENDAR_RED },
       { label: 'Weather', route: 'Weather', art: WEATHER_ART },
+      { label: 'Calculator', route: 'Calculator', art: CALC_ART },
     ],
   },
   {
-    title: 'More',
+    title: 'Settings & Support',
     items: [
       { label: 'Settings', route: 'Settings', art: SETTINGS_ART },
       { label: 'Help', route: 'Help', art: HELP_ART },
-      { label: 'About', route: 'About', art: ABOUT_ART },
       { label: 'User Guide', route: 'UserGuide', art: GUIDE_ART },
+      { label: 'About', route: 'About', art: ABOUT_ART },
     ],
   },
   {
-    title: 'Legal & Privacy',
+    title: 'Privacy & Legal',
     items: [
       { label: 'Privacy Centre', route: 'PrivacyCentre', set: 'mci', icon: 'shield-account-outline' },
       { label: 'Privacy Policy', route: 'LegalPage', params: { docKey: 'privacy' }, art: PRIVACY_ART },
@@ -294,10 +298,12 @@ export function MenuScreen() {
           const visible = SECTIONS
             .map((sec) => ({ ...sec, items: sec.items.filter((it) => !it.feature || features?.[it.feature] !== false) }))
             .filter((sec) => sec.items.length);
+          // An appeal or the admin area is why those people open the menu,
+          // so it comes first for them.
           return [
-            ...visible,
             ...(currentUser?.is_suspended ? [APPEAL_SECTION] : []),
             ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
+            ...visible,
           ];
         })().map((section) => (
           <View key={section.title} style={styles.section}>

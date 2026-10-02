@@ -123,6 +123,11 @@ class ConversationSerializer(serializers.ModelSerializer):
         data['is_request'] = getattr(obj, 'st_accepted', True) is False
         data['muted'] = bool(getattr(obj, 'st_muted', False))
         data['archived'] = bool(getattr(obj, 'st_archived', False))
+        # A Single & Searching match's own chat: marked in the inbox, and
+        # closed (read-only) once either of them unmatched.
+        singles = getattr(obj, 'singles_state', None)
+        data['singles'] = singles is not None
+        data['closed'] = singles == 'ended'
         other = data.get('other_participant') or {}
         if other.get('id'):
             data['online'] = is_online(other['id'])

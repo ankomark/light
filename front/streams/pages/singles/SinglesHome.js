@@ -1,0 +1,469 @@
+// Single & Searching: the one door in (the menu's Connect section). What it
+// shows depends on where the person is:
+//   can't join yet (too new, unverified…) → why, and when
+//   no profile                            → the welcome and its promises
+//   a profile not yet approved            → My profile, with its review state
+//   approved                              → Discover · Matches · My profile
+// A match opens a celebration with a way to begin, then the chat in Messages.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, TextInput, ScrollView, RefreshControl,
+} from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useI18n } from '../../context/I18nContext';
+import {
+  fetchSinglesMe, fetchSinglesDiscover, answerSingles, fetchSinglesMatches,
+} from '../../services/api';
+import { notify } from '../../utils/adminConfirm';
+import {
+  GOLD, FACE, SinglesScreen, GoldButton, Label, Card, Chip, Portrait, Ring, Title, Body, Centered,
+} from '../../components/singles/SinglesKit';
+import ProfileCard from '../../components/singles/ProfileCard';
+import SafetySheet from '../../components/singles/SafetySheet';
+import MyProfilePane from '../../components/singles/MyProfilePane';
+
+const TABS = ['discover', 'matches', 'me'];
+
+export default function SinglesHome() {
+  const { t } = useI18n();
+  const [me, setMe] = useState(null);
+  const [failed, setFailed] = useState(null);
+  const [tab, setTab] = useState('discover');
+
+  const load = useCallback(async () => {
+    try {
+      setMe(await fetchSinglesMe());
+      setFailed(null);
+    } catch (e) {
+      setFailed(e?.data?.code === 'feature_off' ? 'off' : 'error');
+    }
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  if (failed === 'off') {
+    return (
+      <SinglesScreen title={t('singles.title')} testID="singles-off">
+        <Centered><Body style={{ textAlign: 'center' }}>{t('singles.off')}</Body></Centered>
+      </SinglesScreen>
+    );
+  }
+  if (failed) {
+    return (
+      <SinglesScreen title={t('singles.title')} testID="singles-error">
+        <Centered>
+          <Body style={{ textAlign: 'center' }}>{t('singles.loadFailed')}</Body>
+          <GoldButton label={t('common.retry')} kind="outline" onPress={load} />
+        </Centered>
+      </SinglesScreen>
+    );
+  }
+  if (!me) {
+    return (
+      <SinglesScreen title={t('singles.title')} scroll={false}>
+        <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />
+      </SinglesScreen>
+    );
+  }
+  if (!me.eligible) return <NotYet me={me} />;
+  if (!me.profile) return <Welcome />;
+  if (me.profile.status !== 'approved') {
+    return (
+      <SinglesScreen title={t('singles.mine.title')} testID="singles-mine">
+        <MyProfilePane profile={me.profile} onChange={load} />
+      </SinglesScreen>
+    );
+  }
+  return (
+    <SinglesScreen title={t('singles.title')} scroll={false} testID="singles-home">
+      <View style={styles.tabs} accessibilityRole="tablist">
+        {TABS.map((k) => (
+          <TouchableOpacity key={k} onPress={() => setTab(k)} style={[styles.tab, tab === k && styles.tabOn]}
+            accessibilityRole="tab" accessibilityState={{ selected: tab === k }} testID={`singles-tab-${k}`}>
+            <Text style={[styles.tabText, tab === k && styles.tabTextOn]}>{t(`singles.tab.${k}`)}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {tab === 'discover' && <Discover paused={me.profile.is_paused} onMine={() => setTab('me')} />}
+      {tab === 'matches' && <Matches />}
+      {tab === 'me' && (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
+          <MyProfilePane profile={me.profile} onChange={load} />
+        </ScrollView>
+      )}
+    </SinglesScreen>
+  );
+}
+
+// ── Can't join yet ───────────────────────────────────────────────────────────
+function NotYet({ me }) {
+  const { t } = useI18n();
+  return (
+    <SinglesScreen title={t('singles.title')} testID="singles-not-yet">
+      <Centered>
+        <Ring><View style={styles.mark}><MaterialCommunityIcons name="ring" size={36} color={GOLD.gold} /></View></Ring>
+        <Title>{t('singles.notYet.title')}</Title>
+        {me.blockers.map((b) => (
+          <Body key={b} style={{ textAlign: 'center' }}>
+            {t(`singles.blocker.${b}`, { date: me.ready_on || '' })}
+          </Body>
+        ))}
+      </Centered>
+    </SinglesScreen>
+  );
+}
+
+// ── Welcome ──────────────────────────────────────────────────────────────────
+const PROMISES = [
+  ['shield-check-outline', 'real'],
+  ['heart-outline', 'both'],
+  ['lock-outline', 'private'],
+  ['flag-outline', 'safe'],
+];
+
+function Welcome() {
+  const { t } = useI18n();
+  const navigation = useNavigation();
+  const [agreed, setAgreed] = useState(false);
+  return (
+    <SinglesScreen title="" testID="singles-welcome"
+      footer={(
+        <GoldButton label={t('singles.welcome.create')} icon="heart" disabled={!agreed} testID="singles-create"
+          onPress={() => navigation.navigate('SinglesEdit', { create: true })} />
+      )}>
+      <Centered>
+        <Ring><View style={styles.mark}><MaterialCommunityIcons name="ring" size={36} color={GOLD.gold} /></View></Ring>
+        <Label>{t('singles.welcome.eyebrow')}</Label>
+        <Title size={40}>{t('singles.title')}</Title>
+        <Body style={{ textAlign: 'center', maxWidth: 330 }}>{t('singles.welcome.lead')}</Body>
+      </Centered>
+      <View style={{ gap: 16, marginTop: 26 }}>
+        {PROMISES.map(([icon, key]) => (
+          <View key={key} style={styles.promise}>
+            <View style={styles.promiseIcon}><MaterialCommunityIcons name={icon} size={20} color={GOLD.gold} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.promiseTitle}>{t(`singles.promise.${key}`)}</Text>
+              <Text style={styles.promiseSub}>{t(`singles.promise.${key}Sub`)}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+      <Card style={{ marginTop: 24 }}>
+        <Label>{t('singles.rules.title')}</Label>
+        {['one', 'two', 'three', 'four', 'five'].map((n) => (
+          <Body key={n} style={{ fontSize: 14 }}>{`•  ${t(`singles.rules.${n}`)}`}</Body>
+        ))}
+        <TouchableOpacity style={styles.agree} onPress={() => setAgreed((v) => !v)} accessibilityRole="checkbox"
+          accessibilityState={{ checked: agreed }} testID="singles-agree">
+          <Ionicons name={agreed ? 'checkbox' : 'square-outline'} size={24} color={GOLD.gold} />
+          <Text style={styles.agreeText}>{t('singles.rules.agree')}</Text>
+        </TouchableOpacity>
+      </Card>
+    </SinglesScreen>
+  );
+}
+
+// ── Discover ─────────────────────────────────────────────────────────────────
+function Discover({ paused, onMine }) {
+  const { t } = useI18n();
+  const navigation = useNavigation();
+  const [queue, setQueue] = useState(null);
+  const [left, setLeft] = useState(null);
+  const [filters, setFilters] = useState({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [safety, setSafety] = useState(false);
+  const [match, setMatch] = useState(null);
+  const scroll = useRef(null);
+
+  const load = useCallback(async (f) => {
+    try {
+      const res = await fetchSinglesDiscover(f);
+      setQueue(res.results || []);
+      setLeft(res.left_today);
+    } catch (e) {
+      setQueue([]);
+      if (e?.data?.code === 'paused') setLeft(-1);
+    }
+  }, []);
+  useEffect(() => { if (!paused) load(filters); }, [load, filters, paused]);
+
+  if (paused) {
+    return (
+      <View style={styles.pane}>
+        <Centered>
+          <Title size={30}>{t('singles.discover.pausedTitle')}</Title>
+          <Body style={{ textAlign: 'center' }}>{t('singles.discover.pausedBody')}</Body>
+          <GoldButton label={t('singles.discover.toMine')} kind="outline" onPress={onMine} />
+        </Centered>
+      </View>
+    );
+  }
+  if (queue === null) return <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />;
+
+  const current = queue[0];
+  const answer = async (kind) => {
+    if (!current || busy) return;
+    setBusy(true);
+    try {
+      const res = await answerSingles(current.id, kind);
+      setLeft(res.left_today);
+      if (res.matched) setMatch(res.match);
+      const rest = queue.slice(1);
+      setQueue(rest);
+      scroll.current?.scrollTo?.({ y: 0, animated: false });
+      if (!rest.length && res.left_today > 0) load(filters);
+    } catch (e) {
+      if (e?.data?.code === 'daily_limit') { setLeft(0); setQueue([]); } else notify(t('common.error'), t('singles.discover.failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.discoverBar}>
+        <Text style={styles.leftToday} testID="singles-left">
+          {left > 0 ? t('singles.discover.left', { n: left }) : t('singles.discover.none')}
+        </Text>
+        <TouchableOpacity onPress={() => setFiltersOpen(true)} style={styles.filterBtn} accessibilityRole="button"
+          accessibilityLabel={t('singles.filters.title')} testID="singles-filters">
+          <Ionicons name="options-outline" size={20} color={GOLD.text} />
+          {Object.keys(filters).length > 0 && <View style={styles.dot} />}
+        </TouchableOpacity>
+      </View>
+      {current ? (
+        <>
+          <ScrollView ref={scroll} contentContainerStyle={{ padding: 16, paddingBottom: 140 }}
+            showsVerticalScrollIndicator={false}>
+            <ProfileCard profile={current} testID={`singles-card-${current.id}`} />
+            <TouchableOpacity onPress={() => setSafety(true)} style={styles.safetyLink} accessibilityRole="button"
+              testID="singles-card-safety">
+              <Ionicons name="flag-outline" size={15} color={GOLD.muted} />
+              <Text style={styles.safetyText}>{t('singles.safety.link')}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+          <View style={styles.actions}>
+            <GoldButton label={t('singles.notNow')} icon="close" kind="outline" onPress={() => answer('pass')}
+              disabled={busy} testID="singles-pass" />
+            <GoldButton label={t('singles.interested')} icon="heart" onPress={() => answer('interested')} busy={busy}
+              testID="singles-interested" />
+          </View>
+          <SafetySheet profile={current} visible={safety} onClose={() => setSafety(false)}
+            onDone={() => setQueue((q) => q.slice(1))} />
+        </>
+      ) : (
+        <ScrollView contentContainerStyle={styles.pane}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={() => load(filters)} tintColor={GOLD.gold} />}>
+          <Centered>
+            <Title size={30}>{left === 0 ? t('singles.discover.doneTitle') : t('singles.discover.emptyTitle')}</Title>
+            <Body style={{ textAlign: 'center' }}>
+              {left === 0 ? t('singles.discover.doneBody') : t('singles.discover.emptyBody')}
+            </Body>
+            {Object.keys(filters).length > 0 && (
+              <GoldButton label={t('singles.filters.clear')} kind="outline" onPress={() => setFilters({})} />
+            )}
+          </Centered>
+        </ScrollView>
+      )}
+      <FiltersSheet visible={filtersOpen} value={filters} onClose={() => setFiltersOpen(false)}
+        onApply={(f) => { setFilters(f); setFiltersOpen(false); }} />
+      <MatchMoment match={match} onClose={() => setMatch(null)}
+        onHello={() => {
+          const m = match;
+          setMatch(null);
+          navigation.navigate('Chat', { conversationId: m.conversation_id, otherUser: m.user, singles: true });
+        }} />
+    </View>
+  );
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────────
+function FiltersSheet({ visible, value, onClose, onApply }) {
+  const { t } = useI18n();
+  const [f, setF] = useState(value);
+  useEffect(() => { if (visible) setF(value); }, [visible, value]);
+  const set = (k, v) => setF((cur) => {
+    const next = { ...cur };
+    if (v === '' || v === null || v === undefined || cur[k] === v) delete next[k]; else next[k] = v;
+    return next;
+  });
+  const num = (k) => (text) => set(k, text.replace(/[^0-9]/g, '').slice(0, 3));
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={onClose} accessibilityLabel={t('common.close')} />
+      <View style={styles.sheet} testID="singles-filters-sheet">
+        <Title size={28}>{t('singles.filters.title')}</Title>
+        <Label>{t('singles.filters.age')}</Label>
+        <View style={styles.ageRow}>
+          <TextInput style={styles.field} value={f.min_age || ''} onChangeText={num('min_age')} keyboardType="number-pad"
+            placeholder="18" placeholderTextColor={GOLD.muted} accessibilityLabel={t('singles.filters.minAge')}
+            testID="singles-min-age" />
+          <Text style={styles.to}>{t('singles.filters.to')}</Text>
+          <TextInput style={styles.field} value={f.max_age || ''} onChangeText={num('max_age')} keyboardType="number-pad"
+            placeholder="60" placeholderTextColor={GOLD.muted} accessibilityLabel={t('singles.filters.maxAge')} />
+        </View>
+        <Label>{t('singles.field.country')}</Label>
+        <TextInput style={styles.field} value={f.country || ''} onChangeText={(v) => set('country', v)}
+          placeholder={t('singles.filters.anyCountry')} placeholderTextColor={GOLD.muted}
+          accessibilityLabel={t('singles.field.country')} />
+        <Label>{t('singles.field.baptised')}</Label>
+        <View style={styles.chipRow}>
+          {['yes', 'not_yet'].map((b) => (
+            <Chip key={b} text={t(`singles.baptised.${b}`)} on={f.baptised === b} onPress={() => set('baptised', b)} />
+          ))}
+        </View>
+        <Label>{t('singles.field.lookingFor')}</Label>
+        <View style={styles.chipRow}>
+          {['marriage', 'friendship'].map((b) => (
+            <Chip key={b} text={t(`singles.looking.${b}`)} on={f.looking_for === b} onPress={() => set('looking_for', b)} />
+          ))}
+        </View>
+        <Label>{t('singles.field.language')}</Label>
+        <TextInput style={styles.field} value={f.language || ''} onChangeText={(v) => set('language', v)}
+          placeholder={t('singles.filters.anyLanguage')} placeholderTextColor={GOLD.muted}
+          accessibilityLabel={t('singles.field.language')} />
+        <View style={styles.sheetActions}>
+          <GoldButton label={t('singles.filters.clear')} kind="outline" onPress={() => onApply({})} />
+          <GoldButton label={t('singles.filters.apply')} onPress={() => onApply(f)} testID="singles-filters-apply" />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ── It's a match ─────────────────────────────────────────────────────────────
+export function openerText(t, opener, name) {
+  if (!opener) return '';
+  if (opener.kind === 'prompt') {
+    return t('singles.opener.prompt', { name, prompt: t(`singles.prompt.${opener.key}`), answer: opener.answer });
+  }
+  if (opener.kind === 'interest') return t('singles.opener.interest', { name, value: opener.value });
+  if (opener.kind === 'church') return t('singles.opener.church', { name, value: opener.value });
+  return t('singles.opener.general', { name });
+}
+
+function MatchMoment({ match, onClose, onHello }) {
+  const { t } = useI18n();
+  if (!match) return null;
+  const p = match.profile;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.matchWrap} testID="singles-match">
+        <Label>{t('singles.match.eyebrow')}</Label>
+        <Title size={46}>{t('singles.match.title')}</Title>
+        <Ring><Portrait uri={p.photos?.[0]?.url} size={150} /></Ring>
+        <Body style={{ textAlign: 'center', maxWidth: 320 }}>{t('singles.match.body', { name: p.first_name })}</Body>
+        <Card style={{ alignSelf: 'stretch' }}>
+          <Label>{t('singles.match.begin')}</Label>
+          <Text style={styles.opener}>{openerText(t, match.opener, p.first_name)}</Text>
+        </Card>
+        <View style={{ alignSelf: 'stretch', gap: 10 }}>
+          <GoldButton label={t('singles.match.hello')} icon="chatbubble-ellipses" onPress={onHello} testID="singles-hello" />
+          <GoldButton label={t('singles.match.later')} kind="quiet" onPress={onClose} />
+        </View>
+        <View style={styles.safeNote}>
+          <Ionicons name="shield-checkmark-outline" size={14} color={GOLD.muted} />
+          <Text style={styles.safeText}>{t('singles.match.safety')}</Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ── Matches ──────────────────────────────────────────────────────────────────
+function Matches() {
+  const { t } = useI18n();
+  const navigation = useNavigation();
+  const [rows, setRows] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const load = useCallback(async () => {
+    try { setRows((await fetchSinglesMatches()).results || []); } catch { setRows((r) => r || []); }
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+  if (rows === null) return <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />;
+  return (
+    <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 48 }}
+      refreshControl={<RefreshControl refreshing={refreshing} tintColor={GOLD.gold}
+        onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}>
+      {rows.length === 0 ? (
+        <Centered>
+          <Title size={30}>{t('singles.matches.emptyTitle')}</Title>
+          <Body style={{ textAlign: 'center' }}>{t('singles.matches.emptyBody')}</Body>
+        </Centered>
+      ) : rows.map((m) => (
+        <TouchableOpacity key={m.id} style={styles.matchRow} activeOpacity={0.85} testID={`singles-match-${m.id}`}
+          onPress={() => navigation.navigate('SinglesPerson', { match: m })} accessibilityRole="button"
+          accessibilityLabel={m.profile.first_name}>
+          <Ring style={{ padding: 3 }}><Portrait uri={m.profile.photos?.[0]?.url} size={58} /></Ring>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.matchName}>{m.profile.first_name}<Text style={styles.matchAge}>, {m.profile.age}</Text></Text>
+            <Text style={styles.matchSub} numberOfLines={2}>{openerText(t, m.opener, m.profile.first_name)}</Text>
+          </View>
+          <TouchableOpacity style={styles.chatBtn} accessibilityRole="button" accessibilityLabel={t('singles.match.hello')}
+            onPress={() => navigation.navigate('Chat', { conversationId: m.conversation_id, otherUser: m.user, singles: true })}>
+            <Ionicons name="chatbubble-ellipses-outline" size={20} color={GOLD.onGold} />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  tabs: {
+    flexDirection: 'row', marginHorizontal: 16, marginBottom: 6, borderRadius: 999, padding: 4,
+    backgroundColor: GOLD.cardDeep, borderWidth: 1, borderColor: GOLD.border,
+  },
+  tab: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
+  tabOn: { backgroundColor: GOLD.gold },
+  tabText: { color: GOLD.sub, fontSize: 14, fontFamily: FACE.bold },
+  tabTextOn: { color: GOLD.onGold },
+  pane: { flexGrow: 1, padding: 24, justifyContent: 'center' },
+  mark: { width: 72, height: 72, borderRadius: 36, backgroundColor: GOLD.soft, alignItems: 'center', justifyContent: 'center' },
+  promise: { flexDirection: 'row', gap: 14, alignItems: 'flex-start' },
+  promiseIcon: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: GOLD.soft, alignItems: 'center', justifyContent: 'center',
+  },
+  promiseTitle: { color: GOLD.text, fontSize: 15.5, fontFamily: FACE.bold },
+  promiseSub: { color: GOLD.sub, fontSize: 13.5, lineHeight: 20, fontFamily: FACE.body, marginTop: 2 },
+  agree: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, marginTop: 4 },
+  agreeText: { flex: 1, color: GOLD.text, fontSize: 14.5, fontFamily: FACE.semi },
+  discoverBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  leftToday: { color: GOLD.muted, fontSize: 13, fontFamily: FACE.semi },
+  filterBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  dot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: GOLD.gold },
+  safetyLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 44, marginTop: 18 },
+  safetyText: { color: GOLD.muted, fontSize: 13, fontFamily: FACE.semi },
+  actions: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', gap: 12, padding: 16, paddingBottom: 24,
+    backgroundColor: GOLD.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: GOLD.border,
+  },
+  scrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  sheet: {
+    backgroundColor: GOLD.cardDeep, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, gap: 10,
+    borderTopWidth: 1, borderColor: GOLD.border,
+  },
+  ageRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  to: { color: GOLD.sub, fontFamily: FACE.semi },
+  field: {
+    flex: 1, minHeight: 46, borderRadius: 10, borderWidth: 1, borderColor: GOLD.border, backgroundColor: GOLD.card,
+    color: GOLD.text, paddingHorizontal: 12, fontSize: 15, fontFamily: FACE.body,
+  },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sheetActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  matchWrap: {
+    flex: 1, backgroundColor: 'rgba(10,22,40,0.97)', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14,
+  },
+  opener: { color: GOLD.text, fontSize: 15, lineHeight: 22, fontFamily: FACE.body },
+  safeNote: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  safeText: { color: GOLD.muted, fontSize: 12.5, fontFamily: FACE.body, flexShrink: 1 },
+  matchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14, padding: 12, borderRadius: 18,
+    backgroundColor: GOLD.card, borderWidth: 1, borderColor: GOLD.border,
+  },
+  matchName: { color: GOLD.text, fontFamily: FACE.title, fontSize: 24 },
+  matchAge: { color: GOLD.gold, fontFamily: FACE.title, fontSize: 20 },
+  matchSub: { color: GOLD.muted, fontSize: 13, fontFamily: FACE.body, marginTop: 2 },
+  chatBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: GOLD.gold, alignItems: 'center', justifyContent: 'center' },
+});

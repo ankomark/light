@@ -2512,3 +2512,40 @@ export const fetchSimilarTracks = (trackId) => apiRequest('get', `/tracks/${trac
 export const postPlays = (events) => apiRequest('post', '/tracks/plays/', { events });
 // Recently played, most recent first, each track once.
 export const fetchRecentTracks = (limit = 20) => apiRequest('get', '/tracks/recent/', null, { params: { limit } });
+
+// ── Single & Searching (advent-backend songs/views/singles.py) ──────────────
+// { eligible, blockers, ready_on, profile } — blockers are codes:
+// email_not_verified, suspended, account_too_new, banned.
+export const fetchSinglesMe = () => apiRequest('get', '/singles/me/');
+// Join: { agree_rules: true, first_name, birth_date, gender, country, baptised, ... }.
+export const createSinglesProfile = (data) => apiRequest('post', '/singles/me/', data);
+// Birth date and gender can't change; everything else can.
+export const updateSinglesProfile = (data) => apiRequest('patch', '/singles/me/', data);
+export const leaveSingles = () => apiRequest('delete', '/singles/me/');
+export const submitSinglesProfile = () => apiRequest('post', '/singles/me/submit/');
+export const pauseSinglesProfile = (paused) => apiRequest('post', '/singles/me/pause/', { paused });
+// formData with `image`; it waits for review before others see it.
+export const addSinglesPhoto = (formData) => apiRequest('post', '/singles/me/photos/', formData, {
+  headers: { 'Content-Type': 'multipart/form-data' },
+});
+export const removeSinglesPhoto = (id) => apiRequest('delete', `/singles/me/photos/${id}/`);
+export const orderSinglesPhotos = (ids) => apiRequest('post', '/singles/me/photos/order/', { ids });
+
+// The reviewers' queue (review_singles). state: waiting | approved | rejected | banned | all.
+export const fetchSinglesQueue = (state = 'waiting', page = 1) =>
+  apiRequest('get', '/admin/singles/', null, { params: { state, page } });
+export const reviewSinglesProfile = (id, decision, reason = '', photos = {}) =>
+  apiRequest('post', `/admin/singles/${id}/review/`, { decision, reason, photos });
+export const banFromSingles = (id, reason) => apiRequest('post', `/admin/singles/${id}/ban/`, { reason });
+export const unbanFromSingles = (id, reason) => apiRequest('post', `/admin/singles/${id}/unban/`, { reason });
+// Discover: ?min_age&max_age&country&baptised&language&looking_for → { results, left_today }.
+export const fetchSinglesDiscover = (filters = {}) => apiRequest('get', '/singles/discover/', null, { params: filters });
+export const fetchSinglesProfile = (id) => apiRequest('get', `/singles/profiles/${id}/`);
+// kind: interested | pass → { matched, match, left_today }.
+export const answerSingles = (id, kind) => apiRequest('post', `/singles/profiles/${id}/interest/`, { kind });
+export const fetchSinglesMatches = () => apiRequest('get', '/singles/matches/');
+export const unmatchSingles = (matchId) => apiRequest('post', `/singles/matches/${matchId}/unmatch/`);
+// reason: fake | scam | inappropriate | harassment | underage | married | other.
+export const reportSingles = (id, reason, description = '', block = false) =>
+  apiRequest('post', `/singles/profiles/${id}/report/`, { reason, description, block });
+export const blockSingles = (id) => apiRequest('post', `/singles/profiles/${id}/block/`);

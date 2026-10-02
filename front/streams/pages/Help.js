@@ -35,6 +35,8 @@ const FAQS = [
   { topic: 'safety', q: 'help.faq.privateQ', a: 'help.faq.privateA' },
   { topic: 'safety', q: 'help.faq.reportQ', a: 'help.faq.reportA' },
   { topic: 'safety', q: 'help.faq.appealQ', a: 'help.faq.appealA' },
+  { topic: 'safety', q: 'help.faq.singlesJoinQ', a: 'help.faq.singlesJoinA', feature: 'singles' },
+  { topic: 'safety', q: 'help.faq.singlesSafeQ', a: 'help.faq.singlesSafeA', feature: 'singles' },
   { topic: 'app', q: 'help.faq.notifQ', a: 'help.faq.notifA', appendAppName: true },
   { topic: 'app', q: 'help.faq.quietQ', a: 'help.faq.quietA' },
   { topic: 'app', q: 'help.faq.offlineQ', a: 'help.faq.offlineA' },

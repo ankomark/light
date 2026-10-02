@@ -27,6 +27,7 @@ const TOOLS = [
   ['broadcast', 'AdminBroadcast', 'bullhorn-outline', 'broadcast'],
   ['manage_app', 'AdminAppControl', 'toggle-switch-outline', 'app'],
   ['verify_accounts', 'AdminVerify', 'check-decagram-outline', 'verify'],
+  ['review_singles', 'AdminSingles', 'ring', 'singles'],
   ['manage_quiz', 'AdminQuizBank', 'head-question-outline', 'quiz'],
   ['manage_puzzles', 'AdminPuzzleThemes', 'puzzle-outline', 'puzzles'],
   ['manage_wallpapers', 'AdminWallpapers', 'image-multiple-outline', 'wallpapers'],

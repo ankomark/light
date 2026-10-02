@@ -4,6 +4,8 @@ import json
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
 NOTIFICATION_TITLES = {
+    # Single & Searching: discreet — never a name on the lock screen.
+    'singles_match': '\U0001f49b Single & Searching',
     'quiz_duel': '\u2694\ufe0f Your duel was played',
     'puzzle_challenge': '\U0001f9e9 Your puzzle challenge was played',
     'like': '❤️ New Like',
@@ -50,6 +52,7 @@ NOTIFICATION_CATEGORIES = {
     'mention': 'comments',
     'follow': 'follows',
     'message': 'messages',
+    'singles_match': 'messages',
     'group_join_request': 'groups',
     'group_mention': 'messages',
     'notice': 'notices',

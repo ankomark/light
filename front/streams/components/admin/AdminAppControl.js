@@ -10,7 +10,7 @@ import { useAppStatus } from '../../context/AppStatusContext';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { ADMIN, ErrorState } from './AdminKit';
 
-const FEATURES = ['marketplace', 'quiz', 'puzzle', 'live'];
+const FEATURES = ['marketplace', 'quiz', 'puzzle', 'live', 'singles'];
 
 export default function AdminAppControl() {
   const { t } = useI18n();

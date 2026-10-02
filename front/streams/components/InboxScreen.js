@@ -10,7 +10,7 @@ import {
   ActivityIndicator, AppState, RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   fetchConversations, fetchConversationsByUrl, fetchUnreadMessageCount, setConversationState,
@@ -48,6 +48,10 @@ const ConversationItem = memo(({ item, onPress, onLongPress, meId, typing, t }) 
           <Text style={[styles.name, hasUnread && styles.nameBold]} numberOfLines={1}>
             {other?.username ?? t('dm.unknown')}
           </Text>
+          {item.singles ? (
+            <MaterialCommunityIcons name="ring" size={14} color="#FFC46B" style={styles.muted}
+              accessibilityLabel={t('singles.title')} testID={`singles-chat-${item.id}`} />
+          ) : null}
           {item.muted ? <Ionicons name="notifications-off" size={13} color={colors.textMuted} style={styles.muted} /> : null}
           <Text style={[styles.time, hasUnread && styles.timeUnread]}>
             {shortAgo(t, item.last_message?.created_at || item.updated_at)}
@@ -283,6 +287,8 @@ const InboxScreen = ({ navigation }) => {
       isRequest: !!conversation.is_request,
       muted: !!conversation.muted,
       archived: !!conversation.archived,
+      singles: !!conversation.singles,
+      closed: !!conversation.closed,
     });
   }, [navigation, put]);
 

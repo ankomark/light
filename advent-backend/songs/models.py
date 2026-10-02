@@ -34,6 +34,7 @@ ADMIN_CAPABILITIES = (
     ('verify_accounts', 'Give the verified tick (artists, sellers, services, organizations)'),
     ('broadcast', 'Send a notification to everyone or a group'),
     ('manage_app', 'Maintenance mode & switching parts of the app off'),
+    ('review_singles', 'Review Single & Searching profiles and photos'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 
@@ -3636,3 +3637,109 @@ class WeatherBriefing(models.Model):
 
     def __str__(self):
         return f"{self.user.username} · {self.date}"
+
+
+# ── Single & Searching ──────────────────────────────────────────────────────
+# A separate, opt-in space for unmarried adults to meet with marriage in mind.
+# The singles profile is kept apart from the social Profile: it is not linked
+# from posts, search or Explore, and leaving deletes it. Nobody sees a profile
+# until an admin approves it; a new photo waits for approval too. Birth date
+# and gender are set once and never change (they decide who sees whom).
+class SinglesProfile(models.Model):
+    MAN, WOMAN = 'man', 'woman'
+    GENDERS = [(MAN, 'Man'), (WOMAN, 'Woman')]
+    LOOKING = [('marriage', 'Marriage'), ('friendship', 'Friendship that may lead to marriage')]
+    BAPTISED = [('yes', 'Yes'), ('not_yet', 'Not yet')]
+    DRAFT, PENDING, APPROVED, REJECTED, BANNED = 'draft', 'pending', 'approved', 'rejected', 'banned'
+    STATUSES = [(DRAFT, 'Draft'), (PENDING, 'Waiting for review'), (APPROVED, 'Approved'),
+                (REJECTED, 'Changes needed'), (BANNED, 'Banned')]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='singles_profile')
+    first_name = models.CharField(max_length=40)
+    birth_date = models.DateField()
+    gender = models.CharField(max_length=8, choices=GENDERS)
+    country = models.CharField(max_length=60)
+    town = models.CharField(max_length=80, blank=True, default='')
+    church = models.CharField(max_length=120, blank=True, default='')
+    baptised = models.CharField(max_length=8, choices=BAPTISED)
+    looking_for = models.CharField(max_length=12, choices=LOOKING, default='marriage')
+    languages = models.JSONField(default=list, blank=True)
+    about = models.TextField(max_length=500, blank=True, default='')
+    # [{key, answer}], up to three, from songs/singles.py PROMPTS.
+    prompts = models.JSONField(default=list, blank=True)
+    occupation = models.CharField(max_length=80, blank=True, default='')
+    education = models.CharField(max_length=80, blank=True, default='')
+    interests = models.JSONField(default=list, blank=True)
+
+    status = models.CharField(max_length=10, choices=STATUSES, default=DRAFT)
+    review_note = models.CharField(max_length=255, blank=True, default='')
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='singles_reviewed')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    is_paused = models.BooleanField(default=False)
+    agreed_rules_at = models.DateTimeField()
+    last_active_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['status', 'gender', 'is_paused'])]
+
+    def __str__(self):
+        return f'Singles profile of {self.user_id} ({self.status})'
+
+
+class SinglesPhoto(models.Model):
+    PENDING, APPROVED, REJECTED = 'pending', 'approved', 'rejected'
+    STATUSES = [(PENDING, 'Waiting for review'), (APPROVED, 'Approved'), (REJECTED, 'Rejected')]
+
+    profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='photos')
+    url = models.CharField(max_length=500)
+    position = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['position', 'id']
+
+    def __str__(self):
+        return f'Singles photo {self.id} ({self.status})'
+
+
+class SinglesInterest(models.Model):
+    """One person's answer to another's profile: interested, or not now.
+    Private: nobody is told of a "not now", and an interest only shows as a
+    match once it is returned."""
+    INTERESTED, PASS = 'interested', 'pass'
+    KINDS = [(INTERESTED, 'Interested'), (PASS, 'Not now')]
+
+    from_profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='interests_given')
+    to_profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='interests_received')
+    kind = models.CharField(max_length=12, choices=KINDS)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('from_profile', 'to_profile')
+        indexes = [models.Index(fields=['from_profile', 'created_at']),
+                   models.Index(fields=['to_profile', 'kind'])]
+
+
+class SinglesMatch(models.Model):
+    """Two people who are both interested. Their chat is its own conversation
+    in Messages; unmatching ends the match and closes that chat for both."""
+    # Kept (ended) when one of them leaves, so their chat stays closed rather
+    # than turning into an ordinary one.
+    profile_a = models.ForeignKey(SinglesProfile, null=True, on_delete=models.SET_NULL, related_name='+')
+    profile_b = models.ForeignKey(SinglesProfile, null=True, on_delete=models.SET_NULL, related_name='+')
+    conversation = models.OneToOneField('Conversation', null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name='singles_match')
+    created_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    ended_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+
+    class Meta:
+        unique_together = ('profile_a', 'profile_b')
+
+    def other(self, profile):
+        return self.profile_b if profile.pk == self.profile_a_id else self.profile_a

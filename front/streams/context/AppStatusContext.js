@@ -12,7 +12,7 @@ import { API_URL } from '../services/api';
 
 const DEFAULT = {
   maintenance: { on: false, message: '' },
-  features: { marketplace: true, quiz: true, puzzle: true, live: true },
+  features: { marketplace: true, quiz: true, puzzle: true, live: true, singles: true },
 };
 
 const AppStatus = createContext({ ...DEFAULT, refresh: () => {} });
