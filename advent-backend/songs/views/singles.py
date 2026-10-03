@@ -254,6 +254,12 @@ def _mine(user):
     profile = _profile_of(user)
     if profile is None or profile.status == SinglesProfile.BANNED:
         raise PermissionDenied({'code': 'no_profile', 'detail': 'You have no singles profile.'})
+    # Standing is checked on every action, not only when joining: someone
+    # suspended after they joined can't carry on here (leaving still works —
+    # it doesn't come through here).
+    blockers = rules.blockers(user)
+    if blockers:
+        raise PermissionDenied({'code': 'not_eligible', 'blockers': blockers})
     return profile
 
 

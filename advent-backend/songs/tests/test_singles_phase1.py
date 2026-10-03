@@ -12,6 +12,7 @@ from unittest import mock
 
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -65,6 +66,7 @@ class Base(APITestCase):
 
 
 class JoiningTests(Base):
+    @override_settings(REQUIRE_EMAIL_VERIFICATION=True)
     def test_who_may_join(self):
         r = self.client.get(ME)
         self.assertEqual((r.data['eligible'], r.data['blockers'], r.data['profile']), (True, [], None))
@@ -83,6 +85,29 @@ class JoiningTests(Base):
             self.client.force_authenticate(User.objects.get(pk=who.pk))
             r = self.join()
             self.assertEqual((r.status_code, r.data['blockers']), (403, [code]))
+
+    def test_unverified_email_is_fine_while_the_app_does_not_ask_for_it(self):
+        # No mail server yet: the app treats everyone as verified, and so does
+        # Single & Searching — otherwise nobody could ever join (Ivy's bug).
+        ivy = member('ivy')
+        User.objects.filter(pk=ivy.pk).update(is_email_verified=False)
+        self.client.force_authenticate(User.objects.get(pk=ivy.pk))
+        r = self.client.get(ME)
+        self.assertEqual((r.data['eligible'], r.data['blockers']), (True, []))
+        self.assertEqual(self.join().status_code, 201)
+
+    @override_settings(REQUIRE_EMAIL_VERIFICATION=True)
+    def test_admins_skip_the_email_and_new_account_checks(self):
+        admin = User.objects.create_user('boss', 'boss@x.com', 'pw', admin_role='super_admin')
+        self.client.force_authenticate(admin)
+        r = self.client.get(ME)
+        self.assertEqual((r.data['eligible'], r.data['blockers']), (True, []))
+        mod = User.objects.create_user('mod', 'mod@x.com', 'pw', role=Role.objects.create(name='R', capabilities=['review_singles']))
+        self.client.force_authenticate(mod)
+        self.assertEqual(self.client.get(ME).data['blockers'], [])
+        suspended_admin = User.objects.create_user('sus', 'sus@x.com', 'pw', admin_role='moderator', is_suspended=True)
+        self.client.force_authenticate(suspended_admin)
+        self.assertEqual(self.client.get(ME).data['blockers'], [singles.SUSPENDED])   # suspension still counts
 
     def test_18_or_over_and_the_rules_agreed(self):
         r = self.join(birth_date=years_ago(18, days=-1).isoformat())         # 18 tomorrow

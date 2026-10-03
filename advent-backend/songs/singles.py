@@ -43,16 +43,31 @@ def age_on(birth, today=None):
     return today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
 
 
+def verification_required():
+    """Email verification is only asked for once the app sends email
+    (settings.REQUIRE_EMAIL_VERIFICATION). Until then the app treats everyone
+    as verified (views/auth.AuthStatusView) — and so must this, or nobody
+    could ever join: there would be no way to verify."""
+    from django.conf import settings
+    return bool(getattr(settings, 'REQUIRE_EMAIL_VERIFICATION', False))
+
+
+def email_ok(user):
+    return bool(user.is_email_verified) or not verification_required()
+
+
 def blockers(user, now=None):
     """Why this person can't use Single & Searching yet ([] when they can).
-    Age is checked when they give their birth date, not here."""
+    Age is checked when they give their birth date, not here. Admins are
+    trusted accounts: the email and new-account checks don't apply to them."""
     now = now or timezone.now()
     out = []
-    if not user.is_email_verified:
+    admin = bool(getattr(user, 'is_platform_admin', False))
+    if not admin and not email_ok(user):
         out.append(NOT_VERIFIED)
     if user.is_suspended or user.is_deactivated:
         out.append(SUSPENDED)
-    if user.date_joined and user.date_joined > now - timedelta(days=MIN_ACCOUNT_DAYS):
+    if not admin and user.date_joined and user.date_joined > now - timedelta(days=MIN_ACCOUNT_DAYS):
         out.append(TOO_NEW)
     from .models import SinglesProfile
     if SinglesProfile.objects.filter(user=user, status=SinglesProfile.BANNED).exists():
@@ -170,11 +185,16 @@ def visible_profiles():
     from django.db.models import Exists, OuterRef
     from .models import SinglesPhoto, SinglesProfile
     photo = SinglesPhoto.objects.filter(profile=OuterRef('pk'), status=SinglesPhoto.APPROVED)
-    return (SinglesProfile.objects
-            .filter(status=SinglesProfile.APPROVED, is_paused=False,
-                    user__is_active=True, user__is_deactivated=False, user__is_suspended=False,
-                    user__is_email_verified=True)
-            .filter(Exists(photo)))
+    qs = (SinglesProfile.objects
+          .filter(status=SinglesProfile.APPROVED, is_paused=False,
+                  user__is_active=True, user__is_deactivated=False, user__is_suspended=False)
+          .filter(Exists(photo)))
+    if verification_required():
+        # Admins never had to verify (see blockers), so they stay visible.
+        from django.db.models import Q
+        qs = qs.filter(Q(user__is_email_verified=True) | Q(user__admin_role__in=('moderator', 'super_admin'))
+                       | Q(user__is_superuser=True) | Q(user__role__isnull=False))
+    return qs
 
 
 def candidates(me, filters=None):

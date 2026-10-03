@@ -32,6 +32,7 @@ def years_ago(n):
 def single(name, gender='woman', age=27, status='approved', country='Kenya', **extra):
     u = User.objects.create_user(name, f'{name}@x.com', 'pw', is_email_verified=True)
     User.objects.filter(pk=u.pk).update(date_joined=timezone.now() - timedelta(days=30))
+    u.refresh_from_db()
     p = SinglesProfile.objects.create(
         user=u, first_name=name.title(), birth_date=years_ago(age), gender=gender, country=country,
         baptised='yes', status=status, agreed_rules_at=timezone.now(), last_active_at=timezone.now(), **extra)
@@ -79,6 +80,14 @@ class DiscoverTests(Base):
         self.assertNotIn('birth_date', shown)
         self.assertNotIn('status', shown)
         self.assertEqual(shown['age'], 27)
+
+    def test_unverified_emails_shown_unless_the_app_requires_verification(self):
+        from django.test import override_settings
+        quiet = single('quiet')
+        User.objects.filter(pk=quiet.user_id).update(is_email_verified=False)
+        self.assertEqual(self.ids(), [quiet.id])
+        with override_settings(REQUIRE_EMAIL_VERIFICATION=True):
+            self.assertEqual(self.ids(), [])
 
     def test_you_must_be_approved_and_not_paused_to_look(self):
         SinglesProfile.objects.filter(pk=self.mark.pk).update(status='pending')
@@ -196,6 +205,15 @@ class SafetyTests(Base):
         self.mark.refresh_from_db()
         self.assertEqual(self.mark.status, 'pending')
         self.assertIn('very many interests', self.mark.review_note)
+
+    def test_suspended_after_joining_cannot_carry_on(self):
+        User.objects.filter(pk=self.mark.user_id).update(is_suspended=True)
+        self.client.force_authenticate(User.objects.get(pk=self.mark.user_id))
+        r = self.discover()
+        self.assertEqual((r.status_code, r.data['code']), (403, 'not_eligible'))
+        self.assertEqual(self.client.post(f'/api/singles/profiles/{self.grace.id}/interest/', {'kind': 'interested'},
+                                          format='json').status_code, 403)
+        self.assertEqual(self.client.get('/api/singles/me/').data['eligible'], False)
 
     def test_a_report_needs_a_known_reason(self):
         r = self.client.post(f'/api/singles/profiles/{self.grace.id}/report/', {'reason': 'ugly'}, format='json')
