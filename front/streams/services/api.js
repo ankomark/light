@@ -2549,3 +2549,38 @@ export const unmatchSingles = (matchId) => apiRequest('post', `/singles/matches/
 export const reportSingles = (id, reason, description = '', block = false) =>
   apiRequest('post', `/singles/profiles/${id}/report/`, { reason, description, block });
 export const blockSingles = (id) => apiRequest('post', `/singles/profiles/${id}/block/`);
+// A verse by reference ("Philippians 4:13", up to five verses) → { ref, text, version }.
+export const lookupVerse = (ref) => apiRequest('get', '/bible/lookup/', null, { params: { ref } });
+
+// ── Single & Searching: the hub (phases 6-11) ───────────────────────────────
+export const fetchSinglesHub = (mode = 'foryou') => apiRequest('get', '/singles/hub/', null, { params: { mode } });
+export const browseSingles = (mode = 'foryou', page = 1, filters = {}) =>
+  apiRequest('get', '/singles/browse/', null, { params: { mode, page, ...filters } });
+export const fetchSinglesLikes = () => apiRequest('get', '/singles/likes/');
+export const saveSinglesAnswers = (answers) => apiRequest('put', '/singles/me/answers/', { answers });
+export const fetchIcebreakers = (matchId) => apiRequest('get', `/singles/matches/${matchId}/icebreakers/`);
+export const askIcebreaker = (matchId, key) => apiRequest('post', `/singles/matches/${matchId}/icebreakers/`, { key });
+export const answerIcebreaker = (id, answer) => apiRequest('post', `/singles/icebreakers/${id}/answer/`, { answer });
+export const fetchSinglesTopics = () => apiRequest('get', '/singles/topics/');
+export const askSinglesTopic = (body) => apiRequest('post', '/singles/topics/', { body });
+export const fetchSinglesTopic = (id) => apiRequest('get', `/singles/topics/${id}/`);
+export const replySinglesTopic = (id, body) => apiRequest('post', `/singles/topics/${id}/replies/`, { body });
+export const heartSinglesTopic = (id) => apiRequest('post', `/singles/topics/${id}/heart/`);
+export const fetchSinglesGatherings = () => apiRequest('get', '/singles/gatherings/');
+export const suggestSinglesGathering = (data) => apiRequest('post', '/singles/gatherings/', data);
+export const rsvpSinglesGathering = (id) => apiRequest('post', `/singles/gatherings/${id}/rsvp/`);
+export const fetchSinglesRooms = () => apiRequest('get', '/singles/rooms/');
+export const startSinglesRoom = (title) => apiRequest('post', '/live/broadcasts/', { kind: 'meet', title, singles_only: true });
+export const fetchSinglesStories = () => apiRequest('get', '/singles/stories/');
+export const tellSinglesStory = (matchId, title, body) => apiRequest('post', `/singles/matches/${matchId}/story/`, { title, body });
+export const agreeSinglesStory = (id) => apiRequest('post', `/singles/stories/${id}/consent/`);
+export const withdrawSinglesStory = (id) => apiRequest('delete', `/singles/stories/${id}/consent/`);
+export const fetchSinglesVerify = () => apiRequest('get', '/singles/me/verify/');
+export const sendSinglesSelfie = (formData) => apiRequest('post', '/singles/me/verify/', formData, {
+  headers: { 'Content-Type': 'multipart/form-data' },
+});
+// Reviewers.
+export const fetchSinglesStats = () => apiRequest('get', '/admin/singles-stats/');
+export const fetchSinglesReviewList = (kind) => apiRequest('get', `/admin/singles-${kind}/`);
+export const decideSinglesItem = (kind, id, decision, reason = '') =>
+  apiRequest('post', `/admin/singles-${kind}/${id}/decide/`, { decision, reason });

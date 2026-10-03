@@ -68,6 +68,13 @@ def _own_json(profile):
         'baptised': profile.baptised, 'looking_for': profile.looking_for,
         'languages': profile.languages, 'about': profile.about, 'prompts': profile.prompts,
         'occupation': profile.occupation, 'education': profile.education, 'interests': profile.interests,
+        'ministries': profile.ministries, 'diet': profile.diet,
+        'show_age': profile.show_age, 'show_town': profile.show_town, 'show_online': profile.show_online,
+        'discoverable': profile.discoverable,
+        'preferences': {'min_age': profile.pref_min_age, 'max_age': profile.pref_max_age,
+                        'countries': profile.pref_countries, 'intents': profile.pref_intents},
+        'photo_verified': profile.photo_verified_at is not None,
+        'answers': [{'key': a.key, 'answer': a.answer, 'visible': a.visible} for a in profile.answers.all()],
         'status': profile.status, 'review_note': profile.review_note,
         'is_paused': profile.is_paused,
         'photos': [_photo_json(p) for p in profile.photos.exclude(status=SinglesPhoto.REJECTED)],
@@ -106,6 +113,57 @@ def _apply(profile, data, creating=False):
             profile.prompts = rules.clean_prompts(data['prompts'])
         except ValueError as e:
             errors['prompts'] = str(e)
+    if 'ministries' in data:
+        try:
+            profile.ministries = rules.clean_ministries(data['ministries'])
+        except ValueError as e:
+            errors['ministries'] = str(e)
+    if 'diet' in data:
+        if data['diet'] not in dict(SinglesProfile.DIETS):
+            errors['diet'] = f'One of {list(dict(SinglesProfile.DIETS))}.'
+        else:
+            profile.diet = data['diet']
+    for field in ('show_age', 'show_town', 'show_online'):
+        if field in data:
+            setattr(profile, field, bool(data[field]))
+    if 'discoverable' in data:
+        if data['discoverable'] not in dict(SinglesProfile.DISCOVERABLE):
+            errors['discoverable'] = 'everyone or liked'
+        else:
+            profile.discoverable = data['discoverable']
+    if 'preferences' in data:
+        errors.update(_apply_preferences(profile, data['preferences']))
+    return errors
+
+
+def _apply_preferences(profile, prefs):
+    if not isinstance(prefs, dict):
+        return {'preferences': 'An object.'}
+    errors = {}
+    for key, field in (('min_age', 'pref_min_age'), ('max_age', 'pref_max_age')):
+        if key in prefs:
+            value = prefs[key]
+            if value in (None, ''):
+                setattr(profile, field, None)
+                continue
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                errors['preferences'] = 'Ages are numbers.'
+                continue
+            setattr(profile, field, max(rules.MIN_AGE, min(rules.MAX_AGE, value)))
+    if profile.pref_min_age and profile.pref_max_age and profile.pref_min_age > profile.pref_max_age:
+        errors['preferences'] = 'The youngest age is above the oldest.'
+    if 'countries' in prefs:
+        countries = prefs['countries'] if isinstance(prefs['countries'], list) else []
+        profile.pref_countries = [rules.clean(c, 60) for c in countries if rules.clean(c, 60)][:5]
+    if 'intents' in prefs:
+        intents = prefs['intents'] if isinstance(prefs['intents'], list) else []
+        allowed = dict(SinglesProfile.LOOKING)
+        if any(i not in allowed for i in intents):
+            errors['preferences'] = f'intents: any of {list(allowed)}'
+        else:
+            profile.pref_intents = list(dict.fromkeys(intents))
     return errors
 
 
@@ -295,6 +353,7 @@ def _review_json(profile):
                  'strikes': user.strikes},
         'photos': [_photo_json(p) for p in profile.photos.all()],
         'submitted_at': profile.submitted_at.isoformat() if profile.submitted_at else None,
+        'risk': rules.risk(profile),
         'reviewed_at': profile.reviewed_at.isoformat() if profile.reviewed_at else None,
     }
 
@@ -375,7 +434,10 @@ class AdminSinglesViewSet(viewsets.ViewSet):
             profile.status = profile.APPROVED if decision == 'approve' else profile.REJECTED
             profile.review_note = '' if decision == 'approve' else reason
             profile.reviewed_by, profile.reviewed_at = request.user, timezone.now()
-            profile.save(update_fields=['status', 'review_note', 'reviewed_by', 'reviewed_at', 'updated_at'])
+            if decision == 'approve' and was != profile.APPROVED and not profile.approved_at:
+                profile.approved_at = timezone.now()
+            profile.save(update_fields=['status', 'review_note', 'reviewed_by', 'reviewed_at', 'approved_at',
+                                        'updated_at'])
         log_admin_action(request.user, f'singles_{decision}', 'singlesprofile', profile.pk,
                          reason=reason or profile.first_name)
         if decision == 'approve' and was != profile.APPROVED:
@@ -417,19 +479,36 @@ class AdminSinglesViewSet(viewsets.ViewSet):
 
 
 # ── Phase 2: Discover, interest and matches ─────────────────────────────────
-def _public_json(profile, viewer=None):
-    """A profile as someone else sees it: no birth date (age only), no review
-    state, approved photos only."""
-    return {
+def _public_json(profile, viewer=None, reasons=None):
+    """A profile as someone else sees it: no birth date, no review state,
+    approved photos only — and only what its owner chose to show (age, town,
+    being online, each values answer)."""
+    answers = getattr(profile, '_answers', None)
+    if answers is None:
+        answers = {a.key: a.answer for a in profile.answers.all() if a.visible}
+    out = {
         'id': profile.id,
         'first_name': profile.first_name,
-        'age': rules.age_on(profile.birth_date),
-        'country': profile.country, 'town': profile.town, 'church': profile.church,
+        'age': rules.age_on(profile.birth_date) if profile.show_age else None,
+        'country': profile.country, 'town': profile.town if profile.show_town else '',
+        'church': profile.church,
         'baptised': profile.baptised, 'looking_for': profile.looking_for,
         'languages': profile.languages, 'about': profile.about, 'prompts': profile.prompts,
         'occupation': profile.occupation, 'education': profile.education, 'interests': profile.interests,
+        'ministries': profile.ministries, 'diet': profile.diet,
+        'answers': [{'key': k, 'answer': v} for k, v in answers.items()],
+        'online': rules.is_online(profile),
+        'badges': {'email': True, 'photo': profile.photo_verified_at is not None},
         'photos': [_photo_json(p, own=False) for p in profile.photos.all() if p.status == SinglesPhoto.APPROVED],
     }
+    if viewer is not None and reasons is None and viewer.pk != profile.pk:
+        if getattr(viewer, '_answers', None) is None:
+            rules._with_answers([viewer])
+        profile._answers = answers
+        reasons = rules.reasons_for(viewer, profile)
+    if reasons is not None:
+        out['reasons'] = reasons
+    return out
 
 
 def _seen(profile):
@@ -475,7 +554,11 @@ class SinglesDiscoverView(APIView):
         left = max(0, rules.DAILY_NEW - rules.answered_today(me))
         if not left:
             return Response({'results': [], 'left_today': 0})
-        batch = list(rules.candidates(me, _filters(request.query_params))[:min(rules.BATCH, left)])
+        filters = _filters(request.query_params)
+        qs = rules.candidates(me, filters)
+        if not filters:
+            qs = rules.apply_preferences(qs, me)
+        batch = list(qs[:min(rules.BATCH, left)])
         return Response({'results': [_public_json(p, me) for p in batch], 'left_today': left})
 
 
@@ -488,9 +571,21 @@ def _match_json(match, me):
         'created_at': match.created_at.isoformat(),
         'ended': match.ended_at is not None,
         'opener': rules.opener(other),
+        'starters': rules.starters(other),
         # Only once matched: who they are in Messages, where the chat lives.
         'user': {'id': other.user_id, 'username': other.user.username},
+        'story': _story_state(match, me),
     }
+
+
+def _story_state(match, me):
+    try:
+        story = match.story
+    except Exception:  # noqa: BLE001 — RelatedObjectDoesNotExist: no story yet
+        return None
+    consents = story.consents or []
+    return {'id': story.id, 'title': story.title, 'status': story.status,
+            'agreed': me.user_id in consents, 'both_agreed': len(set(consents)) >= 2}
 
 
 def _make_match(me, other):
@@ -510,6 +605,7 @@ def _make_match(me, other):
             ])
             match.conversation = conv
             match.save(update_fields=['conversation'])
+            rules.signal(me, 'match', other)
     if created:
         for user in (me.user, other.user):
             try:
@@ -535,6 +631,7 @@ class SinglesProfileView(APIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         if target.pk == me.pk:
             return Response(_own_json(me))
+        rules.signal(me, 'view', target)
         return Response(_public_json(target, me))
 
 
@@ -557,6 +654,7 @@ class SinglesInterestView(APIView):
         if already is None and rules.answered_today(me) >= rules.DAILY_NEW:
             return Response({'code': 'daily_limit', 'left_today': 0}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         SinglesInterest.objects.update_or_create(from_profile=me, to_profile=target, defaults={'kind': kind})
+        rules.signal(me, 'interest' if kind == SinglesInterest.INTERESTED else 'pass', target)
         _seen(me)
         if kind == SinglesInterest.INTERESTED and _too_fast(me):
             return Response({'code': 'slow_down'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
@@ -667,6 +765,7 @@ class SinglesReportView(APIView):
         Report.objects.get_or_create(
             reporter=request.user, content_type='singlesprofile', object_id=target.pk,
             defaults={'reason': 'other', 'description': f'[{reason}] {description}'.strip()})
+        rules.signal(me, 'report', target)
         open_reports = (Report.objects.filter(content_type='singlesprofile', object_id=target.pk, status='pending')
                         .values('reporter').distinct().count())
         if open_reports >= rules.REPORTS_TO_PAUSE and target.status == target.APPROVED:
@@ -681,6 +780,7 @@ class SinglesReportView(APIView):
 def _block(user, me, target):
     from ..models import Block
     Block.objects.get_or_create(blocker=user, blocked=target.user)
+    rules.signal(me, 'block', target)
     _end_match(me, other=target, by=user)
 
 

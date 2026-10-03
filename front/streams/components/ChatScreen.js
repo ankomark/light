@@ -32,7 +32,7 @@ import { compressImage } from '../services/imageProcessing';
 import {
   fetchMessages, fetchOlderMessages, sendMessage, markConversationRead,
   editMessage, deleteMessage, reactToMessage, setConversationState, fetchPresence,
-  searchMessages, blockUser,
+  searchMessages, blockUser, lookupVerse,
 } from '../services/api';
 import { subscribeDM, isDMOpen, sendDMTyping, announceDM } from '../services/dmSocket';
 import { uploadMedia } from '../services/cloudinary';
@@ -81,12 +81,21 @@ const fmtDuration = (s) => {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 };
 
+// A Scripture card's content is "reference|text".
+const verseParts = (content) => {
+  const at = (content || '').indexOf('|');
+  return at < 0 ? { ref: content || '', text: '' } : { ref: content.slice(0, at), text: content.slice(at + 1) };
+};
+
+// Links, emails and phone numbers — what a scam reaches for first.
+const CONTACT = /(https?:\/\/|www\.|\b[\w-]+\.(com|net|org|co|ke|io|me|ly|app)\b|\S+@\S+\.\S+|\+?\d(?:[\s\-.()]*\d){6,})/i;
+
 // One bubble. Memoised with primitive props, so a new message, a read receipt
 // or a keystroke in the composer re-renders only the rows that changed — not
 // every bubble on screen.
 const MessageRow = memo(({
   item, isOwn, showAvatar, dayText, isPlaying, imgSide, highlighted, replyName, t,
-  onOpenImage, onOpenFile, onPlayAudio, onLongPress, onRetry, onReact,
+  onOpenImage, onOpenFile, onPlayAudio, onLongPress, onRetry, onReact, caution,
 }) => {
   const type = item.message_type || 'text';
   const deleted = !!item.is_deleted;
@@ -145,6 +154,16 @@ const MessageRow = memo(({
                 </Text>
                 <Ionicons name="download-outline" size={18} color={isOwn ? 'rgba(255,255,255,0.8)' : colors.textMuted} />
               </Pressable>
+            ) : type === 'verse' ? (
+              <View style={styles.verseCard} testID={`verse-${item.id}`}>
+                <View style={styles.verseHead}>
+                  <Ionicons name="book" size={15} color={colors.accent} />
+                  <Text style={styles.verseRef}>{verseParts(item.content).ref}</Text>
+                </View>
+                <Text selectable style={[styles.verseText, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther]}>
+                  {verseParts(item.content).text}
+                </Text>
+              </View>
             ) : type === 'audio' ? (
               <Pressable style={styles.audioRow} onPress={() => onPlayAudio(item)} onLongPress={() => onLongPress(item)}>
                 <Ionicons name={isPlaying ? 'pause-circle' : 'play-circle'} size={30} color={isOwn ? colors.white : colors.primary} />
@@ -157,12 +176,18 @@ const MessageRow = memo(({
               </Pressable>
             ) : null}
 
-            {!deleted && !!item.content && (
+            {!deleted && !!item.content && type !== 'verse' && (
               <Text selectable style={[styles.bubbleText, isOwn ? styles.bubbleTextOwn : styles.bubbleTextOther, type === 'image' && styles.captionGap]}>
                 {item.content}
               </Text>
             )}
 
+            {caution && !deleted ? (
+              <View style={styles.cautionRow} testID={`caution-${item.id}`}>
+                <Ionicons name="shield-half-outline" size={13} color={colors.accent} />
+                <Text style={styles.cautionText}>{t('singles.caution')}</Text>
+              </View>
+            ) : null}
             {item.failed ? (
               <View style={styles.failedRow}>
                 <Ionicons name="alert-circle" size={13} color={colors.error} />
@@ -224,6 +249,11 @@ const ChatScreen = ({ route, navigation }) => {
   const [archived, setArchived] = useState(!!route.params.archived);
   // A Single & Searching chat whose match has ended: read-only.
   const [closed, setClosed] = useState(!!route.params.closed);
+  const singles = !!route.params.singles;
+  const [verseSheet, setVerseSheet] = useState(false);
+  const [verseRef, setVerseRef] = useState('');
+  const [verseFound, setVerseFound] = useState(null);
+  const [verseBusy, setVerseBusy] = useState(false);
   // The other person, live.
   const [presence, setPresence] = useState({ online: false, lastSeen: null });
   const [otherTyping, setOtherTyping] = useState(false);
@@ -536,6 +566,27 @@ const ChatScreen = ({ route, navigation }) => {
     scrollToEndSoon();
     return deliver(tempId, () => payload);
   }, [deliver, optimisticBase]);
+
+  // A Scripture card: the server puts the Bible's own words on it.
+  const sendVerse = useCallback((ref) => {
+    const tempId = nextTempId();
+    const payload = { content: ref, message_type: 'verse', client_id: tempId };
+    setMessages((prev) => [...prev, optimisticBase(tempId, { content: ref, message_type: 'verse', _payload: payload })]);
+    scrollToEndSoon();
+    return deliver(tempId, () => payload);
+  }, [deliver, optimisticBase]);
+
+  const findVerse = useCallback(async () => {
+    if (!verseRef.trim()) return;
+    setVerseBusy(true);
+    try {
+      setVerseFound(await lookupVerse(verseRef.trim()));
+    } catch {
+      setVerseFound(false);
+    } finally {
+      setVerseBusy(false);
+    }
+  }, [verseRef]);
 
   // Media: show the local file at once, upload it in the background, then
   // send the message with just the URL.
@@ -927,9 +978,10 @@ const ChatScreen = ({ route, navigation }) => {
         onLongPress={setActionsFor}
         onRetry={retry}
         onReact={react}
+        caution={singles && !isOwn && (item.message_type || 'text') === 'text' && CONTACT.test(item.content || '')}
       />
     );
-  }, [meId, messages, playingId, imgSide, highlight, replyName, t, openFile, playAudio, retry, react]);
+  }, [meId, messages, playingId, imgSide, highlight, replyName, t, openFile, playAudio, retry, react, singles]);
 
   const keyExtractor = useCallback((item) => String(item.id), []);
   // Don't yank the view to the bottom while we're prepending history.
@@ -1216,6 +1268,34 @@ const ChatScreen = ({ route, navigation }) => {
 
       <ReportModal visible={!!reportId} onClose={() => setReportId(null)} contentType="message" objectId={reportId} />
 
+      {/* Share Scripture: type a reference, see the verse, send it as a card */}
+      <Modal visible={verseSheet} transparent animationType="slide" onRequestClose={() => setVerseSheet(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setVerseSheet(false)}>
+          <Pressable style={styles.sheetCard} testID="verse-sheet">
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t('chat.verse')}</Text>
+            <TextInput style={styles.verseInput} value={verseRef} onChangeText={(v) => { setVerseRef(v); setVerseFound(null); }}
+              placeholder={t('chat.versePlaceholder')} placeholderTextColor={colors.placeholder} autoCapitalize="words"
+              returnKeyType="search" onSubmitEditing={findVerse} accessibilityLabel={t('chat.versePlaceholder')}
+              testID="verse-input" />
+            {verseFound ? (
+              <View style={styles.versePreview}>
+                <Text style={styles.verseRef}>{verseFound.ref}</Text>
+                <Text style={styles.versePreviewText}>{verseFound.text}</Text>
+              </View>
+            ) : verseFound === false ? (
+              <Text style={styles.sheetSubtitle}>{t('chat.verseNotFound')}</Text>
+            ) : null}
+            <TouchableOpacity style={[styles.verseBtn, verseBusy && { opacity: 0.6 }]} disabled={verseBusy} testID="verse-go"
+              onPress={() => {
+                if (verseFound) { setVerseSheet(false); sendVerse(verseFound.ref); } else findVerse();
+              }}>
+              <Text style={styles.verseBtnText}>{verseFound ? t('chat.verseSend') : t('chat.verseFind')}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Attachment sheet: choose what to send */}
       <Modal visible={attachSheet} transparent animationType="slide" onRequestClose={() => setAttachSheet(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setAttachSheet(false)}>
@@ -1242,6 +1322,18 @@ const ChatScreen = ({ route, navigation }) => {
               <View style={styles.sheetOptionText}>
                 <Text style={styles.sheetOptionLabel}>{t('chat.document')}</Text>
                 <Text style={styles.sheetOptionHint}>{t('chat.documentSub')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} testID="attach-verse"
+              onPress={() => { setAttachSheet(false); setVerseFound(null); setVerseRef(''); setVerseSheet(true); }}>
+              <View style={[styles.sheetIcon, styles.sheetIconPhoto]}>
+                <Ionicons name="book" size={24} color={colors.accent} />
+              </View>
+              <View style={styles.sheetOptionText}>
+                <Text style={styles.sheetOptionLabel}>{t('chat.verse')}</Text>
+                <Text style={styles.sheetOptionHint}>{t('chat.verseSub')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
@@ -1277,6 +1369,21 @@ const styles = StyleSheet.create({
   headerStatusLive: { color: colors.success },
   menuBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 16, paddingVertical: spacing.xs },
+
+  verseCard: { gap: 4, maxWidth: 280 },
+  verseHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  verseRef: { color: colors.accent, fontWeight: '800', fontSize: 13 },
+  verseText: { fontStyle: 'italic', fontSize: 15, lineHeight: 22 },
+  verseInput: {
+    marginTop: spacing.sm, minHeight: 46, borderRadius: radius.md, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
+    color: colors.textPrimary, paddingHorizontal: spacing.md, fontSize: 16,
+  },
+  versePreview: { marginTop: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: 'rgba(255,255,255,0.06)', gap: 4 },
+  versePreviewText: { color: colors.textPrimary, fontStyle: 'italic', fontSize: 15, lineHeight: 22 },
+  verseBtn: { marginTop: spacing.md, minHeight: 48, borderRadius: radius.full, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  verseBtnText: { color: '#0A1628', fontWeight: '800', fontSize: 15 },
+  cautionRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+  cautionText: { color: colors.accent, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
 
   requestBanner: {
     margin: spacing.sm, padding: spacing.md, borderRadius: radius.lg, backgroundColor: 'rgba(16,46,80,0.92)',

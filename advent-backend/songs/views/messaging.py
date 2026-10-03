@@ -14,6 +14,25 @@ MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
 
 
+def _singles_signals(conversation, me, message):
+    """In a Single & Searching chat: the first message from each side is a
+    "conversation started" (the engine's measure of a meaningful connection),
+    and contact details shared are counted for the reviewers' risk signals."""
+    from .. import singles
+    from ..models import SinglesProfile
+    match = SinglesMatch.objects.filter(conversation=conversation).first()
+    if match is None:
+        return
+    mine = SinglesProfile.objects.filter(user=me).first()
+    if mine is None:
+        return
+    other = match.profile_b if match.profile_a_id == mine.pk else match.profile_a
+    if not conversation.messages.filter(sender=me).exclude(pk=message.pk).exists():
+        singles.signal(mine, 'chat_started', other)
+    if message.message_type == 'text' and singles.has_contact(message.content):
+        singles.signal(mine, 'link_shared', other)
+
+
 class ConversationViewSet(viewsets.ModelViewSet):
     """Direct messages (songs/messaging.py has the rules and the live fan-out).
 
@@ -203,6 +222,15 @@ class ConversationViewSet(viewsets.ModelViewSet):
         duration = request.data.get('duration')
         if not content and not attachment:
             return Response({'error': 'Message cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
+        # A Scripture card: the reference is looked up here, so the words on
+        # the card are the Bible's, not whatever was typed.
+        if message_type == 'verse':
+            from ..bible_books import lookup
+            found = lookup(content.split('|')[0])
+            if found is None:
+                return Response({'error': 'Verse not found.', 'code': 'verse_not_found'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            content, attachment = f"{found['ref']}|{found['text']}", ''
 
         # Attachments: our own uploads (R2, or Cloudinary from older builds) —
         # never any address on the internet — or a legacy base64 data URI.
@@ -230,6 +258,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
             duration=duration if isinstance(duration, (int, float)) else None,
         )
         Conversation.objects.filter(pk=conversation.pk).update(updated_at=message.created_at)
+        _singles_signals(conversation, me, message)
         # Answering is accepting; writing brings a chat back from the archive —
         # for both sides.
         ConversationState.objects.filter(pk=mine.pk).update(accepted=True, archived=False)
@@ -240,7 +269,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         dm.tell([me.id, other.id if other else None], {'type': 'message', 'conversation_id': conversation.id, 'message': data})
 
         if other and theirs:
-            preview = content[:80] if content else {
+            preview = f"📖 {content.split('|')[0]}" if message_type == 'verse' else content[:80] if content else {
                 'image': '📷 Photo', 'file': '📎 File', 'audio': '🎤 Voice note',
             }.get(message_type, 'New message')
             if theirs.accepted and not theirs.muted:

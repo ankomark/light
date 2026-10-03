@@ -38,7 +38,16 @@ jest.mock('../../services/api', () => ({
   reportSingles: jest.fn(), blockSingles: jest.fn(), unmatchSingles: jest.fn(),
   fetchSinglesQueue: jest.fn(), fetchAdminByUrl: jest.fn(), reviewSinglesProfile: jest.fn(),
   banFromSingles: jest.fn(), unbanFromSingles: jest.fn(),
+  fetchSinglesHub: jest.fn(), fetchSinglesLikes: jest.fn(), fetchConversations: jest.fn(async () => []),
+  browseSingles: jest.fn(), fetchSinglesProfile: jest.fn(), saveSinglesAnswers: jest.fn(),
+  fetchIcebreakers: jest.fn(async () => ({ results: [], keys: [] })), askIcebreaker: jest.fn(), answerIcebreaker: jest.fn(),
+  tellSinglesStory: jest.fn(), agreeSinglesStory: jest.fn(), withdrawSinglesStory: jest.fn(),
+  fetchSinglesTopics: jest.fn(), askSinglesTopic: jest.fn(), heartSinglesTopic: jest.fn(),
+  fetchSinglesGatherings: jest.fn(), rsvpSinglesGathering: jest.fn(), suggestSinglesGathering: jest.fn(),
+  fetchSinglesRooms: jest.fn(async () => ({ results: [] })), fetchBroadcastToken: jest.fn(), startSinglesRoom: jest.fn(),
+  fetchSinglesStats: jest.fn(async () => ({ waiting: {} })), fetchSinglesReviewList: jest.fn(), decideSinglesItem: jest.fn(),
 }));
+jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 1 } }) }));
 jest.mock('../../components/admin/AdminKit', () => ({
   ADMIN: { card: '#000', border: '#111', text: '#fff', muted: '#999', gold: '#fc6', onGold: '#000', danger: '#f00' },
   ErrorState: () => null,
@@ -60,6 +69,14 @@ const mine = (status, extra = {}) => ({
   languages: [], about: 'Hi', prompts: [], occupation: '', education: '', interests: [], photos: [], status,
   review_note: '', is_paused: false, missing: [], ...extra,
 });
+
+const HUB = {
+  first_name: 'Mark', paused: false, today: 12, left_today: 20, mode: 'foryou', likes: 2, matches: 1,
+  preview: [{ id: 7, first_name: 'Grace', age: 27, town: 'Nairobi', looking_for: 'marriage', online: true,
+    badges: { photo: true }, photo: null, reasons: [] }],
+  topic: { id: 3, body: 'What matters most in marriage?', reply_count: 4 },
+  gathering: null, live_rooms: 1, stories: 0,
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -105,7 +122,10 @@ test('discover: interested can become a match with a way to begin, then the chat
     match: { id: 3, conversation_id: 44, profile: grace, user: { id: 9, username: 'grace' },
       opener: { kind: 'prompt', key: 'verse', answer: 'Isaiah 41:10' } },
   });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
   const screen = render(<SinglesHome />);
+  await waitFor(() => expect(screen.getByTestId('singles-hub')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-tab-discover')); });
   await waitFor(() => expect(screen.getByTestId('singles-card-7')).toBeTruthy());
   expect(screen.getByText('singles.discover.left:20')).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByTestId('singles-interested')); });
@@ -120,7 +140,10 @@ test('discover: "not now" moves on, and the day ends kindly', async () => {
   api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
   api.fetchSinglesDiscover.mockResolvedValueOnce({ results: [grace], left_today: 1 });
   api.answerSingles.mockResolvedValue({ matched: false, match: null, left_today: 0 });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
   const screen = render(<SinglesHome />);
+  await waitFor(() => expect(screen.getByTestId('singles-hub')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-tab-discover')); });
   await waitFor(() => expect(screen.getByTestId('singles-card-7')).toBeTruthy());
   await act(async () => { fireEvent.press(screen.getByTestId('singles-pass')); });
   expect(screen.getByText('singles.discover.doneTitle')).toBeTruthy();
@@ -171,4 +194,132 @@ test('reviewers approve with a refused photo', async () => {
   await act(async () => { fireEvent.press(screen.getByTestId('singles-approve-5')); });
   expect(api.reviewSinglesProfile).toHaveBeenCalledWith(5, 'approve', '', { 11: 'approve', 12: 'reject' });
   expect(screen.queryByTestId('singles-review-5')).toBeNull();
+});
+
+// ── The hub (phases 6-11) ───────────────────────────────────────────────────
+test('the hub greets, counts today, and leads into the community and live rooms', async () => {
+  api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
+  const screen = render(<SinglesHome />);
+  await waitFor(() => expect(screen.getByTestId('singles-hub')).toBeTruthy());
+  expect(screen.getByText('singles.hub.today:12')).toBeTruthy();
+  expect(screen.getByTestId('singles-grid-7')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('singles-grid-7'));
+  expect(mockNav.navigate).toHaveBeenCalledWith('SinglesView', expect.objectContaining({ id: 7 }));
+  fireEvent.press(screen.getByTestId('singles-hub-community'));
+  expect(mockNav.navigate).toHaveBeenCalledWith('SinglesCommunity');
+  fireEvent.press(screen.getByTestId('singles-hub-live'));
+  expect(mockNav.navigate).toHaveBeenCalledWith('SinglesEvents', { tab: 'rooms' });
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-mode-online')); });
+  expect(api.fetchSinglesHub).toHaveBeenLastCalledWith('online');
+});
+
+test('connections: who is interested in you', async () => {
+  api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
+  api.fetchSinglesLikes.mockResolvedValue({ results: [{ ...HUB.preview[0], id: 9 }] });
+  const screen = render(<SinglesHome />);
+  await waitFor(() => expect(screen.getByTestId('singles-hub')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-tab-connections')); });
+  await waitFor(() => expect(screen.getByTestId('singles-like-9')).toBeTruthy());
+});
+
+test('a suggested profile says why, and interest from it can become a match', async () => {
+  mockParams = { id: 7 };
+  const SinglesView = require('../singles/SinglesView').default;
+  api.fetchSinglesProfile.mockResolvedValue({ ...grace, reasons: [{ kind: 'ministries', values: ['music'] }],
+    badges: { photo: true } });
+  api.answerSingles.mockResolvedValue({ matched: false, left_today: 19 });
+  const screen = render(<SinglesView />);
+  await waitFor(() => expect(screen.getByTestId('singles-why')).toBeTruthy());
+  expect(screen.getByText('•  singles.reasonText.ministries:singles.ministry.music')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-view-interested')); });
+  expect(api.answerSingles).toHaveBeenCalledWith(7, 'interested');
+  expect(mockNav.goBack).toHaveBeenCalled();
+});
+
+test('preferences and privacy save together, incognito included', async () => {
+  mockParams = { profile: mine('approved', { show_age: true, discoverable: 'everyone', preferences: {} }) };
+  const SinglesSettings = require('../singles/SinglesSettings').default;
+  api.updateSinglesProfile.mockResolvedValue({});
+  const screen = render(<SinglesSettings />);
+  fireEvent.changeText(screen.getByTestId('singles-pref-min'), '25');
+  fireEvent.changeText(screen.getByTestId('singles-pref-max'), '35');
+  fireEvent(screen.getByTestId('singles-show_age'), 'valueChange', false);
+  fireEvent.press(screen.getByTestId('singles-discoverable-liked'));
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-settings-save')); });
+  expect(api.updateSinglesProfile).toHaveBeenCalledWith(expect.objectContaining({
+    show_age: false, discoverable: 'liked', preferences: expect.objectContaining({ min_age: 25, max_age: 35 }) }));
+});
+
+test('values: answered and hidden or shown, each its own choice', async () => {
+  mockParams = { profile: mine('approved', { answers: [] }) };
+  const SinglesValues = require('../singles/SinglesValues').default;
+  api.saveSinglesAnswers.mockResolvedValue({});
+  const screen = render(<SinglesValues />);
+  fireEvent.press(screen.getByTestId('singles-value-relocate-maybe'));
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-values-save')); });
+  const sent = api.saveSinglesAnswers.mock.calls[0][0];
+  expect(sent.find((a) => a.key === 'relocate')).toEqual({ key: 'relocate', answer: 'maybe', visible: true });
+  expect(sent.find((a) => a.key === 'children').answer).toBe('');
+});
+
+test('a match: starters, and an icebreaker answered', async () => {
+  mockParams = { match: { id: 3, conversation_id: 44, user: { id: 9 }, profile: grace, story: null,
+    starters: [{ kind: 'prompt', key: 'verse', answer: 'Isaiah 41:10' }, { kind: 'meaningful' }] } };
+  api.fetchIcebreakers.mockResolvedValue({ keys: ['gospel_song'], results: [
+    { id: 5, key: 'country_visit', mine: null, theirs: null, waiting_for: 'you' }] });
+  api.answerIcebreaker.mockResolvedValue({});
+  const SinglesPerson = require('../singles/SinglesPerson').default;
+  const screen = render(<SinglesPerson />);
+  await waitFor(() => expect(screen.getByTestId('singles-ice-5')).toBeTruthy());
+  expect(screen.getByTestId('singles-starter-1')).toBeTruthy();
+  fireEvent.changeText(screen.getByTestId('singles-ice-input-5'), 'Japan');
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-ice-send-5')); });
+  expect(api.answerIcebreaker).toHaveBeenCalledWith(5, 'Japan');
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-ice-ask-gospel_song')); });
+  expect(api.askIcebreaker).toHaveBeenCalledWith(3, 'gospel_song');
+});
+
+test('community: ask a question', async () => {
+  const SinglesCommunity = require('../singles/SinglesCommunity').default;
+  api.fetchSinglesTopics.mockResolvedValue({ results: [] });
+  api.askSinglesTopic.mockResolvedValue({ id: 8, body: 'What matters most?', author: { first_name: 'Mark' },
+    reply_count: 0, heart_count: 0, hearted: false });
+  const screen = render(<SinglesCommunity />);
+  fireEvent.changeText(screen.getByTestId('singles-ask-input'), 'What matters most in marriage?');
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-ask')); });
+  expect(api.askSinglesTopic).toHaveBeenCalledWith('What matters most in marriage?');
+  await waitFor(() => expect(screen.getByTestId('singles-topic-8')).toBeTruthy());
+});
+
+test('events: interested, with the matches who are going', async () => {
+  const SinglesEvents = require('../singles/SinglesEvents').default;
+  const event = { id: 4, kind: 'coffee', title: 'Young Adults Connect', starts_at: '2030-01-04T16:00:00Z', place: 'Nairobi',
+    country: '', status: 'approved', going: 3, interested: false, friends_going: ['Grace'] };
+  api.fetchSinglesGatherings.mockResolvedValue({ results: [event] });
+  api.rsvpSinglesGathering.mockResolvedValue({ ...event, going: 4, interested: true });
+  const screen = render(<SinglesEvents />);
+  await waitFor(() => expect(screen.getByTestId('singles-event-4')).toBeTruthy());
+  expect(screen.getByText('singles.events.going:3  ·  singles.events.friends:Grace')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-rsvp-4')); });
+  expect(screen.getByText('singles.events.notGoing')).toBeTruthy();
+});
+
+test('reviewers see risk, and decide on events', async () => {
+  api.fetchSinglesQueue.mockResolvedValue({ results: [{
+    id: 5, first_name: 'Ann', age: 30, gender: 'woman', town: '', country: 'Kenya', church: '', about: '', prompts: [],
+    review_note: '', status: 'pending', user: { username: 'ann', joined: '2026-09-01', strikes: 0 }, photos: [],
+    risk: { level: 'high', score: 9, reasons: [{ kind: 'reports', n: 3 }] },
+  }], next: null });
+  api.fetchSinglesReviewList.mockResolvedValue({ results: [{ id: 2, kind: 'coffee', title: 'Coffee', starts_at: '2030-01-01T10:00:00Z',
+    place: 'Nairobi', country: '', by: 'mark', description: '' }] });
+  api.decideSinglesItem.mockResolvedValue({ id: 2, status: 'approved' });
+  const screen = render(<AdminSingles />);
+  await waitFor(() => expect(screen.getByTestId('singles-risk-5')).toBeTruthy());
+  expect(screen.getByText('adminSingles.risk.high  ·  adminSingles.riskWhy.reports:3')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-state-gatherings')); });
+  await waitFor(() => expect(screen.getByTestId('singles-extra-2')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-extra-approve-2')); });
+  expect(api.decideSinglesItem).toHaveBeenCalledWith('gatherings', 2, 'approve', '');
 });

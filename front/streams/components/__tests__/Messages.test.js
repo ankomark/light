@@ -24,6 +24,7 @@ const mockApi = {
   fetchPresence: jest.fn(async () => ({ online: false, last_seen: null })),
   searchMessages: jest.fn(async () => []),
   blockUser: jest.fn(async () => ({})),
+  lookupVerse: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 
@@ -313,5 +314,28 @@ describe('Chat', () => {
     fireEvent.changeText(r.getByTestId('chat-search'), 'found');
     await waitFor(() => expect(r.getByTestId('search-hit-1')).toBeTruthy());
     expect(mockApi.searchMessages).toHaveBeenCalledWith(id, 'found');
+  });
+  it('a Scripture card: looked up, sent by reference, drawn as a card', async () => {
+    const { r, id } = await open({}, [msg(1), msg(2, { message_type: 'verse', content: 'John 3:16|For God so loved the world' })]);
+    expect(r.getByTestId('verse-2')).toBeTruthy();
+    expect(r.getByText('For God so loved the world')).toBeTruthy();
+    mockApi.lookupVerse.mockResolvedValue({ ref: 'Philippians 4:13', text: 'I can do all things', version: 'KJV' });
+    mockApi.sendMessage.mockResolvedValue(msg(9, { sender: { id: 1 }, message_type: 'verse', content: 'Philippians 4:13|I can do all things' }));
+    fireEvent.press(r.getByLabelText('dm.attach'));
+    fireEvent.press(r.getByTestId('attach-verse'));
+    fireEvent.changeText(r.getByTestId('verse-input'), 'phil 4:13');
+    await act(async () => { fireEvent.press(r.getByTestId('verse-go')); });
+    expect(r.getByText('I can do all things')).toBeTruthy();
+    await act(async () => { fireEvent.press(r.getByTestId('verse-go')); });
+    expect(mockApi.sendMessage).toHaveBeenCalledWith(id, expect.objectContaining({ message_type: 'verse', content: 'Philippians 4:13' }));
+  });
+
+  it('a Single & Searching chat: numbers and links from them carry a caution; an ended match is read-only', async () => {
+    const { r } = await open({ singles: true }, [msg(1), msg(2, { content: 'WhatsApp me on 0712 345 678' })]);
+    expect(r.getByTestId('caution-2')).toBeTruthy();
+    expect(r.queryByTestId('caution-1')).toBeNull();
+    const closed = await open({ singles: true, closed: true });
+    expect(closed.r.getByTestId('chat-closed')).toBeTruthy();
+    expect(closed.r.queryByTestId('chat-input')).toBeNull();
   });
 });

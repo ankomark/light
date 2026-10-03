@@ -11,11 +11,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
 import {
   fetchSinglesQueue, fetchAdminByUrl, reviewSinglesProfile, banFromSingles, unbanFromSingles,
+  fetchSinglesStats, fetchSinglesReviewList, decideSinglesItem,
 } from '../../services/api';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { ADMIN, ErrorState, useReasonSheet } from './AdminKit';
 
 const STATES = ['waiting', 'approved', 'rejected', 'banned'];
+// The other queues: events members suggest, stories couples tell, selfies.
+const EXTRA = ['gatherings', 'stories', 'verifications'];
+const RISK_COLOR = { high: '#FF7A6B', medium: '#FFC46B', low: '#5FD39A' };
 
 export default function AdminSingles() {
   const { t } = useI18n();
@@ -27,6 +31,7 @@ export default function AdminSingles() {
   const [busyId, setBusyId] = useState(null);
   const [refused, setRefused] = useState({});          // photo id -> true
   const [reasonSheet, askReason] = useReasonSheet();
+  const [stats, setStats] = useState(null);
   const latest = useRef(0);
 
   const load = useCallback(async (st) => {
@@ -34,7 +39,8 @@ export default function AdminSingles() {
     setLoading(true);
     setFailed(false);
     try {
-      const res = await fetchSinglesQueue(st);
+      fetchSinglesStats().then(setStats).catch(() => {});
+      const res = EXTRA.includes(st) ? await fetchSinglesReviewList(st) : await fetchSinglesQueue(st);
       if (mine !== latest.current) return;
       setRows(res?.results || []);
       setNext(res?.next || null);
@@ -92,8 +98,62 @@ export default function AdminSingles() {
     if (reason) act(row, () => unbanFromSingles(row.id, reason));
   };
 
+  const decideExtra = async (row, decision) => {
+    let reason = '';
+    if (decision === 'reject') {
+      reason = await askReason({ title: t('adminSingles.rejectItemTitle'), message: t('adminSingles.rejectBody'),
+        confirmLabel: t('adminSingles.reject') });
+      if (!reason) return;
+    }
+    act(row, () => decideSinglesItem(state, row.id, decision, reason));
+  };
+
+  const renderExtra = ({ item }) => (
+    <View style={styles.card} testID={`singles-extra-${item.id}`}>
+      {state === 'verifications' ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+          <View>
+            <Image source={{ uri: item.selfie }} style={styles.photo} contentFit="cover" />
+            <Text style={[styles.photoTag, styles.photoTagNew]}>{t(`singles.gesture.${item.gesture}`)}</Text>
+          </View>
+          {item.photos.map((u) => <Image key={u} source={{ uri: u }} style={styles.photo} contentFit="cover" />)}
+        </ScrollView>
+      ) : null}
+      <Text style={styles.name}>{item.title || item.first_name || (item.names || []).join(' & ')}</Text>
+      <Text style={styles.sub}>
+        {state === 'gatherings' ? [t(`singles.eventKind.${item.kind}`), new Date(item.starts_at).toLocaleString(),
+          [item.place, item.country].filter(Boolean).join(', '), `@${item.by}`].filter(Boolean).join('  ·  ')
+          : state === 'stories' ? (item.both_agreed ? t('adminSingles.bothAgreed') : t('adminSingles.waitingConsent'))
+            : `@${item.username}`}
+      </Text>
+      {!!(item.description || item.body) && <Text style={styles.body}>{item.description || item.body}</Text>}
+      <View style={styles.actions}>
+        {busyId === item.id ? <ActivityIndicator color={ADMIN.gold} /> : (
+          <>
+            <TouchableOpacity style={[styles.btn, styles.btnGold]} onPress={() => decideExtra(item, 'approve')}
+              testID={`singles-extra-approve-${item.id}`}>
+              <Text style={styles.btnText}>{t('adminSingles.approve')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.btn, styles.btnOutline]} onPress={() => decideExtra(item, 'reject')}>
+              <Text style={styles.btnTextOutline}>{t('adminSingles.decline')}</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </View>
+  );
+
   const renderItem = ({ item }) => (
     <View style={styles.card} testID={`singles-review-${item.id}`}>
+      {item.risk ? (
+        <View style={styles.risk} testID={`singles-risk-${item.id}`}>
+          <View style={[styles.riskDot, { backgroundColor: RISK_COLOR[item.risk.level] }]} />
+          <Text style={styles.riskText}>
+            {t(`adminSingles.risk.${item.risk.level}`)}
+            {item.risk.reasons.length ? `  ·  ${item.risk.reasons.map((r) => t(`adminSingles.riskWhy.${r.kind}`, { n: r.n ?? '' })).join(', ')}` : ''}
+          </Text>
+        </View>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
         {item.photos.map((p) => (
           <TouchableOpacity key={p.id} disabled={p.status !== 'pending'} accessibilityRole="button"
@@ -141,17 +201,28 @@ export default function AdminSingles() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('adminSingles.title')}</Text>
+      {stats ? (
+        <Text style={styles.stats} testID="singles-stats">
+          {t('adminSingles.stats', {
+            approved: stats.profiles?.approved || 0, matches: stats.matches_total || 0,
+            chats: stats.conversations_started_week || 0, reports: stats.week?.report || 0,
+          })}
+        </Text>
+      ) : null}
       <View style={styles.chips}>
-        {STATES.map((st) => (
+        {[...STATES, ...EXTRA].map((st) => (
           <TouchableOpacity key={st} style={[styles.chip, state === st && styles.chipOn]} onPress={() => pick(st)}
             testID={`singles-state-${st}`}>
-            <Text style={[styles.chipText, state === st && styles.chipTextOn]}>{t(`adminSingles.state.${st}`)}</Text>
+            <Text style={[styles.chipText, state === st && styles.chipTextOn]}>
+              {t(`adminSingles.state.${st}`)}
+              {stats?.waiting?.[st === 'waiting' ? 'profiles' : st] ? ` · ${stats.waiting[st === 'waiting' ? 'profiles' : st]}` : ''}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
       {loading && !rows.length ? <ActivityIndicator color={ADMIN.gold} style={{ marginTop: 40 }} />
         : failed ? <ErrorState onRetry={() => load(state)} /> : (
-          <FlatList data={rows} keyExtractor={(item) => String(item.id)} renderItem={renderItem}
+          <FlatList data={rows} keyExtractor={(item) => String(item.id)} renderItem={EXTRA.includes(state) ? renderExtra : renderItem}
             contentContainerStyle={styles.list} onEndReached={more} onEndReachedThreshold={0.5}
             onRefresh={() => load(state)} refreshing={loading}
             ListEmptyComponent={<Text style={styles.empty}>{t('adminSingles.none')}</Text>} />
@@ -192,4 +263,8 @@ const styles = StyleSheet.create({
   btnTextOutline: { color: ADMIN.text, fontWeight: '800' },
   btnTextDanger: { color: ADMIN.danger, fontWeight: '800' },
   empty: { color: ADMIN.muted, textAlign: 'center', marginTop: 40 },
+  stats: { color: ADMIN.muted, fontSize: 12.5, paddingHorizontal: 16, marginTop: 4 },
+  risk: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  riskDot: { width: 10, height: 10, borderRadius: 5 },
+  riskText: { flex: 1, color: ADMIN.text, fontSize: 12.5, fontWeight: '700' },
 });

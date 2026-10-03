@@ -79,3 +79,49 @@ BOOKS_BY_NAME = {b['name']: b for b in BIBLE_BOOKS}
 OLD_TESTAMENT = [b for b in BIBLE_BOOKS if b['number'] <= 39]
 NEW_TESTAMENT = [b for b in BIBLE_BOOKS if b['number'] > 39]
 TOTAL_CHAPTERS = sum(b['chapters'] for b in BIBLE_BOOKS)
+
+
+# ── Looking up a reference (Scripture cards in chats) ──────────────────────
+import re as _re
+
+_REF = _re.compile(r'^\s*((?:[1-3]\s*)?[A-Za-z][A-Za-z .]*?)\s*(\d{1,3})\s*:\s*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?\s*$')
+_ALIASES = {'ps': 'Psalms', 'psalm': 'Psalms', 'prov': 'Proverbs', 'song of songs': 'Song of Solomon',
+            'eccl': 'Ecclesiastes', 'phil': 'Philippians', 'philemon': 'Philemon', 'jn': 'John', 'rev': 'Revelation',
+            'revelations': 'Revelation', 'matt': 'Matthew', 'mt': 'Matthew', 'mk': 'Mark', 'lk': 'Luke',
+            'rom': 'Romans', 'gen': 'Genesis', 'ex': 'Exodus', 'isa': 'Isaiah', 'jer': 'Jeremiah', 'heb': 'Hebrews'}
+MAX_VERSES = 5
+
+
+def book_named(name):
+    """'Phil', 'philippians', '1 cor' → the book's canonical name, or None."""
+    key = _re.sub(r'\s+', ' ', name.replace('.', ' ')).strip().lower()
+    if key in _ALIASES:
+        return _ALIASES[key]
+    squashed = key.replace(' ', '')
+    for b in BIBLE_BOOKS:
+        if b['name'].lower().replace(' ', '') == squashed:
+            return b['name']
+    matches = [b['name'] for b in BIBLE_BOOKS if b['name'].lower().replace(' ', '').startswith(squashed)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def lookup(ref):
+    """'Philippians 4:13' or 'John 3:16-17' (up to five verses) from the KJV
+    stored here → {ref, text, version}, or None."""
+    m = _REF.match(str(ref or '')[:60])
+    if not m:
+        return None
+    name = book_named(m.group(1))
+    if name is None:
+        return None
+    chapter, first = int(m.group(2)), int(m.group(3))
+    last = int(m.group(4) or first)
+    if last < first or last - first >= MAX_VERSES:
+        return None
+    from .models import BibleVerse
+    verses = list(BibleVerse.objects.filter(book=name, chapter=chapter, verse__gte=first, verse__lte=last)
+                  .order_by('verse').values_list('text', flat=True))
+    if not verses:
+        return None
+    label = f'{name} {chapter}:{first}' + (f'-{last}' if last != first else '')
+    return {'ref': label, 'text': ' '.join(v.strip() for v in verses), 'version': 'KJV'}

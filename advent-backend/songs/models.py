@@ -971,6 +971,8 @@ class Message(models.Model):
         ('image', 'Image'),
         ('file', 'File'),
         ('audio', 'Voice note'),
+        # A Bible verse shared as a card: content is "reference|text".
+        ('verse', 'Scripture'),
     ]
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
@@ -2790,6 +2792,8 @@ class LiveBroadcast(models.Model):
     kind = models.CharField(max_length=10, choices=KIND_CHOICES, default='meet')
     title = models.CharField(max_length=200)
     room_name = models.CharField(max_length=100, unique=True)
+    # A Single & Searching room: only approved singles may join or see it.
+    singles_only = models.BooleanField(default=False)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='live')
     viewer_count = models.PositiveIntegerField(default=0)
     peak_viewer_count = models.PositiveIntegerField(default=0)
@@ -3648,7 +3652,13 @@ class WeatherBriefing(models.Model):
 class SinglesProfile(models.Model):
     MAN, WOMAN = 'man', 'woman'
     GENDERS = [(MAN, 'Man'), (WOMAN, 'Woman')]
-    LOOKING = [('marriage', 'Marriage'), ('friendship', 'Friendship that may lead to marriage')]
+    # What someone is here for, from open to marriage-minded: shown as a
+    # badge so expectations match.
+    LOOKING = [('open', 'Open to meeting people'), ('friendship', 'Friendship first'),
+               ('serious', 'Serious relationship'), ('marriage', 'Marriage-minded')]
+    DIETS = [('vegan', 'Vegan'), ('vegetarian', 'Vegetarian'), ('flexible', 'Flexible'), ('', 'Not said')]
+    EVERYONE, LIKED_ONLY = 'everyone', 'liked'
+    DISCOVERABLE = [(EVERYONE, 'Everyone eligible'), (LIKED_ONLY, 'Only people I am interested in')]
     BAPTISED = [('yes', 'Yes'), ('not_yet', 'Not yet')]
     DRAFT, PENDING, APPROVED, REJECTED, BANNED = 'draft', 'pending', 'approved', 'rejected', 'banned'
     STATUSES = [(DRAFT, 'Draft'), (PENDING, 'Waiting for review'), (APPROVED, 'Approved'),
@@ -3670,6 +3680,23 @@ class SinglesProfile(models.Model):
     occupation = models.CharField(max_length=80, blank=True, default='')
     education = models.CharField(max_length=80, blank=True, default='')
     interests = models.JSONField(default=list, blank=True)
+    # Phase 7: more of who they are. Ministries from songs/singles.py MINISTRIES.
+    ministries = models.JSONField(default=list, blank=True)
+    diet = models.CharField(max_length=12, choices=DIETS, blank=True, default='')
+    # What others may see, and who may find them ("liked" = incognito: only
+    # people they have shown interest in).
+    show_age = models.BooleanField(default=True)
+    show_town = models.BooleanField(default=True)
+    show_online = models.BooleanField(default=True)
+    discoverable = models.CharField(max_length=10, choices=DISCOVERABLE, default=EVERYONE)
+    # Phase 8: who they would like to see (saved filters that shape For You).
+    pref_min_age = models.PositiveSmallIntegerField(null=True, blank=True)
+    pref_max_age = models.PositiveSmallIntegerField(null=True, blank=True)
+    pref_countries = models.JSONField(default=list, blank=True)
+    pref_intents = models.JSONField(default=list, blank=True)
+    # Phase 11: a selfie checked against their photos by an admin.
+    photo_verified_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
 
     status = models.CharField(max_length=10, choices=STATUSES, default=DRAFT)
     review_note = models.CharField(max_length=255, blank=True, default='')
@@ -3743,3 +3770,141 @@ class SinglesMatch(models.Model):
 
     def other(self, profile):
         return self.profile_b if profile.pk == self.profile_a_id else self.profile_a
+
+
+class SinglesAnswer(models.Model):
+    """An answer to one of the values questions (songs/singles.py VALUES),
+    shown on the profile only when they choose."""
+    profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='answers')
+    key = models.CharField(max_length=40)
+    answer = models.CharField(max_length=40)
+    visible = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('profile', 'key')
+
+
+class SinglesSignal(models.Model):
+    """What happened between two profiles, for the discovery engine and its
+    honest counts: a view, an interest, a pass, a match, a first message, a
+    block, a report. Never shown to anyone as a list."""
+    KINDS = ('view', 'interest', 'pass', 'match', 'chat_started', 'block', 'report')
+    profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='+')
+    target = models.ForeignKey(SinglesProfile, null=True, on_delete=models.SET_NULL, related_name='+')
+    kind = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['kind', 'created_at']), models.Index(fields=['target', 'kind'])]
+
+
+class SinglesIcebreaker(models.Model):
+    """A get-to-know-you question in a match: each answers, and neither sees
+    the other's answer until both have."""
+    match = models.ForeignKey(SinglesMatch, on_delete=models.CASCADE, related_name='icebreakers')
+    key = models.CharField(max_length=40)
+    asked_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    answers = models.JSONField(default=dict)          # {user id: answer}
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class SinglesTopic(models.Model):
+    """A question for the singles community ("What matters most in a life
+    partner?"), with replies and hearts."""
+    author = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='topics')
+    body = models.TextField(max_length=300)
+    reply_count = models.PositiveIntegerField(default=0)
+    heart_count = models.PositiveIntegerField(default=0)
+    is_removed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class SinglesReply(models.Model):
+    topic = models.ForeignKey(SinglesTopic, on_delete=models.CASCADE, related_name='replies')
+    author = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='+')
+    body = models.TextField(max_length=600)
+    is_removed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+
+class SinglesHeart(models.Model):
+    topic = models.ForeignKey(SinglesTopic, on_delete=models.CASCADE, related_name='hearts')
+    profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='+')
+
+    class Meta:
+        unique_together = ('topic', 'profile')
+
+
+class SinglesGathering(models.Model):
+    """A singles meet-up, Bible study, hike, retreat or online meet & greet.
+    Members suggest them; an admin approves before they are listed."""
+    KINDS = [('coffee', 'Coffee meet-up'), ('bible_study', 'Bible study'), ('outdoors', 'Outdoors'),
+             ('concert', 'Concert'), ('retreat', 'Retreat'), ('seminar', 'Seminar'), ('prayer', 'Prayer evening'),
+             ('online', 'Online meet & greet')]
+    PENDING, APPROVED, REJECTED, CANCELLED = 'pending', 'approved', 'rejected', 'cancelled'
+    STATUSES = [(PENDING, 'Waiting for review'), (APPROVED, 'Listed'), (REJECTED, 'Not listed'),
+                (CANCELLED, 'Cancelled')]
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='singles_gatherings')
+    kind = models.CharField(max_length=16, choices=KINDS)
+    title = models.CharField(max_length=120)
+    description = models.TextField(max_length=1500, blank=True, default='')
+    starts_at = models.DateTimeField()
+    place = models.CharField(max_length=160, blank=True, default='')
+    country = models.CharField(max_length=60, blank=True, default='')
+    online = models.BooleanField(default=False)
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING)
+    review_note = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['starts_at']
+
+
+class SinglesRsvp(models.Model):
+    gathering = models.ForeignKey(SinglesGathering, on_delete=models.CASCADE, related_name='rsvps')
+    profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='rsvps')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('gathering', 'profile')
+
+
+class SinglesStory(models.Model):
+    """A couple who met here and chose to say so. Both must agree before an
+    admin may publish it; either can take it down."""
+    PENDING, PUBLISHED, REJECTED = 'pending', 'published', 'rejected'
+    STATUSES = [(PENDING, 'Waiting'), (PUBLISHED, 'Published'), (REJECTED, 'Not published')]
+    match = models.OneToOneField(SinglesMatch, on_delete=models.CASCADE, related_name='story')
+    title = models.CharField(max_length=120)
+    body = models.TextField(max_length=3000)
+    photo = models.CharField(max_length=500, blank=True, default='')
+    consents = models.JSONField(default=list)          # user ids who agreed
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class SinglesVerification(models.Model):
+    """A selfie making a set gesture, for an admin to compare with the
+    profile's photos. Approved, the profile shows "Photo verified"."""
+    PENDING, APPROVED, REJECTED = 'pending', 'approved', 'rejected'
+    STATUSES = [(PENDING, 'Waiting'), (APPROVED, 'Verified'), (REJECTED, 'Not verified')]
+    profile = models.ForeignKey(SinglesProfile, on_delete=models.CASCADE, related_name='verifications')
+    selfie = models.CharField(max_length=500)
+    gesture = models.CharField(max_length=20)
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING)
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']

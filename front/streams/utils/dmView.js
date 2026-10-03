@@ -21,7 +21,8 @@ export function previewText(t, last, meId) {
   if (!last) return t('dm.noMessages');
   if (last.is_deleted) return t('dm.deleted');
   let body;
-  if (last.content) body = last.content;
+  if (last.message_type === 'verse') body = `📖 ${(last.content || '').split('|')[0]}`;
+  else if (last.content) body = last.content;
   else {
     switch (last.message_type) {
       case 'image': body = `📷 ${t('chat.photo')}`; break;

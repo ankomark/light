@@ -138,6 +138,15 @@ import AdminSingles from './components/admin/AdminSingles';
 import SinglesHome from './pages/singles/SinglesHome';
 import SinglesEdit from './pages/singles/SinglesEdit';
 import SinglesPerson from './pages/singles/SinglesPerson';
+import SinglesView from './pages/singles/SinglesView';
+import SinglesBrowse from './pages/singles/SinglesBrowse';
+import SinglesSettings from './pages/singles/SinglesSettings';
+import SinglesValues from './pages/singles/SinglesValues';
+import SinglesVerify from './pages/singles/SinglesVerify';
+import SinglesCommunity from './pages/singles/SinglesCommunity';
+import SinglesTopic from './pages/singles/SinglesTopic';
+import SinglesEvents from './pages/singles/SinglesEvents';
+import SinglesStories from './pages/singles/SinglesStories';
 import { AppStatusProvider } from './context/AppStatusContext';
 import MaintenanceGate from './components/MaintenanceGate';
 import VideoFeed from './components/VideoFeed';
@@ -512,6 +521,15 @@ const App = () => {
                 <Stack.Screen name="Singles" component={SinglesHome} options={{ headerShown: false }} />
                 <Stack.Screen name="SinglesEdit" component={SinglesEdit} options={{ headerShown: false }} />
                 <Stack.Screen name="SinglesPerson" component={SinglesPerson} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesView" component={SinglesView} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesBrowse" component={SinglesBrowse} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesSettings" component={SinglesSettings} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesValues" component={SinglesValues} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesVerify" component={SinglesVerify} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesCommunity" component={SinglesCommunity} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesTopic" component={SinglesTopic} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesEvents" component={SinglesEvents} options={{ headerShown: false }} />
+                <Stack.Screen name="SinglesStories" component={SinglesStories} options={{ headerShown: false }} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxWrapper} />

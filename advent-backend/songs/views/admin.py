@@ -3,7 +3,7 @@ from django.core.cache import cache
 from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
-from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES, BookReview, ChapterComment, ServiceReview, Message
+from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES, BookReview, ChapterComment, ServiceReview, Message, SinglesTopic, SinglesReply
 from .. import rights
 from ..signals import sync_removal_likes
 from ..serializers.admin import build_report_targets
@@ -79,6 +79,8 @@ _CONTENT_MODELS = {
     'mediastation': MediaStation,
     'servicereview': ServiceReview,   # a review of a service
     'message': Message,               # a direct message (reported by someone in the chat)
+    'singlestopic': SinglesTopic,     # a Single & Searching community question
+    'singlesreply': SinglesReply,     # and a reply to one
 }
 
 
@@ -88,12 +90,14 @@ _AUTHOR_FIELD = {
     'story': 'user', 'publication': 'author', 'chapter': 'publication__author', 'bookreview': 'user',
     'chaptercomment': 'user', 'product': 'seller', 'productreview': 'reviewer', 'grouppost': 'user',
     'videostudio': 'created_by', 'mediastation': 'created_by', 'servicereview': 'user', 'message': 'sender',
+    'singlestopic': 'author__user', 'singlesreply': 'author__user',
 }
 _CONTENT_WORD = {
     'post': 'post', 'comment': 'comment', 'trackcomment': 'comment', 'group': 'group', 'story': 'story',
     'publication': 'publication', 'chapter': 'chapter', 'bookreview': 'review', 'chaptercomment': 'comment',
     'product': 'listing', 'productreview': 'review', 'grouppost': 'group message', 'videostudio': 'studio',
     'mediastation': 'media station', 'servicereview': 'review', 'message': 'message',
+    'singlestopic': 'singles question', 'singlesreply': 'singles reply',
 }
 
 

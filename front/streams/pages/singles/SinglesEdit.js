@@ -10,7 +10,7 @@ import { notify } from '../../utils/adminConfirm';
 import {
   GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body,
 } from '../../components/singles/SinglesKit';
-import { PROMPTS } from '../../components/singles/ProfileCard';
+import { PROMPTS, INTENTS, INTENT_ICON, MINISTRIES } from '../../components/singles/ProfileCard';
 
 const MAX_PROMPTS = 3;
 const splitList = (text) => text.split(',').map((x) => x.trim()).filter(Boolean);
@@ -27,7 +27,11 @@ export default function SinglesEdit() {
     about: start.about || '', occupation: start.occupation || '', education: start.education || '',
     languages: (start.languages || []).join(', '), interests: (start.interests || []).join(', '),
     gender: '', day: '', month: '', year: '',
+    diet: start.diet || '',
   });
+  const [ministries, setMinistries] = useState(start.ministries || []);
+  const toggleMinistry = (m) => setMinistries((cur) => (cur.includes(m) ? cur.filter((x) => x !== m)
+    : cur.length >= 5 ? cur : [...cur, m]));
   const [answers, setAnswers] = useState(() => Object.fromEntries((start.prompts || []).map((p) => [p.key, p.answer])));
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -40,6 +44,7 @@ export default function SinglesEdit() {
       baptised: f.baptised, looking_for: f.looking_for, about: f.about.trim(), occupation: f.occupation.trim(),
       education: f.education.trim(), languages: splitList(f.languages), interests: splitList(f.interests),
       prompts: PROMPTS.filter((k) => answers[k]?.trim()).map((k) => ({ key: k, answer: answers[k].trim() })),
+      ministries, diet: f.diet,
     };
     if (creating) {
       const pad = (n) => String(n).padStart(2, '0');
@@ -133,8 +138,9 @@ export default function SinglesEdit() {
       <View style={styles.field}>
         <Label>{t('singles.field.lookingFor')}</Label>
         <View style={styles.chips}>
-          {['marriage', 'friendship'].map((b) => (
-            <Chip key={b} text={t(`singles.looking.${b}`)} on={f.looking_for === b} onPress={() => set('looking_for')(b)} />
+          {INTENTS.map((b) => (
+            <Chip key={b} icon={INTENT_ICON[b]} text={t(`singles.looking.${b}`)} on={f.looking_for === b}
+              onPress={() => set('looking_for')(b)} testID={`singles-intent-${b}`} />
           ))}
         </View>
       </View>
@@ -167,6 +173,26 @@ export default function SinglesEdit() {
           );
         })}
         {!!errors.prompts && <Text style={styles.error}>{t('singles.edit.fieldBad')}</Text>}
+      </View>
+
+      <View style={styles.field}>
+        <Label>{t('singles.faithLife')}</Label>
+        <Text style={styles.note}>{t('singles.edit.ministriesNote')}</Text>
+        <View style={styles.chips}>
+          {MINISTRIES.map((m) => (
+            <Chip key={m} text={t(`singles.ministry.${m}`)} on={ministries.includes(m)} onPress={() => toggleMinistry(m)}
+              testID={`singles-ministry-${m}`} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Label>{t('singles.field.diet')}</Label>
+        <View style={styles.chips}>
+          {['vegan', 'vegetarian', 'flexible', ''].map((d) => (
+            <Chip key={d || 'none'} text={t(`singles.diet.${d || 'none'}`)} on={f.diet === d} onPress={() => set('diet')(d)} />
+          ))}
+        </View>
       </View>
 
       {field('languages', t('singles.field.languages'), { hint: t('singles.edit.listHint') })}

@@ -17,6 +17,26 @@ MIN_FOLLOWERS = {'tv': 1000, 'meet': 100}
 KIND_LABEL = {'tv': 'Go-Live', 'meet': 'Meet'}
 
 
+def _approved_single(user):
+    from ..models import SinglesProfile
+    from .. import singles
+    return singles.feature_on() and SinglesProfile.objects.filter(
+        user=user, status=SinglesProfile.APPROVED).exists() and not singles.blockers(user)
+
+
+def _singles_host_refusal(user, kind):
+    from ..models import SinglesProfile
+    if kind != 'meet':
+        return Response({'error': 'Single & Searching rooms are audio only.'}, status=status.HTTP_400_BAD_REQUEST)
+    if user.is_platform_admin:
+        return None
+    if not _approved_single(user) or not SinglesProfile.objects.filter(
+            user=user, photo_verified_at__isnull=False).exists():
+        return Response({'error': 'Hosting a singles room needs an approved profile with a verified photo.',
+                         'code': 'singles_host'}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
 def _identity(user):
     return f"u{user.id}"
 
@@ -53,7 +73,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
     # ── Discovery ────────────────────────────────────────────────────────────
     def list(self, request):
-        qs = self.get_queryset()
+        # Single & Searching rooms are listed only inside it (views/singles_hub).
+        qs = self.get_queryset().filter(singles_only=False)
         page = self.paginate_queryset(qs)
         data = LiveBroadcastListSerializer(
             page if page is not None else qs, many=True, context={'request': request},
@@ -62,6 +83,9 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
     def retrieve(self, request, pk=None):
         b = get_object_or_404(LiveBroadcast, pk=pk)
+        # A singles room is not there at all for anyone outside it.
+        if b.singles_only and not request.user.is_platform_admin and not _approved_single(request.user):
+            return Response(status=status.HTTP_404_NOT_FOUND)
         return Response(LiveBroadcastSerializer(b, context={'request': request}).data)
 
     # ── Go live (host) ─────────────────────────────────────────────────────────
@@ -73,9 +97,17 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         if not title:
             return Response({'error': 'title is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # A Single & Searching room: hosted by an approved single with a
+        # verified photo (or an admin), audio only, and no follower gate —
+        # followers aren't told either: it is not theirs to see.
+        singles_only = bool(request.data.get('singles_only'))
+        if singles_only:
+            refused = _singles_host_refusal(request.user, kind)
+            if refused:
+                return refused
         # Follower gate (staff/admins exempt): Go-Live (video) needs 1,000
         # followers; Meet (audio) needs 100.
-        if not request.user.is_platform_admin:
+        if not request.user.is_platform_admin and not singles_only:
             needed = MIN_FOLLOWERS.get(kind, 0)
             if needed and request.user.followers.count() < needed:
                 return Response(
@@ -94,7 +126,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
         room_name = f"bc_{uuid.uuid4().hex[:12]}"
         broadcast = LiveBroadcast.objects.create(
-            host=request.user, kind=kind, title=title[:200], room_name=room_name,
+            host=request.user, kind=kind, title=title[:200], room_name=room_name, singles_only=singles_only,
         )
         lk.ensure_room(room_name, metadata={
             'broadcast_id': broadcast.id, 'host': request.user.username,
@@ -104,7 +136,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             identity=_identity(request.user), name=request.user.username,
             room=room_name, can_publish=True,
         )
-        self._notify_followers(request.user, broadcast)
+        if not singles_only:
+            self._notify_followers(request.user, broadcast)
         return Response(_broadcast_payload(broadcast, token, request), status=status.HTTP_201_CREATED)
 
     def _notify_followers(self, host, broadcast):
@@ -125,6 +158,9 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         # Super admins can join any broadcast — a block by the host can't shut them out.
         if not request.user.is_super_admin and is_blocked_between(request.user, b.host):
             return Response({'error': 'You cannot join this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
+        if b.singles_only and not request.user.is_platform_admin and not _approved_single(request.user):
+            return Response({'error': 'This room is for Single & Searching members.', 'code': 'singles_only'},
+                            status=status.HTTP_403_FORBIDDEN)
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=False,  # viewers are subscribe-only

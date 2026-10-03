@@ -8,6 +8,13 @@ from .views.singles import (
     SinglesDiscoverView, SinglesProfileView, SinglesInterestView, SinglesMatchesView, SinglesUnmatchView,
     SinglesReportView, SinglesBlockView,
 )
+from .views.singles_hub import (
+    SinglesHubView, SinglesBrowseView, SinglesLikesView, SinglesAnswersView, SinglesIcebreakersView,
+    SinglesIcebreakerAnswerView, SinglesTopicsView, SinglesTopicView, SinglesReplyView, SinglesHeartView,
+    SinglesGatheringsView, SinglesRsvpView, SinglesRoomsView, SinglesStoriesView, SinglesMatchStoryView,
+    SinglesStoryConsentView, SinglesVerifyView, BibleLookupView, AdminSinglesGatheringViewSet,
+    AdminSinglesStoryViewSet, AdminSinglesVerificationViewSet, AdminSinglesStatsView,
+)
 from .views import (
     UserViewSet,
     AppealViewSet,
@@ -171,6 +178,9 @@ router.register(r'admin/puzzle-themes', AdminPuzzleThemeViewSet, basename='admin
 router.register(r'admin/verify', AdminVerifyViewSet, basename='admin-verify')
 router.register(r'admin/broadcasts', AdminBroadcastViewSet, basename='admin-broadcasts')
 router.register(r'admin/singles', AdminSinglesViewSet, basename='admin-singles')
+router.register(r'admin/singles-gatherings', AdminSinglesGatheringViewSet, basename='admin-singles-gatherings')
+router.register(r'admin/singles-stories', AdminSinglesStoryViewSet, basename='admin-singles-stories')
+router.register(r'admin/singles-verifications', AdminSinglesVerificationViewSet, basename='admin-singles-verifications')
 router.register(r'live/broadcasts', LiveBroadcastViewSet, basename='live-broadcasts')
 
 # Nested routers
@@ -290,6 +300,25 @@ urlpatterns = [
     path('singles/me/photos/order/', SinglesPhotoOrderView.as_view(), name='singles-photo-order'),
     path('singles/me/photos/<int:pk>/', SinglesPhotoDetailView.as_view(), name='singles-photo'),
     path('singles/discover/', SinglesDiscoverView.as_view(), name='singles-discover'),
+    path('admin/singles-stats/', AdminSinglesStatsView.as_view(), name='admin-singles-stats'),
+    path('singles/hub/', SinglesHubView.as_view(), name='singles-hub'),
+    path('singles/browse/', SinglesBrowseView.as_view(), name='singles-browse'),
+    path('singles/likes/', SinglesLikesView.as_view(), name='singles-likes'),
+    path('singles/me/answers/', SinglesAnswersView.as_view(), name='singles-answers'),
+    path('singles/me/verify/', SinglesVerifyView.as_view(), name='singles-verify'),
+    path('singles/matches/<int:pk>/icebreakers/', SinglesIcebreakersView.as_view(), name='singles-icebreakers'),
+    path('singles/icebreakers/<int:pk>/answer/', SinglesIcebreakerAnswerView.as_view(), name='singles-icebreaker-answer'),
+    path('singles/matches/<int:pk>/story/', SinglesMatchStoryView.as_view(), name='singles-match-story'),
+    path('singles/topics/', SinglesTopicsView.as_view(), name='singles-topics'),
+    path('singles/topics/<int:pk>/', SinglesTopicView.as_view(), name='singles-topic'),
+    path('singles/topics/<int:pk>/replies/', SinglesReplyView.as_view(), name='singles-replies'),
+    path('singles/topics/<int:pk>/heart/', SinglesHeartView.as_view(), name='singles-heart'),
+    path('singles/gatherings/', SinglesGatheringsView.as_view(), name='singles-gatherings'),
+    path('singles/gatherings/<int:pk>/rsvp/', SinglesRsvpView.as_view(), name='singles-rsvp'),
+    path('singles/rooms/', SinglesRoomsView.as_view(), name='singles-rooms'),
+    path('singles/stories/', SinglesStoriesView.as_view(), name='singles-stories'),
+    path('singles/stories/<int:pk>/consent/', SinglesStoryConsentView.as_view(), name='singles-story-consent'),
+    path('bible/lookup/', BibleLookupView.as_view(), name='bible-lookup'),
     path('singles/profiles/<int:pk>/', SinglesProfileView.as_view(), name='singles-profile'),
     path('singles/profiles/<int:pk>/interest/', SinglesInterestView.as_view(), name='singles-interest'),
     path('singles/profiles/<int:pk>/report/', SinglesReportView.as_view(), name='singles-report'),

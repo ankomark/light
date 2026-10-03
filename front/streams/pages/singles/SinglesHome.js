@@ -22,14 +22,26 @@ import {
 import ProfileCard from '../../components/singles/ProfileCard';
 import SafetySheet from '../../components/singles/SafetySheet';
 import MyProfilePane from '../../components/singles/MyProfilePane';
+import HomeTab from '../../components/singles/HomeTab';
+import ConnectionsTab from '../../components/singles/ConnectionsTab';
+import ChatsTab from '../../components/singles/ChatsTab';
+import MoreLinks from '../../components/singles/MoreLinks';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const TABS = ['discover', 'matches', 'me'];
+// The hub's bottom bar: home first (not a wall of faces), then Discover,
+// your connections, your chats, and you.
+const TABS = [
+  ['home', 'home-heart'], ['discover', 'compass-outline'], ['connections', 'heart-multiple-outline'],
+  ['chats', 'chat-outline'], ['me', 'account-circle-outline'],
+];
 
 export default function SinglesHome() {
   const { t } = useI18n();
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const [me, setMe] = useState(null);
   const [failed, setFailed] = useState(null);
-  const [tab, setTab] = useState('discover');
+  const [tab, setTab] = useState('home');
 
   const load = useCallback(async () => {
     try {
@@ -75,22 +87,35 @@ export default function SinglesHome() {
     );
   }
   return (
-    <SinglesScreen title={t('singles.title')} scroll={false} testID="singles-home">
-      <View style={styles.tabs} accessibilityRole="tablist">
-        {TABS.map((k) => (
-          <TouchableOpacity key={k} onPress={() => setTab(k)} style={[styles.tab, tab === k && styles.tabOn]}
-            accessibilityRole="tab" accessibilityState={{ selected: tab === k }} testID={`singles-tab-${k}`}>
-            <Text style={[styles.tabText, tab === k && styles.tabTextOn]}>{t(`singles.tab.${k}`)}</Text>
+    <SinglesScreen title={t('singles.title')} scroll={false} testID="singles-home"
+      right={(
+        <TouchableOpacity onPress={() => navigation.navigate('SinglesSettings', { profile: me.profile })}
+          accessibilityRole="button" accessibilityLabel={t('singles.settings.title')} hitSlop={10}>
+          <Ionicons name="options-outline" size={22} color={GOLD.text} />
+        </TouchableOpacity>
+      )}>
+      <View style={{ flex: 1 }}>
+        {tab === 'home' && <HomeTab onTab={setTab} />}
+        {tab === 'discover' && <Discover paused={me.profile.is_paused} onMine={() => setTab('me')} />}
+        {tab === 'connections' && <ConnectionsTab Matches={Matches} />}
+        {tab === 'chats' && <ChatsTab />}
+        {tab === 'me' && (
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
+            <MyProfilePane profile={me.profile} onChange={load} />
+            <MoreLinks profile={me.profile} />
+          </ScrollView>
+        )}
+      </View>
+      <View style={[styles.bottomBar, { paddingBottom: 8 + insets.bottom }]} accessibilityRole="tablist">
+        {TABS.map(([k, icon]) => (
+          <TouchableOpacity key={k} onPress={() => setTab(k)} style={styles.bottomTab} accessibilityRole="tab"
+            accessibilityState={{ selected: tab === k }} accessibilityLabel={t(`singles.tab.${k}`)} testID={`singles-tab-${k}`}>
+            <MaterialCommunityIcons name={icon} size={24} color={tab === k ? GOLD.gold : GOLD.muted} />
+            <Text style={[styles.bottomText, tab === k && { color: GOLD.gold }]} numberOfLines={1}
+              maxFontSizeMultiplier={1.2}>{t(`singles.tab.${k}`)}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      {tab === 'discover' && <Discover paused={me.profile.is_paused} onMine={() => setTab('me')} />}
-      {tab === 'matches' && <Matches />}
-      {tab === 'me' && (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
-          <MyProfilePane profile={me.profile} onChange={load} />
-        </ScrollView>
-      )}
     </SinglesScreen>
   );
 }
@@ -279,7 +304,7 @@ function Discover({ paused, onMine }) {
 }
 
 // ── Filters ──────────────────────────────────────────────────────────────────
-function FiltersSheet({ visible, value, onClose, onApply }) {
+export function FiltersSheet({ visible, value, onClose, onApply }) {
   const { t } = useI18n();
   const [f, setF] = useState(value);
   useEffect(() => { if (visible) setF(value); }, [visible, value]);
@@ -315,7 +340,7 @@ function FiltersSheet({ visible, value, onClose, onApply }) {
         </View>
         <Label>{t('singles.field.lookingFor')}</Label>
         <View style={styles.chipRow}>
-          {['marriage', 'friendship'].map((b) => (
+          {['open', 'friendship', 'serious', 'marriage'].map((b) => (
             <Chip key={b} text={t(`singles.looking.${b}`)} on={f.looking_for === b} onPress={() => set('looking_for', b)} />
           ))}
         </View>
@@ -343,7 +368,7 @@ export function openerText(t, opener, name) {
   return t('singles.opener.general', { name });
 }
 
-function MatchMoment({ match, onClose, onHello }) {
+export function MatchMoment({ match, onClose, onHello }) {
   const { t } = useI18n();
   if (!match) return null;
   const p = match.profile;
@@ -411,6 +436,12 @@ function Matches() {
 }
 
 const styles = StyleSheet.create({
+  bottomBar: {
+    flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: GOLD.border,
+    backgroundColor: GOLD.cardDeep, paddingTop: 6,
+  },
+  bottomTab: { flex: 1, alignItems: 'center', gap: 2, minHeight: 48, justifyContent: 'center' },
+  bottomText: { color: GOLD.muted, fontSize: 11, fontFamily: FACE.semi },
   tabs: {
     flexDirection: 'row', marginHorizontal: 16, marginBottom: 6, borderRadius: 999, padding: 4,
     backgroundColor: GOLD.cardDeep, borderWidth: 1, borderColor: GOLD.border,
