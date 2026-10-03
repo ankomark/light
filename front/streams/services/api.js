@@ -2584,3 +2584,5 @@ export const fetchSinglesStats = () => apiRequest('get', '/admin/singles-stats/'
 export const fetchSinglesReviewList = (kind) => apiRequest('get', `/admin/singles-${kind}/`);
 export const decideSinglesItem = (kind, id, decision, reason = '') =>
   apiRequest('post', `/admin/singles-${kind}/${id}/decide/`, { decision, reason });
+// Every Single & Searching chat, open or ended (the server filters them).
+export const fetchSinglesChats = () => apiRequest('get', '/conversations/', null, { params: { singles: 1, page_size: 100 } });

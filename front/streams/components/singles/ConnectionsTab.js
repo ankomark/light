@@ -1,11 +1,11 @@
 // Connections: people who are interested in you (answer to match — a
 // "not now" is never told), and your matches.
-import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesLikes } from '../../services/api';
-import { GOLD, FACE, Body, Centered, Title } from './SinglesKit';
+import { GOLD, FACE, Body, Centered, Title, SkeletonList } from './SinglesKit';
+import useSingles from './useSingles';
 import GridCard, { useGridWidth } from './GridCard';
 
 export default function ConnectionsTab({ Matches }) {
@@ -29,13 +29,10 @@ export default function ConnectionsTab({ Matches }) {
 function Likes() {
   const { t } = useI18n();
   const width = useGridWidth();
-  const [rows, setRows] = useState(null);
+  const { data, failed, reload: load } = useSingles('likes', async () => (await fetchSinglesLikes()).results || []);
+  const rows = data ?? (failed ? [] : null);
   const [refreshing, setRefreshing] = useState(false);
-  const load = useCallback(async () => {
-    try { setRows((await fetchSinglesLikes()).results || []); } catch { setRows((r) => r || []); }
-  }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
-  if (rows === null) return <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />;
+  if (rows === null) return <SkeletonList rows={3} />;
   return (
     <ScrollView contentContainerStyle={styles.pad}
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={GOLD.gold}

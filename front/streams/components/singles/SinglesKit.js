@@ -2,10 +2,17 @@
 // for what matters and what can be tapped, Cormorant Garamond for names and
 // titles, Figtree for the words (both loaded in App.js). Portraits sit in a
 // gold ring; nothing flashes or counts down — this is not a game.
-import React from 'react';
+//
+// Glass, as the menu: the app's rotating wallpaper (or plain navy when
+// wallpapers are off in Settings) under a navy scrim and an edge vignette,
+// with translucent cards over it.
+import React, { useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions, Animated,
+  AccessibilityInfo,
 } from 'react-native';
+import RotatingBackground from '../RotatingBackground';
+import ScreenVignette from '../ScreenVignette';
 import { Image } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -15,9 +22,11 @@ import { FONT_SCALE } from '../../utils/layout';
 
 export const GOLD = {
   bg: '#0A1628',
-  card: '#13233B',
-  cardDeep: '#0F1C30',
-  border: '#22385A',
+  // Glass: translucent navy over the wallpaper.
+  card: 'rgba(19,35,59,0.78)',
+  cardDeep: 'rgba(12,24,42,0.86)',
+  border: 'rgba(255,255,255,0.12)',
+  solidCard: '#13233B',
   text: '#FFFFFF',
   sub: '#C9D3E0',
   muted: '#93A0B2',
@@ -49,6 +58,7 @@ export function SinglesScreen({ title, right, children, scroll = true, footer, t
   const column = { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' };
   return (
     <View style={s.root} testID={testID}>
+      <Backdrop />
       <SafeAreaView edges={['top', 'left', 'right']} style={s.bar}>
         <TouchableOpacity onPress={onBack || (() => navigation.goBack())} style={s.icon} accessibilityRole="button"
           accessibilityLabel={t('common.back')} hitSlop={10}>
@@ -75,6 +85,47 @@ export function SinglesScreen({ title, right, children, scroll = true, footer, t
     </View>
   );
 }
+
+/** The wallpaper, its navy scrim and the edge vignette — behind everything. */
+export const Backdrop = () => (
+  <>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.66)" />
+    <ScreenVignette tintRgb="6,16,34" strength={0.55} zIndex={0} />
+  </>
+);
+
+/** A calm grey shape where content will be — instead of a spinner. */
+export const Skeleton = ({ width = '100%', height = 16, radius = 8, style }) => (
+  <View style={[{ width, height, borderRadius: radius, backgroundColor: 'rgba(255,255,255,0.08)' }, style]} />
+);
+
+/** A page of skeletons: a few cards' worth, for a first-ever open. */
+export const SkeletonList = ({ rows = 3, testID }) => (
+  <View style={{ padding: 16, gap: 12 }} testID={testID}>
+    {Array.from({ length: rows }).map((_, i) => (
+      <View key={i} style={[s.card, { gap: 10 }]}>
+        <Skeleton width="55%" height={20} />
+        <Skeleton height={14} />
+        <Skeleton width="80%" height={14} />
+      </View>
+    ))}
+  </View>
+);
+
+/** Content eases in once, unless the person asked for less motion. */
+export const FadeIn = ({ children, style, delay = 0 }) => {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    let live = true;
+    AccessibilityInfo.isReduceMotionEnabled?.().then((reduce) => {
+      if (!live) return;
+      if (reduce) opacity.setValue(1);
+      else Animated.timing(opacity, { toValue: 1, duration: 260, delay, useNativeDriver: true }).start();
+    }).catch(() => opacity.setValue(1));
+    return () => { live = false; };
+  }, [opacity, delay]);
+  return <Animated.View style={[{ opacity }, style]}>{children}</Animated.View>;
+};
 
 /** A gold button, an outlined one, or a quiet text one. */
 export const GoldButton = ({ label, icon, onPress, kind = 'solid', busy, disabled, testID, style }) => {
@@ -146,13 +197,13 @@ export const Centered = ({ children }) => <View style={s.centered}>{children}</V
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: GOLD.bg },
-  bar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingBottom: 4, backgroundColor: GOLD.bg },
+  bar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingBottom: 4, zIndex: 2 },
   icon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   barTitle: { flex: 1, textAlign: 'center', color: GOLD.text, fontSize: 16, fontFamily: FACE.bold },
   scroll: { paddingTop: 8 },
   footer: {
-    position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 12, paddingHorizontal: 16,
-    backgroundColor: GOLD.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: GOLD.border,
+    position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 12, paddingHorizontal: 16, zIndex: 3,
+    backgroundColor: 'rgba(10,22,40,0.92)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: GOLD.border,
   },
   footerRow: { flexDirection: 'row', gap: 12 },
   btn: {

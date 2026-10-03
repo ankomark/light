@@ -46,8 +46,16 @@ jest.mock('../../services/api', () => ({
   fetchSinglesGatherings: jest.fn(), rsvpSinglesGathering: jest.fn(), suggestSinglesGathering: jest.fn(),
   fetchSinglesRooms: jest.fn(async () => ({ results: [] })), fetchBroadcastToken: jest.fn(), startSinglesRoom: jest.fn(),
   fetchSinglesStats: jest.fn(async () => ({ waiting: {} })), fetchSinglesReviewList: jest.fn(), decideSinglesItem: jest.fn(),
+  fetchUnreadMessageCount: jest.fn(async () => ({ singles: 0 })), fetchSinglesChats: jest.fn(async () => ({ results: [] })),
+  orderSinglesPhotos: jest.fn(async () => ({})),
 }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 1 } }) }));
+jest.mock('../../components/RotatingBackground', () => () => null);
+jest.mock('../../components/ScreenVignette', () => () => null);
+let mockDM = null;
+jest.mock('../../services/dmSocket', () => ({ subscribeDM: (fn) => { mockDM = fn; return () => {}; } }));
+jest.mock('expo-haptics', () => ({ impactAsync: jest.fn(async () => {}), notificationAsync: jest.fn(async () => {}),
+  ImpactFeedbackStyle: { Light: 'light' }, NotificationFeedbackType: { Success: 'success' } }));
 jest.mock('../../components/admin/AdminKit', () => ({
   ADMIN: { card: '#000', border: '#111', text: '#fff', muted: '#999', gold: '#fc6', onGold: '#000', danger: '#f00' },
   ErrorState: () => null,
@@ -78,7 +86,9 @@ const HUB = {
   gathering: null, live_rooms: 1, stories: 0,
 };
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Each test starts with nothing kept: no screen paints another test's copy.
+  await require('../../utils/screenCache').clearAllCaches();
   jest.clearAllMocks();
   mockParams = {};
 });
@@ -287,7 +297,10 @@ test('community: ask a question', async () => {
   api.askSinglesTopic.mockResolvedValue({ id: 8, body: 'What matters most?', author: { first_name: 'Mark' },
     reply_count: 0, heart_count: 0, hearted: false });
   const screen = render(<SinglesCommunity />);
+  await waitFor(() => expect(screen.getByText('singles.community.empty')).toBeTruthy());
   fireEvent.changeText(screen.getByTestId('singles-ask-input'), 'What matters most in marriage?');
+  api.fetchSinglesTopics.mockResolvedValue({ results: [{ id: 8, body: 'What matters most?', author: { first_name: 'Mark' },
+    reply_count: 0, heart_count: 0, hearted: false }] });                  // the server has it now
   await act(async () => { fireEvent.press(screen.getByTestId('singles-ask')); });
   expect(api.askSinglesTopic).toHaveBeenCalledWith('What matters most in marriage?');
   await waitFor(() => expect(screen.getByTestId('singles-topic-8')).toBeTruthy());
@@ -322,4 +335,64 @@ test('reviewers see risk, and decide on events', async () => {
   await waitFor(() => expect(screen.getByTestId('singles-extra-2')).toBeTruthy());
   await act(async () => { fireEvent.press(screen.getByTestId('singles-extra-approve-2')); });
   expect(api.decideSinglesItem).toHaveBeenCalledWith('gatherings', 2, 'approve', '');
+});
+
+
+// ── Phases 13-16 ────────────────────────────────────────────────────────────
+test('a second visit paints at once from the last copy', async () => {
+  api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
+  const first = render(<SinglesHome />);
+  await waitFor(() => expect(first.getByTestId('singles-grid-7')).toBeTruthy());
+  first.unmount();
+  api.fetchSinglesHub.mockImplementation(() => new Promise(() => {}));      // the network hangs now
+  api.fetchSinglesMe.mockImplementation(() => new Promise(() => {}));
+  const again = render(<SinglesHome />);
+  expect(again.getByTestId('singles-grid-7')).toBeTruthy();                   // no skeleton, no wait
+});
+
+test('unread in match chats shows on the Chats tab; a live match refreshes', async () => {
+  api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
+  api.fetchUnreadMessageCount.mockResolvedValue({ singles: 2 });
+  const screen = render(<SinglesHome />);
+  await waitFor(() => expect(screen.getByTestId('singles-unread')).toBeTruthy());
+  const calls = api.fetchSinglesMe.mock.calls.length;
+  await act(async () => { mockDM({ type: 'singles_match', match_id: 9 }); });
+  expect(api.fetchSinglesMe.mock.calls.length).toBeGreaterThan(calls);
+});
+
+test('the chats tab asks the server for every match chat', async () => {
+  api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
+  api.fetchSinglesChats.mockResolvedValue({ results: [{ id: 31, singles: true, closed: true,
+    other_participant: { id: 9, username: 'grace' }, last_message: null, unread_count: 0 }] });
+  const screen = render(<SinglesHome />);
+  await waitFor(() => expect(screen.getByTestId('singles-hub')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-tab-chats')); });
+  await waitFor(() => expect(screen.getByTestId('singles-chatrow-31')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('singles-chatrow-31'));
+  expect(mockNav.navigate).toHaveBeenCalledWith('Chat', expect.objectContaining({ conversationId: 31, closed: true }));
+});
+
+test('an icebreaker answer arrives live', async () => {
+  mockParams = { match: { id: 3, conversation_id: 44, user: { id: 9 }, profile: grace, story: null, starters: [] } };
+  const SinglesPerson = require('../singles/SinglesPerson').default;
+  render(<SinglesPerson />);
+  await waitFor(() => expect(api.fetchIcebreakers).toHaveBeenCalledTimes(1));
+  await act(async () => { mockDM({ type: 'singles_icebreaker', match_id: 3, icebreaker_id: 5 }); });
+  expect(api.fetchIcebreakers).toHaveBeenCalledTimes(2);
+  await act(async () => { mockDM({ type: 'singles_icebreaker', match_id: 99 }); });       // another match's
+  expect(api.fetchIcebreakers).toHaveBeenCalledTimes(2);
+});
+
+test('any photo can become the main one', async () => {
+  const MyProfilePane = require('../../components/singles/MyProfilePane').default;
+  const onChange = jest.fn();
+  const screen = render(<MyProfilePane profile={mine('approved', { photos: [
+    { id: 1, url: 'https://x/1.jpg', status: 'approved' }, { id: 2, url: 'https://x/2.jpg', status: 'approved' }] })}
+    onChange={onChange} />);
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-make-main-2')); });
+  expect(api.orderSinglesPhotos).toHaveBeenCalledWith([2, 1]);
+  expect(onChange).toHaveBeenCalled();
 });

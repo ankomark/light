@@ -1,32 +1,29 @@
 // Chats: your Single & Searching conversations — the same chats as in
 // Messages, gathered here, newest first.
-import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { Image } from 'expo-image';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
-import { fetchConversations } from '../../services/api';
+import { fetchSinglesChats } from '../../services/api';
+import useSingles from './useSingles';
 import { previewText } from '../../utils/dmView';
 import { useAuth } from '../../context/useAuth';
-import { GOLD, FACE, Body, Centered, Title } from './SinglesKit';
+import { GOLD, FACE, Body, Centered, Title, SkeletonList } from './SinglesKit';
 
 export default function ChatsTab() {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { currentUser } = useAuth();
-  const [rows, setRows] = useState(null);
+  // Every Single & Searching chat, open or ended — not only the inbox's
+  // first page (the server filters them).
+  const { data, failed, reload: load } = useSingles('chats', async () => {
+    const res = await fetchSinglesChats();
+    return Array.isArray(res) ? res : res?.results || [];
+  });
+  const rows = data ?? (failed ? [] : null);
   const [refreshing, setRefreshing] = useState(false);
-  const load = useCallback(async () => {
-    try {
-      const res = await fetchConversations({});
-      const list = Array.isArray(res) ? res : res?.results || [];
-      const archived = await fetchConversations({ folder: 'archived' }).catch(() => []);
-      const more = Array.isArray(archived) ? archived : archived?.results || [];
-      setRows([...list, ...more].filter((c) => c.singles));
-    } catch { setRows((r) => r || []); }
-  }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
-  if (rows === null) return <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />;
+  if (rows === null) return <SkeletonList rows={3} />;
   return (
     <ScrollView contentContainerStyle={styles.pad}
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={GOLD.gold}

@@ -1,14 +1,15 @@
 // The singles community: questions worth talking about ("What qualities
 // matter most in a life partner?"). Someone can become interesting because
 // of what they say, not only their photo.
-import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, RefreshControl, FlatList, ActivityIndicator } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, RefreshControl, FlatList } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesTopics, askSinglesTopic, heartSinglesTopic } from '../../services/api';
 import { notify } from '../../utils/adminConfirm';
-import { GOLD, FACE, SinglesScreen, GoldButton, Portrait, Body } from '../../components/singles/SinglesKit';
+import { GOLD, FACE, SinglesScreen, GoldButton, Portrait, Body, SkeletonList } from '../../components/singles/SinglesKit';
+import useSingles from '../../components/singles/useSingles';
 
 export function TopicRow({ topic, onPress, onHeart }) {
   const { t } = useI18n();
@@ -39,21 +40,19 @@ export function TopicRow({ topic, onPress, onHeart }) {
 export default function SinglesCommunity() {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const [rows, setRows] = useState(null);
+  const { data, setData: setRows, failed, reload: load } = useSingles('topics', async () => (await fetchSinglesTopics()).results || []);
+  const rows = data ?? (failed ? [] : null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const load = useCallback(async () => {
-    try { setRows((await fetchSinglesTopics()).results || []); } catch { setRows((r) => r || []); }
-  }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const ask = async () => {
     setBusy(true);
     try {
       const topic = await askSinglesTopic(text.trim());
-      setRows((r) => [topic, ...(r || [])]);
+      setRows((r) => [topic, ...(r || []).filter((x) => x.id !== topic.id)]);
       setText('');
+      load();          // the server's list has it too — a slow first load can't wipe it
     } catch (e) {
       notify(t('common.error'), e?.data?.code === 'slow_down' ? t('singles.community.slowDown') : t('singles.community.askBad'));
     } finally { setBusy(false); }
@@ -80,7 +79,7 @@ export default function SinglesCommunity() {
               testID="singles-ask" />
           </View>
         )}
-        ListEmptyComponent={rows === null ? <ActivityIndicator color={GOLD.gold} /> : <Body style={{ textAlign: 'center' }}>{t('singles.community.empty')}</Body>}
+        ListEmptyComponent={rows === null ? <SkeletonList rows={3} /> : <Body style={{ textAlign: 'center' }}>{t('singles.community.empty')}</Body>}
         renderItem={({ item }) => (
           <TopicRow topic={item} onHeart={() => heart(item)} onPress={() => navigation.navigate('SinglesTopic', { id: item.id })} />
         )} />

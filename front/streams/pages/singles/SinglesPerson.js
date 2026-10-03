@@ -1,7 +1,7 @@
 // A match's profile, opened from Matches: who they are, ways to begin, the
 // get-to-know-you game (both answer before either sees), telling your story
 // if it becomes one, and — always within reach — unmatch, report or block.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, TextInput, StyleSheet, Modal } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import {
   withdrawSinglesStory,
 } from '../../services/api';
 import { confirmAction, notify } from '../../utils/adminConfirm';
+import { subscribeDM } from '../../services/dmSocket';
 import { GOLD, FACE, SinglesScreen, GoldButton, Card, Label, Body, Chip } from '../../components/singles/SinglesKit';
 import ProfileCard from '../../components/singles/ProfileCard';
 import SafetySheet from '../../components/singles/SafetySheet';
@@ -39,6 +40,10 @@ export default function SinglesPerson() {
     try { setIce(await fetchIcebreakers(match.id)); } catch { /* the rest still works */ }
   }, [match]);
   useFocusEffect(useCallback(() => { loadIce(); }, [loadIce]));
+  // Their answer arrives live: the other side of a question shows at once.
+  useEffect(() => subscribeDM((e) => {
+    if (e.type === 'singles_icebreaker' && match && e.match_id === match.id) loadIce();
+  }), [loadIce, match]);
   if (!match) return null;
   const p = match.profile;
   const openChat = () => navigation.navigate('Chat', { conversationId: match.conversation_id, otherUser: match.user, singles: true });

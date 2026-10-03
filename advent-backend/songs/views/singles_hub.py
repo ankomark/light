@@ -74,12 +74,23 @@ class SinglesHubView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        from django.core.cache import cache
         _require_on()
         me = _approved(request.user)
         _seen(me)
         mode = request.query_params.get('mode', 'foryou')
         if mode not in rules.MODES:
             mode = 'foryou'
+        # The hub is the heaviest read here and opened often: kept for a few
+        # seconds per person (dropped at once when they answer or match).
+        cached = cache.get(rules.hub_key(me.pk, mode))
+        if cached is not None:
+            return Response(cached)
+        data = self._build(request, me, mode)
+        cache.set(rules.hub_key(me.pk, mode), data, rules.HUB_SECONDS)
+        return Response(data)
+
+    def _build(self, request, me, mode):
         preview = []
         if not me.is_paused:
             rows, _more = rules.browse(me, mode)
@@ -88,7 +99,7 @@ class SinglesHubView(APIView):
         topic = SinglesTopic.objects.filter(is_removed=False).exclude(author__user_id__in=blocked_ids_for(request.user)).first()
         upcoming = (SinglesGathering.objects.filter(status=SinglesGathering.APPROVED, starts_at__gte=timezone.now())
                     .annotate(n=Count('rsvps')).first())
-        return Response({
+        return {
             'first_name': me.first_name,
             'paused': me.is_paused,
             'today': min(today, rules.DAILY_NEW),
@@ -101,7 +112,7 @@ class SinglesHubView(APIView):
             'gathering': _gathering_json(upcoming, me) if upcoming else None,
             'live_rooms': LiveBroadcast.objects.filter(singles_only=True, status='live').count(),
             'stories': SinglesStory.objects.filter(status=SinglesStory.PUBLISHED).count(),
-        })
+        }
 
 
 class SinglesBrowseView(APIView):

@@ -7,17 +7,24 @@
 // A match opens a celebration with a way to begin, then the chat in Messages.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, TextInput, ScrollView, RefreshControl,
+  View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ScrollView, RefreshControl,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
+import { Image } from 'expo-image';
 import {
-  fetchSinglesMe, fetchSinglesDiscover, answerSingles, fetchSinglesMatches,
+  fetchSinglesMe, fetchSinglesDiscover, answerSingles, fetchSinglesMatches, fetchUnreadMessageCount,
 } from '../../services/api';
+import { subscribeDM } from '../../services/dmSocket';
 import { notify } from '../../utils/adminConfirm';
+import { peekCache, readCache, writeCache, userKey } from '../../utils/screenCache';
+import { useAuth } from '../../context/useAuth';
+import { tap, celebrate } from '../../components/singles/feel';
+import useSingles from '../../components/singles/useSingles';
 import {
-  GOLD, FACE, SinglesScreen, GoldButton, Label, Card, Chip, Portrait, Ring, Title, Body, Centered,
+  GOLD, FACE, SinglesScreen, GoldButton, Label, Card, Chip, Portrait, Ring, Title, Body, Centered, FadeIn,
+  SkeletonList,
 } from '../../components/singles/SinglesKit';
 import ProfileCard from '../../components/singles/ProfileCard';
 import SafetySheet from '../../components/singles/SafetySheet';
@@ -39,19 +46,28 @@ export default function SinglesHome() {
   const { t } = useI18n();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [me, setMe] = useState(null);
-  const [failed, setFailed] = useState(null);
   const [tab, setTab] = useState('home');
-
-  const load = useCallback(async () => {
-    try {
-      setMe(await fetchSinglesMe());
-      setFailed(null);
-    } catch (e) {
-      setFailed(e?.data?.code === 'feature_off' ? 'off' : 'error');
+  const [unread, setUnread] = useState(0);
+  // Drawn from the last copy at once (no spinner on a return visit), then
+  // refreshed. "Switched off" is an answer, not an error.
+  const { data: me, failed: loadFailed, reload: load } = useSingles('me', async () => {
+    try { return await fetchSinglesMe(); } catch (e) {
+      if (e?.data?.code === 'feature_off') return { off: true };
+      throw e;
     }
+  });
+  const failed = me?.off ? 'off' : loadFailed && !me ? 'error' : null;
+
+  // Unread in Single & Searching chats: a dot on the Chats tab.
+  const countUnread = useCallback(() => {
+    fetchUnreadMessageCount().then((r) => setUnread(r?.singles || 0)).catch(() => {});
   }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(countUnread);
+  // A match made while you're here, or a message: refresh at once.
+  useEffect(() => subscribeDM((e) => {
+    if (e.type === 'singles_match') load();
+    if (e.type === 'message' || e.type === 'read') countUnread();
+  }), [load, countUnread]);
 
   if (failed === 'off') {
     return (
@@ -73,7 +89,7 @@ export default function SinglesHome() {
   if (!me) {
     return (
       <SinglesScreen title={t('singles.title')} scroll={false}>
-        <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />
+        <SkeletonList rows={4} testID="singles-loading" />
       </SinglesScreen>
     );
   }
@@ -96,7 +112,9 @@ export default function SinglesHome() {
       )}>
       <View style={{ flex: 1 }}>
         {tab === 'home' && <HomeTab onTab={setTab} />}
-        {tab === 'discover' && <Discover paused={me.profile.is_paused} onMine={() => setTab('me')} />}
+        {tab === 'discover' && (
+          <Discover paused={me.profile.is_paused} onMine={() => setTab('me')} mePhoto={me.profile.photos?.[0]?.url} />
+        )}
         {tab === 'connections' && <ConnectionsTab Matches={Matches} />}
         {tab === 'chats' && <ChatsTab />}
         {tab === 'me' && (
@@ -110,7 +128,10 @@ export default function SinglesHome() {
         {TABS.map(([k, icon]) => (
           <TouchableOpacity key={k} onPress={() => setTab(k)} style={styles.bottomTab} accessibilityRole="tab"
             accessibilityState={{ selected: tab === k }} accessibilityLabel={t(`singles.tab.${k}`)} testID={`singles-tab-${k}`}>
-            <MaterialCommunityIcons name={icon} size={24} color={tab === k ? GOLD.gold : GOLD.muted} />
+            <View>
+              <MaterialCommunityIcons name={icon} size={24} color={tab === k ? GOLD.gold : GOLD.muted} />
+              {k === 'chats' && unread > 0 && <View style={styles.unreadDot} testID="singles-unread" />}
+            </View>
             <Text style={[styles.bottomText, tab === k && { color: GOLD.gold }]} numberOfLines={1}
               maxFontSizeMultiplier={1.2}>{t(`singles.tab.${k}`)}</Text>
           </TouchableOpacity>
@@ -189,10 +210,12 @@ function Welcome() {
 }
 
 // ── Discover ─────────────────────────────────────────────────────────────────
-function Discover({ paused, onMine }) {
+function Discover({ paused, onMine, mePhoto }) {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const [queue, setQueue] = useState(null);
+  const { currentUser } = useAuth();
+  const cacheKey = currentUser?.id ? userKey(currentUser.id, 'singles:discover') : null;
+  const [queue, setQueue] = useState(() => (cacheKey ? peekCache(cacheKey)?.results ?? null : null));
   const [left, setLeft] = useState(null);
   const [filters, setFilters] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -202,15 +225,24 @@ function Discover({ paused, onMine }) {
   const scroll = useRef(null);
 
   const load = useCallback(async (f) => {
+    const plain = !Object.keys(f || {}).length;
+    if (plain && cacheKey && !peekCache(cacheKey)) {
+      const kept = await readCache(cacheKey);
+      if (kept) { setQueue((q) => q ?? kept.results); setLeft((l) => l ?? kept.left_today); }
+    }
     try {
       const res = await fetchSinglesDiscover(f);
       setQueue(res.results || []);
       setLeft(res.left_today);
+      if (plain && cacheKey) writeCache(cacheKey, res);
+      // The next faces load while you read this one.
+      const next = (res.results || []).slice(1).map((p) => p.photos?.[0]?.url).filter(Boolean);
+      if (next.length) Image.prefetch?.(next);
     } catch (e) {
-      setQueue([]);
+      setQueue((q) => q ?? []);
       if (e?.data?.code === 'paused') setLeft(-1);
     }
-  }, []);
+  }, [cacheKey]);
   useEffect(() => { if (!paused) load(filters); }, [load, filters, paused]);
 
   if (paused) {
@@ -224,18 +256,20 @@ function Discover({ paused, onMine }) {
       </View>
     );
   }
-  if (queue === null) return <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />;
+  if (queue === null) return <SkeletonList rows={2} />;
 
   const current = queue[0];
   const answer = async (kind) => {
     if (!current || busy) return;
     setBusy(true);
     try {
+      if (kind === 'interested') tap();
       const res = await answerSingles(current.id, kind);
       setLeft(res.left_today);
-      if (res.matched) setMatch(res.match);
+      if (res.matched) { celebrate(); setMatch(res.match); }
       const rest = queue.slice(1);
       setQueue(rest);
+      if (cacheKey) writeCache(cacheKey, { results: rest, left_today: res.left_today });
       scroll.current?.scrollTo?.({ y: 0, animated: false });
       if (!rest.length && res.left_today > 0) load(filters);
     } catch (e) {
@@ -261,7 +295,7 @@ function Discover({ paused, onMine }) {
         <>
           <ScrollView ref={scroll} contentContainerStyle={{ padding: 16, paddingBottom: 140 }}
             showsVerticalScrollIndicator={false}>
-            <ProfileCard profile={current} testID={`singles-card-${current.id}`} />
+            <FadeIn key={current.id}><ProfileCard profile={current} testID={`singles-card-${current.id}`} /></FadeIn>
             <TouchableOpacity onPress={() => setSafety(true)} style={styles.safetyLink} accessibilityRole="button"
               testID="singles-card-safety">
               <Ionicons name="flag-outline" size={15} color={GOLD.muted} />
@@ -293,7 +327,7 @@ function Discover({ paused, onMine }) {
       )}
       <FiltersSheet visible={filtersOpen} value={filters} onClose={() => setFiltersOpen(false)}
         onApply={(f) => { setFilters(f); setFiltersOpen(false); }} />
-      <MatchMoment match={match} onClose={() => setMatch(null)}
+      <MatchMoment match={match} mePhoto={mePhoto} onClose={() => setMatch(null)}
         onHello={() => {
           const m = match;
           setMatch(null);
@@ -368,7 +402,7 @@ export function openerText(t, opener, name) {
   return t('singles.opener.general', { name });
 }
 
-export function MatchMoment({ match, onClose, onHello }) {
+export function MatchMoment({ match, onClose, onHello, mePhoto }) {
   const { t } = useI18n();
   if (!match) return null;
   const p = match.profile;
@@ -377,7 +411,11 @@ export function MatchMoment({ match, onClose, onHello }) {
       <View style={styles.matchWrap} testID="singles-match">
         <Label>{t('singles.match.eyebrow')}</Label>
         <Title size={46}>{t('singles.match.title')}</Title>
-        <Ring><Portrait uri={p.photos?.[0]?.url} size={150} /></Ring>
+        <View style={styles.pair}>
+          <Ring><Portrait uri={mePhoto} size={118} /></Ring>
+          <View style={styles.pairHeart}><Ionicons name="heart" size={22} color={GOLD.onGold} /></View>
+          <Ring><Portrait uri={p.photos?.[0]?.url} size={118} /></Ring>
+        </View>
         <Body style={{ textAlign: 'center', maxWidth: 320 }}>{t('singles.match.body', { name: p.first_name })}</Body>
         <Card style={{ alignSelf: 'stretch' }}>
           <Label>{t('singles.match.begin')}</Label>
@@ -400,13 +438,10 @@ export function MatchMoment({ match, onClose, onHello }) {
 function Matches() {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const [rows, setRows] = useState(null);
+  const { data, reload: load, failed } = useSingles('matches', async () => (await fetchSinglesMatches()).results || []);
+  const rows = data ?? (failed ? [] : null);
   const [refreshing, setRefreshing] = useState(false);
-  const load = useCallback(async () => {
-    try { setRows((await fetchSinglesMatches()).results || []); } catch { setRows((r) => r || []); }
-  }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
-  if (rows === null) return <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />;
+  if (rows === null) return <SkeletonList rows={3} />;
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 48 }}
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={GOLD.gold}
@@ -438,10 +473,19 @@ function Matches() {
 const styles = StyleSheet.create({
   bottomBar: {
     flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: GOLD.border,
-    backgroundColor: GOLD.cardDeep, paddingTop: 6,
+    backgroundColor: 'rgba(10,22,40,0.94)', paddingTop: 6,
   },
   bottomTab: { flex: 1, alignItems: 'center', gap: 2, minHeight: 48, justifyContent: 'center' },
   bottomText: { color: GOLD.muted, fontSize: 11, fontFamily: FACE.semi },
+  unreadDot: {
+    position: 'absolute', top: -2, right: -4, width: 10, height: 10, borderRadius: 5, backgroundColor: GOLD.gold,
+    borderWidth: 1.5, borderColor: '#0A1628',
+  },
+  pair: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  pairHeart: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: GOLD.gold, alignItems: 'center', justifyContent: 'center',
+    marginHorizontal: -14, zIndex: 1,
+  },
   tabs: {
     flexDirection: 'row', marginHorizontal: 16, marginBottom: 6, borderRadius: 999, padding: 4,
     backgroundColor: GOLD.cardDeep, borderWidth: 1, borderColor: GOLD.border,

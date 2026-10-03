@@ -83,7 +83,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         qs = (
             Conversation.objects
             .filter(participants=user)
-            .filter(dm.folder_q(user, self.request.query_params.get('folder')))
+            .filter(self._folder(user))
             .prefetch_related('participants__profile')
             .annotate(
                 st_cleared=Coalesce(Subquery(mine.values('cleared_before_id')[:1]), Value(0)),
@@ -126,6 +126,13 @@ class ConversationViewSet(viewsets.ModelViewSet):
         ctx = super().get_serializer_context()
         ctx['request'] = self.request
         return ctx
+
+    def _folder(self, user):
+        """?singles=1: every Single & Searching chat, open or ended (the
+        Chats tab there); otherwise the usual folders."""
+        if self.request.query_params.get('singles') in ('1', 'true'):
+            return Q(states__user=user, singles_match__isnull=False)
+        return dm.folder_q(user, self.request.query_params.get('folder'))
 
     def _msg_qs(self, conversation):
         return (dm.visible_messages(conversation, self.request.user)
@@ -392,20 +399,23 @@ class ConversationViewSet(viewsets.ModelViewSet):
         light the badge), after what was cleared."""
         user = request.user
         states = ConversationState.objects.filter(conversation=OuterRef('conversation'), user=user)
-        count = (Message.objects.filter(conversation__participants=user, read=False, is_removed=False)
-                 .exclude(sender=user)
-                 .annotate(ok=Subquery(states.filter(accepted=True, muted=False).values('id')[:1]),
-                           cleared=Coalesce(Subquery(states.values('cleared_before_id')[:1]), Value(0)))
-                 .filter(ok__isnull=False, id__gt=F('cleared'))
-                 .exclude(sender__in=blocked_ids_for(user))
-                 .count())
+        unread = (Message.objects.filter(conversation__participants=user, read=False, is_removed=False)
+                  .exclude(sender=user)
+                  .annotate(ok=Subquery(states.filter(accepted=True, muted=False).values('id')[:1]),
+                            cleared=Coalesce(Subquery(states.values('cleared_before_id')[:1]), Value(0)))
+                  .filter(ok__isnull=False, id__gt=F('cleared'))
+                  .exclude(sender__in=blocked_ids_for(user)))
+        count = unread.count()
+        # Of those, in Single & Searching chats (its own badge on the menu).
+        singles = unread.filter(conversation__singles_match__isnull=False,
+                                conversation__singles_match__ended_at__isnull=True).count() if count else 0
         requests_n = (ConversationState.objects.filter(user=user, accepted=False)
                       .filter(conversation__messages__isnull=False).values('conversation').distinct().count())
         # And groups with something new (communities count too; muted ones don't).
         from ..group_live import unread_groups
         from .directory import unseen_notices
         return Response({'unread_count': count, 'requests': requests_n, **unread_groups(user),
-                         'notices': unseen_notices(user)})
+                         'notices': unseen_notices(user), 'singles': singles})
 
 
 def _our_upload(url):

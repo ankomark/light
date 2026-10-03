@@ -223,6 +223,7 @@ class SinglesMeView(APIView):
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         profile.save()
+        rules.drop_hub(profile.pk)
         return Response(_own_json(profile))
 
     def delete(self, request):
@@ -662,6 +663,7 @@ class SinglesInterestView(APIView):
         SinglesInterest.objects.update_or_create(from_profile=me, to_profile=target, defaults={'kind': kind})
         rules.signal(me, 'interest' if kind == SinglesInterest.INTERESTED else 'pass', target)
         _seen(me)
+        rules.drop_hub(me.pk, target.pk)
         if kind == SinglesInterest.INTERESTED and _too_fast(me):
             return Response({'code': 'slow_down'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         match = None

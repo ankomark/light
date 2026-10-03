@@ -322,3 +322,49 @@ class AdminTests(Base):
         stats = self.client.get('/api/admin/singles-stats/').data
         self.assertEqual(stats['waiting']['profiles'], 1)
         self.assertIn('chat_started', stats['week'])
+
+
+class Phase13And14Tests(Base):
+    """Phase 13: every match chat in the Chats tab (not only the inbox's first
+    page), and its own unread badge. Phase 14: Discover's answers in one
+    query, and the hub kept briefly but dropped when you answer."""
+
+    def test_every_singles_chat_and_its_unread_count(self):
+        grace = single('grace')
+        m = self.match(grace)
+        self.as_(grace)
+        self.client.post(f'/api/conversations/{m.conversation_id}/send_message/', {'content': 'Hello Mark'}, format='json')
+        self.as_(self.mark)
+        ids = [c['id'] for c in self.client.get('/api/conversations/', {'singles': 1}).data['results']]
+        self.assertEqual(ids, [m.conversation_id])
+        self.assertEqual(self.client.get('/api/conversations/unread_count/').data['singles'], 1)
+        self.client.post(f'/api/singles/matches/{m.id}/unmatch/')
+        self.assertEqual(self.client.get('/api/conversations/unread_count/').data['singles'], 0)
+        ids = [c['id'] for c in self.client.get('/api/conversations/', {'singles': 1}).data['results']]
+        self.assertEqual(ids, [m.conversation_id])          # ended chats still listed there, closed
+
+    def test_discover_loads_answers_once_for_the_page(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        for i in range(5):
+            p = single(f'w{i}')
+            SinglesAnswer.objects.create(profile=p, key='relocate', answer='yes')
+        with CaptureQueriesContext(connection) as few:
+            self.client.get('/api/singles/discover/')
+        for i in range(5, 10):
+            single(f'w{i}')
+        cache.clear()
+        with CaptureQueriesContext(connection) as more:
+            r = self.client.get('/api/singles/discover/')
+        self.assertEqual(len(r.data['results']), 5)
+        self.assertLessEqual(len(more.captured_queries), len(few.captured_queries))
+
+    def test_the_hub_is_kept_briefly_and_dropped_when_you_answer(self):
+        grace = single('grace')
+        first = self.client.get('/api/singles/hub/').data
+        self.assertEqual(first['today'], 1)
+        ann = single('ann')
+        self.assertEqual(self.client.get('/api/singles/hub/').data['today'], 1)       # kept
+        self.client.post(f'/api/singles/profiles/{grace.id}/interest/', {'kind': 'pass'}, format='json')
+        self.assertEqual(self.client.get('/api/singles/hub/').data['today'], 1)       # grace gone, ann counted
+        self.assertIn(ann.id, [c['id'] for c in self.client.get('/api/singles/hub/').data['preview']])

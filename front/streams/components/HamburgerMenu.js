@@ -169,7 +169,7 @@ const isPage = (route, item) => !!route && route.name === item.route
 // communities with something new. `poll`: keep it fresh (the header's
 // button) — live off the DM socket, with a slow poll behind it; otherwise
 // it's read once (the menu, open for a moment).
-const NONE = { messages: 0, groups: 0, communities: 0, notices: 0 };
+const NONE = { messages: 0, groups: 0, communities: 0, notices: 0, singles: 0 };
 const useUnread = ({ poll }) => {
   const { isAuthenticated } = useAuth();
   const [unread, setUnread] = useState(NONE);
@@ -181,6 +181,7 @@ const useUnread = ({ poll }) => {
         groups: r?.groups || 0,
         communities: r?.communities || 0,
         notices: r?.notices || 0,
+        singles: r?.singles || 0,
       }))
       .catch(() => {});
   }, [isAuthenticated]);
@@ -221,7 +222,10 @@ export function MenuScreen() {
   const { features } = useAppStatus();
   const { t } = useI18n();
   const unread = useUnread({ poll: false });
-  const badgeFor = { Inbox: unread.messages, Groups: unread.groups, Communities: unread.communities, NoticeBoard: unread.notices };
+  const badgeFor = {
+    Inbox: unread.messages, Groups: unread.groups, Communities: unread.communities, NoticeBoard: unread.notices,
+    Singles: unread.singles,
+  };
 
   // The page the menu was opened over: marked as where you are.
   const below = useNavigationState((s) => s?.routes?.[s.index - 1]);

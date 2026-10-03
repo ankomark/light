@@ -568,10 +568,12 @@ const ChatScreen = ({ route, navigation }) => {
   }, [deliver, optimisticBase]);
 
   // A Scripture card: the server puts the Bible's own words on it.
-  const sendVerse = useCallback((ref) => {
+  const sendVerse = useCallback((found) => {
     const tempId = nextTempId();
-    const payload = { content: ref, message_type: 'verse', client_id: tempId };
-    setMessages((prev) => [...prev, optimisticBase(tempId, { content: ref, message_type: 'verse', _payload: payload })]);
+    const payload = { content: found.ref, message_type: 'verse', client_id: tempId };
+    // The card shows its words at once (the server puts the same in).
+    setMessages((prev) => [...prev, optimisticBase(tempId, {
+      content: `${found.ref}|${found.text}`, message_type: 'verse', _payload: payload })]);
     scrollToEndSoon();
     return deliver(tempId, () => payload);
   }, [deliver, optimisticBase]);
@@ -1288,7 +1290,7 @@ const ChatScreen = ({ route, navigation }) => {
             ) : null}
             <TouchableOpacity style={[styles.verseBtn, verseBusy && { opacity: 0.6 }]} disabled={verseBusy} testID="verse-go"
               onPress={() => {
-                if (verseFound) { setVerseSheet(false); sendVerse(verseFound.ref); } else findVerse();
+                if (verseFound) { setVerseSheet(false); sendVerse(verseFound); } else findVerse();
               }}>
               <Text style={styles.verseBtnText}>{verseFound ? t('chat.verseSend') : t('chat.verseFind')}</Text>
             </TouchableOpacity>

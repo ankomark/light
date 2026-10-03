@@ -244,7 +244,9 @@ def candidates(me, filters=None):
         # JSON contains is not on every database; the list is short, so a
         # text match on its stored form is enough.
         qs = qs.filter(languages__icontains=language)
-    return qs.select_related('user').prefetch_related('photos').order_by(
+    # Photos and values answers come in two queries for the whole page, not
+    # one per profile.
+    return qs.select_related('user').prefetch_related('photos', 'answers').order_by(
         '-near', '-same_church', '-last_active_at', '-id')
 
 
@@ -522,3 +524,18 @@ CONTACT_PATTERNS = (_URL, _EMAIL, _PHONE)
 
 def has_contact(text):
     return any(p.search(text or '') for p in CONTACT_PATTERNS)
+
+
+# ── Phase 14: the hub, briefly cached ───────────────────────────────────────
+HUB_SECONDS = 30
+
+
+def hub_key(profile_id, mode):
+    return f'singles:hub:{profile_id}:{mode}'
+
+
+def drop_hub(*profile_ids):
+    """Something changed for these people (an answer, a match): their hub is
+    recomputed on the next open rather than up to 30 s later."""
+    from django.core.cache import cache
+    cache.delete_many([hub_key(pid, m) for pid in profile_ids if pid for m in MODES])

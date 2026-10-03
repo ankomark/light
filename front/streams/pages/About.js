@@ -127,7 +127,7 @@ const About = () => {
           <View style={styles.founderHead}>
             <View style={styles.founderRing}><Text style={styles.founderInitials} maxFontSizeMultiplier={FONT_SCALE.tight}>ENG.</Text></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>Eng.Dir Anko Mark</Text>
+              <Text style={styles.cardTitle}>T16 Engineers</Text>
               <Text style={styles.founderRole}>FOUNDER · LEAD ENGINEER</Text>
             </View>
           </View>

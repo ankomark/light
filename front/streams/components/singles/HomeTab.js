@@ -2,13 +2,14 @@
 // (For You, New, Nearby, Online), then what makes this a community rather
 // than a list of faces — a question people are answering, the next meet-up,
 // live rooms, couples' stories.
-import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesHub } from '../../services/api';
-import { GOLD, FACE, Label, Card, Chip, Body } from './SinglesKit';
+import { GOLD, FACE, Label, Card, Chip, Body, SkeletonList, FadeIn } from './SinglesKit';
+import useSingles from './useSingles';
 import GridCard, { useGridWidth } from './GridCard';
 
 const MODES = ['foryou', 'new', 'nearby', 'online'];
@@ -19,26 +20,21 @@ export default function HomeTab({ onTab }) {
   const { t } = useI18n();
   const navigation = useNavigation();
   const width = useGridWidth();
-  const [hub, setHub] = useState(null);
   const [mode, setMode] = useState('foryou');
   const [refreshing, setRefreshing] = useState(false);
+  // Each mode keeps its own last copy, so switching back is instant too.
+  const { data: hub, failed, reload } = useSingles(`hub:${mode}`, () => fetchSinglesHub(mode));
 
-  const load = useCallback(async (m) => {
-    try { setHub(await fetchSinglesHub(m)); } catch { setHub((h) => h || { failed: true }); }
-  }, []);
-  useFocusEffect(useCallback(() => { load(mode); }, [load, mode]));
-
-  if (!hub) return <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />;
-  if (hub.failed) {
+  if (!hub && failed) {
     return <View style={styles.pad}><Body style={{ textAlign: 'center' }}>{t('singles.loadFailed')}</Body></View>;
   }
-  // The focus effect reloads for the new mode (it depends on `mode`).
+  if (!hub) return <SkeletonList rows={4} testID="singles-hub-loading" />;
   const pick = (m) => setMode(m);
 
   return (
     <ScrollView contentContainerStyle={styles.pad} showsVerticalScrollIndicator={false} testID="singles-hub"
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={GOLD.gold}
-        onRefresh={async () => { setRefreshing(true); await load(mode); setRefreshing(false); }} />}>
+        onRefresh={async () => { setRefreshing(true); await reload(); setRefreshing(false); }} />}>
       <Text style={styles.greet}>{t(`singles.hub.${greetingKey(new Date().getHours())}`, { name: hub.first_name })}</Text>
       <Text style={styles.lead}>{t('singles.hub.lead')}</Text>
 
@@ -67,9 +63,9 @@ export default function HomeTab({ onTab }) {
             {MODES.map((m) => <Chip key={m} text={t(`singles.mode.${m}`)} on={mode === m} onPress={() => pick(m)} testID={`singles-mode-${m}`} />)}
           </ScrollView>
           {hub.preview.length ? (
-            <View style={styles.grid}>
+            <FadeIn style={styles.grid} key={mode}>
               {hub.preview.map((c) => <GridCard key={c.id} card={c} width={width} testID={`singles-grid-${c.id}`} />)}
-            </View>
+            </FadeIn>
           ) : <Body style={styles.empty}>{t(`singles.mode.${mode}Empty`)}</Body>}
           <TouchableOpacity style={styles.more} onPress={() => navigation.navigate('SinglesBrowse', { mode })}
             accessibilityRole="button" testID="singles-see-all">

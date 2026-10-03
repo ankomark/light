@@ -10,7 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useI18n } from '../../context/I18nContext';
 import {
-  addSinglesPhoto, removeSinglesPhoto, submitSinglesProfile, pauseSinglesProfile, leaveSingles,
+  addSinglesPhoto, removeSinglesPhoto, submitSinglesProfile, pauseSinglesProfile, leaveSingles, orderSinglesPhotos,
 } from '../../services/api';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { GOLD, FACE, GoldButton, Label, Card, Portrait } from './SinglesKit';
@@ -55,6 +55,10 @@ export default function MyProfilePane({ profile, onChange }) {
       confirmLabel: t('singles.mine.remove'), cancelLabel: t('common.cancel'), destructive: true }))) return;
     run(`rm-${photo.id}`, () => removeSinglesPhoto(photo.id));
   };
+
+  // The first photo is the one people see first: any can take its place.
+  const makeMain = (photo) => run(`main-${photo.id}`, () => orderSinglesPhotos(
+    [photo.id, ...photos.filter((p) => p.id !== photo.id).map((p) => p.id)]));
 
   const submit = () => run('submit', async () => {
     try {
@@ -101,6 +105,13 @@ export default function MyProfilePane({ profile, onChange }) {
               <Portrait uri={p.url} size={150} radius={14} style={styles.slotImg} />
               {i === 0 && <Text style={styles.mainTag}>{t('singles.mine.main')}</Text>}
               {p.status === 'pending' && <Text style={styles.waitTag}>{t('singles.mine.photoWaiting')}</Text>}
+              {i > 0 && (
+                <TouchableOpacity style={styles.makeMain} onPress={() => makeMain(p)} accessibilityRole="button"
+                  accessibilityLabel={t('singles.mine.makeMain')} testID={`singles-make-main-${p.id}`}>
+                  {busy === `main-${p.id}` ? <ActivityIndicator size="small" color={GOLD.onGold} />
+                    : <Ionicons name="star" size={15} color={GOLD.onGold} />}
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={styles.remove} onPress={() => removePhoto(p)} accessibilityRole="button"
                 accessibilityLabel={t('singles.mine.removePhotoTitle')} hitSlop={8}>
                 {busy === `rm-${p.id}` ? <ActivityIndicator size="small" color={GOLD.text} />
@@ -182,6 +193,10 @@ const styles = StyleSheet.create({
   waitTag: {
     position: 'absolute', left: 8, bottom: 8, backgroundColor: 'rgba(10,22,40,0.85)', color: GOLD.text, fontSize: 11,
     fontFamily: FACE.bold, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, overflow: 'hidden',
+  },
+  makeMain: {
+    position: 'absolute', right: 6, bottom: 6, width: 34, height: 34, borderRadius: 17,
+    backgroundColor: GOLD.gold, alignItems: 'center', justifyContent: 'center',
   },
   remove: {
     position: 'absolute', right: 6, top: 6, width: 30, height: 30, borderRadius: 15,
