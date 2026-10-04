@@ -15,12 +15,12 @@ const {
 
 const API = 'https://tickets.smartbillsolution.com/api/v1/';
 const reply = (status, body) => ({ ok: status < 300, status, headers: { get: () => null }, json: async () => body });
-const stored = () => JSON.parse(mockSecure.get('tickets_org_tokens') || 'null');
-const signIn = (access = 'a1', refresh = 'r1') => mockSecure.set('tickets_org_tokens', JSON.stringify({ access, refresh }));
+const stored = () => JSON.parse(mockSecure.get('tickets_org_tokens_u7') || 'null');
+const signIn = (access = 'a1', refresh = 'r1') => mockSecure.set('tickets_org_tokens_u7', JSON.stringify({ access, refresh }));
 
 beforeEach(() => {
   mockSecure.clear();
-  org.__resetOrganiser();
+  org.__resetOrganiser(7);
   global.fetch = jest.fn();
 });
 
@@ -35,6 +35,52 @@ describe('session', () => {
     expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ email: 'a@b.co', password: 'secret123', display_name: 'Amani Choir' });
     expect(stored()).toEqual({ access: 'a1', refresh: 'r1' });
     expect(await org.hasSession()).toBe(true);
+  });
+
+  it('is kept per Streams account: hidden on sign-out, back for the same account, never shown to another', async () => {
+    signIn();
+    expect(await org.hasSession()).toBe(true);
+    org.setOrganiserOwner(null);              // signed out of Streams
+    expect(await org.hasSession()).toBe(false);
+    org.setOrganiserOwner(8);                 // someone else on the phone
+    expect(await org.hasSession()).toBe(false);
+    expect(await org.rememberedEmail()).toBe('');
+    org.setOrganiserOwner(7);                 // back again
+    expect(await org.hasSession()).toBe(true);
+    expect(stored()).toEqual({ access: 'a1', refresh: 'r1' });
+  });
+
+  it("drops the old phone-wide session, whose owner can't be told", async () => {
+    mockSecure.set('tickets_org_tokens', JSON.stringify({ access: 'x', refresh: 'y' }));
+    org.__resetOrganiser();
+    org.setOrganiserOwner(7);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSecure.has('tickets_org_tokens')).toBe(false);
+    expect(await org.hasSession()).toBe(false);
+  });
+
+  it('remembers the email signed in with, for this account only', async () => {
+    global.fetch
+      .mockResolvedValueOnce(reply(200, { access: 'a1', refresh: 'r1' }))
+      .mockResolvedValueOnce(reply(200, { id: 1 }));
+    await org.logIn({ email: ' Choir@Example.com ', password: 'pw' });
+    expect(await org.rememberedEmail()).toBe('choir@example.com');
+  });
+
+  it('a refresh that lands after the Streams account changed keeps the tokens with their owner', async () => {
+    signIn();
+    let finish;
+    global.fetch
+      .mockResolvedValueOnce(reply(401, { detail: 'expired' }))
+      .mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+    const call = org.fetchMe();
+    await new Promise((r) => setTimeout(r, 0));
+    org.setOrganiserOwner(8);
+    finish(reply(200, { access: 'a2', refresh: 'r2' }));
+    await call;
+    expect(stored()).toEqual({ access: 'a2', refresh: 'r2' });           // still account 7's
+    expect(mockSecure.has('tickets_org_tokens_u8')).toBe(false);
+    expect(await org.hasSession()).toBe(false);
   });
 
   it('sends the Bearer token on organiser calls', async () => {
@@ -80,7 +126,7 @@ describe('session', () => {
       .mockResolvedValueOnce(reply(401, {}))
       .mockResolvedValueOnce(reply(401, { detail: 'Token is blacklisted' }));
     expect(await org.fetchMe()).toBeNull();
-    expect(mockSecure.has('tickets_org_tokens')).toBe(false);
+    expect(mockSecure.has('tickets_org_tokens_u7')).toBe(false);
     await expect(org.fetchTills()).rejects.toMatchObject({ code: 'signed_out' });
   });
 

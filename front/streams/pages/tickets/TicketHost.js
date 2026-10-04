@@ -1,8 +1,11 @@
 /**
  * The door to opening an event: is there an organiser account on this phone?
  *
- * - A session the server still accepts → straight on to creating the event.
- * - None, or one that has ended → create an account, or log in to one.
+ * - A session the server still accepts → straight on to creating the event
+ *   (or to My events, when that is where they were going).
+ * - None, or one that has ended → log in (the first door, with the email this
+ *   Streams account last used), or create an account if they choose to.
+ *   "Forgot password?" leads to a reset by emailed code.
  * - The server can't be reached → say so, with Retry (creating an event needs
  *   the server anyway).
  *
@@ -19,12 +22,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import { useAuth } from '../../context/useAuth';
-import { fetchMe, signUp, logIn, isEmailTaken } from '../../services/ticketsOrganiser';
+import { fetchMe, signUp, logIn, isEmailTaken, rememberedEmail } from '../../services/ticketsOrganiser';
 import { normalizeKePhone } from '../../services/tickets';
 import { T, F, tap, Kicker, GoldButton, Notice } from '../../components/tickets/TicketKit';
 import { ticketErrorText } from './ticketText';
 
-const PASSWORD_MIN = 8;
+export const PASSWORD_MIN = 8;
 
 const Field = ({ label, error, children }) => (
   <View>
@@ -58,9 +61,17 @@ const TicketHost = ({ navigation, route }) => {
   }, [proceed]);
   useEffect(() => { check(); }, [check]);
 
-  const [mode, setMode] = useState('signup');        // signup | login
+  // Log in first: most who come back have an account, and a sign-up with a
+  // taken email turns into a log in anyway.
+  const [mode, setMode] = useState('login');         // login | signup
   const [name, setName] = useState(currentUser?.username || '');
   const [email, setEmail] = useState(currentUser?.email || '');
+  // The organiser email this Streams account signed in with before wins.
+  useEffect(() => {
+    let live = true;
+    rememberedEmail().then((e) => { if (live && e) setEmail(e); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [reveal, setReveal] = useState(false);
@@ -144,7 +155,7 @@ const TicketHost = ({ navigation, route }) => {
 
           {/* Two doors, side by side: the one in use filled. */}
           <View style={styles.tabs} accessibilityRole="tablist">
-            {['signup', 'login'].map((m) => (
+            {['login', 'signup'].map((m) => (
               <TouchableOpacity
                 key={m}
                 onPress={() => mode !== m && switchMode(m)}
@@ -202,6 +213,16 @@ const TicketHost = ({ navigation, route }) => {
           {mode === 'signup' && !errOf('password') && (
             <Text style={styles.hint}>{t('tix.host.passwordHint', { n: PASSWORD_MIN })}</Text>
           )}
+          {mode === 'login' && (
+            <TouchableOpacity
+              onPress={() => { tap(); navigation.push('TicketPasswordReset', { email: email.trim(), next }); }}
+              style={styles.forgot}
+              accessibilityRole="button"
+              testID="host-forgot"
+            >
+              <Text style={styles.forgotText}>{t('tix.reset.forgot')}</Text>
+            </TouchableOpacity>
+          )}
 
           {!!error && (
             <View style={styles.error} accessibilityLiveRegion="polite">
@@ -256,6 +277,8 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontFamily: F.uiSemi, fontSize: 16, color: T.ivory, paddingVertical: 0 },
   bad: { fontFamily: F.ui, fontSize: 13, color: T.danger, marginTop: 8, marginLeft: 4 },
   hint: { fontFamily: F.ui, fontSize: 13, color: T.faint, marginTop: 8, marginLeft: 4 },
+  forgot: { alignSelf: 'flex-end', paddingVertical: 10, paddingHorizontal: 4, marginTop: 4 },
+  forgotText: { fontFamily: F.uiBold, fontSize: 13.5, color: T.champagne },
 
   error: {
     flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginTop: 22, padding: 14, borderRadius: 14,

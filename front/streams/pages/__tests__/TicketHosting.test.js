@@ -40,17 +40,18 @@ jest.mock('../../services/secureStorage', () => ({
 const { __resetOrganiser } = require('../../services/ticketsOrganiser');
 const { default: TicketHost } = require('../tickets/TicketHost');
 const { default: TicketCreateEvent } = require('../tickets/TicketCreateEvent');
+const { default: TicketPasswordReset, isResetCode } = require('../tickets/TicketPasswordReset');
 
 const API = 'https://tickets.smartbillsolution.com/api/v1/';
 const reply = (status, body) => ({ ok: status < 300, status, headers: { get: () => null }, json: async () => body });
 const nav = () => ({ push: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() });
-const signIn = () => mockSecure.set('tickets_org_tokens', JSON.stringify({ access: 'a1', refresh: 'r1' }));
+const signIn = () => mockSecure.set('tickets_org_tokens_u7', JSON.stringify({ access: 'a1', refresh: 'r1' }));
 
 let routes;
 let calls;
 beforeEach(async () => {
   mockSecure.clear();
-  __resetOrganiser();
+  __resetOrganiser(7);
   await AsyncStorage.clear();
   routes = {};
   calls = [];
@@ -79,6 +80,7 @@ describe('the account check', () => {
     const screen = render(<TicketHost navigation={navigation} />);
     await waitFor(() => expect(screen.getByTestId('host-email')).toBeTruthy());
     expect(global.fetch).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('host-mode-signup'));
     expect(screen.getByTestId('host-email').props.value).toBe('amani@example.com');
     expect(screen.getByTestId('host-name').props.value).toBe('amani');
 
@@ -89,7 +91,7 @@ describe('the account check', () => {
     fireEvent.changeText(screen.getByTestId('host-password'), 'long enough');
     fireEvent.press(screen.getByTestId('host-submit'));
     await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketCreateEvent'));
-    expect(JSON.parse(mockSecure.get('tickets_org_tokens'))).toEqual({ access: 'a1', refresh: 'r1' });
+    expect(JSON.parse(mockSecure.get('tickets_org_tokens_u7'))).toEqual({ access: 'a1', refresh: 'r1' });
   });
 
   test('an email that already has an account turns the form into a log in', async () => {
@@ -99,6 +101,7 @@ describe('the account check', () => {
     const navigation = nav();
     const screen = render(<TicketHost navigation={navigation} />);
     await waitFor(() => expect(screen.getByTestId('host-password')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('host-mode-signup'));
     fireEvent.changeText(screen.getByTestId('host-password'), 'long enough');
     fireEvent.press(screen.getByTestId('host-submit'));
     await waitFor(() => expect(screen.getByText('tix.host.emailTaken')).toBeTruthy());
@@ -106,6 +109,28 @@ describe('the account check', () => {
 
     fireEvent.press(screen.getByTestId('host-submit'));
     await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketCreateEvent'));
+  });
+
+  test('log in comes first, with the email this Streams account used before, and no sign-up fields', async () => {
+    mockSecure.set('tickets_org_email_u7', 'choir@example.com');
+    routes['POST auth/login/'] = reply(200, { access: 'a1', refresh: 'r1' });
+    routes['GET auth/me/'] = reply(200, { id: 1 });
+    const navigation = nav();
+    const screen = render(<TicketHost navigation={navigation} route={{ params: { next: 'TicketMyEvents' } }} />);
+    await waitFor(() => expect(screen.getByTestId('host-email').props.value).toBe('choir@example.com'));
+    expect(screen.getByTestId('host-mode-login').props.accessibilityState).toEqual({ selected: true });
+    expect(screen.queryByTestId('host-name')).toBeNull();
+    fireEvent.changeText(screen.getByTestId('host-password'), 'pw');
+    fireEvent.press(screen.getByTestId('host-submit'));
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketMyEvents'));
+  });
+
+  test('forgot password leads to the reset, carrying the email and where to go next', async () => {
+    const navigation = nav();
+    const screen = render(<TicketHost navigation={navigation} route={{ params: { next: 'TicketMyEvents' } }} />);
+    await waitFor(() => expect(screen.getByTestId('host-forgot')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('host-forgot'));
+    expect(navigation.push).toHaveBeenCalledWith('TicketPasswordReset', { email: 'amani@example.com', next: 'TicketMyEvents' });
   });
 
   test('a wrong password says so', async () => {
@@ -116,6 +141,52 @@ describe('the account check', () => {
     fireEvent.changeText(screen.getByTestId('host-password'), 'nope');
     fireEvent.press(screen.getByTestId('host-submit'));
     await waitFor(() => expect(screen.getByText('tix.host.wrongPassword')).toBeTruthy());
+  });
+});
+
+describe('forgot password', () => {
+  test('a code is six digits', () => {
+    expect(isResetCode('123456')).toBe(true);
+    expect(isResetCode('12345')).toBe(false);
+    expect(isResetCode('12a456')).toBe(false);
+  });
+
+  test('email, then the code and a new password: signed in and on to My events', async () => {
+    routes['POST auth/password/reset/'] = reply(200, { detail: 'If that email has an account, a code is on its way.' });
+    routes['POST auth/password/reset/confirm/'] = reply(200, { access: 'a2', refresh: 'r2' });
+    routes['GET auth/me/'] = reply(200, { id: 1 });
+    const navigation = nav();
+    const screen = render(<TicketPasswordReset navigation={navigation} route={{ params: { email: 'amani@example.com', next: 'TicketMyEvents' } }} />);
+    fireEvent.press(screen.getByTestId('reset-submit'));
+    await waitFor(() => expect(screen.getByTestId('reset-code')).toBeTruthy());
+    expect(screen.getByText('tix.reset.sent')).toBeTruthy();
+
+    fireEvent.changeText(screen.getByTestId('reset-code'), '12 34');
+    fireEvent.changeText(screen.getByTestId('reset-password'), 'short');
+    fireEvent.press(screen.getByTestId('reset-submit'));
+    expect(screen.getByText('tix.reset.codeInvalid')).toBeTruthy();
+    expect(screen.getByText('tix.host.err.passwordShort:8')).toBeTruthy();
+
+    fireEvent.changeText(screen.getByTestId('reset-code'), '123456');
+    fireEvent.changeText(screen.getByTestId('reset-password'), 'a new long one');
+    fireEvent.press(screen.getByTestId('reset-submit'));
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketMyEvents'));
+    const sent = global.fetch.mock.calls.find((c) => c[0].endsWith('password/reset/confirm/'));
+    expect(JSON.parse(sent[1].body)).toEqual({ email: 'amani@example.com', code: '123456', new_password: 'a new long one' });
+    expect(JSON.parse(mockSecure.get('tickets_org_tokens_u7'))).toEqual({ access: 'a2', refresh: 'r2' });
+    expect(mockSecure.get('tickets_org_email_u7')).toBe('amani@example.com');
+  });
+
+  test('a wrong code says so, and keeps them on the form', async () => {
+    routes['POST auth/password/reset/confirm/'] = reply(400, { detail: 'That code is wrong or has expired.' });
+    const navigation = nav();
+    const screen = render(<TicketPasswordReset navigation={navigation} route={{ params: { email: 'amani@example.com' } }} />);
+    fireEvent.press(screen.getByTestId('reset-have-code'));
+    fireEvent.changeText(screen.getByTestId('reset-code'), '000000');
+    fireEvent.changeText(screen.getByTestId('reset-password'), 'a new long one');
+    fireEvent.press(screen.getByTestId('reset-submit'));
+    await waitFor(() => expect(screen.getByText('That code is wrong or has expired.')).toBeTruthy());
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
 });
 
@@ -285,7 +356,7 @@ describe('making the event', () => {
 
   test('a session that has ended sends them to sign in, the draft kept', async () => {
     mockSecure.clear();
-    __resetOrganiser();
+    __resetOrganiser(7);
     await AsyncStorage.setItem('tix:hostDraft', JSON.stringify(READY));
     const navigation = nav();
     render(<TicketCreateEvent navigation={navigation} />);

@@ -19,7 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
-import { fetchMyEvents, fetchOverview, fetchTills } from '../../services/ticketsOrganiser';
+import { fetchMyEvents, fetchOverview, fetchTills, logOut } from '../../services/ticketsOrganiser';
+import { confirmAction } from '../../utils/adminConfirm';
 import { formatKes, formatWhen } from '../../services/tickets';
 import { T, F, tap, Kicker, Pill, Notice, GoldButton } from '../../components/tickets/TicketKit';
 import { eventState, groupEvents, soldOf, staffNote } from './eventState';
@@ -62,6 +63,17 @@ const TicketMyEvents = ({ navigation }) => {
 
   const open = (e) => { tap(); navigation.push('TicketManageEvent', { id: e.id }); };
   const create = () => { tap(); navigation.push('TicketCreateEvent'); };
+  // The one way the organiser session is really forgotten on this phone.
+  const signOut = async () => {
+    tap();
+    const sure = await confirmAction({
+      title: t('tix.mine.signOut'), message: t('tix.mine.signOutBody'),
+      confirmLabel: t('tix.mine.signOut'), cancelLabel: t('common.cancel'), destructive: true,
+    });
+    if (!sure) return;
+    await logOut();
+    navigation.navigate('TicketsHome');
+  };
 
   if (!events) {
     return (
@@ -156,6 +168,10 @@ const TicketMyEvents = ({ navigation }) => {
           ))}
         </>
       )}
+      <TouchableOpacity onPress={signOut} style={styles.signOut} accessibilityRole="button" testID="mine-sign-out">
+        <Ionicons name="log-out-outline" size={18} color={T.muted} />
+        <Text style={styles.signOutText}>{t('tix.mine.signOut')}</Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -191,6 +207,11 @@ const Total = ({ value, label, wide }) => (
 );
 
 const styles = StyleSheet.create({
+  signOut: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 28, paddingVertical: 14,
+    borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: T.lineStrong,
+  },
+  signOutText: { fontFamily: F.uiBold, fontSize: 14, color: T.muted },
   root: { flex: 1, backgroundColor: T.ink },
   centre: { alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },

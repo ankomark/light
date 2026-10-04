@@ -14,53 +14,109 @@
  * - on a 401: refresh once, keep both new tokens, replay the request. If the
  *   refresh fails too, the session is over: tokens are cleared and callers get
  *   `code: 'signed_out'`, which the screens answer with the sign-in form.
+ *
+ * Kept per Streams account, like the buyer's tickets: signing out of Streams
+ * only hides the organiser session, and signing back in to the same account
+ * brings it back. Nobody else signing in on the phone ever sees it. Only
+ * "Sign out" on My events (or a session the server ended) forgets it.
  */
 import * as secure from './secureStorage';
 import { request, TicketsError } from './tickets';
 
-const TOKENS_KEY = 'tickets_org_tokens';
+// Secure-store keys allow letters, digits, ".", "-" and "_".
+const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, '_');
+
+let owner = null;           // the signed-in Streams account's id, as a string
+const tokensKey = (who) => `tickets_org_tokens_u${safe(who)}`;
+const emailKey = (who) => `tickets_org_email_u${safe(who)}`;
 
 let tokens;                 // undefined: not read yet; null: signed out
 let refreshing = null;      // the one refresh in flight, shared
 
+// Before accounts: one session for the whole phone, whose it was unknown.
+// Dropped rather than handed to whoever signs in next.
+let legacyGone = false;
+const forgetLegacy = () => {
+  if (legacyGone) return;
+  legacyGone = true;
+  secure.deleteItemAsync?.('tickets_org_tokens')?.catch?.(() => {});
+};
+
+/**
+ * Whose organiser session this is: the signed-in Streams account's id, or
+ * null once they sign out of Streams (kept, but hidden until they're back).
+ */
+export const setOrganiserOwner = (id) => {
+  const next = id == null || id === '' ? null : String(id);
+  forgetLegacy();
+  if (next === owner) return;
+  owner = next;
+  tokens = undefined;
+  refreshing = null;
+};
+
 const readTokens = async () => {
+  if (!owner) return null;
   if (tokens !== undefined) return tokens;
+  const whose = owner;
+  let read = null;
   try {
-    const raw = await secure.getItemAsync(TOKENS_KEY);
+    const raw = await secure.getItemAsync(tokensKey(whose));
     const t = raw ? JSON.parse(raw) : null;
-    tokens = t?.access && t?.refresh ? t : null;
-  } catch {
-    tokens = null;
-  }
+    read = t?.access && t?.refresh ? t : null;
+  } catch { /* none kept */ }
+  if (whose !== owner) return readTokens();   // switched while reading
+  if (tokens === undefined) tokens = read;
   return tokens;
 };
 
-const keepTokens = async (next) => {
-  tokens = next?.access && next?.refresh ? { access: next.access, refresh: next.refresh } : null;
+// `whose` is fixed when the call starts: a refresh that lands after the
+// Streams account changed must not write one account's tokens into another's.
+const keepTokens = async (next, whose = owner) => {
+  const kept = next?.access && next?.refresh ? { access: next.access, refresh: next.refresh } : null;
+  if (whose === owner) tokens = whose ? kept : null;
+  if (!whose) return;
   try {
-    if (tokens) await secure.setItemAsync(TOKENS_KEY, JSON.stringify(tokens));
-    else await secure.deleteItemAsync?.(TOKENS_KEY);
+    if (kept) await secure.setItemAsync(tokensKey(whose), JSON.stringify(kept));
+    else await secure.deleteItemAsync?.(tokensKey(whose));
   } catch { /* the in-memory copy still serves this session */ }
+};
+
+const rememberEmail = async (email) => {
+  if (!owner || !email) return;
+  try { await secure.setItemAsync(emailKey(owner), String(email).trim().toLowerCase()); } catch { /* convenience only */ }
+};
+
+/** The organiser email this Streams account last signed in with, or ''. */
+export const rememberedEmail = async () => {
+  if (!owner) return '';
+  try { return (await secure.getItemAsync(emailKey(owner))) || ''; } catch { return ''; }
 };
 
 const signedOut = () => new TicketsError('', { status: 401, code: 'signed_out' });
 
 const refresh = () => {
   if (!refreshing) {
-    refreshing = (async () => {
+    const whose = owner;
+    const run = (async () => {
       const current = await readTokens();
       if (!current) throw signedOut();
       try {
         const next = await request('auth/token/refresh/', { method: 'POST', body: { refresh: current.refresh } });
-        await keepTokens({ access: next.access, refresh: next.refresh || current.refresh });
-        return tokens.access;
+        const fresh = { access: next.access, refresh: next.refresh || current.refresh };
+        await keepTokens(fresh, whose);
+        if (whose !== owner) throw signedOut();
+        return fresh.access;
       } catch (err) {
         // A refresh the server refused ends the session. One that never
         // reached it (no network) does not: the tokens may still be good.
-        if (err?.code !== 'network') { await keepTokens(null); throw signedOut(); }
+        if (err?.code === 'signed_out') throw err;
+        if (err?.code !== 'network') { await keepTokens(null, whose); throw signedOut(); }
         throw err;
       }
-    })().finally(() => { refreshing = null; });
+    })();
+    refreshing = run;
+    run.finally(() => { if (refreshing === run) refreshing = null; }).catch(() => {});
   }
   return refreshing;
 };
@@ -112,12 +168,33 @@ export const signUp = async ({ email, password, displayName, phone }) => {
     },
   });
   await keepTokens(res);
+  await rememberEmail(email);
   return res.user;
 };
 
 export const logIn = async ({ email, password }) => {
   const res = await request('auth/login/', { method: 'POST', body: { email: email.trim(), password } });
   await keepTokens(res);
+  await rememberEmail(email);
+  return fetchMe();
+};
+
+/**
+ * Forgot password, step one: a six-digit code by email. The server answers
+ * the same whether or not the email has an account, so this never tells.
+ */
+export const requestPasswordReset = (email) => request('auth/password/reset/', {
+  method: 'POST', body: { email: String(email || '').trim() },
+});
+
+/** Step two: the code and a new password. Signed in on success. */
+export const confirmPasswordReset = async ({ email, code, newPassword }) => {
+  const res = await request('auth/password/reset/confirm/', {
+    method: 'POST',
+    body: { email: String(email || '').trim(), code: String(code || '').trim(), new_password: newPassword },
+  });
+  await keepTokens(res);
+  await rememberEmail(email);
   return fetchMe();
 };
 
@@ -290,4 +367,6 @@ export const checkIn = async (id, code) => {
 };
 
 /** Tests only: forget the session read, as a fresh launch would. */
-export const __resetOrganiser = () => { tokens = undefined; refreshing = null; };
+export const __resetOrganiser = (who = null) => {
+  tokens = undefined; refreshing = null; owner = who == null ? null : String(who); legacyGone = false;
+};

@@ -110,17 +110,18 @@ test('events: the soonest leads, the rest follow, and a search asks the server',
   expect(navigation.push).toHaveBeenCalledWith('TicketEvent', { slug: 'youth-camp', preview: SECOND });
 });
 
-test('events: My events appears on coming back after signing in as an organiser', async () => {
+test('events: My events is always offered: sign-in first, then straight there once signed in', async () => {
   routes['GET public/events/?kind=event'] = reply(200, { count: 0, next: null, results: [] });
   const listeners = {};
   const navigation = nav({ addListener: (e, fn) => { listeners[e] = fn; return () => {}; } });
   const screen = render(<TicketsHome navigation={navigation} />);
   await waitFor(() => expect(screen.getByText('tix.emptyTitle')).toBeTruthy());
-  expect(screen.queryByTestId('my-events')).toBeNull();
+  fireEvent.press(screen.getByTestId('my-events'));
+  expect(navigation.push).toHaveBeenCalledWith('TicketHost', { next: 'TicketMyEvents' });
 
   // Signed in on the screen pushed over this one, then back.
-  mockSecure.set('tickets_org_tokens', JSON.stringify({ access: 'a1', refresh: 'r1' }));
-  require('../../services/ticketsOrganiser').__resetOrganiser();
+  mockSecure.set('tickets_org_tokens_u7', JSON.stringify({ access: 'a1', refresh: 'r1' }));
+  require('../../services/ticketsOrganiser').__resetOrganiser(7);
   await act(async () => { listeners.focus(); });
   fireEvent.press(await screen.findByTestId('my-events'));
   expect(navigation.push).toHaveBeenCalledWith('TicketMyEvents');

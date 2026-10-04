@@ -66,8 +66,8 @@ let routes;
 let calls;
 beforeEach(async () => {
   mockSecure.clear();
-  mockSecure.set('tickets_org_tokens', JSON.stringify({ access: 'a1', refresh: 'r1' }));
-  __resetOrganiser();
+  mockSecure.set('tickets_org_tokens_u7', JSON.stringify({ access: 'a1', refresh: 'r1' }));
+  __resetOrganiser(7);
   __resetTickets(7);
   await clearAllCaches();
   await AsyncStorage.clear();

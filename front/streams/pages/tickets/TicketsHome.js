@@ -128,7 +128,7 @@ const TicketsHome = ({ navigation }) => {
   const events = useEvents(search, city, kind);
   const saved = useSavedOrders();
   useEffect(() => { refreshSavedOrders(); }, []);
-  // An organiser signed in on this phone gets their events beside Open event.
+  // Whether My events can open straight away, or must ask for a sign-in first.
   const [organiser, setOrganiser] = useState(false);
   // Asked again whenever this screen is back in front: signing in happens on
   // a screen pushed over this one, which stays mounted underneath.
@@ -241,16 +241,20 @@ const TicketsHome = ({ navigation }) => {
       {/* The organiser's way in. TicketHost checks for an account first. */}
       <View style={styles.host}>
         <Text style={styles.hostText} numberOfLines={2}>{t('tix.hostPrompt')}</Text>
-        {organiser && (
-          <TouchableOpacity
-            onPress={() => { tap(); navigation.push('TicketMyEvents'); }}
-            style={styles.mineBtn}
-            accessibilityRole="button"
-            testID="my-events"
-          >
-            <Text style={styles.mineBtnText}>{t('tix.mine.title')}</Text>
-          </TouchableOpacity>
-        )}
+        {/* Always there, so an organiser can find their events; signed out,
+            it asks them to sign in first and then goes on to them. */}
+        <TouchableOpacity
+          onPress={() => {
+            tap();
+            if (organiser) navigation.push('TicketMyEvents');
+            else navigation.push('TicketHost', { next: 'TicketMyEvents' });
+          }}
+          style={styles.mineBtn}
+          accessibilityRole="button"
+          testID="my-events"
+        >
+          <Text style={styles.mineBtnText}>{t('tix.mine.title')}</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={() => { tap(); navigation.push('TicketHost'); }}
           style={styles.hostBtn}

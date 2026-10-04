@@ -16,7 +16,7 @@ import { clearReadingQueue } from '../services/readingTracker';
 import { clearBookHighlights } from '../services/bookHighlights';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 import { setTicketOwner } from '../services/tickets';
-import { logOut as logOutOrganiser } from '../services/ticketsOrganiser';
+import { setOrganiserOwner } from '../services/ticketsOrganiser';
 
 const AuthContext = createContext(null);
 
@@ -75,7 +75,7 @@ export const AuthProvider = ({ children }) => {
     await clearReadingQueue();    // reading not yet sent is the leaving account's
     await clearBookHighlights();  // so are their highlights and notes in books
     setTicketOwner(null);         // tickets are kept per account: show none
-    await logOutOrganiser().catch(() => {}); // their events and gate scanner too
+    setOrganiserOwner(null);      // their events too: kept for when they're back
     setCurrentUser(null);
     setIsAuthenticated(false);
     setIsEmailVerified(false);
@@ -84,6 +84,7 @@ export const AuthProvider = ({ children }) => {
   // Apply an /auth/status/ payload: set flags and load the profile if present.
   const applyStatus = async (token, statusData) => {
     setTicketOwner(statusData.id);  // this account's tickets, nobody else's
+    setOrganiserOwner(statusData.id); // and its organiser session
     setIsAuthenticated(true);
     setIsEmailVerified(!!statusData.is_email_verified);
     if (statusData.has_profile) {

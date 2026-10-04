@@ -73,8 +73,8 @@ let routes;
 let calls;
 beforeEach(() => {
   mockSecure.clear();
-  mockSecure.set('tickets_org_tokens', JSON.stringify({ access: 'a1', refresh: 'r1' }));
-  __resetOrganiser();
+  mockSecure.set('tickets_org_tokens_u7', JSON.stringify({ access: 'a1', refresh: 'r1' }));
+  __resetOrganiser(7);
   mockConfirm.mockClear();
   mockConfirm.mockImplementation(async () => true);
   mockFs.writeAsStringAsync.mockClear();
@@ -149,7 +149,7 @@ describe('My events', () => {
 
   test('a session that has ended goes to sign in and comes back here', async () => {
     mockSecure.clear();
-    __resetOrganiser();
+    __resetOrganiser(7);
     const navigation = nav();
     render(<TicketMyEvents navigation={navigation} />);
     await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketHost', { next: 'TicketMyEvents' }));
