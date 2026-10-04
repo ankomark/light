@@ -1,8 +1,11 @@
 /**
- * Open an event, in five steps: the banner, title and description; when and
- * where; the ticket levels (Regular, VIP, VVIP… each with a price and how
- * many); the M-Pesa till the money goes to; and a review that shows the event
- * as buyers will see it.
+ * Open an event or a fundraiser. First, which. An event: the banner, title
+ * and description; when and where; the ticket levels (Regular, VIP, VVIP…
+ * each with a price and how many). A fundraiser: the banner, story and cause;
+ * the goal and the amounts offered as one tap; a supporting document for
+ * Skylink's review (never public). Then for both: the M-Pesa till the money
+ * goes to, who may see the supporters list and the total, and a review that
+ * shows it as the public will see it.
  *
  * Every event is reviewed by Skylink's staff before it sells. Creating it asks
  * for it to go on sale; it does so by itself once it is approved and its till
@@ -11,11 +14,12 @@
  * Venue, start time and till are not optional: the server will not take an
  * event without them, and an event with no till can never be paid for.
  *
- * Saving is several calls — the event (a draft), then each ticket level, then
- * asking for it to go on sale — and any of them can fail on a phone.
- * What has been saved is remembered in the draft (`saved`), so trying again
- * carries on from there instead of making the event twice. Once a level is
- * on the server it is locked here; the rest can still change.
+ * Saving is several calls — the event (a draft), its banner and document,
+ * each ticket level, then asking for it to go on sale — and any of them can
+ * fail on a phone. What has been saved is remembered in the draft (`saved`:
+ * the event, the fields as sent, which files went up, which levels), so
+ * trying again carries on from there instead of making the event twice. Once
+ * a level is on the server it is locked here; the rest can still change.
  *
  * The whole draft is kept on the phone as it is typed, so leaving halfway —
  * or being signed out and back in — loses nothing.
@@ -32,7 +36,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
 import {
-  fetchTills, createTill, createEvent, updateEvent, addTicketType, publishEvent,
+  fetchTills, createTill, createEvent, updateEvent, uploadEventFiles, addTicketType, publishEvent,
 } from '../../services/ticketsOrganiser';
 import { formatKes, formatWhen, dateTile } from '../../services/tickets';
 import {
@@ -41,9 +45,12 @@ import {
 import DateTimeField from '../../components/tickets/DateTimeField';
 import { pickBanner as chooseBanner, BannerPermissionError } from '../../components/tickets/pickBanner';
 import {
-  STEPS, MAX_LEVELS, TITLE_MAX, NAME_MAX, emptyDraft, newLevel, validateStep, firstInvalidStep,
-  serverErrorsByStep, levelPayloads, priceRange, wholeNumber,
+  MAX_LEVELS, TITLE_MAX, NAME_MAX, emptyDraft, newLevel, validateStep, firstInvalidStep, stepsFor,
+  serverErrorsByStep, levelPayloads, priceRange, wholeNumber, suggestedPayload, upgradeDraft,
 } from './eventDraft';
+import {
+  TypeStep, CategoryPicker, GoalStep, DocumentStep, VisibilityStep, pickDocument,
+} from './HostSteps';
 import { ticketErrorText } from './ticketText';
 
 const DRAFT_KEY = 'tix:hostDraft';
@@ -51,14 +58,15 @@ const SAVE_WAIT_MS = 400;
 const PRESETS = ['regular', 'vip', 'vvip', 'earlyBird', 'couple', 'group'];
 const BANNER_RATIO = 4 / 5;     // as the Events list shows posters
 
-// The event's own fields as a string, to tell whether they changed after the
-// event was first saved (and so need sending again).
-const eventSignature = (d) => JSON.stringify([d.title, d.description, d.venue, d.city, d.startsAt, d.endsAt, d.salesEndAt, d.till, d.poster?.uri]);
-
+// The fields the server keeps (no files), and as a string to tell whether
+// they changed after the event was first saved (and so need sending again).
 const eventFields = (d) => ({
-  title: d.title, description: d.description, venue: d.venue, city: d.city,
-  startsAt: d.startsAt, endsAt: d.endsAt, salesEndAt: d.salesEndAt, till: d.till,
+  kind: d.kind, title: d.title, description: d.description, venue: d.venue, city: d.city,
+  startsAt: d.kind === 'fundraiser' ? null : d.startsAt, endsAt: d.endsAt, salesEndAt: d.salesEndAt, till: d.till,
+  category: d.category, goal: d.goal, suggested: suggestedPayload(d.suggested),
+  showSupporters: d.showSupporters, showTotal: d.showTotal,
 });
+const fieldsSignature = (d) => JSON.stringify(eventFields(d));
 
 const TILL_KIND = { active: 'paid', pending: 'pending', submitted: 'pending', rejected: 'failed' };
 
@@ -89,14 +97,20 @@ const TicketCreateEvent = ({ navigation }) => {
     AsyncStorage.getItem(DRAFT_KEY)
       .then((raw) => {
         const kept = raw ? JSON.parse(raw) : null;
-        if (kept?.levels) { setDraft(kept); setResumed(!!(kept.title || kept.saved)); } else setDraft(emptyDraft());
+        if (kept?.levels) { setDraft(kept.kind ? kept : upgradeDraft(kept)); setResumed(!!(kept.title || kept.saved)); } else setDraft(emptyDraft());
       })
       .catch(() => setDraft(emptyDraft()));
   }, []);
+  // The pending save is held here, not only in the effect's cleanup: saving
+  // the event clears it at once (React may not have re-rendered yet), so an
+  // older draft can never land on top of what the server now has — or bring
+  // a finished event back as a draft.
+  const saveTimer = useRef(null);
   useEffect(() => {
     if (!draft) return undefined;
-    const id = setTimeout(() => { AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft)).catch(() => {}); }, SAVE_WAIT_MS);
-    return () => clearTimeout(id);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft)).catch(() => {}); }, SAVE_WAIT_MS);
+    return () => clearTimeout(saveTimer.current);
   }, [draft]);
   const update = useCallback((patch) => setDraft((d) => ({ ...d, ...patch })), []);
   const startOver = () => {
@@ -108,12 +122,13 @@ const TicketCreateEvent = ({ navigation }) => {
   };
 
   // ── Steps ─────────────────────────────────────────────────────────────
+  const steps = stepsFor(draft?.kind);
   const [step, setStep] = useState(0);
   const [errors, setErrors] = useState({});
   const scroll = useRef(null);
   const go = (i) => { setStep(i); setErrors({}); scroll.current?.scrollTo?.({ y: 0, animated: false }); };
   const next = () => {
-    const e = validateStep(STEPS[step], draft);
+    const e = validateStep(steps[step], draft);
     if (Object.keys(e).length) { setErrors(e); return; }
     tap();
     go(step + 1);
@@ -122,6 +137,24 @@ const TicketCreateEvent = ({ navigation }) => {
   const err = (k) => (errors[k] ? (errors[k].startsWith('tix.') ? t(errors[k]) : errors[k]) : '');
 
   // ── Banner ────────────────────────────────────────────────────────────
+  // ── A fundraiser's supporting document ────────────────────────────────
+  const [docBusy, setDocBusy] = useState(false);
+  const [docNotice, setDocNotice] = useState('');
+  const chooseDocument = async () => {
+    tap();
+    setDocNotice('');
+    setDocBusy(true);
+    try {
+      const doc = await pickDocument();
+      if (doc === 'too_big') setDocNotice(t('tix.host.docTooBig'));
+      else if (doc) { update({ document: doc }); setErrors((e) => ({ ...e, document: undefined })); }
+    } catch {
+      setDocNotice(t('tix.host.docFailed'));
+    } finally {
+      setDocBusy(false);
+    }
+  };
+
   const [bannerBusy, setBannerBusy] = useState(false);
   const [bannerError, setBannerError] = useState('');
   const pickBanner = async () => {
@@ -204,7 +237,7 @@ const TicketCreateEvent = ({ navigation }) => {
 
   const submit = async () => {
     const bad = firstInvalidStep(draft);
-    if (bad) { go(STEPS.indexOf(bad)); setErrors(validateStep(bad, draft)); return; }
+    if (bad) { go(steps.indexOf(bad)); setErrors(validateStep(bad, draft)); return; }
     setBusy(true);
     setSubmitError('');
     let d = draft;
@@ -213,29 +246,40 @@ const TicketCreateEvent = ({ navigation }) => {
     // the next try must know the event already exists, or it makes it twice.
     const keep = (saved) => {
       d = { ...d, saved };
+      clearTimeout(saveTimer.current);
       setDraft(d);
       AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(d)).catch(() => {});
     };
     try {
-      // The event: made once; sent again only if its details changed since.
+      // The event: made once; its fields sent again only if they changed.
       let event = d.saved?.event;
       if (!event) {
         setProgress(t('tix.host.savingEvent'));
-        event = await createEvent({ ...eventFields(d), poster: d.poster });
-        keep({ event, signature: eventSignature(d), levels: {} });
-      } else if (d.saved.signature !== eventSignature(d)) {
+        event = await createEvent(eventFields(d));
+        keep({ event, fields: fieldsSignature(d), poster: null, document: null, levels: {} });
+      } else if (d.saved.fields !== fieldsSignature(d)) {
         setProgress(t('tix.host.savingEvent'));
-        const posterChanged = JSON.parse(d.saved.signature)[8] !== d.poster?.uri;
-        event = await updateEvent(event.id, { ...eventFields(d), poster: posterChanged ? d.poster : null });
-        keep({ ...d.saved, event, signature: eventSignature(d) });
+        event = await updateEvent(event.id, eventFields(d));
+        keep({ ...d.saved, event, fields: fieldsSignature(d) });
       }
 
-      // The levels, each once.
-      const payloads = levelPayloads(d.levels);
-      for (let i = 0; i < d.levels.length; i += 1) {
-        const level = d.levels[i];
+      // The banner and the document: each sent once, and again only if
+      // another was chosen since.
+      const poster = d.poster?.uri && d.poster.uri !== d.saved.poster ? d.poster : null;
+      const doc = d.kind === 'fundraiser' && d.document?.uri && d.document.uri !== d.saved.document ? d.document : null;
+      if (poster || doc) {
+        setProgress(t('tix.host.uploading'));
+        event = await uploadEventFiles(event.id, { poster, document: doc });
+        keep({ ...d.saved, event, poster: d.poster?.uri || d.saved.poster, document: d.document?.uri || d.saved.document });
+      }
+
+      // An event's levels, each once. A fundraiser has none.
+      const levels = d.kind === 'fundraiser' ? [] : d.levels;
+      const payloads = levelPayloads(levels);
+      for (let i = 0; i < levels.length; i += 1) {
+        const level = levels[i];
         if (d.saved.levels[level.key]) continue;
-        setProgress(t('tix.host.savingLevels', { i: i + 1, n: d.levels.length }));
+        setProgress(t('tix.host.savingLevels', { i: i + 1, n: levels.length }));
         const made = await addTicketType(event.id, payloads[i]);
         keep({ ...d.saved, levels: { ...d.saved.levels, [level.key]: made.id } });
       }
@@ -254,13 +298,14 @@ const TicketCreateEvent = ({ navigation }) => {
       const published = event.status === 'published';
       // Finished: the draft goes, and with it any save still waiting to run
       // (it would bring the finished event back as a draft next time).
+      clearTimeout(saveTimer.current);
       setDraft(null);
       AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
       setDone({ event, published, publishNote, till: chosenTill, tillActive });
     } catch (x) {
       if (x?.code === 'signed_out') { navigation.replace('TicketHost'); return; }
-      const { step: where, errors: fieldErrors } = serverErrorsByStep(x?.fields);
-      if (where && where !== 'tickets') { go(STEPS.indexOf(where)); setErrors(fieldErrors); }
+      const { step: where, errors: fieldErrors } = serverErrorsByStep(x?.fields, d.kind);
+      if (where && where !== 'tickets') { go(steps.indexOf(where)); setErrors(fieldErrors); }
       setSubmitError(ticketErrorText(x, t));
     } finally {
       setBusy(false);
@@ -311,7 +356,8 @@ const TicketCreateEvent = ({ navigation }) => {
     return <View style={[styles.root, styles.centre]}><ActivityIndicator color={T.gold} size="large" /></View>;
   }
 
-  const name = STEPS[step];
+  const name = steps[step];
+  const fund = draft.kind === 'fundraiser';
   const range = priceRange(draft.levels);
   const previewWidth = Math.min(width, 620) - 40;
 
@@ -321,10 +367,10 @@ const TicketCreateEvent = ({ navigation }) => {
         {/* Where they are: five bars, the current one gold. */}
         <View style={styles.progress}>
           <View style={styles.bars}>
-            {STEPS.map((s, i) => <View key={s} style={[styles.barSeg, i <= step && styles.barSegOn]} />)}
+            {steps.map((s, i) => <View key={s} style={[styles.barSeg, i <= step && styles.barSegOn]} />)}
           </View>
           <Text style={styles.stepLabel}>
-            {t('tix.host.stepOf', { i: step + 1, n: STEPS.length })}  ·  {t(`tix.host.step.${name}`)}
+            {t('tix.host.stepOf', { i: step + 1, n: steps.length })}  ·  {t(`tix.host.step.${name}`)}
           </Text>
         </View>
 
@@ -339,9 +385,26 @@ const TicketCreateEvent = ({ navigation }) => {
             </View>
           )}
 
+          {name === 'type' && (
+            <TypeStep t={t} kind={draft.kind} error={err('kind')}
+                      onPick={(k) => { update({ kind: k, showSupporters: draft.kind ? draft.showSupporters : k === 'fundraiser', showTotal: draft.kind ? draft.showTotal : k === 'fundraiser' }); setErrors({}); }} />
+          )}
+
+          {name === 'goal' && <GoalStep t={t} draft={draft} update={update} err={err} when={when} />}
+
+          {name === 'document' && (
+            <DocumentStep t={t} document={draft.document} err={err} busy={docBusy} notice={docNotice}
+                          onPick={chooseDocument} onRemove={() => { tap(); update({ document: null }); }} />
+          )}
+
+          {name === 'visibility' && <VisibilityStep t={t} draft={draft} update={update} />}
+
           {name === 'details' && (
             <>
-              <Text style={styles.heading} accessibilityRole="header">{t('tix.host.detailsTitle')}</Text>
+              <Text style={styles.heading} accessibilityRole="header">
+                {fund ? t('tix.host.fundDetailsTitle') : t('tix.host.detailsTitle')}
+              </Text>
+              {fund && <CategoryPicker t={t} value={draft.category} onPick={(c) => update({ category: c })} error={err('category')} />}
               <TouchableOpacity
                 onPress={pickBanner}
                 activeOpacity={0.85}
@@ -563,32 +626,61 @@ const TicketCreateEvent = ({ navigation }) => {
                 )}
                 <LinearGradient colors={['rgba(10,10,13,0)', 'rgba(10,10,13,0.35)', 'rgba(10,10,13,0.96)']}
                                 locations={[0.25, 0.55, 1]} style={StyleSheet.absoluteFill} />
-                {!!draft.startsAt && <DateTile {...dateTile(draft.startsAt, months)} style={styles.previewTile} />}
+                {!fund && !!draft.startsAt && <DateTile {...dateTile(draft.startsAt, months)} style={styles.previewTile} />}
                 <View style={styles.previewText}>
-                  {!!draft.city && <Kicker>{draft.city}</Kicker>}
+                  {fund ? (!!draft.category && <Kicker>{t(`tix.cat.${draft.category}`)}</Kicker>)
+                    : (!!draft.city && <Kicker>{draft.city}</Kicker>)}
                   <Text style={styles.previewTitle} numberOfLines={3}>{draft.title}</Text>
-                  <Text style={styles.previewMeta} numberOfLines={1}>{when(draft.startsAt)}  ·  {draft.venue}</Text>
-                  {!!range && <Text style={styles.previewPrice}>{t('tix.from', { price: formatKes(range[0]) })}</Text>}
+                  {!fund && <Text style={styles.previewMeta} numberOfLines={1}>{when(draft.startsAt)}  ·  {draft.venue}</Text>}
+                  {fund ? (
+                    <Text style={styles.previewPrice}>
+                      {wholeNumber(draft.goal) >= 1 ? t('tix.host.goalOf', { goal: formatKes(wholeNumber(draft.goal)) }) : t('tix.fund.giveMpesa')}
+                    </Text>
+                  ) : (!!range && <Text style={styles.previewPrice}>{t('tix.from', { price: formatKes(range[0]) })}</Text>)}
                 </View>
               </View>
 
-              <ReviewBlock title={t('tix.host.step.details')} onEdit={() => go(0)} editLabel={t('tix.host.edit')}>
+              <ReviewBlock title={t('tix.host.step.details')} onEdit={() => go(steps.indexOf('details'))} editLabel={t('tix.host.edit')}>
                 <Text style={styles.reviewLine} numberOfLines={4}>{draft.description || t('tix.host.noDescription')}</Text>
               </ReviewBlock>
-              <ReviewBlock title={t('tix.host.step.when')} onEdit={() => go(1)} editLabel={t('tix.host.edit')}>
-                <Text style={styles.reviewLine}>{[draft.venue, draft.city].filter(Boolean).join(', ')}</Text>
-                <Text style={styles.reviewLine}>{when(draft.startsAt)}{draft.endsAt ? `  →  ${when(draft.endsAt)}` : ''}</Text>
-                {!!draft.salesEndAt && <Text style={styles.reviewMuted}>{t('tix.salesEnd', { when: when(draft.salesEndAt) })}</Text>}
+              {fund ? (
+                <>
+                  <ReviewBlock title={t('tix.host.step.goal')} onEdit={() => go(steps.indexOf('goal'))} editLabel={t('tix.host.edit')}>
+                    <Text style={styles.reviewLine}>
+                      {wholeNumber(draft.goal) >= 1 ? t('tix.host.goalOf', { goal: formatKes(wholeNumber(draft.goal)) }) : t('tix.host.noGoal')}
+                    </Text>
+                    <Text style={styles.reviewMuted}>
+                      {draft.endsAt ? t('tix.fund.ends', { when: when(draft.endsAt) }) : t('tix.host.openEnded')}
+                    </Text>
+                    <Text style={styles.reviewMuted}>{suggestedPayload(draft.suggested).map((n) => formatKes(n)).join('  ·  ')}</Text>
+                  </ReviewBlock>
+                  <ReviewBlock title={t('tix.host.step.document')} onEdit={() => go(steps.indexOf('document'))} editLabel={t('tix.host.edit')}>
+                    <Text style={styles.reviewLine} numberOfLines={1}>{draft.document?.name}</Text>
+                    <Text style={styles.reviewMuted}>{t('tix.host.docPrivate')}</Text>
+                  </ReviewBlock>
+                </>
+              ) : (
+                <>
+                  <ReviewBlock title={t('tix.host.step.when')} onEdit={() => go(steps.indexOf('when'))} editLabel={t('tix.host.edit')}>
+                    <Text style={styles.reviewLine}>{[draft.venue, draft.city].filter(Boolean).join(', ')}</Text>
+                    <Text style={styles.reviewLine}>{when(draft.startsAt)}{draft.endsAt ? `  →  ${when(draft.endsAt)}` : ''}</Text>
+                    {!!draft.salesEndAt && <Text style={styles.reviewMuted}>{t('tix.salesEnd', { when: when(draft.salesEndAt) })}</Text>}
+                  </ReviewBlock>
+                  <ReviewBlock title={t('tix.host.step.tickets')} onEdit={() => go(steps.indexOf('tickets'))} editLabel={t('tix.host.edit')}>
+                    {draft.levels.map((l) => (
+                      <View key={l.key} style={styles.reviewLevel}>
+                        <Text style={styles.reviewLine}>{l.name}</Text>
+                        <Text style={styles.reviewMuted}>{wholeNumber(l.quantity)} × {formatKes(wholeNumber(l.price))}</Text>
+                      </View>
+                    ))}
+                  </ReviewBlock>
+                </>
+              )}
+              <ReviewBlock title={t('tix.host.step.visibility')} onEdit={() => go(steps.indexOf('visibility'))} editLabel={t('tix.host.edit')}>
+                <Text style={styles.reviewLine}>{draft.showSupporters ? t('tix.vis.listOn') : t('tix.vis.listOff')}</Text>
+                <Text style={styles.reviewLine}>{draft.showTotal ? t('tix.vis.totalOn') : t('tix.vis.totalOff')}</Text>
               </ReviewBlock>
-              <ReviewBlock title={t('tix.host.step.tickets')} onEdit={() => go(2)} editLabel={t('tix.host.edit')}>
-                {draft.levels.map((l) => (
-                  <View key={l.key} style={styles.reviewLevel}>
-                    <Text style={styles.reviewLine}>{l.name}</Text>
-                    <Text style={styles.reviewMuted}>{wholeNumber(l.quantity)} × {formatKes(wholeNumber(l.price))}</Text>
-                  </View>
-                ))}
-              </ReviewBlock>
-              <ReviewBlock title={t('tix.host.step.payout')} onEdit={() => go(3)} editLabel={t('tix.host.edit')}>
+              <ReviewBlock title={t('tix.host.step.payout')} onEdit={() => go(steps.indexOf('payout'))} editLabel={t('tix.host.edit')}>
                 <Text style={styles.reviewLine}>
                   {chosenTill ? `${chosenTill.business_name} · ${t('tix.host.tillNo', { n: chosenTill.till_number })}` : ''}
                 </Text>

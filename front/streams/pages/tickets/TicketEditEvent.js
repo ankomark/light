@@ -18,19 +18,26 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
-import { fetchMyEvent, updateEvent } from '../../services/ticketsOrganiser';
-import { formatWhen } from '../../services/tickets';
+import { fetchMyEvent, updateEvent, uploadEventFiles } from '../../services/ticketsOrganiser';
+import { formatWhen, formatKes } from '../../services/tickets';
 import { confirmAction } from '../../utils/adminConfirm';
 import { T, F, tap, Kicker, GoldButton, Notice } from '../../components/tickets/TicketKit';
 import DateTimeField from '../../components/tickets/DateTimeField';
 import { pickBanner, BannerPermissionError } from '../../components/tickets/pickBanner';
-import { validateStep, serverErrorsByStep, TITLE_MAX } from './eventDraft';
+import { validateStep, serverErrorsByStep, TITLE_MAX, wholeNumber } from './eventDraft';
+import { CategoryPicker } from './HostSteps';
 import { ticketErrorText } from './ticketText';
 
+// Everything the save sends, read back from the event — the switches and
+// a fundraiser's fields included, so editing the text never resets them.
 const fromEvent = (e) => ({
-  title: e.title || '', description: e.description || '', venue: e.venue || '', city: e.city || '',
-  startsAt: e.starts_at, endsAt: e.ends_at || null, salesEndAt: e.sales_end_at || null,
+  kind: e.kind || 'event', title: e.title || '', description: e.description || '', venue: e.venue || '',
+  city: e.city || '', startsAt: e.starts_at, endsAt: e.ends_at || null, salesEndAt: e.sales_end_at || null,
+  category: e.category || '', goal: e.goal_amount ? String(e.goal_amount) : '',
+  suggested: (e.suggested_amounts || []).map(String),
+  showSupporters: !!e.show_supporters, showTotal: !!e.show_total,
 });
+const EDITABLE = ['venue', 'city', 'startsAt', 'endsAt', 'salesEndAt', 'category', 'goal'];
 
 const TicketEditEvent = ({ navigation, route }) => {
   const { t } = useI18n();
@@ -85,14 +92,14 @@ const TicketEditEvent = ({ navigation, route }) => {
     );
   }
 
+  const fund = draft.kind === 'fundraiser';
   const before = fromEvent(event);
   const contentChanged = !!poster || draft.title.trim() !== before.title || draft.description.trim() !== before.description;
-  const changed = contentChanged || ['venue', 'city', 'startsAt', 'endsAt', 'salesEndAt']
-    .some((k) => (draft[k] || '') !== (before[k] || ''));
+  const changed = contentChanged || EDITABLE.some((k) => (draft[k] || '') !== (before[k] || ''));
   const goesToReview = contentChanged && event.review_status === 'approved';
 
   const save = async () => {
-    const e = { ...validateStep('details', draft), ...validateStep('when', draft) };
+    const e = { ...validateStep('details', draft), ...validateStep(fund ? 'goal' : 'when', draft) };
     setErrors(e);
     if (Object.keys(e).length || !changed || busy) return;
     if (goesToReview && event.status === 'published') {
@@ -105,11 +112,12 @@ const TicketEditEvent = ({ navigation, route }) => {
     setBusy(true);
     setSaveError('');
     try {
-      await updateEvent(id, { ...draft, till: event.till, poster });
+      await updateEvent(id, { ...draft, till: event.till });
+      if (poster) await uploadEventFiles(id, { poster });
       navigation.goBack();
     } catch (x) {
       if (x?.code === 'signed_out') { signedOut(); return; }
-      setErrors(serverErrorsByStep(x?.fields).errors);
+      setErrors(serverErrorsByStep(x?.fields, draft.kind).errors);
       setSaveError(ticketErrorText(x, t));
       setBusy(false);
     }
@@ -160,25 +168,40 @@ const TicketEditEvent = ({ navigation, route }) => {
                        onChangeText={(v) => update({ description: v })} maxLength={5000} placeholderTextColor={T.faint}
                        accessibilityLabel={t('tix.host.description')} testID="edit-description" />
           </Field>
+          {fund && <CategoryPicker t={t} value={draft.category} onPick={(c) => update({ category: c })} error={err('category')} />}
+          {fund && (
+            <Field label={t('tix.host.goal')} error={err('goal')}>
+              <TextInput style={styles.input} value={draft.goal} keyboardType="number-pad" maxLength={9}
+                         onChangeText={(v) => update({ goal: v.replace(/[^\d]/g, '') })} placeholder={t('tix.host.goalPlaceholder')}
+                         placeholderTextColor={T.faint} accessibilityLabel={t('tix.host.goal')} testID="edit-goal" />
+            </Field>
+          )}
+          {fund && wholeNumber(draft.goal) >= 1 && <Text style={styles.hintGold}>{t('tix.host.goalOf', { goal: formatKes(wholeNumber(draft.goal)) })}</Text>}
+          {!fund && (
           <Field label={t('tix.host.venue')} error={err('venue')}>
             <TextInput style={styles.input} value={draft.venue} onChangeText={(v) => update({ venue: v })}
                        maxLength={200} placeholderTextColor={T.faint} accessibilityLabel={t('tix.host.venue')} testID="edit-venue" />
           </Field>
+          )}
           <Field label={t('tix.host.city')} error={err('city')}>
             <TextInput style={styles.input} value={draft.city} onChangeText={(v) => update({ city: v })}
                        maxLength={80} placeholderTextColor={T.faint} accessibilityLabel={t('tix.host.city')} testID="edit-city" />
           </Field>
+          {!fund && (
           <DateTimeField label={t('tix.host.starts')} value={draft.startsAt} display={when(draft.startsAt)}
                          onChange={(v) => update({ startsAt: v })} placeholder={t('tix.host.pickDate')}
                          minimumDate={new Date()} doneLabel={t('tix.host.doneShort')} error={err('startsAt')} testID="edit-starts" />
-          <DateTimeField label={t('tix.host.ends')} value={draft.endsAt} display={when(draft.endsAt)}
+          )}
+          <DateTimeField label={fund ? t('tix.host.fundEnds') : t('tix.host.ends')} value={draft.endsAt} display={when(draft.endsAt)}
                          onChange={(v) => update({ endsAt: v })} placeholder={t('tix.host.optional')} clearable
                          clearLabel={t('tix.host.clear')} minimumDate={new Date()} doneLabel={t('tix.host.doneShort')}
                          error={err('endsAt')} testID="edit-ends" />
+          {!fund && (
           <DateTimeField label={t('tix.host.salesEnd')} value={draft.salesEndAt} display={when(draft.salesEndAt)}
                          onChange={(v) => update({ salesEndAt: v })} placeholder={t('tix.host.salesEndPlaceholder')} clearable
                          clearLabel={t('tix.host.clear')} minimumDate={new Date()} doneLabel={t('tix.host.doneShort')}
                          error={err('salesEndAt')} testID="edit-sales-end" />
+          )}
 
           {goesToReview && (
             <View style={styles.notice} accessibilityLiveRegion="polite" testID="edit-review-warning">
@@ -237,6 +260,7 @@ const styles = StyleSheet.create({
   },
   multiline: { minHeight: 140 },
   bad: { fontFamily: F.ui, fontSize: 13, color: T.danger, marginTop: 8, marginLeft: 4 },
+  hintGold: { fontFamily: F.uiBold, fontSize: 13, color: T.champagne, marginTop: 8, marginLeft: 4 },
 
   notice: {
     flexDirection: 'row', gap: 10, marginTop: 22, padding: 14, borderRadius: 14,

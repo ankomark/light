@@ -50,13 +50,16 @@ const USER_AGENT = (() => {
  * that word it themselves.
  */
 export class TicketsError extends Error {
-  constructor(message, { status = 0, code = 'error', fields = {}, retryAfter = 0 } = {}) {
+  constructor(message, { status = 0, code = 'error', fields = {}, retryAfter = 0, body = null } = {}) {
     super(message);
     this.name = 'TicketsError';
     this.status = status;
     this.code = code;
     this.fields = fields;
     this.retryAfter = retryAfter;
+    // The server's whole answer, for the calls where an error status still
+    // carries facts (a ticket already used says when).
+    this.body = body;
   }
 }
 
@@ -107,6 +110,7 @@ export const request = async (path, { method = 'GET', body, form, token, raw, ti
     status: res.status,
     code: res.status === 404 ? 'not_found' : res.status >= 500 ? 'server' : 'invalid',
     fields,
+    body: data,
   });
 };
 
@@ -117,9 +121,21 @@ const query = (params) => {
   return parts.length ? `?${parts.join('&')}` : '';
 };
 
-/** Published events, soonest first. `{count, next, previous, results}` */
-export const fetchEvents = ({ search, city, page } = {}) => (
-  request(`public/events/${query({ search: search?.trim(), city, page })}`)
+/**
+ * Published events and fundraisers, soonest first. `kind`: 'event' or
+ * 'fundraiser' (both when absent). `{count, next, previous, results}`
+ */
+export const fetchEvents = ({ search, city, page, kind, category } = {}) => (
+  request(`public/events/${query({ search: search?.trim(), city, page, kind, category })}`)
+);
+
+/**
+ * Who has paid in, newest first, when the organiser made the list public:
+ * `{ name, phone, ticket_type, quantity, amount, paid_at }` — name and phone
+ * (071****678) only for supporters who agreed; null for everyone else.
+ */
+export const fetchSupporters = (slug, page) => (
+  request(`public/events/${encodeURIComponent(slug)}/supporters/${query({ page })}`)
 );
 
 /** One event with its ticket types (`id, name, price, remaining`). */
@@ -129,11 +145,33 @@ export const fetchEvent = (slug) => request(`public/events/${encodeURIComponent(
  * Sends the M-Pesa prompt to `phone`. Comes back `pending` at once; the
  * order is then polled until `paid`, `failed` or `expired`.
  */
-export const createOrder = ({ ticketType, quantity, phone, name }) => request('public/orders/', {
+export const createOrder = ({ ticketType, quantity, phone, name, showName = false }) => request('public/orders/', {
   method: 'POST',
   timeout: ORDER_TIMEOUT_MS,
-  body: { ticket_type: ticketType, quantity, phone: phone.trim(), ...(name?.trim() ? { name: name.trim() } : {}) },
+  body: {
+    ticket_type: ticketType, quantity, phone: phone.trim(), show_name: !!showName,
+    ...(name?.trim() ? { name: name.trim() } : {}),
+  },
 });
+
+/**
+ * Give to a fundraiser: any whole-shilling amount, the same M-Pesa prompt,
+ * and a receipt instead of tickets. `showName`: the giver agreed to appear by
+ * name on the public supporters list.
+ */
+export const createDonation = ({ slug, amount, phone, name, showName = false }) => request('public/orders/', {
+  method: 'POST',
+  timeout: ORDER_TIMEOUT_MS,
+  body: {
+    fundraiser: slug, amount: Number(amount), phone: phone.trim(), show_name: !!showName,
+    ...(name?.trim() ? { name: name.trim() } : {}),
+  },
+});
+
+// What a fundraiser offers as one tap when its organiser set none.
+export const DEFAULT_SUGGESTED = [500, 1000, 2000, 5000];
+export const MIN_GIFT = 10;
+export const MAX_GIFT = 250000;
 
 /** The order and, once paid, its tickets. */
 export const fetchOrder = (reference) => request(`public/orders/${encodeURIComponent(reference)}/`);

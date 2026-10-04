@@ -13,7 +13,7 @@ import { View, Text, StyleSheet, TouchableOpacity, SectionList, RefreshControl, 
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
-import { useSavedOrders, refreshSavedOrders, formatWhen, dateTile, isPast } from '../../services/tickets';
+import { useSavedOrders, refreshSavedOrders, formatWhen, formatKes, dateTile, isPast } from '../../services/tickets';
 import { T, F, tap, Kicker, DateTile, Pill, Notice } from '../../components/tickets/TicketKit';
 
 const SHOWN = ['paid', 'pending'];
@@ -91,14 +91,19 @@ const MyTickets = ({ navigation }) => {
               <DateTile {...dateTile(o.starts_at, months)} />
               <View style={styles.flex}>
                 <Text style={styles.event} numberOfLines={2}>{o.event}</Text>
-                <Text style={styles.meta} numberOfLines={1}>{o.quantity} × {o.ticket_type}  ·  {o.venue}</Text>
+                <Text style={styles.meta} numberOfLines={1}>
+                  {o.kind === 'donation'
+                    ? `${t('tix.fund.contribution')}  ·  ${formatKes(o.amount)}`
+                    : `${o.quantity} × ${o.ticket_type}  ·  ${o.venue}`}
+                </Text>
                 <Pill
                   kind={o.status}
                   label={o.status === 'paid' ? t('tix.paid') : t('tix.pending')}
                   style={styles.pill}
                 />
               </View>
-              <Ionicons name="qr-code-outline" size={22} color={o.status === 'paid' ? T.champagne : T.faint} />
+              <Ionicons name={o.kind === 'donation' ? 'heart-outline' : 'qr-code-outline'} size={22}
+                        color={o.status === 'paid' ? T.champagne : T.faint} />
             </TouchableOpacity>
           );
         }}

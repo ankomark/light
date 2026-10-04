@@ -23,6 +23,7 @@ import { useI18n } from '../../context/I18nContext';
 import useCachedData from '../../utils/useCachedData';
 import { fetchEvent, formatKes, formatWhen, MAX_QUANTITY } from '../../services/tickets';
 import { T, F, tap, Kicker, Pill, GoldButton, Notice } from '../../components/tickets/TicketKit';
+import Supporters, { Progress, useLive } from '../../components/tickets/Supporters';
 import { ticketErrorText } from './ticketText';
 
 // "12 left" only once it is worth knowing; above this a count reads as noise.
@@ -52,6 +53,12 @@ const TicketEvent = ({ navigation, route }) => {
   const { slug, preview } = route.params;
 
   const full = useCachedData(`tix:event:${slug}`, () => fetchEvent(slug));
+  // A link to a fundraiser (streams://events/<slug>) lands here first.
+  useEffect(() => {
+    if (full.data?.kind === 'fundraiser') navigation.replace('TicketFundraiser', { slug, preview: full.data });
+  }, [full.data?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A public total climbs while the page is open.
+  useLive(() => full.reload(), undefined, !!full.data?.show_total);
   const event = full.data || preview || null;
   const types = full.data?.ticket_types || [];
   const reason = full.data ? closedReason(full.data) : null;
@@ -199,6 +206,14 @@ const TicketEvent = ({ navigation, route }) => {
             </>
           )}
 
+          {full.data?.raised != null && (
+            <Progress raised={full.data.raised} supporters={full.data.supporters} style={styles.total} />
+          )}
+          {!!full.data?.show_supporters && (
+            <Supporters slug={slug} count={full.data.supporters} style={styles.kicker}
+                        onSeeAll={() => navigation.push('TicketSupporters', { slug, title: event.title })} />
+          )}
+
           {!full.data && !full.failed && <ActivityIndicator style={styles.loading} color={T.gold} />}
           {!full.data && full.failed && (
             <Notice title={ticketErrorText(null, t, 'tix.eventFailed')} action={t('common.retry')} onAction={full.reload} />
@@ -279,6 +294,7 @@ const styles = StyleSheet.create({
   qty: { fontFamily: F.uiHeavy, fontSize: 17, color: T.ivory, minWidth: 34, textAlign: 'center' },
 
   loading: { marginTop: 30 },
+  total: { marginTop: 24 },
 
   bar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16,

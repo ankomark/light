@@ -87,8 +87,8 @@ beforeEach(async () => {
 const nav = (extra = {}) => ({ push: jest.fn(), replace: jest.fn(), goBack: jest.fn(), navigate: jest.fn(), ...extra });
 
 test('events: the soonest leads, the rest follow, and a search asks the server', async () => {
-  routes['GET public/events/'] = reply(200, { count: 2, next: null, results: [EVENT, SECOND] });
-  routes['GET public/events/?search=camp'] = reply(200, { count: 1, next: null, results: [SECOND] });
+  routes['GET public/events/?kind=event'] = reply(200, { count: 2, next: null, results: [EVENT, SECOND] });
+  routes['GET public/events/?search=camp&kind=event'] = reply(200, { count: 1, next: null, results: [SECOND] });
   const navigation = nav();
   const screen = render(<TicketsHome navigation={navigation} />);
   await waitFor(() => expect(screen.getByText('Gospel Night')).toBeTruthy());
@@ -99,7 +99,7 @@ test('events: the soonest leads, the rest follow, and a search asks the server',
   expect(screen.getByText('Kisumu')).toBeTruthy();
 
   fireEvent.changeText(screen.getByLabelText('tix.searchPlaceholder'), 'camp');
-  await waitFor(() => expect(global.fetch.mock.calls.map((c) => c[0])).toContain(`${API}public/events/?search=camp`));
+  await waitFor(() => expect(global.fetch.mock.calls.map((c) => c[0])).toContain(`${API}public/events/?search=camp&kind=event`));
   await waitFor(() => expect(screen.queryByText('Gospel Night')).toBeNull());
 
   fireEvent.press(screen.getByText('Youth Camp'));
@@ -107,7 +107,7 @@ test('events: the soonest leads, the rest follow, and a search asks the server',
 });
 
 test('events: an empty server says so, plainly', async () => {
-  routes['GET public/events/'] = reply(200, { count: 0, next: null, results: [] });
+  routes['GET public/events/?kind=event'] = reply(200, { count: 0, next: null, results: [] });
   const screen = render(<TicketsHome navigation={nav()} />);
   await waitFor(() => expect(screen.getByText('tix.emptyTitle')).toBeTruthy());
 });
@@ -167,7 +167,7 @@ test('checkout: pay saves the reference first, then waits on the order', async (
   fireEvent.press(screen.getByTestId('checkout-pay'));
 
   await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketOrder', { reference: 'ref-123', fresh: true }));
-  expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ ticket_type: 2, quantity: 2, phone: '0712 345 678', name: 'Amani' });
+  expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ ticket_type: 2, quantity: 2, phone: '0712 345 678', name: 'Amani', show_name: false });
   expect(JSON.parse(mockSecure.get('tickets_refs'))).toEqual(['ref-123']);
   // And the details are offered next time.
   await waitFor(() => expect(JSON.parse(mockSecure.get('tickets_buyer'))).toEqual({ phone: '0712 345 678', name: 'Amani' }));

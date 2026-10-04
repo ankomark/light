@@ -111,7 +111,11 @@ const TicketMyEvents = ({ navigation }) => {
           </LinearGradient>
         )}
         <View style={styles.flex}>
-          <Text style={styles.when} numberOfLines={1}>{formatWhen(e.starts_at, { months, weekdays })}</Text>
+          <Text style={styles.when} numberOfLines={1}>
+            {e.kind === 'fundraiser'
+              ? [t('tix.kind.fundraiser'), e.category ? t(`tix.cat.${e.category}`) : ''].filter(Boolean).join(' · ')
+              : formatWhen(e.starts_at, { months, weekdays })}
+          </Text>
           <Text style={styles.title} numberOfLines={2}>{e.title}</Text>
           <Pill kind={state.tone} label={t(`tix.mine.state.${state.key}`)} style={styles.pill} />
           {!!staffNote(e, state.key) && (

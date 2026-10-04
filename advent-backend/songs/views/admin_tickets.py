@@ -33,7 +33,7 @@ from .admin import log_admin_action
 from .common import Cap
 
 # Only what the staff API reads; anything else in the query string stays here.
-LIST_PARAMS = {'status', 'review', 'view', 'search', 'page', 'page_size'}
+LIST_PARAMS = {'status', 'review', 'view', 'kind', 'search', 'page', 'page_size'}
 
 # Actions, and what each is called in this server's audit log.
 EVENT_ACTIONS = {

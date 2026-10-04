@@ -54,7 +54,7 @@ describe('requests', () => {
     expect(url).toBe(`${API}public/orders/`);
     expect(init.method).toBe('POST');
     // An empty name is left out rather than sent blank.
-    expect(JSON.parse(init.body)).toEqual({ ticket_type: 7, quantity: 2, phone: '0712 345 678' });
+    expect(JSON.parse(init.body)).toEqual({ ticket_type: 7, quantity: 2, phone: '0712 345 678', show_name: false });
   });
 
   it('escapes a slug and a reference in the path', async () => {

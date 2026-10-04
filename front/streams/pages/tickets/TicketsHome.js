@@ -46,35 +46,38 @@ const mergeBySlug = (a, b) => {
   return a.concat(b.filter((e) => !seen.has(e.slug)));
 };
 
-/** Events for a search and city, a page at a time. */
-const useEvents = (search, city) => {
+/** Events or fundraisers for a search and city, a page at a time. */
+const useEvents = (search, city, kind) => {
   const plain = !search && !city;
-  const [state, setState] = useState(() => {
-    const kept = plain ? peekCache(CACHE_KEY) : null;
+  const cacheKey = `${CACHE_KEY}:${kind}`;
+  const fromCache = (key) => {
+    const kept = peekCache(key);
     return { items: kept?.results || [], next: kept?.next || null, loading: !kept, failed: false, more: false };
-  });
+  };
+  const [state, setState] = useState(() => (plain ? fromCache(cacheKey) : fromCache(null)));
   const run = useRef(0);
 
   const load = useCallback(async () => {
     const id = ++run.current;
     setState((s) => ({ ...s, failed: false, loading: !s.items.length || !plain }));
-    if (plain && !peekCache(CACHE_KEY)) {
-      const kept = await readCache(CACHE_KEY, KEEP_MS);
+    if (plain && !peekCache(cacheKey)) {
+      const kept = await readCache(cacheKey, KEEP_MS);
       if (id === run.current && kept) setState((s) => ({ ...s, items: kept.results, next: kept.next, loading: false }));
     }
     try {
-      const page = await fetchEvents({ search, city });
+      const page = await fetchEvents({ search, city, kind });
       if (id !== run.current) return;
       setState({ items: page.results || [], next: page.next, loading: false, failed: false, more: false });
-      if (plain) writeCache(CACHE_KEY, { results: page.results || [], next: page.next });
+      if (plain) writeCache(cacheKey, { results: page.results || [], next: page.next });
     } catch (err) {
       if (id === run.current) setState((s) => ({ ...s, loading: false, failed: true, error: err }));
     }
-  }, [search, city, plain]);
+  }, [search, city, kind, plain, cacheKey]);
 
   useEffect(() => {
-    // A new search starts from nothing rather than the last search's rows.
-    if (!plain) setState({ items: [], next: null, loading: true, failed: false, more: false });
+    // A new search, or the other tab, starts from its own rows (kept, for the
+    // plain list) rather than the last one's.
+    setState(plain ? fromCache(cacheKey) : { items: [], next: null, loading: true, failed: false, more: false });
     load();
   }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -84,13 +87,13 @@ const useEvents = (search, city) => {
     const id = run.current;
     setState((s) => ({ ...s, more: true }));
     try {
-      const res = await fetchEvents({ search, city, page });
+      const res = await fetchEvents({ search, city, kind, page });
       if (id !== run.current) return;
       setState((s) => ({ ...s, items: mergeBySlug(s.items, res.results || []), next: res.next, more: false }));
     } catch {
       if (id === run.current) setState((s) => ({ ...s, more: false }));
     }
-  }, [state.next, state.more, state.loading, search, city]);
+  }, [state.next, state.more, state.loading, search, city, kind]);
 
   return { ...state, reload: load, loadMore };
 };
@@ -118,8 +121,11 @@ const TicketsHome = ({ navigation }) => {
     return () => clearTimeout(id);
   }, [typed]);
   const [city, setCity] = useState(null);
+  // Events (tickets) or fundraisers (gifts): the same list, a tab apart.
+  const [kind, setKind] = useState('event');
+  const fund = kind === 'fundraiser';
 
-  const events = useEvents(search, city);
+  const events = useEvents(search, city, kind);
   const saved = useSavedOrders();
   useEffect(() => { refreshSavedOrders(); }, []);
   // An organiser signed in on this phone gets their events beside Open event.
@@ -140,8 +146,18 @@ const TicketsHome = ({ navigation }) => {
 
   const open = useCallback((event) => {
     tap();
-    navigation.push('TicketEvent', { slug: event.slug, preview: event });
+    navigation.push(event.kind === 'fundraiser' ? 'TicketFundraiser' : 'TicketEvent', { slug: event.slug, preview: event });
   }, [navigation]);
+  // A fundraiser's line: how far it has come when the total is public, else
+  // an invitation to give.
+  const fundLine = (e) => (e.raised != null
+    ? (e.goal_amount ? t('tix.fund.raisedOf', { raised: formatKes(e.raised), goal: formatKes(e.goal_amount) })
+      : t('tix.fund.raisedOnly', { raised: formatKes(e.raised) }))
+    : t('tix.fund.giveMpesa'));
+  const pctOf = (e) => (e.raised != null && e.goal_amount ? Math.min(100, (e.raised / e.goal_amount) * 100) : null);
+  const kindOf = (e) => (e.kind === 'fundraiser'
+    ? [e.category ? t(`tix.cat.${e.category}`) : '', e.organiser].filter(Boolean).join(' · ')
+    : formatWhen(e.starts_at, { months, weekdays }));
 
   const featured = !search && !city ? events.items[0] : null;
   const rows = featured ? events.items.slice(1) : events.items;
@@ -190,6 +206,18 @@ const TicketsHome = ({ navigation }) => {
             <Ionicons name="close-circle" size={17} color={T.faint} />
           </TouchableOpacity>
         )}
+      </View>
+
+      <View style={styles.kinds} accessibilityRole="tablist">
+        {['event', 'fundraiser'].map((k) => (
+          <TouchableOpacity key={k} onPress={() => { if (k !== kind) { tap(); setKind(k); setCity(null); } }}
+                            style={[styles.kind, kind === k && styles.kindOn]} accessibilityRole="tab"
+                            accessibilityState={{ selected: kind === k }} testID={`kind-${k}`}>
+            <Ionicons name={k === 'event' ? 'ticket-outline' : 'heart-outline'} size={15}
+                      color={kind === k ? T.paperInk : T.muted} />
+            <Text style={[styles.kindText, kind === k && styles.kindTextOn]}>{t(`tix.kind.${k}s`)}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* The organiser's way in. TicketHost checks for an account first. */}
@@ -247,7 +275,7 @@ const TicketsHome = ({ navigation }) => {
             onPress={() => open(featured)}
             style={[styles.hero, { width: heroWidth, height: heroWidth * 1.18 }]}
             accessibilityRole="button"
-            accessibilityLabel={`${featured.title}, ${formatWhen(featured.starts_at, { months, weekdays })}, ${featured.venue}`}
+            accessibilityLabel={`${featured.title}, ${kindOf(featured)}`}
           >
             <Poster uri={featured.poster} title={featured.title} style={StyleSheet.absoluteFill} />
             <LinearGradient
@@ -256,16 +284,24 @@ const TicketsHome = ({ navigation }) => {
               style={StyleSheet.absoluteFill}
             />
             <View style={styles.heroTop}>
-              <DateTile {...dateTile(featured.starts_at, months)} />
+              {fund ? <View /> : <DateTile {...dateTile(featured.starts_at, months)} />}
               {!!closedLabel(featured) && <Pill label={closedLabel(featured)} />}
             </View>
             <View style={styles.heroText}>
-              {!!featured.city && <Kicker>{featured.city}</Kicker>}
+              {fund ? (!!featured.category && <Kicker>{t(`tix.cat.${featured.category}`)}</Kicker>)
+                : (!!featured.city && <Kicker>{featured.city}</Kicker>)}
               <Text style={styles.heroTitle} numberOfLines={3}>{featured.title}</Text>
               <Text style={styles.heroMeta} numberOfLines={1}>
-                {formatWhen(featured.starts_at, { months, weekdays })}  ·  {featured.venue}
+                {fund ? featured.organiser : `${formatWhen(featured.starts_at, { months, weekdays })}  ·  ${featured.venue}`}
               </Text>
-              {!!priceLine(featured) && <Text style={styles.heroPrice}>{priceLine(featured)}</Text>}
+              {fund ? (
+                <>
+                  <Text style={styles.heroPrice}>{fundLine(featured)}</Text>
+                  {pctOf(featured) != null && (
+                    <View style={styles.heroTrack}><View style={[styles.heroFill, { width: `${pctOf(featured)}%` }]} /></View>
+                  )}
+                </>
+              ) : (!!priceLine(featured) && <Text style={styles.heroPrice}>{priceLine(featured)}</Text>)}
             </View>
           </TouchableOpacity>
         </>
@@ -281,15 +317,26 @@ const TicketsHome = ({ navigation }) => {
       style={styles.row}
       activeOpacity={0.8}
       accessibilityRole="button"
-      accessibilityLabel={`${e.title}, ${formatWhen(e.starts_at, { months, weekdays })}, ${e.venue}`}
+      accessibilityLabel={`${e.title}, ${kindOf(e)}`}
     >
       <Poster uri={e.poster} title={e.title} style={styles.thumb} />
       <View style={styles.rowBody}>
-        <Text style={styles.rowWhen} numberOfLines={1}>{formatWhen(e.starts_at, { months, weekdays })}</Text>
+        <Text style={styles.rowWhen} numberOfLines={1}>
+          {e.kind === 'fundraiser' ? (e.category ? t(`tix.cat.${e.category}`) : '') : formatWhen(e.starts_at, { months, weekdays })}
+        </Text>
         <Text style={styles.rowTitle} numberOfLines={2}>{e.title}</Text>
-        <Text style={styles.rowVenue} numberOfLines={1}>{[e.venue, e.city].filter(Boolean).join(' · ')}</Text>
+        <Text style={styles.rowVenue} numberOfLines={1}>
+          {e.kind === 'fundraiser' ? e.organiser : [e.venue, e.city].filter(Boolean).join(' · ')}
+        </Text>
         <View style={styles.rowFoot}>
-          {priceLine(e) ? <Text style={styles.rowPrice}>{priceLine(e)}</Text> : <Pill label={closedLabel(e)} />}
+          {e.kind === 'fundraiser' ? (
+            e.on_sale ? (
+              <>
+                <Text style={styles.rowPrice}>{fundLine(e)}</Text>
+                {pctOf(e) != null && <View style={styles.rowTrack}><View style={[styles.heroFill, { width: `${pctOf(e)}%` }]} /></View>}
+              </>
+            ) : <Pill label={t('tix.fund.closed')} />
+          ) : priceLine(e) ? <Text style={styles.rowPrice}>{priceLine(e)}</Text> : <Pill label={closedLabel(e)} />}
         </View>
       </View>
     </TouchableOpacity>
@@ -302,7 +349,7 @@ const TicketsHome = ({ navigation }) => {
   ) : search || city ? (
     <Notice title={t('tix.noResults', { q: search || city })} />
   ) : (
-    <Notice title={t('tix.emptyTitle')} body={t('tix.emptyBody')} />
+    <Notice title={fund ? t('tix.fund.emptyTitle') : t('tix.emptyTitle')} body={fund ? t('tix.fund.emptyBody') : t('tix.emptyBody')} />
   );
 
   return (
@@ -394,6 +441,17 @@ const styles = StyleSheet.create({
   heroText: { position: 'absolute', left: 20, right: 20, bottom: 20 },
   heroTitle: { fontFamily: F.display, fontSize: 34, lineHeight: 37, color: T.ivory, marginTop: 6 },
   heroMeta: { fontFamily: F.uiSemi, fontSize: 13, color: T.muted, marginTop: 8 },
+  kinds: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  kind: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10,
+    borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: T.lineStrong,
+  },
+  kindOn: { backgroundColor: T.champagne, borderColor: T.champagne },
+  kindText: { fontFamily: F.uiBold, fontSize: 13.5, color: T.muted },
+  kindTextOn: { color: T.paperInk },
+  heroTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(246,241,231,0.18)', overflow: 'hidden', marginTop: 10 },
+  heroFill: { height: '100%', borderRadius: 3, backgroundColor: T.gold },
+  rowTrack: { height: 4, borderRadius: 2, backgroundColor: T.line, overflow: 'hidden', marginTop: 6 },
   heroPrice: { fontFamily: F.uiHeavy, fontSize: 15, color: T.champagne, marginTop: 10, letterSpacing: 0.3 },
 
   posterBlank: { alignItems: 'center', justifyContent: 'center' },

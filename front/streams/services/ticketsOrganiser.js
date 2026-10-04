@@ -151,42 +151,65 @@ export const createTill = ({ tillNumber, businessName }) => authed('organiser/ti
  * A new event, a draft until published. With a poster it goes as multipart
  * (the field is `poster`: JPEG, PNG or WebP, at most 5 MB); without, as JSON.
  */
-const eventBody = ({ title, description, venue, city, startsAt, endsAt, salesEndAt, till }) => ({
-    title: title.trim(),
-    description: (description || '').trim(),
-    venue: venue.trim(),
-    city: (city || '').trim(),
-    starts_at: startsAt,
-    ...(endsAt ? { ends_at: endsAt } : {}),
-    ...(salesEndAt ? { sales_end_at: salesEndAt } : {}),
-    till,
-});
-
-const sendEvent = (path, method, fields, poster) => {
-  if (!poster?.uri) return authed(path, { method, body: fields });
-  const form = new FormData();
-  Object.entries(fields).forEach(([k, v]) => form.append(k, String(v)));
-  form.append('poster', { uri: poster.uri, name: 'poster.jpg', type: 'image/jpeg' });
-  // An upload on mobile data takes longer than a JSON call.
-  return authed(path, { method, form, timeout: 60000 });
+/**
+ * An event's or a fundraiser's fields as the server takes them. A fundraiser
+ * has no venue and may have no start (it opens when published); it has a
+ * category, an optional goal and the amounts offered as one tap.
+ */
+const eventBody = (d) => {
+  const fundraiser = d.kind === 'fundraiser';
+  return {
+    kind: fundraiser ? 'fundraiser' : 'event',
+    title: d.title.trim(),
+    description: (d.description || '').trim(),
+    city: (d.city || '').trim(),
+    ...(fundraiser ? {
+      category: d.category,
+      goal_amount: d.goal ? Number(d.goal) : null,
+      suggested_amounts: (d.suggested || []).map(Number).filter((n) => n >= 10),
+      ...(d.startsAt ? { starts_at: d.startsAt } : {}),
+    } : {
+      venue: (d.venue || '').trim(),
+      starts_at: d.startsAt,
+    }),
+    ends_at: d.endsAt || null,
+    sales_end_at: d.salesEndAt || null,
+    show_supporters: !!d.showSupporters,
+    show_total: !!d.showTotal,
+    till: d.till,
+  };
 };
-
-export const createEvent = ({ poster, ...fields }) => sendEvent('organiser/events/', 'POST', eventBody(fields), poster);
 
 /**
- * Change an event already made (a retry after its details were edited). A
- * poster is sent only when it changed; clearing optional dates sends null.
+ * A new event or fundraiser, a draft until published — as JSON. Its banner
+ * and supporting document go up after, with uploadEventFiles: two calls, so
+ * a failed upload on a phone can be tried again without making it twice.
  */
-export const updateEvent = (id, { poster, ...fields }) => {
-  const body = eventBody(fields);
-  // JSON can clear an optional date with null. Multipart cannot carry a null,
-  // so alongside a new poster a cleared date is left as it was.
-  if (!poster?.uri) {
-    if (!fields.endsAt) body.ends_at = null;
-    if (!fields.salesEndAt) body.sales_end_at = null;
+export const createEvent = (fields) => authed('organiser/events/', { method: 'POST', body: eventBody(fields) });
+
+/** Change an event's fields. Clearing an optional date sends null. */
+export const updateEvent = (id, fields) => authed(`organiser/events/${id}/`, { method: 'PATCH', body: eventBody(fields) });
+
+/**
+ * The banner (`poster`: a local JPEG) and/or a fundraiser's supporting
+ * document (`document`: { uri, name, mimeType }), as multipart.
+ */
+export const uploadEventFiles = (id, { poster, document }) => {
+  const form = new FormData();
+  if (poster?.uri) form.append('poster', { uri: poster.uri, name: 'poster.jpg', type: 'image/jpeg' });
+  if (document?.uri) {
+    form.append('supporting_document', {
+      uri: document.uri, name: document.name || 'document.pdf', type: document.mimeType || 'application/pdf',
+    });
   }
-  return sendEvent(`organiser/events/${id}/`, 'PATCH', body, poster);
+  // An upload on mobile data takes longer than a JSON call.
+  return authed(`organiser/events/${id}/`, { method: 'PATCH', form, timeout: 90000 });
 };
+
+/** Who sees the supporters list and the running total. Not reviewed: no content changes. */
+export const updateVisibility = (id, { showSupporters, showTotal }) => authed(`organiser/events/${id}/`, {
+  method: 'PATCH', body: { show_supporters: !!showSupporters, show_total: !!showTotal },
+});
 
 /** One ticket level: a name, its price in whole shillings, how many there are. */
 export const addTicketType = (eventId, { name, price, quantity, position }) => authed(
@@ -238,6 +261,33 @@ export const updateTicketType = (eventId, typeId, patch) => authed(
 export const deleteTicketType = (eventId, typeId) => authed(
   `organiser/events/${eventId}/ticket-types/${typeId}/`, { method: 'DELETE' },
 );
+
+// ── At the gate ───────────────────────────────────────────────────────────
+
+/**
+ * The event's valid tickets, a page at a time (up to 500), for the scanner
+ * to keep: `{ code, ticket_type, buyer_name, checked_in_at }`. `since`: only
+ * tickets issued or checked in after that ISO time.
+ */
+export const fetchGateTickets = (id, { since, page } = {}) => {
+  const q = ['page_size=500', since && `since=${encodeURIComponent(since)}`, page && `page=${page}`]
+    .filter(Boolean).join('&');
+  return authed(`organiser/events/${id}/tickets/?${q}`);
+};
+
+/**
+ * Check a ticket in. Resolves `{ result: 'admitted' | 'already_used' |
+ * 'invalid', ... }` for all three: 409 and 404 are answers here, not errors.
+ */
+export const checkIn = async (id, code) => {
+  try {
+    return await authed(`organiser/events/${id}/checkin/`, { method: 'POST', body: { code } });
+  } catch (err) {
+    if (err?.status === 409) return { result: 'already_used', ...(err.body || {}) };
+    if (err?.status === 404 && err?.body?.result === 'invalid') return { result: 'invalid', ...err.body };
+    throw err;
+  }
+};
 
 /** Tests only: forget the session read, as a fresh launch would. */
 export const __resetOrganiser = () => { tokens = undefined; refreshing = null; };

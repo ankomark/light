@@ -11,7 +11,7 @@
 // it), and Burn — remove for good, which asks for a fresh authenticator
 // code and can't be undone here. Every one asks why, and is logged.
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
@@ -114,6 +114,11 @@ export default function AdminTicketEvent({ navigation, route }) {
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         {!!event.poster && <Image source={{ uri: event.poster }} style={styles.poster} contentFit="cover" />}
+        {event.kind === 'fundraiser' && (
+          <Text style={styles.kind}>
+            {[t('tix.kind.fundraiser'), event.category ? t(`tix.cat.${event.category}`) : ''].filter(Boolean).join(' · ')}
+          </Text>
+        )}
         <Text style={styles.title}>{event.title}</Text>
         <View style={styles.badges}>
           <Badge color={STATE_COLOR[adminState(event)] || ADMIN.muted} label={stateLabel(t, event)} />
@@ -147,6 +152,20 @@ export default function AdminTicketEvent({ navigation, route }) {
         <Section label={t('adminTix.description')}>
           <Line>{event.description || t('adminTix.noDescription')}</Line>
         </Section>
+        {event.kind === 'fundraiser' && (
+          <Section label={t('adminTix.fundraiser')}>
+            <Line>{event.goal_amount ? t('tix.host.goalOf', { goal: formatKes(event.goal_amount) }) : t('tix.host.noGoal')}</Line>
+            <Line muted>{t('adminTix.collected', { amount: formatKes(event.collected || 0) })}</Line>
+            {/* Proof for review: opened from the ticketing server by a link that lasts ten minutes. */}
+            {event.document_url ? (
+              <TouchableOpacity style={styles.docBtn} onPress={() => Linking.openURL(event.document_url).catch(() => {})}
+                                testID="admin-tix-document">
+                <Text style={styles.docText}>{t('adminTix.openDocument')}</Text>
+              </TouchableOpacity>
+            ) : <Line muted>{t('adminTix.noDocument')}</Line>}
+          </Section>
+        )}
+        {event.kind !== 'fundraiser' && (
         <Section label={t('adminTix.tickets')}>
           {(event.ticket_types || []).map((tt) => (
             <View key={tt.id} style={styles.level}>
@@ -156,6 +175,11 @@ export default function AdminTicketEvent({ navigation, route }) {
           ))}
           {!event.ticket_types?.length && <Line muted>{t('adminTix.noTickets')}</Line>}
           {event.collected > 0 && <Line muted>{t('adminTix.collected', { amount: formatKes(event.collected) })}</Line>}
+        </Section>
+        )}
+        <Section label={t('tix.vis.title')}>
+          <Line>{event.show_supporters ? t('tix.vis.listOn') : t('tix.vis.listOff')}</Line>
+          <Line>{event.show_total ? t('tix.vis.totalOn') : t('tix.vis.totalOff')}</Line>
         </Section>
         <Section label={t('adminTix.payout')}>
           <View style={styles.tillRow}>
@@ -246,6 +270,12 @@ const styles = StyleSheet.create({
   content: { padding: 18, paddingBottom: 32, width: '100%', maxWidth: 760, alignSelf: 'center' },
   poster: { width: '100%', aspectRatio: 4 / 5, maxHeight: 420, borderRadius: 16, marginBottom: 14 },
   title: { color: ADMIN.text, fontSize: 22, fontWeight: '800' },
+  kind: { color: ADMIN.gold, fontSize: 12, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
+  docBtn: {
+    marginTop: 12, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: ADMIN.gold,
+  },
+  docText: { color: ADMIN.gold, fontWeight: '800', fontSize: 14 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   note: { marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,122,107,0.10)', borderWidth: 1, borderColor: 'rgba(255,122,107,0.35)' },
   noteLabel: { color: ADMIN.muted, fontSize: 11.5, fontWeight: '700' },

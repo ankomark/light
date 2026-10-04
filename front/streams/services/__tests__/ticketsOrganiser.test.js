@@ -113,32 +113,57 @@ describe('making an event', () => {
     startsAt: '2026-11-14T15:00:00.000Z', endsAt: null, salesEndAt: null, till: 4,
   };
 
-  it('sends JSON without a poster', async () => {
+  it('makes an event as JSON', async () => {
     signIn();
     global.fetch.mockResolvedValue(reply(201, { id: 9 }));
-    await org.createEvent({ ...fields, poster: null });
+    await org.createEvent({ ...fields, kind: 'event', showSupporters: true });
     const [url, init] = global.fetch.mock.calls[0];
     expect(url).toBe(`${API}organiser/events/`);
     expect(JSON.parse(init.body)).toEqual({
-      title: 'Gospel Night', description: 'Worship.', venue: 'KICC', city: 'Nairobi', starts_at: '2026-11-14T15:00:00.000Z', till: 4,
+      kind: 'event', title: 'Gospel Night', description: 'Worship.', venue: 'KICC', city: 'Nairobi',
+      starts_at: '2026-11-14T15:00:00.000Z', ends_at: null, sales_end_at: null,
+      show_supporters: true, show_total: false, till: 4,
     });
   });
 
-  it('sends multipart with the poster as `poster`', async () => {
+  it('makes a fundraiser with a cause, a goal and suggested amounts, and no venue', async () => {
     signIn();
-    global.fetch.mockResolvedValue(reply(201, { id: 9 }));
-    await org.createEvent({ ...fields, poster: { uri: 'file:///banner.jpg' } });
-    const init = global.fetch.mock.calls[0][1];
-    expect(init.body).toBeInstanceOf(FormData);
-    expect(init.headers['Content-Type']).toBeUndefined();
-    expect(init.body.get('title')).toBe('Gospel Night');
-    expect(init.body.has('poster')).toBe(true);
+    global.fetch.mockResolvedValue(reply(201, { id: 10 }));
+    await org.createEvent({
+      kind: 'fundraiser', title: ' Fees for Baraka ', description: 'Form 3.', city: '', category: 'education',
+      goal: '120000', suggested: [500, 1000, 5], till: 4, showTotal: true,
+    });
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+      kind: 'fundraiser', title: 'Fees for Baraka', description: 'Form 3.', city: '', category: 'education',
+      goal_amount: 120000, suggested_amounts: [500, 1000], ends_at: null, sales_end_at: null,
+      show_supporters: false, show_total: true, till: 4,
+    });
   });
 
-  it('clears optional dates when editing without a new poster', async () => {
+  it('uploads the banner and the document as multipart, after', async () => {
     signIn();
     global.fetch.mockResolvedValue(reply(200, { id: 9 }));
-    await org.updateEvent(9, { ...fields, poster: null });
+    await org.uploadEventFiles(9, { poster: { uri: 'file:///banner.jpg' }, document: { uri: 'file:///letter.pdf', name: 'letter.pdf', mimeType: 'application/pdf' } });
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toBe(`${API}organiser/events/9/`);
+    expect(init.method).toBe('PATCH');
+    expect(init.body).toBeInstanceOf(FormData);
+    expect(init.headers['Content-Type']).toBeUndefined();
+    expect(init.body.has('poster')).toBe(true);
+    expect(init.body.has('supporting_document')).toBe(true);
+  });
+
+  it('changes who sees the list and the total, and nothing else', async () => {
+    signIn();
+    global.fetch.mockResolvedValue(reply(200, { id: 9 }));
+    await org.updateVisibility(9, { showSupporters: true, showTotal: false });
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ show_supporters: true, show_total: false });
+  });
+
+  it('clears optional dates when editing', async () => {
+    signIn();
+    global.fetch.mockResolvedValue(reply(200, { id: 9 }));
+    await org.updateEvent(9, { ...fields });
     const [url, init] = global.fetch.mock.calls[0];
     expect(url).toBe(`${API}organiser/events/9/`);
     expect(init.method).toBe('PATCH');
@@ -164,13 +189,14 @@ describe('the draft', () => {
   const now = new Date('2026-10-04T09:00:00Z').getTime();
   const ready = () => ({
     ...emptyDraft(),
+    kind: 'event',
     title: 'Gospel Night', venue: 'KICC', startsAt: '2026-11-14T15:00:00Z', till: 4,
     levels: [{ ...newLevel('Regular'), price: '500', quantity: '200' }, { ...newLevel('VIP'), price: '2,000', quantity: '50' }],
   });
 
   it('is ready when every step is', () => {
     expect(firstInvalidStep(ready(), now)).toBeNull();
-    expect(firstInvalidStep(emptyDraft(), now)).toBe('details');
+    expect(firstInvalidStep(emptyDraft(), now)).toBe('type');
   });
 
   it('needs a title, a venue and a start in the future', () => {

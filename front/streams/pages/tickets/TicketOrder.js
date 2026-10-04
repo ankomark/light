@@ -169,9 +169,9 @@ const TicketOrder = ({ navigation, route }) => {
     // when this screen was opened from My tickets.
     const routes = navigation.getState?.()?.routes || [];
     const prev = routes[routes.length - 2];
-    if (prev?.name === 'TicketEvent') navigation.goBack();
-    else navigation.replace('TicketEvent', { slug: order?.event_slug });
-  }, [navigation, order?.event_slug]);
+    if (prev?.name === 'TicketEvent' || prev?.name === 'TicketFundraiser') navigation.goBack();
+    else navigation.replace(order?.kind === 'donation' ? 'TicketFundraiser' : 'TicketEvent', { slug: order?.event_slug });
+  }, [navigation, order?.event_slug, order?.kind]);
 
   const [page, setPage] = useState(0);
   const stubWidth = Math.min(width, 520) - 48;
@@ -185,6 +185,26 @@ const TicketOrder = ({ navigation, route }) => {
           <ActivityIndicator color={T.gold} size="large" />
         )}
       </View>
+    );
+  }
+
+  // A gift: a thank-you and its receipt, no tickets.
+  if (order.status === 'paid' && order.kind === 'donation') {
+    return (
+      <SafeAreaView style={styles.root} edges={['bottom']}>
+        <ScrollView contentContainerStyle={styles.thanksScroll} showsVerticalScrollIndicator={false}>
+          <View style={styles.thanksIcon}><Ionicons name="heart" size={36} color={T.paperInk} /></View>
+          <Text style={styles.thanksTitle} accessibilityRole="header">{t('tix.fund.thanks')}</Text>
+          <Text style={styles.thanksBody}>{t('tix.fund.thanksBody', { amount: formatKes(order.amount), title: order.event })}</Text>
+          <View style={[styles.details, styles.thanksDetails]}>
+            <Row label={t('tix.fund.contribution')} value={formatKes(order.amount)} />
+            {!!order.mpesa_receipt && <Row label={t('tix.receipt')} value={order.mpesa_receipt} />}
+            <Row label={t('tix.orderCode')} value={order.code} last />
+          </View>
+          <GhostButton label={t('tix.fund.backTo')} style={styles.thanksBack}
+                       onPress={() => navigation.navigate('TicketFundraiser', { slug: order.event_slug })} />
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 
@@ -318,6 +338,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10,
     backgroundColor: T.surface, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.lineStrong,
   },
+
+  // A gift
+  thanksScroll: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 56, paddingBottom: 32 },
+  thanksIcon: { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: T.champagne },
+  thanksTitle: { fontFamily: F.display, fontSize: 36, lineHeight: 40, color: T.ivory, textAlign: 'center', marginTop: 22 },
+  thanksBody: { fontFamily: F.ui, fontSize: 15.5, lineHeight: 24, color: T.muted, textAlign: 'center', marginTop: 10, maxWidth: 380 },
+  thanksDetails: { alignSelf: 'stretch', maxWidth: 520, width: '100%', marginHorizontal: 0 },
+  thanksBack: { marginTop: 22 },
 
   // Paid
   paidScroll: { paddingBottom: 32 },

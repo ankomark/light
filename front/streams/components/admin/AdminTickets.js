@@ -133,6 +133,7 @@ export default function AdminTickets({ navigation, route }) {
         ? <Image source={{ uri: e.poster }} style={styles.thumb} contentFit="cover" />
         : <View style={[styles.thumb, styles.thumbBlank]}><Text style={styles.thumbLetter}>{(e.title || '?')[0]}</Text></View>}
       <View style={styles.rowBody}>
+        {e.kind === 'fundraiser' && <Text style={styles.rowKind}>{t('tix.kind.fundraiser')}</Text>}
         <Text style={styles.rowTitle} numberOfLines={2}>{e.title}</Text>
         <Text style={styles.rowMeta} numberOfLines={1}>{e.organiser?.display_name || e.organiser?.email}</Text>
         <Text style={styles.rowMeta} numberOfLines={1}>{formatWhen(e.starts_at, { months, weekdays })} · {e.venue}</Text>
@@ -223,6 +224,7 @@ const styles = StyleSheet.create({
   thumbBlank: { backgroundColor: ADMIN.field, alignItems: 'center', justifyContent: 'center' },
   thumbLetter: { color: ADMIN.gold, fontSize: 26, fontWeight: '700' },
   rowBody: { flex: 1 },
+  rowKind: { color: ADMIN.gold, fontSize: 11, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
   rowTitle: { color: ADMIN.text, fontSize: 15.5, fontWeight: '700' },
   rowMeta: { color: ADMIN.muted, fontSize: 12.5, marginTop: 3 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },

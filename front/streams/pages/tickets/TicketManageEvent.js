@@ -21,13 +21,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
 import {
-  fetchMyEvent, fetchEventSummary, publishEvent, unpublishEvent, cancelEvent,
+  fetchMyEvent, fetchEventSummary, publishEvent, unpublishEvent, cancelEvent, updateVisibility, uploadEventFiles,
   addTicketType, updateTicketType, deleteTicketType,
 } from '../../services/ticketsOrganiser';
 import { formatKes, formatWhen } from '../../services/tickets';
 import { confirmAction } from '../../utils/adminConfirm';
 import { T, F, tap, Kicker, Pill, Notice, GoldButton, GhostButton } from '../../components/tickets/TicketKit';
 import { eventState, isOver, staffNote } from './eventState';
+import { VisibilityControls, pickDocument } from './HostSteps';
+import { Progress } from '../../components/tickets/Supporters';
 import { wholeNumber, NAME_MAX, MAX_LEVELS } from './eventDraft';
 import { ticketErrorText } from './ticketText';
 
@@ -102,6 +104,17 @@ const TicketManageEvent = ({ navigation, route }) => {
     if (ok) act('cancel', () => cancelEvent(id));
   };
 
+  const replaceDocument = async () => {
+    tap();
+    try {
+      const doc = await pickDocument();
+      if (doc === 'too_big') { setActionError(t('tix.host.docTooBig')); return; }
+      if (doc) act('document', () => uploadEventFiles(id, { document: doc }));
+    } catch {
+      setActionError(t('tix.host.docFailed'));
+    }
+  };
+
   const share = () => {
     tap();
     const link = /^https?:/.test(event.share_url || '') ? event.share_url : `streams://events/${event.slug}`;
@@ -162,6 +175,7 @@ const TicketManageEvent = ({ navigation, route }) => {
   const state = eventState(event);
   const over = isOver(event);
   const closed = event.status === 'cancelled' || over;
+  const fund = event.kind === 'fundraiser';
   const levels = event.ticket_types || [];
   const days = (summary?.by_day || []).slice(-DAYS_SHOWN);
   const dayMax = Math.max(1, ...days.map((d) => d.collected || 0));
@@ -220,16 +234,29 @@ const TicketManageEvent = ({ navigation, route }) => {
         {/* How it is selling. */}
         {!!summary && (
           <>
-            <Kicker style={styles.kicker}>{t('tix.mine.sales')}</Kicker>
-            <View style={styles.tiles}>
-              <Tile value={formatKes(summary.collected)} label={t('tix.mine.collected')} wide />
-              <Tile value={`${summary.tickets_sold}/${capacity}`} label={t('tix.mine.ticketsSold')} />
-            </View>
-            <View style={styles.tiles}>
-              <Tile value={String(summary.checked_in)} label={t('tix.mine.checkedIn')} />
-              <Tile value={String(summary.orders || 0)} label={t('tix.mine.orders')} />
-              <Tile value={String(summary.failed_attempts)} label={t('tix.mine.failed')} muted />
-            </View>
+            <Kicker style={styles.kicker}>{fund ? t('tix.mine.giving') : t('tix.mine.sales')}</Kicker>
+            {fund ? (
+              <>
+                {/* The organiser always sees it, whatever the public is shown. */}
+                <Progress raised={summary.collected} goal={event.goal_amount} supporters={summary.orders || 0} />
+                <View style={[styles.tiles, styles.tilesGap]}>
+                  <Tile value={String(summary.orders || 0)} label={t('tix.mine.supporters')} />
+                  <Tile value={String(summary.failed_attempts)} label={t('tix.mine.failed')} muted />
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.tiles}>
+                  <Tile value={formatKes(summary.collected)} label={t('tix.mine.collected')} wide />
+                  <Tile value={`${summary.tickets_sold}/${capacity}`} label={t('tix.mine.ticketsSold')} />
+                </View>
+                <View style={styles.tiles}>
+                  <Tile value={String(summary.checked_in)} label={t('tix.mine.checkedIn')} />
+                  <Tile value={String(summary.orders || 0)} label={t('tix.mine.orders')} />
+                  <Tile value={String(summary.failed_attempts)} label={t('tix.mine.failed')} muted />
+                </View>
+              </>
+            )}
             {days.length > 0 && (
               <View style={styles.chart} accessible accessibilityLabel={t('tix.mine.byDay')}>
                 <Text style={styles.chartLabel}>{t('tix.mine.byDay')}</Text>
@@ -245,9 +272,33 @@ const TicketManageEvent = ({ navigation, route }) => {
           </>
         )}
 
-        {/* Ticket levels. */}
-        <Kicker style={styles.kicker}>{t('tix.host.ticketsTitle')}</Kicker>
-        {levels.map((tt) => (
+        {/* Who sees the supporters and the total: the organiser's switches. */}
+        {!event.removed_at && (
+          <>
+            <Kicker style={styles.kicker}>{t('tix.vis.title')}</Kicker>
+            <VisibilityControls t={t} showSupporters={!!event.show_supporters} showTotal={!!event.show_total}
+                                onChange={(v) => act('visibility', () => updateVisibility(id, v))} />
+          </>
+        )}
+
+        {/* A fundraiser's proof for review. */}
+        {fund && !closed && (
+          <>
+            <Kicker style={styles.kicker}>{t('tix.host.step.document')}</Kicker>
+            <TouchableOpacity onPress={replaceDocument} style={styles.doc} disabled={busy === 'document'}
+                              accessibilityRole="button" testID="mine-document">
+              <Ionicons name={event.has_document ? 'document-text' : 'cloud-upload-outline'} size={22} color={T.champagne} />
+              <View style={styles.flex}>
+                <Text style={styles.levelName}>{event.has_document ? t('tix.mine.docOn') : t('tix.host.docAdd')}</Text>
+                <Text style={styles.levelMeta}>{event.has_document ? t('tix.mine.docReplace') : t('tix.host.docKinds')}</Text>
+              </View>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Ticket levels: an event's, not a fundraiser's. */}
+        {!fund && <Kicker style={styles.kicker}>{t('tix.host.ticketsTitle')}</Kicker>}
+        {!fund && levels.map((tt) => (
           <View key={tt.id} style={styles.level}>
             <TouchableOpacity style={styles.levelHead} onPress={() => (editing === tt.id ? setEditing(null) : openLevel(tt))}
                               disabled={closed} accessibilityRole="button" testID={`mine-level-${tt.id}`}>
@@ -265,7 +316,7 @@ const TicketManageEvent = ({ navigation, route }) => {
             )}
           </View>
         ))}
-        {!closed && levels.length < MAX_LEVELS && (editing === 'new' ? (
+        {!fund && !closed && levels.length < MAX_LEVELS && (editing === 'new' ? (
           <View style={styles.level}>
             <LevelForm t={t} form={form} setForm={setForm} error={formError} onSave={saveLevel} busy={busy === 'level'}
                        onCancel={() => setEditing(null)} />
@@ -279,8 +330,13 @@ const TicketManageEvent = ({ navigation, route }) => {
 
         {/* Everything else. */}
         <View style={styles.links}>
-          <LinkRow icon="people-outline" label={t('tix.mine.buyers')} sub={t('tix.mine.buyersSub', { n: summary?.orders || 0 })}
+          <LinkRow icon="people-outline" label={fund ? t('tix.mine.supporters') : t('tix.mine.buyers')}
+                   sub={t('tix.mine.buyersSub', { n: summary?.orders || 0 })}
                    onPress={() => navigation.push('TicketBuyers', { id, title: event.title })} testID="mine-buyers" />
+          {!fund && !event.removed_at && event.status !== 'cancelled' && (
+            <LinkRow icon="scan-outline" label={t('tix.gate.open')} sub={t('tix.gate.openSub')}
+                     onPress={() => navigation.push('TicketScanner', { id, title: event.title })} testID="mine-scan" />
+          )}
           {event.status === 'published' && (
             <LinkRow icon="share-social-outline" label={t('tix.host.share')} sub={t('tix.mine.shareSub')} onPress={share} testID="mine-share" />
           )}
@@ -372,6 +428,11 @@ const styles = StyleSheet.create({
 
   kicker: { marginTop: 26, marginBottom: 12, marginLeft: 4 },
   tiles: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  tilesGap: { marginTop: 10 },
+  doc: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 18,
+    backgroundColor: T.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: T.line,
+  },
   tile: { flex: 1, padding: 14, borderRadius: 18, backgroundColor: T.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: T.line },
   tileWide: { flex: 1.6 },
   tileValue: { fontFamily: F.display, fontSize: 24, color: T.ivory },

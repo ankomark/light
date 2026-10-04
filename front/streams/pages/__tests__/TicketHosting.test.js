@@ -4,10 +4,13 @@
  * halfway and is retried without making the event twice.
  */
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, configure } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.setTimeout(20000);
+// The wizard is seven steps now: walking them under a loaded test run can
+// take longer than the default one-second wait.
+configure({ asyncUtilTimeout: 5000 });
 
 const mockT = (k, p) => {
   if (k === 'tix.months') return 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec';
@@ -141,6 +144,11 @@ describe('making the event', () => {
   test('each step asks for what it needs before Next', async () => {
     const screen = render(<TicketCreateEvent navigation={nav()} />);
     await waitFor(() => expect(screen.getByTestId('host-next')).toBeTruthy());
+    // First: an event or a fundraiser.
+    fireEvent.press(screen.getByTestId('host-next'));
+    expect(screen.getByText('tix.host.err.kind')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('host-kind-event'));
+    fireEvent.press(screen.getByTestId('host-next'));
     fireEvent.press(screen.getByTestId('host-next'));
     expect(screen.getByText('tix.host.err.title')).toBeTruthy();
 
@@ -156,8 +164,7 @@ describe('making the event', () => {
     await AsyncStorage.setItem('tix:hostDraft', JSON.stringify({ ...READY, levels: [{ key: 'l1', name: 'Regular', price: '', quantity: '' }] }));
     const screen = render(<TicketCreateEvent navigation={nav()} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('host-next'));
-    fireEvent.press(screen.getByTestId('host-next'));
+    for (let i = 0; i < 3; i += 1) fireEvent.press(screen.getByTestId('host-next'));
     expect(screen.getByText('tix.host.ticketsTitle')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('host-preset-vip'));
@@ -178,7 +185,7 @@ describe('making the event', () => {
     const navigation = nav();
     const screen = render(<TicketCreateEvent navigation={navigation} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
-    for (let i = 0; i < 4; i += 1) fireEvent.press(screen.getByTestId('host-next'));
+    for (let i = 0; i < 6; i += 1) fireEvent.press(screen.getByTestId('host-next'));
     await waitFor(() => expect(screen.getByText('tix.host.willReview')).toBeTruthy());
     expect(screen.getByText('tix.host.createSubmit')).toBeTruthy();
 
@@ -211,10 +218,10 @@ describe('making the event', () => {
     routes['POST organiser/events/9/publish/'] = reply(200, { ...EVENT, status: 'draft', review_status: 'pending' });
     const screen = render(<TicketCreateEvent navigation={nav()} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
-    for (let i = 0; i < 3; i += 1) fireEvent.press(screen.getByTestId('host-next'));
+    for (let i = 0; i < 4; i += 1) fireEvent.press(screen.getByTestId('host-next'));
     await waitFor(() => expect(screen.getByText('tix.host.tillNotActive')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('host-next'));
-    fireEvent.press(screen.getByTestId('host-create'));
+    fireEvent.press(screen.getByTestId('host-next'));      // visibility
+    fireEvent.press(screen.getByTestId('host-next'));      // review
     expect(screen.getByText('tix.host.willReviewTill')).toBeTruthy();
     fireEvent.press(screen.getByTestId('host-create'));
     await waitFor(() => expect(screen.getByText('tix.host.sentTitle')).toBeTruthy());
@@ -229,7 +236,7 @@ describe('making the event', () => {
     const navigation = nav();
     const screen = render(<TicketCreateEvent navigation={navigation} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
-    for (let i = 0; i < 4; i += 1) fireEvent.press(screen.getByTestId('host-next'));
+    for (let i = 0; i < 6; i += 1) fireEvent.press(screen.getByTestId('host-next'));
     await waitFor(() => expect(screen.getByTestId('host-create')).toBeTruthy());
     fireEvent.press(screen.getByTestId('host-create'));
     await waitFor(() => expect(screen.getByText('tix.host.liveTitle')).toBeTruthy());
@@ -242,7 +249,7 @@ describe('making the event', () => {
     await AsyncStorage.setItem('tix:hostDraft', JSON.stringify({ ...READY, till: null }));
     const screen = render(<TicketCreateEvent navigation={nav()} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
-    for (let i = 0; i < 3; i += 1) fireEvent.press(screen.getByTestId('host-next'));
+    for (let i = 0; i < 4; i += 1) fireEvent.press(screen.getByTestId('host-next'));
     await waitFor(() => expect(screen.getByTestId('host-till-number')).toBeTruthy());
     fireEvent.changeText(screen.getByTestId('host-till-number'), '512345678');     // 9 digits
     fireEvent.changeText(screen.getByTestId('host-business'), 'Amani Choir');
@@ -260,7 +267,7 @@ describe('making the event', () => {
     routes['POST organiser/events/9/publish/'] = reply(200, { ...EVENT, status: 'published' });
     const screen = render(<TicketCreateEvent navigation={nav()} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
-    for (let i = 0; i < 4; i += 1) fireEvent.press(screen.getByTestId('host-next'));
+    for (let i = 0; i < 6; i += 1) fireEvent.press(screen.getByTestId('host-next'));
     await waitFor(() => expect(screen.getByTestId('host-create')).toBeTruthy());
 
     fireEvent.press(screen.getByTestId('host-create'));

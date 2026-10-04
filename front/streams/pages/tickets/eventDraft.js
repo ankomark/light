@@ -1,10 +1,20 @@
-// The event being created: its shape, what each step needs before Next,
-// and how the server's field errors map back to the step that owns them.
+// The event or fundraiser being created: its shape, what each step needs
+// before Next, and how the server's field errors map back to the step that
+// owns them.
 //
 // Dates are kept as ISO strings throughout, so the draft can be saved to the
 // phone as JSON and picked up again.
 
-export const STEPS = ['details', 'when', 'tickets', 'payout', 'review'];
+// An event sells tickets on a date at a place; a fundraiser takes gifts of
+// any amount toward a cause, and needs a document for Skylink's review.
+const EVENT_STEPS = ['type', 'details', 'when', 'tickets', 'payout', 'visibility', 'review'];
+const FUNDRAISER_STEPS = ['type', 'details', 'goal', 'document', 'payout', 'visibility', 'review'];
+export const stepsFor = (kind) => (kind === 'fundraiser' ? FUNDRAISER_STEPS : EVENT_STEPS);
+export const STEPS = EVENT_STEPS;
+export const SUGGESTED_DEFAULT = ['500', '1000', '2000', '5000'];
+export const GOAL_MIN = 100;
+export const GIFT_MIN = 10;
+export const GIFT_MAX = 250000;
 
 export const MAX_LEVELS = 10;
 export const TITLE_MAX = 160;
@@ -14,6 +24,13 @@ let seq = 0;
 export const newLevel = (name = '') => ({ key: `l${Date.now().toString(36)}${(seq += 1)}`, name, price: '', quantity: '' });
 
 export const emptyDraft = () => ({
+  kind: null,            // 'event' | 'fundraiser', chosen first
+  category: '',          // a fundraiser's cause
+  goal: '',              // optional target, whole shillings
+  suggested: [...SUGGESTED_DEFAULT],
+  document: null,        // { uri, name, mimeType, size }: proof for review, never public
+  showSupporters: false,
+  showTotal: false,
   poster: null,          // { uri, width, height } — a local file, compressed
   title: '',
   description: '',
@@ -40,8 +57,24 @@ const time = (iso) => (iso ? new Date(iso).getTime() : NaN);
  */
 export const validateStep = (step, d, now = Date.now()) => {
   const e = {};
+  if (step === 'type') {
+    if (!d.kind) e.kind = 'tix.host.err.kind';
+  }
   if (step === 'details') {
     if (!d.title.trim()) e.title = 'tix.host.err.title';
+    if (d.kind === 'fundraiser' && !d.category) e.category = 'tix.host.err.category';
+  }
+  if (step === 'goal') {
+    if (String(d.goal || '').trim() && !(wholeNumber(d.goal) >= GOAL_MIN)) e.goal = 'tix.host.err.goal';
+    if (d.endsAt && time(d.endsAt) <= now) e.endsAt = 'tix.host.err.endPast';
+    (d.suggested || []).forEach((v, i) => {
+      if (!String(v).trim()) return;
+      const n = wholeNumber(v);
+      if (!(n >= GIFT_MIN && n <= GIFT_MAX)) e[`suggested.${i}`] = 'tix.host.err.suggested';
+    });
+  }
+  if (step === 'document') {
+    if (!d.document?.uri) e.document = 'tix.host.err.document';
   }
   if (step === 'when') {
     if (!d.venue.trim()) e.venue = 'tix.host.err.venue';
@@ -74,30 +107,46 @@ export const validateStep = (step, d, now = Date.now()) => {
 
 /** The first step with a problem, or null when the whole draft is ready. */
 export const firstInvalidStep = (d, now = Date.now()) => (
-  STEPS.find((s) => Object.keys(validateStep(s, d, now)).length) || null
+  stepsFor(d.kind).find((s) => Object.keys(validateStep(s, d, now)).length) || null
 );
 
 // Which step shows each of the server's fields.
 const FIELD_STEP = {
-  title: 'details', description: 'details', poster: 'details',
+  kind: 'type',
+  title: 'details', description: 'details', poster: 'details', category: 'details',
   venue: 'when', city: 'when', starts_at: 'when', ends_at: 'when', sales_end_at: 'when',
+  goal_amount: 'goal', suggested_amounts: 'goal',
+  supporting_document: 'document',
   till: 'payout',
   name: 'tickets', price: 'tickets', quantity: 'tickets',
 };
 // And the draft's name for it.
-const FIELD_DRAFT = { starts_at: 'startsAt', ends_at: 'endsAt', sales_end_at: 'salesEndAt' };
+const FIELD_DRAFT = {
+  starts_at: 'startsAt', ends_at: 'endsAt', sales_end_at: 'salesEndAt', goal_amount: 'goal',
+  supporting_document: 'document',
+};
 
 /** The step a server error belongs to, and the errors in the draft's terms. */
-export const serverErrorsByStep = (fields = {}) => {
+export const serverErrorsByStep = (fields = {}, kind = 'event') => {
+  const steps = stepsFor(kind);
   const out = { step: null, errors: {} };
   Object.entries(fields).forEach(([k, msg]) => {
-    const step = FIELD_STEP[k];
-    if (!step) return;
-    if (!out.step || STEPS.indexOf(step) < STEPS.indexOf(out.step)) out.step = step;
+    let step = FIELD_STEP[k];
+    // A fundraiser's dates live on its goal step.
+    if (kind === 'fundraiser' && step === 'when') step = 'goal';
+    if (!step || !steps.includes(step)) return;
+    if (!out.step || steps.indexOf(step) < steps.indexOf(out.step)) out.step = step;
     out.errors[FIELD_DRAFT[k] || k] = msg;
   });
   return out;
 };
+
+/** The suggested amounts as the server takes them: whole, in range, no blanks, no repeats. */
+export const suggestedPayload = (list) => [...new Set((list || [])
+  .map(wholeNumber).filter((n) => n >= GIFT_MIN && n <= GIFT_MAX))];
+
+/** A draft saved by an older version of the app (events only) carries on as an event. */
+export const upgradeDraft = (kept) => ({ ...emptyDraft(), kind: 'event', ...kept });
 
 /** The levels as the server takes them, in the order shown. */
 export const levelPayloads = (levels) => levels.map((l, position) => ({

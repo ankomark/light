@@ -90,6 +90,9 @@ import TicketMyEvents from './pages/tickets/TicketMyEvents';
 import TicketManageEvent from './pages/tickets/TicketManageEvent';
 import TicketEditEvent from './pages/tickets/TicketEditEvent';
 import TicketBuyers from './pages/tickets/TicketBuyers';
+import TicketFundraiser from './pages/tickets/TicketFundraiser';
+import TicketSupporters from './pages/tickets/TicketSupporters';
+import TicketScanner from './pages/tickets/TicketScanner';
 import UserGuide from './pages/UserGuide';
 import LegalPage from './pages/LegalPage';
 import PrivacyCentre from './pages/PrivacyCentre';
@@ -504,6 +507,9 @@ const App = () => {
                 <Stack.Screen name="TicketManageEvent" component={TicketManageEventScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="TicketEditEvent" component={TicketEditEventScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="TicketBuyers" component={TicketBuyersScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketFundraiser" component={TicketFundraiserScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketSupporters" component={TicketSupportersScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketScanner" component={TicketScannerScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="UserGuide" component={UserGuide} />
                 <Stack.Screen name="PrivacyCentre" component={PrivacyCentre} />
                 <Stack.Screen name="LegalPage" component={LegalPage} />
@@ -726,6 +732,9 @@ const TicketMyEventsScreen = TicketsWrapper(TicketMyEvents);
 const TicketManageEventScreen = TicketsWrapper(TicketManageEvent);
 const TicketEditEventScreen = TicketsWrapper(TicketEditEvent);
 const TicketBuyersScreen = TicketsWrapper(TicketBuyers);
+const TicketFundraiserScreen = TicketsWrapper(TicketFundraiser);
+const TicketSupportersScreen = TicketsWrapper(TicketSupporters);
+const TicketScannerScreen = TicketsWrapper(TicketScanner);
 
 const WeatherWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#000000' }}>

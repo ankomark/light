@@ -8,17 +8,24 @@
  * the event with the same ticket still chosen).
  *
  * The number and name are remembered on the phone for next time.
+ *
+ * A gift to a fundraiser comes here too (`donation: { amount }` instead of a
+ * ticket type): the same stub and prompt, a receipt instead of tickets.
+ *
+ * When the organiser shows supporters publicly, the buyer chooses whether
+ * they appear by name (phone partly hidden). Off unless they turn it on:
+ * nobody is listed by name without saying so.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform,
+  View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Switch,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
 import {
-  createOrder, saveReference, cacheOrder, normalizeKePhone, formatKes, formatWhen, readBuyer, saveBuyer,
+  createOrder, createDonation, saveReference, cacheOrder, normalizeKePhone, formatKes, formatWhen, readBuyer, saveBuyer,
 } from '../../services/tickets';
 import { T, F, Kicker, GoldButton } from '../../components/tickets/TicketKit';
 import { ticketErrorText } from './ticketText';
@@ -27,8 +34,9 @@ const TicketCheckout = ({ navigation, route }) => {
   const { t } = useI18n();
   const months = t('tix.months').split(',');
   const weekdays = t('tix.weekdays').split(',');
-  const { event, ticketType, quantity } = route.params;
-  const total = ticketType.price * quantity;
+  const { event, ticketType, quantity, donation } = route.params;
+  const total = donation ? donation.amount : ticketType.price * quantity;
+  const [showName, setShowName] = useState(false);
 
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
@@ -56,7 +64,9 @@ const TicketCheckout = ({ navigation, route }) => {
     setError('');
     setFieldErrors({});
     try {
-      const order = await createOrder({ ticketType: ticketType.id, quantity, phone, name });
+      const order = donation
+        ? await createDonation({ slug: event.slug, amount: donation.amount, phone, name, showName })
+        : await createOrder({ ticketType: ticketType.id, quantity, phone, name, showName });
       // The key to the tickets, kept before anything else can go wrong.
       await saveReference(order.reference);
       cacheOrder(order);
@@ -100,8 +110,8 @@ const TicketCheckout = ({ navigation, route }) => {
               <View style={[styles.notch, styles.notchRight]} />
             </View>
             <View style={styles.stubLine}>
-              <Text style={styles.stubItem}>{quantity} × {ticketType.name}</Text>
-              <Text style={styles.stubItem}>{formatKes(ticketType.price)}</Text>
+              <Text style={styles.stubItem}>{donation ? t('tix.fund.contribution') : `${quantity} × ${ticketType.name}`}</Text>
+              <Text style={styles.stubItem}>{formatKes(donation ? donation.amount : ticketType.price)}</Text>
             </View>
             <View style={[styles.stubLine, styles.stubTotal]}>
               <Text style={styles.totalLabel}>{t('tix.total')}</Text>
@@ -147,6 +157,18 @@ const TicketCheckout = ({ navigation, route }) => {
             />
           </View>
           {!!fieldErrors.name && <Text style={[styles.hint, styles.bad]}>{fieldErrors.name}</Text>}
+
+          {/* Consent to appear on the public list: off until they say so. */}
+          {!!event.show_supporters && (
+            <View style={styles.consent}>
+              <View style={styles.consentText}>
+                <Text style={styles.consentTitle}>{t('tix.sup.consent')}</Text>
+                <Text style={styles.consentHint}>{showName ? t('tix.sup.consentOn') : t('tix.sup.consentOff')}</Text>
+              </View>
+              <Switch value={showName} onValueChange={setShowName} trackColor={{ true: T.gold, false: T.raised }}
+                      thumbColor={T.ivory} accessibilityLabel={t('tix.sup.consent')} testID="checkout-show-name" />
+            </View>
+          )}
 
           {!!error && (
             <View style={styles.error} accessibilityLiveRegion="polite">
@@ -200,6 +222,13 @@ const styles = StyleSheet.create({
   totalLabel: { fontFamily: F.uiBold, fontSize: 12, letterSpacing: 1.6, textTransform: 'uppercase', color: 'rgba(22,19,14,0.55)', alignSelf: 'center' },
   totalValue: { fontFamily: F.display, fontSize: 30, lineHeight: 33, color: T.paperInk },
 
+  consent: {
+    flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 22, padding: 16, borderRadius: 16,
+    backgroundColor: T.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: T.line,
+  },
+  consentText: { flex: 1 },
+  consentTitle: { fontFamily: F.uiBold, fontSize: 14.5, color: T.ivory },
+  consentHint: { fontFamily: F.ui, fontSize: 12.5, lineHeight: 18, color: T.muted, marginTop: 3 },
   label: { fontFamily: F.uiBold, fontSize: 12, letterSpacing: 1.4, textTransform: 'uppercase', color: T.muted, marginTop: 26, marginBottom: 8 },
   field: {
     flexDirection: 'row', alignItems: 'center', gap: 10, height: 54, borderRadius: 16, paddingHorizontal: 16,
