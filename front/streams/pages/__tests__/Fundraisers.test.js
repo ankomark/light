@@ -68,7 +68,7 @@ beforeEach(async () => {
   mockSecure.clear();
   mockSecure.set('tickets_org_tokens', JSON.stringify({ access: 'a1', refresh: 'r1' }));
   __resetOrganiser();
-  __resetTickets();
+  __resetTickets(7);
   await clearAllCaches();
   await AsyncStorage.clear();
   mockScan = null;
@@ -115,6 +115,16 @@ describe('a fundraiser', () => {
     expect(navigation.push).toHaveBeenCalledWith('TicketCheckout', expect.objectContaining({
       donation: { amount: 1000 }, event: expect.objectContaining({ slug: 'help-amani', show_supporters: true }),
     }));
+  });
+
+  test('a ticket buyer shows their level with what they paid beside it, and how many', async () => {
+    routes['GET public/events/help-amani/'] = reply(200, FUND);
+    routes['GET public/events/help-amani/supporters/'] = reply(200, { count: 1, next: null, results: [
+      { name: 'Kamau', phone: '072****111', ticket_type: 'VIP', quantity: 2, amount: 4000, paid_at: ago(3) }] });
+    const screen = render(<TicketFundraiser navigation={nav()} route={{ params: { slug: 'help-amani' } }} />);
+    await waitFor(() => expect(screen.getByText('VIP')).toBeTruthy());
+    expect(screen.getByText('KES 4,000')).toBeTruthy();
+    expect(screen.getByText('tix.sup.tickets:2')).toBeTruthy();
   });
 
   test('a private total shows the goal only, and no list', async () => {

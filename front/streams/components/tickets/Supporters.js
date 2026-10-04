@@ -64,7 +64,11 @@ export const SupporterRow = ({ s, t, months }) => {
       <View style={styles.right}>
         {s.ticket_type ? (
           <>
-            <Text style={styles.level} numberOfLines={1}>{s.ticket_type}</Text>
+            {/* The level, and what was paid for it, side by side. */}
+            <View style={styles.levelRow}>
+              <Text style={styles.level} numberOfLines={1}>{s.ticket_type}</Text>
+              <Text style={styles.paid}>{formatKes(s.amount)}</Text>
+            </View>
             <Text style={styles.qty}>{t('tix.sup.tickets', { n: s.quantity })}</Text>
           </>
         ) : (
@@ -166,8 +170,10 @@ const styles = StyleSheet.create({
   initial: { fontFamily: F.uiHeavy, fontSize: 15, color: T.paperInk },
   name: { fontFamily: F.uiBold, fontSize: 14.5, color: T.ivory },
   meta: { fontFamily: F.ui, fontSize: 12, color: T.muted, marginTop: 2 },
-  right: { alignItems: 'flex-end', maxWidth: '38%' },
-  level: { fontFamily: F.uiBold, fontSize: 13, color: T.champagne },
+  right: { alignItems: 'flex-end', maxWidth: '52%' },
+  levelRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  level: { flexShrink: 1, fontFamily: F.uiBold, fontSize: 13, color: T.champagne },
+  paid: { fontFamily: F.uiHeavy, fontSize: 14, color: T.ivory },
   qty: { fontFamily: F.ui, fontSize: 12, color: T.muted, marginTop: 2 },
   amount: { fontFamily: F.uiHeavy, fontSize: 14, color: T.champagne },
   all: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 12 },
