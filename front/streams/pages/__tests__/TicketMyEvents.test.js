@@ -66,7 +66,7 @@ const ev = (extra) => ({
 });
 const SUMMARY = {
   collected: 60000, orders: 80, tickets_sold: 120, tickets_available: 130, checked_in: 12, failed_attempts: 3,
-  by_ticket_type: [], by_day: [{ date: '2026-10-01', collected: 20000 }, { date: '2026-10-02', collected: 40000 }],
+  by_ticket_type: [{ id: 31, name: 'Regular', price: 500, quantity: 200, sold: 120, collected: 60000 }], by_day: [{ date: '2026-10-01', collected: 20000 }, { date: '2026-10-02', collected: 40000 }],
 };
 
 let routes;
@@ -130,7 +130,10 @@ describe('My events', () => {
       ev({ id: 1, title: 'Youth Camp', review_status: 'rejected', review_note: 'Poster uses a copyrighted logo' }),
       ev({ id: 2, status: 'published', review_status: 'approved', publish_requested: true }),
     ] });
-    routes['GET organiser/overview/'] = reply(200, { collected: 152000, tickets_sold: 300, upcoming_live_events: 1 });
+    const today = new Date();
+    const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    routes['GET organiser/overview/'] = reply(200, { collected: 152000, tickets_sold: 300, upcoming_live_events: 1,
+      by_day: [{ date: key, collected: 7500, tickets: 3 }] });
     routes['GET organiser/tills/?page_size=100'] = reply(200, { results: [
       { id: 4, till_number: '5123456', business_name: 'AMANI CHOIR', status: 'rejected', status_label: 'Rejected', note: "Name doesn't match Safaricom" },
     ] });
@@ -141,6 +144,8 @@ describe('My events', () => {
     expect(screen.getByText('Poster uses a copyrighted logo')).toBeTruthy();
     expect(screen.getByText('tix.mine.sold:120,250')).toBeTruthy();
     expect(screen.getByText('KES 152,000')).toBeTruthy();
+    expect(screen.getByText('KES 7,500')).toBeTruthy();               // the two-week trend
+    expect(screen.getByTestId('chart-spark', { includeHiddenElements: true })).toBeTruthy();
     expect(screen.getByText("Name doesn't match Safaricom")).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('mine-event-1'));
@@ -177,8 +182,13 @@ describe('running one event', () => {
     routes['POST organiser/events/9/publish/'] = reply(200, ev({ review_status: 'pending', publish_requested: true }));
     const { screen } = open(ev());
     await waitFor(() => expect(screen.getByText('tix.mine.state.draftBody')).toBeTruthy());
-    expect(screen.getByText('KES 60,000')).toBeTruthy();
+    expect(screen.getAllByText('KES 60,000').length).toBeGreaterThan(0);
     expect(screen.getByText('120/250')).toBeTruthy();
+    // The charts: how full, how many in, money by day, the split by level.
+    expect(screen.getByTestId('ring-sold')).toBeTruthy();
+    expect(screen.getByTestId('ring-admitted')).toBeTruthy();
+    expect(screen.getByTestId('chart-days')).toBeTruthy();
+    expect(screen.getByTestId('chart-levels')).toBeTruthy();
     await act(async () => { fireEvent.press(screen.getByTestId('mine-publish')); });
     await waitFor(() => expect(screen.getByText('tix.mine.state.inReviewBody')).toBeTruthy());
     expect(screen.queryByTestId('mine-publish')).toBeNull();

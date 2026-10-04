@@ -27,6 +27,7 @@ import {
 } from '../../services/ticketsOrganiser';
 import { formatKes, formatWhen } from '../../services/tickets';
 import { confirmAction } from '../../utils/adminConfirm';
+import { DailyBars, LevelShare, Ring } from '../../components/tickets/Charts';
 import { T, F, tap, Kicker, Pill, Notice, GoldButton, GhostButton } from '../../components/tickets/TicketKit';
 import { eventState, isOver, staffNote } from './eventState';
 import { VisibilityControls, pickDocument } from './HostSteps';
@@ -34,7 +35,6 @@ import { Progress } from '../../components/tickets/Supporters';
 import { wholeNumber, NAME_MAX, MAX_LEVELS } from './eventDraft';
 import { ticketErrorText } from './ticketText';
 
-const DAYS_SHOWN = 14;
 
 const TicketManageEvent = ({ navigation, route }) => {
   const kbScroll = useRef(null);
@@ -179,8 +179,6 @@ const TicketManageEvent = ({ navigation, route }) => {
   const closed = event.status === 'cancelled' || over;
   const fund = event.kind === 'fundraiser';
   const levels = event.ticket_types || [];
-  const days = (summary?.by_day || []).slice(-DAYS_SHOWN);
-  const dayMax = Math.max(1, ...days.map((d) => d.collected || 0));
   const capacity = (summary?.tickets_sold || 0) + (summary?.tickets_available || 0);
 
   return (
@@ -258,20 +256,18 @@ const TicketManageEvent = ({ navigation, route }) => {
                   <Tile value={String(summary.orders || 0)} label={t('tix.mine.orders')} />
                   <Tile value={String(summary.failed_attempts)} label={t('tix.mine.failed')} muted />
                 </View>
+                {/* How full, and how many are in: the two numbers on the night. */}
+                <View style={styles.rings}>
+                  <Ring value={summary.tickets_sold} total={capacity} label={t('tix.chart.sold')}
+                        sub={t('tix.chart.soldOf', { sold: summary.tickets_sold, total: capacity })} testID="ring-sold" />
+                  <Ring value={summary.checked_in} total={summary.tickets_sold} label={t('tix.chart.admitted')}
+                        sub={t('tix.chart.admittedOf', { n: summary.checked_in, total: summary.tickets_sold })}
+                        color={T.success} testID="ring-admitted" />
+                </View>
               </>
             )}
-            {days.length > 0 && (
-              <View style={styles.chart} accessible accessibilityLabel={t('tix.mine.byDay')}>
-                <Text style={styles.chartLabel}>{t('tix.mine.byDay')}</Text>
-                <View style={styles.bars}>
-                  {days.map((d) => (
-                    <View key={d.date} style={styles.barCol}>
-                      <View style={[styles.bar, { height: Math.max(3, ((d.collected || 0) / dayMax) * 64) }]} />
-                    </View>
-                  ))}
-                </View>
-              </View>
-            )}
+            <DailyBars byDay={summary.by_day} t={t} months={months} />
+            {!fund && <LevelShare levels={summary.by_ticket_type} t={t} />}
           </>
         )}
 
@@ -442,11 +438,7 @@ const styles = StyleSheet.create({
   tileValue: { fontFamily: F.display, fontSize: 24, color: T.ivory },
   tileMuted: { color: T.muted },
   tileLabel: { fontFamily: F.uiBold, fontSize: 10.5, letterSpacing: 1.2, textTransform: 'uppercase', color: T.faint, marginTop: 2 },
-  chart: { padding: 14, borderRadius: 18, backgroundColor: T.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: T.line },
-  chartLabel: { fontFamily: F.uiBold, fontSize: 10.5, letterSpacing: 1.2, textTransform: 'uppercase', color: T.faint },
-  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 70, marginTop: 10 },
-  barCol: { flex: 1, justifyContent: 'flex-end' },
-  bar: { borderRadius: 3, backgroundColor: T.gold },
+  rings: { flexDirection: 'row', gap: 10, marginTop: 12 },
 
   level: {
     marginBottom: 10, padding: 14, borderRadius: 18,

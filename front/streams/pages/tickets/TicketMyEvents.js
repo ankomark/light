@@ -23,6 +23,7 @@ import { fetchMyEvents, fetchOverview, fetchTills, logOut } from '../../services
 import { confirmAction } from '../../utils/adminConfirm';
 import { formatKes, formatWhen } from '../../services/tickets';
 import { T, F, tap, Kicker, Pill, Notice, GoldButton } from '../../components/tickets/TicketKit';
+import { Spark } from '../../components/tickets/Charts';
 import { eventState, groupEvents, soldOf, staffNote } from './eventState';
 import { ticketErrorText } from './ticketText';
 
@@ -99,11 +100,25 @@ const TicketMyEvents = ({ navigation }) => {
         </TouchableOpacity>
       </View>
       {!!overview && (
-        <View style={styles.totals}>
-          <Total value={formatKes(overview.collected)} label={t('tix.mine.collected')} wide />
-          <Total value={String(overview.tickets_sold)} label={t('tix.mine.ticketsSold')} />
-          <Total value={String(overview.upcoming_live_events)} label={t('tix.mine.live')} />
-        </View>
+        <>
+          <View style={styles.totals}>
+            <Total value={formatKes(overview.collected)} label={t('tix.mine.collected')} wide />
+            <Total value={String(overview.tickets_sold)} label={t('tix.mine.ticketsSold')} />
+            <Total value={String(overview.upcoming_live_events)} label={t('tix.mine.live')} />
+          </View>
+          {/* The last two weeks across every event, at a glance. */}
+          {Array.isArray(overview.by_day) && (
+            <View style={styles.trend}>
+              <View style={styles.trendHead}>
+                <Text style={styles.trendLabel}>{t('tix.chart.days', { n: 14 })}</Text>
+                <Text style={styles.trendValue}>
+                  {formatKes(overview.by_day.reduce((s, d) => s + (d.collected || 0), 0))}
+                </Text>
+              </View>
+              <Spark byDay={overview.by_day} />
+            </View>
+          )}
+        </>
       )}
     </View>
   );
@@ -207,6 +222,13 @@ const Total = ({ value, label, wide }) => (
 );
 
 const styles = StyleSheet.create({
+  trend: {
+    marginTop: 10, padding: 14, borderRadius: 18, backgroundColor: T.surface,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: T.line,
+  },
+  trendHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 },
+  trendLabel: { fontFamily: F.uiBold, fontSize: 10.5, letterSpacing: 1.2, textTransform: 'uppercase', color: T.faint },
+  trendValue: { fontFamily: F.uiHeavy, fontSize: 14, color: T.ivory },
   signOut: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 28, paddingVertical: 14,
     borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: T.lineStrong,
