@@ -1,4 +1,4 @@
-// import React from "react";
+import React from "react";
 // import { View, Text, StyleSheet } from "react-native";
 // import TrackList from "./TrackList";
 // // import Footer from "./Footer";
@@ -24,7 +24,7 @@
  
 // });
 import React from "react";
-import { View, Text, StyleSheet,ActivityIndicator } from "react-native";
+import { View, StyleSheet, ActivityIndicator } from "react-native";
 import SocialFeed from "./SocialFeed";
 import { useAuth } from "../context/useAuth";
 import { useNavigation } from '@react-navigation/native';
@@ -36,14 +36,18 @@ const HomePage = () => {
   React.useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated) {
-      navigation.navigate('Login');
+      // A reset, not a push: Back from Login must not land on a Home that
+      // sends them straight back to Login.
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } else if (!isEmailVerified) {
       // Email verification is required before app access.
       navigation.reset({ index: 0, routes: [{ name: 'EmailVerification' }] });
     }
-  }, [isAuthenticated, isEmailVerified, isLoading]);
+  }, [isAuthenticated, isEmailVerified, isLoading, navigation]);
 
-  if (isLoading) {
+  // Signed out, or not verified yet: on the way elsewhere — don't fetch a feed
+  // that can only fail.
+  if (isLoading || !isAuthenticated || !isEmailVerified) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" />

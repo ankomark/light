@@ -69,6 +69,12 @@ NEG_AUTHOR_PENALTY = _cfg('FEED_NEG_AUTHOR_PENALTY', 6.0)
 NEG_TAG_PENALTY = _cfg('FEED_NEG_TAG_PENALTY', 4.0)
 NEG_TTL = _cfg('FEED_NEG_TTL', 12 * 60 * 60)
 NEG_SAMPLE_CAP = _cfg('FEED_NEG_SAMPLE_CAP', 200)
+# Quick skips: posts scrolled past in barely a second. One means nothing; the
+# same author skipped again and again (and never liked) is a soft "not for me".
+QUICK_SKIP_MS = _cfg('FEED_QUICK_SKIP_MS', 1200)
+QUICK_SKIP_MIN = _cfg('FEED_QUICK_SKIP_MIN', 3)
+QUICK_SKIP_SAMPLE_CAP = _cfg('FEED_QUICK_SKIP_SAMPLE_CAP', 300)
+SKIP_AUTHOR_PENALTY = _cfg('FEED_SKIP_AUTHOR_PENALTY', 2.0)
 
 
 def _score(row, now, taste=None, neg=None):
@@ -92,6 +98,8 @@ def _score(row, now, taste=None, neg=None):
     if neg:
         if row.get('user_id') in neg['authors']:
             modifier -= NEG_AUTHOR_PENALTY
+        elif row.get('user_id') in neg.get('skipped', ()):
+            modifier -= SKIP_AUTHOR_PENALTY
         if post_tags and neg['tags'].intersection(post_tags):
             modifier -= NEG_TAG_PENALTY
     # Keep the base positive so recency still orders near-zero-signal posts.
@@ -185,7 +193,20 @@ def negative_taste(user):
         if author_id is not None:
             authors.add(author_id)
         tags.update((post_tags or '').lower().split())
-    profile = {'authors': authors, 'tags': tags}
+
+    # Authors the viewer keeps flicking past and never likes: a softer demotion
+    # than "not interested", learnt without anyone pressing anything.
+    skips = {}
+    for author_id in (
+        WatchEvent.objects.filter(user=user, dwell_ms__lt=QUICK_SKIP_MS)
+        .order_by('-id').values_list('post__user_id', flat=True)[:QUICK_SKIP_SAMPLE_CAP]
+    ):
+        if author_id is not None:
+            skips[author_id] = skips.get(author_id, 0) + 1
+    liked = set(PostLike.objects.filter(user=user, post__user_id__in=list(skips))
+                .values_list('post__user_id', flat=True)) if skips else set()
+    skipped = {a for a, n in skips.items() if n >= QUICK_SKIP_MIN and a not in liked}
+    profile = {'authors': authors, 'tags': tags, 'skipped': skipped}
     cache.set(key, profile, NEG_TTL)
     return profile
 
@@ -199,19 +220,36 @@ def invalidate_user(user_id):
     ])
 
 
+def _top_candidates(qs, fields, cap):
+    """Up to `cap` newest rows plus up to `cap` most-engaged rows of `qs`
+    (de-duplicated): fresh posts and the ones people are responding to both
+    reach the scorer, whatever the table's size."""
+    newest = list(qs.order_by('-created_at').values(*fields)[:cap])
+    engaged = list(qs.order_by('-comments_count', '-likes_count', '-created_at').values(*fields)[:cap])
+    seen, out = set(), []
+    for row in newest + engaged:
+        if row['id'] not in seen:
+            seen.add(row['id'])
+            out.append(row)
+    return out
+
+
 # ── Trending (global, cached, lazily refreshed) ───────────────────────────────
 def compute_trending():
     """Rank recent posts app-wide and cache [{'id', 'a'(author)}]. Called lazily
     when the cache is cold, or by the `refresh_trending` command from a cron."""
     now = timezone.now()
-    rows = list(
+    base = (
         SocialPost.objects
         .filter(is_removed=False, created_at__gte=now - timedelta(days=TRENDING_WINDOW_DAYS),
                 visibility=SocialPost.VISIBILITY_PUBLIC)
         .exclude(user__is_deactivated=True)
-        .values('id', 'user_id', 'likes_count', 'comments_count', 'view_count', 'created_at')
-        [:CANDIDATE_CAP * 2]
     )
+    fields = ('id', 'user_id', 'likes_count', 'comments_count', 'view_count', 'created_at')
+    # The newest and the most engaged, never an arbitrary slice: once the
+    # window holds more posts than the cap, an unordered slice would score a
+    # random subset and could miss the posts that are actually trending.
+    rows = _top_candidates(base, fields, CANDIDATE_CAP)
     rows.sort(key=lambda r: _score(r, now), reverse=True)
     trending = [{'id': r['id'], 'a': r['user_id']} for r in rows[:TRENDING_SIZE]]
     cache.set('feed:trending', trending, TRENDING_TTL)
@@ -343,8 +381,8 @@ def build_ranked_feed(user):
             qs = qs.exclude(user_id__in=blocked)
         if hidden:
             qs = qs.exclude(id__in=hidden)
-        rows = list(qs.values('id', 'user_id', 'likes_count', 'comments_count',
-                              'view_count', 'created_at', 'tags')[:CANDIDATE_CAP])
+        rows = _top_candidates(qs, ('id', 'user_id', 'likes_count', 'comments_count',
+                                    'view_count', 'created_at', 'tags'), CANDIDATE_CAP)
         rows.sort(key=lambda r: _score(r, now, taste, neg), reverse=True)
         for r in rows:
             authors[r['id']] = r['user_id']
@@ -397,6 +435,10 @@ def get_snapshot(user, *, fresh=False):
     if not fresh:
         cached = cache.get(key)
         if cached is not None:
+            # Sliding expiry: someone still scrolling keeps the same order, so
+            # page 4 never comes from a rebuilt list that repeats or skips posts.
+            cache.touch(key, SNAPSHOT_TTL)
+            cache.touch(f'feed:reason:{user.id}', SNAPSHOT_TTL)
             return cached
     snapshot = build_ranked_feed(user)
     cache.set(key, snapshot, SNAPSHOT_TTL)

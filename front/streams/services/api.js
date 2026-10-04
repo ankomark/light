@@ -590,6 +590,9 @@ export const fetchSocialPosts = async (cursor = null, feed = null, search = '', 
   const retry = async (attempt = 1) => {
     try {
       const response = await apiRequest('get', '/social-posts/', null, {
+        // A feed page is small: 20 s, not the default minute, so a dead
+        // network falls back to the saved feed while the person still cares.
+        timeout: FEED_TIMEOUT_MS,
         params: {
           page_size: 20,
           ...(cursor ? { cursor } : {}),
@@ -604,7 +607,11 @@ export const fetchSocialPosts = async (cursor = null, feed = null, search = '', 
       if (!response?.results) throw new Error('Invalid response format from server');
       return response;
     } catch (error) {
-      if (attempt <= 2 && error.response?.status >= 500) {
+      // Server trouble: twice more. A dropped or timed-out connection (no
+      // response at all — common on a moving phone): once more.
+      const serverError = error.response?.status >= 500;
+      const noResponse = !error.response;
+      if ((serverError && attempt <= 2) || (noResponse && attempt <= 1)) {
         await new Promise(r => setTimeout(r, 1000 * attempt));
         return retry(attempt + 1);
       }
@@ -615,6 +622,7 @@ export const fetchSocialPosts = async (cursor = null, feed = null, search = '', 
 
   return retry();
 };
+const FEED_TIMEOUT_MS = 20000;
 
 // Social Post Endpoints
 export const likePost = async (postId) => {

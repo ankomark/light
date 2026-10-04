@@ -5,7 +5,6 @@ import {
   FlatList,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   TouchableOpacity,
   Pressable,
   Platform,
@@ -44,6 +43,9 @@ import formatCount from '../utils/formatCount';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { on, EVENTS } from '../utils/appEvents';
 import { useContentWidth, useMaxMediaHeight, FONT_SCALE } from '../utils/layout';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import useOnline from '../hooks/useOnline';
+import OfflineBanner from './OfflineBanner';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
 // The menu's own coloured Explore artwork, kept in its colours (not tinted
@@ -106,6 +108,17 @@ const feedCacheKey = (userId, feedType) => userKey(userId, `feed:${feedType}`);
 // read the same tab the feed is about to show — two places agreeing by
 // coincidence is how a stale Following feed ends up flashing under For You.
 const DEFAULT_FEED_TYPE = 'for_you';
+
+// Room the mini player takes over the bottom of the feed when it shows.
+const MINI_PLAYER_SPACE = 76;
+
+/** `prev` then the posts of `more` it doesn't have yet, in order. */
+export const dedupeAppend = (prev, more) => {
+  if (!more?.length) return prev;
+  const have = new Set(prev.map((p) => p.id));
+  const fresh = more.filter((p) => !have.has(p.id) && have.add(p.id));
+  return fresh.length ? [...prev, ...fresh] : prev;
+};
 
 // How stale a feed may be and still be worth painting instantly. Half an hour
 // of drift on a social feed is invisible — the revalidation lands a moment
@@ -648,7 +661,16 @@ const SocialFeed = ({ showBackground = true }) => {
   const navigation = useNavigation();
   const audioRef = useRef(null);
   const currentUser = _cu;
-  const { pause: pauseMusic } = usePlayer();
+  const { pause: pauseMusic, currentTrack } = usePlayer();
+  const insets = useSafeAreaInsets();
+  const online = useOnline();
+  // Which load is the latest: a slower, older answer (a tab or a search the
+  // user already left) must never replace a newer one.
+  const loadSeqRef = useRef(0);
+  const loadingRef = useRef(false);
+  // On screen and the app in front: the "new posts" probe only runs then.
+  const focusedRef = useRef(true);
+  const appActiveRef = useRef(AppState.currentState === 'active');
   const { preferences } = usePreferences();
   const lastFetchTimeRef = useRef(0);
 
@@ -785,6 +807,12 @@ const SocialFeed = ({ showBackground = true }) => {
   const loadPosts = useCallback(async (isRefresh = false) => {
     const now = Date.now();
     if (!isRefresh && now - lastFetchTimeRef.current < 1000) return;
+    // Opening Home fires both the mount and the focus load: one request, not
+    // two. (A refresh, a tab or a search still supersedes one in flight.)
+    if (!isRefresh && loadingRef.current) return;
+    const seq = ++loadSeqRef.current;
+    const stale = () => seq !== loadSeqRef.current;
+    loadingRef.current = true;
 
     try {
       // Only claim "loading" when there is genuinely nothing on screen. With
@@ -800,6 +828,7 @@ const SocialFeed = ({ showBackground = true }) => {
       // For You is the ranked feed (?rank=1); Following stays chronological.
       const useRank = !search && feedType === 'for_you';
       const response = await fetchSocialPosts(null, search ? null : feedType, search, { fresh: isRefresh, rank: useRank });
+      if (stale()) return;
       const raw = response?.results ?? [];
       const valid = raw.filter(p => p.user && typeof p.user === 'object');
       const processed = valid.map(p => processPost(p, followStatesRef.current));
@@ -817,22 +846,32 @@ const SocialFeed = ({ showBackground = true }) => {
       if (!search && processed.length && currentUser?.id) {
         writeCache(cacheKey, processed);
       }
-    } catch (err) {
-      setError(err);
-      if (!isRefresh) {
-        Alert.alert(
-          t('feed.loadErrorTitle'),
-          err.response?.status === 500
-            ? t('feed.loadErrorServer')
-            : t('feed.loadErrorNetwork'),
-          [{ text: 'OK' }, { text: 'Retry', onPress: () => loadPosts(false) }]
-        );
+      // The next page now, in the background: the first scroll never waits.
+      if (response?.next) {
+        fetchFeedByUrl(response.next).then((more) => {
+          if (stale()) return;
+          const extra = (more?.results ?? [])
+            .filter((p) => p.user && typeof p.user === 'object')
+            .map((p) => processPost(p, followStatesRef.current));
+          setPosts((prev) => dedupeAppend(prev, extra));
+          prefetchMedia(extra);
+          setNextUrl(more?.next ?? null);
+          setHasMore(!!more?.next);
+        }).catch(() => { /* the usual load-more will try again */ });
       }
+    } catch (err) {
+      if (stale()) return;
+      // No popup: what is on screen stays, a slim banner says what happened
+      // and offers Retry (renderEmptyComponent covers an empty screen).
+      setError(err);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (!stale()) {
+        loadingRef.current = false;
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [feedType, prefetchMedia, cacheKey, currentUser?.id, t]);
+  }, [feedType, prefetchMedia, cacheKey, currentUser?.id]);
 
   // A background upload just finished: put the post at the top of this feed
   // now. The feed only revalidates every couple of minutes, so without this
@@ -854,15 +893,18 @@ const SocialFeed = ({ showBackground = true }) => {
   const loadMorePosts = useCallback(async () => {
     if (loadingMore || !hasMore || loading || !nextUrl) return;
     setLoadingMore(true);
+    const seq = loadSeqRef.current;
     try {
       // Follow the server's `next` link — carries the feed's mode + pagination
       // style (page for ranked, cursor for chronological).
       const response = await fetchFeedByUrl(nextUrl);
+      if (seq !== loadSeqRef.current) return;   // the tab or search changed meanwhile
       const raw = response?.results ?? [];
       const processed = raw
         .filter(p => p.user && typeof p.user === 'object')
         .map(p => processPost(p, followStatesRef.current));
-      setPosts(prev => [...prev, ...processed]);
+      // A ranked list rebuilt mid-scroll can send a post again: once only.
+      setPosts(prev => dedupeAppend(prev, processed));
       prefetchMedia(processed);
       setNextUrl(response?.next ?? null);
       setHasMore(!!response?.next);
@@ -889,6 +931,7 @@ const SocialFeed = ({ showBackground = true }) => {
     searchRef.current = '';
     setSearchQuery('');
     lastFetchTimeRef.current = 0; // bypass the throttle so the tab reloads now
+    loadingRef.current = false;   // the old tab's load in flight doesn't hold this one
     setFeedType(type);
   }, [feedType]);
 
@@ -904,6 +947,7 @@ const SocialFeed = ({ showBackground = true }) => {
   // there would be misleading; pull-to-refresh recomputes it instead. Uses the
   // lightweight /latest/ endpoint (just the newest id) — no full feed fetch.
   const checkForNewPosts = useCallback(async () => {
+    if (!focusedRef.current || !appActiveRef.current) return;   // no data spent off screen
     if (refreshing || loading || searchRef.current || feedType !== 'following') return;
     try {
       const response = await fetchLatestPostId('following');
@@ -925,9 +969,16 @@ const SocialFeed = ({ showBackground = true }) => {
     return () => clearInterval(interval);
   }, [checkForNewPosts]);
 
+  // Back online after a failed load: try again by itself.
+  useEffect(() => {
+    if (online && error) loadPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
+
   // Flush dwell events periodically, on background, and on unmount.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
+      appActiveRef.current = s === 'active';
       if (s !== 'active') flushWatch(true);
     });
     const iv = setInterval(() => flushWatch(false), 30000);
@@ -936,10 +987,12 @@ const SocialFeed = ({ showBackground = true }) => {
 
   useFocusEffect(
     useCallback(() => {
+      focusedRef.current = true;
       const now = Date.now();
       if (now - lastFetchTimeRef.current > 120000) loadPosts();
       // Leaving the screen: pause the focused video, stop audio, send dwell.
       return () => {
+        focusedRef.current = false;
         focusedVideoIdRef.current = null;
         setFocusedVideoId(null);
         stopSongRef.current?.();
@@ -953,7 +1006,9 @@ const SocialFeed = ({ showBackground = true }) => {
     if (audioRef.current) audioRef.current.unloadAsync().catch(() => {});
   }, []);
 
+  const songTokenRef = useRef(0);
   const stopSong = useCallback(async () => {
+    songTokenRef.current += 1;    // any load still under way is now stale
     if (audioRef.current) {
       try {
         await audioRef.current.stopAsync();
@@ -973,12 +1028,20 @@ const SocialFeed = ({ showBackground = true }) => {
   // wins over attached-song audio, so callers gate this on there being no video.
   const playSong = useCallback(async (post) => {
     if (!post?.song_audio_url || playingSongPostIdRef.current === post.id) return;
+    // Claimed before anything is awaited: a second tap (or the next post
+    // scrolling in) while this one loads supersedes it, and the loser's sound
+    // is unloaded instead of playing on with no way to stop it.
+    const token = ++songTokenRef.current;
     try {
       if (audioRef.current) await stopSong();
       const { sound } = await createSound(
         { uri: post.song_audio_url },
         { shouldPlay: false, isLooping: true }
       );
+      if (token !== songTokenRef.current) {
+        sound.unloadAsync?.().catch(() => {});
+        return;
+      }
       audioRef.current = sound;
       playingSongPostIdRef.current = post.id;
       setCurrentlyPlayingPostId(post.id);
@@ -1351,7 +1414,7 @@ const SocialFeed = ({ showBackground = true }) => {
       return (
         <View style={styles.emptyContainer}>
           <Feather name="search" size={46} color={colors.textMuted} />
-          <Text style={styles.emptyText}>No results for &quot;{searchQuery}&quot;</Text>
+          <Text style={styles.emptyText}>{t('feed.noResults', { q: searchQuery })}</Text>
         </View>
       );
     }
@@ -1496,6 +1559,12 @@ const SocialFeed = ({ showBackground = true }) => {
                 scrolls up behind it for the frosted-glass effect. */}
             <View style={{ height: topBarH }} />
             <StoriesBar navigation={navigation} />
+            {/* Offline, or a load failed, with posts still on screen: say so
+                quietly instead of a popup. (Nothing on screen: the empty
+                state below has its own Retry.) */}
+            {posts.length > 0 && (!online || error) && (
+              <OfflineBanner kind={!online ? 'offline' : 'failed'} onRetry={() => loadPosts(true)} />
+            )}
             {/* Your own posts that are still uploading. */}
             <PendingPosts />
           </View>
@@ -1504,6 +1573,8 @@ const SocialFeed = ({ showBackground = true }) => {
         keyExtractor={keyExtractor}
         contentContainerStyle={[
           styles.listContent,
+          // Clear of the gesture bar and, when it shows, the mini player.
+          { paddingBottom: 20 + insets.bottom + (currentTrack ? MINI_PLAYER_SPACE : 0) },
           posts.length === 0 && styles.emptyListContent
         ]}
         refreshing={refreshing}

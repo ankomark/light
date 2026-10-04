@@ -309,6 +309,15 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         if not isinstance(ids, list):
             return Response({'error': 'post_ids must be a list'}, status=status.HTTP_400_BAD_REQUEST)
         counted = _count_views(request.user, ids[:VIEW_BATCH_CAP])
+        # What was really on screen: demoted on the next refresh of For You.
+        from .. import feed as feedrank
+        clean = []
+        for pid in ids[:VIEW_BATCH_CAP]:
+            try:
+                clean.append(int(pid))
+            except (TypeError, ValueError):
+                continue
+        feedrank.mark_seen(request.user.id, clean)
         return Response({'counted': counted}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
@@ -451,8 +460,9 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             if reason:
                 row['feed_reason'] = reason
 
-        # Remember what we served so later refreshes demote it (cache-only).
-        feedrank.mark_seen(user.id, page_ids)
+        # "Seen" is recorded when a post is actually on screen (mark_viewed),
+        # not when it is sent: a page sent ahead and never scrolled to is not
+        # demoted on the next refresh.
 
         has_next = start + size < len(snapshot)
         base = request.build_absolute_uri(request.path)

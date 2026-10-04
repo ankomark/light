@@ -1204,6 +1204,9 @@ export const STRINGS = {
     'common.error': 'Error',
     'common.save': 'Save',
     'common.retry': 'Try Again',
+    'net.offlineSaved': "You're offline. Showing what was saved.",
+    'net.loadFailed': "Couldn't refresh. Showing what was saved.",
+    'feed.noResults': 'No results for "{q}"',
     'common.block': 'Block',
     'common.blocked': 'Blocked',
 
@@ -6080,6 +6083,9 @@ export const STRINGS = {
     'common.error': 'Hitilafu',
     'common.save': 'Hifadhi',
     'common.retry': 'Jaribu Tena',
+    'net.offlineSaved': 'Huna mtandao. Unaona kilichohifadhiwa.',
+    'net.loadFailed': 'Imeshindwa kusasisha. Unaona kilichohifadhiwa.',
+    'feed.noResults': 'Hakuna matokeo ya "{q}"',
     'common.block': 'Zuia',
     'common.blocked': 'Amezuiwa',
 

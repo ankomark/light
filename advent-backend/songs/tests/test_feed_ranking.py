@@ -126,6 +126,48 @@ class RankedFeedEndpointTests(APITestCase):
         # The seen high-scorer is demoted below the unseen low-scorer.
         self.assertLess(snap.index(lo.id), snap.index(hi.id))
 
+    def test_a_post_counts_as_seen_when_viewed_not_when_sent(self):
+        res = self.client.get('/api/social-posts/?rank=1&fresh=1')
+        self.assertIn(self.bob_post.id, self._ids(res))
+        self.assertEqual(feed.get_seen(self.alice.id), [])          # sent, not yet on screen
+        self.client.post('/api/social-posts/mark_viewed/', {'post_ids': [self.bob_post.id, 'x']}, format='json')
+        self.assertEqual(feed.get_seen(self.alice.id), [self.bob_post.id])
+
+    def test_scrolling_keeps_the_snapshot_alive(self):
+        self.client.get('/api/social-posts/?rank=1&fresh=1')
+        with mock.patch.object(feed.cache, 'touch', wraps=feed.cache.touch) as touch:
+            self.client.get('/api/social-posts/?rank=1&page=2')
+            touched = [c.args[0] for c in touch.call_args_list]
+        self.assertIn(f'feed:rank:{self.alice.id}', touched)
+
+    def test_an_author_flicked_past_again_and_again_is_demoted(self):
+        from songs.models import WatchEvent
+        follow(self.alice, self.carol)
+        skipped = mkpost(self.bob, likes=6)        # would lead on engagement
+        kept = mkpost(self.carol, likes=5)
+        for _ in range(feed.QUICK_SKIP_MIN):
+            WatchEvent.objects.create(user=self.alice, post=self.bob_post, dwell_ms=600)
+        cache.clear()
+        snap = feed.build_ranked_feed(self.alice)
+        self.assertLess(snap.index(kept.id), snap.index(skipped.id))
+
+    def test_a_liked_author_is_not_demoted_for_quick_skips(self):
+        from songs.models import PostLike, WatchEvent
+        for _ in range(feed.QUICK_SKIP_MIN):
+            WatchEvent.objects.create(user=self.alice, post=self.bob_post, dwell_ms=600)
+        PostLike.objects.create(user=self.alice, post=self.bob_post)
+        cache.clear()
+        self.assertNotIn(self.bob.id, feed.negative_taste(self.alice)['skipped'])
+
+    def test_trending_reaches_engaged_posts_beyond_the_cap(self):
+        star = mkpost(self.dave, likes=500, comments=80)
+        for _ in range(4):
+            mkpost(self.dave, likes=0)              # newer, but nobody cares
+        with mock.patch.object(feed, 'CANDIDATE_CAP', 2):
+            cache.clear()
+            ids = [t['id'] for t in feed.compute_trending()]
+        self.assertIn(star.id, ids)
+
     def test_taste_boosts_matching_tag(self):
         from songs import feed
         # Alice likes a 'worship' post -> her taste tags include 'worship'.

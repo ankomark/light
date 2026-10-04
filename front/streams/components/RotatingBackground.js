@@ -1,5 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { Animated, AppState, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
+import { NavigationContext } from '@react-navigation/native';
 import ScreenVignette from './ScreenVignette';
 import { useWallpapers } from '../context/WallpaperContext';
 
@@ -44,6 +46,9 @@ const RotatingBackground = ({
   const [top, setTop] = useState(0);
   const opacity = useRef(new Animated.Value(0)).current;
   const idxRef = useRef(0);
+  // The latest set, read by the timer without restarting it on every render.
+  const listRef = useRef(list);
+  listRef.current = list;
 
   // An admin deleting wallpapers can shrink the list while this is mounted, so
   // stale indices would point past the end. Reset to the start on any change.
@@ -54,10 +59,36 @@ const RotatingBackground = ({
     opacity.setValue(0);
   }, [list.length, opacity]);
 
+  // Rotate only while someone can see it: a screen further down the stack, or
+  // the app in the background, keeps its timer (and its downloads) quiet.
+  const navigation = useContext(NavigationContext);
+  const [visible, setVisible] = useState(true);
   useEffect(() => {
-    if (list.length < 2) return undefined;
-    const timer = setInterval(() => {
-      const next = (idxRef.current + 1) % list.length;
+    let focused = navigation?.isFocused ? navigation.isFocused() : true;
+    let active = AppState.currentState !== 'background';
+    const update = () => setVisible(focused && active);
+    const subs = [
+      AppState.addEventListener('change', (st) => { active = st !== 'background'; update(); }),
+    ];
+    if (navigation?.addListener) {
+      subs.push({ remove: navigation.addListener('focus', () => { focused = true; update(); }) });
+      subs.push({ remove: navigation.addListener('blur', () => { focused = false; update(); }) });
+    }
+    update();
+    return () => subs.forEach((x) => (typeof x.remove === 'function' ? x.remove() : null));
+  }, [navigation]);
+
+  useEffect(() => {
+    if (list.length < 2 || !visible) return undefined;
+    let live = true;
+    const timer = setInterval(async () => {
+      const urls = listRef.current;
+      if (urls.length < 2) return;
+      const next = (idxRef.current + 1) % urls.length;
+      // On the phone before it fades in: on a slow network the fade would
+      // otherwise reveal an empty layer. Not loaded in time: skip this turn.
+      const ready = await Image.prefetch(urls[next], 'memory-disk').catch(() => false);
+      if (!live || !ready) return;
       setTop(next);            // queue next image on the (still transparent) top layer
       opacity.setValue(0);
       Animated.timing(opacity, {
@@ -70,8 +101,8 @@ const RotatingBackground = ({
         setBottom(next);       // top is fully opaque now, so this swap is hidden
       });
     }, intervalMs);
-    return () => clearInterval(timer);
-  }, [list.length, intervalMs, opacity]);
+    return () => { live = false; clearInterval(timer); };
+  }, [list.length, intervalMs, opacity, visible]);
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: BASE_BG }]} pointerEvents="none">
@@ -80,13 +111,14 @@ const RotatingBackground = ({
       {hasImages && (
         <>
           {/* Stable bottom layer */}
-          <Image source={{ uri: list[bottom] }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          {/* Kept on disk: the next launch paints it with no download. */}
+          <Image source={{ uri: list[bottom] }} style={StyleSheet.absoluteFill} contentFit="cover"
+                 cachePolicy="memory-disk" transition={0} />
           {/* Top layer fades the next image in over the bottom */}
-          <Animated.Image
-            source={{ uri: list[top] }}
-            style={[StyleSheet.absoluteFill, { opacity }]}
-            resizeMode="cover"
-          />
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity }]}>
+            <Image source={{ uri: list[top] }} style={StyleSheet.absoluteFill} contentFit="cover"
+                   cachePolicy="memory-disk" transition={0} />
+          </Animated.View>
         </>
       )}
       {/* Legibility scrim */}
