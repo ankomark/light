@@ -231,14 +231,55 @@ export const isPast = (iso, now = Date.now()) => {
 // In secure storage (Keychain / Keystore): the references open the tickets,
 // and the tickets' codes get people through the gate. Each order is its own
 // entry, so no single value outgrows what the Keychain will hold.
+//
+// Kept per Streams account, never per phone: a ticket's code is as good as
+// the ticket, so someone else signing in on the same phone must not see it.
+// With nobody signed in there is nothing to list and nothing is kept.
 
-const REFS_KEY = 'tickets_refs';
 // Secure-store keys allow letters, digits, ".", "-" and "_".
-const orderKey = (reference) => `tickets_order_${String(reference).replace(/[^A-Za-z0-9._-]/g, '_')}`;
+const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, '_');
 
-let refsCache = null;                // [reference], newest first
+let owner = null;                    // the signed-in account's id, as a string
+const refsKey = () => `tickets_refs_u${safe(owner)}`;
+const orderKey = (reference) => `tickets_order_u${safe(owner)}_${safe(reference)}`;
+
+let refsCache = null;                // { owner, refs: [reference] newest first }
 const listeners = new Set();
 const announce = () => listeners.forEach((fn) => fn());
+
+// Before accounts: one list for the whole phone. Whose it was cannot be told,
+// so it is dropped rather than shown to whoever signs in next. A paid order
+// comes back through "Recover tickets" with the M-Pesa receipt.
+const LEGACY_REFS = 'tickets_refs';
+let legacyGone = null;
+const forgetLegacy = () => {
+  if (!legacyGone) {
+    legacyGone = (async () => {
+      try {
+        const refs = JSON.parse((await secure.getItemAsync(LEGACY_REFS)) || '[]');
+        for (const r of Array.isArray(refs) ? refs : []) {
+          await secure.deleteItemAsync(`tickets_order_${safe(r)}`).catch(() => {});
+        }
+        await secure.deleteItemAsync(LEGACY_REFS);
+        await secure.deleteItemAsync('tickets_buyer');
+      } catch { /* nothing kept, or nothing to drop */ }
+    })();
+  }
+  return legacyGone;
+};
+
+/**
+ * Whose tickets this phone shows: the signed-in Streams account's id, or null
+ * once they sign out. Set by the auth provider; every screen re-reads.
+ */
+export const setTicketOwner = (id) => {
+  const next = id == null || id === '' ? null : String(id);
+  forgetLegacy();
+  if (next === owner) return;
+  owner = next;
+  refsCache = null;
+  announce();
+};
 
 // One write at a time, so two orders saved together cannot drop each other.
 let queue = Promise.resolve();
@@ -249,15 +290,18 @@ const serial = (job) => {
 };
 
 const readRefs = async () => {
-  if (refsCache) return refsCache;
+  if (!owner) return [];
+  if (refsCache?.owner === owner) return refsCache.refs;
+  const whose = owner;
+  let refs = [];
   try {
-    const raw = await secure.getItemAsync(REFS_KEY);
-    const list = JSON.parse(raw || '[]');
-    refsCache = Array.isArray(list) ? list.filter((r) => typeof r === 'string') : [];
-  } catch {
-    refsCache = [];
-  }
-  return refsCache;
+    const list = JSON.parse((await secure.getItemAsync(refsKey())) || '[]');
+    refs = Array.isArray(list) ? list.filter((r) => typeof r === 'string') : [];
+  } catch { /* none kept */ }
+  // Signed out or switched while reading: these are not the new account's.
+  if (whose !== owner) return readRefs();
+  refsCache = { owner, refs };
+  return refs;
 };
 
 /**
@@ -265,17 +309,17 @@ const readRefs = async () => {
  * else, so a crash or a closed app cannot lose a paid ticket.
  */
 export const saveReference = (reference) => serial(async () => {
-  if (!reference) return;
+  if (!reference || !owner) return;
   const refs = await readRefs();
   if (refs.includes(reference)) return;
-  refsCache = [reference, ...refs];
-  await secure.setItemAsync(REFS_KEY, JSON.stringify(refsCache));
+  refsCache = { owner, refs: [reference, ...refs] };
+  await secure.setItemAsync(refsKey(), JSON.stringify(refsCache.refs));
   announce();
 });
 
 /** Keep the latest copy of an order, so its tickets open with no network. */
 export const cacheOrder = async (order) => {
-  if (!order?.reference) return;
+  if (!order?.reference || !owner) return;
   await saveReference(order.reference);
   try { await secure.setItemAsync(orderKey(order.reference), JSON.stringify(order)); } catch { /* best effort */ }
   announce();
@@ -283,6 +327,7 @@ export const cacheOrder = async (order) => {
 
 /** The kept copy of an order, or null. */
 export const readCachedOrder = async (reference) => {
+  if (!owner) return null;
   try {
     const raw = await secure.getItemAsync(orderKey(reference));
     return raw ? JSON.parse(raw) : null;
@@ -324,14 +369,18 @@ export const useSavedOrders = () => {
 };
 
 // The details last paid with, so a second purchase is two taps. On the phone
-// only, in secure storage, like everything else here.
-const BUYER_KEY = 'tickets_buyer';
+// only, in secure storage, and per account like the orders.
+const buyerKey = () => `tickets_buyer_u${safe(owner)}`;
 export const readBuyer = async () => {
-  try { return JSON.parse((await secure.getItemAsync(BUYER_KEY)) || 'null') || {}; } catch { return {}; }
+  if (!owner) return {};
+  try { return JSON.parse((await secure.getItemAsync(buyerKey())) || 'null') || {}; } catch { return {}; }
 };
 export const saveBuyer = async ({ phone, name }) => {
-  try { await secure.setItemAsync(BUYER_KEY, JSON.stringify({ phone: phone || '', name: name || '' })); } catch { /* convenience only */ }
+  if (!owner) return;
+  try { await secure.setItemAsync(buyerKey(), JSON.stringify({ phone: phone || '', name: name || '' })); } catch { /* convenience only */ }
 };
 
-/** Tests only: forget what was read, as a fresh launch would. */
-export const __resetTickets = () => { refsCache = null; queue = Promise.resolve(); };
+/** Tests only: forget what was read, as a fresh launch would, signed in as `who`. */
+export const __resetTickets = (who = null) => {
+  refsCache = null; queue = Promise.resolve(); owner = who == null ? null : String(who); legacyGone = null;
+};

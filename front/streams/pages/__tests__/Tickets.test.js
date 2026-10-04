@@ -73,7 +73,7 @@ const PAID = {
 let routes;
 beforeEach(async () => {
   mockSecure.clear();
-  __resetTickets();
+  __resetTickets(7);
   await clearAllCaches();
   routes = {};
   global.fetch = jest.fn(async (url, init = {}) => {
@@ -174,9 +174,9 @@ test('checkout: pay saves the reference first, then waits on the order', async (
 
   await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketOrder', { reference: 'ref-123', fresh: true }));
   expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ ticket_type: 2, quantity: 2, phone: '0712 345 678', name: 'Amani', show_name: false });
-  expect(JSON.parse(mockSecure.get('tickets_refs'))).toEqual(['ref-123']);
+  expect(JSON.parse(mockSecure.get('tickets_refs_u7'))).toEqual(['ref-123']);
   // And the details are offered next time.
-  await waitFor(() => expect(JSON.parse(mockSecure.get('tickets_buyer'))).toEqual({ phone: '0712 345 678', name: 'Amani' }));
+  await waitFor(() => expect(JSON.parse(mockSecure.get('tickets_buyer_u7'))).toEqual({ phone: '0712 345 678', name: 'Amani' }));
 });
 
 test("checkout: the server's reason is shown as it comes", async () => {
@@ -209,7 +209,7 @@ test('order: waits for M-Pesa, then shows a QR per ticket and keeps them', async
   const settled = asked;
   await act(() => new Promise((r) => setTimeout(r, 120)));
   expect(asked).toBe(settled);
-  await waitFor(() => expect(JSON.parse(mockSecure.get('tickets_order_ref-123')).status).toBe('paid'));
+  await waitFor(() => expect(JSON.parse(mockSecure.get('tickets_order_u7_ref-123')).status).toBe('paid'));
 });
 
 test('order: kept tickets open with no network', async () => {
@@ -273,5 +273,5 @@ test('recover: a receipt that matches nothing says so; one that matches opens th
   fireEvent.changeText(screen.getByTestId('recover-receipt'), 'sjk3h2l9qx');
   fireEvent.press(screen.getByTestId('recover-find'));
   await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketOrder', { reference: 'ref-123' }));
-  expect(JSON.parse(mockSecure.get('tickets_refs'))).toContain('ref-123');
+  expect(JSON.parse(mockSecure.get('tickets_refs_u7'))).toContain('ref-123');
 });

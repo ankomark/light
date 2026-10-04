@@ -12,7 +12,7 @@ const {
   fetchEvents, fetchEvent, createOrder, fetchOrder, lookupOrder, TicketsError,
   formatKes, normalizeKePhone, formatWhen, dateTile, isPast,
   saveReference, cacheOrder, readCachedOrder, listSavedOrders, refreshSavedOrders,
-  readBuyer, saveBuyer, __resetTickets,
+  readBuyer, saveBuyer, setTicketOwner, __resetTickets,
 } = require('../tickets');
 const { nextPage } = require('../../pages/tickets/TicketsHome');
 const { closedReason } = require('../../pages/tickets/TicketEvent');
@@ -33,7 +33,7 @@ const WEEKDAYS = 'Sun,Mon,Tue,Wed,Thu,Fri,Sat'.split(',');
 
 beforeEach(() => {
   mockSecure.clear();
-  __resetTickets();
+  __resetTickets(7);
   global.fetch = jest.fn();
 });
 
@@ -175,19 +175,19 @@ describe('orders kept on the phone', () => {
   it('keeps references newest first, once each, through concurrent saves', async () => {
     await Promise.all([saveReference('a'), saveReference('b'), saveReference('a')]);
     await saveReference('c');
-    expect(JSON.parse(mockSecure.get('tickets_refs'))).toEqual(['c', 'b', 'a']);
+    expect(JSON.parse(mockSecure.get('tickets_refs_u7'))).toEqual(['c', 'b', 'a']);
   });
 
   it('keeps each order under its own key, safe for the Keychain', async () => {
     await cacheOrder({ reference: 'ab/c+d', status: 'paid', tickets: [{ code: 'T1' }] });
-    expect(mockSecure.has('tickets_order_ab_c_d')).toBe(true);
+    expect(mockSecure.has('tickets_order_u7_ab_c_d')).toBe(true);
     expect((await readCachedOrder('ab/c+d')).tickets[0].code).toBe('T1');
     expect(await listSavedOrders()).toEqual([{ reference: 'ab/c+d', order: expect.objectContaining({ status: 'paid' }) }]);
   });
 
   it('reads the list back after a restart', async () => {
     await saveReference('r1');
-    __resetTickets();
+    __resetTickets(7);
     expect((await listSavedOrders()).map((s) => s.reference)).toEqual(['r1']);
   });
 
@@ -206,6 +206,39 @@ describe('orders kept on the phone', () => {
     expect(await readBuyer()).toEqual({});
     await saveBuyer({ phone: '0712345678', name: 'Amani' });
     expect(await readBuyer()).toEqual({ phone: '0712345678', name: 'Amani' });
+  });
+
+  it("never shows one account's tickets, or phone, to another on the same phone", async () => {
+    await cacheOrder({ reference: 'mine', status: 'paid', tickets: [{ code: 'T1' }] });
+    await saveBuyer({ phone: '0712345678', name: 'Amani' });
+
+    setTicketOwner(8);
+    expect(await listSavedOrders()).toEqual([]);
+    expect(await readCachedOrder('mine')).toBeNull();
+    expect(await readBuyer()).toEqual({});
+    await cacheOrder({ reference: 'theirs', status: 'paid' });
+
+    setTicketOwner(7);
+    expect((await listSavedOrders()).map((s) => s.reference)).toEqual(['mine']);
+  });
+
+  it('signed out: nothing listed, nothing kept', async () => {
+    await saveReference('mine');
+    setTicketOwner(null);
+    expect(await listSavedOrders()).toEqual([]);
+    await cacheOrder({ reference: 'x', status: 'paid' });
+    expect([...mockSecure.keys()].some((k) => k.includes('_x'))).toBe(false);
+  });
+
+  it("drops the old phone-wide list, whose owner can't be told", async () => {
+    mockSecure.set('tickets_refs', JSON.stringify(['old']));
+    mockSecure.set('tickets_order_old', '{"reference":"old"}');
+    mockSecure.set('tickets_buyer', '{"phone":"0700000000"}');
+    __resetTickets();
+    setTicketOwner(7);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await listSavedOrders()).toEqual([]);
+    expect([...mockSecure.keys()]).toEqual([]);
   });
 });
 
