@@ -61,7 +61,7 @@ describe('the queues', () => {
     const navigation = { navigate: jest.fn() };
     const screen = render(<AdminTickets navigation={navigation} />);
     await waitFor(() => expect(screen.getByText('Gospel Night')).toBeTruthy());
-    expect(mockApi.fetchAdminTicketEvents).toHaveBeenCalledWith({ review: 'pending' });
+    expect(mockApi.fetchAdminTicketEvents).toHaveBeenCalledWith({ view: 'review' });
     expect(screen.getByText('KES 152,000')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('admin-tix-event-5'));
@@ -172,5 +172,87 @@ describe('a till', () => {
     fireEvent.changeText(screen.getByTestId('admin-till-phone'), '0812');
     await act(async () => { fireEvent.press(screen.getByTestId('admin-till-test')); });
     expect(mockApi.adminTillAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('every event has a tab', () => {
+  test("an event never sent for review is under Not sent, marked as such", async () => {
+    const draft = { ...EVENT, review_status: 'unsubmitted', publish_requested: false };
+    mockApi.fetchAdminTicketEvents.mockImplementation(async (p) => ({ results: p.view === 'drafts' ? [draft] : [], next: null }));
+    const screen = render(<AdminTickets navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(screen.getByText('adminTix.empty.events')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('admin-tix-filter-drafts'));
+    await waitFor(() => expect(screen.getByText('Gospel Night')).toBeTruthy());
+    expect(screen.getByText('adminTix.review.unsubmitted')).toBeTruthy();
+  });
+
+  test('a live event that was warned and paused says so on its row', async () => {
+    mockApi.fetchAdminTicketEvents.mockResolvedValue({ results: [{ ...EVENT, status: 'draft', review_status: 'approved',
+      paused_by_staff: true, warning_note: 'Wrong date' }], next: null });
+    const screen = render(<AdminTickets navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(screen.getByText('adminTix.state.paused')).toBeTruthy());
+    expect(screen.getByText('adminTix.warned')).toBeTruthy();
+  });
+});
+
+describe('managing an approved event', () => {
+  const LIVE = { ...EVENT, status: 'published', review_status: 'approved', warning_note: '', paused_by_staff: false, removed_at: null };
+  const openEvent = (event) => {
+    mockApi.fetchAdminTicketEvent.mockResolvedValue(event);
+    return render(<AdminTicketEvent navigation={{ navigate: jest.fn() }} route={{ params: { id: 5 } }} />);
+  };
+  const giveReason = async (screen, text) => {
+    await waitFor(() => expect(screen.getByTestId('reason-sheet')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('reason-text'), text);
+    await act(async () => { fireEvent.press(screen.getByTestId('reason-confirm')); });
+  };
+
+  test('warn: the note goes with it, and shows on the event', async () => {
+    mockApi.adminTicketEventAction.mockResolvedValue({ ...LIVE, warning_note: 'Your poster lists the wrong date' });
+    const screen = openEvent(LIVE);
+    await waitFor(() => expect(screen.getByTestId('admin-tix-warn')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('admin-tix-warn'));
+    await giveReason(screen, 'Your poster lists the wrong date');
+    expect(mockApi.adminTicketEventAction).toHaveBeenCalledWith(5, 'warn', { note: 'Your poster lists the wrong date' });
+    await waitFor(() => expect(screen.getByText('Your poster lists the wrong date')).toBeTruthy());
+  });
+
+  test('pause, then resume', async () => {
+    mockApi.adminTicketEventAction
+      .mockResolvedValueOnce({ ...LIVE, status: 'draft', paused_by_staff: true, pause_note: 'Checking a complaint' })
+      .mockResolvedValueOnce(LIVE);
+    const screen = openEvent(LIVE);
+    await waitFor(() => expect(screen.getByTestId('admin-tix-pause')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('admin-tix-pause'));
+    await giveReason(screen, 'Checking a complaint');
+    expect(mockApi.adminTicketEventAction).toHaveBeenCalledWith(5, 'pause', { note: 'Checking a complaint' });
+    await waitFor(() => expect(screen.getByTestId('admin-tix-resume')).toBeTruthy());
+    expect(screen.queryByTestId('admin-tix-pause')).toBeNull();
+
+    await act(async () => { fireEvent.press(screen.getByTestId('admin-tix-resume')); });
+    expect(mockApi.adminTicketEventAction).toHaveBeenLastCalledWith(5, 'resume', undefined);
+    await waitFor(() => expect(screen.getByTestId('admin-tix-pause')).toBeTruthy());
+  });
+
+  test('burn: removed for good, and nothing more can be done to it', async () => {
+    mockApi.adminTicketEventAction.mockResolvedValue({ ...LIVE, status: 'cancelled', removed_at: future, removed_note: 'Fraudulent event' });
+    const screen = openEvent(LIVE);
+    await waitFor(() => expect(screen.getByTestId('admin-tix-remove')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('admin-tix-remove'));
+    await giveReason(screen, 'Fraudulent event');
+    expect(mockApi.adminTicketEventAction).toHaveBeenCalledWith(5, 'remove', { note: 'Fraudulent event' });
+    await waitFor(() => expect(screen.getByText('Fraudulent event')).toBeTruthy());
+    expect(screen.getByText('adminTix.state.removed')).toBeTruthy();
+    for (const id of ['admin-tix-warn', 'admin-tix-pause', 'admin-tix-remove', 'admin-tix-reject', 'admin-tix-approve']) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+  });
+
+  test('a draft never sent says so, and can still be approved', async () => {
+    mockApi.adminTicketEventAction.mockResolvedValue({ ...EVENT, review_status: 'approved' });
+    const screen = openEvent({ ...EVENT, review_status: 'unsubmitted', publish_requested: false });
+    await waitFor(() => expect(screen.getByText('adminTix.notSent')).toBeTruthy());
+    await act(async () => { fireEvent.press(screen.getByTestId('admin-tix-approve')); });
+    expect(mockApi.adminTicketEventAction).toHaveBeenCalledWith(5, 'approve', undefined);
   });
 });

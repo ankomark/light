@@ -2,10 +2,15 @@
 Events & Tickets in the admin area: Streams admins acting as Skylink's.
 
     GET  /api/admin/tickets/stats/                      what is waiting, what has sold
-    GET  /api/admin/tickets/events/?review=pending      the review queue
+    GET  /api/admin/tickets/events/?view=review         the review queue; also live, approved,
+                                                        drafts, paused, rejected, removed
     GET  /api/admin/tickets/events/<id>/
     POST /api/admin/tickets/events/<id>/approve/
     POST /api/admin/tickets/events/<id>/reject/         {note}   (also takes down one on sale)
+    POST /api/admin/tickets/events/<id>/warn/           {note}   the organiser sees it; still sells
+    POST /api/admin/tickets/events/<id>/pause/          {note}   off sale until resumed
+    POST /api/admin/tickets/events/<id>/resume/
+    POST /api/admin/tickets/events/<id>/remove/         {note}   for good ("burn"), with a fresh code
     GET  /api/admin/tickets/tills/?status=pending
     GET  /api/admin/tickets/tills/<id>/                 polled while a test push is out
     POST /api/admin/tickets/tills/<id>/submit/
@@ -28,16 +33,19 @@ from .admin import log_admin_action
 from .common import Cap
 
 # Only what the staff API reads; anything else in the query string stays here.
-LIST_PARAMS = {'status', 'review', 'search', 'page', 'page_size'}
+LIST_PARAMS = {'status', 'review', 'view', 'search', 'page', 'page_size'}
 
 # Actions, and what each is called in this server's audit log.
-EVENT_ACTIONS = {'approve': 'ticket_event_approve', 'reject': 'ticket_event_reject'}
+EVENT_ACTIONS = {
+    'approve': 'ticket_event_approve', 'reject': 'ticket_event_reject', 'warn': 'ticket_event_warn',
+    'pause': 'ticket_event_pause', 'resume': 'ticket_event_resume', 'remove': 'ticket_event_remove',
+}
 TILL_ACTIONS = {
     'submit': 'ticket_till_submit', 'test': 'ticket_till_test',
     'activate': 'ticket_till_activate', 'reject': 'ticket_till_reject',
 }
 # What each action may send on: a note, or the tester's phone. Nothing else.
-ACTION_FIELDS = {'reject': ('note',), 'test': ('phone',)}
+ACTION_FIELDS = {'reject': ('note',), 'warn': ('note',), 'pause': ('note',), 'remove': ('note',), 'test': ('phone',)}
 
 
 def _relay(fn):
@@ -123,6 +131,13 @@ class AdminTicketTill(AdminTicketsDetail):
 class AdminTicketEventAction(AdminTicketsAction):
     kind = 'events'
     actions = EVENT_ACTIONS
+
+    def get_permissions(self):
+        # Removing an event for good can't be undone from the app: a fresh
+        # authenticator code, like activating a till.
+        if self.kwargs.get('action') == 'remove':
+            return [Cap('manage_tickets', recent=True)()]
+        return super().get_permissions()
 
 
 class AdminTicketTillAction(AdminTicketsAction):

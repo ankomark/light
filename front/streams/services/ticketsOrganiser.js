@@ -197,5 +197,47 @@ export const addTicketType = (eventId, { name, price, quantity, position }) => a
 /** On sale. Refused (with a clear `detail`) until the till is active and a ticket type exists. */
 export const publishEvent = (eventId) => authed(`organiser/events/${eventId}/publish/`, { method: 'POST' });
 
+// ── Running events ────────────────────────────────────────────────────────
+
+/** Totals across all the organiser's events: collected, sold, live, tills waiting. */
+export const fetchOverview = () => authed('organiser/overview/');
+
+/** The organiser's events, newest first (one page holds them all for now). */
+export const fetchMyEvents = async () => (await authed('organiser/events/?page_size=100')).results || [];
+
+export const fetchMyEvent = (id) => authed(`organiser/events/${id}/`);
+
+/**
+ * One event's dashboard: collected, tickets sold and left, checked in,
+ * failed attempts, and sales per ticket type and per day.
+ */
+export const fetchEventSummary = (id) => authed(`organiser/events/${id}/summary/`);
+
+/** Who paid, newest first: name, masked phone, type, amount, receipt. */
+export const fetchPayments = (id, { search, page } = {}) => {
+  const q = [search?.trim() && `search=${encodeURIComponent(search.trim())}`, page && `page=${page}`]
+    .filter(Boolean).join('&');
+  return authed(`organiser/events/${id}/payments/${q ? `?${q}` : ''}`);
+};
+
+/** Every payment as CSV text, for the phone's share sheet. */
+export const exportPaymentsCsv = (id) => authed(`organiser/events/${id}/payments/export/`, { raw: true, timeout: 60000 });
+
+/** Off sale, back to a draft. Everything sold stays sold. */
+export const unpublishEvent = (id) => authed(`organiser/events/${id}/unpublish/`, { method: 'POST' });
+
+/** Cancelled for good. Tickets already sold are not refunded by this. */
+export const cancelEvent = (id) => authed(`organiser/events/${id}/cancel/`, { method: 'POST' });
+
+/** Change a level: its name, its price (only before anyone buys), how many (never below sold). */
+export const updateTicketType = (eventId, typeId, patch) => authed(
+  `organiser/events/${eventId}/ticket-types/${typeId}/`, { method: 'PATCH', body: patch },
+);
+
+/** Remove a level nobody has bought. */
+export const deleteTicketType = (eventId, typeId) => authed(
+  `organiser/events/${eventId}/ticket-types/${typeId}/`, { method: 'DELETE' },
+);
+
 /** Tests only: forget the session read, as a fresh launch would. */
 export const __resetOrganiser = () => { tokens = undefined; refreshing = null; };

@@ -65,9 +65,10 @@ const firstOf = (v) => (Array.isArray(v) ? v[0] : v);
 /**
  * One call to the ticketing server. `token` adds the organiser's Bearer
  * token (public calls send none); `form` sends multipart FormData instead of
- * JSON — only for a poster upload. Exported for services/ticketsOrganiser.js.
+ * JSON — only for a poster upload; `raw` returns the body as text (a CSV
+ * export). Exported for services/ticketsOrganiser.js.
  */
-export const request = async (path, { method = 'GET', body, form, token, timeout = TIMEOUT_MS } = {}) => {
+export const request = async (path, { method = 'GET', body, form, token, raw, timeout = TIMEOUT_MS } = {}) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   let res;
@@ -91,6 +92,7 @@ export const request = async (path, { method = 'GET', body, form, token, timeout
     clearTimeout(timer);
   }
 
+  if (raw && res.ok) return res.text();
   let data = null;
   try { data = await res.json(); } catch { /* an empty or non-JSON body */ }
   if (res.ok) return data;

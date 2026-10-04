@@ -26,13 +26,11 @@ import {
   ActivityIndicator, Share, useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
-import { compressImage } from '../../services/imageProcessing';
 import {
   fetchTills, createTill, createEvent, updateEvent, addTicketType, publishEvent,
 } from '../../services/ticketsOrganiser';
@@ -41,6 +39,7 @@ import {
   T, F, tap, Kicker, DateTile, Pill, GoldButton, GhostButton,
 } from '../../components/tickets/TicketKit';
 import DateTimeField from '../../components/tickets/DateTimeField';
+import { pickBanner as chooseBanner, BannerPermissionError } from '../../components/tickets/pickBanner';
 import {
   STEPS, MAX_LEVELS, TITLE_MAX, NAME_MAX, emptyDraft, newLevel, validateStep, firstInvalidStep,
   serverErrorsByStep, levelPayloads, priceRange, wholeNumber,
@@ -51,7 +50,6 @@ const DRAFT_KEY = 'tix:hostDraft';
 const SAVE_WAIT_MS = 400;
 const PRESETS = ['regular', 'vip', 'vvip', 'earlyBird', 'couple', 'group'];
 const BANNER_RATIO = 4 / 5;     // as the Events list shows posters
-const BANNER_MAX_WIDTH = 1600;  // the guide's advice: cuts upload time on mobile data
 
 // The event's own fields as a string, to tell whether they changed after the
 // event was first saved (and so need sending again).
@@ -130,18 +128,11 @@ const TicketCreateEvent = ({ navigation }) => {
     tap();
     setBannerError('');
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm.status !== 'granted') { setBannerError(t('tix.host.photoPermission')); return; }
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'], allowsEditing: true, aspect: [4, 5], quality: 1,
-      });
-      const asset = !res.canceled && res.assets?.[0];
-      if (!asset) return;
       setBannerBusy(true);
-      const out = await compressImage(asset.uri, { maxWidth: BANNER_MAX_WIDTH, sourceWidth: asset.width, quality: 0.85 });
-      update({ poster: { uri: out.uri, width: out.width, height: out.height } });
-    } catch {
-      setBannerError(t('tix.host.photoFailed'));
+      const poster = await chooseBanner();
+      if (poster) update({ poster });
+    } catch (err) {
+      setBannerError(err instanceof BannerPermissionError ? t('tix.host.photoPermission') : t('tix.host.photoFailed'));
     } finally {
       setBannerBusy(false);
     }
@@ -296,16 +287,19 @@ const TicketCreateEvent = ({ navigation }) => {
           <Text style={styles.doneEvent}>{event.title}</Text>
         </ScrollView>
         <View style={styles.bar}>
-          {published && (
+          {published ? (
             <GoldButton label={t('tix.host.viewEvent')} onPress={() => navigation.replace('TicketEvent', { slug: event.slug })}
                         testID="host-view-event" />
+          ) : (
+            <GoldButton label={t('tix.mine.manage')} onPress={() => navigation.replace('TicketManageEvent', { id: event.id })}
+                        testID="host-manage" />
           )}
           <View style={styles.barRow}>
             {published && !!event.share_url && (
               <GhostButton label={t('tix.host.share')} style={styles.flex}
                            onPress={() => Share.share({ message: `${event.title}\n${event.share_url}` }).catch(() => {})} />
             )}
-            <GhostButton label={t('tix.host.done')} style={styles.flex} onPress={() => navigation.navigate('TicketsHome')}
+            <GhostButton label={t('tix.mine.title')} style={styles.flex} onPress={() => navigation.replace('TicketMyEvents')}
                          testID="host-done" />
           </View>
         </View>

@@ -5,6 +5,11 @@
 // Approving puts it on sale at once only if its organiser has published it
 // and its till is active; otherwise it goes on sale by itself when the last
 // of those happens (the ticketing server's events/review.py).
+//
+// Once approved, staff still hold it: Warn (the organiser reads it; it keeps
+// selling), Pause sales (off sale until resumed; the organiser can't undo
+// it), and Burn — remove for good, which asks for a fresh authenticator
+// code and can't be undone here. Every one asks why, and is logged.
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
@@ -14,7 +19,7 @@ import { fetchAdminTicketEvent, adminTicketEventAction } from '../../services/ap
 import { formatKes, formatWhen } from '../../services/tickets';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { ADMIN, ErrorState, useReasonSheet } from './AdminKit';
-import { Badge, REVIEW_COLOR, TILL_COLOR } from './AdminTickets';
+import { Badge, TILL_COLOR, STATE_COLOR, adminState, stateLabel } from './AdminTickets';
 
 export default function AdminTicketEvent({ navigation, route }) {
   const { t } = useI18n();
@@ -57,6 +62,28 @@ export default function AdminTicketEvent({ navigation, route }) {
     act('reject', { note });
   };
 
+  // Warn, pause, burn: each asks why, in words the organiser will read.
+  const withNote = async (action, { title, message, confirmLabel, destructive }) => {
+    const note = await askReason({ title, message, confirmLabel, destructive });
+    if (note) act(action, { note });
+  };
+  const warn = () => withNote('warn', {
+    title: t('adminTix.warnTitle'), message: t('adminTix.warnMessage'), confirmLabel: t('adminTix.warn'),
+  });
+  const pause = () => withNote('pause', {
+    title: t('adminTix.pauseTitle'), message: t('adminTix.pauseMessage'), confirmLabel: t('adminTix.pause'), destructive: true,
+  });
+  const burn = () => withNote('remove', {
+    title: t('adminTix.removeTitle'), message: t('adminTix.removeMessage'), confirmLabel: t('adminTix.remove'), destructive: true,
+  });
+  const resume = async () => {
+    const ok = await confirmAction({
+      title: t('adminTix.resumeTitle'), message: t('adminTix.resumeMessage'),
+      confirmLabel: t('adminTix.resume'), cancelLabel: t('common.cancel'),
+    });
+    if (ok) act('resume');
+  };
+
   const act = async (action, body) => {
     setBusy(true);
     try {
@@ -78,6 +105,10 @@ export default function AdminTicketEvent({ navigation, route }) {
 
   const selling = event.status === 'published';
   const decided = event.review_status === 'approved' || event.review_status === 'rejected';
+  const removed = !!event.removed_at;
+  const paused = !!event.paused_by_staff;
+  // Pausing means something once it is (or could go) on sale.
+  const pausable = !paused && (selling || event.review_status === 'approved');
 
   return (
     <>
@@ -85,10 +116,17 @@ export default function AdminTicketEvent({ navigation, route }) {
         {!!event.poster && <Image source={{ uri: event.poster }} style={styles.poster} contentFit="cover" />}
         <Text style={styles.title}>{event.title}</Text>
         <View style={styles.badges}>
-          <Badge color={REVIEW_COLOR[event.review_status] || ADMIN.muted} label={t(`adminTix.review.${event.review_status}`)} />
-          <Badge color={selling ? ADMIN.ok : ADMIN.muted} label={t(`adminTix.status.${event.status}`)} />
-          {event.publish_requested && !selling && <Badge color={ADMIN.gold} label={t('adminTix.wantsToSell')} />}
+          <Badge color={STATE_COLOR[adminState(event)] || ADMIN.muted} label={stateLabel(t, event)} />
+          {!removed && <Badge color={selling ? ADMIN.ok : ADMIN.muted} label={t(`adminTix.status.${event.status}`)} />}
+          {event.publish_requested && !selling && !removed && <Badge color={ADMIN.gold} label={t('adminTix.wantsToSell')} />}
         </View>
+
+        {event.review_status === 'unsubmitted' && !removed && (
+          <Text style={styles.info}>{t('adminTix.notSent')}</Text>
+        )}
+        {removed && <Note label={t('adminTix.removedNote')} text={event.removed_note} danger />}
+        {paused && <Note label={t('adminTix.pausedNote')} text={event.pause_note} />}
+        {!!event.warning_note && !removed && <Note label={t('adminTix.warningNote')} text={event.warning_note} />}
 
         {!!event.review_note && (
           <View style={styles.note}>
@@ -134,8 +172,26 @@ export default function AdminTicketEvent({ navigation, route }) {
             </TouchableOpacity>
           )}
         </Section>
+
+        {/* What staff can still do with it, once it is past review. */}
+        {!removed && (
+          <Section label={t('adminTix.manage')}>
+            <ManageRow icon="!" label={t('adminTix.warn')} sub={t('adminTix.warnSub')} onPress={warn} disabled={busy}
+                       testID="admin-tix-warn" />
+            {paused ? (
+              <ManageRow icon="▶" label={t('adminTix.resume')} sub={t('adminTix.resumeSub')} onPress={resume} disabled={busy}
+                         testID="admin-tix-resume" />
+            ) : pausable ? (
+              <ManageRow icon="Ⅱ" label={t('adminTix.pause')} sub={t('adminTix.pauseSub')} onPress={pause} disabled={busy}
+                         testID="admin-tix-pause" />
+            ) : null}
+            <ManageRow icon="✕" label={t('adminTix.remove')} sub={t('adminTix.removeSub')} onPress={burn} disabled={busy}
+                       danger testID="admin-tix-remove" />
+          </Section>
+        )}
       </ScrollView>
 
+      {!removed && (
       <View style={styles.bar}>
         {(!decided || event.review_status === 'rejected') && (
           <TouchableOpacity style={[styles.btn, styles.approve, busy && styles.off]} onPress={approve} disabled={busy}
@@ -150,10 +206,30 @@ export default function AdminTicketEvent({ navigation, route }) {
           </TouchableOpacity>
         )}
       </View>
+      )}
       {reasonSheet}
     </>
   );
 }
+
+const Note = ({ label, text, danger }) => (
+  <View style={[styles.note, !danger && styles.noteQuiet]}>
+    <Text style={[styles.noteLabel, !danger && styles.noteLabelQuiet]}>{label}</Text>
+    <Text style={styles.noteText}>{text}</Text>
+  </View>
+);
+
+const ManageRow = ({ icon, label, sub, onPress, disabled, danger, testID }) => (
+  <TouchableOpacity style={[styles.manageRow, disabled && styles.off]} onPress={onPress} disabled={disabled} testID={testID}>
+    <View style={[styles.manageIcon, danger && styles.manageIconDanger]}>
+      <Text style={[styles.manageIconText, danger && styles.manageTextDanger]}>{icon}</Text>
+    </View>
+    <View style={{ flex: 1 }}>
+      <Text style={[styles.manageLabel, danger && styles.manageTextDanger]}>{label}</Text>
+      <Text style={styles.manageSub}>{sub}</Text>
+    </View>
+  </TouchableOpacity>
+);
 
 const Section = ({ label, children }) => (
   <View style={styles.section}>
@@ -174,6 +250,19 @@ const styles = StyleSheet.create({
   note: { marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,122,107,0.10)', borderWidth: 1, borderColor: 'rgba(255,122,107,0.35)' },
   noteLabel: { color: ADMIN.muted, fontSize: 11.5, fontWeight: '700' },
   noteText: { color: ADMIN.text, fontSize: 14, marginTop: 4, lineHeight: 20 },
+  noteQuiet: { backgroundColor: 'rgba(255,196,107,0.10)', borderColor: 'rgba(255,196,107,0.35)' },
+  noteLabelQuiet: { color: ADMIN.gold },
+  info: { color: ADMIN.muted, fontSize: 13.5, lineHeight: 20, marginTop: 12 },
+  manageRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  manageIcon: {
+    width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: ADMIN.gold,
+  },
+  manageIconDanger: { borderColor: ADMIN.danger },
+  manageIconText: { color: ADMIN.gold, fontWeight: '800', fontSize: 14 },
+  manageTextDanger: { color: ADMIN.danger },
+  manageLabel: { color: ADMIN.text, fontSize: 15, fontWeight: '700' },
+  manageSub: { color: ADMIN.muted, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
   section: { marginTop: 16, padding: 14, borderRadius: 14, backgroundColor: ADMIN.card, borderWidth: 1, borderColor: ADMIN.border },
   sectionLabel: { color: ADMIN.gold, fontSize: 11.5, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
   line: { color: ADMIN.text, fontSize: 14.5, lineHeight: 21 },

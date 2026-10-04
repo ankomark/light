@@ -86,6 +86,10 @@ import MyTickets from './pages/tickets/MyTickets';
 import TicketRecover from './pages/tickets/TicketRecover';
 import TicketHost from './pages/tickets/TicketHost';
 import TicketCreateEvent from './pages/tickets/TicketCreateEvent';
+import TicketMyEvents from './pages/tickets/TicketMyEvents';
+import TicketManageEvent from './pages/tickets/TicketManageEvent';
+import TicketEditEvent from './pages/tickets/TicketEditEvent';
+import TicketBuyers from './pages/tickets/TicketBuyers';
 import UserGuide from './pages/UserGuide';
 import LegalPage from './pages/LegalPage';
 import PrivacyCentre from './pages/PrivacyCentre';
@@ -496,6 +500,10 @@ const App = () => {
                 <Stack.Screen name="TicketRecover" component={TicketRecoverScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="TicketHost" component={TicketHostScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="TicketCreateEvent" component={TicketCreateEventScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketMyEvents" component={TicketMyEventsScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketManageEvent" component={TicketManageEventScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketEditEvent" component={TicketEditEventScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketBuyers" component={TicketBuyersScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="UserGuide" component={UserGuide} />
                 <Stack.Screen name="PrivacyCentre" component={PrivacyCentre} />
                 <Stack.Screen name="LegalPage" component={LegalPage} />
@@ -714,6 +722,10 @@ const MyTicketsScreen = TicketsWrapper(MyTickets);
 const TicketRecoverScreen = TicketsWrapper(TicketRecover);
 const TicketHostScreen = TicketsWrapper(TicketHost);
 const TicketCreateEventScreen = TicketsWrapper(TicketCreateEvent);
+const TicketMyEventsScreen = TicketsWrapper(TicketMyEvents);
+const TicketManageEventScreen = TicketsWrapper(TicketManageEvent);
+const TicketEditEventScreen = TicketsWrapper(TicketEditEvent);
+const TicketBuyersScreen = TicketsWrapper(TicketBuyers);
 
 const WeatherWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#000000' }}>

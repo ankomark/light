@@ -26,6 +26,7 @@ import { peekCache, readCache, writeCache } from '../../utils/screenCache';
 import {
   fetchEvents, formatKes, formatWhen, dateTile, refreshSavedOrders, useSavedOrders,
 } from '../../services/tickets';
+import { hasSession } from '../../services/ticketsOrganiser';
 import { T, F, tap, Kicker, DateTile, Pill, Notice } from '../../components/tickets/TicketKit';
 import { ticketErrorText } from './ticketText';
 
@@ -121,6 +122,9 @@ const TicketsHome = ({ navigation }) => {
   const events = useEvents(search, city);
   const saved = useSavedOrders();
   useEffect(() => { refreshSavedOrders(); }, []);
+  // An organiser signed in on this phone gets their events beside Open event.
+  const [organiser, setOrganiser] = useState(false);
+  useEffect(() => { hasSession().then(setOrganiser).catch(() => {}); }, []);
 
   // Cities seen in the unfiltered list, so choosing one does not hide the rest.
   const cities = useRef([]);
@@ -191,6 +195,16 @@ const TicketsHome = ({ navigation }) => {
       {/* The organiser's way in. TicketHost checks for an account first. */}
       <View style={styles.host}>
         <Text style={styles.hostText} numberOfLines={2}>{t('tix.hostPrompt')}</Text>
+        {organiser && (
+          <TouchableOpacity
+            onPress={() => { tap(); navigation.push('TicketMyEvents'); }}
+            style={styles.mineBtn}
+            accessibilityRole="button"
+            testID="my-events"
+          >
+            <Text style={styles.mineBtnText}>{t('tix.mine.title')}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={() => { tap(); navigation.push('TicketHost'); }}
           style={styles.hostBtn}
@@ -353,6 +367,11 @@ const styles = StyleSheet.create({
     backgroundColor: T.champagne,
   },
   hostBtnText: { fontFamily: F.uiHeavy, fontSize: 13, color: T.paperInk },
+  mineBtn: {
+    paddingVertical: 9, paddingHorizontal: 12, borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: T.lineStrong,
+  },
+  mineBtnText: { fontFamily: F.uiBold, fontSize: 13, color: T.champagne },
   chips: { gap: 8, paddingTop: 14 },
   chip: {
     paddingVertical: 7, paddingHorizontal: 14, borderRadius: 16,

@@ -14,11 +14,26 @@ import { fetchAdminTicketStats, fetchAdminTicketEvents, fetchAdminTills, fetchAd
 import { formatKes, formatWhen } from '../../services/tickets';
 import { ADMIN, ErrorState } from './AdminKit';
 
-const EVENT_FILTERS = ['pending', 'approved', 'rejected', 'all'];
+// One tab per state, so every event is somewhere: one never sent for review
+// used to fit none of the tabs and looked missing (the ticketing server's
+// staff/views.py EVENT_VIEWS).
+const EVENT_FILTERS = ['review', 'live', 'approved', 'drafts', 'paused', 'rejected', 'removed', 'all'];
+const FIRST_FILTER = { events: 'review', tills: 'pending' };
 const TILL_FILTERS = ['pending', 'submitted', 'active', 'rejected'];
 
 export const TILL_COLOR = { pending: ADMIN.gold, submitted: '#7CB8FF', active: ADMIN.ok, rejected: ADMIN.danger };
 export const REVIEW_COLOR = { pending: ADMIN.gold, approved: ADMIN.ok, rejected: ADMIN.danger, unsubmitted: ADMIN.muted };
+
+/** What an event is doing, for its badge: removed and paused before anything else. */
+export const adminState = (e) => (e.removed_at ? 'removed'
+  : e.paused_by_staff ? 'paused'
+  : e.status === 'published' ? 'live'
+  : e.review_status);
+export const STATE_COLOR = { ...REVIEW_COLOR, live: ADMIN.ok, paused: ADMIN.gold, removed: ADMIN.danger };
+export const stateLabel = (t, e) => {
+  const s = adminState(e);
+  return ['live', 'paused', 'removed'].includes(s) ? t(`adminTix.state.${s}`) : t(`adminTix.review.${s}`);
+};
 
 export const Badge = ({ color, label }) => (
   <View style={[styles.badge, { borderColor: color }]}>
@@ -31,7 +46,7 @@ export default function AdminTickets({ navigation, route }) {
   const months = t('tix.months').split(',');
   const weekdays = t('tix.weekdays').split(',');
   const [tab, setTab] = useState(route?.params?.tab || 'events');
-  const [filter, setFilter] = useState('pending');
+  const [filter, setFilter] = useState(FIRST_FILTER[route?.params?.tab || 'events']);
   const [rows, setRows] = useState([]);
   const [next, setNext] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -46,7 +61,7 @@ export default function AdminTickets({ navigation, route }) {
     fetchAdminTicketStats().then((s) => { if (mine === latest.current) setStats(s); }).catch(() => {});
     try {
       const res = which === 'events'
-        ? await fetchAdminTicketEvents(f === 'all' ? {} : { review: f })
+        ? await fetchAdminTicketEvents(f === 'all' ? {} : { view: f })
         : await fetchAdminTills({ status: f });
       if (mine !== latest.current) return;
       setRows(res?.results || []);
@@ -63,7 +78,7 @@ export default function AdminTickets({ navigation, route }) {
   const pickTab = (which) => {
     if (which === tab) return;
     setTab(which);
-    setFilter('pending');
+    setFilter(FIRST_FILTER[which]);
     setRows([]);
   };
 
@@ -122,7 +137,8 @@ export default function AdminTickets({ navigation, route }) {
         <Text style={styles.rowMeta} numberOfLines={1}>{e.organiser?.display_name || e.organiser?.email}</Text>
         <Text style={styles.rowMeta} numberOfLines={1}>{formatWhen(e.starts_at, { months, weekdays })} · {e.venue}</Text>
         <View style={styles.badges}>
-          <Badge color={REVIEW_COLOR[e.review_status] || ADMIN.muted} label={t(`adminTix.review.${e.review_status}`)} />
+          <Badge color={STATE_COLOR[adminState(e)] || ADMIN.muted} label={stateLabel(t, e)} />
+          {!!e.warning_note && <Badge color={ADMIN.gold} label={t('adminTix.warned')} />}
           <Badge color={TILL_COLOR[e.till?.status] || ADMIN.muted} label={t('adminTix.tillShort', { status: t(`adminTix.till.${e.till?.status}`) })} />
         </View>
       </View>

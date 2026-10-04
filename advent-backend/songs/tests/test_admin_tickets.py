@@ -119,3 +119,29 @@ class AdminTicketsTests(APITestCase):
         self.assertEqual(res.status_code, 403)
         self.assertIn(res.data['code'], ('admin_session_required', 'reauth_required'))
         self.request.assert_not_called()
+
+    def test_warn_pause_resume_and_remove_pass_through_with_the_note_only(self):
+        self.request.return_value = answer(body={'id': 5, 'title': 'Gospel Night'})
+        for action, body in (('warn', {'note': 'Wrong date on the poster'}), ('pause', {'note': 'Checking a complaint'}),
+                             ('resume', {}), ('remove', {'note': 'Fraudulent event'})):
+            res = self.client.post(f'/api/admin/tickets/events/5/{action}/', {**body, 'status': 'published'}, format='json')
+            self.assertEqual(res.status_code, 200, action)
+            method, url, kwargs = self.sent(len(self.request.call_args_list) - 1)
+            self.assertEqual(url, f'https://tickets.test/api/v1/staff/events/5/{action}/')
+            self.assertEqual(kwargs['json'], body)
+        self.assertEqual(list(AdminActionLog.objects.order_by('id').values_list('action', flat=True)), [
+            'ticket_event_warn', 'ticket_event_pause', 'ticket_event_resume', 'ticket_event_remove',
+        ])
+
+    def test_the_view_tabs_reach_the_staff_api(self):
+        self.request.return_value = answer(body={'count': 0, 'results': []})
+        self.client.get('/api/admin/tickets/events/', {'view': 'drafts'})
+        self.assertEqual(self.sent()[2]['params'], {'view': 'drafts'})
+
+    @override_settings(ADMIN_2FA_REQUIRED=True)
+    def test_removing_for_good_needs_a_fresh_code(self):
+        self.request.return_value = answer(body={'id': 5})
+        res = self.client.post('/api/admin/tickets/events/5/remove/', {'note': 'Fraudulent event'}, format='json')
+        self.assertEqual(res.status_code, 403)
+        self.request.assert_not_called()
+

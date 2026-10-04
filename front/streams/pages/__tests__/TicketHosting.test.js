@@ -195,10 +195,12 @@ describe('making the event', () => {
       { name: 'VIP', price: 2000, quantity: 50, position: 1 },
     ]);
     await waitFor(async () => expect(await AsyncStorage.getItem('tix:hostDraft')).toBeNull());
-    // Not on sale yet, so nothing to view: only Done.
+    // Not on sale yet, so nothing to view: manage it, or go to My events.
     expect(screen.queryByTestId('host-view-event')).toBeNull();
+    fireEvent.press(screen.getByTestId('host-manage'));
+    expect(navigation.replace).toHaveBeenCalledWith('TicketManageEvent', { id: 9 });
     fireEvent.press(screen.getByTestId('host-done'));
-    expect(navigation.navigate).toHaveBeenCalledWith('TicketsHome');
+    expect(navigation.replace).toHaveBeenCalledWith('TicketMyEvents');
   });
 
   test('a pending till: sent for review, and told it also waits for the till', async () => {

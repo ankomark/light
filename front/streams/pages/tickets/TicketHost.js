@@ -33,13 +33,15 @@ const Field = ({ label, error, children }) => (
   </View>
 );
 
-const TicketHost = ({ navigation }) => {
+const TicketHost = ({ navigation, route }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth() || {};
 
   const [phase, setPhase] = useState('checking');   // checking | form | offline
   const [checkError, setCheckError] = useState(null);
-  const proceed = useCallback(() => navigation.replace('TicketCreateEvent'), [navigation]);
+  // Where they were going: making an event (Open event), or My events.
+  const next = route?.params?.next || 'TicketCreateEvent';
+  const proceed = useCallback(() => navigation.replace(next), [navigation, next]);
 
   const check = useCallback(async () => {
     setPhase('checking');
