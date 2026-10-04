@@ -142,11 +142,12 @@ describe('a fundraiser', () => {
     expect(calls[0].body).toEqual({ fundraiser: 'help-amani', amount: 1000, phone: '0712345678', name: 'Wanjiru', show_name: true });
   });
 
-  test('no consent switch when the list is private', () => {
+  test('asked even while the list is private, and says so', () => {
     const screen = render(<TicketCheckout navigation={nav()} route={{ params: {
       event: { slug: 'x', title: 'X', show_supporters: false }, ticketType: { id: 1, name: 'Regular', price: 500 }, quantity: 1,
     } }} />);
-    expect(screen.queryByTestId('checkout-show-name')).toBeNull();
+    expect(screen.getByTestId('checkout-show-name').props.value).toBe(false);
+    expect(screen.getByText('tix.sup.consentPrivate')).toBeTruthy();
   });
 
   test('a paid gift: thank you and a receipt, no ticket', async () => {

@@ -12,9 +12,11 @@
  * A gift to a fundraiser comes here too (`donation: { amount }` instead of a
  * ticket type): the same stub and prompt, a receipt instead of tickets.
  *
- * When the organiser shows supporters publicly, the buyer chooses whether
- * they appear by name (phone partly hidden). Off unless they turn it on:
- * nobody is listed by name without saying so.
+ * The buyer always chooses whether they may appear by name (phone partly
+ * hidden) on the event's supporters list — asked even while the organiser
+ * keeps the list private, since they may share it later and every earlier
+ * buyer must have had the choice. Off unless they turn it on: nobody is
+ * listed by name without saying so.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -160,17 +162,16 @@ const TicketCheckout = ({ navigation, route }) => {
           </View>
           {!!fieldErrors.name && <Text style={[styles.hint, styles.bad]}>{fieldErrors.name}</Text>}
 
-          {/* Consent to appear on the public list: off until they say so. */}
-          {!!event.show_supporters && (
-            <View style={styles.consent}>
-              <View style={styles.consentText}>
-                <Text style={styles.consentTitle}>{t('tix.sup.consent')}</Text>
-                <Text style={styles.consentHint}>{showName ? t('tix.sup.consentOn') : t('tix.sup.consentOff')}</Text>
-              </View>
-              <Switch value={showName} onValueChange={setShowName} trackColor={{ true: T.gold, false: T.raised }}
-                      thumbColor={T.ivory} accessibilityLabel={t('tix.sup.consent')} testID="checkout-show-name" />
+          {/* Consent to appear on the supporters list: always asked, off until they say so. */}
+          <View style={styles.consent}>
+            <View style={styles.consentText}>
+              <Text style={styles.consentTitle}>{t('tix.sup.consent')}</Text>
+              <Text style={styles.consentHint}>{showName ? t('tix.sup.consentOn') : t('tix.sup.consentOff')}</Text>
+              {!event.show_supporters && <Text style={styles.consentHint}>{t('tix.sup.consentPrivate')}</Text>}
             </View>
-          )}
+            <Switch value={showName} onValueChange={setShowName} trackColor={{ true: T.gold, false: T.raised }}
+                    thumbColor={T.ivory} accessibilityLabel={t('tix.sup.consent')} testID="checkout-show-name" />
+          </View>
 
           {!!error && (
             <View style={styles.error} accessibilityLiveRegion="polite">

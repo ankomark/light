@@ -135,6 +135,8 @@ test('event: choose a ticket and how many, sold-out types cannot be chosen', asy
   fireEvent.press(screen.getByTestId('ticket-continue'));
   expect(navigation.push).toHaveBeenCalledWith('TicketCheckout', expect.objectContaining({
     ticketType: { id: 2, name: 'VIP', price: 2000 }, quantity: 3,
+    // Checkout needs to know whether the list is public, to word the consent.
+    event: expect.objectContaining({ show_supporters: false }),
   }));
 });
 

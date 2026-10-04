@@ -80,7 +80,10 @@ const TicketEvent = ({ navigation, route }) => {
   const go = () => {
     if (!selected || !event) return;
     navigation.push('TicketCheckout', {
-      event: { slug, title: event.title, starts_at: event.starts_at, venue: event.venue, city: event.city, poster: event.poster },
+      event: {
+        slug, title: event.title, starts_at: event.starts_at, venue: event.venue, city: event.city, poster: event.poster,
+        show_supporters: !!full.data?.show_supporters,
+      },
       ticketType: { id: selected.id, name: selected.name, price: selected.price },
       quantity,
     });
