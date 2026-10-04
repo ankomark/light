@@ -6,7 +6,7 @@
 // in a single <AuthProvider> near the root; `useAuth` just reads that context,
 // so all existing `useAuth()` callers share one source of truth unchanged.
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import * as SecureStore from '../services/secureStorage'; // web-safe shim (expo-secure-store stubs web)
 import axios from 'axios';
 import { API_URL, storeTokens, clearTokens } from '../services/api';
@@ -14,7 +14,8 @@ import { clearAllCaches } from '../utils/screenCache';
 import { forgetKeptChapters } from '../services/publicationStore';
 import { clearReadingQueue } from '../services/readingTracker';
 import { clearBookHighlights } from '../services/bookHighlights';
-import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
+import { registerForPushNotifications, forgetPushToken } from '../services/pushNotifications';
+import { reportSignOut, flushPendingSignOuts } from '../services/signOut';
 import { setTicketOwner } from '../services/tickets';
 import { setOrganiserOwner } from '../services/ticketsOrganiser';
 
@@ -66,14 +67,17 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   const clearAuthData = async () => {
-    await clearTokens();
+    // All on the phone, all at once: nothing here waits on the network.
     // Screens paint their last cached payload on open. Those payloads are keyed
     // per account, but dropping them on the way out means a shared phone can't
     // flash the previous user's feed even for a frame.
-    await clearAllCaches();
-    await forgetKeptChapters();   // publications kept for offline (can be drafts)
-    await clearReadingQueue();    // reading not yet sent is the leaving account's
-    await clearBookHighlights();  // so are their highlights and notes in books
+    await Promise.all([
+      clearTokens(),
+      clearAllCaches(),
+      forgetKeptChapters(),   // publications kept for offline (can be drafts)
+      clearReadingQueue(),    // reading not yet sent is the leaving account's
+      clearBookHighlights(),  // so are their highlights and notes in books
+    ].map((p) => Promise.resolve(p).catch(() => {})));
     setTicketOwner(null);         // tickets are kept per account: the guest list now
     setOrganiserOwner(null);      // their organiser side too: kept for when they're back
     setCurrentUser(null);
@@ -167,18 +171,28 @@ export const AuthProvider = ({ children }) => {
 
     // Register push token in the background — don't block login.
     registerForPushNotifications().catch(() => {});
+    flushPendingSignOuts();
 
     return { isVerified: !!status.is_email_verified, hasProfile: !!status.has_profile };
   };
 
-  const logout = async () => {
-    await unregisterPushToken().catch(() => {});
-    // Revoke the refresh token server-side (best-effort) before clearing.
-    const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
-    if (refresh) {
-      await axios.post(`${API_URL}/auth/logout/`, { refresh }).catch(() => {});
+  // Signing out is instant: the phone forgets the account first, then the
+  // server is told in the background (session revoked, this phone's
+  // notifications off), retried on the next launch if it was offline.
+  // A second tap while it runs waits on the first rather than starting over.
+  const signingOut = useRef(null);
+  const logout = () => {
+    if (!signingOut.current) {
+      signingOut.current = (async () => {
+        const [refresh, deviceToken] = await Promise.all([
+          SecureStore.getItemAsync('refreshToken').catch(() => null),
+          forgetPushToken(),
+        ]);
+        await clearAuthData();
+        reportSignOut({ refresh, deviceToken }).catch(() => {});
+      })().finally(() => { signingOut.current = null; });
     }
-    await clearAuthData();
+    return signingOut.current;
   };
 
   // Refresh cached user + verification status (e.g. after editing a profile
@@ -198,6 +212,7 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     checkAuthStatus();
+    flushPendingSignOuts();   // a sign-out that was offline last time
   }, []);
 
   const value = useMemo(

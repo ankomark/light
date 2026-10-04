@@ -441,6 +441,9 @@ class DeviceTokenViewSet(viewsets.ViewSet):
             token=token,
             defaults={'platform': platform, 'is_active': True},
         )
+        # A phone gets one account's notifications: whoever signed in on it
+        # before (and never signed out cleanly) stops getting them here.
+        DeviceToken.objects.filter(token=token, is_active=True).exclude(user=request.user).update(is_active=False)
         return Response({'status': 'registered'})
 
     @action(detail=False, methods=['post'])

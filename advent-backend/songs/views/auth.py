@@ -550,22 +550,36 @@ class AuthStatusView(APIView):
 
 
 class LogoutView(APIView):
-    """Revoke a refresh token by blacklisting it. AllowAny: possession of a
-    valid refresh token is sufficient (and the auth header is stripped for
-    /auth/ routes client-side anyway)."""
+    """Revoke a refresh token by blacklisting it, and stop this phone's push
+    notifications for the account — one call, so the app can sign out in a
+    single request (and retry it later when it was offline).
+
+    AllowAny: possession of a valid refresh token is sufficient (and the auth
+    header is stripped for /auth/ routes client-side anyway). The device token
+    is only switched off for the refresh token's own user.
+
+    Body: {refresh, device_token?}"""
     permission_classes = [AllowAny]
 
     def post(self, request):
         from rest_framework_simplejwt.tokens import RefreshToken
         from rest_framework_simplejwt.exceptions import TokenError
+        from songs.models import DeviceToken
 
         refresh = request.data.get('refresh')
         if not refresh:
             return Response({'error': 'refresh token is required'}, status=status.HTTP_400_BAD_REQUEST)
+        user_id = None
         try:
-            RefreshToken(refresh).blacklist()
+            token = RefreshToken(refresh)
+            user_id = token.get('user_id')
+            token.blacklist()
         except TokenError:
             # Already expired/blacklisted/invalid — the goal (revoked) holds.
+            # Whose it was can't be trusted, so no device token is touched.
             pass
+        device_token = str(request.data.get('device_token') or '').strip()
+        if user_id and device_token:
+            DeviceToken.objects.filter(user_id=user_id, token=device_token).update(is_active=False)
         return Response({'message': 'Logged out'}, status=status.HTTP_205_RESET_CONTENT)
 

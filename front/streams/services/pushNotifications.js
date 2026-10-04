@@ -99,6 +99,21 @@ export async function registerTokenWithBackend(token) {
   }
 }
 
+/**
+ * This phone's push token, forgotten locally (signing out). The server is
+ * told along with the sign-out itself (services/signOut.js), so this needs
+ * no network.
+ */
+export async function forgetPushToken() {
+  try {
+    const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+    await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
+    return token;
+  } catch {
+    return null;
+  }
+}
+
 export async function unregisterPushToken() {
   try {
     const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
