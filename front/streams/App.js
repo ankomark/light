@@ -76,6 +76,16 @@ import Calculator from './pages/Calculator';
 import CalendarPage from './pages/Calendar';
 import Weather from './pages/Weather';
 import DailyVerse from './pages/DailyVerse';
+import SabbathSchool from './pages/SabbathSchool';
+import SabbathSchoolLesson from './pages/SabbathSchoolLesson';
+import TicketsHome from './pages/tickets/TicketsHome';
+import TicketEvent from './pages/tickets/TicketEvent';
+import TicketCheckout from './pages/tickets/TicketCheckout';
+import TicketOrder from './pages/tickets/TicketOrder';
+import MyTickets from './pages/tickets/MyTickets';
+import TicketRecover from './pages/tickets/TicketRecover';
+import TicketHost from './pages/tickets/TicketHost';
+import TicketCreateEvent from './pages/tickets/TicketCreateEvent';
 import UserGuide from './pages/UserGuide';
 import LegalPage from './pages/LegalPage';
 import PrivacyCentre from './pages/PrivacyCentre';
@@ -135,6 +145,9 @@ import AdminVerify from './components/admin/AdminVerify';
 import AdminAppControl from './components/admin/AdminAppControl';
 import AdminBroadcast from './components/admin/AdminBroadcast';
 import AdminSingles from './components/admin/AdminSingles';
+import AdminTickets from './components/admin/AdminTickets';
+import AdminTicketEvent from './components/admin/AdminTicketEvent';
+import AdminTicketTill from './components/admin/AdminTicketTill';
 import SinglesHome from './pages/singles/SinglesHome';
 import SinglesEdit from './pages/singles/SinglesEdit';
 import SinglesPerson from './pages/singles/SinglesPerson';
@@ -220,6 +233,11 @@ const linking = {
       Notice: 'notice/:id',
       // The home-screen verse widget opens here.
       DailyVerse: 'daily-verse',
+      // streams://sabbath-school — for a Sabbath-morning reminder later.
+      SabbathSchool: 'sabbath-school',
+      // Events & Tickets: streams://events, and one event by its slug.
+      TicketsHome: 'events',
+      TicketEvent: 'events/:slug',
       // A friend's challenge: streams://quiz/speed?from=mark&score=180.
       QuizPlay: 'quiz/:mode',
       // A Live Bible Battle to join: streams://battle/ABC123.
@@ -468,6 +486,16 @@ const App = () => {
                 <Stack.Screen name="Calendar" component={CalendarPage} options={{ headerShown: false }} />
                 <Stack.Screen name="Weather" component={WeatherWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="DailyVerse" component={DailyVerseWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="SabbathSchool" component={SabbathSchoolWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="SabbathSchoolLesson" component={SabbathSchoolLessonWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketsHome" component={TicketsHomeScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketEvent" component={TicketEventScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketCheckout" component={TicketCheckoutScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketOrder" component={TicketOrderScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="MyTickets" component={MyTicketsScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketRecover" component={TicketRecoverScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketHost" component={TicketHostScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TicketCreateEvent" component={TicketCreateEventScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="UserGuide" component={UserGuide} />
                 <Stack.Screen name="PrivacyCentre" component={PrivacyCentre} />
                 <Stack.Screen name="LegalPage" component={LegalPage} />
@@ -520,6 +548,9 @@ const App = () => {
                 <Stack.Screen name="AdminAppControl" component={AdminAppControlWrapper} />
                 <Stack.Screen name="AdminBroadcast" component={AdminBroadcastWrapper} />
                 <Stack.Screen name="AdminSingles" component={AdminSinglesWrapper} />
+                <Stack.Screen name="AdminTickets" component={AdminTicketsWrapper} />
+                <Stack.Screen name="AdminTicketEvent" component={AdminTicketEventWrapper} />
+                <Stack.Screen name="AdminTicketTill" component={AdminTicketTillWrapper} />
                 {/* Single & Searching: its own headers (components/singles/SinglesKit). */}
                 <Stack.Screen name="Singles" component={SinglesHome} options={{ headerShown: false }} />
                 <Stack.Screen name="SinglesEdit" component={SinglesEdit} options={{ headerShown: false }} />
@@ -633,6 +664,56 @@ const DailyVerseWrapper = ({ navigation, route }) => (
     </ErrorBoundary>
   </View>
 );
+
+// Sabbath School takes each quarter's own colour, so like the verse screen it
+// keeps the app's blue under a transparent bar and a dark backing until the
+// quarter's colour has loaded.
+const SabbathSchoolWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#1E1A1C' }}>
+    <View style={{ backgroundColor: HEADER_BLUE }}>
+      <Header navigation={navigation} transparentBg />
+    </View>
+    <ErrorBoundary fallbackMessage="The lessons couldn't load.">
+      <SabbathSchool navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const SabbathSchoolLessonWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: route.params?.colors?.dark || '#1E1A1C' }}>
+    <View style={{ backgroundColor: HEADER_BLUE }}>
+      <Header navigation={navigation} transparentBg />
+    </View>
+    <ErrorBoundary fallbackMessage="This lesson couldn't load.">
+      <SabbathSchoolLesson navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+// Events & Tickets (pages/tickets): the app's blue under a transparent bar,
+// over the screens' own near-black. Made once per screen at module load, so
+// each keeps a stable component identity across renders.
+const TicketsWrapper = (Screen) => function TicketsScreen({ navigation, route }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0A0A0D' }}>
+      <View style={{ backgroundColor: HEADER_BLUE }}>
+        <Header navigation={navigation} transparentBg />
+      </View>
+      <ErrorBoundary fallbackMessage="This page couldn't load.">
+        <Screen navigation={navigation} route={route} />
+      </ErrorBoundary>
+    </View>
+  );
+};
+
+const TicketsHomeScreen = TicketsWrapper(TicketsHome);
+const TicketEventScreen = TicketsWrapper(TicketEvent);
+const TicketCheckoutScreen = TicketsWrapper(TicketCheckout);
+const TicketOrderScreen = TicketsWrapper(TicketOrder);
+const MyTicketsScreen = TicketsWrapper(MyTickets);
+const TicketRecoverScreen = TicketsWrapper(TicketRecover);
+const TicketHostScreen = TicketsWrapper(TicketHost);
+const TicketCreateEventScreen = TicketsWrapper(TicketCreateEvent);
 
 const WeatherWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#000000' }}>
@@ -931,7 +1012,8 @@ const adminWrap = (Screen) => ({ navigation, route }) => (
     <Header navigation={navigation} transparentBg />
     <RequireAdmin navigation={navigation}>
       <AdminTabs navigation={navigation} current={route?.name}>
-        <Screen navigation={navigation} />
+        {/* route too: screens opened for one thing (a till, an event) read it from route.params. */}
+        <Screen navigation={navigation} route={route} />
       </AdminTabs>
     </RequireAdmin>
   </View>
@@ -945,6 +1027,9 @@ const AdminVerifyWrapper = adminWrap(AdminVerify);
 const AdminAppControlWrapper = adminWrap(AdminAppControl);
 const AdminBroadcastWrapper = adminWrap(AdminBroadcast);
 const AdminSinglesWrapper = adminWrap(AdminSingles);
+const AdminTicketsWrapper = adminWrap(AdminTickets);
+const AdminTicketEventWrapper = adminWrap(AdminTicketEvent);
+const AdminTicketTillWrapper = adminWrap(AdminTicketTill);
 const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);

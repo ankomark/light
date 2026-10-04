@@ -2,6 +2,10 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
 from .views.organizations import OrganizationViewSet
+from .views.admin_tickets import (
+    AdminTicketsStats, AdminTicketsAudit, AdminTicketEvents, AdminTicketEvent, AdminTicketEventAction,
+    AdminTicketTills, AdminTicketTill, AdminTicketTillAction,
+)
 from .views.singles import (
     SinglesMeView, SinglesSubmitView, SinglesPauseView, SinglesPhotosView, SinglesPhotoDetailView,
     SinglesPhotoOrderView, AdminSinglesViewSet,
@@ -301,6 +305,15 @@ urlpatterns = [
     path('singles/me/photos/<int:pk>/', SinglesPhotoDetailView.as_view(), name='singles-photo'),
     path('singles/discover/', SinglesDiscoverView.as_view(), name='singles-discover'),
     path('admin/singles-stats/', AdminSinglesStatsView.as_view(), name='admin-singles-stats'),
+    # Events & Tickets, as Skylink's staff (views/admin_tickets.py).
+    path('admin/tickets/stats/', AdminTicketsStats.as_view(), name='admin-tickets-stats'),
+    path('admin/tickets/audit/', AdminTicketsAudit.as_view(), name='admin-tickets-audit'),
+    path('admin/tickets/events/', AdminTicketEvents.as_view(), name='admin-tickets-events'),
+    path('admin/tickets/events/<int:pk>/', AdminTicketEvent.as_view(), name='admin-tickets-event'),
+    path('admin/tickets/events/<int:pk>/<str:action>/', AdminTicketEventAction.as_view(), name='admin-tickets-event-action'),
+    path('admin/tickets/tills/', AdminTicketTills.as_view(), name='admin-tickets-tills'),
+    path('admin/tickets/tills/<int:pk>/', AdminTicketTill.as_view(), name='admin-tickets-till'),
+    path('admin/tickets/tills/<int:pk>/<str:action>/', AdminTicketTillAction.as_view(), name='admin-tickets-till-action'),
     path('singles/hub/', SinglesHubView.as_view(), name='singles-hub'),
     path('singles/browse/', SinglesBrowseView.as_view(), name='singles-browse'),
     path('singles/likes/', SinglesLikesView.as_view(), name='singles-likes'),

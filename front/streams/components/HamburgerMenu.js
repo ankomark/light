@@ -49,6 +49,9 @@ const CALENDAR_RED = '#EA4335';
 // The teal of the verse screen's own artwork, so the row points at it.
 const VERSE_TEAL = '#2E9E96';
 
+// The gold the Sabbath School screens use for their accents.
+const SABBATH_GOLD = '#E3C46A';
+
 // label = what the user sees; route = the registered screen name; set/icon = glyph.
 // Most used first: the conversations people return to every day (and the
 // only rows with unread badges), then going live, publishing and services,
@@ -66,6 +69,9 @@ const SECTIONS = [
       // Churches and choirs are no longer separate entries — they are
       // categories inside Community, alongside any kind someone starts.
       { label: 'Communities', route: 'Communities', art: COMMUNITIES_ART },
+      // Buy tickets with M-Pesa; no account needed (pages/tickets).
+      { label: 'Events & Tickets', route: 'TicketsHome', set: 'mci', icon: 'ticket-confirmation-outline',
+        tint: '#E8D4AA' },
       { label: 'Notice Board', route: 'NoticeBoard', art: NOTICE_ART },
     ],
   },
@@ -82,6 +88,8 @@ const SECTIONS = [
     items: [
       { label: 'Verse of the Day', route: 'DailyVerse', set: 'mci', icon: 'book-open-variant',
         tint: VERSE_TEAL },
+      { label: 'Sabbath School', route: 'SabbathSchool', set: 'mci', icon: 'book-education-outline',
+        tint: SABBATH_GOLD },
       { label: 'Bible Quiz', route: 'QuizHome', art: QUIZ_ART, feature: 'quiz' },
       { label: 'Word Puzzle', route: 'PuzzlePlay', art: PUZZLE_ART, feature: 'puzzle' },
     ],

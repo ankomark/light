@@ -2581,6 +2581,23 @@ export const sendSinglesSelfie = (formData) => apiRequest('post', '/singles/me/v
 });
 // Reviewers.
 export const fetchSinglesStats = () => apiRequest('get', '/admin/singles-stats/');
+
+// Events & Tickets, as Skylink's staff (manage_tickets). The server passes
+// each call to the ticketing server's staff API as this admin; see
+// songs/views/admin_tickets.py. 503 `ticketing_unavailable` = not connected.
+export const fetchAdminTicketStats = () => apiRequest('get', '/admin/tickets/stats/');
+// review: pending | approved | rejected | unsubmitted (none = all, newest first)
+export const fetchAdminTicketEvents = (params = {}) => apiRequest('get', '/admin/tickets/events/', null, { params });
+export const fetchAdminTicketEvent = (id) => apiRequest('get', `/admin/tickets/events/${id}/`);
+// action: approve | reject ({ note })
+export const adminTicketEventAction = (id, action, body = {}) =>
+  apiRequest('post', `/admin/tickets/events/${id}/${action}/`, body);
+// status: pending | submitted | active | rejected
+export const fetchAdminTills = (params = {}) => apiRequest('get', '/admin/tickets/tills/', null, { params });
+export const fetchAdminTill = (id) => apiRequest('get', `/admin/tickets/tills/${id}/`);
+// action: submit | test ({ phone }) | activate | reject ({ note })
+export const adminTillAction = (id, action, body = {}) =>
+  apiRequest('post', `/admin/tickets/tills/${id}/${action}/`, body);
 export const fetchSinglesReviewList = (kind) => apiRequest('get', `/admin/singles-${kind}/`);
 export const decideSinglesItem = (kind, id, decision, reason = '') =>
   apiRequest('post', `/admin/singles-${kind}/${id}/decide/`, { decision, reason });

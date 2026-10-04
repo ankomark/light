@@ -35,6 +35,7 @@ ADMIN_CAPABILITIES = (
     ('broadcast', 'Send a notification to everyone or a group'),
     ('manage_app', 'Maintenance mode & switching parts of the app off'),
     ('review_singles', 'Review Single & Searching profiles and photos'),
+    ('manage_tickets', 'Approve events & activate ticket tills (Events & Tickets)'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 

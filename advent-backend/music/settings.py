@@ -585,3 +585,13 @@ LOGGING = {
         },
     },
 }
+
+
+# ── Events & Tickets: the ticketing server's staff API ─────────────────────────
+# Streams admins with `manage_tickets` act on the ticketing server through
+# its staff API (songs/ticketing_staff.py), server to server: this key in the
+# Authorization header, and the acting admin's name for its audit log. The
+# same value is STAFF_SERVICE_KEY in the ticketing server's .env; rotate both
+# together. Unset, the admin Tickets screens say so instead of failing.
+TICKETING_API_URL = os.getenv('TICKETING_API_URL', 'https://tickets.smartbillsolution.com').rstrip('/')
+TICKETING_SERVICE_KEY = os.getenv('TICKETING_SERVICE_KEY', '')
