@@ -21,11 +21,14 @@ const INACTIVE = 'rgba(255,255,255,0.62)';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 // The marketplace's own coloured artwork (it was the menu's Marketplace row).
 const MARKET_ART = require('../assets/marketplace-icon.png');
+// The house, in its own maroon on clear.
+const HOME_ART = require('../assets/home-icon.png');
 
 /** A single bottom-row destination: filled icon + accent when on that screen.
  *  With `art`, a coloured picture in its own colours instead of a glyph (the
- *  label still lights up when on that screen). */
-const NavItem = ({ set: Set = Ionicons, active, inactive, art, label, isActive, onPress, testID }) => (
+ *  label still lights up when on that screen); with `tint` too, the picture
+ *  is one colour, grey or accent like a glyph. */
+const NavItem = ({ set: Set = Ionicons, active, inactive, art, tint, label, isActive, onPress, testID }) => (
   <TouchableOpacity
     style={styles.navItem}
     onPress={onPress}
@@ -36,7 +39,11 @@ const NavItem = ({ set: Set = Ionicons, active, inactive, art, label, isActive, 
     accessibilityState={{ selected: isActive }}
   >
     {art ? (
-      <Image source={art} style={[styles.navArt, isActive && styles.navArtActive]} resizeMode="contain" />
+      <Image
+        source={art}
+        style={[styles.navArt, isActive && styles.navArtActive, tint && { tintColor: isActive ? colors.accent : INACTIVE }]}
+        resizeMode="contain"
+      />
     ) : (
       <Set name={isActive ? active : inactive} size={22} color={isActive ? colors.accent : INACTIVE} />
     )}
@@ -148,7 +155,7 @@ const Header = ({ transparentBg = false }) => {
         {/* Bottom row: primary destinations */}
         <View style={[styles.bottomRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
           <NavItem
-            active="home" inactive="home-outline" label="Home"
+            art={HOME_ART} label="Home" testID="nav-home-outline"
             isActive={isOn('Home')} onPress={() => navigation.navigate('Home')}
           />
           <NavItem
