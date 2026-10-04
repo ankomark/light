@@ -20,6 +20,7 @@
  * brings it back. Nobody else signing in on the phone ever sees it. Only
  * "Sign out" on My events (or a session the server ended) forgets it.
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as secure from './secureStorage';
 import { request, TicketsError } from './tickets';
 
@@ -40,6 +41,26 @@ const forgetLegacy = () => {
   if (legacyGone) return;
   legacyGone = true;
   secure.deleteItemAsync?.('tickets_org_tokens')?.catch?.(() => {});
+  // The gate lists (admission codes) and the event draft were phone-wide too.
+  AsyncStorage.getAllKeys?.()
+    .then((keys) => AsyncStorage.multiRemove((keys || []).filter((k) => /^tix:gate:\d+$/.test(k) || k === 'tix:hostDraft')))
+    .catch(() => {});
+};
+
+/**
+ * What the organiser's own things on the phone (the gate list, the event
+ * draft) are filed under: the Streams account's, or null when signed out —
+ * then nothing is read or kept.
+ */
+export const organiserScope = () => (owner ? `u${safe(owner)}` : null);
+
+/** Everything this account's organiser side kept on the phone, gone. */
+const forgetLocal = async (scope) => {
+  if (!scope) return;
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    await AsyncStorage.multiRemove((keys || []).filter((k) => k.startsWith(`tix:gate:${scope}:`) || k === `tix:hostDraft:${scope}`));
+  } catch { /* nothing kept */ }
 };
 
 /**
@@ -202,6 +223,7 @@ export const confirmPasswordReset = async ({ email, code, newPassword }) => {
 export const logOut = async () => {
   const current = await readTokens();
   await keepTokens(null);
+  await forgetLocal(organiserScope());   // the gate's admission codes, the draft
   if (current) request('auth/logout/', { method: 'POST', body: { refresh: current.refresh } }).catch(() => {});
 };
 

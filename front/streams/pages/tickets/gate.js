@@ -7,14 +7,18 @@
 // server, and a ticket it says was already used — another gate let it in
 // while this one was offline — is flagged for staff rather than hidden.
 //
-// Kept in AsyncStorage, per event: a few thousand short rows. The codes admit
-// people, so the list lives only on the organiser's phone and is dropped
-// with forgetGate.
+// Kept in AsyncStorage, per Streams account and event: a few thousand short
+// rows. The codes admit people, so the list is filed under the signed-in
+// account (another on the same phone never reads it), dropped with
+// forgetGate, and with everything else when the organiser signs out.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchGateTickets, checkIn } from '../../services/ticketsOrganiser';
+import { fetchGateTickets, checkIn, organiserScope } from '../../services/ticketsOrganiser';
 import { nextPage } from './TicketsHome';
 
-const key = (eventId) => `tix:gate:${eventId}`;
+const key = (eventId) => {
+  const scope = organiserScope();
+  return scope ? `tix:gate:${scope}:${eventId}` : null;
+};
 // The server's clock and the phone's may differ; sync from a little earlier
 // than the last sync, so nothing issued in between is missed.
 const SYNC_OVERLAP_MS = 2 * 60 * 1000;
@@ -22,8 +26,10 @@ const SYNC_OVERLAP_MS = 2 * 60 * 1000;
 export const emptyGate = () => ({ tickets: {}, syncedAt: null, queue: [], flags: [] });
 
 export const loadGate = async (eventId) => {
+  const k = key(eventId);
+  if (!k) return emptyGate();
   try {
-    const raw = await AsyncStorage.getItem(key(eventId));
+    const raw = await AsyncStorage.getItem(k);
     const kept = raw ? JSON.parse(raw) : null;
     return kept?.tickets ? { ...emptyGate(), ...kept } : emptyGate();
   } catch {
@@ -31,9 +37,15 @@ export const loadGate = async (eventId) => {
   }
 };
 
-export const saveGate = (eventId, gate) => AsyncStorage.setItem(key(eventId), JSON.stringify(gate)).catch(() => {});
+export const saveGate = async (eventId, gate) => {
+  const k = key(eventId);
+  if (k) await AsyncStorage.setItem(k, JSON.stringify(gate)).catch(() => {});
+};
 
-export const forgetGate = (eventId) => AsyncStorage.removeItem(key(eventId)).catch(() => {});
+export const forgetGate = async (eventId) => {
+  const k = key(eventId);
+  if (k) await AsyncStorage.removeItem(k).catch(() => {});
+};
 
 /** Admitted and total, from the list on the phone. */
 export const gateCounts = (gate) => {

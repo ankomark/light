@@ -282,6 +282,23 @@ describe('the gate, offline', () => {
     expect(gate.scanOffline(g0, 'ZZZ').outcome.result).toBe('invalid');
   });
 
+  test("the list is this account's alone, and goes when the organiser signs out", async () => {
+    const org = require('../../services/ticketsOrganiser');
+    const g0 = { ...gate.emptyGate(), tickets: { AAA: { t: 'VIP', n: 'Wanjiru', c: null } } };
+    await gate.saveGate(9, g0);
+    expect(await AsyncStorage.getItem('tix:gate:u7:9')).not.toBeNull();
+    org.setOrganiserOwner(8);                                  // someone else on the phone
+    expect(Object.keys((await gate.loadGate(9)).tickets)).toEqual([]);
+    org.setOrganiserOwner(null);                               // nobody: nothing kept
+    await gate.saveGate(9, g0);
+    org.setOrganiserOwner(7);
+    expect(Object.keys((await gate.loadGate(9)).tickets)).toEqual(['AAA']);
+    await AsyncStorage.setItem('tix:hostDraft:u7', '{}');
+    await org.logOut();
+    expect(await AsyncStorage.getItem('tix:gate:u7:9')).toBeNull();
+    expect(await AsyncStorage.getItem('tix:hostDraft:u7')).toBeNull();
+  });
+
   test('the queue goes up; one another gate already let in is flagged; a dropped network stops it', async () => {
     const g0 = { ...gate.emptyGate(), tickets: { AAA: { t: 'VIP', n: 'Wanjiru', c: ago(1) }, BBB: { t: 'Regular', n: 'Kamau', c: ago(1) }, CCC: { t: 'VIP', n: 'Otieno', c: ago(1) } },
       queue: [{ code: 'AAA', at: ago(1) }, { code: 'BBB', at: ago(1) }, { code: 'CCC', at: ago(1) }] };

@@ -232,7 +232,7 @@ describe('making the event', () => {
   });
 
   test('ticket levels: presets add a named level once; each needs a price and quantity', async () => {
-    await AsyncStorage.setItem('tix:hostDraft', JSON.stringify({ ...READY, levels: [{ key: 'l1', name: 'Regular', price: '', quantity: '' }] }));
+    await AsyncStorage.setItem('tix:hostDraft:u7', JSON.stringify({ ...READY, levels: [{ key: 'l1', name: 'Regular', price: '', quantity: '' }] }));
     const screen = render(<TicketCreateEvent navigation={nav()} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
     for (let i = 0; i < 3; i += 1) fireEvent.press(screen.getByTestId('host-next'));
@@ -249,7 +249,7 @@ describe('making the event', () => {
   });
 
   test('create: the event, then each level, then it goes to review', async () => {
-    await AsyncStorage.setItem('tix:hostDraft', JSON.stringify(READY));
+    await AsyncStorage.setItem('tix:hostDraft:u7', JSON.stringify(READY));
     routes['POST organiser/events/'] = reply(201, EVENT);
     routes['POST organiser/events/9/ticket-types/'] = reply(201, { id: 31 });
     routes['POST organiser/events/9/publish/'] = reply(200, { ...EVENT, status: 'draft', review_status: 'pending' });
@@ -272,7 +272,7 @@ describe('making the event', () => {
       { name: 'Regular', price: 500, quantity: 200, position: 0 },
       { name: 'VIP', price: 2000, quantity: 50, position: 1 },
     ]);
-    await waitFor(async () => expect(await AsyncStorage.getItem('tix:hostDraft')).toBeNull());
+    await waitFor(async () => expect(await AsyncStorage.getItem('tix:hostDraft:u7')).toBeNull());
     // Not on sale yet, so nothing to view: manage it, or go to My events.
     expect(screen.queryByTestId('host-view-event')).toBeNull();
     fireEvent.press(screen.getByTestId('host-manage'));
@@ -283,7 +283,7 @@ describe('making the event', () => {
 
   test('a pending till: sent for review, and told it also waits for the till', async () => {
     routes['GET organiser/tills/?page_size=100'] = reply(200, { count: 1, results: [{ ...TILL, status: 'pending', status_label: 'Pending' }] });
-    await AsyncStorage.setItem('tix:hostDraft', JSON.stringify(READY));
+    await AsyncStorage.setItem('tix:hostDraft:u7', JSON.stringify(READY));
     routes['POST organiser/events/'] = reply(201, EVENT);
     routes['POST organiser/events/9/ticket-types/'] = reply(201, { id: 31 });
     routes['POST organiser/events/9/publish/'] = reply(200, { ...EVENT, status: 'draft', review_status: 'pending' });
@@ -300,7 +300,7 @@ describe('making the event', () => {
   });
 
   test('an event already approved goes straight on sale', async () => {
-    await AsyncStorage.setItem('tix:hostDraft', JSON.stringify(READY));
+    await AsyncStorage.setItem('tix:hostDraft:u7', JSON.stringify(READY));
     routes['POST organiser/events/'] = reply(201, EVENT);
     routes['POST organiser/events/9/ticket-types/'] = reply(201, { id: 31 });
     routes['POST organiser/events/9/publish/'] = reply(200, { ...EVENT, status: 'published', review_status: 'approved' });
@@ -317,7 +317,7 @@ describe('making the event', () => {
 
   test('a till number the server would refuse is caught here', async () => {
     routes['GET organiser/tills/?page_size=100'] = reply(200, { count: 0, results: [] });
-    await AsyncStorage.setItem('tix:hostDraft', JSON.stringify({ ...READY, till: null }));
+    await AsyncStorage.setItem('tix:hostDraft:u7', JSON.stringify({ ...READY, till: null }));
     const screen = render(<TicketCreateEvent navigation={nav()} />);
     await waitFor(() => expect(screen.getByText('tix.host.resumed')).toBeTruthy());
     for (let i = 0; i < 4; i += 1) fireEvent.press(screen.getByTestId('host-next'));
@@ -330,7 +330,7 @@ describe('making the event', () => {
   });
 
   test('a save that fails halfway carries on from there, never making the event twice', async () => {
-    await AsyncStorage.setItem('tix:hostDraft', JSON.stringify(READY));
+    await AsyncStorage.setItem('tix:hostDraft:u7', JSON.stringify(READY));
     routes['POST organiser/events/'] = reply(201, EVENT);
     routes['POST organiser/events/9/ticket-types/'] = [
       reply(201, { id: 31 }), reply(500, { detail: 'Server error' }), reply(201, { id: 32 }),
@@ -344,7 +344,7 @@ describe('making the event', () => {
     fireEvent.press(screen.getByTestId('host-create'));
     await waitFor(() => expect(screen.getByText('Server error')).toBeTruthy());
     // What reached the server is on the phone already, for a retry after a restart.
-    const kept = JSON.parse(await AsyncStorage.getItem('tix:hostDraft'));
+    const kept = JSON.parse(await AsyncStorage.getItem('tix:hostDraft:u7'));
     expect(kept.saved.event.id).toBe(9);
     expect(kept.saved.levels).toEqual({ l1: 31 });
 
@@ -357,10 +357,10 @@ describe('making the event', () => {
   test('a session that has ended sends them to sign in, the draft kept', async () => {
     mockSecure.clear();
     __resetOrganiser(7);
-    await AsyncStorage.setItem('tix:hostDraft', JSON.stringify(READY));
+    await AsyncStorage.setItem('tix:hostDraft:u7', JSON.stringify(READY));
     const navigation = nav();
     render(<TicketCreateEvent navigation={navigation} />);
     await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketHost'));
-    expect(JSON.parse(await AsyncStorage.getItem('tix:hostDraft')).title).toBe('Gospel Night');
+    expect(JSON.parse(await AsyncStorage.getItem('tix:hostDraft:u7')).title).toBe('Gospel Night');
   });
 });

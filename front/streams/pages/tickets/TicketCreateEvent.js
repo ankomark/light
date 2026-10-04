@@ -36,7 +36,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import {
-  fetchTills, createTill, createEvent, updateEvent, uploadEventFiles, addTicketType, publishEvent,
+  fetchTills, createTill, createEvent, updateEvent, uploadEventFiles, addTicketType, publishEvent, organiserScope,
 } from '../../services/ticketsOrganiser';
 import { formatKes, formatWhen, dateTile } from '../../services/tickets';
 import {
@@ -53,7 +53,8 @@ import {
 } from './HostSteps';
 import { ticketErrorText } from './ticketText';
 
-const DRAFT_KEY = 'tix:hostDraft';
+// Filed under the Streams account: another on the same phone never sees it.
+const draftKey = () => `tix:hostDraft:${organiserScope() || 'none'}`;
 const SAVE_WAIT_MS = 400;
 const PRESETS = ['regular', 'vip', 'vvip', 'earlyBird', 'couple', 'group'];
 const BANNER_RATIO = 4 / 5;     // as the Events list shows posters
@@ -94,7 +95,7 @@ const TicketCreateEvent = ({ navigation }) => {
   const [draft, setDraft] = useState(null);
   const [resumed, setResumed] = useState(false);
   useEffect(() => {
-    AsyncStorage.getItem(DRAFT_KEY)
+    AsyncStorage.getItem(draftKey())
       .then((raw) => {
         const kept = raw ? JSON.parse(raw) : null;
         if (kept?.levels) { setDraft(kept.kind ? kept : upgradeDraft(kept)); setResumed(!!(kept.title || kept.saved)); } else setDraft(emptyDraft());
@@ -109,7 +110,7 @@ const TicketCreateEvent = ({ navigation }) => {
   useEffect(() => {
     if (!draft) return undefined;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft)).catch(() => {}); }, SAVE_WAIT_MS);
+    saveTimer.current = setTimeout(() => { AsyncStorage.setItem(draftKey(), JSON.stringify(draft)).catch(() => {}); }, SAVE_WAIT_MS);
     return () => clearTimeout(saveTimer.current);
   }, [draft]);
   const update = useCallback((patch) => setDraft((d) => ({ ...d, ...patch })), []);
@@ -248,7 +249,7 @@ const TicketCreateEvent = ({ navigation }) => {
       d = { ...d, saved };
       clearTimeout(saveTimer.current);
       setDraft(d);
-      AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(d)).catch(() => {});
+      AsyncStorage.setItem(draftKey(), JSON.stringify(d)).catch(() => {});
     };
     try {
       // The event: made once; its fields sent again only if they changed.
@@ -300,7 +301,7 @@ const TicketCreateEvent = ({ navigation }) => {
       // (it would bring the finished event back as a draft next time).
       clearTimeout(saveTimer.current);
       setDraft(null);
-      AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
+      AsyncStorage.removeItem(draftKey()).catch(() => {});
       setDone({ event, published, publishNote, till: chosenTill, tillActive });
     } catch (x) {
       if (x?.code === 'signed_out') { navigation.replace('TicketHost'); return; }
