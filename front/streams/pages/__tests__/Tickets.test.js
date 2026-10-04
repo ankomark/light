@@ -104,6 +104,10 @@ test('events: the soonest leads, the rest follow, and a search asks the server',
 
   fireEvent.press(screen.getByText('Youth Camp'));
   expect(navigation.push).toHaveBeenCalledWith('TicketEvent', { slug: 'youth-camp', preview: SECOND });
+  // And a button that says so, for anyone who wouldn't think to tap the poster.
+  navigation.push.mockClear();
+  fireEvent.press(screen.getByTestId('cta-youth-camp'));
+  expect(navigation.push).toHaveBeenCalledWith('TicketEvent', { slug: 'youth-camp', preview: SECOND });
 });
 
 test('events: an empty server says so, plainly', async () => {

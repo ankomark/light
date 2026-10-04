@@ -26,14 +26,14 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Share, useWindowDimensions,
+  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, Share, useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import {
   fetchTills, createTill, createEvent, updateEvent, uploadEventFiles, addTicketType, publishEvent,
@@ -363,7 +363,7 @@ const TicketCreateEvent = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardLift scrollRef={scroll}>
         {/* Where they are: five bars, the current one gold. */}
         <View style={styles.progress}>
           <View style={styles.bars}>
@@ -709,7 +709,7 @@ const TicketCreateEvent = ({ navigation }) => {
             )}
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

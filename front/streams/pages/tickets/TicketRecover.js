@@ -3,10 +3,11 @@
  * from the M-Pesa confirmation SMS. Both must match the same paid order on
  * the server. The order found is kept like any other and opened.
  */
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, StyleSheet, TextInput, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import { lookupOrder, cacheOrder, normalizeKePhone } from '../../services/tickets';
 import { T, F, Kicker, GoldButton } from '../../components/tickets/TicketKit';
@@ -16,6 +17,7 @@ import { ticketErrorText } from './ticketText';
 export const isReceipt = (s) => /^[A-Z0-9]{10}$/.test(String(s || '').trim().toUpperCase());
 
 const TicketRecover = ({ navigation }) => {
+  const kbScroll = useRef(null);
   const { t } = useI18n();
   const [phone, setPhone] = useState('');
   const [receipt, setReceipt] = useState('');
@@ -43,8 +45,8 @@ const TicketRecover = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <KeyboardLift scrollRef={kbScroll}>
+        <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Kicker>{t('tix.recover')}</Kicker>
           <Text style={styles.heading} accessibilityRole="header">{t('tix.recoverTitle')}</Text>
           <Text style={styles.body}>{t('tix.recoverBody')}</Text>
@@ -93,7 +95,7 @@ const TicketRecover = ({ navigation }) => {
         <View style={styles.bar}>
           <GoldButton label={t('tix.find')} onPress={find} busy={busy} testID="recover-find" />
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

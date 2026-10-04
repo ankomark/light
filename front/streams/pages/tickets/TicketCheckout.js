@@ -18,11 +18,12 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Switch,
+  View, Text, StyleSheet, TextInput, ScrollView, Switch,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import {
   createOrder, createDonation, saveReference, cacheOrder, normalizeKePhone, formatKes, formatWhen, readBuyer, saveBuyer,
@@ -31,6 +32,7 @@ import { T, F, Kicker, GoldButton } from '../../components/tickets/TicketKit';
 import { ticketErrorText } from './ticketText';
 
 const TicketCheckout = ({ navigation, route }) => {
+  const kbScroll = useRef(null);
   const { t } = useI18n();
   const months = t('tix.months').split(',');
   const weekdays = t('tix.weekdays').split(',');
@@ -86,8 +88,8 @@ const TicketCheckout = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <KeyboardLift scrollRef={kbScroll}>
+        <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Kicker>{t('tix.checkout')}</Kicker>
           <Text style={styles.heading} accessibilityRole="header">{t('tix.summary')}</Text>
 
@@ -190,7 +192,7 @@ const TicketCheckout = ({ navigation, route }) => {
             <Text style={styles.secureText}>{t('tix.secure')}</Text>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

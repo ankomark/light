@@ -10,12 +10,13 @@
  * form is prefilled from the Streams account so it is mostly a password.
  * A sign-up with an email that already has an account turns into a log in.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
+  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import { useAuth } from '../../context/useAuth';
 import { fetchMe, signUp, logIn, isEmailTaken } from '../../services/ticketsOrganiser';
@@ -34,6 +35,7 @@ const Field = ({ label, error, children }) => (
 );
 
 const TicketHost = ({ navigation, route }) => {
+  const kbScroll = useRef(null);
   const { t } = useI18n();
   const { currentUser } = useAuth() || {};
 
@@ -132,8 +134,8 @@ const TicketHost = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <KeyboardLift scrollRef={kbScroll}>
+        <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Kicker>{t('tix.host.kicker')}</Kicker>
           <Text style={styles.heading} accessibilityRole="header">
             {mode === 'signup' ? t('tix.host.signupTitle') : t('tix.host.loginTitle')}
@@ -216,7 +218,7 @@ const TicketHost = ({ navigation, route }) => {
             testID="host-submit"
           />
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

@@ -10,13 +10,14 @@
  *
  * A rejected event is fixed here, then sent again from its page.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator,
+  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import { fetchMyEvent, updateEvent, uploadEventFiles } from '../../services/ticketsOrganiser';
 import { formatWhen, formatKes } from '../../services/tickets';
@@ -40,6 +41,7 @@ const fromEvent = (e) => ({
 const EDITABLE = ['venue', 'city', 'startsAt', 'endsAt', 'salesEndAt', 'category', 'goal'];
 
 const TicketEditEvent = ({ navigation, route }) => {
+  const kbScroll = useRef(null);
   const { t } = useI18n();
   const months = t('tix.months').split(',');
   const weekdays = t('tix.weekdays').split(',');
@@ -127,8 +129,8 @@ const TicketEditEvent = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <KeyboardLift scrollRef={kbScroll}>
+        <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Kicker>{t('tix.edit.kicker')}</Kicker>
           <Text style={styles.heading} accessibilityRole="header">{t('tix.edit.title')}</Text>
 
@@ -216,7 +218,7 @@ const TicketEditEvent = ({ navigation, route }) => {
         <View style={styles.bar}>
           <GoldButton label={t('tix.edit.save')} onPress={save} busy={busy} disabled={!changed} testID="edit-save" />
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

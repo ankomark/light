@@ -155,6 +155,18 @@ const TicketsHome = ({ navigation }) => {
       : t('tix.fund.raisedOnly', { raised: formatKes(e.raised) }))
     : t('tix.fund.giveMpesa'));
   const pctOf = (e) => (e.raised != null && e.goal_amount ? Math.min(100, (e.raised / e.goal_amount) * 100) : null);
+  // Said in words, not left to the poster: not everyone knows a card opens
+  // the page where tickets are bought or a gift is given.
+  const cta = (e, big = false) => (e.on_sale ? (
+    <TouchableOpacity onPress={() => open(e)} style={[styles.cta, big && styles.ctaBig]} accessibilityRole="button"
+                      accessibilityLabel={`${e.kind === 'fundraiser' ? t('tix.cta.give') : t('tix.cta.tickets')}: ${e.title}`}
+                      testID={`cta-${e.slug}`}>
+      <Ionicons name={e.kind === 'fundraiser' ? 'heart' : 'ticket'} size={big ? 15 : 13} color={T.paperInk} />
+      <Text style={[styles.ctaText, big && styles.ctaTextBig]}>
+        {e.kind === 'fundraiser' ? t('tix.cta.give') : t('tix.cta.tickets')}
+      </Text>
+    </TouchableOpacity>
+  ) : null);
   const kindOf = (e) => (e.kind === 'fundraiser'
     ? [e.category ? t(`tix.cat.${e.category}`) : '', e.organiser].filter(Boolean).join(' · ')
     : formatWhen(e.starts_at, { months, weekdays }));
@@ -302,6 +314,7 @@ const TicketsHome = ({ navigation }) => {
                   )}
                 </>
               ) : (!!priceLine(featured) && <Text style={styles.heroPrice}>{priceLine(featured)}</Text>)}
+              <View style={styles.heroCta}>{cta(featured, true)}</View>
             </View>
           </TouchableOpacity>
         </>
@@ -337,6 +350,7 @@ const TicketsHome = ({ navigation }) => {
               </>
             ) : <Pill label={t('tix.fund.closed')} />
           ) : priceLine(e) ? <Text style={styles.rowPrice}>{priceLine(e)}</Text> : <Pill label={closedLabel(e)} />}
+          <View style={styles.rowCta}>{cta(e)}</View>
         </View>
       </View>
     </TouchableOpacity>
@@ -467,6 +481,15 @@ const styles = StyleSheet.create({
   rowTitle: { fontFamily: F.display, fontSize: 22, lineHeight: 25, color: T.ivory, marginTop: 4 },
   rowVenue: { fontFamily: F.ui, fontSize: 13, color: T.muted, marginTop: 4 },
   rowFoot: { marginTop: 'auto', paddingTop: 8 },
+  rowCta: { flexDirection: 'row', marginTop: 8 },
+  heroCta: { flexDirection: 'row', marginTop: 14 },
+  cta: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 12,
+    borderRadius: 14, backgroundColor: T.champagne,
+  },
+  ctaBig: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 20 },
+  ctaText: { fontFamily: F.uiHeavy, fontSize: 12, color: T.paperInk },
+  ctaTextBig: { fontSize: 14 },
   rowPrice: { fontFamily: F.uiHeavy, fontSize: 13.5, color: T.champagne },
 
   spinner: { marginTop: 60 },

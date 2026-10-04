@@ -20,6 +20,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import { checkIn } from '../../services/ticketsOrganiser';
 import { T, F, tap, Kicker, GhostButton } from '../../components/tickets/TicketKit';
@@ -46,6 +47,7 @@ const clock = (iso) => {
 };
 
 const TicketScanner = ({ navigation, route }) => {
+  const kbScroll = useRef(null);
   const { t } = useI18n();
   const { id, title } = route.params;
   const [permission, requestPermission] = useCameraPermissions();
@@ -148,7 +150,8 @@ const TicketScanner = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <KeyboardLift scrollRef={kbScroll}>
+      <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Kicker>{t('tix.gate.kicker')}</Kicker>
         <Text style={styles.title} numberOfLines={2}>{title}</Text>
 
@@ -251,6 +254,7 @@ const TicketScanner = ({ navigation, route }) => {
           </>
         )}
       </ScrollView>
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

@@ -6,7 +6,7 @@
  * The total (and the supporters list) shows only when the organiser made it
  * public, and climbs while the page is open — re-read every 10 s.
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
@@ -14,6 +14,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import { fetchEvent, formatKes, formatWhen, DEFAULT_SUGGESTED, MIN_GIFT, MAX_GIFT } from '../../services/tickets';
 import { T, F, tap, Kicker, Pill, GoldButton, Notice } from '../../components/tickets/TicketKit';
@@ -28,6 +29,7 @@ export const CATEGORY_ICON = {
 export const CATEGORIES = Object.keys(CATEGORY_ICON);
 
 const TicketFundraiser = ({ navigation, route }) => {
+  const kbScroll = useRef(null);
   const { t } = useI18n();
   const { width, height } = useWindowDimensions();
   const months = t('tix.months').split(',');
@@ -80,7 +82,8 @@ const TicketFundraiser = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <KeyboardLift scrollRef={kbScroll}>
+      <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={[styles.hero, { height: heroHeight }]}>
           {event.poster ? (
             <Image source={{ uri: event.poster }} style={StyleSheet.absoluteFill} contentFit="cover"
@@ -160,6 +163,7 @@ const TicketFundraiser = ({ navigation, route }) => {
                       onPress={give} disabled={!valid} testID="give-continue" />
         </View>
       )}
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

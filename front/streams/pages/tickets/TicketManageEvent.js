@@ -11,7 +11,7 @@
  * What a level allows comes from the server's rules: its price is fixed once
  * anyone has bought it, and its quantity can't drop below what is sold.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, RefreshControl, Share,
 } from 'react-native';
@@ -19,6 +19,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import {
   fetchMyEvent, fetchEventSummary, publishEvent, unpublishEvent, cancelEvent, updateVisibility, uploadEventFiles,
@@ -36,6 +37,7 @@ import { ticketErrorText } from './ticketText';
 const DAYS_SHOWN = 14;
 
 const TicketManageEvent = ({ navigation, route }) => {
+  const kbScroll = useRef(null);
   const { t } = useI18n();
   const months = t('tix.months').split(',');
   const weekdays = t('tix.weekdays').split(',');
@@ -183,7 +185,8 @@ const TicketManageEvent = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <ScrollView
+      <KeyboardLift scrollRef={kbScroll}>
+      <ScrollView ref={kbScroll}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={pulling} onRefresh={pull} tintColor={T.gold} colors={[T.gold]} />}
@@ -352,6 +355,7 @@ const TicketManageEvent = ({ navigation, route }) => {
           </TouchableOpacity>
         )}
       </ScrollView>
+      </KeyboardLift>
     </SafeAreaView>
   );
 };

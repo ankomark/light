@@ -169,6 +169,7 @@ describe('a fundraiser', () => {
     fireEvent.press(screen.getByTestId('kind-fundraiser'));
     await waitFor(() => expect(screen.getByText('Help Amani walk again')).toBeTruthy());
     expect(screen.getByText('tix.fund.raisedOf:KES 125,000,KES 500,000')).toBeTruthy();
+    expect(screen.getByText('tix.cta.give')).toBeTruthy();
     fireEvent.press(screen.getByText('Help Amani walk again'));
     expect(navigation.push).toHaveBeenCalledWith('TicketFundraiser', { slug: 'help-amani', preview: FUND });
   });

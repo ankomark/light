@@ -117,6 +117,8 @@ export const STRINGS = {
     'tix.weekdays': 'Sun,Mon,Tue,Wed,Thu,Fri,Sat',
     // Events & Tickets: opening an event (pages/tickets/TicketHost, TicketCreateEvent)
     'tix.openEvent': 'Open event',
+    'tix.cta.tickets': 'Get tickets',
+    'tix.cta.give': 'Give',
     // Fundraisers, supporters, the gate
     'tix.kind.events': 'Events',
     'tix.kind.fundraisers': 'Fundraisers',
@@ -4942,6 +4944,8 @@ export const STRINGS = {
     'tix.weekdays': 'Jpi,Jtt,Jnn,Jtn,Alh,Iju,Jmo',
     // Matukio na Tiketi: kufungua tukio
     'tix.openEvent': 'Fungua tukio',
+    'tix.cta.tickets': 'Pata tiketi',
+    'tix.cta.give': 'Changia',
     // Michango, wachangiaji, lango
     'tix.kind.events': 'Matukio',
     'tix.kind.fundraisers': 'Michango',
