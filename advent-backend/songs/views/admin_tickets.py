@@ -18,6 +18,11 @@ Events & Tickets in the admin area: Streams admins acting as Skylink's.
     POST /api/admin/tickets/tills/<id>/activate/        only after a paid test
     POST /api/admin/tickets/tills/<id>/reject/          {note}
     GET  /api/admin/tickets/audit/
+    GET  /api/admin/tickets/organisers/?search=         by email, name or phone
+    GET  /api/admin/tickets/organisers/<id>/
+    POST /api/admin/tickets/organisers/<id>/send-reset/ email them a reset code (never shown here)
+    POST /api/admin/tickets/organisers/<id>/reset-code/ a code to read out, shown once; fresh code needed
+    POST /api/admin/tickets/organisers/<id>/sign-out/   end every session they have; fresh code needed
 
 Each is passed to the ticketing server's staff API (songs/ticketing_staff.py)
 as this admin. Who may: `manage_tickets` (super admins always), through the
@@ -43,6 +48,11 @@ EVENT_ACTIONS = {
 TILL_ACTIONS = {
     'submit': 'ticket_till_submit', 'test': 'ticket_till_test',
     'activate': 'ticket_till_activate', 'reject': 'ticket_till_reject',
+}
+# Helping a locked-out organiser. Nobody here ever sees or sets a password.
+ORGANISER_ACTIONS = {
+    'send-reset': 'ticket_organiser_send_reset', 'reset-code': 'ticket_organiser_reset_code',
+    'sign-out': 'ticket_organiser_sign_out',
 }
 # What each action may send on: a note, or the tester's phone. Nothing else.
 ACTION_FIELDS = {'reject': ('note',), 'warn': ('note',), 'pause': ('note',), 'remove': ('note',), 'test': ('phone',)}
@@ -106,6 +116,7 @@ class AdminTicketsAction(_TicketsView):
         if response.status_code == 200:
             data = response.data or {}
             # A line a person can read later: the event's title, or the till.
+            # Never a reset code: it is shown to the admin once, and kept nowhere.
             what = data.get('title') or data.get('till_number') or ''
             log_admin_action(request.user, self.actions[action], target_type=f'ticket_{self.kind[:-1]}',
                              target_id=pk, reason=' — '.join(x for x in (what, body.get('note', '')) if x))
@@ -126,6 +137,26 @@ class AdminTicketEvent(AdminTicketsDetail):
 
 class AdminTicketTill(AdminTicketsDetail):
     kind = 'tills'
+
+
+class AdminTicketOrganisers(AdminTicketsList):
+    kind = 'organisers'
+
+
+class AdminTicketOrganiser(AdminTicketsDetail):
+    kind = 'organisers'
+
+
+class AdminTicketOrganiserAction(AdminTicketsAction):
+    kind = 'organisers'
+    actions = ORGANISER_ACTIONS
+
+    def get_permissions(self):
+        # A code that sets someone's password, or ending their sessions: a
+        # fresh authenticator code. Emailing a code to their own inbox is not.
+        if self.kwargs.get('action') in ('reset-code', 'sign-out'):
+            return [Cap('manage_tickets', recent=True)()]
+        return super().get_permissions()
 
 
 class AdminTicketEventAction(AdminTicketsAction):

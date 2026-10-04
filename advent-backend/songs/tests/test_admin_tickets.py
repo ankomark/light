@@ -138,6 +138,40 @@ class AdminTicketsTests(APITestCase):
         self.client.get('/api/admin/tickets/events/', {'view': 'drafts'})
         self.assertEqual(self.sent()[2]['params'], {'view': 'drafts'})
 
+    def test_organisers_are_searched_and_helped_without_any_password_passing_here(self):
+        self.request.return_value = answer(body={'count': 1, 'results': [{'id': 4, 'email': 'org@example.com'}]})
+        self.client.get('/api/admin/tickets/organisers/', {'search': '0712345678'})
+        self.assertEqual(self.sent()[1], 'https://tickets.test/api/v1/staff/organisers/')
+        self.assertEqual(self.sent()[2]['params'], {'search': '0712345678'})
+
+        self.request.return_value = answer(body={'detail': 'A code is on its way to org@example.com.', 'sent': True})
+        res = self.client.post('/api/admin/tickets/organisers/4/send-reset/', {'password': 'x'}, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.sent(1)[1], 'https://tickets.test/api/v1/staff/organisers/4/send-reset/')
+        self.assertEqual(self.sent(1)[2]['json'], {})                        # nothing rides along
+
+        self.request.return_value = answer(body={'code': '123456', 'expires_at': '2026-10-04T12:00:00Z'})
+        res = self.client.post('/api/admin/tickets/organisers/4/reset-code/')
+        self.assertEqual(res.data['code'], '123456')
+        logs = list(AdminActionLog.objects.order_by('id').values_list('action', 'target_type', 'reason'))
+        self.assertEqual([a for a, _, _ in logs], ['ticket_organiser_send_reset', 'ticket_organiser_reset_code'])
+        self.assertEqual({t for _, t, _ in logs}, {'ticket_organiser'})
+        self.assertFalse(any('123456' in r for _, _, r in logs))             # the code is kept nowhere
+
+    @override_settings(ADMIN_2FA_REQUIRED=True)
+    def test_a_read_out_code_or_signing_out_needs_a_fresh_code(self):
+        self.request.return_value = answer(body={'code': '123456'})
+        for action in ('reset-code', 'sign-out'):
+            res = self.client.post(f'/api/admin/tickets/organisers/4/{action}/')
+            self.assertEqual(res.status_code, 403, action)
+        self.request.assert_not_called()
+
+    def test_email_not_set_up_is_said_plainly(self):
+        self.request.return_value = answer(409, {'detail': 'Email is not set up on the ticket server.', 'sent': False})
+        res = self.client.post('/api/admin/tickets/organisers/4/send-reset/')
+        self.assertEqual(res.status_code, 409)
+        self.assertFalse(AdminActionLog.objects.exists())
+
     @override_settings(ADMIN_2FA_REQUIRED=True)
     def test_removing_for_good_needs_a_fresh_code(self):
         self.request.return_value = answer(body={'id': 5})

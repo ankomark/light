@@ -33,6 +33,7 @@ jest.mock('../../../utils/adminConfirm', () => ({
 const AdminTickets = require('../AdminTickets').default;
 const AdminTicketEvent = require('../AdminTicketEvent').default;
 const AdminTicketTill = require('../AdminTicketTill').default;
+const AdminTicketOrganiser = require('../AdminTicketOrganiser').default;
 
 const future = new Date(Date.now() + 10 * 86400000).toISOString();
 const EVENT = {
@@ -254,5 +255,52 @@ describe('managing an approved event', () => {
     await waitFor(() => expect(screen.getByText('adminTix.notSent')).toBeTruthy());
     await act(async () => { fireEvent.press(screen.getByTestId('admin-tix-approve')); });
     expect(mockApi.adminTicketEventAction).toHaveBeenCalledWith(5, 'approve', undefined);
+  });
+});
+
+describe('organisers locked out', () => {
+  const ORG = { id: 2, email: 'org@example.com', display_name: 'Amani Choir', phone: '0712345678', events: 3, tills: 1,
+    date_joined: '2026-09-01T10:00:00Z', last_login: null };
+
+  test('searched by email, name or phone, once typing pauses', async () => {
+    mockApi.fetchAdminTicketEvents.mockResolvedValue({ results: [], next: null });
+    mockApi.fetchAdminTicketOrganisers.mockResolvedValue({ results: [ORG], next: null });
+    const navigation = { navigate: jest.fn() };
+    const screen = render(<AdminTickets navigation={navigation} route={{}} />);
+    fireEvent.press(screen.getByTestId('admin-tix-tab-organisers'));
+    fireEvent.changeText(screen.getByTestId('admin-tix-org-search'), '0712');
+    fireEvent.changeText(screen.getByTestId('admin-tix-org-search'), '0712345678');
+    await waitFor(() => expect(mockApi.fetchAdminTicketOrganisers).toHaveBeenLastCalledWith({ search: '0712345678' }));
+    expect(mockApi.fetchAdminTicketOrganisers).not.toHaveBeenCalledWith({ search: '0712' });
+    fireEvent.press(await screen.findByTestId('admin-tix-org-2'));
+    expect(navigation.navigate).toHaveBeenCalledWith('AdminTicketOrganiser', { id: 2 });
+  });
+
+  test('a code to read out is shown once it is confirmed; emailing never shows one', async () => {
+    mockApi.fetchAdminTicketOrganiser.mockResolvedValue(ORG);
+    mockApi.adminTicketOrganiserAction.mockImplementation(async (id, action) => (action === 'reset-code'
+      ? { code: '482913', expires_at: '2026-10-04T12:15:00Z' } : { detail: 'A code is on its way to org@example.com.', sent: true }));
+    const screen = render(<AdminTicketOrganiser route={{ params: { id: 2 } }} />);
+    fireEvent.press(await screen.findByTestId('admin-org-send-reset'));
+    await waitFor(() => expect(mockNotify).toHaveBeenCalledWith('adminTix.org.done', 'A code is on its way to org@example.com.'));
+    expect(screen.queryByTestId('admin-org-code')).toBeNull();
+
+    mockConfirm.mockResolvedValueOnce(false);
+    fireEvent.press(screen.getByTestId('admin-org-reset-code'));
+    await waitFor(() => expect(mockConfirm).toHaveBeenCalledTimes(2));
+    expect(mockApi.adminTicketOrganiserAction).not.toHaveBeenCalledWith(2, 'reset-code');
+
+    fireEvent.press(screen.getByTestId('admin-org-reset-code'));
+    await waitFor(() => expect(screen.getByText('482913')).toBeTruthy());
+    expect(mockConfirm.mock.calls[2][0].destructive).toBe(true);
+  });
+
+  test('sign out everywhere, and a refusal is said plainly', async () => {
+    mockApi.fetchAdminTicketOrganiser.mockResolvedValue(ORG);
+    mockApi.adminTicketOrganiserAction.mockRejectedValue(new Error('Email is not set up on the ticket server.'));
+    const screen = render(<AdminTicketOrganiser route={{ params: { id: 2 } }} />);
+    fireEvent.press(await screen.findByTestId('admin-org-sign-out'));
+    await waitFor(() => expect(mockApi.adminTicketOrganiserAction).toHaveBeenCalledWith(2, 'sign-out'));
+    await waitFor(() => expect(mockNotify).toHaveBeenCalledWith('adminTix.actionFailed', 'Email is not set up on the ticket server.'));
   });
 });

@@ -6,11 +6,13 @@
 // An event sells only once it is approved AND its till is active, so the two
 // queues sit side by side.
 import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
-import { fetchAdminTicketStats, fetchAdminTicketEvents, fetchAdminTills, fetchAdminByUrl } from '../../services/api';
+import {
+  fetchAdminTicketStats, fetchAdminTicketEvents, fetchAdminTills, fetchAdminByUrl, fetchAdminTicketOrganisers,
+} from '../../services/api';
 import { formatKes, formatWhen } from '../../services/tickets';
 import { ADMIN, ErrorState } from './AdminKit';
 
@@ -18,7 +20,7 @@ import { ADMIN, ErrorState } from './AdminKit';
 // used to fit none of the tabs and looked missing (the ticketing server's
 // staff/views.py EVENT_VIEWS).
 const EVENT_FILTERS = ['review', 'live', 'approved', 'drafts', 'paused', 'rejected', 'removed', 'all'];
-const FIRST_FILTER = { events: 'review', tills: 'pending' };
+const FIRST_FILTER = { events: 'review', tills: 'pending', organisers: '' };
 const TILL_FILTERS = ['pending', 'submitted', 'active', 'rejected'];
 
 export const TILL_COLOR = { pending: ADMIN.gold, submitted: '#7CB8FF', active: ADMIN.ok, rejected: ADMIN.danger };
@@ -62,7 +64,9 @@ export default function AdminTickets({ navigation, route }) {
     try {
       const res = which === 'events'
         ? await fetchAdminTicketEvents(f === 'all' ? {} : { view: f })
-        : await fetchAdminTills({ status: f });
+        : which === 'organisers'
+          ? await fetchAdminTicketOrganisers(f.trim() ? { search: f.trim() } : {})
+          : await fetchAdminTills({ status: f });
       if (mine !== latest.current) return;
       setRows(res?.results || []);
       setNext(res?.next || null);
@@ -73,7 +77,13 @@ export default function AdminTickets({ navigation, route }) {
     }
   }, []);
   // Back from a decision: the queue is read again, so it no longer shows.
-  useFocusEffect(useCallback(() => { load(tab, filter); }, [load, tab, filter]));
+  // A search waits for typing to pause.
+  const typing = useRef(null);
+  useFocusEffect(useCallback(() => {
+    if (tab !== 'organisers') { load(tab, filter); return undefined; }
+    typing.current = setTimeout(() => load(tab, filter), 350);
+    return () => clearTimeout(typing.current);
+  }, [load, tab, filter]));
 
   const pickTab = (which) => {
     if (which === tab) return;
@@ -108,21 +118,30 @@ export default function AdminTickets({ navigation, route }) {
       )}
 
       <View style={styles.tabs}>
-        {['events', 'tills'].map((which) => (
+        {['events', 'tills', 'organisers'].map((which) => (
           <TouchableOpacity key={which} style={[styles.tab, tab === which && styles.tabOn]} onPress={() => pickTab(which)}
                             testID={`admin-tix-tab-${which}`}>
             <Text style={[styles.tabText, tab === which && styles.tabTextOn]}>{t(`adminTix.tab.${which}`)}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <View style={styles.chips}>
-        {(tab === 'events' ? EVENT_FILTERS : TILL_FILTERS).map((f) => (
-          <TouchableOpacity key={f} style={[styles.chip, filter === f && styles.chipOn]} onPress={() => setFilter(f)}
-                            testID={`admin-tix-filter-${f}`}>
-            <Text style={[styles.chipText, filter === f && styles.chipTextOn]}>{t(`adminTix.filter.${f}`)}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {tab === 'organisers' ? (
+        <>
+          <TextInput value={filter} onChangeText={setFilter} style={styles.search} autoCapitalize="none"
+                     autoCorrect={false} placeholder={t('adminTix.org.search')} placeholderTextColor={ADMIN.muted}
+                     accessibilityLabel={t('adminTix.org.search')} testID="admin-tix-org-search" />
+          <Text style={styles.sub}>{t('adminTix.org.searchHint')}</Text>
+        </>
+      ) : (
+        <View style={styles.chips}>
+          {(tab === 'events' ? EVENT_FILTERS : TILL_FILTERS).map((f) => (
+            <TouchableOpacity key={f} style={[styles.chip, filter === f && styles.chipOn]} onPress={() => setFilter(f)}
+                              testID={`admin-tix-filter-${f}`}>
+              <Text style={[styles.chipText, filter === f && styles.chipTextOn]}>{t(`adminTix.filter.${f}`)}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </View>
   );
 
@@ -142,6 +161,17 @@ export default function AdminTickets({ navigation, route }) {
           {!!e.warning_note && <Badge color={ADMIN.gold} label={t('adminTix.warned')} />}
           <Badge color={TILL_COLOR[e.till?.status] || ADMIN.muted} label={t('adminTix.tillShort', { status: t(`adminTix.till.${e.till?.status}`) })} />
         </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderOrganiser = ({ item: o }) => (
+    <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('AdminTicketOrganiser', { id: o.id })}
+                      testID={`admin-tix-org-${o.id}`}>
+      <View style={styles.rowBody}>
+        <Text style={styles.rowTitle} numberOfLines={1}>{o.display_name || o.email}</Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>{o.email}{o.phone ? ` · ${o.phone}` : ''}</Text>
+        <Text style={styles.rowMeta}>{t('adminTix.eventsCount', { n: o.events })}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -168,7 +198,8 @@ export default function AdminTickets({ navigation, route }) {
       contentContainerStyle={styles.content}
       data={loading || error ? [] : rows}
       keyExtractor={(r) => `${tab}-${r.id}`}
-      renderItem={tab === 'events' ? renderEvent : renderTill}
+      renderItem={tab === 'events' ? renderEvent : tab === 'organisers' ? renderOrganiser : renderTill}
+      keyboardShouldPersistTaps="handled"
       ListHeaderComponent={header}
       ListEmptyComponent={
         loading ? <ActivityIndicator color={ADMIN.gold} style={styles.loading} />
@@ -210,6 +241,10 @@ const styles = StyleSheet.create({
   tabOn: { backgroundColor: ADMIN.gold },
   tabText: { color: ADMIN.muted, fontWeight: '700', fontSize: 14 },
   tabTextOn: { color: ADMIN.onGold },
+  search: {
+    marginTop: 12, marginBottom: 4, height: 46, paddingHorizontal: 14, borderRadius: 12, color: ADMIN.text,
+    backgroundColor: ADMIN.field, borderWidth: 1, borderColor: ADMIN.border, fontSize: 15,
+  },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, marginBottom: 6 },
   chip: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: ADMIN.border },
   chipOn: { borderColor: ADMIN.gold, backgroundColor: 'rgba(255,196,107,0.12)' },

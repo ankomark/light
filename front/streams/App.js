@@ -156,6 +156,7 @@ import AdminSingles from './components/admin/AdminSingles';
 import AdminTickets from './components/admin/AdminTickets';
 import AdminTicketEvent from './components/admin/AdminTicketEvent';
 import AdminTicketTill from './components/admin/AdminTicketTill';
+import AdminTicketOrganiser from './components/admin/AdminTicketOrganiser';
 import SinglesHome from './pages/singles/SinglesHome';
 import SinglesEdit from './pages/singles/SinglesEdit';
 import SinglesPerson from './pages/singles/SinglesPerson';
@@ -567,6 +568,7 @@ const App = () => {
                 <Stack.Screen name="AdminTickets" component={AdminTicketsWrapper} />
                 <Stack.Screen name="AdminTicketEvent" component={AdminTicketEventWrapper} />
                 <Stack.Screen name="AdminTicketTill" component={AdminTicketTillWrapper} />
+                <Stack.Screen name="AdminTicketOrganiser" component={AdminTicketOrganiserWrapper} />
                 {/* Single & Searching: its own headers (components/singles/SinglesKit). */}
                 <Stack.Screen name="Singles" component={SinglesHome} options={{ headerShown: false }} />
                 <Stack.Screen name="SinglesEdit" component={SinglesEdit} options={{ headerShown: false }} />
@@ -1054,6 +1056,7 @@ const AdminSinglesWrapper = adminWrap(AdminSingles);
 const AdminTicketsWrapper = adminWrap(AdminTickets);
 const AdminTicketEventWrapper = adminWrap(AdminTicketEvent);
 const AdminTicketTillWrapper = adminWrap(AdminTicketTill);
+const AdminTicketOrganiserWrapper = adminWrap(AdminTicketOrganiser);
 const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);

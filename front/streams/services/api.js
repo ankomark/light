@@ -2598,6 +2598,12 @@ export const fetchAdminTill = (id) => apiRequest('get', `/admin/tickets/tills/${
 // action: submit | test ({ phone }) | activate | reject ({ note })
 export const adminTillAction = (id, action, body = {}) =>
   apiRequest('post', `/admin/tickets/tills/${id}/${action}/`, body);
+// Organisers locked out: search, then send-reset | reset-code | sign-out.
+export const fetchAdminTicketOrganisers = (params = {}) =>
+  apiRequest('get', '/admin/tickets/organisers/', null, { params });
+export const fetchAdminTicketOrganiser = (id) => apiRequest('get', `/admin/tickets/organisers/${id}/`);
+export const adminTicketOrganiserAction = (id, action) =>
+  apiRequest('post', `/admin/tickets/organisers/${id}/${action}/`, {});
 export const fetchSinglesReviewList = (kind) => apiRequest('get', `/admin/singles-${kind}/`);
 export const decideSinglesItem = (kind, id, decision, reason = '') =>
   apiRequest('post', `/admin/singles-${kind}/${id}/decide/`, { decision, reason });

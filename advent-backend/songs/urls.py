@@ -5,6 +5,7 @@ from .views.organizations import OrganizationViewSet
 from .views.admin_tickets import (
     AdminTicketsStats, AdminTicketsAudit, AdminTicketEvents, AdminTicketEvent, AdminTicketEventAction,
     AdminTicketTills, AdminTicketTill, AdminTicketTillAction,
+    AdminTicketOrganisers, AdminTicketOrganiser, AdminTicketOrganiserAction,
 )
 from .views.singles import (
     SinglesMeView, SinglesSubmitView, SinglesPauseView, SinglesPhotosView, SinglesPhotoDetailView,
@@ -314,6 +315,10 @@ urlpatterns = [
     path('admin/tickets/tills/', AdminTicketTills.as_view(), name='admin-tickets-tills'),
     path('admin/tickets/tills/<int:pk>/', AdminTicketTill.as_view(), name='admin-tickets-till'),
     path('admin/tickets/tills/<int:pk>/<str:action>/', AdminTicketTillAction.as_view(), name='admin-tickets-till-action'),
+    path('admin/tickets/organisers/', AdminTicketOrganisers.as_view(), name='admin-tickets-organisers'),
+    path('admin/tickets/organisers/<int:pk>/', AdminTicketOrganiser.as_view(), name='admin-tickets-organiser'),
+    path('admin/tickets/organisers/<int:pk>/<str:action>/', AdminTicketOrganiserAction.as_view(),
+         name='admin-tickets-organiser-action'),
     path('singles/hub/', SinglesHubView.as_view(), name='singles-hub'),
     path('singles/browse/', SinglesBrowseView.as_view(), name='singles-browse'),
     path('singles/likes/', SinglesLikesView.as_view(), name='singles-likes'),
