@@ -294,6 +294,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
             # Read receipts, live: everything they sent here is now read.
             others = conversation.participants.exclude(id=request.user.id).values_list('id', flat=True)
             dm.tell(list(others), {'type': 'read', 'conversation_id': conversation.id, 'reader_id': request.user.id})
+            # And the reader's own devices: their unread badges (the header,
+            # the menu, Single & Searching) drop at once, not at the next poll.
+            dm.tell([request.user.id], {'type': 'seen', 'conversation_id': conversation.id})
         return Response({'status': 'ok'})
 
     def _message(self, conversation, mid):

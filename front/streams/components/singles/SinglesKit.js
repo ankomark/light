@@ -9,7 +9,7 @@
 import React, { useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions, Animated,
-  AccessibilityInfo,
+  AccessibilityInfo, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import RotatingBackground from '../RotatingBackground';
 import ScreenVignette from '../ScreenVignette';
@@ -57,7 +57,7 @@ export function SinglesScreen({ title, right, children, scroll = true, footer, t
   const insets = useSafeAreaInsets();
   const column = { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' };
   return (
-    <View style={s.root} testID={testID}>
+    <KeyboardAvoidingView style={s.root} testID={testID} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Backdrop />
       <SafeAreaView edges={['top', 'left', 'right']} style={s.bar}>
         <TouchableOpacity onPress={onBack || (() => navigation.goBack())} style={s.icon} accessibilityRole="button"
@@ -71,7 +71,8 @@ export function SinglesScreen({ title, right, children, scroll = true, footer, t
         <ScrollView
           contentContainerStyle={[s.scroll, column, { paddingBottom: (footer ? 120 : 48) + insets.bottom,
             paddingLeft: 16 + insets.left, paddingRight: 16 + insets.right }]}
-          keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive">
           {children}
         </ScrollView>
       ) : (
@@ -82,9 +83,12 @@ export function SinglesScreen({ title, right, children, scroll = true, footer, t
           <View style={[s.footerRow, column]}>{footer}</View>
         </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
+
+/** A bottom sheet's own bottom padding: clear of the home indicator. */
+export const useSheetPad = (base = 20) => base + useSafeAreaInsets().bottom;
 
 /** The wallpaper, its navy scrim and the edge vignette — behind everything. */
 export const Backdrop = () => (

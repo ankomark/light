@@ -6,7 +6,7 @@ import { ActivityIndicator } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../../services/imageProcessing';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesVerify, sendSinglesSelfie } from '../../services/api';
 import { notify } from '../../utils/adminConfirm';
@@ -30,7 +30,8 @@ export default function SinglesVerify() {
     if (shot.canceled || !shot.assets?.[0]) return;
     setBusy(true);
     try {
-      const small = await manipulateAsync(shot.assets[0].uri, [{ resize: { width: 1000 } }], { compress: 0.8, format: SaveFormat.JPEG });
+      const shotAsset = shot.assets[0];
+      const small = await compressImage(shotAsset.uri, { width: 1000, quality: 0.8, sourceWidth: shotAsset.width });
       const form = new FormData();
       form.append('image', { uri: small.uri, name: 'selfie.jpg', type: 'image/jpeg' });
       form.append('gesture', state.gesture);

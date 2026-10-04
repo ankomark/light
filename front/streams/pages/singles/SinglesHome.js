@@ -7,7 +7,8 @@
 // A match opens a celebration with a way to begin, then the chat in Messages.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ScrollView, RefreshControl,
+  View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ScrollView, RefreshControl, useWindowDimensions,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -24,7 +25,7 @@ import { tap, celebrate } from '../../components/singles/feel';
 import useSingles from '../../components/singles/useSingles';
 import {
   GOLD, FACE, SinglesScreen, GoldButton, Label, Card, Chip, Portrait, Ring, Title, Body, Centered, FadeIn,
-  SkeletonList,
+  SkeletonList, useSheetPad,
 } from '../../components/singles/SinglesKit';
 import ProfileCard from '../../components/singles/ProfileCard';
 import SafetySheet from '../../components/singles/SafetySheet';
@@ -223,6 +224,7 @@ function Discover({ paused, onMine, mePhoto }) {
   const [safety, setSafety] = useState(false);
   const [match, setMatch] = useState(null);
   const scroll = useRef(null);
+  const insets = useSafeAreaInsets();
 
   const load = useCallback(async (f) => {
     const plain = !Object.keys(f || {}).length;
@@ -302,7 +304,7 @@ function Discover({ paused, onMine, mePhoto }) {
               <Text style={styles.safetyText}>{t('singles.safety.link')}</Text>
             </TouchableOpacity>
           </ScrollView>
-          <View style={styles.actions}>
+          <View style={[styles.actions, { paddingBottom: 14 + insets.bottom }]}>
             <GoldButton label={t('singles.notNow')} icon="close" kind="outline" onPress={() => answer('pass')}
               disabled={busy} testID="singles-pass" />
             <GoldButton label={t('singles.interested')} icon="heart" onPress={() => answer('interested')} busy={busy}
@@ -340,6 +342,7 @@ function Discover({ paused, onMine, mePhoto }) {
 // ── Filters ──────────────────────────────────────────────────────────────────
 export function FiltersSheet({ visible, value, onClose, onApply }) {
   const { t } = useI18n();
+  const sheetPad = useSheetPad();
   const [f, setF] = useState(value);
   useEffect(() => { if (visible) setF(value); }, [visible, value]);
   const set = (k, v) => setF((cur) => {
@@ -350,8 +353,9 @@ export function FiltersSheet({ visible, value, onClose, onApply }) {
   const num = (k) => (text) => set(k, text.replace(/[^0-9]/g, '').slice(0, 3));
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={onClose} accessibilityLabel={t('common.close')} />
-      <View style={styles.sheet} testID="singles-filters-sheet">
+      <View style={[styles.sheet, { paddingBottom: sheetPad }]} testID="singles-filters-sheet">
         <Title size={28}>{t('singles.filters.title')}</Title>
         <Label>{t('singles.filters.age')}</Label>
         <View style={styles.ageRow}>
@@ -387,6 +391,7 @@ export function FiltersSheet({ visible, value, onClose, onApply }) {
           <GoldButton label={t('singles.filters.apply')} onPress={() => onApply(f)} testID="singles-filters-apply" />
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -404,6 +409,9 @@ export function openerText(t, opener, name) {
 
 export function MatchMoment({ match, onClose, onHello, mePhoto }) {
   const { t } = useI18n();
+  const { width } = useWindowDimensions();
+  // Two rings and the heart between them, inside the page's margins.
+  const size = Math.max(84, Math.min(118, Math.floor((Math.min(width, 560) - 48 - 30 - 26) / 2)));
   if (!match) return null;
   const p = match.profile;
   return (
@@ -412,9 +420,9 @@ export function MatchMoment({ match, onClose, onHello, mePhoto }) {
         <Label>{t('singles.match.eyebrow')}</Label>
         <Title size={46}>{t('singles.match.title')}</Title>
         <View style={styles.pair}>
-          <Ring><Portrait uri={mePhoto} size={118} /></Ring>
+          <Ring><Portrait uri={mePhoto} size={size} /></Ring>
           <View style={styles.pairHeart}><Ionicons name="heart" size={22} color={GOLD.onGold} /></View>
-          <Ring><Portrait uri={p.photos?.[0]?.url} size={118} /></Ring>
+          <Ring><Portrait uri={p.photos?.[0]?.url} size={size} /></Ring>
         </View>
         <Body style={{ textAlign: 'center', maxWidth: 320 }}>{t('singles.match.body', { name: p.first_name })}</Body>
         <Card style={{ alignSelf: 'stretch' }}>

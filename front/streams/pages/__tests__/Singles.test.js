@@ -11,6 +11,7 @@ import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 const mockT = (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k);
 jest.mock('../../context/I18nContext', () => ({ useI18n: () => ({ t: mockT }) }));
 const mockNav = { navigate: jest.fn(), goBack: jest.fn(), replace: jest.fn() };
+let mockInsets = { top: 0, bottom: 0, left: 0, right: 0 };
 let mockParams = {};
 jest.mock('@react-navigation/native', () => {
   const R = require('react');
@@ -26,7 +27,7 @@ jest.mock('expo-image-picker', () => ({ MediaTypeOptions: { Images: 'Images' } }
 jest.mock('expo-image-manipulator', () => ({ manipulateAsync: jest.fn(), SaveFormat: { JPEG: 'jpeg' } }));
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
-  return { SafeAreaView: View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
+  return { SafeAreaView: View, useSafeAreaInsets: () => mockInsets };
 });
 jest.mock('../../utils/adminConfirm', () => ({
   notify: jest.fn(), confirmAction: jest.fn(async () => true),
@@ -87,6 +88,7 @@ const HUB = {
 };
 
 beforeEach(async () => {
+  mockInsets = { top: 0, bottom: 0, left: 0, right: 0 };
   // Each test starts with nothing kept: no screen paints another test's copy.
   await require('../../utils/screenCache').clearAllCaches();
   jest.clearAllMocks();
@@ -395,4 +397,47 @@ test('any photo can become the main one', async () => {
   await act(async () => { fireEvent.press(screen.getByTestId('singles-make-main-2')); });
   expect(api.orderSinglesPhotos).toHaveBeenCalledWith([2, 1]);
   expect(onChange).toHaveBeenCalled();
+});
+
+
+// ── Screens of every size ───────────────────────────────────────────────────
+const RN = require('react-native');
+const widths = (tree) => {
+  const out = [];
+  const walk = (n) => {
+    if (!n) return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    const w = RN.StyleSheet.flatten(n.props?.style || {})?.width;
+    if (typeof w === 'number') out.push(w);
+    walk(n.children);
+  };
+  walk(tree);
+  return out;
+};
+
+test('the match moment fits two portraits on a small phone', () => {
+  const { MatchMoment } = require('../singles/SinglesHome');
+  const match = { id: 1, profile: grace, opener: { kind: 'general' } };
+  jest.spyOn(RN, 'useWindowDimensions').mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 1 });
+  const small = render(<MatchMoment match={match} onClose={() => {}} onHello={() => {}} />);
+  expect(widths(small.toJSON())).toContain(108);
+  small.unmount();
+  RN.useWindowDimensions.mockReturnValue({ width: 414, height: 896, scale: 3, fontScale: 1 });
+  const big = render(<MatchMoment match={match} onClose={() => {}} onHello={() => {}} />);
+  expect(widths(big.toJSON())).toContain(118);
+  RN.useWindowDimensions.mockRestore();
+});
+
+test('Interested and Not now clear the home indicator', async () => {
+  mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
+  api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+  api.fetchSinglesHub.mockResolvedValue(HUB);
+  api.fetchSinglesDiscover.mockResolvedValue({ results: [grace], left_today: 20 });
+  const screen = render(<SinglesHome />);
+  await waitFor(() => expect(screen.getByTestId('singles-hub')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-tab-discover')); });
+  await waitFor(() => expect(screen.getByTestId('singles-interested')).toBeTruthy());
+  let node = screen.getByTestId('singles-interested');
+  while (node && RN.StyleSheet.flatten(node.props?.style || {})?.paddingBottom == null) node = node.parent;
+  expect(RN.StyleSheet.flatten(node.props.style).paddingBottom).toBe(14 + 34);
 });

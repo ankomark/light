@@ -7,7 +7,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator } f
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { compressImage } from '../../services/imageProcessing';
 import { useI18n } from '../../context/I18nContext';
 import {
   addSinglesPhoto, removeSinglesPhoto, submitSinglesProfile, pauseSinglesProfile, leaveSingles, orderSinglesPhotos,
@@ -43,8 +43,10 @@ export default function MyProfilePane({ profile, onChange }) {
     if (!perm.granted) { notify(t('singles.mine.photoPermTitle'), t('singles.mine.photoPermBody')); return; }
     const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 1 });
     if (picked.canceled || !picked.assets?.[0]) return;
-    const small = await manipulateAsync(picked.assets[0].uri, [{ resize: { width: 1200 } }],
-      { compress: 0.8, format: SaveFormat.JPEG });
+    // The app's one compressor (as the feed and chats use): a width ceiling,
+    // never upscaled, never made bigger than the original, always JPEG.
+    const asset = picked.assets[0];
+    const small = await compressImage(asset.uri, { width: 1080, quality: 0.8, sourceWidth: asset.width });
     const form = new FormData();
     form.append('image', { uri: small.uri, name: 'photo.jpg', type: 'image/jpeg' });
     await addSinglesPhoto(form);

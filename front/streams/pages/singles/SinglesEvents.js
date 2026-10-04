@@ -3,7 +3,9 @@
 // going and which of your matches are. Live rooms are singles-only audio
 // rooms; verified members can host one.
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Modal, Switch } from 'react-native';
+import {
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Modal, Switch, KeyboardAvoidingView, Platform,
+} from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -12,7 +14,9 @@ import {
   startSinglesRoom,
 } from '../../services/api';
 import { notify } from '../../utils/adminConfirm';
-import { GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body, Card, SkeletonList } from '../../components/singles/SinglesKit';
+import {
+  GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body, Card, SkeletonList, useSheetPad,
+} from '../../components/singles/SinglesKit';
 import useSingles from '../../components/singles/useSingles';
 
 export const KINDS = ['coffee', 'bible_study', 'outdoors', 'concert', 'retreat', 'seminar', 'prayer', 'online'];
@@ -108,6 +112,7 @@ function SuggestSheet({ visible, onClose, onDone }) {
   const { t } = useI18n();
   const [f, setF] = useState({ kind: 'coffee', title: '', date: '', time: '', place: '', country: '', description: '', online: false });
   const [busy, setBusy] = useState(false);
+  const sheetPad = useSheetPad(30);
   const set = (k) => (v) => setF((c) => ({ ...c, [k]: v }));
   const send = async () => {
     const starts = new Date(`${f.date}T${f.time || '00:00'}`);
@@ -120,8 +125,8 @@ function SuggestSheet({ visible, onClose, onDone }) {
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.scrim}>
-        <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={styles.scrim} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: sheetPad }} keyboardShouldPersistTaps="handled">
           <Text style={styles.sheetTitle}>{t('singles.events.suggest')}</Text>
           <View style={styles.chips}>
             {KINDS.map((k) => <Chip key={k} text={t(`singles.eventKind.${k}`)} on={f.kind === k} onPress={() => set('kind')(k)} />)}
@@ -151,7 +156,7 @@ function SuggestSheet({ visible, onClose, onDone }) {
             <GoldButton label={t('singles.events.send')} onPress={send} busy={busy} />
           </View>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -160,6 +165,7 @@ function HostSheet({ visible, onClose, onLive }) {
   const { t } = useI18n();
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  const sheetPad = useSheetPad();
   const go = async () => {
     setBusy(true);
     try { onLive(await startSinglesRoom(title.trim())); } catch (e) {
@@ -168,8 +174,8 @@ function HostSheet({ visible, onClose, onLive }) {
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.scrim}>
-        <View style={[styles.sheet, { gap: 12 }]}>
+      <KeyboardAvoidingView style={styles.scrim} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={[styles.sheet, { gap: 12, paddingBottom: sheetPad }]}>
           <Text style={styles.sheetTitle}>{t('singles.rooms.host')}</Text>
           <Body style={{ fontSize: 14 }}>{t('singles.rooms.hostLead')}</Body>
           <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={200}
@@ -179,7 +185,7 @@ function HostSheet({ visible, onClose, onLive }) {
             <GoldButton label={t('singles.rooms.start')} icon="mic" onPress={go} busy={busy} disabled={!title.trim()} />
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

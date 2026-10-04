@@ -414,6 +414,7 @@ class SinglesGatheringsView(APIView):
             created_by=request.user, kind=kind, title=title, description=rules.clean(data.get('description'), 1500),
             starts_at=starts, place=rules.clean(data.get('place'), 160), country=rules.clean(data.get('country'), 60),
             online=bool(data.get('online')) or kind == 'online')
+        rules.notify_reviewers('gathering', 'A Single & Searching event is waiting to be listed.')
         return Response(_gathering_json(g, me), status=status.HTTP_201_CREATED)
 
 
@@ -505,6 +506,8 @@ class SinglesStoryConsentView(APIView):
         if request.user.pk not in story.consents:
             story.consents = [*story.consents, request.user.pk]
             story.save(update_fields=['consents'])
+            if len(set(story.consents)) >= 2:
+                rules.notify_reviewers('story', 'A Single & Searching story is ready for review.')
         return Response(_story_json(story, request.user))
 
     def delete(self, request, pk):
@@ -546,6 +549,7 @@ class SinglesVerifyView(APIView):
             logger.exception('Singles selfie upload failed')
             return Response({'error': 'The photo could not be uploaded.'}, status=status.HTTP_502_BAD_GATEWAY)
         SinglesVerification.objects.create(profile=me, selfie=url, gesture=gesture)
+        rules.notify_reviewers('selfie', 'A Single & Searching selfie is waiting to be checked.')
         return Response({'last': 'pending'}, status=status.HTTP_201_CREATED)
 
 
@@ -631,6 +635,10 @@ class AdminSinglesStoryViewSet(viewsets.ViewSet):
         story.status = story.PUBLISHED if decision == 'approve' else story.REJECTED
         story.published_at = timezone.now() if decision == 'approve' else None
         story.save(update_fields=['status', 'published_at'])
+        for p in (story.match.profile_a, story.match.profile_b):
+            if p is not None:
+                _tell(p.user, 'Your story is published in Single & Searching — thank you for sharing it.'
+                      if decision == 'approve' else f'Your story wasn’t published: {reason}')
         log_admin_action(request.user, f'singles_story_{decision}', 'singlesstory', story.pk, reason=reason or story.title)
         return Response(_story_json(story))
 

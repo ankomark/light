@@ -323,6 +323,9 @@ const App = () => {
         } else {
           navigate('GroupDetail', { groupSlug: data.groupSlug });
         }
+      } else if (data?.screen === 'AdminSingles') {
+        // Something waits in the Single & Searching review queue (reviewers).
+        navigate('AdminSingles');
       } else if (data?.type === 'singles_match' || data?.screen === 'Singles' || data?.screen === 'SinglesMatches') {
         // Single & Searching: a new match, or word about your profile's review.
         navigate('Singles');

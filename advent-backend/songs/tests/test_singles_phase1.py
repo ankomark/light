@@ -231,7 +231,7 @@ class ReviewTests(Base):
         tell.reset_mock()
         self.client.post(self.url + 'review/', {'decision': 'approve', 'photos': {str(new): 'reject'}}, format='json')
         self.assertEqual(SinglesPhoto.objects.get(pk=new).status, 'rejected')
-        tell.assert_not_called()                                   # nothing new to tell: still approved
+        self.assertIn('wasn’t approved', tell.call_args[0][2])     # told about the photo (still approved)
 
     @mock.patch(TELL)
     def test_reject_needs_a_reason_the_person_reads(self, tell):
@@ -281,3 +281,56 @@ class RuleTests(APITestCase):
         self.assertEqual(singles.clean('John 3:16, Psalm 23:1-6'), 'John 3:16, Psalm 23:1-6')
         self.assertEqual(singles.clean('text 0712 345 678 now'), 'text now')
         self.assertEqual(singles.clean('see https://x.co/a or bit.ly/z'), 'see or')
+
+
+class NoticeTests(Base):
+    """Reviewers hear when something waits (once per kind every ten minutes);
+    members hear what was decided — a new photo included."""
+
+    def setUp(self):
+        super().setUp()
+        self.reviewer = member('reviewer', role=Role.objects.create(name='S', capabilities=['review_singles']))
+        self.boss = User.objects.create_user('boss', 'boss@x.com', 'pw', admin_role='super_admin')
+        self.outsider = member('outsider', role=Role.objects.create(name='Q', capabilities=['manage_quiz']))
+
+    def test_reviewers_are_told_once_per_kind(self):
+        self.assertEqual(set(singles.reviewer_ids()), {self.reviewer.pk, self.boss.pk})
+        self.join()
+        self.add_photo()
+        with mock.patch('songs.push.notify_many') as told:
+            self.client.post(ME + 'submit/')
+            ann = member('ann')
+            self.client.force_authenticate(ann)
+            self.client.post(ME, body(first_name='Ann'), format='json')
+            self.add_photo()
+            self.client.post(ME + 'submit/')                       # a second one, minutes later
+        self.assertEqual(told.call_count, 1)                        # one push, not one per profile
+        ids, kind, message = told.call_args[0][:3]
+        self.assertEqual(set(ids), {self.reviewer.pk, self.boss.pk})
+        self.assertEqual(told.call_args[1]['data']['screen'], 'AdminSingles')
+
+    @mock.patch(TELL)
+    def test_a_new_photo_on_a_live_profile_reaches_reviewers_and_its_owner_hears_back(self, tell):
+        self.join()
+        self.add_photo()
+        self.client.post(ME + 'submit/')
+        profile = SinglesProfile.objects.get(user=self.grace)
+        self.client.force_authenticate(self.reviewer)
+        self.client.post(f'/api/admin/singles/{profile.id}/review/', {'decision': 'approve'}, format='json')
+        cache.clear()
+        self.client.force_authenticate(self.grace)
+        with mock.patch('songs.push.notify_many') as told:
+            new = self.add_photo().data['id']
+        self.assertEqual(told.call_count, 1)
+        tell.reset_mock()
+        self.client.force_authenticate(self.reviewer)
+        self.client.post(f'/api/admin/singles/{profile.id}/review/', {'decision': 'approve'}, format='json')
+        self.assertIn('new photo is approved', tell.call_args[0][2])
+        newer = None
+        self.client.force_authenticate(self.grace)
+        newer = self.add_photo().data['id']
+        self.client.force_authenticate(self.reviewer)
+        self.client.post(f'/api/admin/singles/{profile.id}/review/', {'decision': 'approve',
+                         'photos': {str(newer): 'reject'}}, format='json')
+        self.assertIn('wasn’t approved', tell.call_args[0][2])
+        self.assertTrue(new and newer)

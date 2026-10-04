@@ -2,7 +2,7 @@
 // get-to-know-you game (both answer before either sees), telling your story
 // if it becomes one, and — always within reach — unmatch, report or block.
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, StyleSheet, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, StyleSheet, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -12,7 +12,9 @@ import {
 } from '../../services/api';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { subscribeDM } from '../../services/dmSocket';
-import { GOLD, FACE, SinglesScreen, GoldButton, Card, Label, Body, Chip } from '../../components/singles/SinglesKit';
+import {
+  GOLD, FACE, SinglesScreen, GoldButton, Card, Label, Body, Chip, useSheetPad,
+} from '../../components/singles/SinglesKit';
 import ProfileCard from '../../components/singles/ProfileCard';
 import SafetySheet from '../../components/singles/SafetySheet';
 
@@ -152,6 +154,7 @@ function StorySheet({ visible, matchId, name, onClose }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
+  const sheetPad = useSheetPad();
   const send = async () => {
     setBusy(true);
     try {
@@ -162,8 +165,8 @@ function StorySheet({ visible, matchId, name, onClose }) {
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.scrim}>
-        <View style={styles.sheet}>
+      <KeyboardAvoidingView style={styles.scrim} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={[styles.sheet, { paddingBottom: sheetPad }]}>
           <Text style={styles.sheetTitle}>{t('singles.stories.tell')}</Text>
           <Body style={{ fontSize: 14 }}>{t('singles.stories.tellLead', { name })}</Body>
           <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} placeholder={t('singles.stories.titleHint')}
@@ -175,7 +178,7 @@ function StorySheet({ visible, matchId, name, onClose }) {
             <GoldButton label={t('singles.stories.send')} onPress={send} busy={busy} />
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

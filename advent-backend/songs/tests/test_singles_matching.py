@@ -252,3 +252,21 @@ class EndingTests(Base):
         with mock.patch(TELL):
             self.client.post(f'/api/admin/singles/{self.mark.id}/ban/', {'reason': 'Asked for money'}, format='json')
         self.assertEqual(self.send(self.grace).data['code'], 'unmatched')
+
+
+class ReadTests(Base):
+    @mock.patch(TELL)
+    def test_reading_tells_the_readers_own_devices_so_their_badges_drop(self, _tell):
+        grace = single('grace')
+        self.interest(grace)
+        self.interest(self.mark, as_=grace)
+        conv = SinglesMatch.objects.get().conversation_id
+        self.client.force_authenticate(grace.user)
+        self.client.post(f'/api/conversations/{conv}/send_message/', {'content': 'Hello'}, format='json')
+        self.client.force_authenticate(self.mark.user)
+        self.assertEqual(self.client.get('/api/conversations/unread_count/').data['singles'], 1)
+        with mock.patch('songs.messaging.tell') as told:
+            self.client.post(f'/api/conversations/{conv}/mark_read/')
+        seen = [c for c in told.call_args_list if c[0][1].get('type') == 'seen']
+        self.assertEqual(seen[0][0][0], [self.mark.user_id])
+        self.assertEqual(self.client.get('/api/conversations/unread_count/').data['singles'], 0)

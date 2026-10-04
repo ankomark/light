@@ -539,3 +539,37 @@ def drop_hub(*profile_ids):
     recomputed on the next open rather than up to 30 s later."""
     from django.core.cache import cache
     cache.delete_many([hub_key(pid, m) for pid in profile_ids if pid for m in MODES])
+
+
+# ── Telling the reviewers ───────────────────────────────────────────────────
+REVIEW_NUDGE_SECONDS = 10 * 60
+
+
+def reviewer_ids():
+    """Everyone who may review Single & Searching: super admins, moderators,
+    and staff whose role carries review_singles."""
+    from django.db.models import Q
+    from .models import Role, User
+    roles = [r.pk for r in Role.objects.all() if 'review_singles' in (r.capabilities or [])]
+    return list(User.objects.filter(is_active=True).filter(
+        Q(is_superuser=True) | Q(admin_role__in=('super_admin', 'moderator')) | Q(role_id__in=roles))
+        .values_list('pk', flat=True))
+
+
+def notify_reviewers(kind, message):
+    """Something waits in the review queue. One push per kind every ten
+    minutes at most (a busy hour is not a phone full of the same line);
+    the queue itself always shows everything."""
+    from django.core.cache import cache
+    if not cache.add(f'singles:review-nudge:{kind}', 1, REVIEW_NUDGE_SECONDS):
+        return False
+    ids = reviewer_ids()
+    if not ids:
+        return False
+    from .push import notify_many
+    try:
+        notify_many(ids, 'system', message, data={'screen': 'AdminSingles', 'kind': kind},
+                    title='Single & Searching review')
+    except Exception:  # noqa: BLE001 — telling them never fails what the member did
+        return False
+    return True

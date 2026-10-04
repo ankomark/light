@@ -155,3 +155,16 @@ test('the menu lists the most used parts first, in their groups', async () => {
   expect(rows.indexOf('Services')).toBeLessThan(rows.indexOf('Verse of the Day'));
   expect(rows.indexOf('Calculator')).toBeLessThan(rows.indexOf('Settings'));
 });
+
+test('the Single & Searching count drops after the chats are read and you come back', async () => {
+  const api = require('../../services/api');
+  api.fetchUnreadMessageCount.mockImplementation(async () => ({ unread_count: 0, requests: 0, singles: 4 }));
+  const r = render(<App />);
+  await openMenu(r);
+  await waitFor(() => expect(r.getByText('4')).toBeTruthy());
+  await tap(r, 'Weather');                         // away from the menu…
+  api.fetchUnreadMessageCount.mockImplementation(async () => ({ unread_count: 0, requests: 0, singles: 0 }));
+  await back();                                    // …and back, the chats read meanwhile
+  await waitFor(() => expect(r.queryByText('4')).toBeNull());
+  api.fetchUnreadMessageCount.mockImplementation(async () => ({ unread_count: 2, requests: 1 }));
+});

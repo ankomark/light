@@ -4,7 +4,7 @@ import {
   ScrollView, Pressable, Platform, StatusBar, AppState,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useNavigation, useNavigationState } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import { fetchUnreadMessageCount } from '../services/api';
@@ -185,15 +185,18 @@ const useUnread = ({ poll }) => {
       }))
       .catch(() => {});
   }, [isAuthenticated]);
+  // Counted each time the screen comes into view, not only when it first
+  // mounts: the menu stays mounted under the pages opened from it, and
+  // coming back after reading a chat must show the lower count.
+  useFocusEffect(refresh);
   useEffect(() => {
-    refresh();
     if (!poll || !isAuthenticated) return undefined;
     const interval = setInterval(refresh, 60000);
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refresh(); });
     // A new message or a read receipt: count again (once for a burst).
     let soon = null;
     const unsub = subscribeDM((e) => {
-      if (!['message', 'read', 'deleted', 'group_message', 'group_read', 'notices_seen'].includes(e.type)) return;
+      if (!['message', 'read', 'seen', 'deleted', 'group_message', 'group_read', 'notices_seen'].includes(e.type)) return;
       clearTimeout(soon);
       soon = setTimeout(refresh, 400);
     });

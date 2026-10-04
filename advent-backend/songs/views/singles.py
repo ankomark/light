@@ -277,6 +277,7 @@ class SinglesSubmitView(APIView):
             return Response({'code': 'incomplete', 'missing': missing}, status=status.HTTP_400_BAD_REQUEST)
         profile.status, profile.submitted_at, profile.review_note = profile.PENDING, timezone.now(), ''
         profile.save(update_fields=['status', 'submitted_at', 'review_note', 'updated_at'])
+        rules.notify_reviewers('profile', 'A Single & Searching profile is waiting for review.')
         return Response(_own_json(profile))
 
 
@@ -317,6 +318,8 @@ class SinglesPhotosView(APIView):
         if not kept.exists():
             position = 0
         photo = SinglesPhoto.objects.create(profile=profile, url=url, position=position)
+        if profile.status == profile.APPROVED:
+            rules.notify_reviewers('photo', 'A new Single & Searching photo is waiting for review.')
         return Response(_photo_json(photo), status=status.HTTP_201_CREATED)
 
 
@@ -424,6 +427,7 @@ class AdminSinglesViewSet(viewsets.ViewSet):
         per_photo = request.data.get('photos') or {}
         if not isinstance(per_photo, dict):
             return Response({'photos': '{id: approve|reject}'}, status=status.HTTP_400_BAD_REQUEST)
+        photo_news = []          # what happened to each waiting photo, for telling them
         with transaction.atomic():
             for photo in profile.photos.filter(status=SinglesPhoto.PENDING):
                 said = per_photo.get(str(photo.id)) or per_photo.get(photo.id)
@@ -432,6 +436,7 @@ class AdminSinglesViewSet(viewsets.ViewSet):
                 else:
                     photo.status = SinglesPhoto.APPROVED
                 photo.save(update_fields=['status'])
+                photo_news.append('approve' if photo.status == SinglesPhoto.APPROVED else 'reject')
             approved_photo = profile.photos.filter(status=SinglesPhoto.APPROVED).exists()
             if decision == 'approve' and not approved_photo:
                 transaction.set_rollback(True)
@@ -449,6 +454,10 @@ class AdminSinglesViewSet(viewsets.ViewSet):
                          reason=reason or profile.first_name)
         if decision == 'approve' and was != profile.APPROVED:
             _tell(profile.user, 'Your Single & Searching profile is approved — others can now see it.')
+        elif decision == 'approve' and photo_news:
+            kept = photo_news.count('approve')
+            _tell(profile.user, 'Your new photo is approved and now shows on your profile.' if kept
+                  else 'Your new photo wasn’t approved. Please choose a clear, recent photo of yourself.')
         elif decision == 'reject':
             _tell(profile.user, f'Your Single & Searching profile needs a change: {reason}')
         return Response(_review_json(profile))
@@ -689,6 +698,7 @@ def _too_fast(me):
     SinglesProfile.objects.filter(pk=me.pk).update(
         status=SinglesProfile.PENDING, review_note='Automatic: very many interests in an hour.',
         submitted_at=timezone.now())
+    rules.notify_reviewers('flag', 'A Single & Searching profile was flagged automatically — please review.')
     return True
 
 
@@ -780,6 +790,7 @@ class SinglesReportView(APIView):
             SinglesProfile.objects.filter(pk=target.pk).update(
                 status=SinglesProfile.PENDING, submitted_at=timezone.now(),
                 review_note=f'Automatic: reported by {open_reports} people.')
+            rules.notify_reviewers('flag', 'A Single & Searching profile was reported by several people — please review.')
         if request.data.get('block'):
             _block(request.user, me, target)
         return Response({'reported': True}, status=status.HTTP_201_CREATED)
