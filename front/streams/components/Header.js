@@ -28,7 +28,7 @@ const HOME_ART = require('../assets/home-icon.png');
  *  With `art`, a coloured picture in its own colours instead of a glyph (the
  *  label still lights up when on that screen); with `tint` too, the picture
  *  is one colour, grey or accent like a glyph. */
-const NavItem = ({ set: Set = Ionicons, active, inactive, art, tint, label, isActive, onPress, testID }) => (
+const NavItem = ({ set: Set = Ionicons, active, inactive, art, artStyle, tint, label, isActive, onPress, testID }) => (
   <TouchableOpacity
     style={styles.navItem}
     onPress={onPress}
@@ -41,7 +41,7 @@ const NavItem = ({ set: Set = Ionicons, active, inactive, art, tint, label, isAc
     {art ? (
       <Image
         source={art}
-        style={[styles.navArt, isActive && styles.navArtActive, tint && { tintColor: isActive ? colors.accent : INACTIVE }]}
+        style={[styles.navArt, artStyle, isActive && styles.navArtActive, tint && { tintColor: isActive ? colors.accent : INACTIVE }]}
         resizeMode="contain"
       />
     ) : (
@@ -155,7 +155,7 @@ const Header = ({ transparentBg = false }) => {
         {/* Bottom row: primary destinations */}
         <View style={[styles.bottomRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
           <NavItem
-            art={HOME_ART} label="Home" testID="nav-home-outline"
+            art={HOME_ART} artStyle={styles.homeArt} label="Home" testID="nav-home-outline"
             isActive={isOn('Home')} onPress={() => navigation.navigate('Home')}
           />
           <NavItem
@@ -300,6 +300,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   navArt: { width: 24, height: 24 },
+  homeArt: { width: 26.4, height: 26.4 },   // the house, 10% larger
   // On the marketplace: a touch larger, as the glyphs fill in when active.
   navArtActive: { transform: [{ scale: 1.12 }] },
   navLabel: {
