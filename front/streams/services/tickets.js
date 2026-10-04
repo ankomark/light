@@ -234,14 +234,17 @@ export const isPast = (iso, now = Date.now()) => {
 //
 // Kept per Streams account, never per phone: a ticket's code is as good as
 // the ticket, so someone else signing in on the same phone must not see it.
-// With nobody signed in there is nothing to list and nothing is kept.
+// Tickets can be bought without signing in: those are the phone's "guest"
+// list, kept apart from every account's (and an account's from it).
 
 // Secure-store keys allow letters, digits, ".", "-" and "_".
 const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, '_');
 
-let owner = null;                    // the signed-in account's id, as a string
-const refsKey = () => `tickets_refs_u${safe(owner)}`;
-const orderKey = (reference) => `tickets_order_u${safe(owner)}_${safe(reference)}`;
+const GUEST = '\u0000guest';         // no account id can be this
+let owner = GUEST;                   // the signed-in account's id, as a string
+const scope = () => (owner === GUEST ? 'guest' : `u${safe(owner)}`);
+const refsKey = () => `tickets_refs_${scope()}`;
+const orderKey = (reference) => `tickets_order_${scope()}_${safe(reference)}`;
 
 let refsCache = null;                // { owner, refs: [reference] newest first }
 const listeners = new Set();
@@ -270,10 +273,11 @@ const forgetLegacy = () => {
 
 /**
  * Whose tickets this phone shows: the signed-in Streams account's id, or null
- * once they sign out. Set by the auth provider; every screen re-reads.
+ * once they sign out (the guest list). Set by the auth provider; every
+ * screen re-reads.
  */
 export const setTicketOwner = (id) => {
-  const next = id == null || id === '' ? null : String(id);
+  const next = id == null || id === '' ? GUEST : String(id);
   forgetLegacy();
   if (next === owner) return;
   owner = next;
@@ -290,7 +294,6 @@ const serial = (job) => {
 };
 
 const readRefs = async () => {
-  if (!owner) return [];
   if (refsCache?.owner === owner) return refsCache.refs;
   const whose = owner;
   let refs = [];
@@ -309,7 +312,7 @@ const readRefs = async () => {
  * else, so a crash or a closed app cannot lose a paid ticket.
  */
 export const saveReference = (reference) => serial(async () => {
-  if (!reference || !owner) return;
+  if (!reference) return;
   const refs = await readRefs();
   if (refs.includes(reference)) return;
   refsCache = { owner, refs: [reference, ...refs] };
@@ -319,7 +322,7 @@ export const saveReference = (reference) => serial(async () => {
 
 /** Keep the latest copy of an order, so its tickets open with no network. */
 export const cacheOrder = async (order) => {
-  if (!order?.reference || !owner) return;
+  if (!order?.reference) return;
   await saveReference(order.reference);
   try { await secure.setItemAsync(orderKey(order.reference), JSON.stringify(order)); } catch { /* best effort */ }
   announce();
@@ -327,7 +330,6 @@ export const cacheOrder = async (order) => {
 
 /** The kept copy of an order, or null. */
 export const readCachedOrder = async (reference) => {
-  if (!owner) return null;
   try {
     const raw = await secure.getItemAsync(orderKey(reference));
     return raw ? JSON.parse(raw) : null;
@@ -370,17 +372,15 @@ export const useSavedOrders = () => {
 
 // The details last paid with, so a second purchase is two taps. On the phone
 // only, in secure storage, and per account like the orders.
-const buyerKey = () => `tickets_buyer_u${safe(owner)}`;
+const buyerKey = () => `tickets_buyer_${scope()}`;
 export const readBuyer = async () => {
-  if (!owner) return {};
   try { return JSON.parse((await secure.getItemAsync(buyerKey())) || 'null') || {}; } catch { return {}; }
 };
 export const saveBuyer = async ({ phone, name }) => {
-  if (!owner) return;
   try { await secure.setItemAsync(buyerKey(), JSON.stringify({ phone: phone || '', name: name || '' })); } catch { /* convenience only */ }
 };
 
 /** Tests only: forget what was read, as a fresh launch would, signed in as `who`. */
 export const __resetTickets = (who = null) => {
-  refsCache = null; queue = Promise.resolve(); owner = who == null ? null : String(who); legacyGone = null;
+  refsCache = null; queue = Promise.resolve(); owner = who == null ? GUEST : String(who); legacyGone = null;
 };

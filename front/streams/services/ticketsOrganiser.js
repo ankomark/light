@@ -27,9 +27,13 @@ import { request, TicketsError } from './tickets';
 // Secure-store keys allow letters, digits, ".", "-" and "_".
 const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, '_');
 
-let owner = null;           // the signed-in Streams account's id, as a string
-const tokensKey = (who) => `tickets_org_tokens_u${safe(who)}`;
-const emailKey = (who) => `tickets_org_email_u${safe(who)}`;
+// Signed out of Streams, an organiser can still sign in here: that session
+// is the phone's "guest" one, apart from every account's.
+const GUEST = '\u0000guest';
+let owner = GUEST;          // the signed-in Streams account's id, as a string
+const scopeOf = (who) => (who === GUEST ? 'guest' : `u${safe(who)}`);
+const tokensKey = (who) => `tickets_org_tokens_${scopeOf(who)}`;
+const emailKey = (who) => `tickets_org_email_${scopeOf(who)}`;
 
 let tokens;                 // undefined: not read yet; null: signed out
 let refreshing = null;      // the one refresh in flight, shared
@@ -49,10 +53,9 @@ const forgetLegacy = () => {
 
 /**
  * What the organiser's own things on the phone (the gate list, the event
- * draft) are filed under: the Streams account's, or null when signed out —
- * then nothing is read or kept.
+ * draft) are filed under: the Streams account's, or the guest's.
  */
-export const organiserScope = () => (owner ? `u${safe(owner)}` : null);
+export const organiserScope = () => scopeOf(owner);
 
 /** Everything this account's organiser side kept on the phone, gone. */
 const forgetLocal = async (scope) => {
@@ -68,7 +71,7 @@ const forgetLocal = async (scope) => {
  * null once they sign out of Streams (kept, but hidden until they're back).
  */
 export const setOrganiserOwner = (id) => {
-  const next = id == null || id === '' ? null : String(id);
+  const next = id == null || id === '' ? GUEST : String(id);
   forgetLegacy();
   if (next === owner) return;
   owner = next;
@@ -77,7 +80,6 @@ export const setOrganiserOwner = (id) => {
 };
 
 const readTokens = async () => {
-  if (!owner) return null;
   if (tokens !== undefined) return tokens;
   const whose = owner;
   let read = null;
@@ -95,8 +97,7 @@ const readTokens = async () => {
 // Streams account changed must not write one account's tokens into another's.
 const keepTokens = async (next, whose = owner) => {
   const kept = next?.access && next?.refresh ? { access: next.access, refresh: next.refresh } : null;
-  if (whose === owner) tokens = whose ? kept : null;
-  if (!whose) return;
+  if (whose === owner) tokens = kept;
   try {
     if (kept) await secure.setItemAsync(tokensKey(whose), JSON.stringify(kept));
     else await secure.deleteItemAsync?.(tokensKey(whose));
@@ -104,13 +105,12 @@ const keepTokens = async (next, whose = owner) => {
 };
 
 const rememberEmail = async (email) => {
-  if (!owner || !email) return;
+  if (!email) return;
   try { await secure.setItemAsync(emailKey(owner), String(email).trim().toLowerCase()); } catch { /* convenience only */ }
 };
 
 /** The organiser email this Streams account last signed in with, or ''. */
 export const rememberedEmail = async () => {
-  if (!owner) return '';
   try { return (await secure.getItemAsync(emailKey(owner))) || ''; } catch { return ''; }
 };
 
@@ -390,5 +390,5 @@ export const checkIn = async (id, code) => {
 
 /** Tests only: forget the session read, as a fresh launch would. */
 export const __resetOrganiser = (who = null) => {
-  tokens = undefined; refreshing = null; owner = who == null ? null : String(who); legacyGone = false;
+  tokens = undefined; refreshing = null; owner = who == null ? GUEST : String(who); legacyGone = false;
 };

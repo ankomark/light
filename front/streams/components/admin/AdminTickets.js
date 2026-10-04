@@ -131,6 +131,9 @@ export default function AdminTickets({ navigation, route }) {
                      autoCorrect={false} placeholder={t('adminTix.org.search')} placeholderTextColor={ADMIN.muted}
                      accessibilityLabel={t('adminTix.org.search')} testID="admin-tix-org-search" />
           <Text style={styles.sub}>{t('adminTix.org.searchHint')}</Text>
+          {stats?.email_configured === false && (
+            <Text style={styles.warn} testID="admin-tix-no-email">{t('adminTix.org.noEmail')}</Text>
+          )}
         </>
       ) : (
         <View style={styles.chips}>
@@ -241,6 +244,10 @@ const styles = StyleSheet.create({
   tabOn: { backgroundColor: ADMIN.gold },
   tabText: { color: ADMIN.muted, fontWeight: '700', fontSize: 14 },
   tabTextOn: { color: ADMIN.onGold },
+  warn: {
+    color: ADMIN.gold, fontSize: 13, lineHeight: 19, marginTop: 10, padding: 12, borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(255,196,107,0.4)', backgroundColor: 'rgba(255,196,107,0.08)',
+  },
   search: {
     marginTop: 12, marginBottom: 4, height: 46, paddingHorizontal: 14, borderRadius: 12, color: ADMIN.text,
     backgroundColor: ADMIN.field, borderWidth: 1, borderColor: ADMIN.border, fontSize: 15,

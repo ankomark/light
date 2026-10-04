@@ -74,8 +74,8 @@ export const AuthProvider = ({ children }) => {
     await forgetKeptChapters();   // publications kept for offline (can be drafts)
     await clearReadingQueue();    // reading not yet sent is the leaving account's
     await clearBookHighlights();  // so are their highlights and notes in books
-    setTicketOwner(null);         // tickets are kept per account: show none
-    setOrganiserOwner(null);      // their events too: kept for when they're back
+    setTicketOwner(null);         // tickets are kept per account: the guest list now
+    setOrganiserOwner(null);      // their organiser side too: kept for when they're back
     setCurrentUser(null);
     setIsAuthenticated(false);
     setIsEmailVerified(false);

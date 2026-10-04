@@ -222,12 +222,15 @@ describe('orders kept on the phone', () => {
     expect((await listSavedOrders()).map((s) => s.reference)).toEqual(['mine']);
   });
 
-  it('signed out: nothing listed, nothing kept', async () => {
+  it("signed out: the phone's guest list, apart from every account's", async () => {
     await saveReference('mine');
     setTicketOwner(null);
-    expect(await listSavedOrders()).toEqual([]);
-    await cacheOrder({ reference: 'x', status: 'paid' });
-    expect([...mockSecure.keys()].some((k) => k.includes('_x'))).toBe(false);
+    expect(await listSavedOrders()).toEqual([]);              // not account 7's
+    await cacheOrder({ reference: 'bought-as-guest', status: 'paid' });
+    expect(mockSecure.has('tickets_order_guest_bought-as-guest')).toBe(true);
+    expect((await listSavedOrders()).map((s) => s.reference)).toEqual(['bought-as-guest']);
+    setTicketOwner(7);
+    expect((await listSavedOrders()).map((s) => s.reference)).toEqual(['mine']);   // and not the guest's
   });
 
   it("drops the old phone-wide list, whose owner can't be told", async () => {

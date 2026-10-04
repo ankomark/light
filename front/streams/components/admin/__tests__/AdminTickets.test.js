@@ -272,8 +272,17 @@ describe('organisers locked out', () => {
     fireEvent.changeText(screen.getByTestId('admin-tix-org-search'), '0712345678');
     await waitFor(() => expect(mockApi.fetchAdminTicketOrganisers).toHaveBeenLastCalledWith({ search: '0712345678' }));
     expect(mockApi.fetchAdminTicketOrganisers).not.toHaveBeenCalledWith({ search: '0712' });
+    expect(screen.queryByTestId('admin-tix-no-email')).toBeNull();
     fireEvent.press(await screen.findByTestId('admin-tix-org-2'));
     expect(navigation.navigate).toHaveBeenCalledWith('AdminTicketOrganiser', { id: 2 });
+  });
+
+  test('says so when the ticket server cannot send email', async () => {
+    mockApi.fetchAdminTicketStats.mockResolvedValue({ tills: {}, email_configured: false });
+    mockApi.fetchAdminTicketEvents.mockResolvedValue({ results: [], next: null });
+    mockApi.fetchAdminTicketOrganisers.mockResolvedValue({ results: [], next: null });
+    const screen = render(<AdminTickets navigation={{ navigate: jest.fn() }} route={{ params: { tab: 'organisers' } }} />);
+    expect(await screen.findByTestId('admin-tix-no-email')).toBeTruthy();
   });
 
   test('a code to read out is shown once it is confirmed; emailing never shows one', async () => {
