@@ -130,7 +130,13 @@ const TicketsHome = ({ navigation }) => {
   useEffect(() => { refreshSavedOrders(); }, []);
   // An organiser signed in on this phone gets their events beside Open event.
   const [organiser, setOrganiser] = useState(false);
-  useEffect(() => { hasSession().then(setOrganiser).catch(() => {}); }, []);
+  // Asked again whenever this screen is back in front: signing in happens on
+  // a screen pushed over this one, which stays mounted underneath.
+  useEffect(() => {
+    const check = () => { hasSession().then(setOrganiser).catch(() => {}); };
+    check();
+    return navigation.addListener?.('focus', check);
+  }, [navigation]);
 
   // Cities seen in the unfiltered list, so choosing one does not hide the rest.
   const cities = useRef([]);
