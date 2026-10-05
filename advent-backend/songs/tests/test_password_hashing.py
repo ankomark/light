@@ -15,8 +15,13 @@ from songs.models import User
 
 PBKDF2_ONLY = ['django.contrib.auth.hashers.PBKDF2PasswordHasher']
 PASSWORD = 'Sabbath!2026x'
+# What production runs. The test settings swap in MD5 for speed, so these
+# tests must ask for the real list or they test MD5.
+from music import settings as _prod  # noqa: E402
+PRODUCTION_HASHERS = _prod.PASSWORD_HASHERS
 
 
+@override_settings(PASSWORD_HASHERS=PRODUCTION_HASHERS)
 class PasswordHashingTests(TestCase):
     def test_new_passwords_use_argon2id(self):
         encoded = make_password(PASSWORD)
