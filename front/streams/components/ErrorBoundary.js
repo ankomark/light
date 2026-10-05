@@ -17,8 +17,11 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    // In production, send to Sentry or similar
-    console.error('[ErrorBoundary]', error, info.componentStack);
+    // Caught here, a crash never reaches Sentry's global handler: report it.
+    try {
+      require('@sentry/react-native').captureException(error, { extra: { componentStack: info?.componentStack } });
+    } catch { /* reporting must never throw from the crash screen */ }
+    if (__DEV__) console.error('[ErrorBoundary]', error, info?.componentStack);
   }
 
   reset = () => {

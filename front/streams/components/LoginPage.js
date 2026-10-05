@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image,
+  ActivityIndicator, ScrollView, Image,
 } from 'react-native';
+import KeyboardLift from './tickets/KeyboardLift';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
@@ -58,12 +59,14 @@ const LoginPage = () => {
     }
   };
 
+  const kbScroll = useRef(null);
+
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    // KeyboardLift, not KeyboardAvoidingView: with edge-to-edge Android the
+    // window no longer resizes for the keyboard, which then covered the
+    // password field and the button.
+    <KeyboardLift scrollRef={kbScroll} style={styles.flex}>
+      <ScrollView ref={kbScroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Image source={require('../assets/logo-mark.png')} style={styles.logo} resizeMode="contain" />
 
         <Text style={styles.title}>{t('auth.welcomeBack')}</Text>
@@ -133,7 +136,7 @@ const LoginPage = () => {
           <Text style={styles.signupLink}>{t('auth.signUp')}</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardLift>
   );
 };
 

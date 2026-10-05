@@ -14,6 +14,7 @@ import { colors, spacing, radius, shadows, typography } from '../constants/theme
 // expo-image so the mini player's cover comes from the same cache the track
 // row and Now Playing use, rather than being fetched a third time.
 import { Image } from 'expo-image';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
 import { useContentWidth, FONT_SCALE } from '../utils/layout';
 import { navigate, useCurrentRouteName } from '../services/navigationRef';
@@ -34,6 +35,8 @@ const formatTime = (ms) => {
  * Mounted once at the app root so playback follows the user across screens.
  */
 const MiniPlayer = () => {
+  // Above the iPhone home indicator and Android's gesture bar, not under them.
+  const insets = useSafeAreaInsets();
   const {
     currentTrack,
     isPlaying,
@@ -128,7 +131,7 @@ const MiniPlayer = () => {
   const busy = isLoading || isBuffering;
 
   return (
-    <Animated.View style={[styles.wrap, { opacity: fade }, sideMargin > 0 && {
+    <Animated.View style={[styles.wrap, { opacity: fade, bottom: spacing.sm + insets.bottom }, sideMargin > 0 && {
       left: sideMargin + spacing.sm,
       right: sideMargin + spacing.sm,
     }]}>

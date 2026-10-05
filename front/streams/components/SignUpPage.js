@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image,
+  ActivityIndicator, ScrollView, Image,
 } from 'react-native';
+import KeyboardLift from './tickets/KeyboardLift';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
@@ -56,7 +57,7 @@ const SignUpPage = () => {
           : { index: 0, routes: [{ name: 'EmailVerification', params: { email } }] }
       );
     } catch (err) {
-      console.log('[signup] POST', `${API_URL}/auth/signup/`, '->', err.message, err.response?.status, err.response?.data);
+      if (__DEV__) console.log('[signup] POST', `${API_URL}/auth/signup/`, '->', err.message, err.response?.status);
       const data = err.response?.data;
       let msg;
       if (err.response) {
@@ -73,12 +74,14 @@ const SignUpPage = () => {
     }
   };
 
+  const kbScroll = useRef(null);
+
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    // KeyboardLift, not KeyboardAvoidingView: with edge-to-edge Android the
+    // window no longer resizes for the keyboard, which then covered the
+    // password field and the button.
+    <KeyboardLift scrollRef={kbScroll} style={styles.flex}>
+      <ScrollView ref={kbScroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Image source={require('../assets/logo-mark.png')} style={styles.logo} resizeMode="contain" />
 
         <Text style={styles.title}>{t('auth.createTitle')}</Text>
@@ -157,7 +160,7 @@ const SignUpPage = () => {
           <Text style={styles.loginLink}>{t('auth.login')}</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardLift>
   );
 };
 

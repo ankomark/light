@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Image, Alert,
   StyleSheet, ScrollView, ActivityIndicator
 } from 'react-native';
+import KeyboardLift from './tickets/KeyboardLift';
 import * as ImagePicker from 'expo-image-picker';
 import { compressImage } from '../services/imageProcessing';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -20,6 +21,7 @@ const CreateProfile = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { updateUser } = useAuth();
+  const kbScroll = useRef(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [checkingProfile, setCheckingProfile] = useState(true);
   const [profileData, setProfileData] = useState({
@@ -211,7 +213,9 @@ const CreateProfile = () => {
   }
 
   return (
+    <KeyboardLift scrollRef={kbScroll} style={{ flex: 1 }}>
     <ScrollView
+      ref={kbScroll}
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
     >
@@ -308,6 +312,7 @@ const CreateProfile = () => {
         )}
       </TouchableOpacity>
     </ScrollView>
+    </KeyboardLift>
   );
 };
 

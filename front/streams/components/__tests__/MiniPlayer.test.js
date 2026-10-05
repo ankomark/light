@@ -30,6 +30,7 @@ jest.mock('../../context/PlayerContext', () => ({
   usePlayerProgress: () => ({ positionMs: 0, durationMs: 1000 }),
 }));
 jest.mock('expo-image', () => ({ Image: () => null }));
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null }));
 
 const MiniPlayer = require('../MiniPlayer').default;

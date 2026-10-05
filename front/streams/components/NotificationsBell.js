@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, SectionList,
-  Modal, Image, ActivityIndicator, AppState, Pressable,
+  Modal, Image, ActivityIndicator, Pressable,
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import useScreenActive from '../hooks/useScreenActive';
 import { fetchNotifications, markNotificationAsRead, checkAuthStatus, fetchUnreadNotificationCount } from '../services/api';
 import { addNotificationReceivedListener } from '../services/pushNotifications';
 import * as Notifications from 'expo-notifications';
@@ -75,7 +75,6 @@ const NotificationsBell = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
   const [filter, setFilter] = useState('all');
-  const appState = useRef(AppState.currentState);
   const pollRef = useRef(null);
   const pushListenerRef = useRef(null);
   const isMounted = useRef(true);
@@ -122,42 +121,28 @@ const NotificationsBell = ({ navigation }) => {
     }
   }, []);
 
-  // Initial load + polling lifecycle
+  // Polls only while its screen is the one in view and the app is in front:
+  // every screen in the stack has a header with a bell, and each polling on
+  // its own (every 15 s, in the background too) multiplied the requests by
+  // the number of screens open. Coming back into view counts again at once.
+  const screenActive = useScreenActive();
+  useEffect(() => {
+    if (!screenActive) { stopPolling(); return undefined; }
+    loadNotifications(true);
+    startPolling();
+    // A push while open: count again (only the visible bell listens).
+    pushListenerRef.current = addNotificationReceivedListener(() => loadNotifications(true));
+    return () => {
+      stopPolling();
+      pushListenerRef.current?.remove?.();
+      pushListenerRef.current = null;
+    };
+  }, [screenActive, loadNotifications, startPolling, stopPolling]);
+
   useEffect(() => {
     isMounted.current = true;
-    loadNotifications();
-    startPolling();
-
-    // Listen for push notifications received while app is open
-    pushListenerRef.current = addNotificationReceivedListener(() => {
-      loadNotifications(true);
-    });
-
-    // Pause polling when app goes background, resume when foregrounded
-    const sub = AppState.addEventListener('change', nextState => {
-      if (nextState === 'active' && appState.current !== 'active') {
-        loadNotifications(true);
-        startPolling();
-      } else if (nextState !== 'active') {
-        stopPolling();
-      }
-      appState.current = nextState;
-    });
-
-    return () => {
-      isMounted.current = false;
-      stopPolling();
-      sub.remove();
-      if (pushListenerRef.current) pushListenerRef.current.remove();
-    };
-  }, [loadNotifications, startPolling, stopPolling]);
-
-  // Refresh immediately when user navigates back to a screen containing the bell
-  useFocusEffect(
-    useCallback(() => {
-      loadNotifications(true);
-    }, [loadNotifications])
-  );
+    return () => { isMounted.current = false; };
+  }, []);
 
   const handleMarkAsRead = useCallback(async (id) => {
     try {

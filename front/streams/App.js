@@ -1,3 +1,4 @@
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Sentry from '@sentry/react-native';
 
 import React from 'react';
@@ -410,6 +411,9 @@ const App = () => {
 
     return (
       <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* Insets for everything, not only the navigator's screens: the mini
+          player, the upload pill and other overlays sit outside them. */}
+      <SafeAreaProvider>
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
       <AuthProvider>
       <AuthInitializer>
@@ -621,6 +625,7 @@ const App = () => {
       </AuthInitializer>
       </AuthProvider>
       </ErrorBoundary>
+      </SafeAreaProvider>
       </GestureHandlerRootView>
     );
 };

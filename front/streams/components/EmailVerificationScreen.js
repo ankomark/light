@@ -1,9 +1,10 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, ScrollView,
   Alert,
 } from 'react-native';
+import KeyboardLift from './tickets/KeyboardLift';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { apiRequest } from '../services/api';
@@ -101,12 +102,14 @@ const EmailVerificationScreen = () => {
     }
   };
 
+  const kbScroll = useRef(null);
+
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    // KeyboardLift, not KeyboardAvoidingView: with edge-to-edge Android the
+    // window no longer resizes for the keyboard, which then covered the
+    // password field and the button.
+    <KeyboardLift scrollRef={kbScroll} style={styles.flex}>
+      <ScrollView ref={kbScroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backBtn} onPress={handleExit}>
           <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -164,7 +167,7 @@ const EmailVerificationScreen = () => {
         </View>
 
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardLift>
   );
 };
 

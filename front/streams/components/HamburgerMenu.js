@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image,
-  ScrollView, Pressable, Platform, StatusBar, AppState,
+  ScrollView, Pressable, AppState,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation, useNavigationState } from '@react-navigation/native';
@@ -16,8 +16,9 @@ import ScreenVignette from './ScreenVignette';
 // The menu is a deliberately dark, wallpaper-backed drawer, so it keeps the
 // static (dark) palette in both themes — only its text is internationalized.
 import { colors, spacing, radius, typography } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import useScreenActive from '../hooks/useScreenActive';
 
-const TOP_PAD = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50;
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 // Some rows carry artwork instead of a glyph, and keep their own colours —
@@ -180,6 +181,9 @@ const isPage = (route, item) => !!route && route.name === item.route
 const NONE = { messages: 0, groups: 0, communities: 0, notices: 0, singles: 0 };
 const useUnread = ({ poll }) => {
   const { isAuthenticated } = useAuth();
+  // Every header has this button, on every screen in the stack: only the one
+  // in view keeps polling.
+  const screenActive = useScreenActive();
   const [unread, setUnread] = useState(NONE);
   const refresh = useCallback(() => {
     if (!isAuthenticated) { setUnread(NONE); return; }
@@ -198,7 +202,7 @@ const useUnread = ({ poll }) => {
   // coming back after reading a chat must show the lower count.
   useFocusEffect(refresh);
   useEffect(() => {
-    if (!poll || !isAuthenticated) return undefined;
+    if (!poll || !isAuthenticated || !screenActive) return undefined;
     const interval = setInterval(refresh, 60000);
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refresh(); });
     // A new message or a read receipt: count again (once for a burst).
@@ -209,7 +213,7 @@ const useUnread = ({ poll }) => {
       soon = setTimeout(refresh, 400);
     });
     return () => { clearInterval(interval); sub.remove(); unsub(); clearTimeout(soon); };
-  }, [refresh, poll, isAuthenticated]);
+  }, [refresh, poll, isAuthenticated, screenActive]);
   return unread;
 };
 
@@ -229,6 +233,7 @@ function HamburgerMenu() {
 /** The menu itself: the 'Menu' screen. */
 export function MenuScreen() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { isAuthenticated, currentUser, logout } = useAuth();
   const { features } = useAppStatus();
   const { t } = useI18n();
@@ -262,7 +267,7 @@ export function MenuScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: TOP_PAD }]}>
+    <View style={[styles.container, { paddingTop: insets.top + 6, paddingBottom: insets.bottom }]}>
       {/* Shared luxury backdrop — rotating wallpaper + navy edge vignette. */}
       <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.62)" />
       <ScreenVignette tintRgb="6,16,34" zIndex={1} />

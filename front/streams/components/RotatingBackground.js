@@ -1,7 +1,7 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Animated, AppState, StyleSheet, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
-import { NavigationContext } from '@react-navigation/native';
+import useScreenActive from '../hooks/useScreenActive';
 import ScreenVignette from './ScreenVignette';
 import { useWallpapers } from '../context/WallpaperContext';
 
@@ -61,22 +61,7 @@ const RotatingBackground = ({
 
   // Rotate only while someone can see it: a screen further down the stack, or
   // the app in the background, keeps its timer (and its downloads) quiet.
-  const navigation = useContext(NavigationContext);
-  const [visible, setVisible] = useState(true);
-  useEffect(() => {
-    let focused = navigation?.isFocused ? navigation.isFocused() : true;
-    let active = AppState.currentState !== 'background';
-    const update = () => setVisible(focused && active);
-    const subs = [
-      AppState.addEventListener('change', (st) => { active = st !== 'background'; update(); }),
-    ];
-    if (navigation?.addListener) {
-      subs.push({ remove: navigation.addListener('focus', () => { focused = true; update(); }) });
-      subs.push({ remove: navigation.addListener('blur', () => { focused = false; update(); }) });
-    }
-    update();
-    return () => subs.forEach((x) => (typeof x.remove === 'function' ? x.remove() : null));
-  }, [navigation]);
+  const visible = useScreenActive();
 
   useEffect(() => {
     if (list.length < 2 || !visible) return undefined;
