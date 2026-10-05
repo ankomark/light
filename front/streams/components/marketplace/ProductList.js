@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -87,7 +88,9 @@ const ProductList = () => {
   const categoryId = route.params?.categoryId;
   const [searchQuery, setSearchQuery] = useState(route.params?.q || '');
   const [query, setQuery] = useState(route.params?.q || '');
-  const [sort, setSort] = useState('new');
+  // "See all" from the home page's Popular row opens sorted that way.
+  const [sort, setSort] = useState(() => (SORTS.includes(route.params?.sort) ? route.params.sort : 'new'));
+  const [refreshing, setRefreshing] = useState(false);
   // "Near <town>": the town the weather screen knows, matched against where
   // sellers said they are.
   const [town, setTown] = useState(null);
@@ -135,6 +138,9 @@ const ProductList = () => {
     const shown = startFrom();
     setProducts(shown);
     setHasMore(!!kept?.next);
+    // A new search starts at its first page: a scroll before it answers must
+    // not ask for page 3 of something else.
+    setPage(1);
     try {
       const data = await fetchProducts(1, params);
       writeCache(key, data, { persist: false });
@@ -167,6 +173,11 @@ const ProductList = () => {
 
   useEffect(() => {
     loadProducts();
+  }, [loadProducts]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await loadProducts(); } finally { setRefreshing(false); }
   }, [loadProducts]);
 
   const handleProductPress = (product) => navigation.navigate('ProductDetail', {
@@ -254,6 +265,7 @@ const ProductList = () => {
           keyboardShouldPersistTaps="handled"
           onEndReached={loadMoreProducts}
           onEndReachedThreshold={0.5}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FFC46B" />}
           ListFooterComponent={
             loadingMore
               ? <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 12 }} />

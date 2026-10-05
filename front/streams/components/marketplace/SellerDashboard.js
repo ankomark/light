@@ -15,6 +15,8 @@ import {
   TextInput,
   Switch,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -95,6 +97,7 @@ const QuickEdit = ({ product, onClose, onSaved, t }) => {
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={quick.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <TouchableOpacity style={quick.backdrop} activeOpacity={1} onPress={onClose}>
         <TouchableOpacity activeOpacity={1} style={quick.card}>
           <Text style={quick.title} numberOfLines={1}>{product.title}</Text>
@@ -112,6 +115,7 @@ const QuickEdit = ({ product, onClose, onSaved, t }) => {
           </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -120,6 +124,7 @@ const QuickEdit = ({ product, onClose, onSaved, t }) => {
 const SellerDetails = ({ onClose, t, onSaved }) => {
   const [fields, setFields] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
   React.useEffect(() => {
     fetchSellerProfile().then(setFields).catch(() => setFields({}));
   }, []);
@@ -128,14 +133,18 @@ const SellerDetails = ({ onClose, t, onSaved }) => {
       setSaving(true);
       const out = {};
       SELLER_FIELDS.forEach((k) => { out[k] = (fields?.[k] || '').trim(); });
+      setError(null);
       await saveSellerProfile(out);
       onSaved();
-    } catch {
+    } catch (e) {
+      // Said: otherwise a seller leaves thinking buyers have their numbers.
+      setError(marketError(e, t('market.seller.quickFailed')));
       setSaving(false);
     }
   };
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={quick.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <TouchableOpacity style={quick.backdrop} activeOpacity={1} onPress={onClose}>
         <TouchableOpacity activeOpacity={1} style={quick.card}>
           <Text style={quick.title}>{t('market.seller.detailsTitle')}</Text>
@@ -155,11 +164,13 @@ const SellerDetails = ({ onClose, t, onSaved }) => {
               ))}
             </ScrollView>
           )}
+          {!!error && <Text style={quick.error} testID="details-error">{error}</Text>}
           <TouchableOpacity style={quick.save} onPress={save} disabled={!fields || saving} testID="details-save">
             {saving ? <ActivityIndicator color="#fff" /> : <Text style={quick.saveText}>{t('common.save')}</Text>}
           </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -463,6 +474,7 @@ const SellerDashboard = () => {
 };
 
 const quick = StyleSheet.create({
+  flex: { flex: 1 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
   card: { backgroundColor: '#fff', borderRadius: 14, padding: 18 },
   title: { fontSize: 17, fontWeight: '700', color: '#333', marginBottom: 10 },

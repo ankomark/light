@@ -91,8 +91,10 @@ const AddProduct = () => {
   const [track, setTrack] = useState(null);
   const [progress, setProgress] = useState(null);
   const [saveDefault, setSaveDefault] = useState(true);
-  const whatsappInputRef = useRef(null);
-  // The field being typed in stays above the keyboard (KeyboardLift).
+  const whatsappInputRef = useRef(null);
+
+  // The field being typed in stays above the keyboard (KeyboardLift).
+
   const kbScroll = useRef(null);
   const draftKey = userKey(currentUser?.id, 'market:draft:add');
   const restored = useRef(false);
@@ -183,9 +185,11 @@ const AddProduct = () => {
   // currencies + Cancel can't live in an Alert.
   const handleCurrencyChange = () => setCurrencyOpen(true);
 
+  // Any country, in international form: sellers price in shillings, naira,
+  // dollars, euros and pounds, and only Kenyan numbers were let through.
   const validateWhatsAppNumber = (number) => {
     if (!number) return true; // Optional field
-    return number.startsWith('+254') && number.length === 13;
+    return /^\+[1-9]\d{7,14}$/.test(number);
   };
 
   const handleSubmit = async () => {
@@ -302,7 +306,8 @@ const AddProduct = () => {
   const optional = t('market.form2.optional');
 
   return (
-<KeyboardLift scrollRef={kbScroll}>
+<KeyboardLift scrollRef={kbScroll}>
+
     <ScrollView
       ref={kbScroll}
       style={styles.container}
@@ -412,7 +417,7 @@ const AddProduct = () => {
             value={formData.whatsapp_number}
             onChangeText={handleWhatsAppNumberChange}
             keyboardType="phone-pad"
-            maxLength={13}
+            maxLength={16}
             testID="add-whatsapp"
           />
         </Field>
@@ -530,7 +535,8 @@ const AddProduct = () => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
-    </ScrollView>
+    </ScrollView>
+
     </KeyboardLift>
   );
 };

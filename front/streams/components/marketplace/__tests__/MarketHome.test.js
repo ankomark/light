@@ -164,3 +164,33 @@ describe('the background warm-up', () => {
     expect(peekCache(MARKET_HOME_KEY).products[0].id).toBe(9);
   });
 });
+
+test('Popular glides by: ranked cards, each once to the screen reader, "see all" sorted that way', async () => {
+  const popular = [50, 52, 53].map((id, i) => ({ ...product(id), views: 30 - i }));
+  mockApi.fetchProducts.mockImplementation(async (page, opts = {}) => (opts.sort === 'popular'
+    ? { results: popular, next: null }
+    : { results: [product(1)], next: null }));
+  mockApi.fetchProductCategories.mockResolvedValue([]);
+  const screen = render(<MarketplaceHome />);
+  await waitFor(() => expect(screen.getByTestId('popular-marquee')).toBeTruthy());
+  // Drawn more than once round the belt, but tagged once each.
+  expect(screen.getAllByTestId('spot-50')).toHaveLength(1);
+  expect(screen.getByTestId('spot-50').props.accessibilityLabel).toMatch(/^1\. Thing 50/);
+  fireEvent.press(screen.getByTestId('spot-52'));
+  expect(mockNav.navigate).toHaveBeenCalledWith('ProductDetail', expect.objectContaining({ slug: 'p-52' }));
+  fireEvent.press(screen.getAllByText('market.home.seeAll')[0]);
+  expect(mockNav.navigate).toHaveBeenCalledWith('ProductList', { sort: 'popular' });
+});
+
+test('with Reduce Motion on, Popular is a row that only moves by hand', async () => {
+  const { AccessibilityInfo } = require('react-native');
+  const spy = jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
+  mockApi.fetchProducts.mockImplementation(async (page, opts = {}) => (opts.sort === 'popular'
+    ? { results: [{ ...product(50), views: 3 }, { ...product(52), views: 2 }], next: null }
+    : { results: [product(1)], next: null }));
+  mockApi.fetchProductCategories.mockResolvedValue([]);
+  const screen = render(<MarketplaceHome />);
+  await waitFor(() => expect(screen.getByTestId('popular-row')).toBeTruthy());
+  expect(screen.queryByTestId('popular-marquee')).toBeNull();
+  spy.mockRestore();
+});

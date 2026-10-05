@@ -3,14 +3,19 @@ from rest_framework import mixins
 from rest_framework.exceptions import APIException
 from decimal import Decimal, InvalidOperation
 
+from datetime import timedelta
+
 from django.db.models import Sum
 from ..models import SellerProfile
-from ..serializers.marketplace import SellerProfileSerializer, money_totals
+from ..serializers.marketplace import SellerProfileSerializer, money_totals, MAX_PRODUCT_IMAGES
 
-from django.db.models import Avg, Exists, F, OuterRef
+from django.db.models import Avg, Case, Exists, F, IntegerField, OuterRef, Subquery, Value, When
+from django.db.models.functions import Coalesce
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404
 
 from ..serializers.common import MediaReferenceField
+from .. import app_settings
 
 
 def _image_url(product_images):
@@ -18,14 +23,54 @@ def _image_url(product_images):
     return MediaReferenceField().to_representation(product_images[0].image) if product_images else ''
 
 
+def require_market_open(user):
+    """Switched off by an admin (Admin → App control): nothing new is listed
+    or ordered. Orders already made carry on - sellers still confirm, send
+    and cancel them - and admins can still try things out."""
+    if app_settings.status()['features'].get('marketplace', True):
+        return
+    if getattr(user, 'is_platform_admin', False):
+        return
+    raise PermissionDenied({'code': 'feature_off', 'error': 'The marketplace is closed just now.',
+                            'detail': 'The marketplace is closed just now.'})
+
+
 # How a product list can be sorted: ?sort=<key>.
 PRODUCT_SORTS = {
     'new': ('-created_at',),
     'price_low': ('price', '-created_at'),
     'price_high': ('-price', '-created_at'),
-    'popular': ('-views', '-created_at'),
+    'popular': ('-popularity', '-views', '-created_at'),
     'rating': ('-avg_rating', '-num_reviews', '-created_at'),
 }
+
+# "Popular" is what people want now, not only what was looked at most ever:
+# a look counts 1, being saved to a wishlist 5, a sale in the last month 15,
+# and something listed this week gets a small start so it can be found. All
+# in the database (subqueries, not joins: a join would multiply the counts).
+POPULAR_WEIGHTS = {'wished': 5, 'sold': 15, 'fresh': 10}
+POPULAR_SALES_DAYS = 30
+POPULAR_FRESH_DAYS = 7
+
+
+def with_popularity(queryset):
+    now = timezone.now()
+    sold = (OrderItem.objects
+            .filter(BOUGHT_Q, product=OuterRef('pk'),
+                    order__created_at__gte=now - timedelta(days=POPULAR_SALES_DAYS))
+            .order_by().values('product').annotate(n=Sum('quantity')).values('n')[:1])
+    through = Wishlist.products.through
+    wished = (through.objects.filter(product_id=OuterRef('pk'))
+              .order_by().values('product_id').annotate(n=Count('id')).values('n')[:1])
+    return queryset.annotate(
+        popularity=(
+            F('views')
+            + POPULAR_WEIGHTS['wished'] * Coalesce(Subquery(wished, output_field=IntegerField()), 0)
+            + POPULAR_WEIGHTS['sold'] * Coalesce(Subquery(sold, output_field=IntegerField()), 0)
+            + Case(When(created_at__gte=now - timedelta(days=POPULAR_FRESH_DAYS),
+                        then=Value(POPULAR_WEIGHTS['fresh'])), default=Value(0))
+        ),
+    )
 
 
 # A purchase that happened: the seller confirmed being paid, or it arrived -
@@ -357,7 +402,12 @@ class ProductViewSet(viewsets.ModelViewSet):
             if value:
                 queryset = queryset.filter(**{field: value})
 
-        return queryset.order_by(*PRODUCT_SORTS.get(params.get('sort') or 'new', PRODUCT_SORTS['new']))
+        sort = params.get('sort') or 'new'
+        if sort not in PRODUCT_SORTS:
+            sort = 'new'
+        if sort == 'popular':
+            queryset = with_popularity(queryset)
+        return queryset.order_by(*PRODUCT_SORTS[sort])
 
     def retrieve(self, request, *args, **kwargs):
         product = self.get_object()
@@ -365,7 +415,9 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not (user.is_authenticated and user.pk == product.seller_id):
             who = user.pk if user.is_authenticated else request.META.get('REMOTE_ADDR', '')
             key = f'market:viewed:{product.pk}:{who}'
-            if cache.add(key, 1, 60 * 60):
+            # Once a day per person: opening it again and again must not
+            # push a product up "Popular".
+            if cache.add(key, 1, 24 * 60 * 60):
                 Product.objects.filter(pk=product.pk).update(views=F('views') + 1)
         # Whether I may review it: only people who bought it can.
         product._can_review = (user.is_authenticated and user.pk != product.seller_id
@@ -396,6 +448,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 {"error": "Authentication required to create a product"},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+        require_market_open(request.user)
         try:
             return super().create(request, *args, **kwargs)
         except (APIException, Http404):
@@ -424,6 +477,16 @@ class ProductViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN
                 )
             images = request.FILES.getlist('images')
+            # Pictures only (checked by Pillow, not by the name the phone gave
+            # it) and no more than a product may have: these go to the public
+            # bucket as they are.
+            if product.images.count() + len(images) > MAX_PRODUCT_IMAGES:
+                return Response({"error": f"A product can have at most {MAX_PRODUCT_IMAGES} pictures."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            try:
+                images = [serializers.ImageField().run_validation(image) for image in images]
+            except (serializers.ValidationError, DjangoValidationError):
+                return Response({"error": "Only pictures can be added."}, status=status.HTTP_400_BAD_REQUEST)
             for image in images:
                 ProductImage.objects.create(
                     product=product,
@@ -523,6 +586,7 @@ class CartViewSet(viewsets.ModelViewSet):
         why = cannot_buy(request.user, product)
         if why:
             return Response({"error": why}, status=status.HTTP_400_BAD_REQUEST)
+        require_market_open(request.user)
 
         cart, _ = Cart.objects.get_or_create(user=request.user)
         cart_item = CartItem.objects.filter(cart=cart, product=product).first()
@@ -599,6 +663,7 @@ class CartViewSet(viewsets.ModelViewSet):
         why = cannot_buy(request.user, product)
         if why:
             return Response({"error": why}, status=status.HTTP_400_BAD_REQUEST)
+        require_market_open(request.user)
         if product.quantity < quantity:
             return Response(
                 {"error": f"Only {product.quantity} in stock." if product.quantity else "This item is out of stock.",
@@ -611,6 +676,7 @@ class CartViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def checkout(self, request):
+        require_market_open(request.user)
         cart = get_object_or_404(Cart, user=request.user)
 
         if cart.items.count() == 0:
@@ -912,6 +978,13 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                 seller_id = request.data.get('seller_id')
                 if seller_id:
                     items = items.filter(seller_id=seller_id)
+                # Only what was sent, or paid for (handed over in person). A
+                # delivered line counts as bought (BOUGHT_Q), so a buyer marking
+                # an unpaid, unsent order "received" could leave a verified review.
+                items = items.filter(Q(shipped_at__isnull=False) | Q(payment_confirmed_at__isnull=False))
+                if not items.exists():
+                    return Response({"error": "Nothing has been sent to you yet.", "code": "not_sent"},
+                                    status=status.HTTP_400_BAD_REQUEST)
             else:
                 items = items.filter(seller=request.user)
                 if not order.items.filter(seller=request.user).exists():
@@ -1034,6 +1107,12 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
         # shared order to shipped or delivered.
         if not cancelling and new_status not in ('SHIPPED', 'DELIVERED'):
             return Response({"error": "An order's status follows its parts."}, status=status.HTTP_400_BAD_REQUEST)
+        # As cancel-part: what has gone out cannot be called off (and its stock
+        # must not come back as if it were still on the shelf). A refund can.
+        if new_status == 'CANCELLED' and order.items.filter(cancelled_at__isnull=True).filter(
+                Q(shipped_at__isnull=False) | Q(delivered_at__isnull=False)).exists():
+            return Response({"error": "It has already been sent.", "code": "sent"},
+                            status=status.HTTP_400_BAD_REQUEST)
         if new_status == 'SHIPPED' and order.items.filter(
                 seller=request.user, cancelled_at__isnull=True, payment_confirmed_at__isnull=True).exists():
             return Response({"error": "Confirm you were paid before sending it.", "code": "not_paid"},

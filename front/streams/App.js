@@ -171,7 +171,8 @@ import SinglesCommunity from './pages/singles/SinglesCommunity';
 import SinglesTopic from './pages/singles/SinglesTopic';
 import SinglesEvents from './pages/singles/SinglesEvents';
 import SinglesStories from './pages/singles/SinglesStories';
-import { AppStatusProvider } from './context/AppStatusContext';
+import { AppStatusProvider, useFeature } from './context/AppStatusContext';
+import MarketClosed from './components/marketplace/MarketClosed';
 import MaintenanceGate from './components/MaintenanceGate';
 import VideoFeed from './components/VideoFeed';
 import VideoModeStart from './components/VideoModeStart';
@@ -947,13 +948,18 @@ const marketWrap = (Screen, fallbackMessage = "Marketplace couldn't load.") =>
     // playing, the mini player - the last of a list, a form's Save, the
     // reviews were under it. Once here rather than in twenty screens.
     const bottom = useBottomSpace(0);
+    // Switched off by an admin: closed, however it was reached (a link, a
+    // push, a screen left open). Admins still get in, to check it.
+    const marketOn = useFeature('marketplace');
+    const { currentUser } = useAuth();
+    const open = marketOn || isAdmin(currentUser);
     return (
       <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
         <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
         <Header navigation={navigation} transparentBg />
         <View style={{ flex: 1, paddingBottom: bottom }}>
           <ErrorBoundary fallbackMessage={fallbackMessage}>
-            <Screen navigation={navigation} route={route} />
+            {open ? <Screen navigation={navigation} route={route} /> : <MarketClosed navigation={navigation} />}
           </ErrorBoundary>
         </View>
       </View>

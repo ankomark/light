@@ -83,7 +83,10 @@ export default function SellerPayCard({
   };
 
   const openWhatsApp = () => {
-    const num = (product.whatsapp_number || '').replace(/[^\d]/g, '');
+    // wa.me needs the international form: a Kenyan number saved locally
+    // ("0712 345 678", older listings) becomes 254712345678.
+    let num = (product.whatsapp_number || '').replace(/[^\d]/g, '');
+    if (/^0[17]\d{8}$/.test(num)) num = `254${num.slice(1)}`;
     if (!num) return tell(t('market.checkout.noWhatsapp'), true);
     const text = encodeURIComponent(paidMessage(t, orderId, group));
     return Linking.openURL(`https://wa.me/${num}?text=${text}`)
@@ -93,7 +96,10 @@ export default function SellerPayCard({
   const callSeller = () => {
     const num = product.contact_number || product.whatsapp_number;
     if (!num) return tell(t('market.checkout.noPhone'), true);
-    return Linking.openURL(`tel:${num}`).catch(() => tell(t('market.checkout.callFailed'), true));
+    // Digits and a leading + only: never the seller's text as typed.
+    const dial = String(num || '').replace(/(?!^\+)[^\d]/g, '');
+    if (!dial) return undefined;
+    return Linking.openURL(`tel:${dial}`).catch(() => tell(t('market.checkout.callFailed'), true));
   };
 
   const onCopy = clip ? copy : null;

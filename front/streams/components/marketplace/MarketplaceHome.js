@@ -2,7 +2,7 @@
 //
 //   a slim search bar and the cart;           shortcuts as small pills;
 //   categories as small named chips, dark like the shortcuts above them;
-//   a spotlight of what people look at most — swipes by itself, with dots;
+//   "Popular" (looks, saves and recent sales) gliding by on its own;
 //   rows that scroll sideways: just listed, each of the fullest categories
 //   (with "see all"), recently viewed;
 //   then everything, newest first, as a grid that goes on as it is scrolled.
@@ -13,7 +13,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator,
-  RefreshControl, useWindowDimensions,
+  RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -32,6 +32,7 @@ import {
   MARKET_HOME_KEY, HOME_PAGE_SIZE, loadMarketHome, mergeHome, prefetchPhotos,
 } from '../../utils/marketFeed';
 import CartButton from './CartButton';
+import PopularMarquee from './PopularMarquee';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 // The coloured artwork these had in the menu, kept in their own colours.
@@ -39,9 +40,8 @@ const ORDERS_ART = require('../../assets/orders-icon.png');
 const SELL_ART = require('../../assets/sell-icon.png');
 const GAP = 10;
 const PAD = 16;
-const SPOTLIGHT_MS = 4500;
-const SPOTLIGHT_REST_MS = 10000;   // after a swipe, left alone this long
-const SPOTLIGHT_MAX_W = 520;
+const POPULAR_MAX = 10;
+const POPULAR_ICON = { icon: 'fire', color: '#FF8A3D' };
 const NEW_STRIP = 10;
 const photoOf = (p) => (p?.images?.[0]?.image_url ? { uri: p.images[0].image_url } : PLACEHOLDER_IMAGE);
 
@@ -92,97 +92,6 @@ const Strip = React.memo(({ products, onOpen, testID }) => (
   />
 ));
 
-/** What people look at most, a card at a time. Moves on by itself (not
- *  while the screen is out of sight, and not for a while after a swipe),
- *  with dots to say where it is. */
-const Spotlight = React.memo(({ products, width, onOpen, t }) => {
-  const navigation = useNavigation();
-  const listRef = useRef(null);
-  const [index, setIndex] = useState(0);
-  const at = useRef(0);
-  const touchedAt = useRef(0);
-  const [shown, setShown] = useState(true);
-  // No wider than a big phone, so a tablet does not get a thin stripe.
-  const cardW = Math.min(width - PAD * 2, SPOTLIGHT_MAX_W);
-  const step = cardW + GAP;
-  const count = products.length;
-
-  const goTo = (i) => {
-    at.current = i;
-    setIndex(i);
-  };
-
-  // A refresh with fewer cards: back to the first.
-  useEffect(() => {
-    if (at.current >= count) {
-      goTo(0);
-      listRef.current?.scrollToOffset?.({ offset: 0, animated: false });
-    }
-  }, [count]);
-
-  useEffect(() => {
-    const offs = [
-      navigation.addListener?.('focus', () => setShown(true)),
-      navigation.addListener?.('blur', () => setShown(false)),
-    ];
-    return () => offs.forEach((off) => typeof off === 'function' && off());
-  }, [navigation]);
-
-  useEffect(() => {
-    if (count < 2 || !shown) return undefined;
-    const timer = setInterval(() => {
-      if (Date.now() - touchedAt.current < SPOTLIGHT_REST_MS) return;
-      const next = (at.current + 1) % count;
-      goTo(next);
-      listRef.current?.scrollToOffset?.({ offset: next * step, animated: true });
-    }, SPOTLIGHT_MS);
-    return () => clearInterval(timer);
-  }, [count, step, shown]);
-
-  // The dots follow the finger (onScroll, which the web fires too).
-  const onScroll = (e) => {
-    const i = Math.max(0, Math.min(count - 1, Math.round(e.nativeEvent.contentOffset.x / step)));
-    if (i !== at.current) goTo(i);
-  };
-
-  return (
-    <View style={styles.spotlightWrap} testID="spotlight">
-      <FlatList
-        ref={listRef}
-        horizontal
-        data={products}
-        keyExtractor={(item) => String(item.id)}
-        showsHorizontalScrollIndicator={false}
-        snapToInterval={step}
-        decelerationRate="fast"
-        onScrollBeginDrag={() => { touchedAt.current = Date.now(); }}
-        onScroll={onScroll}
-        scrollEventThrottle={32}
-        getItemLayout={(_, i) => ({ length: step, offset: step * i, index: i })}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={[styles.spotCard, { width: cardW }]} onPress={() => onOpen(item)}
-                            activeOpacity={0.9} accessibilityRole="button"
-                            accessibilityLabel={priceLabel(item)} testID={`spot-${item.id}`}>
-            <Image source={photoOf(item)} placeholder={PLACEHOLDER_IMAGE} contentFit="cover"
-                   transition={150} style={StyleSheet.absoluteFill} />
-            <View style={styles.spotShade} />
-            <View style={styles.spotText}>
-              <Text style={styles.spotTag}>{t('market.home.popular')}</Text>
-              <Text style={styles.spotTitle} numberOfLines={2}>{item.title}</Text>
-              <Text style={styles.spotPrice}>{formatPrice(item.price, item.currency)}</Text>
-            </View>
-          </TouchableOpacity>
-        )}
-      />
-      {count > 1 && (
-        <View style={styles.dots}>
-          {products.map((p, i) => <View key={p.id} style={[styles.dot, i === index && styles.dotOn]} />)}
-        </View>
-      )}
-    </View>
-  );
-});
-
 const Tile = React.memo(({ item, width, onOpen, t }) => (
   <TouchableOpacity style={[styles.tile, { width }]} onPress={() => onOpen(item)} activeOpacity={0.85}
                     accessibilityRole="button" accessibilityLabel={priceLabel(item)}
@@ -203,7 +112,6 @@ const Tile = React.memo(({ item, width, onOpen, t }) => (
 const MarketplaceHome = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const { width } = useWindowDimensions();
   const { currentUser } = useAuth();
   useMarketUser(currentUser?.id);
   const { recent } = useMarket();
@@ -212,10 +120,10 @@ const MarketplaceHome = () => {
   const { data, failed, refreshing, reload } = useCachedData(MARKET_HOME_KEY, loadHome);
   const categories = data?.categories || [];
   const rows = data?.rows || [];
-  // The spotlight is for what people have looked at; with nothing looked at
-  // yet it would only repeat "just listed".
+  // "Popular" is for what people have looked at; with nothing looked at yet
+  // it would only repeat "just listed".
   const popular = useMemo(() => (data?.popular || [])
-    .filter((p) => p.views == null || p.views > 0).slice(0, 6), [data?.popular]);
+    .filter((p) => p.views == null || p.views > 0).slice(0, POPULAR_MAX), [data?.popular]);
 
   // Pages past the first, as the grid is scrolled.
   const [more, setMore] = useState({ items: [], page: 1, next: null, loading: false });
@@ -315,7 +223,13 @@ const MarketplaceHome = () => {
         />
       )}
 
-      {popular.length > 0 && <Spotlight products={popular} width={width} onOpen={open} t={t} />}
+      {popular.length > 0 && (
+        <View style={styles.section} testID="spotlight">
+          <RowTitle title={t('market.home.popular')} icon={POPULAR_ICON} t={t}
+                    onAll={() => navigation.navigate('ProductList', { sort: 'popular' })} />
+          <PopularMarquee products={popular} onOpen={open} />
+        </View>
+      )}
 
       {newest.length > 0 && (
         <View style={styles.section}>
@@ -416,20 +330,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,196,107,0.35)',
   },
   chipText: { fontSize: 12, fontWeight: '600', color: '#FFFFFF', maxWidth: 140 },
-
-  spotlightWrap: { marginBottom: 16 },
-  spotCard: { height: 170, borderRadius: 16, overflow: 'hidden', marginRight: GAP, backgroundColor: '#1D2B40' },
-  spotShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
-  spotText: { position: 'absolute', left: 14, right: 14, bottom: 12 },
-  spotTag: {
-    alignSelf: 'flex-start', color: '#0A1628', backgroundColor: '#FFC46B', fontSize: 10, fontWeight: '800',
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, overflow: 'hidden', marginBottom: 6,
-  },
-  spotTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  spotPrice: { color: '#FFC46B', fontSize: 16, fontWeight: '800', marginTop: 2 },
-  dots: { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.35)' },
-  dotOn: { width: 16, backgroundColor: '#FFC46B' },
 
   section: { marginBottom: 16 },
   rowTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },

@@ -52,6 +52,11 @@ SELLER_FIELDS = [
     'whatsapp_number', 'contact_number', 'location', 'mpesa_number', 'till_number',
     'bank_details', 'payment_instructions',
 ]
+# How to reach and pay a seller: for people signed in only. Listed openly,
+# every seller's phone and M-Pesa number could be scraped without an account.
+PRIVATE_SELLER_FIELDS = [f for f in SELLER_FIELDS if f != 'location']
+# Pictures a product may have.
+MAX_PRODUCT_IMAGES = 10
 
 
 class SellerProfileSerializer(serializers.ModelSerializer):
@@ -185,10 +190,21 @@ class ProductSerializer(serializers.ModelSerializer):
         category, _ = ProductCategory.objects.get_or_create(name=name)
         return category
 
+    def validate_images(self, value):
+        if len(value) > MAX_PRODUCT_IMAGES:
+            raise serializers.ValidationError(f"A product can have at most {MAX_PRODUCT_IMAGES} pictures.")
+        return value
+
     def validate(self, data):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError("Authenticated user required to create a product.")
+        if self.instance is not None and data.get('images'):
+            removing = set(data.get('remove_images') or [])
+            kept = sum(1 for i in self.instance.images.all() if i.id not in removing)
+            if kept + len(data['images']) > MAX_PRODUCT_IMAGES:
+                raise serializers.ValidationError(
+                    {'images': [f"A product can have at most {MAX_PRODUCT_IMAGES} pictures."]})
         return data
 
     def create(self, validated_data):
@@ -219,6 +235,10 @@ class ProductSerializer(serializers.ModelSerializer):
             context=self.context
         ).data
         representation['category'] = instance.category.name if instance.category else None
+        request = self.context.get('request')
+        if not (request and request.user.is_authenticated):
+            for field in PRIVATE_SELLER_FIELDS:
+                representation.pop(field, None)
         return representation
 
     def update(self, instance, validated_data):
@@ -415,6 +435,17 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_items(self, obj):
         return OrderItemSerializer(self.lines(obj), many=True, context=self.context).data
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # A seller's total is their own part: the order's raw total would tell
+        # them what the buyer spent with the other sellers.
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if (user is not None and user.is_authenticated and obj.buyer_id != user.pk
+                and not user.has_capability('handle_reports')):
+            data['total_amount'] = str(sum((i.price_at_purchase * i.quantity for i in self.lines(obj)), 0))
+        return data
 
     def get_timeline(self, obj):
         """Placed → paid → shipped → delivered: each step with when it was
