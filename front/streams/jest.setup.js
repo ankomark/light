@@ -15,3 +15,8 @@ require('./utils/optionalNative').__assumeNativePresent(true);
 // NetInfo has no native side under Jest: its own mock (always connected).
 // The music player subscribes app-wide to know when a song can't stream.
 jest.mock('@react-native-community/netinfo', () => require('@react-native-community/netinfo/jest/netinfo-mock.js'));
+
+// Safe-area insets without a provider (the app has one at its root; most
+// tests render a screen on its own). The package's own Jest mock: zero insets.
+// A test that needs particular insets still mocks the module itself.
+jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);

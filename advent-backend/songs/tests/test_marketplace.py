@@ -4,6 +4,7 @@ from unittest import mock
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from songs.models import Product, ProductImage, ProductReview, Cart, CartItem, Order, OrderItem, User
@@ -124,6 +125,9 @@ class UpdateStatusAuthTests(APITestCase):
 
     def test_seller_can_advance_status(self):
         self.client.force_authenticate(self.seller)
+        # Not before being paid - the same rule as the per-part `ship`.
+        self.assertEqual(self._post_status('SHIPPED').status_code, status.HTTP_400_BAD_REQUEST)
+        self.client.post(f'/api/marketplace/orders/{self.order.id}/confirm-payment/')
         res = self._post_status('SHIPPED')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.order.refresh_from_db()
@@ -396,10 +400,12 @@ class ProductReviewTests(APITestCase):
             price=Decimal('15.00'), quantity=4, slug='rv-decoy',
         )
         ProductReview.objects.create(product=self.decoy, reviewer=self.other, rating=1, comment='decoy')
-        # Reviews are for people who bought the thing (and only that thing).
+        # Reviews are for people who bought the thing (and only that thing):
+        # the seller confirmed being paid for it.
         order = Order.objects.create(buyer=self.buyer, total_amount=Decimal('15.00'))
         OrderItem.objects.create(order=order, product=self.product, quantity=1,
-                                 price_at_purchase=Decimal('15.00'), seller=self.seller)
+                                 price_at_purchase=Decimal('15.00'), seller=self.seller,
+                                 payment_confirmed_at=timezone.now())
 
     def _url(self, slug=None):
         return f'/api/marketplace/products/{slug or self.product.slug}/reviews/'
@@ -563,8 +569,13 @@ class MultiSellerCancelTests(APITestCase):
         self.assertEqual(self.pa.quantity, 3)            # A's sale intact
 
     def test_seller_can_still_advance_fulfilment_on_a_multi_seller_order(self):
+        self.client.force_authenticate(self.seller_b)
+        self.client.post(f'/api/marketplace/orders/{self.order.id}/confirm-payment/')
         res = self._status(self.seller_b, 'SHIPPED')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
+        # Only B's part went: the order isn't "shipped" while A's isn't.
+        self.order.refresh_from_db()
+        self.assertNotEqual(self.order.status, 'SHIPPED')
 
     def test_sole_seller_can_cancel_and_reclaim_their_own_stock(self):
         # Single-seller order: seller B removed, A is the only seller.

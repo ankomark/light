@@ -160,6 +160,15 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_is_wishlisted(self, obj):
         return bool(getattr(obj, 'wishlisted_by_me', False))
 
+    def validate_currency(self, value):
+        """One of the currencies the marketplace prices in (the model's list):
+        the field is a plain text box here, which let any three letters through."""
+        code = str(value or '').strip().upper()
+        allowed = dict(Product._meta.get_field('currency').choices)
+        if code not in allowed:
+            raise serializers.ValidationError(f"Choose one of: {', '.join(allowed)}.")
+        return code
+
     def validate_category(self, value):
         """One of the marketplace's categories (songs/market_categories.py),
         never a new one. A name from the list is taken as it is; anything else
@@ -276,6 +285,14 @@ class CartLineProductSerializer(serializers.ModelSerializer):
 
     def get_is_available(self, obj):
         return bool(obj.is_available and not obj.is_removed)
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # Taken down by a moderator: still listed (it was saved / in the cart)
+        # as not for sale, but its pictures aren't shown again.
+        if obj.is_removed:
+            data['images'] = []
+        return data
 
 
 class CartItemSerializer(serializers.ModelSerializer):

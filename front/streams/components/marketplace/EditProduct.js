@@ -1,6 +1,6 @@
 // Editing a product: the same dark form as adding one (FormParts), the
 // category picked from the marketplace's list (CategoryPicker).
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import KeyboardLift from '../tickets/KeyboardLift';
 import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -24,7 +25,9 @@ import { FormSection, Field, FormInput, Choices, formStyles } from './FormParts'
 import { formTheme as F } from './formTheme';
 
 const EditProduct = () => {
-  const { t } = useI18n();
+  const { t } = useI18n();
+  // The field being typed in stays above the keyboard (KeyboardLift).
+  const kbScroll = useRef(null);
   const navigation = useNavigation();
   const route = useRoute();
   const { slug } = route.params;
@@ -96,8 +99,8 @@ const EditProduct = () => {
       if (product.track) setTrack(product.track);
 
     } catch (error) {
-      console.error('❌ Error loading product:', error);
-      Alert.alert(t('common.error'), error.message || t('market.form.loadFailed'));
+      console.warn('Error loading product:', error?.message);
+      Alert.alert(t('common.error'), t('market.form.loadFailed'));   // in words, never the raw error
       navigation.goBack();
     } finally {
       setLoading(false);
@@ -207,7 +210,7 @@ const EditProduct = () => {
       Alert.alert(t('market.success'), t('market.form.updated'));
       navigation.goBack();
     } catch (error) {
-      console.error('Error updating product:', error);
+      console.warn('Error updating product:', error?.message);
       Alert.alert(t('common.error'), productError(error, t('market.form.updateFailed')));
     } finally {
       setUpdating(false);
@@ -227,7 +230,9 @@ const EditProduct = () => {
   const photoCount = existingImages.length + newImages.length;
 
   return (
+<KeyboardLift scrollRef={kbScroll}>
     <ScrollView
+      ref={kbScroll}
       style={styles.container}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
@@ -398,7 +403,8 @@ const EditProduct = () => {
         {updating ? <ActivityIndicator color={F.onAccent} /> : <Icon name="check" size={16} color={F.onAccent} />}
         <Text style={formStyles.submitText}>{t('market.form.update')}</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </ScrollView>
+    </KeyboardLift>
   );
 };
 

@@ -108,3 +108,22 @@ export const hasPaymentInfo = (p) =>
  *  when it gave some (stock limits say exactly how many are left). */
 export const marketError = (e, fallback) =>
   e?.response?.data?.error || e?.response?.data?.detail || e?.data?.error || fallback;
+
+/**
+ * After an order request whose answer never arrived (the connection dropped
+ * on the way back): the order it may have made, if one was placed in the last
+ * few minutes - so the buyer is taken to it instead of "it failed" (and a
+ * retry that would make a second order). `hasProduct` narrows it to an order
+ * with that product (Buy now). null when there is none, or it can't tell.
+ */
+export const findJustPlacedOrder = async (fetchOrders, { hasProduct = null, withinMs = 3 * 60 * 1000 } = {}) => {
+  try {
+    const res = await fetchOrders({ role: 'buyer', page_size: 1 });
+    const order = (res?.results ?? res ?? [])[0];
+    if (!order || Date.now() - new Date(order.created_at).getTime() > withinMs) return null;
+    if (hasProduct != null && !(order.items || []).some((i) => (i.product?.id ?? i.product) === hasProduct)) return null;
+    return order;
+  } catch {
+    return null;
+  }
+};

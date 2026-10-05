@@ -10,7 +10,7 @@ import { dropCache } from '../../../utils/screenCache';
 jest.setTimeout(20000);
 
 const mockApi = {
-  fetchCart: jest.fn(async () => ({ items: [] })), addToCart: jest.fn(), buyNow: jest.fn(),
+  fetchCart: jest.fn(async () => ({ items: [] })), addToCart: jest.fn(), buyNow: jest.fn(), fetchOrders: jest.fn(),
   fetchWishlist: jest.fn(async () => ({ products: [] })), addToWishlist: jest.fn(), removeFromWishlist: jest.fn(),
   fetchProducts: jest.fn(), fetchProductById: jest.fn(), fetchProductReviews: jest.fn(), addProductReview: jest.fn(),
 };
@@ -154,4 +154,29 @@ test('no review form until it is known whether I may review', () => {
   mockApi.fetchProductById.mockImplementation(() => new Promise(() => {}));
   const screen = render(<ProductDetail />);
   expect(screen.queryByText('market.product.submitReview')).toBeNull();
+});
+
+test('two quick taps on Buy now make one order', async () => {
+  mockParams = { slug: 'p-1', preview: product(1) };
+  mockApi.fetchProductById.mockResolvedValue(product(1));
+  let finish;
+  mockApi.buyNow.mockImplementation(() => new Promise((r) => { finish = r; }));
+  const screen = render(<ProductDetail />);
+  await waitFor(() => expect(screen.getByTestId('product-buy-now')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('product-buy-now'));
+  fireEvent.press(screen.getByTestId('product-buy-now'));
+  await act(async () => { finish({ id: 51 }); });
+  expect(mockApi.buyNow).toHaveBeenCalledTimes(1);
+});
+
+test('the connection drops after Buy now made the order: it opens, rather than "failed" and a second order', async () => {
+  mockParams = { slug: 'p-1', preview: product(1) };
+  mockApi.fetchProductById.mockResolvedValue(product(1));
+  mockApi.buyNow.mockRejectedValueOnce(Object.assign(new Error('Network Error'), { response: undefined }));
+  const placed = { id: 52, created_at: new Date().toISOString(), items: [{ product: { id: 1 } }] };
+  mockApi.fetchOrders.mockResolvedValueOnce({ results: [placed] });
+  const screen = render(<ProductDetail />);
+  await waitFor(() => expect(screen.getByTestId('product-buy-now')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByTestId('product-buy-now')); });
+  await waitFor(() => expect(mockNav.navigate).toHaveBeenCalledWith('Checkout', { orderId: 52, order: placed }));
 });

@@ -11,6 +11,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator,
 } from 'react-native';
+import KeyboardLift from '../tickets/KeyboardLift';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchOrderById, apiRequest, getOrCreateConversation } from '../../services/api';
@@ -34,7 +35,9 @@ const Checkout = () => {
   const [address, setAddress] = useState(given?.shipping_address || '');
   const [savingAddress, setSavingAddress] = useState(false);
   const [toast, showToast] = useMarketToast();
-  const leaving = useRef(false);
+  const leaving = useRef(false);
+  // The field being typed in stays above the keyboard (KeyboardLift).
+  const kbScroll = useRef(null);
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -100,7 +103,8 @@ const Checkout = () => {
 
   return (
     <View style={styles.flex}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}
+<KeyboardLift scrollRef={kbScroll}>
+      <ScrollView ref={kbScroll} style={styles.container} showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <Text style={styles.orderNumber} selectable testID="checkout-number">
           {t('market.order.number', { id: order.id ?? orderId })}
@@ -156,7 +160,8 @@ const Checkout = () => {
         </TouchableOpacity>
 
         <View style={{ height: spacing.xxl }} />
-      </ScrollView>
+      </ScrollView>
+    </KeyboardLift>
       {toast}
     </View>
   );

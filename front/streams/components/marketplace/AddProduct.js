@@ -19,6 +19,7 @@ import {
   Switch,
   ActivityIndicator,
 } from 'react-native';
+import KeyboardLift from '../tickets/KeyboardLift';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -90,7 +91,9 @@ const AddProduct = () => {
   const [track, setTrack] = useState(null);
   const [progress, setProgress] = useState(null);
   const [saveDefault, setSaveDefault] = useState(true);
-  const whatsappInputRef = useRef(null);
+  const whatsappInputRef = useRef(null);
+  // The field being typed in stays above the keyboard (KeyboardLift).
+  const kbScroll = useRef(null);
   const draftKey = userKey(currentUser?.id, 'market:draft:add');
   const restored = useRef(false);
 
@@ -299,7 +302,9 @@ const AddProduct = () => {
   const optional = t('market.form2.optional');
 
   return (
+<KeyboardLift scrollRef={kbScroll}>
     <ScrollView
+      ref={kbScroll}
       style={styles.container}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
@@ -525,7 +530,8 @@ const AddProduct = () => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
-    </ScrollView>
+    </ScrollView>
+    </KeyboardLift>
   );
 };
 

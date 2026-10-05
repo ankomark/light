@@ -18,6 +18,7 @@ import {
   Linking,
   TextInput,
 } from 'react-native';
+import KeyboardLift from '../tickets/KeyboardLift';
 import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -26,6 +27,7 @@ import {
   fetchProductReviews,
   addProductReview,
   buyNow,
+  fetchOrders,
   fetchProducts,
 } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
@@ -36,7 +38,7 @@ import {
   useMarket, useMarketUser, addProductToCart, toggleWish, isWished, rememberViewed,
   refreshWishlist,
 } from '../../utils/cartStore';
-import { formatPrice, hasPaymentInfo, marketError } from '../../utils/market';
+import { formatPrice, hasPaymentInfo, marketError, findJustPlacedOrder } from '../../utils/market';
 import useMarketToast from './MarketToast';
 import CartButton from './CartButton';
 import ShareCardSheet from '../ShareCardSheet';
@@ -128,6 +130,8 @@ const ProductPage = () => {
   const [sharing, setSharing] = useState(false);
   const [galleryW, setGalleryW] = useState(0);
   const gallery = useRef(null);
+  // The field being typed in stays above the keyboard (KeyboardLift).
+  const kbScroll = useRef(null);
   const { currentUser } = useAuth();
   useMarketUser(currentUser?.id);
   const market = useMarket();
@@ -200,15 +204,24 @@ const ProductPage = () => {
     }
   };
 
+  // One tap, one order: a second tap before the first re-renders does nothing.
+  const buyingRef = useRef(false);
   const handleBuyNow = async () => {
     if (!currentUser) { askToLogIn(t('market.product.loginToCart')); return; }
+    if (buyingRef.current) return;
+    buyingRef.current = true;
     try {
       setBuying(true);
       const order = await buyNow(product.id, qty);
       navigation.navigate('Checkout', { orderId: order.id, order });
     } catch (error) {
-      showToast(marketError(error, t('market.cart.checkoutFailed')), { error: true });
+      // No answer (the connection dropped on the way back): if the order was
+      // made, go to it - a retry would make a second one.
+      const placed = !error?.response ? await findJustPlacedOrder(fetchOrders, { hasProduct: product.id }) : null;
+      if (placed) navigation.navigate('Checkout', { orderId: placed.id, order: placed });
+      else showToast(marketError(error, t('market.cart.checkoutFailed')), { error: true });
     } finally {
+      buyingRef.current = false;
       setBuying(false);
     }
   };
@@ -322,7 +335,8 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
 
   return (
     <View style={styles.flex}>
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}
+<KeyboardLift scrollRef={kbScroll}>
+    <ScrollView ref={kbScroll} style={styles.container} contentContainerStyle={styles.scrollContent}
                 keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
      <View style={styles.cartCorner}><CartButton /></View>
      <View style={styles.sheet}>
@@ -714,6 +728,7 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
       {full && <MoreLikeThis product={product} onOpen={openOther} t={t} />}
      </View>
     </ScrollView>
+    </KeyboardLift>
     <ShareCardSheet
       visible={sharing}
       onClose={() => setSharing(false)}

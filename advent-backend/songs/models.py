@@ -2196,12 +2196,22 @@ class OrderItem(models.Model):
     def total_price(self):
         return self.price_at_purchase * self.quantity
 
-    def commit_stock(self):
+    class OutOfStock(Exception):
+        """Not enough left, read under the product's row lock."""
+
+    def commit_stock(self, strict=False):
         """Decrement this line's product inventory exactly once. Caller must
-        already hold an atomic block. Returns True if it actually committed."""
+        already hold an atomic block. Returns True if it actually committed.
+
+        strict: refuse (OutOfStock) when fewer are left than the line wants -
+        checked under the row lock, so two confirmations racing for the last
+        one can't both pass a check made before it. A seller's confirmation is
+        strict; a card payment already taken is not (it is clamped at 0)."""
         if self.stock_committed or self.product_id is None:
             return False
         locked = Product.objects.select_for_update().get(pk=self.product_id)
+        if strict and locked.quantity < self.quantity:
+            raise OrderItem.OutOfStock(locked.title, self.quantity, locked.quantity)
         locked.quantity = max(0, locked.quantity - self.quantity)
         locked.save(update_fields=['quantity'])
         self.stock_committed = True

@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from songs.models import (
@@ -207,7 +208,13 @@ class BuyingTests(APITestCase):
         page = self.client.get(f'/api/marketplace/products/{self.hymnal.slug}/').data
         self.assertFalse(page['can_review'])
 
-        self.client.post('/api/marketplace/cart/buy_now/', {'product_id': self.hymnal.id}, format='json')
+        order_id = self.client.post('/api/marketplace/cart/buy_now/', {'product_id': self.hymnal.id},
+                                    format='json').data['id']
+        # Placing an order isn't buying: not until the seller confirms payment.
+        page = self.client.get(f'/api/marketplace/products/{self.hymnal.slug}/').data
+        self.assertFalse(page['can_review'])
+        self.assertEqual(self.client.post(url, {'rating': 1}).status_code, 403)
+        OrderItem.objects.filter(order_id=order_id).update(payment_confirmed_at=timezone.now())
         page = self.client.get(f'/api/marketplace/products/{self.hymnal.slug}/').data
         self.assertTrue(page['can_review'])
         self.assertEqual(self.client.post(url, {'rating': 5}).status_code, 201)

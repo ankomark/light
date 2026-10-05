@@ -13,6 +13,7 @@ jest.setTimeout(20000);
 const mockApi = {
   fetchCart: jest.fn(), addToCart: jest.fn(), updateCartItem: jest.fn(), removeFromCart: jest.fn(),
   checkoutCart: jest.fn(), fetchWishlist: jest.fn(async () => ({ products: [] })),
+  fetchOrders: jest.fn(async () => ({ results: [] })),
 };
 jest.mock('../../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 jest.mock('../../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 7, username: 'mark' } }) }));
@@ -48,7 +49,8 @@ beforeEach(() => {
 const open = async (items) => {
   mockApi.fetchCart.mockResolvedValue({ items });
   const screen = render(<Cart />);
-  await waitFor(() => expect(screen.getByTestId('cart-checkout')).toBeTruthy());
+  // The file's first render is a cold start: more than a second on a slow machine.
+  await waitFor(() => expect(screen.getByTestId('cart-checkout')).toBeTruthy(), { timeout: 5000 });
   return screen;
 };
 
@@ -138,4 +140,23 @@ test('a line opens its product, and says who sells it', async () => {
   expect(screen.getByText('market.product.soldBy:sella')).toBeTruthy();
   fireEvent.press(screen.getByTestId('cart-open-1'));
   expect(mockNav.navigate).toHaveBeenCalledWith('ProductDetail', expect.objectContaining({ slug: 'p-1' }));
+});
+
+test("the connection drops after the order was made: the buyer is taken to it, not told it failed", async () => {
+  const screen = await open([line(9, product(1), 1)]);
+  mockNav.navigate.mockClear();
+  mockApi.checkoutCart.mockRejectedValueOnce(Object.assign(new Error('Network Error'), { response: undefined }));
+  const placed = { id: 77, created_at: new Date().toISOString(), items: [] };
+  mockApi.fetchOrders.mockResolvedValueOnce({ results: [placed] });
+  await act(async () => { fireEvent.press(screen.getByTestId('cart-checkout')); });
+  await waitFor(() => expect(mockNav.navigate).toHaveBeenCalledWith('Checkout', { orderId: 77, order: placed }));
+  expect(mockApi.fetchOrders).toHaveBeenCalledWith({ role: 'buyer', page_size: 1 });
+});
+
+test('a refusal from the server (an answer) is said as it is - no order is looked for', async () => {
+  const screen = await open([line(9, product(1), 1)]);
+  mockApi.fetchOrders.mockClear();
+  mockApi.checkoutCart.mockRejectedValueOnce(Object.assign(new Error('400'), { response: { status: 400, data: { error: 'Not enough stock' } } }));
+  await act(async () => { fireEvent.press(screen.getByTestId('cart-checkout')); });
+  expect(mockApi.fetchOrders).not.toHaveBeenCalled();
 });

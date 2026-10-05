@@ -212,6 +212,7 @@ import { I18nProvider } from './context/I18nContext';
 import { WallpaperProvider } from './context/WallpaperContext';
 import MiniPlayer from './components/MiniPlayer';
 import AutoDownloads from './components/AutoDownloads';
+import useBottomSpace from './hooks/useBottomSpace';
 import MusicRecap from './components/MusicRecap';
 import { addNotificationResponseListener } from './services/pushNotifications';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -941,15 +942,23 @@ const FavoritesWrapper = ({ navigation }) => (
 // marketplace screen, matching Studios/Communities. The screen itself renders on a
 // transparent surface so the wallpaper shows through behind cards & the header.
 const marketWrap = (Screen, fallbackMessage = "Marketplace couldn't load.") =>
-  ({ navigation, route }) => (
-    <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
-      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
-      <Header navigation={navigation} transparentBg />
-      <ErrorBoundary fallbackMessage={fallbackMessage}>
-        <Screen navigation={navigation} route={route} />
-      </ErrorBoundary>
-    </View>
-  );
+  function MarketScreen({ navigation, route }) {
+    // Every marketplace screen ends above the gesture bar and, with music
+    // playing, the mini player - the last of a list, a form's Save, the
+    // reviews were under it. Once here rather than in twenty screens.
+    const bottom = useBottomSpace(0);
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+        <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+        <Header navigation={navigation} transparentBg />
+        <View style={{ flex: 1, paddingBottom: bottom }}>
+          <ErrorBoundary fallbackMessage={fallbackMessage}>
+            <Screen navigation={navigation} route={route} />
+          </ErrorBoundary>
+        </View>
+      </View>
+    );
+  };
 
 const MarketplaceHomeWrapper = marketWrap(MarketplaceHome);
 const ProductListWrapper = marketWrap(ProductList);

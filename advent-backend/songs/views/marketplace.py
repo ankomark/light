@@ -28,13 +28,18 @@ PRODUCT_SORTS = {
 }
 
 
+# A purchase that happened: the seller confirmed being paid, or it arrived -
+# and that part wasn't cancelled. Only placing an order isn't buying: an
+# order placed, reviewed and then cancelled must not leave a "buyer's" review.
+BOUGHT_Q = (Q(payment_confirmed_at__isnull=False) | Q(delivered_at__isnull=False)) & Q(cancelled_at__isnull=True)
+
+
 def bought(user, product):
-    """Whether `user` has ordered `product` (an order not cancelled)."""
+    """Whether `user` has really bought `product` (BOUGHT_Q)."""
     if not (user and user.is_authenticated):
         return False
-    return OrderItem.objects.filter(
-        order__buyer=user, product=product,
-    ).exclude(order__status__in=('CANCELLED', 'REFUNDED')).exists()
+    return OrderItem.objects.filter(BOUGHT_Q, order__buyer=user, product=product).exclude(
+        order__status__in=('CANCELLED', 'REFUNDED')).exists()
 
 
 def settle(order):
@@ -122,6 +127,10 @@ def cannot_buy(user, product):
         return 'This item is no longer for sale.'
     if product.seller_id == getattr(user, 'pk', None):
         return 'This is your own product.'
+    # A closed account sells nothing; across a block, no trade either way.
+    if getattr(product.seller, 'is_deactivated', False) or (
+            getattr(user, 'is_authenticated', False) and is_blocked_between(user, product.seller)):
+        return 'This item is no longer for sale.'
     if not product.is_available:
         return f"'{product.title}' is not for sale just now."
     return None
@@ -133,6 +142,11 @@ def _decimal(raw):
     except (InvalidOperation, TypeError, ValueError):
         return None
     return value if value >= 0 else None
+
+
+# Currencies Stripe counts in whole units, not cents.
+ZERO_DECIMAL_CURRENCIES = {'bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx',
+                           'vnd', 'vuv', 'xaf', 'xof', 'xpf'}
 
 
 class CreatePaymentIntentView(APIView):
@@ -169,7 +183,15 @@ class CreatePaymentIntentView(APIView):
             return Response({'error': 'This order is priced in more than one currency; pay each seller directly.'},
                             status=status.HTTP_400_BAD_REQUEST)
         currency = currencies.pop().lower()
-        amount_cents = int((order.total_amount * 100).quantize(Decimal('1')))
+        # What is still owed: lines not cancelled and not already paid to the
+        # seller directly - never the order's first total, which counts both.
+        owed = sum((i.price_at_purchase * i.quantity for i in order.items.all()
+                    if not i.cancelled_at and not i.payment_confirmed_at), Decimal('0'))
+        if owed <= 0:
+            return Response({'error': 'Nothing is left to pay on this order.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Stripe counts most currencies in cents, a few in whole units (UGX, RWF...).
+        units = 1 if currency in ZERO_DECIMAL_CURRENCIES else 100
+        amount_cents = int((owed * units).quantize(Decimal('1')))
 
         intent = stripe.PaymentIntent.create(
             amount=amount_cents,
@@ -186,7 +208,7 @@ class CreatePaymentIntentView(APIView):
         return Response({
             'client_secret': intent.client_secret,
             'publishable_key': settings.STRIPE_PUBLISHABLE_KEY,
-            'amount': float(order.total_amount),
+            'amount': float(owed),
             'currency': currency,
         })
 
@@ -234,7 +256,8 @@ class StripeWebhookView(APIView):
             # through OrderItem.commit_stock() so a line already committed by a
             # seller's direct-pay confirmation is never decremented twice.
             now = timezone.now()
-            for item in order.items.select_related('product').all():
+            # A cancelled part is nobody's purchase: its stock stays.
+            for item in order.items.select_related('product').filter(cancelled_at__isnull=True):
                 item.commit_stock()
                 if item.payment_confirmed_at is None:
                     item.payment_confirmed_at = now
@@ -289,6 +312,13 @@ class ProductViewSet(viewsets.ModelViewSet):
             # A link, an order or the seller's own edit screen must still open
             # a product that has sold out or been taken down by its seller.
             return queryset
+
+        # Browsing: not a closed account's things, nor across a block.
+        queryset = queryset.exclude(seller__is_deactivated=True)
+        if user.is_authenticated:
+            hidden = blocked_ids_for(user)
+            if hidden:
+                queryset = queryset.exclude(seller_id__in=hidden)
 
         # Near a place: the town the phone knows (the weather's), matched
         # against where sellers said they are.
@@ -406,7 +436,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"Error uploading images: {str(e)}", exc_info=True)
             return Response(
-                {"error": f"An unexpected error occurred while uploading images: {str(e)}"},
+                {"error": "The pictures couldn't be uploaded. Try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -790,10 +820,19 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                         )
 
                 now = timezone.now()
-                for item in pending:
-                    item.payment_confirmed_at = now
-                    item.save(update_fields=['payment_confirmed_at'])
-                    item.commit_stock()
+                try:
+                    for item in pending:
+                        item.payment_confirmed_at = now
+                        item.save(update_fields=['payment_confirmed_at'])
+                        # Re-checked under the product's lock: two orders for the
+                        # last one confirmed at once must not both go through.
+                        item.commit_stock(strict=True)
+                except OrderItem.OutOfStock as out:
+                    transaction.set_rollback(True)
+                    title, wanted, left = out.args
+                    return Response(
+                        {"error": f"Not enough stock left for '{title}' (ordered {wanted}, available {left})"},
+                        status=status.HTTP_400_BAD_REQUEST)
 
                 # PAID once every seller on the order has confirmed.
                 settle(order)
@@ -989,13 +1028,24 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # The older single-status path follows the per-part rules (ship,
+        # received): nothing is marked sent before it is paid, and the order's
+        # status is read from its parts - one seller can't set the whole of a
+        # shared order to shipped or delivered.
+        if not cancelling and new_status not in ('SHIPPED', 'DELIVERED'):
+            return Response({"error": "An order's status follows its parts."}, status=status.HTTP_400_BAD_REQUEST)
+        if new_status == 'SHIPPED' and order.items.filter(
+                seller=request.user, cancelled_at__isnull=True, payment_confirmed_at__isnull=True).exists():
+            return Response({"error": "Confirm you were paid before sending it.", "code": "not_paid"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         with transaction.atomic():
             order = Order.objects.select_for_update().get(pk=order.pk)
             # Cancelling/refunding hands committed inventory back. Only the buyer
             # or a sole seller reaches this, so every released line belongs to the
             # actor — a seller can never release another seller's stock.
             now = timezone.now()
-            mine = order.items.all() if cancelling and is_buyer else order.items.filter(seller=request.user)
+            mine = order.items.filter(seller=request.user, cancelled_at__isnull=True)
             if cancelling:
                 for item in order.items.select_related('product').all():
                     item.release_stock()
@@ -1004,8 +1054,10 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
                 mine.filter(shipped_at__isnull=True).update(shipped_at=now)
             elif new_status == 'DELIVERED':
                 mine.filter(delivered_at__isnull=True).update(delivered_at=now)
-            order.status = new_status
-            order.save(update_fields=['status'])
+            if new_status == 'REFUNDED':
+                order.status = 'REFUNDED'
+                order.save(update_fields=['status'])
+            settle(order)
 
         return Response({"status": "Order status updated"}, status=status.HTTP_200_OK)
 
@@ -1033,7 +1085,7 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
             # reviewing needed a purchase may not have).
             .annotate(verified=Exists(
                 OrderItem.objects.filter(
-                    product=OuterRef('product'), order__buyer=OuterRef('reviewer'),
+                    BOUGHT_Q, product=OuterRef('product'), order__buyer=OuterRef('reviewer'),
                 ).exclude(order__status__in=('CANCELLED', 'REFUNDED'))
             ))
         )
@@ -1094,8 +1146,10 @@ class WishlistViewSet(viewsets.ModelViewSet):
         product_id = request.data.get('product_id')
 
         try:
-            product = Product.objects.get(id=product_id)
-        except Product.DoesNotExist:
+            # Not a taken-down product; and an id that isn't a number is "not
+            # found", not a server error.
+            product = Product.objects.get(id=product_id, is_removed=False)
+        except (Product.DoesNotExist, ValueError, TypeError):
             return Response(
                 {"error": "Product not found"},
                 status=status.HTTP_404_NOT_FOUND
@@ -1115,7 +1169,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
 
         try:
             product = Product.objects.get(id=product_id)
-        except Product.DoesNotExist:
+        except (Product.DoesNotExist, ValueError, TypeError):
             return Response(
                 {"error": "Product not found"},
                 status=status.HTTP_404_NOT_FOUND

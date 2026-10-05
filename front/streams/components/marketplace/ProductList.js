@@ -143,7 +143,8 @@ const ProductList = () => {
       setPage(1);
       setHasMore(!!data.next);
     } catch (err) {
-      if (wanted.current === key && !shown) setError(err.message || t('market.list.loadFailed'));
+      // In words, never the raw "Network Error".
+      if (wanted.current === key && !shown) setError(t('market.list.loadFailed'));
     }
   }, [key, params, t]);
 

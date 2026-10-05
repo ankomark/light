@@ -20,13 +20,13 @@ import {
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
-import { checkoutCart } from '../../services/api';
+import { checkoutCart, fetchOrders } from '../../services/api';
 import { useAuth } from '../../context/useAuth';
 import {
   useMarket, useMarketUser, refreshCart, setCartQuantity, removeCartLine, emptyCart,
   addProductToCart, whenCartSettled,
 } from '../../utils/cartStore';
-import { formatPrice, formatTotals, cartTotals, marketError } from '../../utils/market';
+import { formatPrice, formatTotals, cartTotals, marketError, findJustPlacedOrder } from '../../utils/market';
 import useMarketToast from './MarketToast';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
@@ -121,6 +121,16 @@ const Cart = () => {
       // The order comes with the answer: the next screen shows it at once.
       navigation.navigate('Checkout', { orderId: order.id, order });
     } catch (error) {
+      // No answer at all (the connection dropped): the order may have been
+      // made - and the cart emptied - before it did. Go to it if so.
+      if (!error?.response) {
+        const placed = await findJustPlacedOrder(fetchOrders);
+        if (placed) {
+          emptyCart();
+          navigation.navigate('Checkout', { orderId: placed.id, order: placed });
+          return;
+        }
+      }
       showToast(marketError(error, t('market.cart.checkoutFailed')), { error: true });
       refreshCart().catch(() => {});
     } finally {

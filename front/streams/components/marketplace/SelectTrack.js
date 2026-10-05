@@ -31,7 +31,7 @@ const SelectTrack = () => {
         setTracks(tracksData);
         setFilteredTracks(tracksData);
       } catch (error) {
-        console.error('Error loading tracks:', error);
+        console.warn('Error loading tracks:', error?.message);
         Alert.alert(t('common.error'), t('market.track.loadFailed'));
       } finally {
         setLoading(false);
