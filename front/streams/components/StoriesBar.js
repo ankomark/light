@@ -159,8 +159,25 @@ const StoriesBar = ({ navigation }) => {
     if (Date.now() - lastFetchRef.current > STORIES_REFETCH_MS) load();
   }, [load]));
 
-  // A story just shared: in the row now, not after the next refresh.
-  useEffect(() => on(EVENTS.STORY_CREATED, () => { load(); }), [load]);
+  // A story just shared or deleted: the row follows now, not after its next
+  // refresh. A reaction is kept on its story, so reopening shows it.
+  useEffect(() => {
+    const offs = [
+      on(EVENTS.STORY_CREATED, () => { load(); }),
+      on(EVENTS.STORY_DELETED, ({ storyId } = {}) => {
+        setGroups((prev) => prev
+          .map((g) => ({ ...g, stories: (g.stories || []).filter((s) => s.id !== storyId) }))
+          .filter((g) => g.stories.length || g.user.id === currentUser?.id));
+      }),
+      on(EVENTS.STORY_REACTED, ({ storyId, emoji } = {}) => {
+        setGroups((prev) => prev.map((g) => ({
+          ...g,
+          stories: (g.stories || []).map((s) => (s.id === storyId ? { ...s, my_reaction: emoji } : s)),
+        })));
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [load, currentUser?.id]);
 
   const openViewer = useCallback((group) => {
     navigation.navigate('StoryViewer', { group });

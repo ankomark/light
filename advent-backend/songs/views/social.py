@@ -849,7 +849,8 @@ def story_queryset(user):
             viewed_by_me=Exists(
                 StoryView.objects.filter(story=OuterRef('pk'), viewer=user)
             ),
-            views_total=Count('views', distinct=True),
+            # Other people's views: the author watching their own story isn't one.
+            views_total=Count('views', filter=~Q(views__viewer=F('user')), distinct=True),
             my_reaction=Subquery(
                 StoryReaction.objects.filter(story=OuterRef('pk'), user=user).values('emoji')[:1]
             ),
@@ -979,6 +980,8 @@ class StoryViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def view_story(self, request, pk=None):
         story = self.get_object()
+        if story.user_id == request.user.id:
+            return Response({'status': 'own'})   # your own viewing isn't counted
         StoryView.objects.get_or_create(story=story, viewer=request.user)
         return Response({'status': 'viewed'})
 

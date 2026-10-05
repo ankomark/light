@@ -115,3 +115,12 @@ class ReactionTests(APITestCase):
         self.assertEqual(data['count'], 1)
         self.assertEqual(data['results'][0]['user']['username'], 'rx_fan')
         self.assertEqual(data['results'][0]['reaction'], '🙏')
+
+    def test_your_own_viewing_is_not_a_view(self):
+        self.client.force_authenticate(self.owner)
+        self.client.post(f'/api/stories/{self.story.pk}/view_story/')
+        self.assertFalse(StoryView.objects.filter(viewer=self.owner).exists())
+        StoryView.objects.create(story=self.story, viewer=self.fan)
+        StoryView.objects.create(story=self.story, viewer=self.owner)   # an old self-view stays uncounted
+        groups = self.client.get('/api/stories/feed/').json()
+        self.assertEqual(groups[0]['stories'][0]['views_count'], 1)

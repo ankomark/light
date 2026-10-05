@@ -466,7 +466,7 @@ class StorySerializer(serializers.ModelSerializer):
         count = getattr(obj, 'views_total', None)
         if count is not None:
             return count
-        return obj.views.count()
+        return obj.views.exclude(viewer_id=obj.user_id).count()
 
 
 

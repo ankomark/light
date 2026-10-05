@@ -27,4 +27,6 @@ export const EVENTS = {
   POST_CREATED: 'post:created',
   TRACK_CREATED: 'track:created',
   STORY_CREATED: 'story:created',
+  STORY_DELETED: 'story:deleted',
+  STORY_REACTED: 'story:reacted',
 };

@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, StyleSheet, Modal, TextInput, Alert } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet, Modal, TextInput, Alert, ScrollView } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import KeyboardLift from './tickets/KeyboardLift';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_URL, getAccessToken, markNotInterested } from '../services/api';
@@ -9,6 +11,8 @@ import { useI18n } from '../context/I18nContext';
 
 const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) => {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
+  const editScroll = useRef(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -56,15 +60,15 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
 
   const handleDeletePost = () => {
     Alert.alert(
-      'Delete Post',
+      t('post.delete'),
       t('post.deleteConfirm'),
       [
         {
-          text: 'Cancel',
+          text: t('common.cancel'),
           style: 'cancel',
         },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           onPress: async () => {
             try {
               setLoading(true);
@@ -97,7 +101,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
           style={styles.button}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
-          accessibilityLabel="Post options"
+          accessibilityLabel={t('post.options')}
         >
           <MaterialIcons name="more-horiz" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
@@ -112,7 +116,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
       >
         <View style={styles.sheetRoot}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setOtherMenuVisible(false)} />
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]}>
             <View style={styles.sheetHandle} />
             <TouchableOpacity style={styles.sheetItem} onPress={handleNotInterested}>
               <MaterialIcons name="not-interested" size={22} color={colors.textSecondary} />
@@ -136,7 +140,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
           style={styles.button}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
-          accessibilityLabel="Post options"
+          accessibilityLabel={t('post.options')}
         >
           <MaterialIcons name="more-horiz" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
@@ -151,11 +155,15 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
       >
         <View style={styles.sheetRoot}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuVisible(false)} />
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]}>
             <View style={styles.sheetHandle} />
             <TouchableOpacity
               style={styles.sheetItem}
-              onPress={() => { setMenuVisible(false); setEditModalVisible(true); }}
+              onPress={() => {
+                setMenuVisible(false);
+                setEditedCaption(post.caption || '');   // what's posted, not a cancelled edit
+                setEditModalVisible(true);
+              }}
             >
               <MaterialIcons name="edit" size={22} color={colors.primary} />
               <Text style={styles.sheetLabel}>{t('post.edit')}</Text>
@@ -185,36 +193,47 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
         transparent={false}
         onRequestClose={() => setEditModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
-          <TouchableOpacity
-            onPress={() => setEditModalVisible(false)}
-            style={styles.modalCloseButton}
-          >
-            <Feather name="x" size={24} color={colors.textPrimary} />
-          </TouchableOpacity>
+        {/* Clear of the notch and the gesture bar; Save stays above the keyboard. */}
+        <KeyboardLift scrollRef={editScroll} style={styles.modalContainer}>
+          <ScrollView ref={editScroll} keyboardShouldPersistTaps="handled"
+                      contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 }}>
+            <TouchableOpacity
+              onPress={() => setEditModalVisible(false)}
+              style={styles.modalCloseButton}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.close')}
+              hitSlop={8}
+            >
+              <Feather name="x" size={24} color={colors.textPrimary} />
+            </TouchableOpacity>
 
-          <Text style={styles.modalTitle}>{t('post.editTitle')}</Text>
+            <Text style={styles.modalTitle}>{t('post.editTitle')}</Text>
 
-          <TextInput
-            style={styles.editInput}
-            value={editedCaption}
-            onChangeText={setEditedCaption}
-            placeholder={t('post.captionPlaceholder')}
-            placeholderTextColor={colors.placeholder}
-            multiline
-            numberOfLines={4}
-          />
-          
-          <TouchableOpacity 
-            onPress={handleEditPost}
-            style={styles.saveButton}
-            disabled={loading}
-          >
-            <Text style={styles.saveButtonText}>
-              {loading ? 'Saving...' : 'Save Changes'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            <TextInput
+              style={styles.editInput}
+              value={editedCaption}
+              onChangeText={setEditedCaption}
+              placeholder={t('post.captionPlaceholder')}
+              placeholderTextColor={colors.placeholder}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              testID="post-edit-caption"
+            />
+
+            <TouchableOpacity
+              onPress={handleEditPost}
+              style={styles.saveButton}
+              disabled={loading}
+              accessibilityRole="button"
+              testID="post-edit-save"
+            >
+              <Text style={styles.saveButtonText}>
+                {loading ? t('common.saving') : t('post.saveChanges')}
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardLift>
       </Modal>
     </View>
   );
@@ -270,8 +289,7 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    padding: 20,
-    paddingTop: 50,
+    paddingHorizontal: 20,   // top and bottom come from the safe-area insets
     backgroundColor: colors.bg,
   },
   modalCloseButton: {

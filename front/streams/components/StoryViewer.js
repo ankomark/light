@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, useWindowDimensions,
-  StatusBar, Animated, Easing, PanResponder, ActivityIndicator, AppState, Modal, FlatList,
+  StatusBar, Animated, Easing, PanResponder, ActivityIndicator, AppState, Modal, FlatList, Alert,
 } from 'react-native';
 // expo-image: cached on disk, so a story seen once paints at once next time,
 // and the next one can be fetched while this one shows.
@@ -11,7 +11,8 @@ import AppVideo from './AppVideo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { viewStory, reactToStory, fetchStoryViewers } from '../services/api';
+import { viewStory, reactToStory, fetchStoryViewers, deleteStory } from '../services/api';
+import { emit, EVENTS } from '../utils/appEvents';
 import { useAuth } from '../context/useAuth';
 import { spacing } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -34,7 +35,12 @@ const StoryViewer = ({ route, navigation }) => {
   const { currentUser } = useAuth() || {};
   const isOwn = !!currentUser?.id && currentUser.id === group.user?.id;
   const insets = useSafeAreaInsets();
-  const stories = useMemo(() => group.stories ?? [], [group.stories]);
+  // Your own stories you delete here leave the list at once.
+  const [removed, setRemoved] = useState(() => new Set());
+  const stories = useMemo(
+    () => (group.stories ?? []).filter((s) => !removed.has(s.id)),
+    [group.stories, removed],
+  );
   // Reactive full-screen size — reflows on rotation / web resize (was a
   // module-scope Dimensions.get snapshot). screenWRef feeds the once-created
   // PanResponder its live value without re-creating it.
@@ -63,6 +69,17 @@ const StoryViewer = ({ route, navigation }) => {
     return () => { lockPortrait(); };
   }, []));
 
+  // Leaving happens once: a video's end, a swipe down and the close button
+  // can all ask at nearly the same moment, and two goBack()s would also
+  // close the screen under this one.
+  const leftRef = useRef(false);
+  const leave = useCallback(() => {
+    if (leftRef.current) return;
+    leftRef.current = true;
+    if (navigation.canGoBack()) navigation.goBack();
+  }, [navigation]);
+  const videoRef = useRef(null);
+
   const progressAnim = useRef(new Animated.Value(0)).current;
   const progressValRef = useRef(0);
   const translateY = useRef(new Animated.Value(0)).current;
@@ -85,9 +102,10 @@ const StoryViewer = ({ route, navigation }) => {
   useEffect(() => { indexRef.current = currentIndex; }, [currentIndex]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
 
+  // Your own stories aren't "viewed" by you (the server ignores it as well).
   const markViewed = useCallback((story) => {
-    if (story) viewStory(story.id).catch(() => {});
-  }, []);
+    if (story && !isOwn) viewStory(story.id).catch(() => {});
+  }, [isOwn]);
 
   // Image stories advance on a timer; `from` lets us resume from where a hold
   // paused, rather than restarting the 5s.
@@ -107,7 +125,12 @@ const StoryViewer = ({ route, navigation }) => {
   const startImageProgressRef = useRef(startImageProgress);
   startImageProgressRef.current = startImageProgress;
 
+  // A story moves on once: a video reports its end on several status
+  // updates, and each used to skip one more story.
+  const advancedFromRef = useRef(-1);
   const goNext = useCallback(() => {
+    if (advancedFromRef.current === currentIndex) return;
+    advancedFromRef.current = currentIndex;
     stopImageProgress();
     progressAnim.setValue(0);
     if (currentIndex < stories.length - 1) {
@@ -115,23 +138,29 @@ const StoryViewer = ({ route, navigation }) => {
       setMediaLoading(true);
       setMediaFailed(false);
     } else {
-      navigation.goBack();
+      leave();
     }
-  }, [currentIndex, stories.length, navigation, progressAnim, stopImageProgress]);
+  }, [currentIndex, stories.length, leave, progressAnim, stopImageProgress]);
 
   const goPrev = useCallback(() => {
     stopImageProgress();
     progressAnim.setValue(0);
+    advancedFromRef.current = -1;
     if (currentIndex > 0) {
       setCurrentIndex((i) => i - 1);
       setMediaLoading(true);
       setMediaFailed(false);
+    } else if (isVideo && !mediaFailed) {
+      // Restart the first story (mirrors WhatsApp's behaviour) — the video
+      // itself too, not just its progress bar.
+      videoRef.current?.setPositionAsync?.(0).catch?.(() => {});
     } else {
-      // Restart the first story (mirrors WhatsApp's behaviour).
-      if (isVideo) progressAnim.setValue(0);
-      else startImageProgress(0);
+      startImageProgress(0);
     }
-  }, [currentIndex, isVideo, progressAnim, startImageProgress, stopImageProgress]);
+  }, [currentIndex, isVideo, mediaFailed, progressAnim, startImageProgress, stopImageProgress]);
+
+  // A new story on screen may move on again.
+  useEffect(() => { if (advancedFromRef.current !== currentIndex) advancedFromRef.current = -1; }, [currentIndex]);
 
   useEffect(() => { goNextRef.current = goNext; }, [goNext]);
   useEffect(() => { goPrevRef.current = goPrev; }, [goPrev]);
@@ -182,8 +211,8 @@ const StoryViewer = ({ route, navigation }) => {
   const dismiss = useCallback(() => {
     Animated.timing(translateY, {
       toValue: screenH, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true,
-    }).start(() => navigation.goBack());
-  }, [translateY, navigation, screenH]);
+    }).start(() => leave());
+  }, [translateY, leave, screenH]);
 
   // The PanResponder is created once, so it must reach pause/resume through refs
   // to avoid capturing a stale `isVideo` from the first story in the group.
@@ -206,8 +235,45 @@ const StoryViewer = ({ route, navigation }) => {
       Animated.timing(burstAnim, { toValue: 1, duration: 900, easing: Easing.out(Easing.quad), useNativeDriver: true })
         .start(() => setBurst(null));
     }
-    reactToStory(story.id, next).catch(() => setReacted((r) => ({ ...r, [story.id]: was })));
+    reactToStory(story.id, next)
+      // The stories row keeps it too, so reopening shows the same reaction.
+      .then(() => emit(EVENTS.STORY_REACTED, { storyId: story.id, emoji: next }))
+      .catch(() => setReacted((r) => ({ ...r, [story.id]: was })));
   }, [stories, reacted, burstAnim]);
+
+  // Your own story: delete it now (its files go too, on the server).
+  const removeStory = useCallback(() => {
+    const story = stories[indexRef.current];
+    if (!story) return;
+    pauseRef.current();
+    Alert.alert(t('story.deleteTitle'), t('story.deleteBody'), [
+      { text: t('common.cancel'), style: 'cancel', onPress: () => resumeRef.current() },
+      {
+        text: t('story.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteStory(story.id);
+          } catch {
+            Alert.alert(t('common.error'), t('story.deleteFailed'));
+            resumeRef.current();
+            return;
+          }
+          emit(EVENTS.STORY_DELETED, { storyId: story.id });
+          if (stories.length <= 1) { leave(); return; }
+          stopImageProgress();
+          progressAnim.setValue(0);
+          advancedFromRef.current = -1;
+          setRemoved((r) => new Set(r).add(story.id));
+          setCurrentIndex((i) => Math.min(i, stories.length - 2));
+          setMediaLoading(true);
+          setMediaFailed(false);
+          setPaused(false);
+          pausedRef.current = false;
+        },
+      },
+    ]);
+  }, [stories, t, leave, progressAnim, stopImageProgress]);
 
   const openViewers = useCallback(() => {
     const story = stories[indexRef.current];
@@ -293,8 +359,8 @@ const StoryViewer = ({ route, navigation }) => {
   // Nothing to show (a group with no stories left): leave, once, from an
   // effect — never from inside rendering.
   useEffect(() => {
-    if (!currentStory && navigation.canGoBack()) navigation.goBack();
-  }, [currentStory, navigation]);
+    if (!currentStory) leave();
+  }, [currentStory, leave]);
   if (!currentStory) return null;
 
   // Every story is shown whole — a landscape photo or video is never cropped
@@ -333,6 +399,7 @@ const StoryViewer = ({ route, navigation }) => {
       {/* Media */}
       {isVideo ? (
         <AppVideo
+          ref={videoRef}
           key={currentStory.id}
           source={{ uri: currentStory.media_url }}
           style={[styles.media, { width: screenW, height: screenH }]}
@@ -416,7 +483,7 @@ const StoryViewer = ({ route, navigation }) => {
           />
           <Text style={styles.username} numberOfLines={1}>{group.user.username}</Text>
           <Text style={styles.timeAgo}>{timeAgo(currentStory.created_at, t)}</Text>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeBtn}
+          <TouchableOpacity onPress={leave} style={styles.closeBtn}
                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                             accessibilityRole="button" accessibilityLabel={t('common.close')} testID="story-close">
             <Ionicons name="close" size={26} color="#fff" />
@@ -456,11 +523,17 @@ const StoryViewer = ({ route, navigation }) => {
       >
         <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)']} style={StyleSheet.absoluteFill} pointerEvents="none" />
         {isOwn ? (
-          <TouchableOpacity style={styles.viewsBtn} onPress={openViewers} accessibilityRole="button"
-                            accessibilityLabel={t('story.viewers')} testID="story-viewers">
-            <Ionicons name="eye-outline" size={18} color="#fff" />
-            <Text style={styles.viewsText}>{t('story.viewsCount', { n: currentStory.views_count || 0 })}</Text>
-          </TouchableOpacity>
+          <View style={styles.ownRow}>
+            <TouchableOpacity style={styles.viewsBtn} onPress={openViewers} accessibilityRole="button"
+                              accessibilityLabel={t('story.viewers')} testID="story-viewers">
+              <Ionicons name="eye-outline" size={18} color="#fff" />
+              <Text style={styles.viewsText}>{t('story.viewsCount', { n: currentStory.views_count || 0 })}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.deleteBtn} onPress={removeStory} accessibilityRole="button"
+                              accessibilityLabel={t('story.delete')} testID="story-delete">
+              <Ionicons name="trash-outline" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={styles.reactions} accessibilityRole="toolbar">
             {STORY_REACTIONS.map((e) => {
@@ -569,6 +642,11 @@ const styles = StyleSheet.create({
   reactionOn: { backgroundColor: 'rgba(255,255,255,0.35)', transform: [{ scale: 1.08 }] },
   reactionText: { fontSize: 24 },
   burst: { position: 'absolute', alignSelf: 'center', bottom: '22%', fontSize: 72 },
+  ownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  deleteBtn: {
+    width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
   viewsBtn: {
     alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44,
     paddingHorizontal: spacing.md, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)',
