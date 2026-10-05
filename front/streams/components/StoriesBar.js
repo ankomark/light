@@ -12,7 +12,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchStoryFeed } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
-import { colors, spacing, radius, typography } from '../constants/theme';
+import { on, EVENTS } from '../utils/appEvents';
+import { useI18n } from '../context/I18nContext';
+import { colors, spacing, typography } from '../constants/theme';
 
 // Stories expire in 24h and the ring state changes rarely, so a cached bar is
 // accurate for far longer than the few minutes we keep it.
@@ -40,16 +42,32 @@ const StoryRing = ({ hasUnviewed, size }) => {
   );
 };
 
-const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onCreatePress }) {
+/** The newest photo among a group's stories (videos have no picture yet). */
+export const storyCover = (stories = []) => {
+  const photos = stories.filter((s) => s && s.content_type !== 'video' && s.media_url);
+  if (!photos.length) return null;
+  const newest = photos.reduce((a, b) => (new Date(b.created_at) > new Date(a.created_at) ? b : a));
+  return newest.media_url;
+};
+
+const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onCreatePress, ownLabel }) {
   const avatarSize = 58;
   const avatar = group.user.profile_picture;
   const hasStories = group.stories?.length > 0;
+  // With stories up, the bubble shows one of them (the newest photo), as
+  // Facebook does — the profile picture moves to a small badge. Only videos
+  // (no picture to show): the profile picture stays, with a play mark.
+  const cover = hasStories ? storyCover(group.stories) : null;
+  const onlyVideos = hasStories && !cover;
 
   return (
     <TouchableOpacity
       style={styles.bubble}
       onPress={() => hasStories ? onPress(group) : isOwn ? onCreatePress() : null}
       activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={isOwn ? ownLabel : group.user.username}
+      testID={isOwn ? 'story-own' : `story-${group.user.id}`}
     >
       <View style={styles.ringWrap}>
         {hasStories
@@ -57,21 +75,41 @@ const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onC
           : <View style={[styles.ring, styles.ringDashed, { width: avatarSize + 6, height: avatarSize + 6, borderRadius: (avatarSize + 6) / 2 }]} />
         }
         <Image
-          source={avatar ? { uri: avatar } : DEFAULT_AVATAR}
+          source={cover ? { uri: cover } : avatar ? { uri: avatar } : DEFAULT_AVATAR}
           placeholder={DEFAULT_AVATAR}
           contentFit="cover"
           cachePolicy="memory-disk"
           transition={120}
+          recyclingKey={cover || avatar || 'default'}
           style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
+          testID={isOwn ? 'story-own-cover' : `story-cover-${group.user.id}`}
         />
-        {isOwn && !hasStories && (
-          <View style={styles.plusBadge}>
-            <Ionicons name="add" size={12} color="#fff" />
+        {/* Whose it is, when the bubble shows the story itself (your own has the "+" there). */}
+        {!!cover && !isOwn && (
+          <Image
+            source={avatar ? { uri: avatar } : DEFAULT_AVATAR}
+            placeholder={DEFAULT_AVATAR}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            style={styles.ownerBadge}
+          />
+        )}
+        {onlyVideos && (
+          <View style={styles.playBadge} pointerEvents="none">
+            <Ionicons name="play" size={11} color="#fff" />
           </View>
+        )}
+        {/* Your own bubble always has its "+": with stories up, the bubble
+            plays them and the "+" adds another. */}
+        {isOwn && (
+          <TouchableOpacity style={styles.plusBadge} onPress={onCreatePress} hitSlop={12}
+                            accessibilityRole="button" accessibilityLabel={ownLabel} testID="story-add">
+            <Ionicons name="add" size={14} color="#fff" />
+          </TouchableOpacity>
         )}
       </View>
       <Text style={styles.username} numberOfLines={1}>
-        {isOwn ? 'Your Story' : group.user.username}
+        {isOwn ? ownLabel : group.user.username}
       </Text>
     </TouchableOpacity>
   );
@@ -79,6 +117,8 @@ const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onC
 
 const StoriesBar = ({ navigation }) => {
   const { currentUser } = useAuth();
+  const { t } = useI18n();
+  const ownLabel = t('story.yours');
   const cacheKey = userKey(currentUser?.id, 'stories');
 
   // Same instant-paint rule as the feed: show the last known bar immediately,
@@ -117,8 +157,15 @@ const StoriesBar = ({ navigation }) => {
     if (Date.now() - lastFetchRef.current > STORIES_REFETCH_MS) load();
   }, [load]));
 
+  // A story just shared: in the row now, not after the next refresh.
+  useEffect(() => on(EVENTS.STORY_CREATED, () => { load(); }), [load]);
+
   const openViewer = useCallback((group) => {
     navigation.navigate('StoryViewer', { group });
+    // Opened is seen: the ring greys straight away.
+    if (group.has_unviewed) {
+      setGroups((prev) => prev.map((g) => (g.user.id === group.user.id ? { ...g, has_unviewed: false } : g)));
+    }
   }, [navigation]);
 
   const openCreate = useCallback(() => {
@@ -146,8 +193,9 @@ const StoriesBar = ({ navigation }) => {
       onPress={openViewer}
       isOwn={index === 0}
       onCreatePress={openCreate}
+      ownLabel={ownLabel}
     />
-  ), [openViewer, openCreate]);
+  ), [openViewer, openCreate, ownLabel]);
 
   const keyExtractor = useCallback((item) => String(item.user.id), []);
 
@@ -192,13 +240,35 @@ const styles = StyleSheet.create({
   ringViewed: { borderWidth: 2.5, borderColor: colors.textMuted, backgroundColor: 'transparent' },
   ringDashed: { borderWidth: 2, borderColor: colors.border, borderStyle: 'dashed', backgroundColor: 'transparent' },
   avatar: { backgroundColor: colors.surface },
+  ownerBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.bg,
+    backgroundColor: colors.surface,
+  },
+  playBadge: {
+    position: 'absolute',
+    top: 2,
+    left: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
   plusBadge: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',

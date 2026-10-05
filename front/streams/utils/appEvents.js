@@ -26,4 +26,5 @@ export const emit = (event, payload) => {
 export const EVENTS = {
   POST_CREATED: 'post:created',
   TRACK_CREATED: 'track:created',
+  STORY_CREATED: 'story:created',
 };

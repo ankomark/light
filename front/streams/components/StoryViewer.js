@@ -1,14 +1,20 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, Image, TouchableOpacity, StyleSheet, useWindowDimensions,
-  StatusBar, Animated, Easing, PanResponder, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, useWindowDimensions,
+  StatusBar, Animated, Easing, PanResponder, ActivityIndicator, AppState,
 } from 'react-native';
+// expo-image: cached on disk, so a story seen once paints at once next time,
+// and the next one can be fetched while this one shows.
+import { Image } from 'expo-image';
+import { useFocusEffect } from '@react-navigation/native';
 import AppVideo from './AppVideo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { viewStory } from '../services/api';
-import { colors, spacing } from '../constants/theme';
+import { spacing } from '../constants/theme';
+import { useI18n } from '../context/I18nContext';
+import { allowAllOrientations, lockPortrait } from '../utils/orientation';
 
 const IMAGE_DURATION = 5000;   // ms an image story is shown
 const VIDEO_MAX_MS = 30000;    // hard 30s cap for video stories
@@ -20,8 +26,9 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const StoryViewer = ({ route, navigation }) => {
   const { group } = route.params;
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
-  const stories = group.stories ?? [];
+  const stories = useMemo(() => group.stories ?? [], [group.stories]);
   // Reactive full-screen size — reflows on rotation / web resize (was a
   // module-scope Dimensions.get snapshot). screenWRef feeds the once-created
   // PanResponder its live value without re-creating it.
@@ -32,6 +39,16 @@ const StoryViewer = ({ route, navigation }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(true);
+  const [mediaFailed, setMediaFailed] = useState(false);
+  // Portrait stories fill a portrait screen; turned sideways, the whole story
+  // is shown (letterboxed) rather than cropped to a thin band.
+  const landscape = screenW > screenH;
+
+  // Turns with the phone while open (the app is otherwise portrait-only).
+  useFocusEffect(useCallback(() => {
+    allowAllOrientations();
+    return () => { lockPortrait(); };
+  }, []));
 
   const progressAnim = useRef(new Animated.Value(0)).current;
   const progressValRef = useRef(0);
@@ -74,6 +91,8 @@ const StoryViewer = ({ route, navigation }) => {
   }, [progressAnim]);
 
   const stopImageProgress = useCallback(() => { animRef.current?.stop(); }, []);
+  const startImageProgressRef = useRef(startImageProgress);
+  startImageProgressRef.current = startImageProgress;
 
   const goNext = useCallback(() => {
     stopImageProgress();
@@ -81,6 +100,7 @@ const StoryViewer = ({ route, navigation }) => {
     if (currentIndex < stories.length - 1) {
       setCurrentIndex((i) => i + 1);
       setMediaLoading(true);
+      setMediaFailed(false);
     } else {
       navigation.goBack();
     }
@@ -92,6 +112,7 @@ const StoryViewer = ({ route, navigation }) => {
     if (currentIndex > 0) {
       setCurrentIndex((i) => i - 1);
       setMediaLoading(true);
+      setMediaFailed(false);
     } else {
       // Restart the first story (mirrors WhatsApp's behaviour).
       if (isVideo) progressAnim.setValue(0);
@@ -102,8 +123,21 @@ const StoryViewer = ({ route, navigation }) => {
   useEffect(() => { goNextRef.current = goNext; }, [goNext]);
   useEffect(() => { goPrevRef.current = goPrev; }, [goPrev]);
 
-  // Mark each story viewed as it becomes current.
-  useEffect(() => { markViewed(currentStory); }, [currentStory, markViewed]);
+  // Mark each story viewed as it becomes current, and fetch the next photo
+  // now so the tap to it shows it straight away.
+  useEffect(() => {
+    markViewed(currentStory);
+    const next = stories[currentIndex + 1];
+    if (next && next.content_type !== 'video' && next.media_url) Image.prefetch(next.media_url).catch(() => {});
+  }, [currentStory, markViewed, stories, currentIndex]);
+
+  // A story that won't load (offline, deleted) says so and moves on by
+  // itself, instead of a spinner that never ends.
+  const handleMediaError = useCallback(() => {
+    setMediaLoading(false);
+    setMediaFailed(true);
+    if (!pausedRef.current) startImageProgressRef.current(0);
+  }, []);
 
   const handleMediaReady = useCallback(() => {
     setMediaLoading(false);
@@ -122,14 +156,14 @@ const StoryViewer = ({ route, navigation }) => {
   const pause = useCallback(() => {
     setPaused(true);
     pausedRef.current = true;
-    if (!isVideo) stopImageProgress();
-  }, [isVideo, stopImageProgress]);
+    if (!isVideo || mediaFailed) stopImageProgress();
+  }, [isVideo, mediaFailed, stopImageProgress]);
 
   const resume = useCallback(() => {
     setPaused(false);
     pausedRef.current = false;
-    if (!isVideo) startImageProgress(progressValRef.current);
-  }, [isVideo, startImageProgress]);
+    if (!isVideo || mediaFailed) startImageProgress(progressValRef.current);
+  }, [isVideo, mediaFailed, startImageProgress]);
 
   const dismiss = useCallback(() => {
     Animated.timing(translateY, {
@@ -145,6 +179,17 @@ const StoryViewer = ({ route, navigation }) => {
   useEffect(() => { pauseRef.current = pause; }, [pause]);
   useEffect(() => { resumeRef.current = resume; }, [resume]);
   useEffect(() => { dismissRef.current = dismiss; }, [dismiss]);
+
+  // Leaving the app pauses the story (the clock and the video); coming back
+  // carries on — unless the person had paused it themselves by holding.
+  const pausedByAppRef = useRef(false);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active' && !pausedRef.current) { pausedByAppRef.current = true; pauseRef.current(); }
+      if (st === 'active' && pausedByAppRef.current) { pausedByAppRef.current = false; resumeRef.current(); }
+    });
+    return () => sub.remove();
+  }, []);
 
   // One gesture surface: tap zones for prev/next, hold to pause, drag down to
   // dismiss — the WhatsApp status interaction model.
@@ -203,10 +248,14 @@ const StoryViewer = ({ route, navigation }) => {
     })
   ).current;
 
-  if (!currentStory) {
-    navigation.goBack();
-    return null;
-  }
+  // Nothing to show (a group with no stories left): leave, once, from an
+  // effect — never from inside rendering.
+  useEffect(() => {
+    if (!currentStory && navigation.canGoBack()) navigation.goBack();
+  }, [currentStory, navigation]);
+  if (!currentStory) return null;
+
+  const fit = landscape ? 'contain' : 'cover';
 
   const dragOpacity = translateY.interpolate({
     inputRange: [0, screenH], outputRange: [1, 0.3], extrapolate: 'clamp',
@@ -219,26 +268,37 @@ const StoryViewer = ({ route, navigation }) => {
       {/* Media */}
       {isVideo ? (
         <AppVideo
+          key={currentStory.id}
           source={{ uri: currentStory.media_url }}
           style={[styles.media, { width: screenW, height: screenH }]}
-          resizeMode="cover"
+          resizeMode={fit}
           shouldPlay={!paused && !mediaLoading}
           isLooping={false}
           onReadyForDisplay={handleMediaReady}
           onPlaybackStatusUpdate={onVideoStatus}
+          onError={handleMediaError}
         />
       ) : (
         <Image
+          key={currentStory.id}
           source={{ uri: currentStory.media_url }}
           style={[styles.media, { width: screenW, height: screenH }]}
-          resizeMode="cover"
+          contentFit={fit}
+          cachePolicy="memory-disk"
           onLoad={handleMediaReady}
+          onError={handleMediaError}
         />
       )}
 
       {mediaLoading && (
-        <View style={styles.loadingOverlay}>
+        <View style={styles.loadingOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
+      {mediaFailed && (
+        <View style={styles.loadingOverlay} pointerEvents="none" testID="story-failed">
+          <Ionicons name="cloud-offline-outline" size={36} color="#fff" />
+          <Text style={styles.failedText}>{t('story.loadFailed')}</Text>
         </View>
       )}
 
@@ -246,7 +306,15 @@ const StoryViewer = ({ route, navigation }) => {
       <View style={styles.gestureLayer} {...pan.panHandlers} />
 
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
+      <View
+        style={[styles.header, {
+          paddingTop: insets.top + spacing.sm,
+          // Turned sideways, the notch is on a side.
+          paddingLeft: spacing.sm + insets.left,
+          paddingRight: spacing.sm + insets.right,
+        }]}
+        pointerEvents="box-none"
+      >
         <LinearGradient
           colors={['rgba(0,0,0,0.6)', 'transparent']}
           style={StyleSheet.absoluteFill}
@@ -277,29 +345,35 @@ const StoryViewer = ({ route, navigation }) => {
         <View style={styles.userRow}>
           <Image
             source={group.user.profile_picture ? { uri: group.user.profile_picture } : DEFAULT_AVATAR}
-            defaultSource={DEFAULT_AVATAR}
+            placeholder={DEFAULT_AVATAR}
+            cachePolicy="memory-disk"
             style={styles.avatar}
           />
-          <Text style={styles.username}>{group.user.username}</Text>
-          <Text style={styles.timeAgo}>{timeAgo(currentStory.created_at)}</Text>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={styles.username} numberOfLines={1}>{group.user.username}</Text>
+          <Text style={styles.timeAgo}>{timeAgo(currentStory.created_at, t)}</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeBtn}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            accessibilityRole="button" accessibilityLabel={t('common.close')} testID="story-close">
             <Ionicons name="close" size={26} color="#fff" />
           </TouchableOpacity>
         </View>
 
         {/* Caption */}
         {currentStory.caption ? (
-          <Text style={styles.caption}>{currentStory.caption}</Text>
+          <Text style={styles.caption} numberOfLines={4}>{currentStory.caption}</Text>
         ) : null}
       </View>
     </Animated.View>
   );
 };
 
-function timeAgo(dateStr) {
+// "now", "5m", "3h" in the reader's language (a story lives a day at most).
+export function timeAgo(dateStr, t) {
   const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
+  if (!Number.isFinite(diff)) return '';
+  if (diff < 60) return t ? t('feed.ago.now') : 'now';
+  if (diff < 3600) return t ? t('feed.ago.m', { n: Math.floor(diff / 60) }) : `${Math.floor(diff / 60)}m`;
+  return t ? t('feed.ago.h', { n: Math.floor(diff / 3600) }) : `${Math.floor(diff / 3600)}h`;
 }
 
 const styles = StyleSheet.create({
@@ -334,6 +408,7 @@ const styles = StyleSheet.create({
   username: { flex: 1, color: '#fff', fontWeight: '600', fontSize: 14 },
   timeAgo: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   closeBtn: { padding: spacing.xs },
+  failedText: { color: '#fff', fontSize: 14, marginTop: spacing.sm, textAlign: 'center', paddingHorizontal: spacing.lg },
   caption: {
     color: '#fff',
     fontSize: 14,
