@@ -34,6 +34,12 @@ import {
   searchPlaces, fetchForecast, describe, guessPlace, describePlace,
 } from '../services/weather';
 import { fetchWeatherPlace, saveWeatherPlace } from '../services/api';
+import { readCache, writeCache } from '../utils/screenCache';
+
+// The last forecast for a place, shown at once and while offline. Weather a
+// few hours old beats a blank page; the fresh one replaces it moments later.
+const forecastKey = (p) => `pub:weather:${Number(p.latitude).toFixed(2)},${Number(p.longitude).toFixed(2)}`;
+const FORECAST_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 const DISPLAY = 'Cinzel_700Bold';
 const DISPLAY_MID = 'Cinzel_600SemiBold';
@@ -82,9 +88,18 @@ const Weather = ({ navigation }) => {
     if (!target) return;
     try {
       setError('');
-      setForecast(await fetchForecast(target));
+      const fresh = await fetchForecast(target);
+      setForecast(fresh);
+      writeCache(forecastKey(target), fresh);
     } catch (e) {
-      setError(e?.message || t('weather.failed'));
+      // Offline or failing: the last forecast for this place, with a note.
+      const kept = await readCache(forecastKey(target), FORECAST_MAX_AGE_MS).catch(() => null);
+      if (kept) {
+        setForecast((cur) => cur || kept);
+        setError(t('net.offlineSaved'));
+      } else {
+        setError(e?.message || t('weather.failed'));
+      }
     }
   }, [t]);
 
@@ -92,6 +107,17 @@ const Weather = ({ navigation }) => {
   useEffect(() => {
     let alive = true;
     (async () => {
+      // The phone's own place and its last forecast first: the page is up at
+      // once, even offline, while the server is asked behind it.
+      const local = await getPreference(PREF_KEYS.weatherPlace);
+      if (alive && local && local.latitude != null) {
+        setPlace((cur) => cur || local);
+        const kept = await readCache(forecastKey(local), FORECAST_MAX_AGE_MS).catch(() => null);
+        if (alive && kept) {
+          setForecast((cur) => cur || kept);
+          setLoading(false);
+        }
+      }
       let chosen = null;
       try {
         const remote = await fetchWeatherPlace();     // the server's copy wins
@@ -102,10 +128,7 @@ const Weather = ({ navigation }) => {
       } catch {
         // Offline, or signed out. The device's own copy will do.
       }
-      if (!chosen) {
-        const local = await getPreference(PREF_KEYS.weatherPlace);
-        if (local && local.latitude != null) chosen = local;
-      }
+      if (!chosen && local && local.latitude != null) chosen = local;
       if (!alive) return;
 
       if (chosen) {
