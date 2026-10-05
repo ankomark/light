@@ -340,6 +340,7 @@ class AdminContentStorySerializer(serializers.ModelSerializer):
 # author + a preview field + is_removed, matching the shape the admin panel
 # renders (caption|content|title|name).
 from ..models import Publication  # not in the common star import
+from ..models import BookClub, LiveBroadcast, Organization
 
 
 class AdminContentPublicationSerializer(serializers.ModelSerializer):
@@ -389,3 +390,30 @@ class AdminContentMediaStationSerializer(serializers.ModelSerializer):
     class Meta:
         model = MediaStation
         fields = ['id', 'name', 'type', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentOrganizationSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = Organization
+        fields = ['id', 'name', 'slug', 'kind', 'location', 'is_verified', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentBookClubSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='created_by', read_only=True)
+    name = serializers.CharField(source='group.name', read_only=True)
+    book = serializers.CharField(source='publication.title', read_only=True)
+
+    class Meta:
+        model = BookClub
+        fields = ['id', 'name', 'book', 'starts_on', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentLiveBroadcastSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='host', read_only=True)
+    created_at = serializers.DateTimeField(source='started_at', read_only=True)
+
+    class Meta:
+        model = LiveBroadcast
+        fields = ['id', 'title', 'kind', 'status', 'singles_only', 'is_removed', 'created_at', 'author']

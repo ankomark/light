@@ -59,14 +59,14 @@ class OrganizationViewSet(viewsets.GenericViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     pagination_class = StandardPagination
     lookup_field = 'slug'
-    queryset = Organization.objects.all()
+    queryset = Organization.objects.filter(is_removed=False)
 
     def _row(self, org):
         return {**orgs.mini(org), 'location': org.location,
                 'books_count': getattr(org, 'books_n', None), 'followers_count': getattr(org, 'followers_n', None)}
 
     def list(self, request):
-        qs = Organization.objects.annotate(
+        qs = Organization.objects.filter(is_removed=False).annotate(
             books_n=Count('publications', filter=Q(publications__status='published', publications__is_removed=False),
                           distinct=True),
             followers_n=Count('followers', distinct=True),

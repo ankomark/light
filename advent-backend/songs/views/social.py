@@ -1520,7 +1520,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         # The same for everyone: counted once every few minutes, not per visit.
         publishers = cache.get('books:publishers')
         if publishers is None:
-            pubs = (Organization.objects.filter(is_verified=True)
+            pubs = (Organization.objects.filter(is_verified=True, is_removed=False)
                     .annotate(n=Count('publications', filter=Q(publications__status='published',
                                                                publications__is_removed=False)))
                     .filter(n__gt=0).order_by('-n', 'name')[:12])
@@ -2015,7 +2015,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
     def club(self, request, cid=None):
         """One club's page (members, or anyone for a public club)."""
         club = get_object_or_404(BookClub.objects.select_related('group', 'publication'), pk=cid,
-                                 group__is_removed=False)
+                                 group__is_removed=False, is_removed=False)
         member = request.user.is_authenticated and GroupMember.objects.filter(group=club.group, user=request.user).exists()
         if club.group.is_private and not member:
             raise Http404('No such club.')
@@ -2024,7 +2024,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path=r'clubs/by-group/(?P<slug>[-\w]+)')
     def club_of_group(self, request, slug=None):
         """The club a group runs, if any — {club: id|null} (the group page shows it)."""
-        club = BookClub.objects.filter(group__slug=slug).values_list('pk', flat=True).first()
+        club = BookClub.objects.filter(group__slug=slug, is_removed=False).values_list('pk', flat=True).first()
         return Response({'club': club})
 
     # ── AI in books (songs/book_ai.py) ──

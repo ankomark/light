@@ -2406,6 +2406,8 @@ class Organization(models.Model):
     location = models.CharField(max_length=120, blank=True, default='')
     is_verified = models.BooleanField(default=False)
     followers = models.ManyToManyField(User, related_name='followed_organizations', blank=True)
+    # Taken down by an admin: hidden everywhere it is shown (songs/views/admin.py).
+    is_removed = models.BooleanField(default=False, db_index=True)
     created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2688,6 +2690,8 @@ class BookClub(models.Model):
     publication = models.ForeignKey(Publication, on_delete=models.CASCADE, related_name='clubs')
     created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
     starts_on = models.DateField()
+    # Taken down by an admin: hidden everywhere it is shown (songs/views/admin.py).
+    is_removed = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2798,6 +2802,8 @@ class LiveBroadcast(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='live')
     viewer_count = models.PositiveIntegerField(default=0)
     peak_viewer_count = models.PositiveIntegerField(default=0)
+    # Taken down by an admin: hidden everywhere it is shown (songs/views/admin.py).
+    is_removed = models.BooleanField(default=False, db_index=True)
     # Running total of ❤️ reactions the room received — persisted so the count
     # survives rejoins and reflects the whole session, not just what one viewer
     # saw. Incremented in batches via the `react` endpoint.

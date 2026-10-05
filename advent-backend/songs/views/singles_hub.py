@@ -110,7 +110,7 @@ class SinglesHubView(APIView):
             'matches': SinglesMatch.objects.filter(Q(profile_a=me) | Q(profile_b=me), ended_at__isnull=True).count(),
             'topic': _topic_json(topic, me) if topic else None,
             'gathering': _gathering_json(upcoming, me) if upcoming else None,
-            'live_rooms': LiveBroadcast.objects.filter(singles_only=True, status='live').count(),
+            'live_rooms': LiveBroadcast.objects.filter(singles_only=True, status='live', is_removed=False).count(),
             'stories': SinglesStory.objects.filter(status=SinglesStory.PUBLISHED).count(),
         }
 
@@ -440,7 +440,7 @@ class SinglesRoomsView(APIView):
     def get(self, request):
         _require_on()
         _approved(request.user)
-        rooms = (LiveBroadcast.objects.filter(singles_only=True, status='live')
+        rooms = (LiveBroadcast.objects.filter(singles_only=True, status='live', is_removed=False)
                  .exclude(host_id__in=blocked_ids_for(request.user)).select_related('host')[:20])
         return Response({'results': [{'id': r.id, 'title': r.title, 'kind': r.kind, 'host': r.host.username,
                                       'listening': r.viewer_count, 'started_at': r.started_at.isoformat()}

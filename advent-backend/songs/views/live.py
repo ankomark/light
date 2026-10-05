@@ -59,7 +59,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     def get_queryset(self):
         return (
             LiveBroadcast.objects.select_related('host__profile')
-            .filter(status='live').order_by('-started_at')
+            .filter(status='live', is_removed=False).order_by('-started_at')
         )
 
     def get_throttles(self):
@@ -82,7 +82,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         return self.get_paginated_response(data) if page is not None else Response(data)
 
     def retrieve(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         # A singles room is not there at all for anyone outside it.
         if b.singles_only and not request.user.is_platform_admin and not _approved_single(request.user):
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -152,7 +152,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     # ── Join (viewer) ──────────────────────────────────────────────────────────
     @action(detail=True, methods=['get'])
     def token(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.status != 'live':
             return Response({'error': 'This broadcast has ended.'}, status=status.HTTP_410_GONE)
         # Super admins can join any broadcast — a block by the host can't shut them out.
@@ -179,7 +179,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             n = 1
         n = max(1, min(n, 100))
         applied = LiveBroadcast.objects.filter(pk=pk, status='live').update(like_count=F('like_count') + n)
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         # Credit the host's lifetime like total only when the tally actually
         # moved — reactions sent to an already-ended room are a no-op above and
         # must not inflate the profile stat either.
@@ -193,7 +193,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         """Set or clear the persisted on-screen graphic. Host or an approved
         co-host only. Persisted so it survives a reconnect and reaches late
         joiners in the join payload; the live push still rides the data channel."""
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         is_cohost = b.cohost_requests.filter(user=request.user, status='approved').exists()
         if b.host_id != request.user.id and not is_cohost and not request.user.is_super_admin:
             return Response({'error': 'Only the host or a co-host can set on-screen text.'}, status=status.HTTP_403_FORBIDDEN)
@@ -219,7 +219,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     # ── End (host or super admin) ───────────────────────────────────────────────
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         # The host ends their own broadcast; a super admin can end anyone's.
         if b.host_id != request.user.id and not request.user.is_super_admin:
             return Response({'error': 'Only the host or an admin can end this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
@@ -234,7 +234,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     def destroy(self, request, pk=None):
         """Remove a broadcast entirely. The host can delete their own; a super
         admin can delete any. A still-live room is torn down first."""
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.host_id != request.user.id and not request.user.is_super_admin:
             return Response({'error': 'Only the host or an admin can delete this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
         if b.status == 'live':
@@ -245,7 +245,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     # ── Co-host requests ───────────────────────────────────────────────────────
     @action(detail=True, methods=['post'], url_path='request-cohost')
     def request_cohost(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.status != 'live':
             return Response({'error': 'Broadcast has ended.'}, status=status.HTTP_410_GONE)
         if b.host_id == request.user.id:
@@ -266,7 +266,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['get'], url_path='cohost-requests')
     def cohost_requests(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.host_id != request.user.id:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
         qs = b.cohost_requests.select_related('user__profile').filter(status='pending')
@@ -274,7 +274,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['post'], url_path='approve-cohost')
     def approve_cohost(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.host_id != request.user.id:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
         req = get_object_or_404(CoHostRequest, pk=request.data.get('request_id'), broadcast=b)
@@ -295,7 +295,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['post'], url_path='reject-cohost')
     def reject_cohost(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.host_id != request.user.id:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
         req = get_object_or_404(CoHostRequest, pk=request.data.get('request_id'), broadcast=b)
@@ -306,7 +306,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['get'], url_path='cohost-token')
     def cohost_token(self, request, pk=None):
         """An approved co-host fetches their publish token."""
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.status != 'live':
             return Response({'error': 'This broadcast has ended.'}, status=status.HTTP_410_GONE)
         approved = b.cohost_requests.filter(user=request.user, status='approved').exists()
@@ -321,7 +321,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     # ── Moderation (host): remove a participant ─────────────────────────────────
     @action(detail=True, methods=['post'])
     def moderate(self, request, pk=None):
-        b = get_object_or_404(LiveBroadcast, pk=pk)
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.host_id != request.user.id and not request.user.is_super_admin:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
         target_user_id = request.data.get('user_id')

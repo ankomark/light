@@ -4,6 +4,7 @@ from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES, BookReview, ChapterComment, ServiceReview, Message, SinglesTopic, SinglesReply
+from ..models import BookClub, LiveBroadcast, Organization
 from .. import rights
 from ..signals import sync_removal_likes
 from ..serializers.admin import build_report_targets
@@ -25,6 +26,9 @@ from ..serializers import (
     AdminContentGroupPostSerializer,
     AdminContentVideostudioSerializer,
     AdminContentMediaStationSerializer,
+    AdminContentOrganizationSerializer,
+    AdminContentBookClubSerializer,
+    AdminContentLiveBroadcastSerializer,
 )
 
 # Strikes at/after which a warning auto-escalates to a temporary suspension.
@@ -81,6 +85,9 @@ _CONTENT_MODELS = {
     'message': Message,               # a direct message (reported by someone in the chat)
     'singlestopic': SinglesTopic,     # a Single & Searching community question
     'singlesreply': SinglesReply,     # and a reply to one
+    'organization': Organization,     # a church, ministry or publisher page
+    'bookclub': BookClub,             # a reading club (its group stays)
+    'livebroadcast': LiveBroadcast,   # a live room: taking it down also ends it
 }
 
 
@@ -91,6 +98,7 @@ _AUTHOR_FIELD = {
     'chaptercomment': 'user', 'product': 'seller', 'productreview': 'reviewer', 'grouppost': 'user',
     'videostudio': 'created_by', 'mediastation': 'created_by', 'servicereview': 'user', 'message': 'sender',
     'singlestopic': 'author__user', 'singlesreply': 'author__user',
+    'organization': 'created_by', 'bookclub': 'created_by', 'livebroadcast': 'host',
 }
 _CONTENT_WORD = {
     'post': 'post', 'comment': 'comment', 'trackcomment': 'comment', 'group': 'group', 'story': 'story',
@@ -98,6 +106,7 @@ _CONTENT_WORD = {
     'product': 'listing', 'productreview': 'review', 'grouppost': 'group message', 'videostudio': 'studio',
     'mediastation': 'media station', 'servicereview': 'review', 'message': 'message',
     'singlestopic': 'singles question', 'singlesreply': 'singles reply',
+    'organization': 'organization page', 'bookclub': 'book club', 'livebroadcast': 'live broadcast',
 }
 
 
@@ -235,7 +244,14 @@ def _soft_remove(content_type, object_id, removed=True):
     sync_removal_likes(Model, [obj.pk], removed)
     obj.is_removed = removed
     obj.save(update_fields=['is_removed'])
+    if removed and Model is LiveBroadcast:
+        _end_live([obj.pk])
     return True
+
+
+def _end_live(ids):
+    """A live broadcast taken down ends now: nobody can join or keep watching."""
+    LiveBroadcast.objects.filter(pk__in=ids, status='live').update(status='ended', ended_at=timezone.now())
 
 
 def _paginated(view, qs, serializer_cls):
@@ -781,6 +797,9 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         'grouppost':    ('user',   AdminContentGroupPostSerializer,   ['content__icontains', 'user__username__icontains']),
         'videostudio':  ('created_by', AdminContentVideostudioSerializer, ['name__icontains', 'location__icontains']),
         'mediastation': ('created_by', AdminContentMediaStationSerializer, ['name__icontains']),
+        'organization': ('created_by', AdminContentOrganizationSerializer, ['name__icontains', 'location__icontains']),
+        'bookclub':     ('created_by', AdminContentBookClubSerializer, ['group__name__icontains', 'publication__title__icontains']),
+        'livebroadcast': ('host', AdminContentLiveBroadcastSerializer, ['title__icontains', 'host__username__icontains']),
     }
 
     def list(self, request):
@@ -790,7 +809,10 @@ class AdminContentViewSet(viewsets.GenericViewSet):
             return Response({'error': f'type must be one of {list(self._CONFIG)}'}, status=status.HTTP_400_BAD_REQUEST)
         rel, ser_cls, search_fields = cfg
         # rel__profile: the author's picture, read with the row (not one query each).
-        qs = _CONTENT_MODELS[ctype].objects.select_related(rel, f'{rel}__profile').order_by('-created_at')
+        Model = _CONTENT_MODELS[ctype]
+        # Newest first; a live broadcast has no created_at, it started_at.
+        newest = '-started_at' if Model is LiveBroadcast else '-created_at'
+        qs = Model.objects.select_related(rel, f'{rel}__profile').order_by(newest)
 
         removed = request.query_params.get('removed')
         if removed == 'true':
@@ -869,6 +891,8 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         sync_removal_likes(Model, ids, op == 'remove')
         changing = list(Model.objects.filter(id__in=ids, is_removed=(op != 'remove')).values_list('id', flat=True))
         count = Model.objects.filter(id__in=changing).update(is_removed=(op == 'remove'))
+        if Model is LiveBroadcast and op == 'remove':
+            _end_live(changing)
         _tell_authors(ctype, changing, op == 'remove', reason, request.user)
         if ctype == 'track' and changing:
             if op == 'remove':

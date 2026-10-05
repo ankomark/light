@@ -186,7 +186,7 @@ class VideoStudioSerializer(serializers.ModelSerializer):
         # Kept as it is (even if they've since left it): always fine.
         if self.instance is not None and self.instance.organization_id and self.instance.organization.slug == slug:
             return self.instance.organization
-        org = Organization.objects.filter(slug=slug).first()
+        org = Organization.objects.filter(slug=slug, is_removed=False).first()
         request = self.context.get('request')
         if org is None or not can_publish_under(getattr(request, 'user', None), org):
             raise serializers.ValidationError('You can list only under an organisation you belong to.')

@@ -28,6 +28,9 @@ const TYPES = [
   { key: 'grouppost', label: 'adminContent.type.grouppost' },
   { key: 'videostudio', label: 'adminContent.type.videostudio' },
   { key: 'mediastation', label: 'adminContent.type.mediastation' },
+  { key: 'organization', label: 'adminContent.type.organization' },
+  { key: 'bookclub', label: 'adminContent.type.bookclub' },
+  { key: 'livebroadcast', label: 'adminContent.type.livebroadcast' },
 ];
 
 const AdminContent = () => {
@@ -174,7 +177,9 @@ const AdminContent = () => {
 
   const renderItem = ({ item }) => {
     const author = item.author;
-    const text = item.caption || item.content || item.title || item.name || `#${item.id}`;
+    // A book club: its name and the book it reads.
+    const text = item.caption || item.content || item.title
+      || (item.book ? `${item.name} — ${item.book}` : item.name) || `#${item.id}`;
     const checked = selected.has(item.id);
     return (
       <Pressable

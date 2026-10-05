@@ -209,6 +209,6 @@ def club_summary(club, user, today=None):
 def clubs_for(user, pub):
     """Clubs reading this book the user can see: theirs, and public ones."""
     mine = GroupMember.objects.filter(user_id=getattr(user, 'id', None)).values('group_id')
-    return (BookClub.objects.filter(publication=pub, group__is_removed=False)
+    return (BookClub.objects.filter(publication=pub, group__is_removed=False, is_removed=False)
             .filter(Q(group__is_private=False) | Q(group_id__in=mine))
             .select_related('group', 'publication'))
