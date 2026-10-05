@@ -25,19 +25,22 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (fn) => require('react').useEffect(fn, [fn]),
 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 24, left: 0, right: 0 }) }));
+const mockWriteCache = jest.fn();
 jest.mock('../../utils/screenCache', () => ({
-  peekCache: () => null, readCache: async () => null, writeCache: jest.fn(), userKey: (u, n) => `u${u}:${n}`,
+  peekCache: () => null, readCache: async () => null, writeCache: (...a) => mockWriteCache(...a), userKey: (u, n) => `u${u}:${n}`,
 }));
 const mockOnline = { value: true };
 jest.mock('../../hooks/useOnline', () => ({ __esModule: true, default: () => mockOnline.value }));
 // The card's many parts are not what's under test here.
 const Null = () => null;
 ['../../services/audioPlayer', '../AppVideo', '../BookPostMedia', '../GlassView', '../../components/SearchBaar',
-  '../../components/FollowButton', '../PostActions', '../CommentAction', '../RichCaption', '../PendingPosts',
+  '../../components/FollowButton', '../CommentAction', '../RichCaption', '../PendingPosts',
   '../StoriesBar', '../AudioVisualizer', '../RotatingBackground', '../ScreenVignette']
   .forEach((m) => jest.doMock(m, () => ({ __esModule: true, default: Null, createSound: jest.fn() })));
 jest.mock('../SocialActions', () => ({ DownloadButton: () => null, SaveButton: () => null, LikeButton: () => null, ShareButton: () => null }));
 jest.mock('../SkeletonLoader', () => ({ PostSkeleton: () => null }));
+const mockPostActions = jest.fn(() => null);
+jest.mock('../PostActions', () => (props) => mockPostActions(props));
 const mockViewer = jest.fn();
 jest.mock('../ImageViewer', () => (props) => { mockViewer(props); return null; });
 
@@ -109,4 +112,15 @@ test("tapping a photo opens it full screen, with the post's caption", async () =
     visible: true, index: 0, caption: 'Sabbath sunrise', author: 'mark',
   })));
   expect(mockViewer.mock.calls.at(-1)[0].urls[0]).toContain('a.jpg');
+});
+
+test('a deleted post leaves the saved copy too, so it cannot flash back on the next launch', async () => {
+  mockApi.fetchSocialPosts.mockResolvedValue(page([1, 2]));
+  const screen = render(<SocialFeed showBackground={false} />);
+  await waitFor(() => expect(screen.UNSAFE_getByType(FlatList).props.data).toHaveLength(2));
+  const actionsFor = (id) => mockPostActions.mock.calls.map((c) => c[0]).reverse().find((p) => p.post.id === id);
+  mockWriteCache.mockClear();
+  await act(async () => { actionsFor(1).onDelete(); });
+  expect(screen.UNSAFE_getByType(FlatList).props.data.map((p) => p.id)).toEqual([2]);
+  expect(mockWriteCache).toHaveBeenCalledWith('u7:feed:for_you', [expect.objectContaining({ id: 2 })]);
 });

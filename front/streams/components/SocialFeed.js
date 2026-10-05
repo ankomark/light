@@ -70,21 +70,25 @@ const FEED_REASON = {
 // centre to the same column instead of stretching.
 const useCardWidth = () => useContentWidth({ gutter: 24 }).width;
 
-// Compact relative time, e.g. "now", "5m", "3h", "2d", "4w", or a date.
-const timeAgo = (dateStr) => {
+// Compact relative time, e.g. "now", "5m", "3h", "2d", "4w", or a date — in
+// the reader's language (`t`; without it, English).
+const timeAgo = (dateStr, t) => {
   const d = new Date(dateStr);
   if (isNaN(d)) return '';
+  const say = (key, n, en) => (t ? t(key, { n }) : en);
   const s = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (s < 60) return 'now';
+  if (s < 60) return t ? t('feed.ago.now') : 'now';
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return say('feed.ago.m', m, `${m}m`);
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
+  if (h < 24) return say('feed.ago.h', h, `${h}h`);
   const days = Math.floor(h / 24);
-  if (days < 7) return `${days}d`;
+  if (days < 7) return say('feed.ago.d', days, `${days}d`);
   const w = Math.floor(days / 7);
-  if (w < 5) return `${w}w`;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (w < 5) return say('feed.ago.w', w, `${w}w`);
+  const months = t ? t('tix.months').split(',') : null;
+  return months?.length === 12 ? `${d.getDate()} ${months[d.getMonth()]}`
+    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
 // Size the card to each image's true width:height so it shows uncropped, the way
@@ -157,6 +161,9 @@ const processPost = (post, existingFollowStates = {}) => {
     .map((it) => it?.optimized_url || it?.media_url)
     .filter(Boolean);
   const primaryUrl = itemUrls[0] || post.optimized_url || post.media_url;
+  // Full screen shows the originals: once the server sends smaller feed
+  // copies as optimized_url, the viewer must not blow those up.
+  const fullUrls = mediaList.map((it) => it?.media_url || it?.optimized_url).filter(Boolean);
 
   // Primary media dimensions, resolved synchronously so the card mounts at the
   // right aspect ratio (uncropped) with no post-load resize/jitter. Prefer the
@@ -185,6 +192,7 @@ const processPost = (post, existingFollowStates = {}) => {
     mediaUrl: primaryUrl,
     thumbnailUrl: posterUrl,
     mediaItems: itemUrls.length ? itemUrls : (primaryUrl ? [primaryUrl] : []),
+    fullMediaItems: fullUrls.length ? fullUrls : [post.media_url || primaryUrl].filter(Boolean),
   };
 };
 
@@ -979,6 +987,9 @@ const SocialFeed = ({ showBackground = true }) => {
     const sub = AppState.addEventListener('change', (s) => {
       appActiveRef.current = s === 'active';
       if (s !== 'active') flushWatch(true);
+      // A feed post's song is part of looking at the post, not background
+      // music (the player is for that): it stops when the app is left.
+      if (s === 'background') stopSongRef.current?.();
     });
     const iv = setInterval(() => flushWatch(false), 30000);
     return () => { sub.remove(); clearInterval(iv); flushWatch(true); };
@@ -1203,7 +1214,13 @@ const SocialFeed = ({ showBackground = true }) => {
   }, []);
 
   const handlePostDelete = useCallback(postId => {
-    setPosts(prev => prev.filter(post => post.id !== postId));
+    setPosts(prev => {
+      const next = prev.filter(post => post.id !== postId);
+      // The saved copy too: a deleted (or "not interested") post must not
+      // flash back from it on the next launch.
+      if (postsKeyRef.current && next.length !== prev.length) writeCache(postsKeyRef.current, next.slice(0, 20));
+      return next;
+    });
   }, []);
 
   // Persist a post's saved/favorite state so it survives row re-mounts & refresh.
@@ -1272,10 +1289,10 @@ const SocialFeed = ({ showBackground = true }) => {
           </View>
           <View style={styles.userTextContainer}>
             <Text style={styles.username} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>
-              {String(item.user.username || 'Unknown user')}
+              {String(item.user.username || t('feed.unknownUser'))}
             </Text>
             <Text style={styles.metaText} numberOfLines={1}>
-              {timeAgo(item.created_at)}
+              {timeAgo(item.created_at, t)}
               {item.location ? `  ·  ${item.location}` : ''}
             </Text>
             {FEED_REASON[item.feed_reason] && (
@@ -1376,7 +1393,8 @@ const SocialFeed = ({ showBackground = true }) => {
   // Full-screen photos: the post's pictures, opened at the one tapped.
   const [viewer, setViewer] = useState(null);
   const openPhotos = useCallback((post, index = 0) => {
-    const urls = (post?.mediaItems?.length ? post.mediaItems : [post?.mediaUrl]).filter(Boolean);
+    const urls = (post?.fullMediaItems?.length ? post.fullMediaItems
+      : post?.mediaItems?.length ? post.mediaItems : [post?.mediaUrl]).filter(Boolean);
     if (!urls.length) return;
     setViewer({ urls, index, caption: post.caption || '', author: post.user?.username || '' });
   }, []);
@@ -1498,6 +1516,9 @@ const SocialFeed = ({ showBackground = true }) => {
             style={styles.createBtn}
             onPress={() => navigation.navigate('CreatePost')}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={t('feed.newPost')}
+            testID="feed-create"
           >
             <MaterialIcons name="add" size={26} color={colors.white} />
           </TouchableOpacity>
@@ -1510,18 +1531,24 @@ const SocialFeed = ({ showBackground = true }) => {
               style={[styles.tab, feedType === 'following' && styles.tabActive]}
               onPress={() => selectFeed('following')}
               activeOpacity={0.8}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: feedType === 'following' }}
+              testID="feed-tab-following"
             >
               <Text style={[styles.tabText, feedType === 'following' && styles.tabTextActive]} maxFontSizeMultiplier={FONT_SCALE.chrome}>
-                Following
+                {t('feed.tab.following')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tab, feedType === 'for_you' && styles.tabActive]}
               onPress={() => selectFeed('for_you')}
               activeOpacity={0.8}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: feedType === 'for_you' }}
+              testID="feed-tab-for_you"
             >
               <Text style={[styles.tabText, feedType === 'for_you' && styles.tabTextActive]} maxFontSizeMultiplier={FONT_SCALE.chrome}>
-                For You
+                {t('feed.tab.forYou')}
               </Text>
             </TouchableOpacity>
             {/* Explore: people, posts and places to discover. It was in the
