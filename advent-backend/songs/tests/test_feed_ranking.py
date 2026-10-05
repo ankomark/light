@@ -280,3 +280,50 @@ class RankedFeedEndpointTests(APITestCase):
         res = self.client.get('/api/social-posts/?rank=1')
         self.assertEqual(res.status_code, 200)
         self.assertIn(zoe_post.id, self._ids(res))
+
+
+class VideoForYouTests(APITestCase):
+    """The Videos page's For You (?rank=1&content_type=video): ranked like the
+    home feed, videos only, and going on through older videos after that."""
+
+    def setUp(self):
+        cache.clear()
+        self.me = User.objects.create_user('viewer', 'v@x.com', 'pw')
+        self.maker = User.objects.create_user('maker', 'm@x.com', 'pw')
+        self.client.force_authenticate(self.me)
+
+    def video(self, **counts):
+        return SocialPost.objects.create(
+            user=self.maker, content_type='video', caption='v',
+            likes_count=counts.get('likes', 0), comments_count=counts.get('comments', 0),
+        )
+
+    def test_only_videos_best_first_then_older_ones(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        quiet = self.video(likes=0)
+        loved = self.video(likes=40, comments=8)
+        old = self.video(likes=90)
+        SocialPost.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=60))
+        mkpost(self.maker, likes=500)                       # a photo: not here
+        res = self.client.get('/api/social-posts/?rank=1&fresh=1&content_type=video')
+        ids = [p['id'] for p in res.data['results']]
+        self.assertEqual(ids[0], loved.id)
+        self.assertIn(quiet.id, ids)
+        self.assertEqual(ids[-1], old.id)                  # past the ranking window, still there
+        self.assertTrue(all(p['content_type'] == 'video' for p in res.data['results']))
+
+    def test_the_home_feed_snapshot_is_its_own(self):
+        v = self.video(likes=5)
+        photo = mkpost(self.maker, likes=5)
+        self.client.get('/api/social-posts/?rank=1&fresh=1&content_type=video')
+        home = [p['id'] for p in self.client.get('/api/social-posts/?rank=1&fresh=1').data['results']]
+        self.assertIn(photo.id, home)
+        self.assertIn(v.id, home)
+
+    def test_not_interested_leaves_the_videos_too(self):
+        v = self.video(likes=5)
+        self.client.get('/api/social-posts/?rank=1&fresh=1&content_type=video')
+        self.client.post(f'/api/social-posts/{v.id}/not_interested/')
+        ids = [p['id'] for p in self.client.get('/api/social-posts/?rank=1&content_type=video').data['results']]
+        self.assertNotIn(v.id, ids)

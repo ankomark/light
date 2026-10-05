@@ -216,6 +216,7 @@ def invalidate_user(user_id):
     feed immediately (e.g. a new "not interested")."""
     cache.delete_many([
         f'feed:rank:{user_id}', f'feed:reason:{user_id}',
+        f'feed:rank:{user_id}:video', f'feed:reason:{user_id}:video',
         f'feed:ni:{user_id}', f'feed:neg:{user_id}',
     ])
 
@@ -235,9 +236,14 @@ def _top_candidates(qs, fields, cap):
 
 
 # ── Trending (global, cached, lazily refreshed) ───────────────────────────────
-def compute_trending():
+def _ctype_suffix(ctype):
+    return f':{ctype}' if ctype else ''
+
+
+def compute_trending(ctype=None):
     """Rank recent posts app-wide and cache [{'id', 'a'(author)}]. Called lazily
-    when the cache is cold, or by the `refresh_trending` command from a cron."""
+    when the cache is cold, or by the `refresh_trending` command from a cron.
+    `ctype` ('video') ranks only that kind, for the Videos page."""
     now = timezone.now()
     base = (
         SocialPost.objects
@@ -245,6 +251,8 @@ def compute_trending():
                 visibility=SocialPost.VISIBILITY_PUBLIC)
         .exclude(user__is_deactivated=True)
     )
+    if ctype:
+        base = base.filter(content_type=ctype)
     fields = ('id', 'user_id', 'likes_count', 'comments_count', 'view_count', 'created_at')
     # The newest and the most engaged, never an arbitrary slice: once the
     # window holds more posts than the cap, an unordered slice would score a
@@ -252,12 +260,12 @@ def compute_trending():
     rows = _top_candidates(base, fields, CANDIDATE_CAP)
     rows.sort(key=lambda r: _score(r, now), reverse=True)
     trending = [{'id': r['id'], 'a': r['user_id']} for r in rows[:TRENDING_SIZE]]
-    cache.set('feed:trending', trending, TRENDING_TTL)
+    cache.set(f'feed:trending{_ctype_suffix(ctype)}', trending, TRENDING_TTL)
     return trending
 
 
-def get_trending():
-    return cache.get('feed:trending') or compute_trending()
+def get_trending(ctype=None):
+    return cache.get(f'feed:trending{_ctype_suffix(ctype)}') or compute_trending(ctype)
 
 
 # ── Discovery authors (followers-of-followers, cached per user) ────────────────
@@ -346,9 +354,17 @@ def _diversify(ordered, authors, window, cap):
     return out
 
 
-def build_ranked_feed(user):
+# The Videos page runs out of ranked videos sooner than the home feed runs out
+# of posts (fewer of them, and only the last fortnight is ranked). After the
+# ranked ones it goes on through the rest, newest first, so it never ends while
+# there is still something to watch.
+CATALOGUE_CAP = _cfg('FEED_CATALOGUE_CAP', 300)
+
+
+def build_ranked_feed(user, ctype=None):
     """Assemble the user's ranked post-id snapshot. Empty list means "no ranked
-    candidates" — the caller should fall back to the chronological feed."""
+    candidates" — the caller should fall back to the chronological feed.
+    `ctype` ('video') ranks only that kind of post (the Videos page)."""
     now = timezone.now()
     # Private accounts the viewer hasn't been approved to follow are hidden the
     # same way blocked users are — the ranked feed filters on this set below.
@@ -377,6 +393,8 @@ def build_ranked_feed(user):
                 | Q(visibility=SocialPost.VISIBILITY_FOLLOWERS, user_id__in=followee_ids)
             )
         )
+        if ctype:
+            qs = qs.filter(content_type=ctype)
         if blocked:
             qs = qs.exclude(user_id__in=blocked)
         if hidden:
@@ -392,7 +410,7 @@ def build_ranked_feed(user):
     discovery_pool = _pool(discovery_ids)
 
     trending_pool = []
-    for t in get_trending():
+    for t in get_trending(ctype):
         if t['a'] == user.id or t['a'] in blocked or t['id'] in hidden:
             continue
         authors.setdefault(t['id'], t['a'])
@@ -407,7 +425,7 @@ def build_ranked_feed(user):
         reasons.setdefault(pid, 'discovery')
     for pid in trending_pool:
         reasons.setdefault(pid, 'trending')
-    cache.set(f'feed:reason:{user.id}', reasons, SNAPSHOT_TTL)
+    cache.set(f'feed:reason:{user.id}{_ctype_suffix(ctype)}', reasons, SNAPSHOT_TTL)
 
     merged = _weighted_interleave(
         [following_pool, trending_pool, discovery_pool], BLEND_WEIGHTS,
@@ -420,26 +438,49 @@ def build_ranked_feed(user):
     ranked = (
         _diversify(unseen, authors, DIVERSITY_WINDOW, SNAPSHOT_SIZE)
         + _diversify(seen_tail, authors, DIVERSITY_WINDOW, SNAPSHOT_SIZE)
+    )[:SNAPSHOT_SIZE]
+    if ctype:
+        ranked = ranked + _catalogue(user, ctype, set(ranked), blocked, hidden, followee_ids)
+    return ranked
+
+
+def _catalogue(user, ctype, have, blocked, hidden, followee_ids):
+    """The rest of that kind, newest first: what the viewer may see and the
+    ranked part did not include (older than the ranking window, or quiet)."""
+    qs = (
+        SocialPost.objects
+        .filter(is_removed=False, content_type=ctype)
+        .exclude(user__is_deactivated=True)
+        .filter(
+            Q(visibility=SocialPost.VISIBILITY_PUBLIC)
+            | Q(visibility=SocialPost.VISIBILITY_FOLLOWERS, user_id__in=followee_ids)
+            | Q(user_id=user.id)
+        )
     )
-    return ranked[:SNAPSHOT_SIZE]
+    if blocked:
+        qs = qs.exclude(user_id__in=blocked)
+    if hidden:
+        qs = qs.exclude(id__in=hidden)
+    ids = qs.order_by('-created_at').values_list('id', flat=True)[:CATALOGUE_CAP + len(have)]
+    return [i for i in ids if i not in have][:CATALOGUE_CAP]
 
 
-def get_reasons(user_id):
+def get_reasons(user_id, ctype=None):
     """Map of post_id -> reason for the user's current snapshot (cached beside
     it by build_ranked_feed). Empty when there's no ranked snapshot."""
-    return cache.get(f'feed:reason:{user_id}') or {}
+    return cache.get(f'feed:reason:{user_id}{_ctype_suffix(ctype)}') or {}
 
 
-def get_snapshot(user, *, fresh=False):
-    key = f'feed:rank:{user.id}'
+def get_snapshot(user, *, fresh=False, ctype=None):
+    key = f'feed:rank:{user.id}{_ctype_suffix(ctype)}'
     if not fresh:
         cached = cache.get(key)
         if cached is not None:
             # Sliding expiry: someone still scrolling keeps the same order, so
             # page 4 never comes from a rebuilt list that repeats or skips posts.
             cache.touch(key, SNAPSHOT_TTL)
-            cache.touch(f'feed:reason:{user.id}', SNAPSHOT_TTL)
+            cache.touch(f'feed:reason:{user.id}{_ctype_suffix(ctype)}', SNAPSHOT_TTL)
             return cached
-    snapshot = build_ranked_feed(user)
+    snapshot = build_ranked_feed(user, ctype)
     cache.set(key, snapshot, SNAPSHOT_TTL)
     return snapshot

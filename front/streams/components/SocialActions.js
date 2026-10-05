@@ -19,6 +19,7 @@ import * as Haptics from 'expo-haptics';
 import config from '../config';
 import { likePost, savePost, PUBLIC_BASE } from '../services/api';
 import { useI18n } from '../context/I18nContext';
+import formatCount from '../utils/formatCount';
 
 // Brand gold for the "liked" state — ties the action into the app's gold
 // wordmark + medallion for a premium feel.
@@ -87,7 +88,15 @@ const useToggle = ({ initial, request, onSettle, onFail }) => {
   return { value, toggle, sync };
 };
 
-export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
+// The Videos page's right-hand column: big filled icons with a dark halo, the
+// count bold underneath — readable over any frame of video. Elsewhere the
+// buttons keep their quiet inline look.
+const RAIL_ICON = 34;
+export const RailLabel = ({ children, color = '#FFF' }) => (
+  <Text style={[styles.railText, { color }]} numberOfLines={1}>{children}</Text>
+);
+
+export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange, variant }) => {
   const { t } = useI18n();
   const [likes, setLikes] = useState(initialLikes || 0);
   const likesRef = useRef(initialLikes || 0);       // what's on screen now
@@ -145,6 +154,24 @@ export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
     sync();
   }, [toggle, sync, onLikeChange, setLikeCount]);
 
+  if (variant === 'rail') {
+    return (
+      <TouchableOpacity
+        style={styles.railButton}
+        onPress={handleLike}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityState={{ selected: liked }}
+        accessibilityLabel={t('video.like')}
+        testID="rail-like"
+      >
+        <MaterialCommunityIcons name="heart" size={RAIL_ICON} color={liked ? '#FF2D55' : '#FFF'}
+                                style={styles.railIcon} />
+        <RailLabel>{formatCount(likes)}</RailLabel>
+      </TouchableOpacity>
+    );
+  }
+
   return (
     <TouchableOpacity
       style={styles.actionButton}
@@ -164,7 +191,7 @@ export const LikeButton = ({ postId, initialLikes, isLiked, onLikeChange }) => {
   );
 };
 
-export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
+export const SaveButton = ({ postId, initialSaved, onSaveChange, variant }) => {
   const { t } = useI18n();
 
   const request = useCallback(async () => {
@@ -187,6 +214,24 @@ export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
     sync();
   }, [toggle, sync, onSaveChange]);
 
+  if (variant === 'rail') {
+    return (
+      <TouchableOpacity
+        style={styles.railButton}
+        onPress={handleSave}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityState={{ selected: saved }}
+        accessibilityLabel={t('video.save')}
+        testID="rail-save"
+      >
+        <MaterialCommunityIcons name="bookmark" size={RAIL_ICON - 2} color={saved ? '#FFD60A' : '#FFF'}
+                                style={styles.railIcon} />
+        <RailLabel>{t('video.save')}</RailLabel>
+      </TouchableOpacity>
+    );
+  }
+
   return (
     <TouchableOpacity
       style={styles.actionButton}
@@ -204,7 +249,7 @@ export const SaveButton = ({ postId, initialSaved, onSaveChange }) => {
   );
 };
 
-export const ShareButton = ({ postId, caption, username }) => {
+export const ShareButton = ({ postId, caption, username, variant }) => {
   const { t } = useI18n();
   const handleShare = async () => {
     // Share the post's web page (NOT the raw media): it renders a rich preview
@@ -227,6 +272,22 @@ export const ShareButton = ({ postId, caption, username }) => {
       console.warn('Share error:', error?.message);
     }
   };
+
+  if (variant === 'rail') {
+    return (
+      <TouchableOpacity
+        style={styles.railButton}
+        onPress={handleShare}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={t('feed.sharePost')}
+        testID="rail-share"
+      >
+        <MaterialCommunityIcons name="share" size={RAIL_ICON + 2} color="#FFF" style={styles.railIcon} />
+        <RailLabel>{t('video.share')}</RailLabel>
+      </TouchableOpacity>
+    );
+  }
 
   return (
     <TouchableOpacity
@@ -336,6 +397,14 @@ export const DownloadButton = ({ mediaUrl, publicId, contentType }) => {
 export { default as CommentAction } from './CommentAction';
 
 const styles = StyleSheet.create({
+  railButton: { alignItems: 'center', justifyContent: 'center', minWidth: 56, gap: 2 },
+  railIcon: {
+    textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
+  railText: {
+    fontSize: 13, fontWeight: '800', letterSpacing: 0.2,
+    textShadowColor: 'rgba(0,0,0,0.75)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',

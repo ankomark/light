@@ -492,6 +492,13 @@ const CommentAction = ({
           <Feather name="message-circle" size={18} color={colors.textSecondary} />
           <Text style={styles.compactText}>{formatCount(shownCount)}</Text>
         </TouchableOpacity>
+      ) : triggerVariant === 'rail' ? (
+        // The Videos page's right-hand column: bold, filled, count beneath.
+        <TouchableOpacity style={styles.railButton} onPress={() => setShowComments(true)} hitSlop={8}
+                          accessibilityRole="button" accessibilityLabel={t('comments.title')} testID="rail-comment">
+          <Ionicons name="chatbubble-ellipses" size={32} color="#FFF" style={styles.railIcon} />
+          <Text style={styles.railText}>{formatCount(shownCount)}</Text>
+        </TouchableOpacity>
       ) : (
         <TouchableOpacity style={styles.actionButton} onPress={() => setShowComments(true)}>
           <Feather name="message-circle" size={24} color="#FFF" />
@@ -663,6 +670,12 @@ const CommentAction = ({
 };
 
 const styles = StyleSheet.create({
+  railButton: { alignItems: 'center', justifyContent: 'center', minWidth: 56, gap: 2 },
+  railIcon: { textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+  railText: {
+    color: '#FFF', fontSize: 13, fontWeight: '800', letterSpacing: 0.2,
+    textShadowColor: 'rgba(0,0,0,0.75)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
   actionButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8 },
   actionText: { fontSize: 14, color: '#FFF' },
   compactButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 6, paddingVertical: 4 },

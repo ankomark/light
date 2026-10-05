@@ -10,7 +10,7 @@ import { emit, EVENTS } from '../utils/appEvents';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const PostActions = ({ post, onUpdate, onDelete, onNotInterested }) => {
+const PostActions = ({ post, onUpdate, onDelete, onNotInterested, variant }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const editScroll = useRef(null);
@@ -95,18 +95,28 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested }) => {
     );
   };
 
+  // On the Videos page: big, white, labelled, like the rest of the column.
+  const rail = variant === 'rail';
+  const triggerIcon = rail ? (
+    <>
+      <MaterialIcons name="more-horiz" size={34} color="#FFF" style={styles.railIcon} />
+      <Text style={styles.railText}>{t('video.more')}</Text>
+    </>
+  ) : <MaterialIcons name="more-horiz" size={24} color={colors.textSecondary} />;
+  const triggerStyle = rail ? styles.railButton : styles.button;
+
   return (
-    <View style={styles.container}>
+    <View style={rail ? null : styles.container}>
       {/* Other people's posts: a "..." menu with Not interested + Report. */}
       {!post.can_edit && (
         <TouchableOpacity
           onPress={() => setOtherMenuVisible(true)}
-          style={styles.button}
+          style={triggerStyle}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
           accessibilityLabel={t('post.options')}
         >
-          <MaterialIcons name="more-horiz" size={24} color={colors.textSecondary} />
+          {triggerIcon}
         </TouchableOpacity>
       )}
 
@@ -140,12 +150,12 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested }) => {
       {post.can_edit && (
         <TouchableOpacity
           onPress={() => setMenuVisible(true)}
-          style={styles.button}
+          style={triggerStyle}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
           accessibilityLabel={t('post.options')}
         >
-          <MaterialIcons name="more-horiz" size={24} color={colors.textSecondary} />
+          {triggerIcon}
         </TouchableOpacity>
       )}
 
@@ -243,6 +253,12 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested }) => {
 };
 
 const styles = StyleSheet.create({
+  railButton: { alignItems: 'center', justifyContent: 'center', minWidth: 56, gap: 0 },
+  railIcon: { textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+  railText: {
+    color: '#FFF', fontSize: 13, fontWeight: '800', marginTop: -4,
+    textShadowColor: 'rgba(0,0,0,0.75)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
   container: {
     flexDirection: 'row',
     alignItems: 'center',

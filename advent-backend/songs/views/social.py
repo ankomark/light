@@ -388,10 +388,11 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         bypass = params.get('fresh') in ('1', 'true', 'True')
         ttl = getattr(settings, 'FEED_CACHE_SECONDS', 0)
 
-        # Ranked "For You" feed (opt-in via ?rank=1). Only for the plain home
-        # feed — search / tag / content-type filters keep the chronological path.
+        # Ranked "For You" feed (opt-in via ?rank=1): the plain home feed, and
+        # the Videos page (?content_type=video). Search, tags and images keep
+        # the chronological path.
         if (params.get('rank') in ('1', 'true', 'True') and user.is_authenticated
-                and not search and not tag and not ctype and feed != 'following'):
+                and not search and not tag and ctype in ('', 'video') and feed != 'following'):
             ranked = self._ranked_list(request)
             if ranked is not None:
                 return ranked
@@ -437,7 +438,8 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         except (TypeError, ValueError):
             page = 1
 
-        snapshot = feedrank.get_snapshot(user, fresh=(fresh and page == 1))
+        ctype = request.query_params.get('content_type') or None
+        snapshot = feedrank.get_snapshot(user, fresh=(fresh and page == 1), ctype=ctype)
         if not snapshot:
             return None
 
@@ -454,7 +456,7 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         data = self.get_serializer(posts, many=True).data
 
         # Attach the "why you're seeing this" reason for the client's chip.
-        reasons = feedrank.get_reasons(user.id)
+        reasons = feedrank.get_reasons(user.id, ctype)
         for row in data:
             reason = reasons.get(row.get('id'))
             if reason:
