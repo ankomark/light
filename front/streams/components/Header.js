@@ -21,7 +21,7 @@ const INACTIVE = 'rgba(255,255,255,0.62)';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 // The marketplace's own coloured artwork (it was the menu's Marketplace row).
 const MARKET_ART = require('../assets/marketplace-icon.png');
-// The house, in its own maroon on clear.
+// The house, in a bright maroon on clear (the deep original vanished on the navy header).
 const HOME_ART = require('../assets/home-icon.png');
 
 /** A single bottom-row destination: filled icon + accent when on that screen.
