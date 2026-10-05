@@ -57,7 +57,7 @@ export function SinglesScreen({ title, right, children, scroll = true, footer, t
   const insets = useSafeAreaInsets();
   const column = { width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center' };
   return (
-    <KeyboardAvoidingView style={s.root} testID={testID} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={s.root} testID={testID} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <Backdrop />
       <SafeAreaView edges={['top', 'left', 'right']} style={s.bar}>
         <TouchableOpacity onPress={onBack || (() => navigation.goBack())} style={s.icon} accessibilityRole="button"

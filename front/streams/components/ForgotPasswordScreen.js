@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, ScrollView,
 } from 'react-native';
+import KeyboardLift from './tickets/KeyboardLift';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { forgotPassword } from '../services/api';
@@ -36,12 +37,14 @@ const ForgotPasswordScreen = () => {
     }
   };
 
+  const kbScroll = useRef(null);
+
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    // KeyboardLift, not KeyboardAvoidingView: with edge-to-edge Android the
+    // window no longer resizes for the keyboard, which then covered the
+    // password field and the button.
+    <KeyboardLift scrollRef={kbScroll} style={styles.flex}>
+      <ScrollView ref={kbScroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -108,7 +111,7 @@ const ForgotPasswordScreen = () => {
           <Text style={styles.loginLinkText}>{t('forgot.backToLogin')}</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardLift>
   );
 };
 

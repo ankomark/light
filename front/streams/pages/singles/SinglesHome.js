@@ -353,7 +353,7 @@ export function FiltersSheet({ visible, value, onClose, onApply }) {
   const num = (k) => (text) => set(k, text.replace(/[^0-9]/g, '').slice(0, 3));
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={onClose} accessibilityLabel={t('common.close')} />
       <View style={[styles.sheet, { paddingBottom: sheetPad }]} testID="singles-filters-sheet">
         <Title size={28}>{t('singles.filters.title')}</Title>

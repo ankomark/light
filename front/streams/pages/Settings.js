@@ -11,11 +11,11 @@ import {
   Platform,
   Modal,
   TextInput,
-  KeyboardAvoidingView,
   ActivityIndicator,
   Share,
   StatusBar,
 } from 'react-native';
+import KeyboardSheetPad from '../components/KeyboardSheetPad';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -1225,10 +1225,7 @@ const Settings = () => {
         transparent
         onRequestClose={() => setContactVisible(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
+        <KeyboardSheetPad style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
@@ -1268,7 +1265,7 @@ const Settings = () => {
                   </>}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
 
       {/* Change-password modal */}
@@ -1278,10 +1275,7 @@ const Settings = () => {
         transparent
         onRequestClose={() => { setPwVisible(false); resetPwForm(); }}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
+        <KeyboardSheetPad style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
@@ -1344,7 +1338,7 @@ const Settings = () => {
                   </>}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
 
       {/* Delete-account modal (password confirmation) */}
@@ -1354,10 +1348,7 @@ const Settings = () => {
         transparent
         onRequestClose={() => { setDeleteVisible(false); setDeletePw(''); }}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
+        <KeyboardSheetPad style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
@@ -1400,7 +1391,7 @@ const Settings = () => {
                   </>}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
 
       {/* Deactivate-account modal (reversible; password confirmation) */}
@@ -1410,10 +1401,7 @@ const Settings = () => {
         transparent
         onRequestClose={() => { setDeactivateVisible(false); setDeactivatePw(''); }}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
+        <KeyboardSheetPad style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
@@ -1454,7 +1442,7 @@ const Settings = () => {
                   </>}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
     </View>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -15,8 +15,12 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { fetchAudiostudios, createAudiostudio, updateAudiostudio, deleteAudiostudio } from '../services/api';
+import { readCache, writeCache } from '../utils/screenCache';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
+
+// The public studios list, kept for an instant first paint.
+const STUDIOS_CACHE = 'pub:audiostudios';
 
 const Audiostudios = () => {
   const { t } = useI18n();
@@ -39,30 +43,47 @@ const Audiostudios = () => {
   const [editingAudiostudio, setEditingAudiostudio] = useState(null);
 
   useEffect(() => {
+    let live = true;
+    // The last list first (no spinner on a slow network), then the server's.
+    readCache(STUDIOS_CACHE).then((kept) => {
+      if (live && Array.isArray(kept) && kept.length) {
+        setAudiostudios((cur) => (cur.length ? cur : kept));
+        setIsLoading(false);
+      }
+    });
     const loadAudiostudios = async () => {
       try {
-        setIsLoading(true);
         const response = await fetchAudiostudios();
-        setAudiostudios(response);
-        setFilteredAudiostudios(response);
-      } catch (error) {
-        Alert.alert(t('common.error'), t('audio.loadFailed'));
+        if (!live) return;
+        const list = Array.isArray(response) ? response : (response?.results || []);
+        setAudiostudios(list);
+        writeCache(STUDIOS_CACHE, list);
+      } catch {
+        // A saved list on screen stays; only an empty screen says it failed.
+        if (live && !audiostudiosRef.current.length) Alert.alert(t('common.error'), t('audio.loadFailed'));
       } finally {
-        setIsLoading(false);
+        if (live) setIsLoading(false);
       }
     };
 
     loadAudiostudios();
-  }, [t]);
+    return () => { live = false; };
+    // Once per visit: a language change must not refetch the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const audiostudiosRef = useRef(audiostudios);
+  audiostudiosRef.current = audiostudios;
 
   useEffect(() => {
     let results = audiostudios;
     
     if (searchTerm) {
-      results = results.filter(studio => 
-        studio.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        studio.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        studio.services?.toLowerCase().includes(searchTerm.toLowerCase())
+      // Any of these can be empty on a studio: never call a method on null.
+      const q = searchTerm.toLowerCase();
+      results = results.filter(studio =>
+        (studio.name || '').toLowerCase().includes(q) ||
+        (studio.location || '').toLowerCase().includes(q) ||
+        (studio.services || '').toLowerCase().includes(q)
       );
     }
     

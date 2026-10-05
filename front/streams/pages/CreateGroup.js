@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity, ActivityIndicator,
-  KeyboardAvoidingView, Platform, ScrollView,
+  ScrollView,
 } from 'react-native';
+import KeyboardSheetPad from '../components/KeyboardSheetPad';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -235,10 +236,7 @@ const GroupForm = ({ navigation, route }) => {
           )}
         </View>
 
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.flex}
-        >
+        <KeyboardSheetPad style={styles.flex}>
           <ScrollView
             style={styles.flex}
             contentContainerStyle={styles.formContainer}
@@ -426,7 +424,7 @@ const GroupForm = ({ navigation, route }) => {
               )}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </SafeAreaView>
     </View>
   );

@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, Modal, Pressable, TextInput, TouchableOpacity,
-  ActivityIndicator, Alert, ScrollView, KeyboardAvoidingView, Platform,
-} from 'react-native';
+  ActivityIndicator, Alert, ScrollView, } from 'react-native';
+import KeyboardSheetPad from './KeyboardSheetPad';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { updatePlaylist } from '../services/api';
@@ -72,7 +72,7 @@ const EditPlaylistSheet = ({ visible, playlist, onClose, onSaved, onDelete }) =>
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.kav}>
+        <KeyboardSheetPad style={styles.kav}>
           <Pressable style={styles.sheet}>
             <View style={styles.handle} />
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
@@ -152,7 +152,7 @@ const EditPlaylistSheet = ({ visible, playlist, onClose, onSaved, onDelete }) =>
               </TouchableOpacity>
             </ScrollView>
           </Pressable>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Pressable>
     </Modal>
   );

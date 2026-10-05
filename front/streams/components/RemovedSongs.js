@@ -4,8 +4,8 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, TextInput, ActivityIndicator, Alert,
-  KeyboardAvoidingView, Platform,
-} from 'react-native';
+  } from 'react-native';
+import KeyboardSheetPad from './KeyboardSheetPad';
 import { Image } from 'expo-image';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -82,7 +82,7 @@ const RemovedSongs = () => {
 
       <Modal visible={!!disputing} transparent animationType="slide" onRequestClose={() => setDisputing(null)}>
         <Pressable style={styles.overlay} onPress={() => setDisputing(null)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.kav}>
+          <KeyboardSheetPad style={styles.kav}>
             <Pressable style={styles.sheet}>
               <Text style={styles.sheetTitle}>{t('rights.disputeTitle', { title: disputing?.title || '' })}</Text>
               <Text style={styles.sheetHint}>{t('rights.disputeHint')}</Text>
@@ -109,7 +109,7 @@ const RemovedSongs = () => {
                 {sending ? <ActivityIndicator color={colors.white} /> : <Text style={styles.sendText}>{t('rights.sendDispute')}</Text>}
               </TouchableOpacity>
             </Pressable>
-          </KeyboardAvoidingView>
+          </KeyboardSheetPad>
         </Pressable>
       </Modal>
     </View>

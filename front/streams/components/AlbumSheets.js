@@ -4,8 +4,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, Modal, Pressable, TextInput, TouchableOpacity,
-  ActivityIndicator, Alert, ScrollView, KeyboardAvoidingView, Platform,
-} from 'react-native';
+  ActivityIndicator, Alert, ScrollView, } from 'react-native';
+import KeyboardSheetPad from './KeyboardSheetPad';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { updateAlbum, setAlbumTracks, fetchUserTracks } from '../services/api';
@@ -20,13 +20,13 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const Sheet = ({ visible, onClose, title, children }) => (
   <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
     <Pressable style={styles.overlay} onPress={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.kav}>
+      <KeyboardSheetPad style={styles.kav}>
         <Pressable style={styles.sheet}>
           <View style={styles.handle} />
           <Text style={styles.title}>{title}</Text>
           {children}
         </Pressable>
-      </KeyboardAvoidingView>
+      </KeyboardSheetPad>
     </Pressable>
   </Modal>
 );
