@@ -46,6 +46,7 @@ import { useContentWidth, useMaxMediaHeight, FONT_SCALE } from '../utils/layout'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useOnline from '../hooks/useOnline';
 import OfflineBanner from './OfflineBanner';
+import ImageViewer from './ImageViewer';
 import { colors, radius, typography, shadows } from '../constants/theme';
 
 // The menu's own coloured Explore artwork, kept in its colours (not tinted
@@ -206,7 +207,8 @@ const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPre
           setIndex(Math.round(e.nativeEvent.contentOffset.x / cardW))
         }
         renderItem={({ item: url }) => (
-          <Pressable onPress={onPressSlide} disabled={!onPressSlide} style={{ width: cardW, height: '100%' }}>
+          <Pressable onPress={() => onPressSlide?.(urls.indexOf(url))} disabled={!onPressSlide}
+                     style={{ width: cardW, height: '100%' }} testID="feed-photo">
             <Image
               source={{ uri: url }}
               style={{ width: '100%', height: '100%' }}
@@ -240,9 +242,27 @@ const HeartBurst = ({ scale }) => (
   </Animated.View>
 );
 
+// Play/pause for a photo post's song: the music pill, now a real button.
+const SongButton = ({ playing, onPress }) => {
+  const { t } = useI18n();
+  return (
+    <TouchableOpacity
+      style={styles.audioVizPill}
+      onPress={onPress}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={playing ? t('feed.pauseSong') : t('feed.playSong')}
+      testID="feed-song-toggle"
+    >
+      <MaterialIcons name={playing ? 'music-note' : 'play-arrow'} size={16} color={colors.white} />
+      {playing ? <AudioVisualizer playing height={20} /> : <MaterialIcons name="music-note" size={14} color={colors.white} />}
+    </TouchableOpacity>
+  );
+};
+
 const PostMedia = React.memo(function PostMedia({
   item, isFocused, isMuted, onToggleMute,
-  isAudioActive, isAudioPlaying, onToggleAudio, onDoubleTapLike,
+  isAudioActive, isAudioPlaying, onToggleAudio, onDoubleTapLike, onOpenPhotos,
 }) {
   const { preferences } = usePreferences();
   // One resolver drives autoplay and buffering, so "Data saver" and the Video
@@ -521,22 +541,10 @@ const PostMedia = React.memo(function PostMedia({
         <FeedCarousel
           urls={galleryUrls}
           aspectRatio={aspectRatio}
-          onPressSlide={() => handleTap(hasAudio ? () => onToggleAudio?.(item) : null)}
+          onPressSlide={(i) => handleTap(() => onOpenPhotos?.(item, Math.max(0, i)))}
         />
         <HeartBurst scale={heartScale} />
-        {hasAudio && isAudioActive && isAudioPlaying && (
-          <GlassView intensity={28} tint="dark" style={styles.audioVizPill} pointerEvents="none">
-            <MaterialIcons name="music-note" size={16} color={colors.white} />
-            <AudioVisualizer playing height={20} />
-          </GlassView>
-        )}
-        {hasAudio && isAudioActive && !isAudioPlaying && (
-          <View style={styles.audioPausedOverlay} pointerEvents="none">
-            <GlassView intensity={32} tint="dark" style={styles.audioPlayBadge}>
-              <MaterialIcons name="play-arrow" size={40} color={colors.white} />
-            </GlassView>
-          </View>
-        )}
+        {hasAudio && <SongButton playing={isAudioActive && isAudioPlaying} onPress={() => onToggleAudio?.(item)} />}
       </View>
     );
   }
@@ -544,7 +552,8 @@ const PostMedia = React.memo(function PostMedia({
   return (
     <Pressable
       style={styles.mediaContainer}
-      onPress={() => handleTap(hasAudio ? () => onToggleAudio?.(item) : null)}
+      onPress={() => handleTap(() => onOpenPhotos?.(item, 0))}
+      testID="feed-photo"
     >
       {/* No spinner and no opacity-0 here any more. The card already reserves
           the image's exact aspect ratio, the feed prefetched this URL when the
@@ -567,20 +576,9 @@ const PostMedia = React.memo(function PostMedia({
         onLoad={handleLoad}
       />
 
-      {/* Accompanying-audio affordances (image posts with a song). */}
-      {hasAudio && isAudioActive && isAudioPlaying && (
-        <View style={styles.audioVizPill} pointerEvents="none">
-          <MaterialIcons name="music-note" size={16} color={colors.white} />
-          <AudioVisualizer playing height={20} />
-        </View>
-      )}
-      {hasAudio && isAudioActive && !isAudioPlaying && (
-        <View style={styles.audioPausedOverlay} pointerEvents="none">
-          <View style={styles.audioPlayBadge}>
-            <MaterialIcons name="play-arrow" size={40} color={colors.white} />
-          </View>
-        </View>
-      )}
+      {/* The song (image posts with one): its own button now, since a tap
+          on the photo opens it full screen. */}
+      {hasAudio && <SongButton playing={isAudioActive && isAudioPlaying} onPress={() => onToggleAudio?.(item)} />}
       <HeartBurst scale={heartScale} />
     </Pressable>
   );
@@ -601,7 +599,7 @@ const PostMedia = React.memo(function PostMedia({
 // are resolved by the caller so this compares cheaply.
 const PostCard = React.memo(function PostCard({
   item, cardW, isFocused, isMuted, isAudioActive, isAudioPlaying,
-  onToggleMute, onToggleAudio, onDoubleTapLike, renderHeader, renderFooter,
+  onToggleMute, onToggleAudio, onDoubleTapLike, onOpenPhotos, renderHeader, renderFooter,
 }) {
   return (
     <View style={[styles.postContainer, { width: cardW }]}>
@@ -618,6 +616,7 @@ const PostCard = React.memo(function PostCard({
           isAudioPlaying={isAudioPlaying}
           onToggleAudio={onToggleAudio}
           onDoubleTapLike={onDoubleTapLike}
+          onOpenPhotos={onOpenPhotos}
         />
       )}
       {renderFooter({ item })}
@@ -1374,6 +1373,15 @@ const SocialFeed = ({ showBackground = true }) => {
     </View>
   ), [currentUser?.profile_picture, handleSaveChange, handleLikeChange, t]);
 
+  // Full-screen photos: the post's pictures, opened at the one tapped.
+  const [viewer, setViewer] = useState(null);
+  const openPhotos = useCallback((post, index = 0) => {
+    const urls = (post?.mediaItems?.length ? post.mediaItems : [post?.mediaUrl]).filter(Boolean);
+    if (!urls.length) return;
+    setViewer({ urls, index, caption: post.caption || '', author: post.user?.username || '' });
+  }, []);
+  const closePhotos = useCallback(() => setViewer(null), []);
+
   const renderItem = useCallback(({ item }) => (
     <PostCard
       item={item}
@@ -1385,11 +1393,12 @@ const SocialFeed = ({ showBackground = true }) => {
       isAudioPlaying={currentlyPlayingPostId === item.id ? isAudioPlaying : false}
       onToggleAudio={toggleSongPlayback}
       onDoubleTapLike={handleDoubleTapLike}
+      onOpenPhotos={openPhotos}
       renderHeader={renderPostHeader}
       renderFooter={renderPostFooter}
     />
   ), [cardW, renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
-      currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback, handleDoubleTapLike]);
+      currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback, handleDoubleTapLike, openPhotos]);
 
   const renderEmptyComponent = useCallback(() => {
     if (loading) return null;
@@ -1597,6 +1606,15 @@ const SocialFeed = ({ showBackground = true }) => {
         initialNumToRender={3}
         windowSize={10}
         removeClippedSubviews={Platform.OS === 'android'}
+      />
+
+      <ImageViewer
+        visible={!!viewer}
+        urls={viewer?.urls || []}
+        index={viewer?.index || 0}
+        caption={viewer?.caption}
+        author={viewer?.author}
+        onClose={closePhotos}
       />
 
       {loading && !refreshing && posts.length === 0 && (

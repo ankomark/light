@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import { Alert, FlatList } from 'react-native';
-import { render, waitFor, act } from '@testing-library/react-native';
+import { render, waitFor, act, fireEvent } from '@testing-library/react-native';
 
 jest.setTimeout(20000);
 
@@ -38,6 +38,8 @@ const Null = () => null;
   .forEach((m) => jest.doMock(m, () => ({ __esModule: true, default: Null, createSound: jest.fn() })));
 jest.mock('../SocialActions', () => ({ DownloadButton: () => null, SaveButton: () => null, LikeButton: () => null, ShareButton: () => null }));
 jest.mock('../SkeletonLoader', () => ({ PostSkeleton: () => null }));
+const mockViewer = jest.fn();
+jest.mock('../ImageViewer', () => (props) => { mockViewer(props); return null; });
 
 const { default: SocialFeed, dedupeAppend } = require('../SocialFeed');
 
@@ -46,6 +48,10 @@ const page = (ids, next = null) => ({ results: ids.map(post), next });
 
 beforeEach(() => {
   Object.values(mockApi).forEach((f) => f.mockClear());
+  // Responses queued by one test (…Once) must not answer the next one.
+  mockApi.fetchSocialPosts.mockReset();
+  mockApi.fetchFeedByUrl.mockReset();
+  mockApi.fetchFeedByUrl.mockResolvedValue({ results: [], next: null });
   mockOnline.value = true;
 });
 
@@ -89,4 +95,18 @@ test('a failed load is a banner over the saved posts, never a popup', async () =
   await waitFor(() => expect(screen.getByTestId('offline-banner')).toBeTruthy());
   expect(alert).not.toHaveBeenCalled();
   alert.mockRestore();
+});
+
+test("tapping a photo opens it full screen, with the post's caption", async () => {
+  const photo = { ...post(5), content_type: 'image', caption: 'Sabbath sunrise', media_url: 'https://cdn.test/a.jpg',
+    optimized_url: 'https://cdn.test/a.jpg', width: 1080, height: 1350 };
+  mockApi.fetchSocialPosts.mockResolvedValue({ results: [photo], next: null });
+  const screen = render(<SocialFeed showBackground={false} />);
+  await waitFor(() => expect(screen.UNSAFE_getByType(FlatList).props.data.length).toBe(1));
+  const tap = await screen.findByTestId('feed-photo');
+  fireEvent.press(tap);
+  await waitFor(() => expect(mockViewer).toHaveBeenLastCalledWith(expect.objectContaining({
+    visible: true, index: 0, caption: 'Sabbath sunrise', author: 'mark',
+  })));
+  expect(mockViewer.mock.calls.at(-1)[0].urls[0]).toContain('a.jpg');
 });
