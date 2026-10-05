@@ -25,6 +25,9 @@ const MARKET_ART = require('../assets/marketplace-icon.png');
 const HOME_ART = require('../assets/home-icon.png');
 // A record with a blue note, brightened so the disc stands off the navy header.
 const MUSIC_ART = require('../assets/music-icon.png');
+// The Holy Bible, its black cover lifted to charcoal and its gold warmed so it
+// stands off the navy header.
+const BIBLE_ART = require('../assets/bible-icon.png');
 
 /** A single bottom-row destination: filled icon + accent when on that screen.
  *  With `art`, a coloured picture in its own colours instead of a glyph (the
@@ -173,7 +176,7 @@ const Header = ({ transparentBg = false }) => {
             />
           )}
           <NavItem
-            active="book" inactive="book-outline" label="Bible"
+            art={BIBLE_ART} artStyle={styles.homeArt} label="Bible" testID="nav-bible"
             isActive={isOn('bible')} onPress={() => navigation.navigate('bible')}
           />
 
