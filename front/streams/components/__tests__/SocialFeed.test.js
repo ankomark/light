@@ -124,3 +124,15 @@ test('a deleted post leaves the saved copy too, so it cannot flash back on the n
   expect(screen.UNSAFE_getByType(FlatList).props.data.map((p) => p.id)).toEqual([2]);
   expect(mockWriteCache).toHaveBeenCalledWith('u7:feed:for_you', [expect.objectContaining({ id: 2 })]);
 });
+
+test('a double-tap only ever likes: it asks for "liked", never a toggle', async () => {
+  // The cached copy says not liked; the server may already have the like.
+  const photo = { ...post(6), content_type: 'image', media_url: 'https://cdn.test/b.jpg', is_liked: false, likes_count: 3 };
+  mockApi.fetchSocialPosts.mockResolvedValue({ results: [photo], next: null });
+  mockApi.likePost.mockResolvedValue({ is_liked: true, likes_count: 3 });
+  const screen = render(<SocialFeed showBackground={false} />);
+  const tap = await screen.findByTestId('feed-photo');
+  await act(async () => { fireEvent.press(tap); fireEvent.press(tap); });
+  expect(mockApi.likePost).toHaveBeenCalledWith(6, { liked: true });
+  await waitFor(() => expect(screen.UNSAFE_getByType(FlatList).props.data[0]).toMatchObject({ is_liked: true, likes_count: 3 }));
+});

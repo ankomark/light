@@ -82,7 +82,8 @@ const CreateStoryScreen = require('../CreateStoryScreen').default;
 const StoryViewer = require('../StoryViewer').default;
 const { timeAgo } = require('../StoryViewer');
 const StoriesBar = require('../StoriesBar').default;
-const { storyCover } = require('../StoriesBar');
+const { storyCover, markStorySeen } = require('../StoriesBar');
+const { Animated } = require('react-native');
 
 const listeners = {};
 beforeEach(() => {
@@ -458,4 +459,84 @@ test('emojis go into the caption where the cursor is', () => {
   expect(screen.getByTestId('story-caption').props.value).toBe('Good🙏 morning');
   fireEvent.press(screen.getByTestId('story-emoji-more'));
   expect(screen.getByTestId('story-emoji-panel')).toBeTruthy();
+});
+
+
+describe('where a story opens, and what counts as seen', () => {
+  const at = (n) => new Date(Date.now() - n * 60000).toISOString();
+  const three = (user, viewed) => ({
+    user,
+    has_unviewed: viewed.includes(false),
+    stories: viewed.map((v, i) => ({
+      id: 70 + i, content_type: 'image', media_url: `https://cdn.test/${70 + i}.jpg`, created_at: at(30 - i), is_viewed: v,
+    })),
+  });
+  const shown = (screen) => screen.UNSAFE_root
+    .findAll((n) => n.props?.contentFit === 'contain' && n.props?.onLoad)[0]?.props.source.uri;
+
+  test("someone else's stories open at the first one not seen yet", () => {
+    const screen = render(<StoryViewer route={{ params: { group: three({ id: 3, username: 'ann' }, [true, false, false]) } }}
+                                       navigation={mockNav} />);
+    expect(shown(screen)).toBe('https://cdn.test/71.jpg');
+  });
+
+  test('all seen, or your own: from the start', () => {
+    const seen = render(<StoryViewer route={{ params: { group: three({ id: 3, username: 'ann' }, [true, true, true]) } }}
+                                     navigation={mockNav} />);
+    expect(shown(seen)).toBe('https://cdn.test/70.jpg');
+    const mine = render(<StoryViewer route={{ params: { group: three({ id: 7, username: 'mark' }, [false, false, false]) } }}
+                                     navigation={mockNav} />);
+    expect(shown(mine)).toBe('https://cdn.test/70.jpg');
+  });
+
+  test('each story seen is told to the row; the ring greys only when none is left', () => {
+    const seenEvt = jest.fn();
+    const off = on(EVENTS.STORY_VIEWED, seenEvt);
+    render(<StoryViewer route={{ params: { group: three({ id: 3, username: 'ann' }, [false, false, false]) } }}
+                        navigation={mockNav} />);
+    expect(seenEvt).toHaveBeenCalledWith({ storyId: 70, userId: 3 });
+    off();
+
+    let groups = [three({ id: 3, username: 'ann' }, [false, false])];
+    groups = markStorySeen(groups, 70);
+    expect(groups[0].has_unviewed).toBe(true);
+    groups = markStorySeen(groups, 71);
+    expect(groups[0].has_unviewed).toBe(false);
+  });
+
+  test("a photo held while it loads doesn't start its clock until it shows", async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    const screen = render(<StoryViewer route={{ params: { group: three({ id: 7, username: 'mark' }, [true, true, true]) } }}
+                                       navigation={mockNav} />);
+    const storyClocks = () => timing.mock.calls.filter(([, cfg]) => cfg.duration > 1000).length;
+    // Pause and resume (the viewers sheet does both) before the photo has loaded.
+    await act(async () => { fireEvent.press(screen.getByTestId('story-viewers')); });
+    await act(async () => { screen.UNSAFE_root.findByType(require('react-native').Modal).props.onRequestClose(); });
+    expect(storyClocks()).toBe(0);
+    act(() => { screen.UNSAFE_root.findAll((n) => n.props?.contentFit === 'contain' && n.props?.onLoad)[0].props.onLoad(); });
+    expect(storyClocks()).toBe(1);
+    timing.mockRestore();
+  });
+});
+
+describe('the stories row keeps up', () => {
+  test('pulling Home to refresh fetches the row again', async () => {
+    mockApi.fetchStoryFeed.mockResolvedValue([]);
+    const screen = render(<StoriesBar navigation={mockNav} refreshSignal={0} />);
+    await waitFor(() => expect(mockApi.fetchStoryFeed).toHaveBeenCalled());
+    const before = mockApi.fetchStoryFeed.mock.calls.length;
+    screen.rerender(<StoriesBar navigation={mockNav} refreshSignal={1} />);
+    await waitFor(() => expect(mockApi.fetchStoryFeed.mock.calls.length).toBe(before + 1));
+  });
+
+  test('a deleted story leaves the saved row too, and so does an empty one', async () => {
+    const { writeCache } = require('../../utils/screenCache');
+    writeCache.mockClear();
+    mockApi.fetchStoryFeed.mockResolvedValue([{ user: { id: 3, username: 'ann' }, has_unviewed: true,
+      stories: [{ id: 81, content_type: 'image', media_url: 'https://cdn.test/81.jpg', created_at: new Date().toISOString() }] }]);
+    render(<StoriesBar navigation={mockNav} />);
+    await waitFor(() => expect(writeCache).toHaveBeenCalledWith('u7:stories', [expect.objectContaining({ user: expect.objectContaining({ id: 3 }) })]));
+    await act(async () => { emit(EVENTS.STORY_DELETED, { storyId: 81 }); });
+    expect(writeCache).toHaveBeenLastCalledWith('u7:stories', []);
+  });
 });

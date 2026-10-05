@@ -65,6 +65,19 @@ class PostLikeIntegrityTests(APITestCase):
         self.assertFalse(second.data['is_liked'])
         self.assertEqual(second.data['likes_count'], 0)
 
+    def test_liked_true_only_ever_likes(self):
+        """A double-tap on the photo sends {liked: true}: on a post the phone's
+        cached copy didn't know was liked, it must not unlike it."""
+        url = f'/api/social-posts/{self.post.id}/like/'
+        for _ in range(2):
+            res = self.client.post(url, {'liked': True}, format='json')
+            self.assertTrue(res.data['is_liked'])
+            self.assertEqual(res.data['likes_count'], 1)
+        self.assertEqual(self._rows(), 1)
+        res = self.client.post(url, {'liked': False}, format='json')
+        self.assertFalse(res.data['is_liked'])
+        self.assertEqual(self._rows(), 0)
+
     def test_a_racing_double_tap_neither_errors_nor_doubles(self):
         """The loser of the race used to hit the unique constraint and 500."""
         self._like()

@@ -125,7 +125,15 @@ const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onC
   );
 });
 
-const StoriesBar = ({ navigation }) => {
+/** A story seen: its group's ring greys once none is left unseen. */
+export const markStorySeen = (groups, storyId) => groups.map((g) => {
+  if (!(g.stories || []).some((s) => s.id === storyId)) return g;
+  const stories = g.stories.map((s) => (s.id === storyId ? { ...s, is_viewed: true } : s));
+  return { ...g, stories, has_unviewed: stories.some((s) => !s.is_viewed) };
+});
+
+// `refreshSignal`: Home's pull-to-refresh — a new value fetches the row again.
+const StoriesBar = ({ navigation, refreshSignal }) => {
   const { currentUser } = useAuth();
   const { t } = useI18n();
   const ownLabel = t('story.yours');
@@ -140,6 +148,10 @@ const StoriesBar = ({ navigation }) => {
   const [groups, setGroups] = useState(() => peekCache(cacheKey) ?? []);
   const [loaded, setLoaded] = useState(() => (peekCache(cacheKey) ?? []).length > 0);
   const lastFetchRef = useRef(0);
+  // Once the server has answered, the saved copy follows every change (a
+  // delete, a story seen, an empty row) — otherwise a deleted or expired
+  // story came back from it on the next launch.
+  const fetchedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,9 +167,9 @@ const StoriesBar = ({ navigation }) => {
     try {
       const data = await fetchStoryFeed();
       const next = Array.isArray(data) ? data : [];
+      fetchedRef.current = true;
       setGroups(next);
       lastFetchRef.current = Date.now();
-      if (next.length) writeCache(cacheKey, next);
     } catch {
       // silent — stories bar should never crash the feed
     } finally {
@@ -165,9 +177,19 @@ const StoriesBar = ({ navigation }) => {
     }
   }, [cacheKey]);
 
+  useEffect(() => {
+    if (fetchedRef.current) writeCache(cacheKey, groups);
+  }, [groups, cacheKey]);
+
   useFocusEffect(useCallback(() => {
     if (Date.now() - lastFetchRef.current > STORIES_REFETCH_MS) load();
   }, [load]));
+
+  // Pulled to refresh: the row too, not only the posts.
+  const firstSignalRef = useRef(refreshSignal);
+  useEffect(() => {
+    if (refreshSignal !== firstSignalRef.current) load();
+  }, [refreshSignal, load]);
 
   // A story just shared or deleted: the row follows now, not after its next
   // refresh. A reaction is kept on its story, so reopening shows it.
@@ -179,6 +201,9 @@ const StoriesBar = ({ navigation }) => {
           .map((g) => ({ ...g, stories: (g.stories || []).filter((s) => s.id !== storyId) }))
           .filter((g) => g.stories.length || g.user.id === currentUser?.id));
       }),
+      on(EVENTS.STORY_VIEWED, ({ storyId } = {}) => {
+        setGroups((prev) => markStorySeen(prev, storyId));
+      }),
       on(EVENTS.STORY_REACTED, ({ storyId, emoji } = {}) => {
         setGroups((prev) => prev.map((g) => ({
           ...g,
@@ -189,12 +214,10 @@ const StoriesBar = ({ navigation }) => {
     return () => offs.forEach((off) => off());
   }, [load, currentUser?.id]);
 
+  // The ring greys as the stories are seen (STORY_VIEWED above), not on
+  // opening: one story watched of five leaves it lit.
   const openViewer = useCallback((group) => {
     navigation.navigate('StoryViewer', { group });
-    // Opened is seen: the ring greys straight away.
-    if (group.has_unviewed) {
-      setGroups((prev) => prev.map((g) => (g.user.id === group.user.id ? { ...g, has_unviewed: false } : g)));
-    }
   }, [navigation]);
 
   const openCreate = useCallback(() => {

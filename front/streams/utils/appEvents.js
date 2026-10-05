@@ -29,4 +29,5 @@ export const EVENTS = {
   STORY_CREATED: 'story:created',
   STORY_DELETED: 'story:deleted',
   STORY_REACTED: 'story:reacted',
+  STORY_VIEWED: 'story:viewed',
 };

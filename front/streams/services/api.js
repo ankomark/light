@@ -626,8 +626,11 @@ export const fetchSocialPosts = async (cursor = null, feed = null, search = '', 
 const FEED_TIMEOUT_MS = 20000;
 
 // Social Post Endpoints
-export const likePost = async (postId) => {
-    return apiRequest('post', `/social-posts/${postId}/like/`);
+// A tap toggles. `{ liked: true }` sets it instead — a double-tap only ever
+// likes, even when this copy of the post didn't know it was liked already.
+export const likePost = async (postId, { liked } = {}) => {
+    return apiRequest('post', `/social-posts/${postId}/like/`,
+      typeof liked === 'boolean' ? { liked } : null);
   };
   
   // `parent` makes it a reply (to a top comment or to another reply).

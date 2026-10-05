@@ -48,9 +48,17 @@ const StoryViewer = ({ route, navigation }) => {
   const screenWRef = useRef(screenW);
   useEffect(() => { screenWRef.current = screenW; }, [screenW]);
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // Someone else's stories open where you left off: at the first one you
+  // haven't seen (all seen: from the start). Yours always from the start.
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    if (isOwn) return 0;
+    const unseen = stories.findIndex((s) => !s.is_viewed);
+    return unseen > 0 ? unseen : 0;
+  });
   const [paused, setPaused] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(true);
+  const mediaLoadingRef = useRef(true);
+  mediaLoadingRef.current = mediaLoading;
   const [mediaFailed, setMediaFailed] = useState(false);
   // Reactions: what this viewer picked per story (starts from the server's
   // my_reaction), the emoji floating up, and — on your own story — the list
@@ -87,7 +95,7 @@ const StoryViewer = ({ route, navigation }) => {
 
   // Mirrors kept in refs so the PanResponder (created once) reads live values.
   const pausedRef = useRef(false);
-  const indexRef = useRef(0);
+  const indexRef = useRef(currentIndex);
   const goNextRef = useRef(() => {});
   const goPrevRef = useRef(() => {});
 
@@ -103,9 +111,13 @@ const StoryViewer = ({ route, navigation }) => {
   useEffect(() => { pausedRef.current = paused; }, [paused]);
 
   // Your own stories aren't "viewed" by you (the server ignores it as well).
+  // The stories row hears of each one seen, so its ring greys only once
+  // they all are, and the next open starts at the first one left.
   const markViewed = useCallback((story) => {
-    if (story && !isOwn) viewStory(story.id).catch(() => {});
-  }, [isOwn]);
+    if (!story || isOwn) return;
+    viewStory(story.id).catch(() => {});
+    if (!story.is_viewed) emit(EVENTS.STORY_VIEWED, { storyId: story.id, userId: group.user?.id });
+  }, [isOwn, group.user?.id]);
 
   // Image stories advance on a timer; `from` lets us resume from where a hold
   // paused, rather than restarting the 5s.
@@ -202,10 +214,11 @@ const StoryViewer = ({ route, navigation }) => {
     if (!isVideo || mediaFailed) stopImageProgress();
   }, [isVideo, mediaFailed, stopImageProgress]);
 
+  // A photo still loading has no clock to resume yet: it starts on load.
   const resume = useCallback(() => {
     setPaused(false);
     pausedRef.current = false;
-    if (!isVideo || mediaFailed) startImageProgress(progressValRef.current);
+    if ((!isVideo || mediaFailed) && !mediaLoadingRef.current) startImageProgress(progressValRef.current);
   }, [isVideo, mediaFailed, startImageProgress]);
 
   const dismiss = useCallback(() => {

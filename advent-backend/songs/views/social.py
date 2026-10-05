@@ -491,15 +491,24 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         # loser of that race used to hit the constraint and 500. get_or_create
         # absorbs it and reports the row that won, so the second tap reads as the
         # toggle-off it looks like to the user.
-        like, created = PostLike.objects.get_or_create(post=post, user=user)
-
-        if not created:
-            # Unlike the post
-            like.delete()
-            liked = False
+        #
+        # {"liked": true|false} sets the state instead of toggling it: a
+        # double-tap only ever likes, even when the phone's (cached) copy of
+        # the post didn't know it was liked already.
+        want = request.data.get('liked') if hasattr(request.data, 'get') else None
+        if isinstance(want, str):
+            want = {'true': True, 'false': False}.get(want.strip().lower())
+        if want is False:
+            PostLike.objects.filter(post=post, user=user).delete()
+            liked, created = False, False
         else:
-            liked = True
+            like, created = PostLike.objects.get_or_create(post=post, user=user)
+            if not created and want is not True:
+                # Unlike the post
+                like.delete()
+            liked = created or want is True
 
+        if created:
             # Create notification only when liking (not unliking)
             if user != post.user:  # Don't notify self
                 msg = f"{user.username} liked your post"
@@ -841,9 +850,15 @@ def story_queryset(user):
     none — StorySerializer reads viewed_by_me / views_total when present.
     """
     from ..models import StoryReaction
+    # Stories are for the people who follow you: your own, plus those of the
+    # accounts you follow — never someone who blocked you (or you them), and
+    # never a deactivated account's. Every story endpoint goes through this,
+    # so a story id alone doesn't open, view or react to anyone else's.
+    following_ids = set(user.followed_by.values_list('id', flat=True)) - blocked_ids_for(user)
     return (
         Story.objects
         .filter(expires_at__gt=timezone.now(), is_removed=False)
+        .filter(Q(user=user) | Q(user_id__in=following_ids, user__is_deactivated=False))
         .select_related('user__profile')
         .annotate(
             viewed_by_me=Exists(
@@ -939,18 +954,18 @@ class StoryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def feed(self, request):
-        """Stories from followed users, grouped by user. Own stories first."""
+        """Stories from followed users, grouped by user. Own stories first.
+
+        Each group's stories are in the order they were posted (oldest first),
+        the order they play in, as on WhatsApp and Instagram."""
         from .. import stories as story_store
         story_store.maybe_purge_expired()   # past 24 h: deleted for good, files too
-        following_ids = list(request.user.followed_by.values_list('id', flat=True))
-        following_ids.append(request.user.id)
 
         # One query for the whole bar: viewed_by_me / views_total arrive as
         # annotations, so neither the grouping below nor the serializer touches
-        # the database again.
-        stories = story_queryset(request.user).filter(
-            user_id__in=following_ids,
-        ).order_by('user_id', '-created_at')
+        # the database again. (story_queryset already limits it to your own
+        # stories and those of the accounts you follow.)
+        stories = story_queryset(request.user).order_by('user_id', 'created_at')
 
         # Group by user
         grouped = {}
@@ -958,6 +973,10 @@ class StoryViewSet(viewsets.ModelViewSet):
             uid = story.user_id
             if uid not in grouped:
                 grouped[uid] = {'user': story.user, 'stories': [], 'has_unviewed': False}
+            # Your own viewing isn't recorded (view_story), so your own
+            # stories count as seen: your ring doesn't light up for them.
+            if uid == request.user.id:
+                story.viewed_by_me = True
             grouped[uid]['stories'].append(story)
             if not story.viewed_by_me:
                 grouped[uid]['has_unviewed'] = True

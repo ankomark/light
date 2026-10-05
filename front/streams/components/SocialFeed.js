@@ -922,7 +922,12 @@ const SocialFeed = ({ showBackground = true }) => {
     }
   }, [loadingMore, hasMore, loading, nextUrl, prefetchMedia]);
 
-  const handleRefresh = useCallback(() => loadPosts(true), [loadPosts]);
+  // Pull to refresh: the stories row above the posts as well.
+  const [storiesRefresh, setStoriesRefresh] = useState(0);
+  const handleRefresh = useCallback(() => {
+    setStoriesRefresh((n) => n + 1);
+    return loadPosts(true);
+  }, [loadPosts]);
 
   // Debounced server-side search.
   const handleSearch = useCallback((term) => {
@@ -1242,7 +1247,7 @@ const SocialFeed = ({ showBackground = true }) => {
   const handleDoubleTapLike = useCallback((post) => {
     if (!post || post.is_liked) return;  // already liked — burst only, no API
     handleLikeChange(post.id, { is_liked: true, likes_count: (post.likes_count || 0) + 1 });
-    likePost(post.id)
+    likePost(post.id, { liked: true })
       .then((res) => {
         if (typeof res?.is_liked === 'boolean' && typeof res?.likes_count === 'number') {
           handleLikeChange(post.id, { is_liked: res.is_liked, likes_count: res.likes_count });
@@ -1594,7 +1599,7 @@ const SocialFeed = ({ showBackground = true }) => {
             {/* Spacer so content starts below the absolute glass bar, then
                 scrolls up behind it for the frosted-glass effect. */}
             <View style={{ height: topBarH }} />
-            <StoriesBar navigation={navigation} />
+            <StoriesBar navigation={navigation} refreshSignal={storiesRefresh} />
             {/* Offline, or a load failed, with posts still on screen: say so
                 quietly instead of a popup. (Nothing on screen: the empty
                 state below has its own Retry.) */}
