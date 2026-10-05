@@ -47,9 +47,12 @@ jest.mock('../FullSheet', () => ({ children, visible }) => (visible ? children :
 const mockTrimmer = jest.fn(() => null);
 jest.mock('../VideoTrimmer', () => (props) => mockTrimmer(props));
 jest.mock('../CoverPicker', () => () => null);
+const mockEnqueue = jest.fn();
+jest.mock('../../services/uploadQueue', () => ({ enqueueUpload: (...a) => mockEnqueue(...a) }));
 const mockApi = {
   createStory: jest.fn(async (b) => ({ id: 9, ...b })), viewStory: jest.fn(async () => ({})), fetchStoryFeed: jest.fn(async () => []),
   reactToStory: jest.fn(async (id, emoji) => ({ my_reaction: emoji })),
+  deleteStory: jest.fn(async () => ({})),
   fetchStoryViewers: jest.fn(async () => ({ count: 1, results: [{ user: { id: 3, username: 'ann' }, viewed_at: new Date().toISOString(), reaction: '🙏' }] })),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
@@ -120,50 +123,35 @@ describe('creating a story', () => {
     expect(side.width / side.height).toBeCloseTo(9 / 16, 2);
   });
 
-  test('a video previews playing; share trims, compresses, uploads its poster and shows it in the row', async () => {
+  test('a video previews playing; share hands it to the background queue and closes at once', async () => {
     mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'video', uri: 'file:///v.mp4', duration: 12000, width: 720, height: 1280 }] });
     mockTrimmer.mockClear();
-    const created = jest.fn();
-    const off = on(EVENTS.STORY_CREATED, created);
+    mockEnqueue.mockClear();
     const screen = render(<CreateStoryScreen />);
     await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
     expect(screen.getByTestId('app-video').props.source).toEqual({ uri: 'file:///v.mp4' });
     expect(mockTrimmer).not.toHaveBeenCalled();                      // 12 s: no need to trim first
-    expect(screen.getByTestId('story-trim')).toBeTruthy();
     fireEvent.changeText(screen.getByTestId('story-caption'), '  Choir practice ');
-    await act(async () => { fireEvent.press(screen.getByTestId('story-share')); });
-    expect(mockVideo.processVideo).toHaveBeenCalledWith(expect.objectContaining({
-      uri: 'file:///v.mp4', startSec: 0, endSec: 12, thumbnail: true, thumbnailAtSec: 0,
+    fireEvent.press(screen.getByTestId('story-share'));
+    expect(mockEnqueue).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'story',
+      snap: expect.objectContaining({
+        caption: 'Choir practice',
+        video: expect.objectContaining({ uri: 'file:///v.mp4' }),
+        trim: { start: 0, end: 12 },
+      }),
     }));
-    const uploaded = mockUpload.mock.calls.map((c) => c[0].uri);
-    expect(uploaded).toEqual(expect.arrayContaining(['file:///v.mp4#720p', 'file:///poster.jpg']));
-    expect(mockApi.createStory).toHaveBeenCalledWith(expect.objectContaining({
-      content_type: 'video', caption: 'Choir practice', thumbnail_url: expect.stringContaining('story_poster_'),
-    }));
-    expect(created).toHaveBeenCalled();
     expect(mockNav.goBack).toHaveBeenCalled();
-    off();
+    expect(mockVideo.processVideo).not.toHaveBeenCalled();            // that happens in the queue now
   });
 
-  test('a picked photo is drawn, with a fallback if it cannot be; the box behind it is black', async () => {
-    mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'image', uri: 'file:///p.jpg', width: 900, height: 1600 }] });
+  test('a photo goes to the queue as one image', async () => {
+    mockEnqueue.mockClear();
+    mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'image', uri: 'file:///a.jpg', width: 900, height: 1600 }] });
     const screen = render(<CreateStoryScreen />);
     await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
-    const box = [].concat(screen.getByTestId('story-preview').props.style).reduce((x, y) => ({ ...x, ...y }), {});
-    expect(box.backgroundColor).toBe('#000');
-    const img = screen.getByTestId('story-preview-image');
-    expect(img.props.source.uri).toContain('file:///p.jpg');
-    act(() => { img.props.onError(); });
-    expect(screen.getByTestId('story-preview-fallback')).toBeTruthy();
-    expect(screen.getByTestId('story-change')).toBeTruthy();
-  });
-
-  test('a picked video shows a still under the player, which draws on a texture (Android clipping)', async () => {
-    mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'video', uri: 'file:///v2.mp4', duration: 8000, width: 720, height: 1280 }] });
-    const screen = render(<CreateStoryScreen />);
-    await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
-    await waitFor(() => expect(screen.getByTestId('story-preview-still').props.source).toEqual({ uri: 'file:///frame0.jpg' }));
-    expect(screen.getByTestId('app-video').props.surfaceType).toBe('textureView');
+    fireEvent.press(screen.getByTestId('story-share'));
+    expect(mockEnqueue.mock.calls[0][0].snap.images[0].uri).toContain('file:///a.jpg');
   });
 
   test('a clip over 30 s opens the trimmer, and the window chosen is what goes up', async () => {
@@ -176,8 +164,9 @@ describe('creating a story', () => {
     act(() => { mockTrimmer.mock.calls.at(-1)[0].onChange(40, 65); });
     fireEvent.press(screen.getByTestId('story-trim-done'));
     expect(screen.getByText('story.trim:0:40,1:05,25')).toBeTruthy();
-    await act(async () => { fireEvent.press(screen.getByTestId('story-share')); });
-    expect(mockVideo.processVideo).toHaveBeenCalledWith(expect.objectContaining({ startSec: 40, endSec: 65, thumbnailAtSec: 0 }));
+    mockEnqueue.mockClear();
+    fireEvent.press(screen.getByTestId('story-share'));
+    expect(mockEnqueue.mock.calls[0][0].snap.trim).toEqual({ start: 40, end: 65 });
   });
 
   test('without the native trimmer, a clip over 30 s is refused', async () => {
@@ -289,6 +278,65 @@ describe('reacting to a story', () => {
     expect(mockApi.fetchStoryViewers).toHaveBeenCalledWith(42);
     await waitFor(() => expect(screen.getByText('ann')).toBeTruthy());
     expect(screen.getByText('🙏')).toBeTruthy();
+  });
+});
+
+describe('watching, safely', () => {
+  const two = {
+    user: { id: 3, username: 'ann' },
+    stories: [
+      { id: 51, content_type: 'video', media_url: 'https://cdn.test/51.mp4', created_at: new Date().toISOString() },
+      { id: 52, content_type: 'video', media_url: 'https://cdn.test/52.mp4', created_at: new Date().toISOString() },
+    ],
+  };
+
+  test('a video reporting its end several times moves on once, and the last one closes once', () => {
+    mockNav.goBack.mockClear();
+    const screen = render(<StoryViewer route={{ params: { group: two } }} navigation={mockNav} />);
+    const status = { isLoaded: true, durationMillis: 10000, positionMillis: 10000, didJustFinish: true };
+    act(() => {
+      const v = screen.getByTestId('app-video');
+      v.props.onPlaybackStatusUpdate(status);
+      v.props.onPlaybackStatusUpdate(status);
+      v.props.onPlaybackStatusUpdate(status);
+    });
+    expect(screen.getByTestId('app-video').props.source).toEqual({ uri: 'https://cdn.test/52.mp4' });
+    act(() => {
+      const v = screen.getByTestId('app-video');
+      v.props.onPlaybackStatusUpdate(status);
+      v.props.onPlaybackStatusUpdate(status);
+    });
+    expect(mockNav.goBack).toHaveBeenCalledTimes(1);
+  });
+
+  test('your own story: not counted as your view, and it can be deleted', async () => {
+    mockApi.viewStory.mockClear();
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation((title, body, buttons) => buttons?.[1]?.onPress?.());
+    const removedEvt = jest.fn();
+    const off = on(EVENTS.STORY_DELETED, removedEvt);
+    const mine = { user: { id: 7, username: 'mark' }, stories: [
+      { id: 61, content_type: 'image', media_url: 'https://cdn.test/61.jpg', created_at: new Date().toISOString() },
+      { id: 62, content_type: 'image', media_url: 'https://cdn.test/62.jpg', created_at: new Date().toISOString() },
+    ] };
+    const screen = render(<StoryViewer route={{ params: { group: mine } }} navigation={mockNav} />);
+    expect(mockApi.viewStory).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.press(screen.getByTestId('story-delete')); });
+    expect(mockApi.deleteStory).toHaveBeenCalledWith(61);
+    expect(removedEvt).toHaveBeenCalledWith({ storyId: 61 });
+    expect(screen.UNSAFE_root.findAll((n) => n.props?.source?.uri === 'https://cdn.test/62.jpg').length).toBeGreaterThan(0);
+    off();
+    alert.mockRestore();
+  });
+
+  test("someone else's story is recorded as viewed; a reaction reaches the row", async () => {
+    mockApi.viewStory.mockClear();
+    const reacted = jest.fn();
+    const off = on(EVENTS.STORY_REACTED, reacted);
+    const screen = render(<StoryViewer route={{ params: { group: two } }} navigation={mockNav} />);
+    expect(mockApi.viewStory).toHaveBeenCalledWith(51);
+    await act(async () => { fireEvent.press(screen.getByTestId('story-react-❤️')); });
+    expect(reacted).toHaveBeenCalledWith({ storyId: 51, emoji: '❤️' });
+    off();
   });
 });
 

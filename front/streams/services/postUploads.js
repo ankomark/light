@@ -4,7 +4,7 @@
 // since the screen that built it is closed by the time the job runs — and
 // returns the job's `run` function for enqueueUpload().
 import { uploadMedia } from './cloudinary';
-import { createSocialPost, apiRequest } from './api';
+import { createSocialPost, createStory, apiRequest } from './api';
 import { processVideo, cleanupProcessedVideos } from './videoProcessing';
 import { compressAudio } from './audioProcessing';
 
@@ -178,6 +178,66 @@ export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => 
   });
   progress(1);
   cleanupProcessedVideos();
+  return created;
+};
+
+/**
+ * A story, in the background like a post (the screen closes at once; the
+ * pill shows progress; a killed app picks it up again).
+ *
+ * Snapshot: { caption,
+ *   images: [{uri,width,height}],                          // a photo story
+ *   video: {uri,width,height,duration}, trim: {start,end},  // a video story
+ *   coverSec, thumbUri }                                    // the chosen cover
+ */
+export const buildStoryJob = (snap) => async ({ progress, stage, thumbnail }) => {
+  const caption = (snap.caption || '').trim();
+  if (snap.video?.uri) {
+    // Cut to the window, 720p, poster — exactly as a video post.
+    stage('processing');
+    progress(0.02);
+    const { video, trim } = snap;
+    const processed = await processVideo({
+      uri: video.uri,
+      startSec: trim?.start ?? 0,
+      endSec: trim?.end,
+      width: video.width,
+      height: video.height,
+      thumbnail: true,
+      thumbnailAtSec: Math.max(0, (snap.coverSec ?? trim?.start ?? 0) - (trim?.start ?? 0)),
+    });
+    const posterUri = processed.thumbnailUri || snap.thumbUri || null;
+    if (posterUri) thumbnail(posterUri);
+
+    stage('uploading');
+    const [videoReport, posterReport] = combinedProgress(progress, [20, posterUri ? 1 : 0], [0.15, 0.95]);
+    const [upload, posterUrl] = await Promise.all([
+      uploadFile({ ...video, uri: processed.uri, name: `story_${Date.now()}.mp4`, mimeType: 'video/mp4' },
+        'video', videoReport, 'story-video'),
+      posterUri
+        ? uploadFile({ uri: posterUri, name: `story_poster_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
+          'image', posterReport).then((r) => r.url).catch(() => null)   // the story still posts
+        : null,
+    ]);
+    stage('finishing');
+    const created = await createStory({
+      media_file: upload.url, media_url: upload.url, content_type: 'video', caption,
+      ...(posterUrl ? { thumbnail_url: posterUrl } : {}),
+    });
+    progress(1);
+    cleanupProcessedVideos();
+    return created;
+  }
+
+  const image = snap.images?.[0];
+  if (!image?.uri) throw new Error('Nothing to share');
+  stage('uploading');
+  const upload = await uploadFile(
+    { ...image, name: `story_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'image', (f) => progress(0.05 + f * 0.9),
+  );
+  stage('finishing');
+  const created = await createStory({ media_file: upload.url, media_url: upload.url, content_type: 'image', caption });
+  progress(1);
   return created;
 };
 

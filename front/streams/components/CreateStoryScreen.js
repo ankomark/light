@@ -13,14 +13,12 @@ import KeyboardLift from './tickets/KeyboardLift';
 import FullSheet from './FullSheet';
 import VideoTrimmer from './VideoTrimmer';
 import CoverPicker from './CoverPicker';
-import { uploadMedia } from '../services/cloudinary';
 import { compressImage } from '../services/imageProcessing';
-import { processVideo, isVideoProcessingAvailable, extractFrame } from '../services/videoProcessing';
-import { createStory } from '../services/api';
+import { isVideoProcessingAvailable, extractFrame } from '../services/videoProcessing';
+import { enqueueUpload } from '../services/uploadQueue';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { allowAllOrientations, lockPortrait } from '../utils/orientation';
-import { emit, EVENTS } from '../utils/appEvents';
 
 // Video works as on Home's composer (components/CreatePost): any length is
 // picked, then trimmed to a window of at most 30 s; a cover frame is chosen;
@@ -70,7 +68,6 @@ const CreateStoryScreen = () => {
   const [coverUri, setCoverUri] = useState(null);
   const [showTrim, setShowTrim] = useState(false);
   const [showCover, setShowCover] = useState(false);
-  const [status, setStatus] = useState('');      // what the upload is doing
   // The preview's fallbacks: a still of a picked video, and whether the
   // photo needs React Native's Image instead.
   const [still, setStill] = useState(null);
@@ -159,60 +156,33 @@ const CreateStoryScreen = () => {
     }
   };
 
-  const handlePost = async () => {
+  // Share: the work goes to the background queue (as Home's posts do) and
+  // this screen closes at once. A pill shows the progress on every screen,
+  // the story appears in the row when it's up, and a killed app resumes it.
+  const handlePost = () => {
     if (!media) { Alert.alert(t('story.noMediaTitle'), t('story.noMediaBody')); return; }
     if (uploading) return;
     setUploading(true);
-    try {
-      const isVideo = media.type === 'video';
-      // R2 stores bytes verbatim: video is cut to the trim window, compressed
-      // to 720p and given its poster on the phone, exactly as Home's posts are.
-      let uploadUri = media.uri;
-      let posterUri = null;
-      if (isVideo) {
-        setStatus(t('story.preparing'));
-        const processed = await processVideo({
-          uri: media.uri,
-          startSec: trim.start,
-          endSec: trim.end,
-          width: media.width,
-          height: media.height,
-          thumbnail: true,
-          // The picker gives source-video time; the poster comes from the
-          // trimmed clip, which starts at trim.start.
-          thumbnailAtSec: Math.max(0, (coverSec ?? trim.start) - trim.start),
-        });
-        uploadUri = processed.uri;
-        posterUri = processed.thumbnailUri || coverUri || null;
-      }
-      setStatus(t('story.uploading'));
-      const [result, poster] = await Promise.all([
-        uploadMedia(
-          { uri: uploadUri, name: `story_${Date.now()}`, mimeType: isVideo ? 'video/mp4' : 'image/jpeg' },
-          isVideo ? 'story-video' : 'social-image',
-        ),
-        // The poster rides along; without it the story still posts.
-        posterUri
-          ? uploadMedia({ uri: posterUri, name: `story_poster_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'social-image')
-            .catch(() => null)
-          : Promise.resolve(null),
-      ]);
-      const story = await createStory({
-        media_file: result.publicId,
-        media_url: result.url,
-        content_type: isVideo ? 'video' : 'image',
-        caption: caption.trim(),
-        ...(poster?.url ? { thumbnail_url: poster.url } : {}),
-      });
-      // The stories row shows it now, not after its next refresh.
-      emit(EVENTS.STORY_CREATED, story);
-      posted.current = true;
-      navigation.goBack();
-    } catch (err) {
-      if (live.current) Alert.alert(t('common.uploadFailedTitle'), err?.message || t('story.uploadFailed'));
-    } finally {
-      if (live.current) { setUploading(false); setStatus(''); }
-    }
+    const isVideo = media.type === 'video';
+    const snap = {
+      caption: caption.trim(),
+      ...(isVideo
+        ? {
+          video: { uri: media.uri, width: media.width, height: media.height, duration: media.duration },
+          trim: { start: trim.start, end: trim.end },
+          coverSec,
+          thumbUri: coverUri || still || null,
+        }
+        : { images: [{ uri: media.uri, width: media.width, height: media.height }] }),
+    };
+    enqueueUpload({
+      kind: 'story',
+      title: caption.trim().slice(0, 60),
+      thumbUri: isVideo ? (coverUri || still || null) : media.uri,
+      snap,
+    });
+    posted.current = true;
+    navigation.goBack();
   };
 
   // The preview: the chosen photo or video at its own shape (portrait or
@@ -342,7 +312,6 @@ const CreateStoryScreen = () => {
           <View style={landscape ? styles.sideCol : styles.stackCol}>
             {videoTools}
             {captionBox}
-            {!!status && <Text style={styles.status} accessibilityLiveRegion="polite">{status}</Text>}
           </View>
         </ScrollView>
       </KeyboardLift>
@@ -464,7 +433,6 @@ const styles = StyleSheet.create({
   },
   chipText: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
   chipThumb: { width: 22, height: 22, borderRadius: 4 },
-  status: { ...typography.caption, color: colors.textSecondary, textAlign: 'center' },
   sheetBody: { padding: spacing.md, gap: spacing.md },
   sheetDone: {
     alignSelf: 'center', minHeight: 44, minWidth: 140, alignItems: 'center', justifyContent: 'center',

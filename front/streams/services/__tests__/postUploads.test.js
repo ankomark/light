@@ -5,17 +5,17 @@
  * forward and ends at 100%.
  */
 jest.mock('../cloudinary', () => ({ uploadMedia: jest.fn() }));
-jest.mock('../api', () => ({ createSocialPost: jest.fn(), apiRequest: jest.fn() }));
+jest.mock('../api', () => ({ createSocialPost: jest.fn(), createStory: jest.fn(), apiRequest: jest.fn() }));
 jest.mock('../videoProcessing', () => ({
   processVideo: jest.fn(), cleanupProcessedVideos: jest.fn(),
 }));
 jest.mock('../audioProcessing', () => ({ compressAudio: jest.fn() }));
 
 import { uploadMedia } from '../cloudinary';
-import { createSocialPost, apiRequest } from '../api';
+import { createSocialPost, createStory, apiRequest } from '../api';
 import { processVideo } from '../videoProcessing';
 import { compressAudio } from '../audioProcessing';
-import { buildPostJob, buildTrackJob, combinedProgress } from '../postUploads';
+import { buildPostJob, buildTrackJob, buildStoryJob, combinedProgress } from '../postUploads';
 
 const ctx = () => {
   const seen = [];
@@ -217,5 +217,50 @@ describe('track upload', () => {
     expect(apiRequest.mock.calls[1][2]).not.toHaveProperty('track_number');
     await buildTrackJob({ title: 'T', audio: { uri: 'a.mp3' } })(ctx());
     expect(apiRequest.mock.calls[2][2]).not.toHaveProperty('album_id');
+  });
+});
+
+
+describe('a story, in the background', () => {
+  beforeEach(() => {
+    createStory.mockImplementation(async (data) => ({ id: 77, ...data }));
+  });
+
+  test('a video story: cut to its window, compressed, poster up alongside, then created', async () => {
+    processVideo.mockResolvedValue({ uri: 'file:///cut.mp4', thumbnailUri: 'file:///poster.jpg', width: 720, height: 1280, processed: true });
+    const c = ctx();
+    const story = await buildStoryJob({
+      caption: '  Vespers ', video: { uri: 'file:///raw.mp4', width: 1080, height: 1920, duration: 95000 },
+      trim: { start: 40, end: 65 }, coverSec: 50,
+    })(c);
+    expect(processVideo).toHaveBeenCalledWith(expect.objectContaining({ uri: 'file:///raw.mp4', startSec: 40, endSec: 65, thumbnailAtSec: 10 }));
+    expect(uploadMedia.mock.calls.map((x) => x[1]).sort()).toEqual(['social-image', 'story-video']);
+    expect(createStory).toHaveBeenCalledWith({
+      media_file: expect.stringContaining('story-video'), media_url: expect.stringContaining('story-video'),
+      content_type: 'video', caption: 'Vespers', thumbnail_url: expect.stringContaining('social-image'),
+    });
+    expect(c.thumbnail).toHaveBeenCalledWith('file:///poster.jpg');
+    expect(c.seen.at(-1)).toBe(1);
+    expect(story.id).toBe(77);
+  });
+
+  test('a photo story: one upload, then created', async () => {
+    const c = ctx();
+    await buildStoryJob({ caption: 'Sunrise', images: [{ uri: 'file:///p.jpg', width: 900, height: 1600 }] })(c);
+    expect(uploadMedia).toHaveBeenCalledTimes(1);
+    expect(createStory).toHaveBeenCalledWith({
+      media_file: expect.any(String), media_url: expect.any(String), content_type: 'image', caption: 'Sunrise',
+    });
+    expect(processVideo).not.toHaveBeenCalled();
+  });
+
+  test('a poster that fails to upload costs the poster, not the story', async () => {
+    processVideo.mockResolvedValue({ uri: 'file:///cut.mp4', thumbnailUri: 'file:///poster.jpg', processed: true });
+    uploadMedia.mockImplementation(async (file, type) => {
+      if (type === 'social-image') throw new Error('poster down');
+      return { url: `https://r2/${type}/1` };
+    });
+    await buildStoryJob({ caption: '', video: { uri: 'file:///raw.mp4' }, trim: { start: 0, end: 10 } })(ctx());
+    expect(createStory).toHaveBeenCalledWith(expect.not.objectContaining({ thumbnail_url: expect.anything() }));
   });
 });

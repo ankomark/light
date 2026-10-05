@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   useUploads, configureUploadQueue, retryUpload, dismissUpload, restoreUploads,
 } from '../services/uploadQueue';
-import { buildPostJob, buildTrackJob } from '../services/postUploads';
+import { buildPostJob, buildTrackJob, buildStoryJob } from '../services/postUploads';
 import {
   copySnapMedia, uploadsDir, draftsDir, moveDir, rebaseSnap, removeDir,
 } from '../utils/mediaStore';
@@ -69,7 +69,11 @@ const queueStorage = (userId) => {
 const statusLabel = (job, t) => {
   if (job.status === 'queued') return t('upload.queued');
   if (job.status === 'failed') return t('upload.failed');
-  if (job.status === 'done') return job.kind === 'track' ? t('upload.doneTrack') : t('upload.donePost');
+  if (job.status === 'done') {
+    if (job.kind === 'track') return t('upload.doneTrack');
+    if (job.kind === 'story') return t('upload.doneStory');
+    return t('upload.donePost');
+  }
   if (job.stage === 'processing') return t('upload.processing');
   if (job.stage === 'finishing') return t('upload.finishing');
   return t('upload.uploading', { pct: Math.round(job.progress * 100) });
@@ -99,7 +103,8 @@ const UploadPill = ({ job }) => {
         {job.thumbUri ? (
           <Image source={{ uri: job.thumbUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
         ) : (
-          <Feather name={job.kind === 'track' ? 'music' : 'video'} size={14} color={colors.textSecondary} />
+          <Feather name={job.kind === 'track' ? 'music' : job.kind === 'story' ? 'circle' : 'video'} size={14}
+                   color={colors.textSecondary} />
         )}
       </View>
       <View style={styles.body}>
@@ -132,7 +137,7 @@ const UploadStatus = () => {
 
   useEffect(() => {
     configureUploadQueue({
-      builders: { post: buildPostJob, track: buildTrackJob },
+      builders: { post: buildPostJob, track: buildTrackJob, story: buildStoryJob },
       stage: stageMedia,
       cleanup: (id) => removeDir(uploadsDir(id)),
       onDone: (job, result) => {
@@ -140,6 +145,9 @@ const UploadStatus = () => {
         if (job.kind === 'track') {
           emit(EVENTS.TRACK_CREATED, result);
           notify(tr('upload.notifyTrackTitle'), tr('upload.notifyTrackBody', { title: job.title || '' }));
+        } else if (job.kind === 'story') {
+          emit(EVENTS.STORY_CREATED, result);
+          notify(tr('upload.notifyStoryTitle'), tr('upload.notifyStoryBody'));
         } else {
           emit(EVENTS.POST_CREATED, result);
           notify(tr('upload.notifyPostTitle'), tr('upload.notifyPostBody'),
