@@ -51,6 +51,13 @@ test('Market wears the coloured marketplace picture, and is lit on the marketpla
   expect(screen.queryByText(/icon:storefront/)).toBeNull();   // a picture, not a glyph
 });
 
+test('Music wears the disc-and-note picture, and is lit on the Music screen', () => {
+  mockRoute = 'Music';
+  const screen = render(<Header />);
+  expect(screen.getByTestId('nav-music').props.accessibilityState).toEqual({ selected: true });
+  expect(screen.queryByText(/icon:musical-notes/)).toBeNull();   // a picture, not a glyph
+});
+
 test('wallpapers off: the header drops its picture for the plain navy', () => {
   const { Image } = require('react-native');
   const pictures = (screen) => screen.UNSAFE_queryAllByType(Image).filter((i) => /wallpapers\//.test(i.props.source?.uri || ''));

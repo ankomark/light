@@ -23,6 +23,8 @@ const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const MARKET_ART = require('../assets/marketplace-icon.png');
 // The house, in a bright maroon on clear (the deep original vanished on the navy header).
 const HOME_ART = require('../assets/home-icon.png');
+// A record with a blue note, brightened so the disc stands off the navy header.
+const MUSIC_ART = require('../assets/music-icon.png');
 
 /** A single bottom-row destination: filled icon + accent when on that screen.
  *  With `art`, a coloured picture in its own colours instead of a glyph (the
@@ -159,7 +161,7 @@ const Header = ({ transparentBg = false }) => {
             isActive={isOn('Home')} onPress={() => navigation.navigate('Home')}
           />
           <NavItem
-            active="musical-notes" inactive="musical-notes-outline" label="Music"
+            art={MUSIC_ART} artStyle={styles.homeArt} label="Music" testID="nav-music"
             isActive={isOn('Music')} onPress={() => navigation.navigate('Music')}
           />
           {/* The marketplace, one tap from anywhere. (Explore lives on the
