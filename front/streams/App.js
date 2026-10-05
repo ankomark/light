@@ -294,12 +294,6 @@ const AuthInitializer = ({ children }) => {
 
   return children;
 };
-  const HymnDetailWrapper = ({ navigation, route }) => (
-    <View style={{ flex: 1 }}>
-      <Header navigation={navigation} />
-      <HymnDetail route={route} />
-    </View>
-  );
   // Add this to your App component
 
 
@@ -469,7 +463,7 @@ const App = () => {
                 <Stack.Screen name="CameraCapture" component={CameraCapture} options={{ headerShown: false, presentation: 'fullScreenModal' }} />
                 <Stack.Screen name="EditTrack" component={EditTrackScreen} />
                 <Stack.Screen name="Hymns" component={HymnsWrapper} options={{ headerShown: false }}/>
-                <Stack.Screen name="HymnDetail" component={HymnDetail}  options={({ route }) => ({ headerShown: false, title: route.params?.hymn?.title || 'Hymn Details' })}/>
+                <Stack.Screen name="HymnDetail" component={HymnDetail}  options={{ headerShown: false }}/>
                 <Stack.Screen name="bible" component={BibleWrapper} />
                 <Stack.Screen name="BibleLibrary" component={BibleLibraryWrapper} />
                 {/* The menu: a screen, so back from a page it opened returns to it. */}

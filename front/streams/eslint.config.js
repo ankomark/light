@@ -5,9 +5,8 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    // dist build output; importHymns.js is a one-off local seed script (loads a
-    // hymns.json that isn't checked in) — not part of the app bundle.
-    ignores: ['dist/*', 'components/importHymns.js'],
+    // dist build output.
+    ignores: ['dist/*'],
   },
   {
     // Jest globals for test files + the jest setup file.

@@ -15,13 +15,16 @@ jest.mock('react-native-safe-area-context', () => {
   return { SafeAreaView: View };
 });
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('../../hooks/useBottomSpace', () => () => 0);
 jest.mock('../../context/I18nContext', () => ({
   useI18n: () => ({ t: (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k) }),
 }));
 
-const HymnDetail = require('../HymnDetail').default;
+const HymnDetailBare = require('../HymnDetail').default;
 const HymnListBare = require('../HymnList').default;
 const { PreferencesProvider } = require('../../context/PreferencesContext');
+// The page keeps its reading size in the saved preferences.
+const HymnDetail = (props) => <PreferencesProvider><HymnDetailBare {...props} /></PreferencesProvider>;
 // The list keeps its Favourites order in the saved preferences.
 const HymnList = (props) => <PreferencesProvider><HymnListBare {...props} /></PreferencesProvider>;
 
@@ -54,7 +57,7 @@ test('favourite a hymn, find it under Favourites, open it, take it off', async (
 
   // Tapping it opens that hymn, in its own hymnal.
   fireEvent.press(list.getByText(swHymn.title));
-  expect(mockNavigate).toHaveBeenCalledWith('HymnDetail', { hymn: swHymn, hymnalName: HYMNALS.sw.name, lang: 'sw' });
+  expect(mockNavigate).toHaveBeenCalledWith('HymnDetail', { lang: 'sw', number: swHymn.number, hymnalName: HYMNALS.sw.name });
 
   // Its heart takes it off the list.
   await act(async () => { fireEvent.press(list.getByLabelText('hymns.removeFavorite')); });
@@ -96,4 +99,41 @@ test('favourites sort by number, title or hymnal, and the choice is remembered',
   await act(async () => { fireEvent.press(again.getByTestId('hymn-favorites-button')); });
   await waitFor(() => expect(again.getByTestId('hymn-sort-hymnal').props.accessibilityState).toEqual({ checked: true }));
   expect(titles(again)).toEqual([pick('en', 3).title, pick('en', 40).title, pick('sw', 2).title]);
+});
+
+test('a hymn opened by number moves on to the next and back, and the words grow', async () => {
+  const en = HYMNALS.en.data.hymns;
+  const page = render(<HymnDetail route={{ params: { lang: 'en', number: en[1].number } }} />);
+  expect(page.getByTestId('hymn-title')).toHaveTextContent(en[1].title);
+  await act(async () => { fireEvent.press(page.getByTestId('hymn-next')); });
+  expect(page.getByTestId('hymn-title')).toHaveTextContent(en[2].title);
+  await act(async () => { fireEvent.press(page.getByTestId('hymn-prev')); });
+  await act(async () => { fireEvent.press(page.getByTestId('hymn-prev')); });
+  expect(page.getByTestId('hymn-title')).toHaveTextContent(en[0].title);
+  // The first hymn has nothing before it.
+  expect(page.getByTestId('hymn-prev').props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+
+  const firstLine = en[0].verses[0].split('\n')[0];
+  const sizeOf = () => [].concat(page.getAllByText(firstLine).pop().props.style).reduce((a, s) => ({ ...a, ...s }), {}).fontSize;
+  const before = sizeOf();
+  await act(async () => { fireEvent.press(page.getByTestId('hymn-larger')); });
+  expect(sizeOf()).toBe(before + 2);
+  await waitFor(async () => expect(JSON.parse(await AsyncStorage.getItem('pref:hymnTextSize'))).toBe(before + 2));
+});
+
+test('a hymn the hymnal no longer has says so instead of breaking', () => {
+  const page = render(<HymnDetail route={{ params: { lang: 'dho', number: 47 } }} />);
+  expect(page.getByTestId('hymn-missing')).toBeTruthy();
+});
+
+test('share sends the words as text', async () => {
+  const { Share } = require('react-native');
+  const share = jest.spyOn(Share, 'share').mockResolvedValue({});
+  const hymn = HYMNALS.en.data.hymns[5];
+  const page = render(<HymnDetail route={{ params: { lang: 'en', number: hymn.number } }} />);
+  await act(async () => { fireEvent.press(page.getByTestId('hymn-share')); });
+  const message = share.mock.calls[0][0].message;
+  expect(message.startsWith(`${hymn.number}. ${hymn.title}`)).toBe(true);
+  expect(message).toContain(hymn.verses[0].split('\n')[0]);
+  share.mockRestore();
 });

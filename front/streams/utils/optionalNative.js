@@ -65,6 +65,10 @@ export const viewShot = optional('view-shot',
   () => web || hasRnModule('RNViewShot'), () => require('react-native-view-shot'));
 export const clipboard = optional('clipboard',
   () => web || hasExpoModule('ExpoClipboard'), () => require('expo-clipboard'));
+// Keeps the screen on while a hymn is being sung. Part of Expo itself, so in
+// every build; guarded all the same.
+export const keepAwake = optional('keep-awake',
+  () => web || hasExpoModule('ExpoKeepAwake'), () => require('expo-keep-awake'));
 export const speech = optional('speech',
   () => web || hasExpoModule('ExpoSpeech'), () => require('expo-speech'));
 export const androidWidget = optional('android-widget',

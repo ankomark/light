@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useDeferredValue } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput, Keyboard,
 } from 'react-native';
@@ -10,23 +10,20 @@ import { useI18n } from '../context/I18nContext';
 import { useHymnFavorites, sortFavorites, FAVORITE_SORTS } from '../services/hymnFavorites';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
+import { searchHymns } from '../utils/hymnSearch';
+import useBottomSpace from '../hooks/useBottomSpace';
 
 // Each hymnal's hymns by number, for turning saved favourites back into hymns.
 const BY_NUMBER = Object.fromEntries(HYMNAL_ORDER.map((code) => [
   code, new Map(HYMNALS[code].data.hymns.map((h) => [Number(h.number), h])),
 ]));
 
-const matches = (h, q) => {
-  if (String(h.number).includes(q)) return true;
-  if (h.title && h.title.toLowerCase().includes(q)) return true;
-  if (h.refrain && h.refrain.toLowerCase().includes(q)) return true;
-  return h.verses?.some((v) => v.toLowerCase().includes(q));
-};
-
 const HymnList = ({ navigation }) => {
   const { t } = useI18n();
-  const [lang, setLang] = useState('en');
   const [searchQuery, setSearchQuery] = useState('');
+  // Typing stays quick: the list follows a moment behind on a slow phone.
+  const query = useDeferredValue(searchQuery);
+  const bottomSpace = useBottomSpace(spacing.xl);
   // The Favourites view: the hymns the user saved, from every hymnal.
   const [showFavs, setShowFavs] = useState(false);
   const { favorites, isFavorite, toggle } = useHymnFavorites();
@@ -34,44 +31,55 @@ const HymnList = ({ navigation }) => {
   const { preferences, setPreference } = usePreferences();
   const favSort = FAVORITE_SORTS.includes(preferences[PREF_KEYS.hymnFavSort])
     ? preferences[PREF_KEYS.hymnFavSort] : 'recent';
+  // The hymnal it opens on: the one used last.
+  const lang = HYMNALS[preferences[PREF_KEYS.hymnLang]] ? preferences[PREF_KEYS.hymnLang] : 'en';
+  const setLang = (code) => setPreference(PREF_KEYS.hymnLang, code);
 
   const hymnal = HYMNALS[lang];
   const hymns = hymnal.data.hymns;
 
   // Rows: { lang, hymn }. Favourites in the chosen order; any that no longer
   // exist in the bundled hymnal (a data update) are skipped.
+  // Searched, best match first (utils/hymnSearch.js).
   const rows = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
     const list = showFavs
       ? sortFavorites(
         favorites.map((f) => ({ lang: f.lang, at: f.at, hymn: BY_NUMBER[f.lang]?.get(f.number) })).filter((r) => r.hymn),
         favSort,
       )
       : hymns.map((hymn) => ({ lang, hymn }));
-    return q ? list.filter((r) => matches(r.hymn, q)) : list;
-  }, [showFavs, favorites, favSort, hymns, lang, searchQuery]);
+    return searchHymns(list, query);
+  }, [showFavs, favorites, favSort, hymns, lang, query]);
 
   const openHymn = useCallback((row) => {
     Keyboard.dismiss();
-    navigation.navigate('HymnDetail', { hymn: row.hymn, hymnalName: HYMNALS[row.lang].name, lang: row.lang });
+    // By number: the page finds it in the hymnal (and can move on from it).
+    navigation.navigate('HymnDetail', { lang: row.lang, number: row.hymn.number, hymnalName: HYMNALS[row.lang].name });
   }, [navigation]);
 
   const renderHymnItem = useCallback(({ item: row }) => {
     const { hymn: item } = row;
-    const preview = (item.refrain || item.verses?.[0] || '').split('\n')[0];
-    const numberMatch = searchQuery && String(item.number).includes(searchQuery.trim());
+    // Found in the words: the line that was remembered, not the first one.
+    const preview = row.match?.line || (item.refrain || item.verses?.[0] || '').split('\n')[0];
+    const where = row.match ? (row.match.refrain ? t('hymns.refrain') : t('hymns.inVerse', { n: row.match.verse })) : null;
+    const numberMatch = !!query && String(item.number) === query.trim();
     const fav = isFavorite(row.lang, item.number);
     return (
-      <TouchableOpacity style={styles.hymnItem} onPress={() => openHymn(row)} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.hymnItem} onPress={() => openHymn(row)} activeOpacity={0.8}
+                        accessibilityRole="button" accessibilityLabel={`${item.number}. ${item.title}`}
+                        testID={`hymn-row-${row.lang}-${item.number}`}>
         <View style={[styles.numberBadge, numberMatch && styles.numberBadgeMatch]}>
           <Text style={styles.numberText}>{item.number}</Text>
         </View>
         <View style={styles.hymnContent}>
           <Text style={styles.hymnTitle} numberOfLines={1}>{item.title}</Text>
-          {showFavs ? (
+          {showFavs && !row.match ? (
             <Text style={styles.bookTag} numberOfLines={1}>{HYMNALS[row.lang].name}</Text>
           ) : preview ? (
-            <Text style={styles.hymnPreview} numberOfLines={1}>{preview}</Text>
+            <Text style={[styles.hymnPreview, row.match && styles.hymnPreviewMatch]} numberOfLines={1}>
+              {where ? <Text style={styles.matchWhere}>{`${where} · `}</Text> : null}
+              {preview}
+            </Text>
           ) : null}
         </View>
         {showFavs ? (
@@ -93,7 +101,7 @@ const HymnList = ({ navigation }) => {
         )}
       </TouchableOpacity>
     );
-  }, [openHymn, searchQuery, showFavs, isFavorite, toggle, t]);
+  }, [openHymn, query, showFavs, isFavorite, toggle, t]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={[]}>
@@ -105,7 +113,7 @@ const HymnList = ({ navigation }) => {
         <View style={styles.headerText}>
           <Text style={styles.headerTitle}>{showFavs ? t('hymns.favorites') : t('hymns.title')}</Text>
           <Text style={styles.headerSubtitle}>
-            {showFavs ? t('hymns.favCount', { n: favorites.length }) : `${hymnal.name} · ${hymns.length} hymns`}
+            {showFavs ? t('hymns.favCount', { n: favorites.length }) : t('hymns.bookCount', { name: hymnal.name, n: hymns.length })}
           </Text>
         </View>
         <TouchableOpacity
@@ -133,6 +141,9 @@ const HymnList = ({ navigation }) => {
               style={[styles.langSeg, active && styles.langSegActive]}
               onPress={() => { setLang(code); Keyboard.dismiss(); }}
               activeOpacity={0.85}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              testID={`hymnal-${code}`}
             >
               <Text
                 style={[styles.langSegText, active && styles.langSegTextActive]}
@@ -159,9 +170,13 @@ const HymnList = ({ navigation }) => {
           onChangeText={setSearchQuery}
           autoCorrect={false}
           autoCapitalize="none"
+          returnKeyType="search"
+          onSubmitEditing={() => { if (rows.length) openHymn(rows[0]); }}
+          testID="hymn-search"
         />
         {searchQuery ? (
-          <TouchableOpacity onPress={() => { setSearchQuery(''); Keyboard.dismiss(); }}>
+          <TouchableOpacity onPress={() => { setSearchQuery(''); Keyboard.dismiss(); }} hitSlop={10}
+                            accessibilityRole="button" accessibilityLabel={t('common.clear')}>
             <Ionicons name="close-circle" size={18} color={colors.textMuted} />
           </TouchableOpacity>
         ) : null}
@@ -190,8 +205,8 @@ const HymnList = ({ navigation }) => {
       ) : null}
 
       {searchQuery ? (
-        <Text style={styles.resultsText}>
-          {rows.length} {rows.length === 1 ? 'result' : 'results'}
+        <Text style={styles.resultsText} testID="hymn-results">
+          {rows.length === 1 ? t('hymns.oneResult') : t('hymns.results', { n: rows.length })}
         </Text>
       ) : null}
 
@@ -199,11 +214,13 @@ const HymnList = ({ navigation }) => {
         data={rows}
         keyExtractor={(row) => `${row.lang}_${row.hymn.number}`}
         renderItem={renderHymnItem}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: bottomSpace }]}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         initialNumToRender={15}
+        maxToRenderPerBatch={20}
         windowSize={10}
+        removeClippedSubviews
         ListEmptyComponent={
           showFavs && !searchQuery ? (
             <View style={styles.empty}>
@@ -334,6 +351,8 @@ const styles = StyleSheet.create({
   hymnContent: { flex: 1, marginRight: spacing.sm },
   hymnTitle: { ...typography.label, color: colors.textPrimary, fontWeight: '600' },
   hymnPreview: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  hymnPreviewMatch: { color: colors.textPrimary, fontStyle: 'italic' },
+  matchWhere: { color: colors.accent, fontStyle: 'normal', fontWeight: '700' },
   sortRow: {
     flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs,
     marginHorizontal: spacing.md, marginTop: spacing.sm,

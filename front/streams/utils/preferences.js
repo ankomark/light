@@ -25,6 +25,8 @@ export const PREF_KEYS = {
   calendarReminders: 'calendarReminders', // date reminders, scheduled on-device
   videoMode: 'videoMode',       // open the app in the Videos feed
   hymnFavSort: 'hymnFavSort',   // favourite hymns: 'recent' | 'number' | 'title' | 'hymnal'
+  hymnLang: 'hymnLang',         // the hymnal the Hymns page opens on ('en' | 'sw' | 'dho' | 'guz')
+  hymnTextSize: 'hymnTextSize', // a hymn's reading size (px)
   bibleVersion: 'bibleVersion', // the Bible version the reader opens in (utils/bibleVersions.js)
   bibleTextSize: 'bibleTextSize', // the Bible's reading size (px)
   wallpaperOn: 'wallpaperOn',   // the admins' wallpapers behind the pages, or the plain background
@@ -56,6 +58,8 @@ export const DEFAULT_PREFERENCES = {
   // Off: the app opens on Home. On: in Videos (Home still one tap away).
   [PREF_KEYS.videoMode]: false,
   [PREF_KEYS.hymnFavSort]: 'recent',
+  [PREF_KEYS.hymnLang]: 'en',
+  [PREF_KEYS.hymnTextSize]: 18,
   [PREF_KEYS.bibleVersion]: 'eng_kjv',
   [PREF_KEYS.bibleTextSize]: 18,
   // As the app has always looked: the admins' wallpapers, in turn.
