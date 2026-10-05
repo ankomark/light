@@ -254,22 +254,23 @@ export const apiRequest = async (method, endpoint, data = null, options = {}) =>
       stack: error.stack,
     };
     
-    if (error.response) {
-      // Server responded with error status
-      console.error('[NETWORK] Server error response:', {
-        ...errorDetails,
-        status: error.response.status,
-        data: error.response.data
-      });
-    } else if (error.request) {
-      // Request was made but no response
-      console.error('[NETWORK] No response received:', {
-        ...errorDetails,
-        diagnosis: diagnoseNetworkError(error, url)
-      });
-    } else {
-      // Request setup error
-      console.error('[NETWORK] Request setup error:', errorDetails);
+    // One readable line, in development only. These errors are thrown to the
+    // caller, which handles them (a message, a retry, a fallback) — so this
+    // is console.warn, not console.error: in a dev build every console.error
+    // becomes a red full-screen box (with a meaningless stack) even for an
+    // expected 404 or a refused request. Release builds log nothing here
+    // (no response bodies in device logs).
+    if (__DEV__) {
+      if (error.response) {
+        const body = error.response.data;
+        const why = typeof body === 'string' ? body.slice(0, 120)
+          : body?.detail || body?.error || (body ? JSON.stringify(body).slice(0, 160) : '');
+        console.warn(`[NETWORK] ${errorDetails.method} ${endpoint} → ${error.response.status}${why ? ` — ${why}` : ''}`);
+      } else if (error.request) {
+        console.warn(`[NETWORK] ${errorDetails.method} ${endpoint} → no response (${diagnoseNetworkError(error, url)})`);
+      } else {
+        console.warn(`[NETWORK] ${errorDetails.method} ${endpoint} → not sent: ${error.message}`);
+      }
     }
     
     // Enhanced error messages
@@ -305,7 +306,7 @@ export const loginUser = async (username, password) => {
     await storeTokens(response.data.access, response.data.refresh);
     return response.data;
   } catch (error) {
-    console.error('Login error:', error);
+    console.warn('Login error:', error);
     throw error;
   }
 };
@@ -540,7 +541,7 @@ export const createSocialPost = async (postData) => {
     return response;
     
   } catch (error) {
-    console.error('[ERROR] Post creation failed:', {
+    console.warn('[ERROR] Post creation failed:', {
       error: error.response?.data || error.message,
       status: error.response?.status,
       config: error.config
@@ -1374,7 +1375,7 @@ const createOnPath = async (path, formData) => {
 
     return response.data;
   } catch (error) {
-    console.error(`Creation error (${path}):`, error.response?.data || error.message);
+    console.warn(`Creation error (${path}):`, error.response?.data || error.message);
     throw error.response?.data || { message: 'Failed to create' };
   }
 };
@@ -1401,7 +1402,7 @@ export const requestJoinGroup = async (slug, message = "") => {
     );
     return response.data;
   } catch (error) {
-    console.error('Join request error:', error.response?.data || error.message);
+    console.warn('Join request error:', error.response?.data || error.message);
     throw error.response?.data || { message: 'Failed to send join request' };
   }
 };
@@ -1611,7 +1612,7 @@ export const checkGroupMembership = async (slug) => {
     }
     return response;
   } catch (error) {
-    console.error('Failed to check group membership:', error);
+    console.warn('Failed to check group membership:', error);
     // Return default response if endpoint not found (for backward compatibility)
     if (error.response?.status === 404) {
       return { is_member: false, is_admin: false };
@@ -1688,7 +1689,7 @@ export const fetchProductById = async (identifier) => {
       is_owner: response.data.is_owner || false,
     };
   } catch (error) {
-    console.error(`API Error [get /marketplace/products/${identifier}/]:`, error);
+    console.warn(`API Error [get /marketplace/products/${identifier}/]:`, error);
     if (error.response?.status === 404) {
       throw new Error('Product not found');
     }
@@ -1721,7 +1722,7 @@ export const removeFromCart = async (itemId) => {
     // Use the correct endpoint format
     return await apiRequest('delete', `/marketplace/cart/items/${itemId}/`);
   } catch (error) {
-    console.error('Error removing item from cart:', error);
+    console.warn('Error removing item from cart:', error);
     throw error;
   }
 };
@@ -1807,20 +1808,20 @@ export const createProduct = async (formData, { onProgress } = {}) => {
     });
     return response.data;
   } catch (error) {
-    console.error('Product creation error:', error);
+    console.warn('Product creation error:', error);
     if (error.response) {
       // The request was made and the server responded with a status code
-      console.error('Response data:', error.response.data);
-      console.error('Response status:', error.response.status);
-      console.error('Response headers:', error.response.headers);
+      console.warn('Response data:', error.response.data);
+      console.warn('Response status:', error.response.status);
+      console.warn('Response headers:', error.response.headers);
       throw error.response.data;
     } else if (error.request) {
       // The request was made but no response was received
-      console.error('Request:', error.request);
+      console.warn('Request:', error.request);
       throw new Error('No response received from server');
     } else {
       // Something happened in setting up the request
-      console.error('Error message:', error.message);
+      console.warn('Error message:', error.message);
       throw error;
     }
   }
@@ -1879,7 +1880,7 @@ const apiLog = (message, data = null, level = 'log') => {
   
   switch(level) {
     case 'error':
-      console.error(logMessage, logData);
+      console.warn(logMessage, logData);
       break;
     case 'warn':
       console.warn(logMessage, logData);

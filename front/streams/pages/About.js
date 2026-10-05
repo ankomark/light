@@ -125,10 +125,10 @@ const About = () => {
       <Section label="The Founder" plain>
         <Card>
           <View style={styles.founderHead}>
-            <View style={styles.founderRing}><Text style={styles.founderInitials} maxFontSizeMultiplier={FONT_SCALE.tight}>ENG.</Text></View>
+            <View style={styles.founderRing}><Text style={styles.founderInitials} maxFontSizeMultiplier={FONT_SCALE.tight}></Text></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.cardTitle}>T16 Engineers</Text>
-              <Text style={styles.founderRole}>FOUNDER · LEAD ENGINEER</Text>
+              <Text style={styles.founderRole}></Text>
             </View>
           </View>
           <Text style={styles.quote}>“Built for the glory of the kingdom of God.”</Text>
