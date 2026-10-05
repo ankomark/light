@@ -82,10 +82,11 @@ export async function registerForPushNotifications() {
   }
 }
 
+/** True once the server has this phone's token; false when it couldn't be told. */
 export async function registerTokenWithBackend(token) {
   try {
     const accessToken = await SecureStore.getItemAsync('accessToken');
-    if (!accessToken || !token) return;
+    if (!accessToken || !token) return false;
 
     await axios.post(
       `${API_URL}/device-tokens/register/`,
@@ -94,8 +95,36 @@ export async function registerTokenWithBackend(token) {
     );
 
     await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    return true;
   } catch (error) {
-    console.error('[Push] Failed to register token with backend:', error?.message);
+    // Usually no network at that moment: ensurePushRegistered tries again on
+    // the next launch and when the connection is back. Not an error worth a
+    // red box.
+    if (__DEV__) console.warn('[Push] Could not register the token yet:', error?.message);
+    return false;
+  }
+}
+
+/**
+ * Make sure the server can reach this phone, quietly: on every launch while
+ * signed in, and again when the network comes back. Sign-in used to be the
+ * only attempt, so one failed request left a phone without notifications
+ * until the next sign-in.
+ *
+ * Never asks for permission (only sign-in and Settings do that), and does
+ * nothing for someone who turned notifications off in Settings.
+ */
+export async function ensurePushRegistered({ pushEnabled } = {}) {
+  try {
+    if (pushEnabled === false || !Device.isDevice) return false;
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return false;
+    const { data: token } = await Notifications.getExpoPushTokenAsync(
+      PROJECT_ID ? { projectId: PROJECT_ID } : undefined
+    );
+    return await registerTokenWithBackend(token);
+  } catch {
+    return false;
   }
 }
 

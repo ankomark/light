@@ -14,7 +14,9 @@ import { clearAllCaches } from '../utils/screenCache';
 import { forgetKeptChapters } from '../services/publicationStore';
 import { clearReadingQueue } from '../services/readingTracker';
 import { clearBookHighlights } from '../services/bookHighlights';
-import { registerForPushNotifications, forgetPushToken } from '../services/pushNotifications';
+import { registerForPushNotifications, forgetPushToken, ensurePushRegistered } from '../services/pushNotifications';
+import { onOnlineChange } from '../hooks/useOnline';
+import { getPreference, PREF_KEYS } from '../utils/preferences';
 import { reportSignOut, flushPendingSignOuts } from '../services/signOut';
 import { setTicketOwner } from '../services/tickets';
 import { setOrganiserOwner } from '../services/ticketsOrganiser';
@@ -214,6 +216,21 @@ export const AuthProvider = ({ children }) => {
     checkAuthStatus();
     flushPendingSignOuts();   // a sign-out that was offline last time
   }, []);
+
+  // Signed in: make sure this phone gets notifications — on launch, and once
+  // more whenever the network comes back after a failed try.
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    let registered = false;
+    const attempt = async () => {
+      if (registered) return;
+      const pushEnabled = await getPreference(PREF_KEYS.pushEnabled).catch(() => undefined);
+      registered = await ensurePushRegistered({ pushEnabled });
+    };
+    attempt();
+    const off = onOnlineChange((online) => { if (online) attempt(); });
+    return off;
+  }, [isAuthenticated]);
 
   const value = useMemo(
     () => ({

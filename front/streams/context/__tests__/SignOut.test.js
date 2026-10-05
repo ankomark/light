@@ -30,6 +30,7 @@ jest.mock('../../services/bookHighlights', () => ({ clearBookHighlights: jest.fn
 jest.mock('../../services/pushNotifications', () => ({
   registerForPushNotifications: jest.fn(async () => {}),
   forgetPushToken: jest.fn(async () => 'ExponentPushToken[phone]'),
+  ensurePushRegistered: jest.fn(async () => true),
 }));
 const mockReport = jest.fn();
 jest.mock('../../services/signOut', () => ({
@@ -38,6 +39,7 @@ jest.mock('../../services/signOut', () => ({
 }));
 jest.mock('../../services/tickets', () => ({ setTicketOwner: jest.fn() }));
 jest.mock('../../services/ticketsOrganiser', () => ({ setOrganiserOwner: jest.fn() }));
+jest.mock('../../hooks/useOnline', () => ({ onOnlineChange: () => () => {} }));
 
 const { AuthProvider, useAuth } = require('../useAuth');
 const tickets = require('../../services/tickets');

@@ -35,7 +35,16 @@ const ZoomablePhoto = ({ url, width, height, onZoomChange, onTap, onDragDown, on
   // The committed values gestures start from (Animated values can't be read synchronously).
   const s = useRef({ scale: 1, x: 0, y: 0, pinchBase: 1, panX: 0, panY: 0, dismissing: false });
 
-  const setZoomed = useCallback((zoomed) => onZoomChange?.(zoomed), [onZoomChange]);
+  // Zoomed in: a drag in any direction moves the photo (the pager is locked
+  // then). Not zoomed: only a mostly-vertical drag counts — the dismiss — and
+  // a sideways one is left to the pager. One pan, configured by this state,
+  // rather than a manually activated second pan (whose activate()/fail()
+  // calls Reanimated warns about on every touch move).
+  const [isZoomed, setIsZoomed] = useState(false);
+  const setZoomed = useCallback((zoomed) => {
+    setIsZoomed(zoomed);
+    onZoomChange?.(zoomed);
+  }, [onZoomChange]);
 
   // How far a zoomed photo may move before its edge leaves the screen edge.
   const bounds = (k) => ({ x: (width * (k - 1)) / 2, y: (height * (k - 1)) / 2 });
@@ -69,9 +78,9 @@ const ZoomablePhoto = ({ url, width, height, onZoomChange, onTap, onDragDown, on
     // closes the viewer (a sideways one is left to the pager).
     const pan = Gesture.Pan()
       .runOnJS(true)
-      .averageTouches(true)
-      .activeOffsetY([-12, 12])
-      .failOffsetX([-24, 24])
+      .averageTouches(true);
+    if (!isZoomed) pan.activeOffsetY([-12, 12]).failOffsetX([-24, 24]);
+    pan
       .onStart(() => { s.current.panX = s.current.x; s.current.panY = s.current.y; })
       .onUpdate((e) => {
         if (s.current.scale > 1.01) {
@@ -98,20 +107,6 @@ const ZoomablePhoto = ({ url, width, height, onZoomChange, onTap, onDragDown, on
         }
       });
 
-    // A sideways drag while zoomed moves the photo; the pager must not take it.
-    const zoomedPanX = Gesture.Pan()
-      .runOnJS(true)
-      .manualActivation(true)
-      .onTouchesMove((e, mgr) => { if (s.current.scale > 1.01) mgr.activate(); else mgr.fail(); })
-      .onStart(() => { s.current.panX = s.current.x; s.current.panY = s.current.y; })
-      .onUpdate((e) => {
-        const b = bounds(s.current.scale);
-        s.current.x = clamp(s.current.panX + e.translationX, -b.x, b.x);
-        s.current.y = clamp(s.current.panY + e.translationY, -b.y, b.y);
-        tx.setValue(s.current.x);
-        ty.setValue(s.current.y);
-      });
-
     const doubleTap = Gesture.Tap()
       .runOnJS(true)
       .numberOfTaps(2)
@@ -127,13 +122,9 @@ const ZoomablePhoto = ({ url, width, height, onZoomChange, onTap, onDragDown, on
       });
     const singleTap = Gesture.Tap().runOnJS(true).maxDuration(260).onEnd(() => onTap?.());
 
-    return Gesture.Simultaneous(
-      pinch,
-      Gesture.Exclusive(zoomedPanX, pan),
-      Gesture.Exclusive(doubleTap, singleTap),
-    );
+    return Gesture.Simultaneous(pinch, pan, Gesture.Exclusive(doubleTap, singleTap));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, height, animateTo, onTap, onDragDown, onDismiss, onDragCancel]);
+  }, [width, height, isZoomed, animateTo, onTap, onDragDown, onDismiss, onDragCancel]);
 
   return (
     <GestureDetector gesture={gesture}>
