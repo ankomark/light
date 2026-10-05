@@ -10,10 +10,12 @@ import DownloadButton from './DownloadButton';
 import { usePlayer } from '../context/PlayerContext';
 import { useDownloadedTracks } from '../utils/downloads';
 import { useI18n } from '../context/I18nContext';
+import useBottomSpace from '../hooks/useBottomSpace';
 import { colors, radius, spacing } from '../constants/theme';
 
 const DownloadsScreen = ({ navigation }) => {
   const { t } = useI18n();
+  const bottomSpace = useBottomSpace(40);
   const tracks = useDownloadedTracks();
   const { playQueue, currentTrack, isPlaying } = usePlayer();
 
@@ -22,8 +24,10 @@ const DownloadsScreen = ({ navigation }) => {
     return (
       <TouchableOpacity style={[styles.row, active && styles.rowActive]} activeOpacity={0.85} onPress={() => playQueue(tracks, index, { source: 'downloads' })}>
         <View style={styles.cover}>
-          {(item.cover_small || item.cover_image) ? (
-            <Image source={{ uri: item.cover_small || item.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          {/* cover_image is the copy saved on the phone (useDownloadedTracks):
+              first, so covers show with no connection. */}
+          {(item.cover_image || item.cover_small) ? (
+            <Image source={{ uri: item.cover_image || item.cover_small }} style={StyleSheet.absoluteFill} contentFit="cover" />
           ) : (
             <Ionicons name="musical-notes" size={22} color={colors.textMuted} />
           )}
@@ -61,7 +65,7 @@ const DownloadsScreen = ({ navigation }) => {
           data={tracks}
           keyExtractor={(tr) => `dl_${tr.id}`}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: bottomSpace }]}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Feather name="download-cloud" size={44} color={colors.textMuted} />
@@ -87,7 +91,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full, backgroundColor: colors.primary,
   },
   playAllText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl, flexGrow: 1 },
+  list: { paddingHorizontal: spacing.md, flexGrow: 1 },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, marginBottom: spacing.xs,
     borderRadius: radius.lg, backgroundColor: 'rgba(14,30,52,0.75)',

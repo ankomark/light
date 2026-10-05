@@ -14,10 +14,12 @@ import TrackRail from './TrackRail';
 import { usePlayer } from '../context/PlayerContext';
 import { fetchTrack, fetchSimilarTracks } from '../services/api';
 import { useI18n } from '../context/I18nContext';
+import useBottomSpace from '../hooks/useBottomSpace';
 import { colors, radius, spacing, shadows } from '../constants/theme';
 
 const TrackDetailScreen = ({ route, navigation }) => {
   const { t } = useI18n();
+  const bottomSpace = useBottomSpace(40);
   const { width } = useWindowDimensions();
   const { trackId, commentId } = route.params || {};
   const [track, setTrack] = useState(route.params?.track || null);
@@ -56,7 +58,7 @@ const TrackDetailScreen = ({ route, navigation }) => {
             : <ActivityIndicator style={styles.spinner} color={colors.primary} />
         ) : (
           <>
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSpace }]} showsVerticalScrollIndicator={false}>
               <View style={[styles.cover, { width: art, height: art }]}>
                 {track.cover_image ? (
                   <Image source={{ uri: track.cover_image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" transition={150} />

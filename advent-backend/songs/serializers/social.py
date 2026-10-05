@@ -16,18 +16,7 @@ class FeedSongSerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image', 'slug']
 
 
-def own_upload(value, what='file'):
-    """A media link a client sends must be one of our own uploads (R2) —
-    never an arbitrary link that every viewer's phone would then fetch (an
-    outside server learning who looks, or content no one can moderate).
-    A bare storage key isn't a link (media.resolve serves only absolute ones),
-    so only an absolute link to anywhere else is refused."""
-    from .. import r2
-    value = (value or '').strip() if isinstance(value, str) else value
-    if (value and getattr(settings, 'R2_PUBLIC_BASE', '') and media.is_absolute(value)
-            and not r2.is_r2_url(value)):
-        raise serializers.ValidationError(f'Upload the {what} first.')
-    return value
+# own_upload (our own storage only) lives in .common, with MediaReferenceField.
 
 
 class SocialPostSerializer(serializers.ModelSerializer):

@@ -185,7 +185,7 @@ const PostDetail = ({ route, navigation }) => {
     return (
       <View style={styles.centered}>
         <Feather name="alert-circle" size={48} color={colors.textMuted} />
-        <Text style={styles.errorText}>{error || 'Post not found.'}</Text>
+        <Text style={styles.errorText}>{error || t('post.unavailable')}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
           <Text style={styles.retryButtonText}>{t('common.goBack')}</Text>
         </TouchableOpacity>
@@ -366,7 +366,7 @@ const PostDetail = ({ route, navigation }) => {
             </View>
             <View style={styles.songInfo}>
               <Text style={styles.songTitle} numberOfLines={1}>
-                {songTitle || 'Original audio'}
+                {songTitle || t('music.originalAudio')}
               </Text>
               {songArtist ? (
                 <Text style={styles.songArtist} numberOfLines={1}>

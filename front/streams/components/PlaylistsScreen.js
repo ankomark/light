@@ -21,6 +21,9 @@ import { TrackListSkeleton } from './SkeletonLoader';
 import PlaylistCover from './PlaylistCover';
 import TrackRail from './TrackRail';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
 
 const VIS_ICON = { private: 'lock-closed', unlisted: 'link', public: 'globe-outline' };
@@ -49,6 +52,8 @@ const Shortcut = ({ icon, iconBg, title, sub, onPress, covers }) => (
 
 const PlaylistsScreen = () => {
   const { t } = useI18n();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(40);
   const navigation = useNavigation();
   const { currentUser } = useAuth();
   const cacheKey = userKey(currentUser?.id, 'library');
@@ -166,6 +171,13 @@ const PlaylistsScreen = () => {
         sub={t('library.songCount', { n: downloads.length })}
         onPress={() => navigation.navigate('Downloads')}
       />
+      <Shortcut
+        icon="sparkles"
+        iconBg="#7C5CE0"
+        title={t('recap.short', { year: new Date().getFullYear() })}
+        sub={t('recap.shortSub')}
+        onPress={() => navigation.navigate('MusicRecap')}
+      />
 
       {recent.length ? (
         <TrackRail
@@ -187,8 +199,8 @@ const PlaylistsScreen = () => {
         data={playlists}
         keyExtractor={(item) => `pl_${item.id}`}
         renderItem={renderItem}
-        ListHeaderComponent={header}
-        contentContainerStyle={[styles.listContent, { paddingHorizontal: spacing.md + sideMargin }]}
+        ListHeaderComponent={<>{!online ? <OfflineBanner kind="offline" /> : null}{header}</>}
+        contentContainerStyle={[styles.listContent, { paddingHorizontal: spacing.md + sideMargin, paddingBottom: bottomSpace }]}
         refreshControl={(
           <RefreshControl
             refreshing={refreshing}
@@ -245,7 +257,7 @@ const PlaylistsScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  listContent: { paddingTop: spacing.sm, paddingBottom: 140, flexGrow: 1 },
+  listContent: { paddingTop: spacing.sm, flexGrow: 1 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
   title: { ...typography.h1, color: colors.textPrimary },
   newBtn: {

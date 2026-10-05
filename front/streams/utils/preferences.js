@@ -28,10 +28,14 @@ export const PREF_KEYS = {
   bibleVersion: 'bibleVersion', // the Bible version the reader opens in (utils/bibleVersions.js)
   bibleTextSize: 'bibleTextSize', // the Bible's reading size (px)
   wallpaperOn: 'wallpaperOn',   // the admins' wallpapers behind the pages, or the plain background
+  musicAutoplay: 'musicAutoplay',       // when a queue ends, keep playing similar songs
+  autoDownloadLiked: 'autoDownloadLiked', // save liked songs to the phone on Wi-Fi
 };
 
 export const DEFAULT_PREFERENCES = {
   [PREF_KEYS.autoplayVideo]: true,
+  [PREF_KEYS.musicAutoplay]: true,
+  [PREF_KEYS.autoDownloadLiked]: false,
   [PREF_KEYS.dataSaver]: false,
   [PREF_KEYS.audioQuality]: 'auto',
   [PREF_KEYS.downloadQuality]: 'standard',

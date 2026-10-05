@@ -17,6 +17,8 @@ const mockFetch = jest.fn(async () => mockLibrary);
 const mockNavigate = jest.fn();
 const mockPlayQueue = jest.fn();
 
+// The screen keeps its last rows clear of the gesture bar (no provider here).
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../services/api', () => ({ fetchArtistLibrary: (id) => mockFetch(id) }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate }),

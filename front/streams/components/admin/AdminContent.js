@@ -31,6 +31,8 @@ const TYPES = [
   { key: 'organization', label: 'adminContent.type.organization' },
   { key: 'bookclub', label: 'adminContent.type.bookclub' },
   { key: 'livebroadcast', label: 'adminContent.type.livebroadcast' },
+  { key: 'album', label: 'adminContent.type.album' },
+  { key: 'playlist', label: 'adminContent.type.playlist' },
 ];
 
 const AdminContent = () => {

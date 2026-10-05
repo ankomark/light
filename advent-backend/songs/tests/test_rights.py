@@ -3,6 +3,7 @@ takedowns that tell the uploader, and the uploader's dispute."""
 from unittest import mock
 
 from django.core import mail
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from songs import rights
@@ -29,6 +30,7 @@ class Base(APITestCase):
         self.client.force_authenticate(self.artist)
 
 
+@override_settings(R2_PUBLIC_BASE=R2)   # the uploads' made-up host
 class UploadTests(Base):
     def test_a_new_song_needs_the_rights_confirmation_and_records_when(self):
         base = {'title': 'New', 'audio_file': f'{R2}/n.mp3'}

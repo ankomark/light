@@ -122,7 +122,7 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
                     .order_by().values('artist').annotate(n=Count('id')).values('n')[:1],
                     output_field=IntegerField()), 0),
                 n_public_playlists=Coalesce(Subquery(
-                    Playlist.objects.filter(user=OuterRef('pk'), visibility=Playlist.PUBLIC)
+                    Playlist.objects.filter(user=OuterRef('pk'), visibility=Playlist.PUBLIC, is_removed=False)
                     .order_by().values('user').annotate(n=Count('id')).values('n')[:1],
                     output_field=IntegerField()), 0),
             )
@@ -156,7 +156,7 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         top = list(annotated_tracks(request.user).filter(artist=user).order_by('-views', '-created_at')[:5])
         albums = albums_with_counts(Album.objects.filter(artist=user))
         if user != request.user:
-            albums = albums.filter(track_count__gt=0)
+            albums = albums.filter(track_count__gt=0, is_removed=False)
         ctx = self.get_serializer_context()
         return Response({
             'verified': user.is_verified_artist,
@@ -187,7 +187,7 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
             return denied
         qs = Playlist.objects.filter(user=user)
         if user != request.user:
-            qs = qs.filter(visibility=Playlist.PUBLIC)
+            qs = qs.filter(visibility=Playlist.PUBLIC, is_removed=False)
         qs = with_playlist_counts(qs).order_by('-updated_at')
         return Response(PlaylistListSerializer(qs, many=True, context=self.get_serializer_context()).data)
 

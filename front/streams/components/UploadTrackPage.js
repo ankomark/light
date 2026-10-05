@@ -134,7 +134,7 @@ const TrackUploadForm = () => {
         setSongs((cur) => cur.map((s) => (s.key === p.key ? { ...s, durationMs } : s)));
       }));
     } catch (error) {
-      console.error('Error picking audio file:', error);
+      console.warn('Error picking audio file:', error?.message);
       setAudioError(t('track.selectAudioFailed'));
     }
   };
@@ -156,7 +156,7 @@ const TrackUploadForm = () => {
   const pickCoverImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -172,7 +172,7 @@ const TrackUploadForm = () => {
       setImageError('');
       setCoverImage({ uri: compressed.uri, mimeType: 'image/jpeg', name: `cover_${Date.now()}.jpg` });
     } catch (error) {
-      console.error('Error picking image:', error);
+      console.warn('Error picking image:', error?.message);
       setImageError(t('track.selectImageFailed'));
     }
   };
@@ -188,7 +188,7 @@ const TrackUploadForm = () => {
       soundRef.current = sound;
       setIsPlaying(true);
     } catch (error) {
-      console.error('Error playing preview:', error);
+      console.warn('Error playing preview:', error?.message);
       Alert.alert(t('track.playbackErrorTitle'), t('track.playbackErrorBody'));
     }
   };

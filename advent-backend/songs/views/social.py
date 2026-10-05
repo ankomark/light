@@ -1059,6 +1059,7 @@ class ReportViewSet(viewsets.ViewSet):
             'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
             'publication', 'chapter', 'bookreview', 'chaptercomment', 'product', 'productreview', 'grouppost',
             'videostudio', 'mediastation', 'servicereview', 'message', 'singlestopic', 'singlesreply',
+            'album', 'playlist',
         }
         if content_type not in valid_types:
             return Response({'error': f'content_type must be one of {list(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1364,7 +1365,7 @@ class ExploreViewSet(viewsets.ViewSet):
         # Albums with songs on them.
         if want('albums'):
             cands = list(
-                Album.objects.filter(fz.candidate_q(['title', 'artist__username'], query))
+                Album.objects.filter(fz.candidate_q(['title', 'artist__username'], query), is_removed=False)
                 .filter(has_live_song)
                 .exclude(artist_id__in=blocked).exclude(artist__is_deactivated=True)
                 .order_by('-created_at').values('id', 'title', 'artist__username')[:fz.CANDIDATES]
@@ -1380,7 +1381,8 @@ class ExploreViewSet(viewsets.ViewSet):
         if want('playlists'):
             live_item = Exists(PlaylistTrack.objects.filter(playlist=OuterRef('pk'), track__is_removed=False))
             cands = list(
-                Playlist.objects.filter(fz.candidate_q(['name', 'description'], query), visibility=Playlist.PUBLIC)
+                Playlist.objects.filter(fz.candidate_q(['name', 'description'], query), visibility=Playlist.PUBLIC,
+                                        is_removed=False)
                 .filter(live_item)
                 .exclude(user_id__in=hidden).exclude(user__is_deactivated=True)
                 .order_by('-updated_at').values('id', 'name', 'description')[:fz.CANDIDATES]

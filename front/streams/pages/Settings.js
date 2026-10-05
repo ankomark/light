@@ -1106,7 +1106,6 @@ const Settings = () => {
                 icon="wifi"
                 label={t('settings.playback.downloadWifiOnly')}
                 sub={t('settings.downloadWifiOnlySub')}
-                last
                 right={
                   <Switch
                     value={!!prefs[PREF_KEYS.downloadWifiOnly]}
@@ -1114,6 +1113,37 @@ const Settings = () => {
                     trackColor={{ false: colors.switchOff, true: colors.primary }}
                 ios_backgroundColor={colors.switchOff}
                     thumbColor={colors.white}
+                  />
+                }
+              />
+              <Row
+                icon="heart-circle-outline"
+                label={t('settings.playback.autoDownloadLiked')}
+                sub={t('settings.autoDownloadLikedSub')}
+                right={
+                  <Switch
+                    value={!!prefs[PREF_KEYS.autoDownloadLiked]}
+                    onValueChange={(v) => updatePref(PREF_KEYS.autoDownloadLiked, v)}
+                    trackColor={{ false: colors.switchOff, true: colors.primary }}
+                    ios_backgroundColor={colors.switchOff}
+                    thumbColor={colors.white}
+                    testID="auto-download-liked"
+                  />
+                }
+              />
+              <Row
+                icon="radio"
+                label={t('settings.playback.musicAutoplay')}
+                sub={t('settings.musicAutoplaySub')}
+                last
+                right={
+                  <Switch
+                    value={prefs[PREF_KEYS.musicAutoplay] !== false}
+                    onValueChange={(v) => updatePref(PREF_KEYS.musicAutoplay, v)}
+                    trackColor={{ false: colors.switchOff, true: colors.primary }}
+                    ios_backgroundColor={colors.switchOff}
+                    thumbColor={colors.white}
+                    testID="music-autoplay"
                   />
                 }
               />

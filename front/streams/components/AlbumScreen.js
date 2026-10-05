@@ -17,7 +17,11 @@ import PlaylistCover from './PlaylistCover';
 import VerifiedBadge from './VerifiedBadge';
 import { EditAlbumSheet, AlbumSongsSheet } from './AlbumSheets';
 import { TrackListSkeleton } from './SkeletonLoader';
+import ReportModal from './ReportModal';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
 
 const lengthOf = (t, ms) => {
@@ -29,6 +33,8 @@ const lengthOf = (t, ms) => {
 
 const AlbumScreen = () => {
   const { t } = useI18n();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(40);
   const navigation = useNavigation();
   const { params = {} } = useRoute();
   const { albumId } = params;
@@ -39,6 +45,7 @@ const AlbumScreen = () => {
   const [album, setAlbum] = useState(() => peekCache(cacheKey));
   const [failed, setFailed] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [picking, setPicking] = useState(false);
 
   const apply = useCallback((data) => {
@@ -150,7 +157,13 @@ const AlbumScreen = () => {
               <Ionicons name="pencil" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
-        ) : null}
+        ) : (
+          // Someone else's album: report it (a cover or title against the rules).
+          <TouchableOpacity style={styles.round} onPress={() => setReporting(true)}
+                            accessibilityRole="button" accessibilityLabel={t('album.report')} testID="album-report">
+            <Ionicons name="flag-outline" size={18} color={colors.textPrimary} />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -163,8 +176,8 @@ const AlbumScreen = () => {
         data={tracks}
         keyExtractor={(item) => `albtrack_${item.id}`}
         renderItem={({ item, index }) => <TrackItem track={item} index={index} onPlay={() => play(index)} />}
-        ListHeaderComponent={header}
-        contentContainerStyle={styles.list}
+        ListHeaderComponent={<>{!online ? <OfflineBanner kind="offline" /> : null}{header}</>}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomSpace }]}
         ListEmptyComponent={(
           <View style={styles.empty}>
             <MaterialIcons name="album" size={44} color={colors.textMuted} />
@@ -183,7 +196,9 @@ const AlbumScreen = () => {
           <EditAlbumSheet visible={editing} album={album} onClose={() => setEditing(false)} onSaved={apply} onDelete={handleDelete} />
           <AlbumSongsSheet visible={picking} album={album} userId={currentUser?.id} onClose={() => setPicking(false)} onSaved={apply} />
         </>
-      ) : null}
+      ) : (
+        <ReportModal visible={reporting} onClose={() => setReporting(false)} contentType="album" objectId={album.id} />
+      )}
     </>
   );
 };
@@ -191,7 +206,7 @@ const AlbumScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
-  list: { paddingBottom: 140, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  list: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   header: { alignItems: 'center', paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
   cover: { marginBottom: spacing.md },
   kind: { ...typography.caption, color: colors.textSecondary, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },

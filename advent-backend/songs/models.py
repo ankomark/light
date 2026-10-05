@@ -314,6 +314,8 @@ class Album(models.Model):
     description = models.CharField(max_length=300, blank=True, default='')
     cover_image = models.CharField(max_length=500, blank=True, default='')
     release_date = models.DateField(null=True, blank=True)
+    # Moderator takedown: hidden from everyone but the artist.
+    is_removed = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -343,6 +345,9 @@ class Playlist(models.Model):
     # four songs' covers.
     cover_image = models.CharField(max_length=500, blank=True, default='')
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default=PRIVATE)
+    # Moderator takedown (a public playlist's name, cover or description):
+    # hidden from everyone but its owner.
+    is_removed = models.BooleanField(default=False, db_index=True)
     tracks = models.ManyToManyField(Track, related_name='playlists', blank=True, through='PlaylistTrack')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

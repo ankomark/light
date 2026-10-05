@@ -18,9 +18,13 @@ import TrackItem from './TrackItem';
 import PlaylistCover from './PlaylistCover';
 import EditPlaylistSheet from './EditPlaylistSheet';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
 import { peekCache, readCache, writeCache } from '../utils/screenCache';
 import { TrackListSkeleton } from './SkeletonLoader';
+import ReportModal from './ReportModal';
 
 const VIS_ICON = { private: 'lock-closed', unlisted: 'link', public: 'globe-outline' };
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
@@ -42,6 +46,8 @@ const move = (list, from, to) => {
 
 const PlaylistDetail = () => {
   const { t } = useI18n();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(40);
   const navigation = useNavigation();
   const route = useRoute();
   const { playQueue } = usePlayer();
@@ -56,6 +62,7 @@ const PlaylistDetail = () => {
   const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [reporting, setReporting] = useState(false);
   // Reordering: a working copy of the order until Done.
   const [order, setOrder] = useState(null);
 
@@ -207,7 +214,12 @@ const PlaylistDetail = () => {
                 <Ionicons name="pencil" size={18} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
-          ) : null}
+          ) : (
+            <TouchableOpacity style={styles.roundBtn} onPress={() => setReporting(true)}
+                              accessibilityRole="button" accessibilityLabel={t('playlist.report')} testID="playlist-report">
+              <Ionicons name="flag-outline" size={18} color={colors.textPrimary} />
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </View>
@@ -277,7 +289,7 @@ const PlaylistDetail = () => {
             onRemoveFromPlaylist={isOwner ? () => handleRemove(item.id) : undefined}
           />
         )}
-        ListHeaderComponent={header}
+        ListHeaderComponent={<>{!online ? <OfflineBanner kind="offline" /> : null}{header}</>}
         ListEmptyComponent={
           <View style={styles.empty}>
             <MaterialIcons name="queue-music" size={48} color={colors.textMuted} />
@@ -285,7 +297,7 @@ const PlaylistDetail = () => {
             {isOwner ? <Text style={styles.emptySub}>{t('playlist.addFromMusic')}</Text> : null}
           </View>
         }
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: bottomSpace }]}
       />
       {isOwner ? (
         <EditPlaylistSheet
@@ -295,6 +307,8 @@ const PlaylistDetail = () => {
           onSaved={apply}
           onDelete={handleDelete}
         />
+      ) : playlist ? (
+        <ReportModal visible={reporting} onClose={() => setReporting(false)} contentType="playlist" objectId={playlist.id} />
       ) : null}
     </>
   );
@@ -303,7 +317,7 @@ const PlaylistDetail = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
-  listContent: { paddingBottom: 140, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  listContent: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm, alignItems: 'center' },
   bigCover: { marginBottom: spacing.md },
   title: { ...typography.h1, color: colors.textPrimary, textAlign: 'center' },

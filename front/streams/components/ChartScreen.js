@@ -18,10 +18,15 @@ import formatCount from '../utils/formatCount';
 import { countryName } from '../utils/region';
 import { TrackListSkeleton } from './SkeletonLoader';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
 
 const ChartScreen = () => {
   const { t } = useI18n();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(40);
   const navigation = useNavigation();
   const { params = {} } = useRoute();
   const chart = params.chart === 'trending' ? 'trending' : 'top';
@@ -83,8 +88,8 @@ const ChartScreen = () => {
       style={styles.container}
       data={rows}
       keyExtractor={(item) => `chart_${item.id}`}
-      ListHeaderComponent={header}
-      contentContainerStyle={styles.list}
+      ListHeaderComponent={<>{!online ? <OfflineBanner kind="offline" /> : null}{header}</>}
+      contentContainerStyle={[styles.list, { paddingBottom: bottomSpace }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} colors={[colors.primary]} />}
       ListEmptyComponent={(
         <View style={styles.empty}>
@@ -118,7 +123,7 @@ const ChartScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  list: { paddingBottom: 140, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  list: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { ...typography.h1, color: colors.textPrimary },
   sub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },

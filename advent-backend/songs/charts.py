@@ -1,7 +1,9 @@
 """Music charts, from listens (PlayEvent) — not likes.
 
-  trending — plays this week
-  top      — plays over the last four weeks ("Top 50")
+  trending — listened to this week
+  top      — listened to over the last four weeks ("Top 50")
+
+ranked by how many people listened (then plays),
 
 each for the whole world and for every country with enough listening (the
 country is the listener's phone region). A play is a counted listen (30s+,
@@ -35,11 +37,16 @@ LIVE_CACHE_SECONDS = 15 * 60
 def compute(chart, country='', now=None):
     """[(track_id, plays)] for a chart, best first."""
     now = now or timezone.now()
-    qs = PlayEvent.objects.filter(counted=True, started_at__gte=now - WINDOWS[chart], track__is_removed=False)
+    qs = PlayEvent.objects.filter(counted=True, started_at__gte=now - WINDOWS[chart], track__is_removed=False,
+                                  track__artist__is_deactivated=False)
     if country:
         qs = qs.filter(country=country)
-    rows = (qs.values('track_id').annotate(n=Count('id'), last=Max('started_at'))
-            .order_by('-n', '-last', 'track_id')[:SIZE])
+    # Ranked by how many PEOPLE listened, then by plays: one listener looping
+    # a song (up to the daily cap the plays endpoint allows) can't carry it
+    # up the chart. The number shown stays the plays.
+    rows = (qs.values('track_id').annotate(listeners=Count('user', distinct=True), n=Count('id'),
+                                           last=Max('started_at'))
+            .order_by('-listeners', '-n', '-last', 'track_id')[:SIZE])
     return [(r['track_id'], r['n']) for r in rows]
 
 

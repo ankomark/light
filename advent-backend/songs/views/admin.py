@@ -4,7 +4,7 @@ from django.db.models import OuterRef, Subquery
 from django.db.models.functions import TruncDate
 from rest_framework.throttling import ScopedRateThrottle
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITIES, BookReview, ChapterComment, ServiceReview, Message, SinglesTopic, SinglesReply
-from ..models import BookClub, LiveBroadcast, Organization
+from ..models import BookClub, LiveBroadcast, Organization, Album, Playlist
 from .. import rights
 from ..signals import sync_removal_likes
 from ..serializers.admin import build_report_targets
@@ -30,6 +30,7 @@ from ..serializers import (
     AdminContentBookClubSerializer,
     AdminContentLiveBroadcastSerializer,
 )
+from ..serializers.admin import AdminContentAlbumSerializer, AdminContentPlaylistSerializer
 
 # Strikes at/after which a warning auto-escalates to a temporary suspension.
 STRIKE_SUSPEND_THRESHOLD = 3
@@ -88,6 +89,8 @@ _CONTENT_MODELS = {
     'organization': Organization,     # a church, ministry or publisher page
     'bookclub': BookClub,             # a reading club (its group stays)
     'livebroadcast': LiveBroadcast,   # a live room: taking it down also ends it
+    'album': Album,                   # an artist's album (its songs stay; each is its own)
+    'playlist': Playlist,             # a listener's (public) playlist
 }
 
 
@@ -99,6 +102,7 @@ _AUTHOR_FIELD = {
     'videostudio': 'created_by', 'mediastation': 'created_by', 'servicereview': 'user', 'message': 'sender',
     'singlestopic': 'author__user', 'singlesreply': 'author__user',
     'organization': 'created_by', 'bookclub': 'created_by', 'livebroadcast': 'host',
+    'album': 'artist', 'playlist': 'user',
 }
 _CONTENT_WORD = {
     'post': 'post', 'comment': 'comment', 'trackcomment': 'comment', 'group': 'group', 'story': 'story',
@@ -107,6 +111,7 @@ _CONTENT_WORD = {
     'mediastation': 'media station', 'servicereview': 'review', 'message': 'message',
     'singlestopic': 'singles question', 'singlesreply': 'singles reply',
     'organization': 'organization page', 'bookclub': 'book club', 'livebroadcast': 'live broadcast',
+    'album': 'album', 'playlist': 'playlist',
 }
 
 
@@ -800,6 +805,8 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         'organization': ('created_by', AdminContentOrganizationSerializer, ['name__icontains', 'location__icontains']),
         'bookclub':     ('created_by', AdminContentBookClubSerializer, ['group__name__icontains', 'publication__title__icontains']),
         'livebroadcast': ('host', AdminContentLiveBroadcastSerializer, ['title__icontains', 'host__username__icontains']),
+        'album':        ('artist', AdminContentAlbumSerializer,      ['title__icontains', 'artist__username__icontains']),
+        'playlist':     ('user',   AdminContentPlaylistSerializer,   ['name__icontains', 'description__icontains', 'user__username__icontains']),
     }
 
     def list(self, request):

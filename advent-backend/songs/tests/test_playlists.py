@@ -1,6 +1,7 @@
 """Playlists with an order, a description, a cover and a visibility; who may
 open one; the profile's Playlists tab; and the Library screen's endpoint."""
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
@@ -94,6 +95,7 @@ class OrderTests(Base):
         self.assertEqual(measure(), few)
 
 
+@override_settings(R2_PUBLIC_BASE=R2)   # the cover's made-up host is 'our storage' here
 class DetailsTests(Base):
     def test_create_with_details_then_edit_them(self):
         data = self.create(description='  For the drive to church ', visibility='public')

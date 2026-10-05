@@ -1,5 +1,5 @@
 // src/components/FavoritesPage.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,15 @@ import TrackItem from './TrackItem';
 import useGridColumns from '../utils/useGridColumns';
 import { colors, spacing, typography, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
+
+// Liked songs and saved posts change only when you change them: a day-old
+// copy is a fine thing to open on while the fresh one loads.
+const FAVORITES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const GRID_PAD = 2;
 
@@ -52,29 +61,51 @@ const FavoritesPage = () => {
   const { cols, tileSize } = useGridColumns({
     target: 124, min: 3, max: 6, horizontalPadding: GRID_PAD * 2, gap: GRID_PAD,
   });
+  const { currentUser } = useAuth();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(30);
+  const cacheKey = userKey(currentUser?.id, 'favorites');
   const [tab, setTab] = useState('music'); // 'music' | 'posts'
-  const [favoriteTracks, setFavoriteTracks] = useState([]);
-  const [savedPosts, setSavedPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Open on the last copy (this session's, then the phone's); `loading` means
+  // "nothing to show yet", never "a request is running".
+  const first = peekCache(cacheKey);
+  const [favoriteTracks, setFavoriteTracks] = useState(() => first?.tracks ?? []);
+  const [savedPosts, setSavedPosts] = useState(() => first?.posts ?? []);
+  const [loading, setLoading] = useState(() => !first);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const [tracks, posts] = await Promise.all([
-        getFavoriteTracks().catch(() => []),
-        fetchSavedPosts().catch(() => []),
-      ]);
-      setFavoriteTracks(Array.isArray(tracks) ? tracks : []);
-      setSavedPosts(Array.isArray(posts) ? posts : []);
-    } catch {
-      setError(t('favorites.loadFailed'));
-    } finally {
+  useEffect(() => {
+    let cancelled = false;
+    readCache(cacheKey, FAVORITES_MAX_AGE_MS).then((saved) => {
+      if (cancelled || !saved) return;
+      setFavoriteTracks((prev) => (prev.length ? prev : saved.tracks || []));
+      setSavedPosts((prev) => (prev.length ? prev : saved.posts || []));
       setLoading(false);
-      setRefreshing(false);
+    });
+    return () => { cancelled = true; };
+  }, [cacheKey]);
+
+  // Each half on its own: a failed one keeps what was showing (and says so)
+  // instead of becoming an empty "nothing saved yet" - which is what offline
+  // used to look like.
+  const load = useCallback(async () => {
+    setError(null);
+    const [tracks, posts] = await Promise.allSettled([getFavoriteTracks(), fetchSavedPosts()]);
+    const next = {};
+    if (tracks.status === 'fulfilled' && Array.isArray(tracks.value)) {
+      setFavoriteTracks(tracks.value);
+      next.tracks = tracks.value;
     }
-  }, [t]);
+    if (posts.status === 'fulfilled' && Array.isArray(posts.value)) {
+      setSavedPosts(posts.value);
+      next.posts = posts.value;
+    }
+    if (tracks.status === 'rejected' || posts.status === 'rejected') setError(t('favorites.loadFailed'));
+    if (next.tracks && next.posts) writeCache(cacheKey, next);
+    setLoading(false);
+    setRefreshing(false);
+  }, [t, cacheKey]);
 
   // Reload on focus so items favorited/saved elsewhere show up immediately.
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -103,6 +134,9 @@ const FavoritesPage = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.header}>{t('profile.myFavorites')}</Text>
+      {(!online || error) && (favoriteTracks.length > 0 || savedPosts.length > 0) ? (
+        <OfflineBanner kind={!online ? 'offline' : 'failed'} onRetry={handleRefresh} />
+      ) : null}
 
       <View style={styles.tabs}>
         <TouchableOpacity
@@ -112,7 +146,7 @@ const FavoritesPage = () => {
         >
           <Ionicons name="musical-notes" size={16} color={tab === 'music' ? colors.white : colors.textSecondary} />
           <Text style={[styles.tabText, tab === 'music' && styles.tabTextActive]}>
-            Music ({favoriteTracks.length})
+            {t('favorites.tabMusic', { n: favoriteTracks.length })}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -122,7 +156,7 @@ const FavoritesPage = () => {
         >
           <Ionicons name="bookmark" size={16} color={tab === 'posts' ? colors.white : colors.textSecondary} />
           <Text style={[styles.tabText, tab === 'posts' && styles.tabTextActive]}>
-            Posts ({savedPosts.length})
+            {t('favorites.tabPosts', { n: savedPosts.length })}
           </Text>
         </TouchableOpacity>
       </View>
@@ -143,7 +177,7 @@ const FavoritesPage = () => {
           renderItem={({ item }) => (
             <TrackItem track={item} onDelete={handleTrackRemoved} onRefresh={load} />
           )}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: bottomSpace }]}
           refreshControl={refreshControl}
           ListEmptyComponent={
             <EmptyState
@@ -185,12 +219,12 @@ const FavoritesPage = () => {
             </TouchableOpacity>
           )}
           columnWrapperStyle={{ gap: GRID_PAD }}
-          contentContainerStyle={[styles.gridContent, savedPosts.length === 0 && { flexGrow: 1 }]}
+          contentContainerStyle={[styles.gridContent, { paddingBottom: bottomSpace }, savedPosts.length === 0 && { flexGrow: 1 }]}
           refreshControl={refreshControl}
           ListEmptyComponent={
             <EmptyState
               icon="bookmark-outline"
-              title={error ? t('common.somethingWrong') : 'No saved posts yet'}
+              title={error ? t('common.somethingWrong') : t('favorites.noPosts')}
               text={error || t('favorites.noPostsSub')}
             />
           }
@@ -250,12 +284,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   list: {
-    paddingBottom: 110,
     flexGrow: 1,
   },
   gridContent: {
     padding: GRID_PAD,
-    paddingBottom: 110,
   },
   cell: {
     marginBottom: GRID_PAD,

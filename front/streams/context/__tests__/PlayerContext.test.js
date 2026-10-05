@@ -28,6 +28,10 @@ jest.mock('../../services/audioPlayer', () => ({
   }),
 }));
 
+// "More like this" for autoplay radio: answered here, never the network.
+const mockSimilar = jest.fn(async () => []);
+jest.mock('../../services/api', () => ({ fetchSimilarTracks: (...a) => mockSimilar(...a) }));
+
 // Listens go to the reporter; capture them instead of hitting the network.
 jest.mock('../../services/playReporter', () => ({
   reportPlay: jest.fn(),
@@ -263,4 +267,71 @@ test('a slow load that finishes after a newer one is thrown away, even for the s
   await act(async () => { await result.current.togglePlay(); });
   expect(fast.pauseAsync).toHaveBeenCalled();    // the controls drive the kept one
   expect(slow.pauseAsync).not.toHaveBeenCalled();
+});
+
+describe('when a song cannot play', () => {
+  const online = require('../../hooks/useOnline');
+  const downloads = require('../../utils/downloads');
+  afterEach(() => { online.__setOnline(true); jest.useRealTimers(); jest.restoreAllMocks(); });
+
+  test('loading lasts until the sound has loaded, and a load that never comes gives up', async () => {
+    jest.useFakeTimers();
+    const { result } = renderHook(() => usePlayer(), { wrapper });
+    await act(async () => { await result.current.playTrack(TRACK(1)); });
+    expect(result.current.isLoading).toBe(true);              // created is not loaded
+    await act(async () => { jest.advanceTimersByTime(20001); });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.loadError).toBe('failed');
+    expect(mockSound.unloadAsync).toHaveBeenCalled();
+  });
+
+  test('a load that arrives clears loading, and no error shows', async () => {
+    const { result } = renderHook(() => usePlayer(), { wrapper });
+    await act(async () => { await result.current.playTrack(TRACK(1)); });
+    await emit({ isPlaying: true, positionMillis: 0, durationMillis: 1000 });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.loadError).toBe(null);
+  });
+
+  test('offline, a song not on the phone says so at once instead of spinning', async () => {
+    online.__setOnline(false);
+    const { result } = renderHook(() => usePlayer(), { wrapper });
+    await act(async () => { await result.current.playTrack(TRACK(1)); });
+    expect(createSound).not.toHaveBeenCalled();
+    expect(result.current.loadError).toBe('offline');
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  test('offline, next steps over songs that are not downloaded', async () => {
+    const { result } = renderHook(() => usePlayer(), { wrapper });
+    await act(async () => { result.current.playQueue([TRACK(1), TRACK(2), TRACK(3)], 0, { shuffle: false }); });
+    online.__setOnline(false);
+    jest.spyOn(downloads, 'isDownloaded').mockImplementation((id) => id === 3);
+    jest.spyOn(downloads, 'getLocalUri').mockImplementation((id) => (id === 3 ? 'file:///3.m4a' : null));
+    await act(async () => { result.current.playNext(); });
+    expect(result.current.currentTrack.id).toBe(3);
+    expect(createSound).toHaveBeenLastCalledWith({ uri: 'file:///3.m4a' }, expect.anything(), expect.any(Function));
+  });
+});
+
+describe('autoplay radio', () => {
+  test('when the queue runs out, similar songs join it and play on', async () => {
+    mockSimilar.mockResolvedValueOnce([TRACK(1), TRACK(7), { id: 8, title: 'no audio' }, TRACK(9)]);
+    const { result } = renderHook(() => usePlayer(), { wrapper });
+    await act(async () => { result.current.playQueue([TRACK(1)], 0, { shuffle: false }); });
+    await act(async () => { mockAudioState.onStatus?.({ isLoaded: true, didJustFinish: true }); });
+    await waitFor(() => expect(result.current.currentTrack.id).toBe(7));
+    expect(mockSimilar).toHaveBeenCalledWith(1);
+    // Already in the queue (1) and unplayable (8) left out; 9 is up next.
+    expect(result.current.getUpNext().map((u) => u.track.id)).toEqual([9]);
+  });
+
+  test('nothing similar: it stops at the start, as before', async () => {
+    mockSimilar.mockResolvedValueOnce([]);
+    const { result } = renderHook(() => usePlayer(), { wrapper });
+    await act(async () => { result.current.playQueue([TRACK(1)], 0, { shuffle: false }); });
+    await act(async () => { mockAudioState.onStatus?.({ isLoaded: true, didJustFinish: true }); });
+    await waitFor(() => expect(mockSound.setStatusAsync).toHaveBeenCalledWith({ shouldPlay: false, positionMillis: 0 }));
+    expect(result.current.currentTrack.id).toBe(1);
+  });
 });

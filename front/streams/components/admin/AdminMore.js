@@ -33,6 +33,7 @@ const TOOLS = [
   ['manage_puzzles', 'AdminPuzzleThemes', 'puzzle-outline', 'puzzles'],
   ['manage_wallpapers', 'AdminWallpapers', 'image-multiple-outline', 'wallpapers'],
   ['view_analytics', 'AdminAnalytics', 'chart-line', 'analytics'],
+  ['view_analytics', 'AdminMusic', 'music-note-eighth', 'music'],
   ['view_audit_log', 'AdminLogs', 'history', 'audit'],
   ['super', 'AdminRoles', 'shield-key-outline', 'roles'],
 ];

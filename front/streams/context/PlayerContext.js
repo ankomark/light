@@ -21,7 +21,10 @@ import { readCache, writeCache, dropCache, userKey } from '../utils/screenCache'
 import { usePreferences } from './PreferencesContext';
 import { useOptionalAuth } from './useAuth';
 import { pickAudioSource } from '../utils/audioQuality';
-import { getLocalUri, getLocalCover } from '../utils/downloads';
+import { getLocalUri, getLocalCover, isDownloaded } from '../utils/downloads';
+import { isOnline, onOnlineChange } from '../hooks/useOnline';
+import { fetchSimilarTracks } from '../services/api';
+import toQueueTrack from '../utils/queueTrack';
 
 // Two contexts, deliberately.
 //
@@ -65,6 +68,12 @@ const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 // Longer queues are saved as just the current song (a 2,000-song shuffle
 // doesn't belong in storage).
 const SESSION_MAX_QUEUE = 300;
+// A song that hasn't loaded by then isn't coming (a dead link, a connection
+// that dropped): say so instead of a spinner forever. The audio layer never
+// throws for these - the player is created at once and simply never loads.
+const LOAD_TIMEOUT_MS = 20000;
+// Autoplay radio: how many similar songs join the queue when it runs out.
+const RADIO_BATCH = 20;
 
 /**
  * Global single-instance audio player with a play queue.
@@ -100,6 +109,10 @@ export const PlayerProvider = ({ children }) => {
   // throws its sound away. (Comparing song ids wasn't enough — two loads of
   // the same song, a double tap, both passed and both played.)
   const loadSeqRef = useRef(0);
+  // The load in flight has produced a playable sound (its first loaded
+  // status), and the timer that gives up on it.
+  const loadedRef = useRef(false);
+  const loadWatchRef = useRef(null);
 
   // Playback prefs (audio quality / data saver). Mirrored to a ref so the load
   // path reads current values without re-creating the loadAndPlay callback.
@@ -141,6 +154,12 @@ export const PlayerProvider = ({ children }) => {
   // Bumped when the queue changes, so the queue screen re-reads getUpNext().
   const [queueVersion, setQueueVersion] = useState(0);
   const [sleepTimer, setSleepTimerState] = useState(null);
+  // Why the current song isn't playing: 'offline' (not downloaded, no
+  // connection) or 'failed' (it didn't load). Tapping play tries again.
+  const [loadError, setLoadError] = useState(null);
+
+  // NetInfo only reports to subscribers: make sure isOnline() is live.
+  useEffect(() => onOnlineChange(() => {}), []);
 
   // Read position/duration through refs. As dependencies they would re-create
   // the callbacks below on every 500ms tick, which would rebuild the "stable"
@@ -246,6 +265,11 @@ export const PlayerProvider = ({ children }) => {
 
   const onStatus = useCallback((status) => {
     if (!status.isLoaded) return;
+    if (!loadedRef.current) {
+      loadedRef.current = true;
+      clearTimeout(loadWatchRef.current);
+      setIsLoading(false);
+    }
     // A restored session (or a resumed song) starts where it left off: seek
     // on the first loaded tick, then play.
     const pending = pendingStartRef.current;
@@ -287,6 +311,21 @@ export const PlayerProvider = ({ children }) => {
     }
   }, [maybePreload, saveSession, endListen, clearSleep]);
 
+  /** The song at `seq` didn't load: stop trying, say why. Its sound is let
+   *  go, so play (togglePlay -> resumeCurrent) loads it afresh. */
+  const failLoad = useCallback((seq, kind) => {
+    if (seq !== loadSeqRef.current) return;
+    clearTimeout(loadWatchRef.current);
+    listenRef.current = null;            // nothing was heard: not a listen
+    const s = soundRef.current;
+    soundRef.current = null;
+    s?.unloadAsync().catch(() => {});
+    setIsLoading(false);
+    setIsPlaying(false);
+    setIsBuffering(false);
+    setLoadError(kind);
+  }, []);
+
   /** Tear down any current sound and load + play the given track.
    *  `startAtMs` resumes partway (a restored session). */
   const loadAndPlay = useCallback(
@@ -294,6 +333,9 @@ export const PlayerProvider = ({ children }) => {
       if (!track?.audio_file) return;
       const seq = ++loadSeqRef.current;
       endListen();
+      clearTimeout(loadWatchRef.current);
+      loadedRef.current = false;
+      setLoadError(null);
       setIsLoading(true);
       setCurrentTrack(track);
       currentTrackRef.current = track;
@@ -314,12 +356,20 @@ export const PlayerProvider = ({ children }) => {
         // Downloaded? Play the file on the phone: instant, and it works with
         // no connection. Quality / data-saver only apply to streaming.
         const src = streamSourceFor(track);
+        // Offline and not on the phone: it can't play - say so now rather
+        // than after a long wait.
+        if (!src.local && !isOnline()) {
+          dropPreload();
+          failLoad(seq, 'offline');
+          return;
+        }
         let sound = null;
         const pre = preloadRef.current;
         preloadRef.current = null;
         if (pre?.sound && pre.id === track.id && pre.uri === src.uri && !startAtMs) {
           // Already loaded while the last song finished: take it over.
           sound = pre.sound;
+          loadedRef.current = true;          // it loaded while the last one played
           sound.setOnPlaybackStatusUpdate(onStatus);
           await sound.playAsync();
         } else {
@@ -337,6 +387,11 @@ export const PlayerProvider = ({ children }) => {
           return;
         }
         soundRef.current = sound;
+        if (!loadedRef.current) {
+          loadWatchRef.current = setTimeout(() => {
+            if (!loadedRef.current) failLoad(seq, isOnline() ? 'failed' : 'offline');
+          }, LOAD_TIMEOUT_MS);
+        }
         startListenFor(track, startAtMs);
         saveSession(startAtMs);
         sound.setLockScreen?.(
@@ -349,12 +404,16 @@ export const PlayerProvider = ({ children }) => {
           { showSeekForward: true, showSeekBackward: true },
         );
       } catch (error) {
-        console.error('Player: failed to load track', error);
+        console.warn('Player: failed to load track', error?.message);
+        failLoad(seq, isOnline() ? 'failed' : 'offline');
       } finally {
-        if (seq === loadSeqRef.current) setIsLoading(false);
+        // Loading ends when the sound reports it is loaded (onStatus), or on
+        // failure (failLoad) - not when the player object exists, which is
+        // at once and says nothing about whether it will ever play.
+        if (seq === loadSeqRef.current && loadedRef.current) setIsLoading(false);
       }
     },
-    [onStatus, endListen, streamSourceFor, startListenFor, saveSession]
+    [onStatus, endListen, streamSourceFor, startListenFor, saveSession, failLoad, dropPreload]
   );
 
   /** Load the track at the given cursor position within the playback order. */
@@ -427,16 +486,61 @@ export const PlayerProvider = ({ children }) => {
     [playQueue, resumeCurrent]
   );
 
+  // The next (or previous) position to play. Offline, songs that aren't on
+  // the phone are stepped over - the queue carries on with what can play.
+  const stepPos = useCallback((step) => {
+    const len = orderRef.current.length;
+    const first = step(len, posRef.current, repeatRef.current);
+    if (first === null || isOnline()) return first;
+    let p = first;
+    for (let tries = 0; tries < len; tries += 1) {
+      const track = queueRef.current[orderRef.current[p]];
+      if (track && isDownloaded(track.id)) return p;
+      const q = step(len, p, repeatRef.current);
+      if (q === null || q === posRef.current || q === first) break;   // nothing further
+      p = q;
+    }
+    // Nothing on the phone: the plain next one, which says it's offline.
+    return first;
+  }, []);
+
   const playNext = useCallback(() => {
-    const p = nextPos(orderRef.current.length, posRef.current, repeatRef.current);
+    const p = stepPos(nextPos);
     if (p !== null) loadAt(p);
-  }, [loadAt]);
+  }, [loadAt, stepPos]);
 
   const playPrevious = useCallback(() => {
-    const p = prevPos(orderRef.current.length, posRef.current, repeatRef.current);
+    const p = stepPos(prevPos);
     if (p !== null) loadAt(p);
     else soundRef.current?.setPositionAsync(0).catch(() => {}); // restart current
-  }, [loadAt]);
+  }, [loadAt, stepPos]);
+
+  // Autoplay radio: the queue ran out - add songs like the last one ("More
+  // like this") and carry on, the way a radio station would. Resolves true
+  // when songs were added. Off in Settings, offline, or nothing similar: false.
+  const radioRef = useRef(false);
+  const extendWithRadio = useCallback(async () => {
+    const seed = currentTrackRef.current;
+    if (!seed || radioRef.current || prefsRef.current?.musicAutoplay === false || !isOnline()) return false;
+    radioRef.current = true;
+    try {
+      const rows = await fetchSimilarTracks(seed.id);
+      const list = Array.isArray(rows) ? rows : (rows?.results || []);
+      const have = new Set(queueRef.current.map((tr) => tr?.id));
+      const add = list.filter((tr) => tr?.audio_file && !have.has(tr.id)).slice(0, RADIO_BATCH).map(toQueueTrack);
+      if (!add.length) return false;
+      const base = queueRef.current.length;
+      queueRef.current = [...queueRef.current, ...add];
+      orderRef.current = [...orderRef.current, ...add.map((_, i) => base + i)];
+      syncNavState();
+      bumpQueue();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      radioRef.current = false;
+    }
+  }, [syncNavState, bumpQueue]);
 
   // What happens when a track finishes on its own.
   advanceRef.current = () => {
@@ -461,9 +565,19 @@ export const PlayerProvider = ({ children }) => {
       if (currentTrackRef.current) startListenFor(currentTrackRef.current, 0);
       return;
     }
-    const p = nextPos(orderRef.current.length, posRef.current, repeatRef.current);
+    const p = stepPos(nextPos);
     if (p !== null) {
       loadAt(p);
+    } else if (repeatRef.current === 'off' && prefsRef.current?.musicAutoplay !== false && isOnline()) {
+      // End of queue: keep going with similar songs (autoplay radio) - unless
+      // the listener started something else while they were being found.
+      const seq = loadSeqRef.current;
+      const at = posRef.current;
+      extendWithRadio().then((added) => {
+        if (seq !== loadSeqRef.current) return;
+        if (added) loadAt(at + 1);
+        else stopAtStart();
+      });
     } else {
       // End of queue: stop at the start, paused.
       stopAtStart();
@@ -619,6 +733,8 @@ export const PlayerProvider = ({ children }) => {
 
   const resetState = useCallback(() => {
     loadSeqRef.current += 1; // a load still in flight must not come back to life
+    clearTimeout(loadWatchRef.current);
+    setLoadError(null);
     currentIdRef.current = null;
     currentTrackRef.current = null;
     queueRef.current = [];
@@ -654,7 +770,10 @@ export const PlayerProvider = ({ children }) => {
       allowsRecordingIOS: false,
       staysActiveInBackground: true,
       playsInSilentModeIOS: true,
-      shouldDuckAndroid: true,
+      // Not mixed with other apps' audio: a music player owns the audio
+      // session, which is also what lets iOS show it on the lock screen and
+      // in Control Center (a mixable session gets no Now Playing controls).
+      interruptionMode: 'doNotMix',
       playThroughEarpieceAndroid: false,
     }).catch(() => {});
 
@@ -732,6 +851,7 @@ export const PlayerProvider = ({ children }) => {
     isPlaying,
     isLoading,
     isBuffering,
+    loadError,
     repeatMode,
     shuffle,
     hasNext,
@@ -758,7 +878,7 @@ export const PlayerProvider = ({ children }) => {
     playFromQueue,
     setSleepTimer,
   }), [
-    currentTrack, isPlaying, isLoading, isBuffering, repeatMode, shuffle,
+    currentTrack, isPlaying, isLoading, isBuffering, loadError, repeatMode, shuffle,
     hasNext, hasPrev, queueVersion, sleepTimer, playTrack, playQueue, playNext,
     playPrevious, togglePlay, pause, toggleShuffle, cycleRepeat, skip, beginSeek,
     seekTo, closePlayer, playNextInQueue, addToQueue, getUpNext, removeFromQueue,

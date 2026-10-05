@@ -120,9 +120,9 @@ const TrackItem = React.memo(function TrackItem({
 
   const handleDelete = () => {
     Alert.alert(t('trackItem.deleteTitle'), t('trackItem.deleteConfirm'), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: async () => {
           try {
@@ -171,7 +171,11 @@ const TrackItem = React.memo(function TrackItem({
         sourceUrl,
         fileUri,
         {},
-        (p) => setDownloadProgress((p.totalBytesWritten / p.totalBytesExpectedToWrite) * 100)
+        // The size isn't always known (a streamed response): no "NaN%".
+        (p) => {
+          const total = p.totalBytesExpectedToWrite;
+          if (total > 0) setDownloadProgress(Math.min(100, (p.totalBytesWritten / total) * 100));
+        }
       );
       const { uri } = await downloadResumable.downloadAsync();
       // Into the phone's music (Android) or the share sheet (iOS) — without the
@@ -181,10 +185,11 @@ const TrackItem = React.memo(function TrackItem({
       FileSystem.deleteAsync(downloadDir, { idempotent: true }).catch(() => {});
       if (where === 'library') Alert.alert(t('market.success'), t('trackItem.downloadedOk'));
     } catch (error) {
-      setDownloadError(error.message);
-      Alert.alert(t('trackItem.downloadFailedTitle'), error.message || t('trackItem.downloadFailedBody'), [
-        { text: 'OK' },
-        { text: 'Retry', onPress: handleDownload },
+      setDownloadError(error?.message);
+      // In words, never the raw error text.
+      Alert.alert(t('trackItem.downloadFailedTitle'), t('trackItem.downloadFailedBody'), [
+        { text: t('common.close') },
+        { text: t('common.retry'), onPress: handleDownload },
       ]);
     } finally {
       setIsDownloading(false);
@@ -301,19 +306,25 @@ const TrackItem = React.memo(function TrackItem({
         </View>
       </View>
 
-      <AddToPlaylistModal
-        visible={playlistModalVisible}
-        onClose={() => setPlaylistModalVisible(false)}
-        trackId={track.id}
-        trackTitle={track.title}
-      />
+      {/* Mounted only while open, like the lyrics below: two hidden modals
+          for every row on screen is weight nobody has asked for. */}
+      {playlistModalVisible && (
+        <AddToPlaylistModal
+          visible
+          onClose={() => setPlaylistModalVisible(false)}
+          trackId={track.id}
+          trackTitle={track.title}
+        />
+      )}
 
-      <ReportModal
-        visible={reportVisible}
-        onClose={() => setReportVisible(false)}
-        contentType="track"
-        objectId={track.id}
-      />
+      {reportVisible && (
+        <ReportModal
+          visible
+          onClose={() => setReportVisible(false)}
+          contentType="track"
+          objectId={track.id}
+        />
+      )}
 
       {/* Floating lyrics page */}
       {/* Mounted only while open. A Modal per row, times every visible row,

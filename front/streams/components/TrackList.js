@@ -7,7 +7,8 @@ import {
   StyleSheet, 
   ActivityIndicator, 
   TouchableOpacity,
-  RefreshControl 
+  RefreshControl,
+  Platform,
 } from "react-native";
 import { Image } from 'expo-image';
 import { useFocusEffect , useNavigation } from '@react-navigation/native';
@@ -27,6 +28,9 @@ import { on, EVENTS } from '../utils/appEvents';
 import { useContentWidth, FONT_SCALE } from '../utils/layout';
 import { colors } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 
 // The playlists' own coloured artwork (it was the menu's Playlists row).
 const PLAYLISTS_ART = require('../assets/playlists-icon.png');
@@ -71,6 +75,11 @@ const TrackList = () => {
   const searchRef = useRef('');
   const debounceRef = useRef(null);
   const lastFetchRef = useRef(0);   // throttle auto-reload on tab focus
+  // Which load is the latest: an older answer (a search already retyped, the
+  // library's next page landing after a search began) never replaces it.
+  const loadSeqRef = useRef(0);
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(30);
 
   // Mirrors `tracks` for callbacks that must not change identity when a page is
   // appended — buildQueue used to depend on `tracks`, so every "load more"
@@ -134,12 +143,14 @@ const TrackList = () => {
   }), [cacheKey]);
 
   const loadTracks = useCallback(async (search = searchRef.current) => {
+    const seq = ++loadSeqRef.current;
     try {
       setRefreshing(true);
       setError(null);
       // A search is ranked and typo-tolerant (the same search as Explore);
       // the plain library is newest first, paged.
       const response = search ? await searchSongs(search) : await fetchTracks(1, search);
+      if (seq !== loadSeqRef.current) return;
       // Media URLs are absolute (R2) and served as-is; no client rewriting.
       const results = response?.results ?? [];
       setTracks(results);
@@ -150,22 +161,33 @@ const TrackList = () => {
       // Page one of the unfiltered library is what this screen opens on next
       // time; a search result is not.
       if (!search && results.length) writeCache(cacheKey, results);
-    } catch (err) {
-      setError(err.response?.data?.message || err.message || t('music.loadTracksFailed'));
+    } catch {
+      if (seq !== loadSeqRef.current) return;
+      // Never the raw "Network Error": what happened, in the reader's language.
+      setError(t('music.loadTracksFailed'));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (seq === loadSeqRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [t, cacheKey, prefetchCovers]);
 
   const loadMoreTracks = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMore || !hasMore || searchRef.current) return;
     setLoadingMore(true);
+    const seq = loadSeqRef.current;
     try {
       const nextPage = page + 1;
-      const response = await fetchTracks(nextPage, searchRef.current);
+      const response = await fetchTracks(nextPage, '');
+      if (seq !== loadSeqRef.current) return;   // a search or refresh began meanwhile
       const more = response?.results ?? [];
-      setTracks(prev => [...prev, ...more]);
+      // New uploads shift the pages: a song already shown appears once.
+      setTracks((prev) => {
+        const have = new Set(prev.map((tr) => tr.id));
+        const fresh = more.filter((tr) => !have.has(tr.id));
+        return fresh.length ? [...prev, ...fresh] : prev;
+      });
       setPage(nextPage);
       setHasMore(!!response?.next);
       prefetchCovers(more);
@@ -223,6 +245,28 @@ const TrackList = () => {
     setTracks(prev => prev.filter(tr => tr.id !== deletedId));
   }, []);
 
+  // Play all: the whole library, newest first - not just the page that
+  // happens to be loaded. One request for up to 100 songs; offline (or if it
+  // fails) the songs on screen.
+  const [startingAll, setStartingAll] = useState(false);
+  const playAll = useCallback(async () => {
+    if (startingAll) return;
+    if (!hasMore || searchRef.current) {
+      playQueue(buildQueue(), 0, { shuffle: false, source: 'library' });
+      return;
+    }
+    setStartingAll(true);
+    try {
+      const res = await fetchTracks(1, '', '', 100);
+      const all = res?.results ?? [];
+      playQueue((all.length ? all : tracksRef.current).map(toQueueTrack), 0, { shuffle: false, source: 'library' });
+    } catch {
+      playQueue(buildQueue(), 0, { shuffle: false, source: 'library' });
+    } finally {
+      setStartingAll(false);
+    }
+  }, [startingAll, hasMore, playQueue, buildQueue]);
+
   // Play from this row's position in the current queue. Stable, so it doesn't
   // re-create every row's props — it reads the queue through tracksRef.
   const handlePlay = useCallback((index) => {
@@ -264,6 +308,11 @@ const TrackList = () => {
   return (
     <View style={styles.container}>
       <SearchBar onSearch={handleSearch} />
+      {/* Offline, or the last load failed, with songs still showing: say so
+          quietly (downloads still play) instead of a popup. */}
+      {tracks.length > 0 && (!online || error) ? (
+        <OfflineBanner kind={!online ? 'offline' : 'failed'} onRetry={() => loadTracks()} />
+      ) : null}
 
       <View style={[styles.queueBar, { marginHorizontal: sideMargin }]}>
         {/* Left: the two main actions. They may shrink (text truncates)
@@ -273,10 +322,14 @@ const TrackList = () => {
             <>
               <TouchableOpacity
                 style={[styles.queueBtn, styles.queueBtnShrink]}
-                onPress={() => playQueue(buildQueue(), 0, { shuffle: false, source: 'library' })}
+                onPress={playAll}
+                disabled={startingAll}
                 activeOpacity={0.85}
+                testID="music-play-all"
               >
-                <Ionicons name="play" size={16} color="white" />
+                {startingAll
+                  ? <ActivityIndicator size="small" color="white" />
+                  : <Ionicons name="play" size={16} color="white" />}
                 <Text style={styles.queueBtnText} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('music.playAll')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -331,7 +384,7 @@ const TrackList = () => {
             <MusicHome home={home} sideMargin={sideMargin} reasonLabel={reasonLabel} />
           )
         }
-        contentContainerStyle={[styles.trackList, { paddingHorizontal: sideMargin }]}
+        contentContainerStyle={[styles.trackList, { paddingHorizontal: sideMargin, paddingBottom: bottomSpace + 56 }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -355,7 +408,7 @@ const TrackList = () => {
             : (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyText}>
-                  {searchRef.current ? `No tracks match "${searchRef.current}"` : 'No tracks found'}
+                  {searchRef.current ? t('music.noMatch', { q: searchRef.current }) : t('music.noTracks')}
                 </Text>
               </View>
             )
@@ -368,12 +421,17 @@ const TrackList = () => {
         maxToRenderPerBatch={8}
         updateCellsBatchingPeriod={50}
         windowSize={11}
-        removeClippedSubviews
+        // Android only: on iOS it can leave rows blank after a fast scroll.
+        removeClippedSubviews={Platform.OS === 'android'}
       />
       
       <TouchableOpacity
-        style={styles.fab}
+        // Above the gesture bar and the mini player, wherever they are.
+        style={[styles.fab, { bottom: bottomSpace }]}
         onPress={() => navigation.navigate('UploadTrack')}
+        accessibilityRole="button"
+        accessibilityLabel={t('music.upload')}
+        testID="music-upload"
       >
         <MaterialIcons name="add" size={28} color="white" />
       </TouchableOpacity>
@@ -475,7 +533,6 @@ const styles = StyleSheet.create({
   },
   trackList: {
     paddingTop: 6,
-    paddingBottom: 110,
   },
   emptyContainer: {
     flex: 1,
@@ -490,7 +547,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 20,
-    bottom: 96,
     backgroundColor: colors.primary,
     width: 56,
     height: 56,

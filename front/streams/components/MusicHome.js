@@ -1,6 +1,7 @@
 // The top of the Music screen, from one request (GET /music/home/):
 //
-//   Recently played · Made for you · Top 50 <your country> / Top 50 Global
+//   Recently played · Editor's picks · Made for you · On repeat · Rediscover
+//   · Top 50 <your country> / Top 50 Global
 //   · Music Library (artists' and choirs' albums) · Trending this week · New releases
 //   · From artists you follow · Genres
 //
@@ -45,7 +46,11 @@ const MusicHome = ({ home, sideMargin = 0, reasonLabel }) => {
   return (
     <View>
       <TrackRail title={t('music.recentlyPlayed')} tracks={home.recent} source="recent" style={rail} />
+      {/* Chosen by the team (admin -> Music): shown only when there are some. */}
+      <TrackRail title={t('music.editorsPicks')} tracks={home.picks} source="picks" style={rail} />
       <TrackRail title={t('music.madeForYou')} tracks={home.for_you} reasonLabel={reasonLabel} source="for_you" style={rail} />
+      <TrackRail title={t('music.onRepeat')} tracks={home.on_repeat} source="on_repeat" style={rail} />
+      <TrackRail title={t('music.rediscover')} tracks={home.rediscover} source="rediscover" style={rail} />
 
       {(topCountry || topWorld) ? (
         <View style={styles.charts}>

@@ -11,3 +11,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // modules and hide their features; use the packages' Jest mocks instead.
 // (pages/__tests__/DailyVerseOldBuild.test.js turns this off to be an old build.)
 require('./utils/optionalNative').__assumeNativePresent(true);
+
+// NetInfo has no native side under Jest: its own mock (always connected).
+// The music player subscribes app-wide to know when a song can't stream.
+jest.mock('@react-native-community/netinfo', () => require('@react-native-community/netinfo/jest/netinfo-mock.js'));

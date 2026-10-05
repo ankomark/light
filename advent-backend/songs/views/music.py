@@ -1,6 +1,6 @@
 ﻿from .common import *  # noqa: F401,F403
 from django.db.models import Exists, OuterRef, Subquery, IntegerField
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncMonth
 from django.db import IntegrityError, transaction
 import re
 from collections import Counter
@@ -136,6 +136,51 @@ class TrackUploadView(APIView):
 
 
 
+TRACK_FILE_FIELDS = ('audio_file', 'cover_image', 'audio_low', 'audio_standard', 'audio_high',
+                     'spectrum', 'cover_small', 'cover_medium')
+
+
+def delete_track(track):
+    """Delete a song for good: the row, and its files in storage (the upload,
+    its processed versions, covers, spectrum) - a deleted song must not stay
+    downloadable from its old link. A file another song, album or playlist
+    still uses is kept; posts that used the song as their music lose that
+    link rather than keep a dead one."""
+    from .. import r2
+    from ..models import Album
+    urls = {getattr(track, f, '') for f in TRACK_FILE_FIELDS} - {'', None}
+    urls = {u for u in urls if r2.is_r2_url(u)}
+    pk = track.pk
+    track.delete()
+    if not urls:
+        return 0
+    SocialPost.objects.filter(song_audio_url__in=urls).update(song_audio_url=None)
+    in_use = Q()
+    for f in TRACK_FILE_FIELDS:
+        in_use |= Q(**{f'{f}__in': urls})
+    still = set()
+    for row in Track.objects.exclude(pk=pk).filter(in_use).values(*TRACK_FILE_FIELDS):
+        still.update(v for v in row.values() if v in urls)
+    still.update(Album.objects.filter(cover_image__in=urls).values_list('cover_image', flat=True))
+    still.update(Playlist.objects.filter(cover_image__in=urls).values_list('cover_image', flat=True))
+    gone = urls - still
+    for u in gone:
+        r2.delete(u)   # never raises
+    return len(gone)
+
+
+def hide_unseen_artists(qs, user, field='artist'):
+    """Songs the viewer shouldn't meet: those of a deactivated account, and of
+    anyone they blocked or who blocked them. Albums and playlists already
+    leave them out; every song list, rail, chart and suggestion does too."""
+    qs = qs.exclude(**{f'{field}__is_deactivated': True})
+    if user is not None and getattr(user, 'is_authenticated', False):
+        blocked = blocked_ids_for(user)
+        if blocked:
+            qs = qs.exclude(**{f'{field}_id__in': blocked})
+    return qs
+
+
 def annotated_tracks(user):
     """Live tracks with the counts and flags a track row draws (likes,
     comments, liked-by-me), each one annotation instead of a query per row.
@@ -176,7 +221,7 @@ def annotated_tracks(user):
                 Like.objects.filter(track=OuterRef('pk'), user=user)
             )
         )
-    return qs
+    return hide_unseen_artists(qs, user)
 
 
 class TrackViewSet(viewsets.ModelViewSet):
@@ -197,7 +242,8 @@ class TrackViewSet(viewsets.ModelViewSet):
         # The list drops `lyrics` (see TrackListSerializer) — retrieve, create
         # and update keep the full payload, so editing a track still round-trips
         # its lyrics untouched.
-        if self.action == 'list':
+        # Favorites is a list too (all your liked songs): list rows.
+        if self.action in ('list', 'get_favorites'):
             return TrackListSerializer
         return TrackSerializer
 
@@ -243,7 +289,7 @@ class TrackViewSet(viewsets.ModelViewSet):
                 {"error": "You can only delete your own tracks"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        instance.delete()
+        delete_track(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_create(self, serializer):
@@ -272,7 +318,8 @@ class TrackViewSet(viewsets.ModelViewSet):
             limit = self.SHUFFLE_DEFAULT
         limit = max(1, min(limit, self.SHUFFLE_MAX))
 
-        qs = Track.objects.filter(is_removed=False).select_related('artist__profile')
+        qs = hide_unseen_artists(
+            Track.objects.filter(is_removed=False).select_related('artist__profile'), request.user)
         search = request.query_params.get('search', '').strip()
         if search:
             qs = qs.filter(
@@ -672,6 +719,7 @@ class PlaylistViewSet(viewsets.ModelViewSet):
             # Someone else's: only if they shared it (public / unlisted), and
             # never across a block or from a deactivated account.
             others = (Q(visibility__in=[Playlist.PUBLIC, Playlist.UNLISTED])
+                      & Q(is_removed=False)
                       & Q(user__is_deactivated=False)
                       & ~Q(user__in=Block.objects.filter(blocker=user).values('blocked'))
                       & ~Q(user__in=Block.objects.filter(blocked=user).values('blocker')))
@@ -773,14 +821,40 @@ def card_tracks():
 
 
 def _rows(ids, user, context, extra=None):
-    """Song cards for `ids`, in that order, in one query."""
-    by_id = card_tracks().filter(id__in=ids).in_bulk()
+    """Song cards for `ids`, in that order, in one query (leaving out what the
+    viewer shouldn't meet: hide_unseen_artists)."""
+    by_id = hide_unseen_artists(card_tracks(), user).filter(id__in=ids).in_bulk()
     tracks = [by_id[i] for i in ids if i in by_id]
     data = TrackCardSerializer(tracks, many=True, context=context).data
     if extra:
         for row in data:
             row.update(extra.get(row['id'], {}))
     return data
+
+
+GENRE_TILES_TTL = 10 * 60
+
+
+def genre_tiles():
+    """The Music home's genre grid - the same for everyone and slow to
+    change, but a query per genre to build: built once, kept ten minutes."""
+    key = 'music:home:genres'
+    rows = cache.get(key)
+    if rows is not None:
+        return rows
+    genres = (Category.objects.exclude(slug__isnull=True)
+              .annotate(track_count=Count('tracks', filter=Q(tracks__is_removed=False), distinct=True))
+              .filter(track_count__gt=0).order_by('position', 'name'))
+    rows = []
+    for g in genres:
+        cover = (g.tracks.filter(is_removed=False).exclude(cover_image__isnull=True).exclude(cover_image='')
+                 .order_by('-views', '-created_at').values_list('cover_medium', 'cover_image').first())
+        rows.append({
+            'slug': g.slug, 'name': g.name, 'track_count': g.track_count,
+            'cover': media.resolve(cover[0] or cover[1]) if cover else None,
+        })
+    cache.set(key, rows, GENRE_TILES_TTL)
+    return rows
 
 
 class MusicHomeView(APIView):
@@ -812,6 +886,10 @@ class MusicHomeView(APIView):
             .values('track_id').annotate(last=Max('started_at')).order_by('-last')
             .values_list('track_id', flat=True)[:self.RAIL])
         for_you, reasons = discovery.for_you(me)
+        from .admin_music import editors_picks
+        picks = editors_picks()
+        repeat = discovery.on_repeat(me)
+        again = discovery.rediscover(me)
         top_country = charts.read('top', country) if country else []
         top_world = charts.read('top')
         trending = [t for t, _ in (charts.read('trending', country) if top_country else [])] or \
@@ -828,7 +906,7 @@ class MusicHomeView(APIView):
         top_world = top_world[:self.CHART_PREVIEW]
         # One query for every song on the page.
         ids = list(dict.fromkeys(
-            recent + for_you + trending[:self.RAIL] + new_releases + following
+            recent + picks + repeat + again + for_you + trending[:self.RAIL] + new_releases + following
             + [t for t, _ in top_country] + [t for t, _ in top_world]))
         ctx = {'request': request}
         rows = {r['id']: r for r in _rows(ids, me, ctx)}
@@ -840,20 +918,13 @@ class MusicHomeView(APIView):
             return {'country': code, 'tracks': [
                 {**rows[t], 'position': i + 1, 'plays': n} for i, (t, n) in enumerate(entries) if t in rows]}
 
-        genres = (Category.objects.exclude(slug__isnull=True)
-                  .annotate(track_count=Count('tracks', filter=Q(tracks__is_removed=False), distinct=True))
-                  .filter(track_count__gt=0).order_by('position', 'name'))
-        genre_rows = []
-        for g in genres:
-            cover = (g.tracks.filter(is_removed=False).exclude(cover_image__isnull=True).exclude(cover_image='')
-                     .order_by('-views', '-created_at').values_list('cover_medium', 'cover_image').first())
-            genre_rows.append({
-                'slug': g.slug, 'name': g.name, 'track_count': g.track_count,
-                'cover': media.resolve(cover[0] or cover[1]) if cover else None,
-            })
+        genre_rows = genre_tiles()
 
         return Response({
             'recent': pick(recent),
+            'picks': pick(picks),        # Editor's picks (set in the admin's Music)
+            'on_repeat': pick(repeat),   # your most played this month
+            'rediscover': pick(again),   # liked a while ago, not played lately
             'for_you': [{**rows[t], 'reason': reasons.get(t)} for t in for_you if t in rows],
             'trending': pick(trending[:self.RAIL]),
             'new_releases': pick(new_releases),
@@ -863,6 +934,59 @@ class MusicHomeView(APIView):
             'genres': genre_rows,
             'libraries': library_artists(me),
         })
+
+
+class MusicRecapView(APIView):
+    """Your year in music: GET /music/recap/?year=2026 (default this year).
+
+      minutes      how long you listened
+      songs        how many different songs
+      top_songs    your five most played (song cards, with plays)
+      top_artists  your five most played artists
+      top_genre    the style you played most
+      busiest      the month you listened most (1-12)
+
+    Only your own listening; cached an hour (it reads a year of plays)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        me = request.user
+        now = timezone.now()
+        try:
+            year = int(request.query_params.get('year') or now.year)
+        except (TypeError, ValueError):
+            year = now.year
+        year = max(2020, min(year, now.year))
+        key = f'music:recap:{me.pk}:{year}'
+        cached = cache.get(key)
+        if cached is not None:
+            return Response(cached)
+
+        plays = PlayEvent.objects.filter(user=me, started_at__year=year, track__is_removed=False)
+        total_ms = plays.aggregate(ms=Sum('ms_played'))['ms'] or 0
+        heard = plays.filter(Q(counted=True) | Q(completed=True))
+        top = list(heard.values('track_id').annotate(n=Count('id')).order_by('-n')[:5])
+        rows = {r['id']: r for r in _rows([t['track_id'] for t in top], me, {'request': request})}
+        artists = list(heard.values('track__artist_id', 'track__artist__username')
+                       .annotate(n=Count('id')).order_by('-n')[:5])
+        genre = (heard.exclude(track__categories__isnull=True)
+                 .values('track__categories__slug', 'track__categories__name')
+                 .annotate(n=Count('id')).order_by('-n').first())
+        months = (heard.annotate(m=TruncMonth('started_at')).values('m')
+                  .annotate(n=Count('id')).order_by('-n').first())
+        data = {
+            'year': year,
+            'minutes': round(total_ms / 60000),
+            'songs': heard.values('track_id').distinct().count(),
+            'top_songs': [{**rows[t['track_id']], 'plays': t['n']} for t in top if t['track_id'] in rows],
+            'top_artists': [{'id': a['track__artist_id'], 'username': a['track__artist__username'], 'plays': a['n']}
+                            for a in artists],
+            'top_genre': ({'slug': genre['track__categories__slug'], 'name': genre['track__categories__name']}
+                          if genre else None),
+            'busiest': months['m'].month if months and months['m'] else None,
+        }
+        cache.set(key, data, 60 * 60)
+        return Response(data)
 
 
 class MusicChartView(APIView):
@@ -909,7 +1033,7 @@ def library_artists(me, limit=20):
     """The Music home's Libraries: artists (choirs) with at least one album
     that has songs, most played first. [{id, username, profile_picture,
     verified, album_count, track_count, cover}]"""
-    live = Q(albums__tracks__is_removed=False)
+    live = Q(albums__tracks__is_removed=False, albums__is_removed=False)
     artists_qs = (_visible_artists(me).filter(live).select_related('profile')
                   .annotate(album_count=Count('albums', filter=live, distinct=True),
                             track_count=Count('albums__tracks', filter=live, distinct=True),
@@ -918,7 +1042,7 @@ def library_artists(me, limit=20):
     rows = list(artists_qs)
     # The newest album's cover stands in for an account without a picture.
     covers = {}
-    for a in albums_with_counts(Album.objects.filter(artist__in=rows)).filter(track_count__gt=0):
+    for a in albums_with_counts(Album.objects.filter(artist__in=rows, is_removed=False)).filter(track_count__gt=0):
         covers.setdefault(a.artist_id, a.cover_image or a.first_cover)
     out = []
     for u in rows:
@@ -937,7 +1061,7 @@ def artist_library(artist, me, context):
     song in album order, for Play all / Shuffle across it."""
     albums = albums_with_counts(Album.objects.filter(artist=artist))
     if artist != me:
-        albums = albums.filter(track_count__gt=0)
+        albums = albums.filter(track_count__gt=0, is_removed=False)
     albums = list(albums)
     rank = {a.id: i for i, a in enumerate(albums)}
     songs = sorted(
@@ -967,7 +1091,7 @@ class AlbumViewSet(viewsets.ModelViewSet):
         me = self.request.user
         qs = albums_with_counts(Album.objects.all())
         # Never across a block or from a deactivated account (yours always).
-        qs = qs.filter(Q(artist=me) | (Q(artist__is_deactivated=False)
+        qs = qs.filter(Q(artist=me) | (Q(artist__is_deactivated=False) & Q(is_removed=False)
                        & ~Q(artist__in=Block.objects.filter(blocker=me).values('blocked'))
                        & ~Q(artist__in=Block.objects.filter(blocked=me).values('blocker'))))
         if self.action == 'list':
@@ -1212,15 +1336,4 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         return Category.objects.exclude(slug__isnull=True).annotate(
             track_count=Count('tracks', filter=Q(tracks__is_removed=False), distinct=True),
         ).order_by('position', 'name')
-
-
-
-class FavoriteTracksView(APIView):
-    permission_classes = [IsAuthenticated]  # Ensure authentication is enforced
-
-    def get(self, request):
-        user = request.user
-        favorite_tracks = Track.objects.filter(likes__user=user)  # Query for the user's favorites
-        serializer = TrackSerializer(favorite_tracks, many=True, context={"request": request})
-        return Response(serializer.data, status=200)
 

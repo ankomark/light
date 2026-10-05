@@ -324,8 +324,8 @@ export const checkProfileExistence = async () => {
 };
 
 // Track endpoints
-export const fetchTracks = async (page = 1, search = '', genre = '') => {
-  const params = { page, page_size: 20 };
+export const fetchTracks = async (page = 1, search = '', genre = '', pageSize = 20) => {
+  const params = { page, page_size: pageSize };
   if (search) params.search = search;
   if (genre) params.genre = genre;
   return apiRequest('get', '/tracks/', null, { params });
@@ -339,6 +339,9 @@ export const searchSongs = async (q) => {
 
 // The Music home in one request (see the backend's MusicHomeView):
 // { recent, for_you, trending, new_releases, following, top_country, top_world, genres }.
+// Your year in music: { year, minutes, songs, top_songs, top_artists, top_genre, busiest }.
+export const fetchMusicRecap = (year) => apiRequest('get', '/music/recap/', null, { params: year ? { year } : {} });
+
 export const fetchMusicHome = (country = '') =>
   apiRequest('get', '/music/home/', null, { params: country ? { country } : {} });
 
@@ -2257,6 +2260,12 @@ export const fetchAdminByUrl = (nextUrl) => {
 export const fetchAdminPulse = (days = 14) => apiRequest('get', '/admin/pulse/', null, { params: { days } });
 export const fetchAdminAnalytics = (days = 14) =>
   apiRequest('get', '/admin/analytics/', null, { params: { days } });
+
+// Admin: music - listening, charts/processing health, genres, Editor's picks.
+export const fetchAdminMusic = (days = 14) => apiRequest('get', '/admin/music/', null, { params: { days } });
+// id null: add {name}, or set the whole order {order: [ids]}; id: rename {name}.
+export const saveMusicGenre = (id, body) => apiRequest('post', id ? `/admin/music/genres/${id}/` : '/admin/music/genres/', body);
+export const saveMusicPicks = (ids) => apiRequest('post', '/admin/music/picks/', { tracks: ids });
 
 // order 'priority': the most reported first.
 export const fetchAdminReports = (status = '', order = '') =>

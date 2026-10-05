@@ -225,6 +225,8 @@ export const setAudioModeAsync = (mode = {}) => {
   if ('shouldDuckAndroid' in mode) {
     next.interruptionMode = mode.shouldDuckAndroid ? 'duckOthers' : 'mixWithOthers';
   }
+  // expo-audio's own name, on both platforms ('doNotMix' for the music player).
+  if (mode.interruptionMode) next.interruptionMode = mode.interruptionMode;
   return expoSetAudioModeAsync(next);
 };
 

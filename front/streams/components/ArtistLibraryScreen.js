@@ -17,6 +17,9 @@ import PlaylistCover from './PlaylistCover';
 import VerifiedBadge from './VerifiedBadge';
 import { TrackListSkeleton } from './SkeletonLoader';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
 
 const MAX_WIDTH = 960;
@@ -34,6 +37,8 @@ const lengthOf = (t, ms) => {
 
 const ArtistLibraryScreen = () => {
   const { t } = useI18n();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(40);
   const navigation = useNavigation();
   const { params = {} } = useRoute();
   const { userId } = params;
@@ -132,8 +137,8 @@ const ArtistLibraryScreen = () => {
       numColumns={cols}
       keyExtractor={(a) => `libalb_${a.id}`}
       columnWrapperStyle={cols > 1 ? { gap: GAP } : undefined}
-      contentContainerStyle={[styles.list, { width: inner + spacing.md * 2 }]}
-      ListHeaderComponent={header}
+      contentContainerStyle={[styles.list, { width: inner + spacing.md * 2, paddingBottom: bottomSpace }]}
+      ListHeaderComponent={<>{!online ? <OfflineBanner kind="offline" /> : null}{header}</>}
       renderItem={({ item: a }) => (
         <TouchableOpacity
           style={[styles.card, { width: cardSize }]}
@@ -162,7 +167,7 @@ const ArtistLibraryScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
-  list: { paddingHorizontal: spacing.md, paddingBottom: 140, alignSelf: 'center', maxWidth: MAX_WIDTH },
+  list: { paddingHorizontal: spacing.md, alignSelf: 'center', maxWidth: MAX_WIDTH },
   header: { alignItems: 'center', paddingTop: spacing.md, paddingBottom: spacing.sm },
   avatar: {
     width: 112, height: 112, borderRadius: 56, overflow: 'hidden', alignItems: 'center', justifyContent: 'center',

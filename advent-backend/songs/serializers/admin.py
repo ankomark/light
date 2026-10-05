@@ -2,6 +2,7 @@ from collections import defaultdict
 
 from .common import *  # noqa: F401,F403  (serializers, models, SimpleUserSerializer, timezone)
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITY_KEYS
+from ..models import Album
 
 
 # ── Report target previews (batched) ─────────────────────────────────────────
@@ -69,6 +70,22 @@ def _chapters_by_id(ids):
     return Chapter.objects.filter(id__in=ids).select_related('publication__author__profile')
 
 
+def _format_album(a):
+    return {
+        'type': 'album', 'id': a.id, 'title': (a.title or '')[:140],
+        'author': SimpleUserSerializer(a.artist).data,
+        'is_removed': a.is_removed,
+    }
+
+
+def _format_playlist(p):
+    return {
+        'type': 'playlist', 'id': p.id, 'title': (p.name or '')[:140],
+        'author': SimpleUserSerializer(p.user).data,
+        'is_removed': p.is_removed,
+    }
+
+
 def _format_product(p):
     return {
         'type': 'product', 'id': p.id, 'title': (p.title or '')[:140],
@@ -89,6 +106,8 @@ _TARGET_FETCHERS = {
     'publication': (lambda ids: Publication.objects.filter(id__in=ids).select_related('author__profile'), _format_publication),
     'chapter': (_chapters_by_id, _format_chapter),
     'product': (lambda ids: Product.objects.filter(id__in=ids).select_related('seller__profile'),    _format_product),
+    'album':   (lambda ids: Album.objects.filter(id__in=ids).select_related('artist__profile'),      _format_album),
+    'playlist': (lambda ids: Playlist.objects.filter(id__in=ids).select_related('user__profile'),    _format_playlist),
 }
 
 
@@ -408,6 +427,22 @@ class AdminContentBookClubSerializer(serializers.ModelSerializer):
     class Meta:
         model = BookClub
         fields = ['id', 'name', 'book', 'starts_on', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentAlbumSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='artist', read_only=True)
+
+    class Meta:
+        model = Album
+        fields = ['id', 'title', 'description', 'cover_image', 'is_removed', 'created_at', 'author']
+
+
+class AdminContentPlaylistSerializer(serializers.ModelSerializer):
+    author = SimpleUserSerializer(source='user', read_only=True)
+
+    class Meta:
+        model = Playlist
+        fields = ['id', 'name', 'description', 'cover_image', 'visibility', 'is_removed', 'created_at', 'author']
 
 
 class AdminContentLiveBroadcastSerializer(serializers.ModelSerializer):

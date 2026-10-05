@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.core.cache import cache
 from django.utils import timezone
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from songs import charts, jobs
@@ -127,6 +128,7 @@ class HomeTests(Base):
         self.assertIsNotNone(data['top_world'])
 
 
+@override_settings(R2_PUBLIC_BASE=R2)   # the songs' made-up host is 'our storage' here
 class GenreTests(Base):
     def test_genres_are_seeded_listed_in_order_and_read_only(self):
         rows = self.client.get('/api/categories/').json()

@@ -6,6 +6,7 @@ idempotent upsert that counts each 30s+ listen once."""
 from unittest import mock
 
 from django.core.cache import cache
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from songs.management.commands.backfill_track_durations import read_duration_ms
@@ -115,6 +116,7 @@ class RecentTests(Base):
         self.assertEqual(self.client.get('/api/tracks/recent/').json(), [])
 
 
+@override_settings(R2_PUBLIC_BASE='https://m.x')   # the upload's made-up host
 class UploadLengthTests(Base):
     def test_upload_keeps_a_sane_length_and_edits_cannot_change_it(self):
         self.client.force_authenticate(self.artist)

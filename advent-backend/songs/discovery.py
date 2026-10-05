@@ -32,6 +32,8 @@ POPULAR_WINDOW_DAYS = 30
 FOR_YOU_TTL = 600
 LISTEN_WINDOW_DAYS = 60  # listening history that counts as taste
 SKIPPED_ARTIST_AFTER = 3  # skips of an artist's songs, never listened to, before they're left out
+PER_ARTIST = 3          # at most this many of one artist's songs in a list
+ON_REPEAT_PLAYS = 3     # played this often lately: yours already (the On repeat rail), not a discovery
 
 
 def _popular_ids(exclude, limit):
@@ -86,7 +88,19 @@ def _co_liked(seed_ids, exclude_user_id, exclude, limit):
     for qs in (liked, heard):
         for row in qs:
             score[row['track_id']] += row['n']
-    return [tid for tid, _ in sorted(score.items(), key=lambda kv: (-kv[1], -kv[0]))[:limit]]
+    if not score:
+        return []
+    # Popular with everyone isn't "people like you": divide by the square root
+    # of how many people liked or played each song overall, so a hit shared by
+    # a few neighbours doesn't drown a song that is truly theirs (cosine-style).
+    top = [tid for tid, _ in score.most_common(limit * 4)]
+    reach = Counter()
+    for qs in (Like.objects.filter(track_id__in=top).values('track_id').annotate(n=Count('user_id', distinct=True)),
+               _listened().filter(track_id__in=top).values('track_id').annotate(n=Count('user_id', distinct=True))):
+        for row in qs:
+            reach[row['track_id']] += row['n']
+    weighted = {tid: score[tid] / (max(1, reach[tid]) ** 0.5) for tid in top}
+    return [tid for tid, _ in sorted(weighted.items(), key=lambda kv: (-kv[1], -kv[0]))[:limit]]
 
 
 def _by_artists(artist_ids, exclude, limit):
@@ -101,19 +115,28 @@ def _by_artists(artist_ids, exclude, limit):
 
 def _merge(*sources):
     """Round-robin the sources (each a (reason, ids) pair) without repeats, so
-    the list opens with a mix instead of thirty of one kind."""
+    the list opens with a mix instead of thirty of one kind - and no more than
+    PER_ARTIST songs of any one artist."""
+    candidates = {tid for _, ids in sources for tid in ids}
+    artist_of = dict(Track.objects.filter(id__in=candidates).values_list('id', 'artist_id'))
+    per_artist = Counter()
     out, reasons, seen = [], {}, set()
     iters = [(reason, iter(ids)) for reason, ids in sources]
     while iters and len(out) < MAX_RESULTS:
         nxt = []
         for reason, it in iters:
             for tid in it:
-                if tid not in seen:
-                    seen.add(tid)
-                    out.append(tid)
-                    reasons[tid] = reason
-                    nxt.append((reason, it))
-                    break
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                artist = artist_of.get(tid)
+                if artist is not None and per_artist[artist] >= PER_ARTIST:
+                    continue
+                per_artist[artist] += 1
+                out.append(tid)
+                reasons[tid] = reason
+                nxt.append((reason, it))
+                break
         iters = nxt
     return out[:MAX_RESULTS], reasons
 
@@ -126,8 +149,10 @@ def for_you(user):
     liked = list(Like.objects.filter(user=user).order_by('-created_at')
                  .values_list('track_id', flat=True)[:SEED_LIKES])
     mine = _listened().filter(user=user)
-    heard = list(mine.values('track_id').annotate(n=Count('id')).order_by('-n')
-                 .values_list('track_id', flat=True)[:SEED_LIKES])
+    heard_counts = list(mine.values('track_id').annotate(n=Count('id')).order_by('-n')
+                        .values_list('track_id', 'n')[:SEED_LIKES])
+    heard = [tid for tid, _ in heard_counts]
+    on_repeat = {tid for tid, n in heard_counts if n >= ON_REPEAT_PLAYS}
     taste = liked + [t for t in heard if t not in set(liked)]
     own = set(Track.objects.filter(artist=user).values_list('id', flat=True))
     # Skipped and never listened to since: not for them.
@@ -138,7 +163,7 @@ def for_you(user):
         skips.exclude(track__artist_id__in=Track.objects.filter(id__in=taste).values('artist_id'))
         .values('track__artist_id').annotate(n=Count('id')).filter(n__gte=SKIPPED_ARTIST_AFTER)
         .values_list('track__artist_id', flat=True))
-    exclude = set(liked) | own | skipped | set(
+    exclude = set(liked) | own | skipped | on_repeat | set(
         Track.objects.filter(artist_id__in=skipped_artists).values_list('id', flat=True))
     artists = set(Track.objects.filter(id__in=taste).exclude(artist=user)
                   .values_list('artist_id', flat=True)) - skipped_artists
@@ -166,14 +191,51 @@ def similar(track, user):
     return result
 
 
+def _same_genre(track, exclude, limit):
+    """Songs in this song's genre, the most played first - what a brand-new
+    song (no listeners yet to learn from) is like."""
+    genres = list(track.categories.values_list('id', flat=True))
+    if not genres:
+        return []
+    return list(
+        Track.objects.filter(categories__in=genres, is_removed=False).exclude(id__in=exclude)
+        .order_by('-views', '-created_at').values_list('id', flat=True).distinct()[:limit])
+
+
 def _similar(track, user):
     own = set(Track.objects.filter(artist=user).values_list('id', flat=True)) if user.is_authenticated else set()
     exclude = {track.id} | own
     return _merge(
         ('fans_also_like', _co_liked([track.id], None, exclude, MAX_RESULTS)),
+        ('same_genre', _same_genre(track, exclude, MAX_RESULTS)),
         ('from_artist', _by_artists([track.artist_id], exclude, MAX_RESULTS)),
         ('popular', _popular_ids(exclude, MAX_RESULTS)),
     )
+
+
+ON_REPEAT_DAYS = 30
+REDISCOVER_AFTER_DAYS = 30
+
+
+def on_repeat(user, limit=20):
+    """Your most played lately: songs you played at least ON_REPEAT_PLAYS
+    times in the last month, most played first."""
+    since = timezone.now() - timedelta(days=ON_REPEAT_DAYS)
+    return list(
+        PlayEvent.objects.filter(user=user, started_at__gte=since, track__is_removed=False)
+        .filter(Q(counted=True) | Q(completed=True))
+        .values('track_id').annotate(n=Count('id')).filter(n__gte=ON_REPEAT_PLAYS)
+        .order_by('-n').values_list('track_id', flat=True)[:limit])
+
+
+def rediscover(user, limit=20):
+    """Songs you liked a while ago and haven't played in a month."""
+    since = timezone.now() - timedelta(days=REDISCOVER_AFTER_DAYS)
+    recent = PlayEvent.objects.filter(user=user, started_at__gte=since).values('track_id')
+    return list(
+        Like.objects.filter(user=user, created_at__lt=since, track__is_removed=False)
+        .exclude(track_id__in=recent).order_by('-created_at')
+        .values_list('track_id', flat=True)[:limit])
 
 
 def forget_for_you(user_id):

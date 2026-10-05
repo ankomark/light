@@ -24,6 +24,9 @@ import { countryName } from '../utils/region';
 import PlaylistCover from './PlaylistCover';
 import RemovedSongs from './RemovedSongs';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
 
 const PERIODS = [7, 28, 90];
@@ -79,6 +82,8 @@ const DailyChart = ({ daily }) => {
 
 const ArtistStudio = () => {
   const { t } = useI18n();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(40);
   const navigation = useNavigation();
   const { currentUser } = useAuth();
   const [days, setDays] = useState(28);
@@ -140,7 +145,7 @@ const ArtistStudio = () => {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: bottomSpace }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} colors={[colors.primary]} />}
     >
       <Text style={styles.title}>{t('artist.studio')}</Text>
@@ -265,7 +270,7 @@ const ArtistStudio = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  content: { padding: spacing.md, paddingBottom: 140, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  content: { padding: spacing.md, width: '100%', maxWidth: 760, alignSelf: 'center' },
   title: { ...typography.h1, color: colors.textPrimary },
   periods: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, marginBottom: spacing.sm },
   period: {

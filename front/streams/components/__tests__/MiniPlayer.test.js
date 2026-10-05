@@ -29,7 +29,12 @@ jest.mock('../../context/PlayerContext', () => ({
   }),
   usePlayerProgress: () => ({ positionMs: 0, durationMs: 1000 }),
 }));
-jest.mock('expo-image', () => ({ Image: () => null }));
+const mockT = (k) => k;
+jest.mock('../../context/I18nContext', () => ({ useI18n: () => ({ t: mockT }) }));
+const mockImages = [];
+jest.mock('expo-image', () => ({ Image: (props) => { mockImages.push(props.source?.uri); return null; } }));
+const mockLocal = { cover: null };
+jest.mock('../../utils/downloads', () => ({ getLocalCover: () => mockLocal.cover }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null }));
 
@@ -58,4 +63,21 @@ test('other screens keep it', () => {
   goTo('Profile');
   act(() => { jest.advanceTimersByTime(400); });
   expect(screen.queryByText('Amazing Grace')).toBeTruthy();
+});
+
+test("a song that can't play says why, in place of the artist", () => {
+  const player = require('../../context/PlayerContext');
+  const base = player.usePlayer();
+  jest.spyOn(player, 'usePlayer').mockReturnValue({ ...base, loadError: 'offline' });
+  const screen = render(<MiniPlayer />);
+  expect(screen.getByTestId('mini-player-error').props.children).toBe('player.offline');
+  player.usePlayer.mockRestore();
+});
+
+test("a downloaded song shows its saved cover (offline too), not the online one", () => {
+  mockLocal.cover = 'file:///covers/1.jpg';
+  mockImages.length = 0;
+  render(<MiniPlayer />);
+  expect(mockImages).toContain('file:///covers/1.jpg');
+  mockLocal.cover = null;
 });

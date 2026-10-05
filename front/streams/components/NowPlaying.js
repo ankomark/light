@@ -22,6 +22,7 @@ import QueueSheet from './QueueSheet';
 import ChoiceSheet from './ChoiceSheet';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { getLocalCover } from '../utils/downloads';
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
@@ -56,6 +57,7 @@ const NowPlaying = () => {
     isPlaying,
     isLoading,
     isBuffering,
+    loadError,
     repeatMode,
     shuffle,
     hasNext,
@@ -172,7 +174,8 @@ const NowPlaying = () => {
 
   const progress = seekValue != null ? seekValue : durationMs > 0 ? positionMs / durationMs : 0;
   const busy = isLoading || isBuffering;
-  const cover = !coverFailed ? upscaleCover(currentTrack.cover_image) : null;
+  // A downloaded song's saved cover first (it shows offline), then the large one.
+  const cover = !coverFailed ? (getLocalCover(currentTrack.id) || upscaleCover(currentTrack.cover_image)) : null;
   const lyrics = lyricsText.trim();
   // Whether the button is enabled comes from the flag on the payload, not from
   // the text — the text isn't fetched until the button is pressed.
@@ -203,7 +206,7 @@ const NowPlaying = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={HIT}>
           <Ionicons name="chevron-down" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.topLabel}>NOW PLAYING</Text>
+        <Text style={styles.topLabel}>{t('player.nowPlaying').toUpperCase()}</Text>
         <TouchableOpacity
           onPress={() => setShowLyrics((s) => !s)}
           hitSlop={HIT}
@@ -255,9 +258,14 @@ const NowPlaying = () => {
         <SpectrumVisualizer url={state?.spectrum} height={72} style={styles.visualizer} />
         <Text style={styles.title} numberOfLines={1}>{currentTrack.title}</Text>
         <Text style={styles.artist} numberOfLines={1}>
-          {currentTrack.artist?.username || 'Unknown artist'}
+          {currentTrack.artist?.username || t('player.unknownArtist')}
           {currentTrack.album ? `  ·  ${currentTrack.album}` : ''}
         </Text>
+        {loadError ? (
+          <Text style={styles.loadError} numberOfLines={2} testID="now-playing-error">
+            {t(loadError === 'offline' ? 'player.offline' : 'player.failed')}
+          </Text>
+        ) : null}
       </View>
 
       {/* Like · comments · download · more like this */}
@@ -433,6 +441,9 @@ const styles = StyleSheet.create({
   title: {
     ...typography.h2, color: colors.textPrimary, textAlign: 'center',
     textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
+  loadError: {
+    color: colors.warning, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 6,
   },
   artist: {
     ...typography.body,

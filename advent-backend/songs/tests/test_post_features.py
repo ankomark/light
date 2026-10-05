@@ -353,6 +353,7 @@ class IdempotentCreateTests(APITestCase):
         self.assertEqual(res.status_code, 201)
 
 
+@override_settings(R2_PUBLIC_BASE='https://media.example.com')   # the uploads' made-up host
 class TrackUploadTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user('tr_u', 'tru@x.com', 'x')

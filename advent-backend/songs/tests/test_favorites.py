@@ -50,3 +50,28 @@ class FavoritesAPITests(APITestCase):
         many = load_count()
         # 7 favorites (7 distinct artists) must cost no more queries than 2.
         self.assertEqual(few, many, f'favorites scales per-row: {few} -> {many}')
+
+
+class FavoritesListTests(APITestCase):
+    """Newest like first; a song taken down, or of an account you blocked,
+    isn't offered; list rows carry no lyrics text."""
+
+    def test_order_takedowns_blocks_and_payload(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from songs.models import Block, Like, Track, User
+        me = User.objects.create_user('fl_me', 'flm@x.com', 'x')
+        choir = User.objects.create_user('fl_choir', 'flc@x.com', 'x')
+        rude = User.objects.create_user('fl_rude', 'flr@x.com', 'x')
+        old = Track.objects.create(title='Old like', artist=choir, audio_file='https://m/1.mp3', lyrics='words')
+        new = Track.objects.create(title='New like', artist=choir, audio_file='https://m/2.mp3')
+        gone = Track.objects.create(title='Taken down', artist=choir, audio_file='https://m/3.mp3', is_removed=True)
+        hidden = Track.objects.create(title='Blocked', artist=rude, audio_file='https://m/4.mp3')
+        for tr in (old, new, gone, hidden):
+            Like.objects.create(user=me, track=tr)
+        Like.objects.filter(track=old).update(created_at=timezone.now() - timedelta(days=3))
+        Block.objects.create(blocker=me, blocked=rude)
+        self.client.force_authenticate(me)
+        rows = self.client.get('/api/tracks/favorites/').json()
+        self.assertEqual([r['title'] for r in rows], ['New like', 'Old like'])
+        self.assertNotIn('lyrics', rows[1])

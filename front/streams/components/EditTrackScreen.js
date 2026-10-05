@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, TextInput, Alert, StyleSheet, TouchableOpacity,
-  KeyboardAvoidingView, ScrollView, Platform, ActivityIndicator,
+  View, Text, TextInput, Alert, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import KeyboardLift from './tickets/KeyboardLift';
 import { apiRequest, fetchTrackLyrics, invalidateTrackLyrics } from '../services/api';
 import { colors, spacing, radius, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -14,6 +15,11 @@ const EditTrackScreen = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { track } = useRoute().params;
+  // No app header on this screen: clear the notch / status bar ourselves, and
+  // keep the field being typed in above the keyboard (KeyboardLift - the
+  // window doesn't resize for it on edge-to-edge Android).
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef(null);
 
   const [title, setTitle] = useState(track.title || '');
   const [album, setAlbum] = useState(track.album || '');
@@ -42,14 +48,22 @@ const EditTrackScreen = () => {
   );
   const [lyricsError, setLyricsError] = useState(false);
 
-  useEffect(() => {
-    if (lyrics !== null) return undefined;
-    let cancelled = false;
+  // Fetch the song's lyrics; on failure the field stays locked (saving would
+  // wipe them) and a Retry is offered - before, a failed load left the song
+  // impossible to save at all.
+  const aliveRef = useRef(true);
+  useEffect(() => () => { aliveRef.current = false; }, []);
+  const loadLyrics = useCallback(() => {
+    setLyricsError(false);
     fetchTrackLyrics(track.id)
-      .then((text) => { if (!cancelled) setLyrics(text); })
-      .catch(() => { if (!cancelled) setLyricsError(true); });
-    return () => { cancelled = true; };
-    // Only on mount / track change — re-running on every keystroke would fight
+      .then((text) => { if (aliveRef.current) setLyrics(text ?? ''); })
+      .catch(() => { if (aliveRef.current) setLyricsError(true); });
+  }, [track.id]);
+
+  useEffect(() => {
+    if (lyrics !== null) return;
+    loadLyrics();
+    // Only on mount / track change - re-running on every keystroke would fight
     // the user's typing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track.id]);
@@ -86,19 +100,26 @@ const EditTrackScreen = () => {
       // TrackList reloads on focus, so just go back.
       navigation.goBack();
     } catch (error) {
-      Alert.alert(t('common.error'), error.message || t('track.edit.updateFailed'));
+      // The server's own reason when it gave one (a bad ISRC...), never the
+      // raw "Request failed with status code 400".
+      const data = error?.response?.data;
+      const reason = typeof data === 'object' && data
+        ? (data.error || data.detail || Object.values(data).flat().find((v) => typeof v === 'string'))
+        : null;
+      Alert.alert(t('common.error'), reason || t('track.edit.updateFailed'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.flex}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 85 : 0}
-    >
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <View style={[styles.flex, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
+    <KeyboardLift scrollRef={scrollRef}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={[styles.content, { paddingBottom: spacing.xxl + insets.bottom }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.header}>{t('track.edit.title')}</Text>
 
         <Text style={styles.label}>{t('track.edit.titleLabel')}</Text>
@@ -145,7 +166,12 @@ const EditTrackScreen = () => {
           maxLength={5000}
         />
         {lyricsError && (
-          <Text style={styles.lyricsError}>{t('track.edit.lyricsLoadFailed')}</Text>
+          <View style={styles.lyricsErrorRow}>
+            <Text style={[styles.lyricsError, { flex: 1 }]}>{t('track.edit.lyricsLoadFailed')}</Text>
+            <TouchableOpacity onPress={loadLyrics} hitSlop={8} accessibilityRole="button" testID="edit-track-lyrics-retry">
+              <Text style={styles.retryText}>{t('common.retry')}</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         <TouchableOpacity
@@ -161,11 +187,14 @@ const EditTrackScreen = () => {
           <Text style={styles.cancelText}>{t('common.cancel')}</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardLift>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  lyricsErrorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  retryText: { color: colors.primary, fontWeight: '700' },
   flex: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   header: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.lg, textAlign: 'center' },

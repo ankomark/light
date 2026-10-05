@@ -12,6 +12,9 @@ const mockStats = (days) => ({
   lifetime_streams: 5400,
 });
 const mockFetchStudio = jest.fn(async (days) => mockStats(days));
+// The screen keeps its last rows clear of the gesture bar (no provider here).
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+jest.mock('../../context/PlayerContext', () => ({ usePlayer: () => ({ currentTrack: null }) }));
 jest.mock('../../services/api', () => ({
   fetchStudio: (d) => mockFetchStudio(d),
   fetchAlbums: jest.fn(async () => [{ id: 3, title: 'Vespers', cover: null, track_count: 4 }]),

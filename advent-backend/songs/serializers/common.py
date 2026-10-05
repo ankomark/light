@@ -22,10 +22,25 @@ class MediaReferenceImageField(serializers.ImageField):
         return media.resolve(value)
 
 
+def own_upload(value, what='file'):
+    """A media link a client sends must be one of our own uploads (R2) -
+    never an arbitrary link that every viewer's phone would then fetch (an
+    outside server learning who looks, or content no one can moderate).
+    A bare storage key isn't a link (media.resolve serves only absolute ones),
+    so only an absolute link to anywhere else is refused."""
+    value = (value or '').strip() if isinstance(value, str) else value
+    if (value and getattr(settings, 'R2_PUBLIC_BASE', '') and media.is_absolute(value)
+            and not r2.is_r2_url(value)):
+        raise serializers.ValidationError(f'Upload the {what} first.')
+    return value
+
+
 class MediaReferenceField(serializers.Field):
     """Media reference field: columns store the absolute R2 public URL. Reads
     resolve via songs.media (stray non-URL leftovers render as None); writes
-    accept the URL string the app got back from its direct-to-R2 upload."""
+    accept the URL string the app got back from its direct-to-R2 upload -
+    our own storage only (own_upload). The value a row already has may be
+    sent back unchanged (an edit that keeps an older song's legacy cover)."""
 
     def to_representation(self, value):
         return media.resolve(value)
@@ -36,7 +51,11 @@ class MediaReferenceField(serializers.Field):
         if isinstance(data, str) and media.is_absolute(data):
             if len(data) > 500:
                 raise serializers.ValidationError('Media URL is too long.')
-            return data
+            instance = getattr(self.parent, 'instance', None)
+            current = getattr(instance, self.source, None) if instance is not None and self.source else None
+            if current and data in (current, media.resolve(current)):
+                return current
+            return own_upload(data, 'file')
         raise serializers.ValidationError(
             'Invalid media reference. Expected the public URL returned by the upload.'
         )

@@ -15,10 +15,15 @@ import toQueueTrack from '../utils/queueTrack';
 import TrackItem from './TrackItem';
 import { TrackListSkeleton } from './SkeletonLoader';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import useOnline from '../hooks/useOnline';
+import useBottomSpace from '../hooks/useBottomSpace';
+import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
 
 const GenreScreen = () => {
   const { t } = useI18n();
+  const online = useOnline();
+  const bottomSpace = useBottomSpace(40);
   const navigation = useNavigation();
   const { params = {} } = useRoute();
   const { slug, name } = params;
@@ -107,8 +112,8 @@ const GenreScreen = () => {
       data={tracks}
       keyExtractor={(item) => `genre_${item.id}`}
       renderItem={({ item, index }) => <TrackItem track={item} index={index} onPlay={playFrom} />}
-      ListHeaderComponent={header}
-      contentContainerStyle={styles.list}
+      ListHeaderComponent={<>{!online ? <OfflineBanner kind="offline" /> : null}{header}</>}
+      contentContainerStyle={[styles.list, { paddingBottom: bottomSpace }]}
       onEndReached={loadMore}
       onEndReachedThreshold={0.5}
       ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.more} color={colors.primary} /> : null}
@@ -125,7 +130,7 @@ const GenreScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  list: { paddingBottom: 140, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  list: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { ...typography.h1, color: colors.textPrimary },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },

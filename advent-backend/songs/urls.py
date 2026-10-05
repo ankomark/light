@@ -2,6 +2,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
 from .views.organizations import OrganizationViewSet
+from .views.admin_music import AdminMusicView, AdminMusicGenresView, AdminMusicPicksView
 from .views.admin_tickets import (
     AdminTicketsStats, AdminTicketsAudit, AdminTicketEvents, AdminTicketEvent, AdminTicketEventAction,
     AdminTicketTills, AdminTicketTill, AdminTicketTillAction,
@@ -30,9 +31,9 @@ from .views import (
     LikeViewSet,
     CategoryViewSet,
     SignUpView,
-    FavoriteTracksView,
     LibraryView,
     MusicHomeView,
+    MusicRecapView,
     MusicChartView,
     AlbumViewSet,
     StudioView,
@@ -231,6 +232,10 @@ urlpatterns = [
     path('admin/pulse/', AdminPulseView.as_view(), name='admin-pulse'),
     path('live/webhook/', LiveKitWebhookView.as_view(), name='livekit-webhook'),
     path('admin/analytics/', AdminAnalyticsView.as_view(), name='admin-analytics'),
+    path('admin/music/', AdminMusicView.as_view(), name='admin-music'),
+    path('admin/music/genres/', AdminMusicGenresView.as_view(), name='admin-music-genres'),
+    path('admin/music/genres/<int:pk>/', AdminMusicGenresView.as_view(), name='admin-music-genre'),
+    path('admin/music/picks/', AdminMusicPicksView.as_view(), name='admin-music-picks'),
     path('marketplace/create-payment-intent/', CreatePaymentIntentView.as_view(), name='create-payment-intent'),
     path('marketplace/seller-profile/', SellerProfileView.as_view(), name='seller-profile'),
     path('marketplace/shops/<str:username>/', ShopView.as_view(), name='shop'),
@@ -244,6 +249,7 @@ urlpatterns = [
     path('library/', LibraryView.as_view(), name='library'),
     # The Music home in one request, and a whole chart.
     path('music/home/', MusicHomeView.as_view(), name='music-home'),
+    path('music/recap/', MusicRecapView.as_view(), name='music-recap'),
     # Artist Studio: your own numbers.
     path('studio/', StudioView.as_view(), name='studio'),
     path('studio/removed/', RemovedSongsView.as_view(), name='studio-removed'),

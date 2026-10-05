@@ -18,6 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayer, usePlayerProgress } from '../context/PlayerContext';
 import { useContentWidth, FONT_SCALE } from '../utils/layout';
 import { navigate, useCurrentRouteName } from '../services/navigationRef';
+import { useI18n } from '../context/I18nContext';
+import { getLocalCover } from '../utils/downloads';
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 // About how long the full-screen player takes to slide away.
@@ -37,11 +39,13 @@ const formatTime = (ms) => {
 const MiniPlayer = () => {
   // Above the iPhone home indicator and Android's gesture bar, not under them.
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const {
     currentTrack,
     isPlaying,
     isLoading,
     isBuffering,
+    loadError,
     repeatMode,
     shuffle,
     hasNext,
@@ -119,7 +123,8 @@ const MiniPlayer = () => {
   if (!currentTrack || !shown) return null;
 
   // The 200px cover (processed songs) — the full one is a waste at this size.
-  const cover = currentTrack.cover_small || currentTrack.cover_image;
+  // A downloaded song's own saved cover first: it shows offline too.
+  const cover = getLocalCover(currentTrack.id) || currentTrack.cover_small || currentTrack.cover_image;
   const progress =
     seekValue != null
       ? seekValue
@@ -193,10 +198,18 @@ const MiniPlayer = () => {
             <Text style={styles.title} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.chrome}>
               {currentTrack.title}
             </Text>
-            <Text style={styles.sub} numberOfLines={1}>
-              {currentTrack.artist?.username || 'Unknown artist'}
-              {durationMs > 0 ? `  ·  ${formatTime(displayedMs)} / ${formatTime(durationMs)}` : ''}
-            </Text>
+            {loadError ? (
+              // Why it isn't playing (offline and not downloaded, or it
+              // wouldn't load) - play tries again.
+              <Text style={[styles.sub, styles.subError]} numberOfLines={1} testID="mini-player-error">
+                {t(loadError === 'offline' ? 'player.offline' : 'player.failed')}
+              </Text>
+            ) : (
+              <Text style={styles.sub} numberOfLines={1}>
+                {currentTrack.artist?.username || t('player.unknownArtist')}
+                {durationMs > 0 ? `  ·  ${formatTime(displayedMs)} / ${formatTime(durationMs)}` : ''}
+              </Text>
+            )}
           </View>
         </TouchableOpacity>
 
@@ -285,6 +298,7 @@ const styles = StyleSheet.create({
   meta: { flex: 1, marginHorizontal: spacing.sm },
   title: { ...typography.label, color: colors.textPrimary },
   sub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  subError: { color: colors.warning },
   controls: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   playButton: {
     width: 40,

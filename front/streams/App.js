@@ -150,6 +150,7 @@ import AdminMore from './components/admin/AdminMore';
 import { PULSE } from './components/admin/PulseCharts';
 import AdminQuizBank from './components/admin/AdminQuizBank';
 import AdminPuzzleThemes from './components/admin/AdminPuzzleThemes';
+import AdminMusic from './components/admin/AdminMusic';
 import AdminVerify from './components/admin/AdminVerify';
 import AdminAppControl from './components/admin/AdminAppControl';
 import AdminBroadcast from './components/admin/AdminBroadcast';
@@ -210,6 +211,8 @@ import { ThemeProvider } from './context/ThemeContext';
 import { I18nProvider } from './context/I18nContext';
 import { WallpaperProvider } from './context/WallpaperContext';
 import MiniPlayer from './components/MiniPlayer';
+import AutoDownloads from './components/AutoDownloads';
+import MusicRecap from './components/MusicRecap';
 import { addNotificationResponseListener } from './services/pushNotifications';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -454,6 +457,7 @@ const App = () => {
                 <Stack.Screen name="MusicChart" component={MusicChartWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="Genre" component={GenreWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="Album" component={AlbumWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="MusicRecap" component={MusicRecapWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="ArtistLibrary" component={ArtistLibraryWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="ArtistStudio" component={ArtistStudioWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="CreatePost" component={CreatePost} options={{ headerShown: false }} />
@@ -565,6 +569,7 @@ const App = () => {
                 <Stack.Screen name="AdminWallpapers" component={AdminWallpapersWrapper} />
                 <Stack.Screen name="AdminQuizBank" component={AdminQuizBankWrapper} />
                 <Stack.Screen name="AdminPuzzleThemes" component={AdminPuzzleThemesWrapper} />
+                <Stack.Screen name="AdminMusic" component={AdminMusicWrapper} />
                 <Stack.Screen name="AdminVerify" component={AdminVerifyWrapper} />
                 <Stack.Screen name="AdminAppControl" component={AdminAppControlWrapper} />
                 <Stack.Screen name="AdminBroadcast" component={AdminBroadcastWrapper} />
@@ -610,6 +615,8 @@ const App = () => {
             {/* The marketplace, ready before it is opened. */}
             <MarketWarmup />
             <MiniPlayer />
+            {/* Liked songs saved to the phone on Wi-Fi, when switched on. */}
+            <AutoDownloads />
             {/* Background uploads: progress pill on every screen. */}
             <UploadStatus />
             {/* An admin's authenticator code, asked on whatever screen needs it. */}
@@ -1004,6 +1011,17 @@ const AlbumWrapper = ({ navigation }) => (
   </View>
 );
 
+// Your year in music: same backdrop and app bar as the other music pages.
+const MusicRecapWrapper = ({ navigation }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="Your year in music couldn't load.">
+      <MusicRecap />
+    </ErrorBoundary>
+  </View>
+);
+
 const ArtistLibraryWrapper = ({ navigation }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
     <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
@@ -1054,6 +1072,7 @@ const AdminDashboardWrapper = adminWrap(AdminDashboard);
 const AdminMoreWrapper = adminWrap(AdminMore);
 const AdminQuizBankWrapper = adminWrap(AdminQuizBank);
 const AdminPuzzleThemesWrapper = adminWrap(AdminPuzzleThemes);
+const AdminMusicWrapper = adminWrap(AdminMusic);
 const AdminVerifyWrapper = adminWrap(AdminVerify);
 const AdminAppControlWrapper = adminWrap(AdminAppControl);
 const AdminBroadcastWrapper = adminWrap(AdminBroadcast);
