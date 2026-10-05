@@ -18,7 +18,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db.models import Q
+from django.db.models import Avg, FloatField, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from .models import (
@@ -46,6 +46,20 @@ BLEND_WEIGHTS = _cfg('FEED_BLEND_WEIGHTS', (6, 2, 1))
 # is the guarantee that always degrades gracefully (higher values can't be
 # honored when one author dominates a short feed, causing worse clumping).
 DIVERSITY_WINDOW = _cfg('FEED_DIVERSITY_WINDOW', 1)
+
+# ── Videos (the Videos page's For You) ───────────────────────────────────────
+# Ranked the way short-video apps rank: by how much of each video people
+# actually watch (completion, rewatches above 1) and how many of those who saw
+# it responded (a rate, so a small creator's good video can rise), not only by
+# raw totals that favour the biggest accounts. More from beyond one's own
+# circle than the home feed, too.
+VIDEO_BLEND_WEIGHTS = _cfg('FEED_VIDEO_BLEND_WEIGHTS', (4, 3, 2))
+VIDEO_SIGNAL_DAYS = _cfg('FEED_VIDEO_SIGNAL_DAYS', 14)     # watch events counted
+VIDEO_RATE_PRIOR = _cfg('FEED_VIDEO_RATE_PRIOR', 20)       # views assumed before any
+VIDEO_RATE_CAP = _cfg('FEED_VIDEO_RATE_CAP', 0.25)         # an engagement rate this high is the most
+VIDEO_COMPLETION_CAP = _cfg('FEED_VIDEO_COMPLETION_CAP', 1.5)
+VIDEO_COMPLETE = _cfg('FEED_VIDEO_COMPLETE', 0.8)          # watched this share = watched through
+VIDEO_REWATCH = _cfg('FEED_VIDEO_REWATCH', 1.5)            # this share = watched again
 
 TRENDING_TTL = _cfg('FEED_TRENDING_TTL', 20 * 60)
 DISCOVERY_TTL = _cfg('FEED_DISCOVERY_TTL', 24 * 60 * 60)
@@ -103,7 +117,36 @@ def _score(row, now, taste=None, neg=None):
         if post_tags and neg['tags'].intersection(post_tags):
             modifier -= NEG_TAG_PENALTY
     # Keep the base positive so recency still orders near-zero-signal posts.
-    return max(0.05, engagement + modifier + 1) * freshness
+    return max(0.05, engagement + modifier + 1) * freshness * video_quality(row)
+
+
+def _seconds(duration):
+    if duration is None:
+        return 0.0
+    return duration.total_seconds() if hasattr(duration, 'total_seconds') else float(duration or 0)
+
+
+def video_quality(row):
+    """How good a video is by what its viewers did, as a multiplier (1 for
+    anything that is not a video row with signals):
+
+    - engagement rate: likes and comments per view, smoothed with a prior so
+      three views and one like is not a 33% hit — up to ×2;
+    - completion: the average share of it watched (rewatches above 1),
+      from ×0.5 (people leave early) to ×2 (people watch it again).
+    """
+    if 'avg_dwell' not in row:
+        return 1.0
+    views = row.get('view_count') or 0
+    responses = (row.get('likes_count') or 0) + 2 * (row.get('comments_count') or 0)
+    rate = min(responses / (views + VIDEO_RATE_PRIOR), VIDEO_RATE_CAP)
+    q = 1.0 + rate / VIDEO_RATE_CAP
+    length = _seconds(row.get('duration'))
+    avg = row.get('avg_dwell')
+    if length > 0 and avg:
+        completion = min(avg / 1000.0 / length, VIDEO_COMPLETION_CAP)
+        q *= 0.5 + completion
+    return q
 
 
 # ── "Seen" set (cache-only, best-effort — no per-impression DB write) ──────────
@@ -125,8 +168,8 @@ def mark_seen(user_id, ids):
 
 
 # ── Taste profile (authors/tags the viewer engages with; cached per user) ──────
-def taste_profile(user):
-    key = f'feed:taste:{user.id}'
+def taste_profile(user, ctype=None):
+    key = f'feed:taste:{user.id}{_ctype_suffix(ctype)}'
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -147,14 +190,31 @@ def taste_profile(user):
     for author_id, tags in likes:
         _tally(author_id, tags)
 
-    # Implicit signal: long dwells count like a soft like (watch-time).
-    watched = (
-        WatchEvent.objects.filter(user=user, dwell_ms__gte=DWELL_STRONG_MS)
-        .order_by('-id')
-        .values_list('post__user_id', 'post__tags')[:WATCH_SAMPLE_CAP]
-    )
-    for author_id, tags in watched:
-        _tally(author_id, tags, weight=WATCH_TASTE_WEIGHT)
+    if ctype == 'video':
+        # Videos: by how much of each was watched, not a fixed number of
+        # seconds (3 s of a 10 s clip and of a 3 min one are not the same).
+        # Watched through counts as a like; watched again, as two.
+        rows = (
+            WatchEvent.objects.filter(user=user, post__content_type='video')
+            .order_by('-id')
+            .values_list('post__user_id', 'post__tags', 'dwell_ms', 'post__duration')[:WATCH_SAMPLE_CAP]
+        )
+        for author_id, tags, ms, duration in rows:
+            length = _seconds(duration)
+            share = (ms / 1000.0 / length) if length else (1.0 if ms >= DWELL_STRONG_MS else 0.0)
+            if share >= VIDEO_REWATCH:
+                _tally(author_id, tags, weight=2)
+            elif share >= VIDEO_COMPLETE:
+                _tally(author_id, tags, weight=WATCH_TASTE_WEIGHT)
+    else:
+        # Implicit signal: long dwells count like a soft like (watch-time).
+        watched = (
+            WatchEvent.objects.filter(user=user, dwell_ms__gte=DWELL_STRONG_MS)
+            .order_by('-id')
+            .values_list('post__user_id', 'post__tags')[:WATCH_SAMPLE_CAP]
+        )
+        for author_id, tags in watched:
+            _tally(author_id, tags, weight=WATCH_TASTE_WEIGHT)
     profile = {
         'authors': set(sorted(author_counts, key=author_counts.get, reverse=True)[:TASTE_MAX_AUTHORS]),
         'tags': set(sorted(tag_counts, key=tag_counts.get, reverse=True)[:TASTE_MAX_TAGS]),
@@ -216,9 +276,22 @@ def invalidate_user(user_id):
     feed immediately (e.g. a new "not interested")."""
     cache.delete_many([
         f'feed:rank:{user_id}', f'feed:reason:{user_id}',
-        f'feed:rank:{user_id}:video', f'feed:reason:{user_id}:video',
+        f'feed:rank:{user_id}:video', f'feed:reason:{user_id}:video', f'feed:taste:{user_id}:video',
         f'feed:ni:{user_id}', f'feed:neg:{user_id}',
     ])
+
+
+VIDEO_FIELDS = ('duration', 'avg_dwell')
+
+
+def with_video_signals(qs, now=None):
+    """Each video's average watch time over the last fortnight, alongside its
+    counters (one subquery, no join to multiply rows)."""
+    now = now or timezone.now()
+    avg = (WatchEvent.objects
+           .filter(post=OuterRef('pk'), created_at__gte=now - timedelta(days=VIDEO_SIGNAL_DAYS))
+           .order_by().values('post').annotate(a=Avg('dwell_ms')).values('a')[:1])
+    return qs.annotate(avg_dwell=Subquery(avg, output_field=FloatField()))
 
 
 def _top_candidates(qs, fields, cap):
@@ -251,9 +324,12 @@ def compute_trending(ctype=None):
                 visibility=SocialPost.VISIBILITY_PUBLIC)
         .exclude(user__is_deactivated=True)
     )
+    fields = ('id', 'user_id', 'likes_count', 'comments_count', 'view_count', 'created_at')
     if ctype:
         base = base.filter(content_type=ctype)
-    fields = ('id', 'user_id', 'likes_count', 'comments_count', 'view_count', 'created_at')
+    if ctype == 'video':
+        base = with_video_signals(base, now)
+        fields = fields + VIDEO_FIELDS
     # The newest and the most engaged, never an arbitrary slice: once the
     # window holds more posts than the cap, an unordered slice would score a
     # random subset and could miss the posts that are actually trending.
@@ -372,7 +448,7 @@ def build_ranked_feed(user, ctype=None):
     followee_ids = set(user.followed_by.values_list('id', flat=True))
     discovery_ids = set(get_discovery_authors(user, list(followee_ids)))
     seen = set(get_seen(user.id))       # demote (not exclude) already-served posts
-    taste = taste_profile(user)         # boost authors/tags the viewer engages with
+    taste = taste_profile(user, ctype)  # boost authors/tags the viewer engages with
     neg = negative_taste(user)          # demote "not interested" authors/tags
     hidden = not_interested_ids(user.id)  # hide "not interested" posts outright
 
@@ -393,14 +469,17 @@ def build_ranked_feed(user, ctype=None):
                 | Q(visibility=SocialPost.VISIBILITY_FOLLOWERS, user_id__in=followee_ids)
             )
         )
+        fields = ('id', 'user_id', 'likes_count', 'comments_count', 'view_count', 'created_at', 'tags')
         if ctype:
             qs = qs.filter(content_type=ctype)
+        if ctype == 'video':
+            qs = with_video_signals(qs, now)
+            fields = fields + VIDEO_FIELDS
         if blocked:
             qs = qs.exclude(user_id__in=blocked)
         if hidden:
             qs = qs.exclude(id__in=hidden)
-        rows = _top_candidates(qs, ('id', 'user_id', 'likes_count', 'comments_count',
-                                    'view_count', 'created_at', 'tags'), CANDIDATE_CAP)
+        rows = _top_candidates(qs, fields, CANDIDATE_CAP)
         rows.sort(key=lambda r: _score(r, now, taste, neg), reverse=True)
         for r in rows:
             authors[r['id']] = r['user_id']
@@ -428,7 +507,8 @@ def build_ranked_feed(user, ctype=None):
     cache.set(f'feed:reason:{user.id}{_ctype_suffix(ctype)}', reasons, SNAPSHOT_TTL)
 
     merged = _weighted_interleave(
-        [following_pool, trending_pool, discovery_pool], BLEND_WEIGHTS,
+        [following_pool, trending_pool, discovery_pool],
+        VIDEO_BLEND_WEIGHTS if ctype == 'video' else BLEND_WEIGHTS,
     )
     # Global seen-demotion: all unseen (diversified) first, then seen as a tail
     # (also diversified) — so nothing repeats until the unseen run out, and the

@@ -13,10 +13,14 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 
 // Normalize the caller's `source` (either a `{ uri }` object as expo-av wanted, or
 // a bare string / require() id) into an expo-video VideoSource.
-const toSource = (source) => {
+// `useCaching` keeps what was downloaded on disk (expo-video's own LRU cache):
+// a clip swiped back to, or got ready ahead, plays from the phone.
+const toSource = (source, useCaching) => {
   if (source == null) return null;
-  if (typeof source === 'string' || typeof source === 'number') return source;
-  return source.uri ? { uri: source.uri } : null;
+  if (typeof source === 'number') return source;
+  if (typeof source === 'string') return useCaching ? { uri: source, useCaching: true } : source;
+  if (!source.uri) return null;
+  return useCaching ? { uri: source.uri, useCaching: true } : { uri: source.uri };
 };
 
 const AppVideo = forwardRef(function AppVideo(
@@ -31,6 +35,7 @@ const AppVideo = forwardRef(function AppVideo(
     nativeControls = false,
     useNativeControls = false,   // expo-av name; either turns controls on
     bufferOptions,               // how far ahead to buffer (data-saver lever)
+    useCaching = false,          // keep the downloaded clip on disk
     onReadyForDisplay,
     onLoad,
     onError,
@@ -39,7 +44,7 @@ const AppVideo = forwardRef(function AppVideo(
   },
   ref,
 ) {
-  const player = useVideoPlayer(toSource(source), (p) => {
+  const player = useVideoPlayer(toSource(source, useCaching), (p) => {
     p.loop = isLooping;
     p.muted = isMuted;
     // Play/pause is driven by the effect below so it also reacts to prop changes.

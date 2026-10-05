@@ -141,3 +141,14 @@ test('in the background the clip stops and its watch time ends; back in front it
   expect(screen.getByTestId('app-video').props.shouldPlay).toBe(true);
   spy.mockRestore();
 });
+
+test('a clip opens on its poster, fills the screen when portrait, and is cached on the phone', async () => {
+  mockApi.fetchSocialPosts.mockResolvedValue({ results: [video(1, { thumbnail_url: 'https://cdn/1.jpg', width: 720, height: 1280 })], next: null });
+  const screen = render(<VideoFeed />);
+  await waitFor(() => expect(screen.getByTestId('poster-1')).toBeTruthy());
+  const player = screen.getByTestId('app-video');
+  expect(player.props.useCaching).toBe(true);
+  expect(player.props.resizeMode).toBe('cover');
+  await act(async () => { player.props.onReadyForDisplay(); });
+  expect(screen.queryByTestId('poster-1')).toBeNull();
+});

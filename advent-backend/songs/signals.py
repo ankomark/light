@@ -314,3 +314,12 @@ def watch_report_bursts(sender, instance, created, **kwargs):
             on_report(instance)
         except Exception:  # noqa: BLE001 — a report is never refused for an alert
             pass
+
+@receiver(post_save, sender=SocialPost)
+def queue_video_faststart(sender, instance, created=False, raw=False, **kwargs):
+    """A new video post: its file is checked (and if need be rewritten) so it
+    starts playing at once in the feed (songs/video_processing.py)."""
+    if raw or not created or instance.content_type != 'video' or not instance.media_file:
+        return
+    from .video_processing import queue_faststart
+    transaction.on_commit(lambda: queue_faststart(instance))

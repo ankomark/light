@@ -22,6 +22,7 @@ import { setAudioModeAsync } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image as Poster } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import VideoModeToggle from './VideoModeToggle';
@@ -49,6 +50,23 @@ const VIEW_FLUSH_MS = 4000;
 // The first page of each tab, kept for an instant (and offline) start.
 const KEEP_MS = 3 * 24 * 60 * 60 * 1000;
 const feedKey = (uid, tab) => userKey(uid, `videos:${tab}`);
+// The spinner waits this long: a clip that starts quickly never shows it.
+const SPINNER_DELAY_MS = 600;
+// Posters of the clips ahead are fetched as soon as their page arrives.
+const prefetchPosters = (items = []) => {
+  const urls = items.map((p) => p.thumbnail_url).filter(Boolean).slice(0, 10);
+  if (urls.length) Poster.prefetch?.(urls)?.catch?.(() => {});
+};
+/** Fill the screen with a portrait clip (as short-video apps do); show the
+ *  whole of a square or landscape one. */
+const fitFor = (item, screenW, screenH) => {
+  const w = Number(item.width) || 0;
+  const h = Number(item.height) || 0;
+  if (!w || !h) return 'contain';
+  const clip = h / w;
+  const screen = screenH / Math.max(screenW, 1);
+  return clip >= 1.5 && Math.abs(clip - screen) / screen < 0.25 ? 'cover' : 'contain';
+};
 const TEXT_SHADOW = { textShadowColor: 'rgba(0,0,0,0.75)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5 };
 
 // ── A single full-screen video page ─────────────────────────────────────────
@@ -72,6 +90,9 @@ const VideoItem = ({
 
   const [manualPaused, setManualPaused] = useState(!autoplay);
   const [loading, setLoading] = useState(true);
+  // The first frame is on screen: the poster under it can go.
+  const [shown, setShown] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [errored, setErrored] = useState(false);
   // A failed clip can be tried again (a new player for it).
   const [attempt, setAttempt] = useState(0);
@@ -162,7 +183,22 @@ const VideoItem = ({
     return Gesture.Exclusive(doubleTap, singleTap);
   }, [isActive, handleDoubleTapLike]);
 
-  const retry = () => { setErrored(false); setLoading(true); setAttempt((n) => n + 1); };
+  const retry = () => { setErrored(false); setLoading(true); setShown(false); setAttempt((n) => n + 1); };
+
+  // A spinner only for a clip that is taking its time.
+  useEffect(() => {
+    if (!isActive || !loading) { setSlow(false); return undefined; }
+    const timer = setTimeout(() => setSlow(true), SPINNER_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [isActive, loading]);
+  // Should the first-frame signal never come, the poster steps aside soon
+  // after the clip has loaded.
+  useEffect(() => {
+    if (loading || shown) return undefined;
+    const timer = setTimeout(() => setShown(true), 1200);
+    return () => clearTimeout(timer);
+  }, [loading, shown]);
+  const fit = fitFor(item, screenW, height);
 
   return (
     <View style={{ height, width: screenW, backgroundColor: '#000' }} testID={`video-${item.id}`}>
@@ -172,20 +208,30 @@ const VideoItem = ({
           ref={videoRef}
           source={{ uri }}
           style={StyleSheet.absoluteFill}
-          resizeMode="contain"
+          resizeMode={fit}
           isLooping
+          useCaching
           shouldPlay={playing}
           isMuted={muted}
           bufferOptions={quality.bufferOptions}
           onLoad={() => setLoading(false)}
           // The first frame on screen also ends the wait: a clip already in
           // the cache can finish loading before the load listener is attached.
-          onReadyForDisplay={() => setLoading(false)}
+          onReadyForDisplay={() => { setLoading(false); setShown(true); }}
           onError={() => { setErrored(true); setLoading(false); }}
         />
       ) : null}
 
-      {loading && !errored && uri && load ? (
+      {/* The clip's poster, at once from the cache, over the video until its
+          first frame is painted (a video surface is black until then), so it
+          appears out of its own picture rather than out of black. */}
+      {item.thumbnail_url && !shown && !errored ? (
+        <Poster source={{ uri: item.thumbnail_url }} style={StyleSheet.absoluteFill} contentFit={fit}
+                cachePolicy="memory-disk" transition={0} recyclingKey={String(item.id)}
+                pointerEvents="none" testID={`poster-${item.id}`} />
+      ) : null}
+
+      {loading && slow && !errored && uri && load ? (
         <View style={[StyleSheet.absoluteFill, styles.center]} pointerEvents="none">
           <ActivityIndicator size="large" color="#fff" />
         </View>
@@ -369,6 +415,7 @@ const VideoFeed = () => {
 
   const showPage = useCallback((res) => {
     const items = res?.results || [];
+    prefetchPosters(items);
     // A new page starts at its top: the list would otherwise stay where the
     // last one was, playing a clip that is not the one on screen.
     listRef.current?.scrollToOffset?.({ offset: 0, animated: false });
@@ -431,6 +478,7 @@ const VideoFeed = () => {
       const res = await fetchFeedByUrl(nextUrlRef.current);
       if (n !== requestRef.current) return;
       const items = res?.results || [];
+      prefetchPosters(items);
       setPosts((prev) => {
         const seen = new Set(prev.map((p) => p.id));
         return [...prev, ...items.filter((p) => !seen.has(p.id))];
