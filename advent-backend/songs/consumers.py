@@ -177,6 +177,23 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
 _background = set()
 
 
+def off_main_thread(fn):
+    """Run a small read in the thread pool, not on the single thread every
+    HTTP view shares (database_sync_to_async's default). Behind slow requests
+    — a remote database, a busy server — a socket's connect queued there for
+    10 s and more, and Daphne killed it. Closes its own DB connection."""
+    def run(*args, **kwargs):
+        from django.db import close_old_connections
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            close_old_connections()
+
+    async def call(*args, **kwargs):
+        return await sync_to_async(run, thread_sensitive=False)(*args, **kwargs)
+    return call
+
+
 def _stamp_last_seen_now(uid):
     from django.db import close_old_connections
     from songs.messaging import stamp_last_seen
@@ -255,19 +272,19 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
         for uid in partners:
             await self.channel_layer.group_send(dm_room(uid), {'type': 'dm_event', 'payload': payload})
 
-    @database_sync_to_async
+    @off_main_thread
     def _allowed(self):
         from songs.models import User
         u = User.objects.filter(pk=self.user.pk).values('is_active', 'is_deactivated').first()
         return bool(u and u['is_active'] and not u['is_deactivated'])
 
-    @database_sync_to_async
+    @off_main_thread
     def _partners(self):
         from songs.messaging import partner_ids
         return partner_ids(self.user)
 
 
-    @database_sync_to_async
+    @off_main_thread
     def _other_in(self, conv_id):
         """The other person in this chat — if this user is in it, and neither
         has blocked the other."""

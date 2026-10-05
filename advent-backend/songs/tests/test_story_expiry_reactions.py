@@ -124,3 +124,10 @@ class ReactionTests(APITestCase):
         StoryView.objects.create(story=self.story, viewer=self.owner)   # an old self-view stays uncounted
         groups = self.client.get('/api/stories/feed/').json()
         self.assertEqual(groups[0]['stories'][0]['views_count'], 1)
+
+    def test_watching_someone_elses_story_is_recorded(self):
+        res = self.client.post(f'/api/stories/{self.story.pk}/view_story/')
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        self.assertTrue(StoryView.objects.filter(story=self.story, viewer=self.fan).exists())
+        # Still the owner's alone to delete.
+        self.assertIn(self.client.delete(f'/api/stories/{self.story.pk}/').status_code, (403, 404))

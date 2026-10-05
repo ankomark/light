@@ -867,9 +867,11 @@ class StoryViewSet(viewsets.ModelViewSet):
         return story_queryset(self.request.user)
 
     def get_permissions(self):
-        # Reacting is for anyone who can see the story (not only its owner);
-        # the viewers list checks ownership itself.
-        if self.action in ('react', 'viewers'):
+        # Watching and reacting are for anyone who can see the story — the
+        # owner-only rule is for changing or deleting it. (view_story was
+        # refused to everyone but the owner, so no view was ever recorded.)
+        # The viewers list checks ownership itself.
+        if self.action in ('react', 'viewers', 'view_story'):
             return [permissions.IsAuthenticated()]
         return super().get_permissions()
 
