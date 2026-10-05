@@ -373,11 +373,12 @@ class CommentSerializer(serializers.ModelSerializer):
     parent = serializers.PrimaryKeyRelatedField(read_only=True)
     reply_to = SimpleUserSerializer(read_only=True)
     reactions = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
         fields = ('id', 'content', 'user', 'track', 'created_at', 'updated_at',
-                  'parent', 'reply_to', 'replies_count', 'reactions')
+                  'parent', 'reply_to', 'replies_count', 'reactions', 'can_delete')
         read_only_fields = ('parent', 'reply_to', 'replies_count')
 
     def validate_content(self, value):
@@ -387,6 +388,20 @@ class CommentSerializer(serializers.ModelSerializer):
         if len(value) > 2200:
             raise serializers.ValidationError('Comment is too long.')
         return value
+
+    def get_can_delete(self, obj):
+        """Yours, or on your song: you may take it down."""
+        request = self.context.get('request')
+        uid = getattr(getattr(request, 'user', None), 'id', None)
+        if not uid:
+            return False
+        if obj.user_id == uid:
+            return True
+        # The song's artist, looked up once per song for a page of comments.
+        artists = self.context.setdefault('_track_artist', {})
+        if obj.track_id not in artists:
+            artists[obj.track_id] = Track.objects.filter(pk=obj.track_id).values_list('artist_id', flat=True).first()
+        return artists[obj.track_id] == uid
 
     def get_reactions(self, obj):
         summaries = self.context.get('reaction_summaries')

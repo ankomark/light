@@ -141,10 +141,12 @@ const MiniPlayer = () => {
       right: sideMargin + spacing.sm,
     }]}>
       <View style={styles.topRow}>
-        <TouchableOpacity onPress={toggleShuffle} hitSlop={HIT}>
+        <TouchableOpacity onPress={toggleShuffle} hitSlop={HIT} accessibilityRole="button"
+                          accessibilityLabel={t('player.shuffle')} accessibilityState={{ selected: shuffle }}>
           <Ionicons name="shuffle" size={18} color={shuffle ? colors.primary : colors.textMuted} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={cycleRepeat} hitSlop={HIT}>
+        <TouchableOpacity onPress={cycleRepeat} hitSlop={HIT} accessibilityRole="button"
+                          accessibilityLabel={t('player.repeat')} accessibilityState={{ selected: repeatMode !== 'off' }}>
           <MaterialIcons
             name={repeatMode === 'one' ? 'repeat-one' : 'repeat'}
             size={18}
@@ -214,7 +216,7 @@ const MiniPlayer = () => {
         </TouchableOpacity>
 
         <View style={styles.controls}>
-          <TouchableOpacity onPress={playPrevious} hitSlop={HIT} disabled={!hasPrev}>
+          <TouchableOpacity onPress={playPrevious} hitSlop={HIT} disabled={!hasPrev} accessibilityRole="button" accessibilityLabel={t('player.previous')}>
             <MaterialIcons name="skip-previous" size={26} color={hasPrev ? colors.textSecondary : colors.textMuted} />
           </TouchableOpacity>
 
@@ -223,6 +225,8 @@ const MiniPlayer = () => {
             style={styles.playButton}
             activeOpacity={0.85}
             disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel={t(isPlaying ? 'player.pause' : 'player.play')}
           >
             {busy ? (
               <ActivityIndicator color={colors.white} size="small" />
@@ -236,11 +240,12 @@ const MiniPlayer = () => {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={playNext} hitSlop={HIT} disabled={!hasNext}>
+          <TouchableOpacity onPress={playNext} hitSlop={HIT} disabled={!hasNext} accessibilityRole="button" accessibilityLabel={t('player.next')}>
             <MaterialIcons name="skip-next" size={26} color={hasNext ? colors.textSecondary : colors.textMuted} />
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={closePlayer} hitSlop={HIT} style={styles.closeBtn}>
+          <TouchableOpacity onPress={closePlayer} hitSlop={HIT} style={styles.closeBtn}
+                            accessibilityRole="button" accessibilityLabel={t('common.close')}>
             <Ionicons name="close" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         </View>

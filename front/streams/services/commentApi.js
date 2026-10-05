@@ -18,6 +18,8 @@ export const commentApi = (kind, targetId) => {
       create: (content, parent = null) => apiRequest('post', base, { content, ...(parent ? { parent } : {}) }),
       react: (commentId, emoji) => apiRequest('post', `${base}${commentId}/react/`, emoji ? { emoji } : {}),
       get: (commentId) => apiRequest('get', `${base}${commentId}/`),
+      // Yours, or any on your own song (the comment says so: can_delete).
+      remove: (commentId) => apiRequest('delete', `${base}${commentId}/`),
     };
   }
   return {

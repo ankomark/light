@@ -55,87 +55,6 @@ class R2SignView(APIView):
         ))
 
 
-class AvatarUploadView(APIView):
-    parser_classes = [MultiPartParser]
-    permission_classes = [permissions.IsAuthenticated]
-
-    def put(self, request):
-        """Alternative endpoint for avatar uploads"""
-        if not hasattr(request.user, 'profile'):
-            return Response(
-                {'error': 'Profile does not exist'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        serializer = AvatarUploadSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            # Straight to R2. Sizing/cropping is the client's job now (it
-            # already compresses before upload); R2 stores bytes verbatim.
-            url = r2.upload_file(serializer.validated_data['avatar'], 'profile_images')
-
-            profile = request.user.profile
-            profile.picture = url
-            profile.save()
-            
-            return Response(
-                ProfileSerializer(profile, context={'request': request}).data,
-                status=status.HTTP_200_OK
-            )
-        except Exception as e:
-            logger.error(f"Avatar upload failed: {str(e)}")
-            return Response(
-                {'error': 'Failed to process image upload'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-
-
-class TrackUploadView(APIView):
-    parser_classes = [MultiPartParser]
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = TrackUploadSerializer(data=request.data)
-        if serializer.is_valid():
-            try:
-                # Straight to R2; the stored reference is the public URL.
-                audio_url = r2.upload_file(
-                    serializer.validated_data['audio_file'], 'audio_uploads')
-
-                cover_url = None
-                if 'cover_image' in serializer.validated_data:
-                    cover_url = r2.upload_file(
-                        serializer.validated_data['cover_image'], 'cover_images')
-
-                # Create track
-                track_data = {
-                    'title': request.data.get('title', 'Untitled Track'),
-                    'artist': request.user.id,
-                    'audio_file': audio_url,
-                    'cover_image': cover_url,
-                    'album': request.data.get('album', ''),
-                    'lyrics': request.data.get('lyrics', '')
-                }
-                
-                track_serializer = TrackSerializer(data=track_data, context={'request': request})
-                if track_serializer.is_valid():
-                    track = track_serializer.save()
-                    return Response(track_serializer.data, status=status.HTTP_201_CREATED)
-                return Response(track_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-            except Exception as e:
-                logger.error(f"Track upload to R2 failed: {e}", exc_info=True)
-                return Response(
-                    {'error': 'Upload failed. Please try again.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-
 TRACK_FILE_FIELDS = ('audio_file', 'cover_image', 'audio_low', 'audio_standard', 'audio_high',
                      'spectrum', 'cover_small', 'cover_medium')
 
@@ -1305,8 +1224,24 @@ class CommentViewSet(viewsets.ModelViewSet):
         summary = reaction_summaries([comment.id], request.user, TRACK_COMMENTS)[comment.id]
         return Response({'reactions': summary, 'mine': mine})
 
+    def get_permissions(self):
+        # Deleting is checked in destroy(): the comment's writer, or the
+        # song's artist (their song, their comment section).
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
+
+    def destroy(self, request, *args, **kwargs):
+        comment = self.get_object()
+        if request.user.id not in (comment.user_id, comment.track.artist_id):
+            return Response({'error': 'Not yours to delete.'}, status=status.HTTP_403_FORBIDDEN)
+        comment.delete()   # its replies go with it; the counts follow (signals)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def create(self, request, *args, **kwargs):
-        track = get_object_or_404(Track, id=self.kwargs.get('track_pk'), is_removed=False)
+        # Not on a song hidden from you (a blocked or deactivated account's).
+        track = get_object_or_404(hide_unseen_artists(Track.objects.filter(is_removed=False), request.user),
+                                  id=self.kwargs.get('track_pk'))
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         parent = None

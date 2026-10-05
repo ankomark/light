@@ -149,3 +149,19 @@ describe('a comment’s long-press menu', () => {
     expect(mockReport).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, contentType: 'comment', objectId: 12 }));
   });
 });
+
+test("a song's comment: deleted from the same menu, through the song's own comments", async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation((title, body, buttons) => buttons?.[1]?.onPress?.());
+  const rows = [{ id: 21, content: 'on my song', user: { id: 9, username: 'ann' }, can_delete: true,
+    replies_count: 0, reactions: { total: 0, top: [], mine: null } }];
+  mockApi.apiRequest.mockImplementation(async (method) => (method === 'get' ? rows : {}));
+  const screen = render(<CommentAction trackId={3} commentCount={1} autoOpen />);
+  await waitFor(() => expect(screen.getByText('on my song')).toBeTruthy(), { timeout: 5000 });
+  fireEvent(screen.getByText('on my song'), 'longPress');
+  await act(async () => { fireEvent.press(screen.getByTestId('comment-delete')); });
+  expect(mockApi.apiRequest).toHaveBeenCalledWith('delete', '/tracks/3/comments/21/');
+  expect(screen.queryByText('on my song')).toBeNull();
+  mockApi.apiRequest.mockReset();
+  mockApi.apiRequest.mockImplementation(async () => ({}));
+  alert.mockRestore();
+});

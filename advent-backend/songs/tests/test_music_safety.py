@@ -191,3 +191,35 @@ class HiddenSongsInListsTests(APITestCase):
         self.assertEqual(res.status_code, 200, res.content[:200])
         self.gone.refresh_from_db()
         self.assertEqual(self.gone.album_ref_id, album.id)
+
+
+class SongCommentsTests(APITestCase):
+    """A song's comments: its writer or the song's artist may delete one
+    (replies go with it), nobody else; and a blocked artist's song takes no
+    comments from you."""
+
+    def setUp(self):
+        cache.clear()
+        self.artist = user('sc_artist')
+        self.fan = user('sc_fan')
+        self.other = user('sc_other')
+        self.track = song(self.artist, 'Psalm')
+        self.client.force_authenticate(self.fan)
+        url = f'/api/tracks/{self.track.id}/comments/'
+        self.comment = self.client.post(url, {'content': 'Beautiful'}, format='json').json()
+
+    def test_the_writer_and_the_artist_may_delete_others_may_not(self):
+        url = f'/api/tracks/{self.track.id}/comments/'
+        self.assertTrue(self.client.get(url).json()['results'][0]['can_delete'])
+        self.client.force_authenticate(self.other)
+        self.assertFalse(self.client.get(url).json()['results'][0]['can_delete'])
+        self.assertEqual(self.client.delete(f'{url}{self.comment["id"]}/').status_code, 403)
+        self.client.force_authenticate(self.artist)
+        self.assertTrue(self.client.get(url).json()['results'][0]['can_delete'])
+        self.assertEqual(self.client.delete(f'{url}{self.comment["id"]}/').status_code, 204)
+
+    def test_no_comments_on_a_blocked_artists_song(self):
+        Block.objects.create(blocker=self.artist, blocked=self.other)
+        self.client.force_authenticate(self.other)
+        res = self.client.post(f'/api/tracks/{self.track.id}/comments/', {'content': 'hi'}, format='json')
+        self.assertEqual(res.status_code, 404)
