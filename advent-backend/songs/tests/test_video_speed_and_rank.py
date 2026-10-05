@@ -38,13 +38,29 @@ class FaststartJobTests(TestCase):
         late = box(b'ftyp', b'isom') + box(b'mdat', b'x' * 50)
         with mock.patch.object(vp, '_head', return_value=late), \
                 mock.patch.object(vp, '_download'), \
-                mock.patch.object(vp, '_ffmpeg') as ffmpeg, \
+                mock.patch.object(vp, '_ffmpeg', return_value=(None, '')) as ffmpeg, \
                 mock.patch.object(vp.r2, 'put_file', return_value='https://cdn.x/posts/clip-fast.mp4') as put:
             vp.faststart_video(self.post.pk)
         self.assertIn('+faststart', ffmpeg.call_args[0][0])
         self.assertEqual(put.call_args[0][0], 'posts/clip-fast.mp4')
         self.post.refresh_from_db()
         self.assertEqual(self.post.media_file, 'https://cdn.x/posts/clip-fast.mp4')
+        # Done once: the rewritten file is not looked at again.
+        with mock.patch.object(vp, '_head') as head:
+            vp.faststart_video(self.post.pk)
+        head.assert_not_called()
+
+    def test_an_iphone_mov_stays_a_mov_and_hevc_in_mp4_gets_the_apple_tag(self, *_):
+        late = box(b'ftyp', b'qt  ') + box(b'mdat', b'x' * 50)
+        SocialPost.objects.filter(pk=self.post.pk).update(media_file='https://cdn.x/posts/clip.MOV')
+        with mock.patch.object(vp, '_head', return_value=late), mock.patch.object(vp, '_download'),                 mock.patch.object(vp, '_ffmpeg', return_value=(None, '')),                 mock.patch.object(vp.r2, 'put_file', return_value='https://cdn.x/posts/clip-fast.mov') as put:
+            vp.faststart_video(self.post.pk)
+        self.assertEqual(put.call_args[0][:3], ('posts/clip-fast.mov', mock.ANY, 'video/quicktime'))
+
+        SocialPost.objects.filter(pk=self.post.pk).update(media_file='https://cdn.x/posts/h.mp4')
+        with mock.patch.object(vp, '_head', return_value=late), mock.patch.object(vp, '_download'),                 mock.patch.object(vp, '_is_hevc', return_value=True),                 mock.patch.object(vp, '_ffmpeg', return_value=(None, '')) as ffmpeg,                 mock.patch.object(vp.r2, 'put_file', return_value='https://cdn.x/posts/h-fast.mp4'):
+            vp.faststart_video(self.post.pk)
+        self.assertIn('hvc1', ffmpeg.call_args[0][0])
 
     def test_a_file_already_fine_is_left_alone(self, *_):
         good = box(b'ftyp', b'isom') + box(b'moov', b'x' * 10) + box(b'mdat')

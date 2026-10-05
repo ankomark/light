@@ -33,7 +33,13 @@ logger = logging.getLogger(__name__)
 HEAD_BYTES = 64 * 1024          # enough to see the boxes before the pictures
 MAX_VIDEO_BYTES = 300 * 1024 * 1024
 FETCH_TIMEOUT = 60
-FAST_SUFFIX = '-fast.mp4'
+FAST_MARK = '-fast'
+# The container is kept: an iPhone's .mov stays a .mov.
+CONTENT_TYPES = {'.mov': 'video/quicktime', '.m4v': 'video/x-m4v'}
+
+
+def _is_rewritten(url):
+    return os.path.splitext(url.split('?')[0])[0].endswith(FAST_MARK)
 
 
 def index_first(head):
@@ -74,6 +80,14 @@ def _download(url, path):
                 fh.write(chunk)
 
 
+def _is_hevc(path):
+    try:
+        _, info = _ffmpeg(['-i', path, '-map', '0:v:0?', '-c', 'copy', '-t', '0', '-f', 'null', '-'])
+    except ProcessingError:
+        return False
+    return 'Video: hevc' in info
+
+
 @handler('faststart_video')
 def faststart_video(post_id):
     post = SocialPost.objects.filter(pk=post_id, content_type='video').first()
@@ -81,21 +95,28 @@ def faststart_video(post_id):
         return
     url = media.resolve(post.media_file)
     # Only our own storage is fetched server-side; done once already.
-    if not url or not r2.is_r2_url(url) or url.endswith(FAST_SUFFIX):
+    if not url or not r2.is_r2_url(url) or _is_rewritten(url):
         return
     if not r2.is_configured():
         raise ProcessingError('R2 is not configured')
     if index_first(_head(url)) is not False:
         return                  # already starts at once (or not an MP4 we know)
 
+    key = r2.key_from_url(url)
+    stem, ext = os.path.splitext(key)
+    ext = ext.lower() if ext.lower() in ('.mp4', '.mov', '.m4v') else '.mp4'
     with tempfile.TemporaryDirectory(prefix='video-') as tmp:
-        src = os.path.join(tmp, 'in.mp4')
-        out = os.path.join(tmp, 'out.mp4')
+        src = os.path.join(tmp, f'in{ext}')
+        out = os.path.join(tmp, f'out{ext}')
         _download(url, src)
-        _ffmpeg(['-i', src, '-map', '0', '-c', 'copy', '-movflags', '+faststart', '-y', out])
-        key = r2.key_from_url(url)
-        new_key = f'{os.path.splitext(key)[0]}{FAST_SUFFIX}'
-        new_url = r2.put_file(new_key, out, 'video/mp4')
+        args = ['-i', src, '-map', '0', '-c', 'copy', '-movflags', '+faststart']
+        # HEVC (iPhones record it) in an MP4 must be tagged 'hvc1': FFmpeg
+        # writes 'hev1' by default, which iPhones and iPads will not play.
+        if ext != '.mov' and _is_hevc(src):
+            args += ['-tag:v', 'hvc1']
+        _ffmpeg(args + ['-y', out])
+        new_key = f'{stem}{FAST_MARK}{ext}'
+        new_url = r2.put_file(new_key, out, CONTENT_TYPES.get(ext, 'video/mp4'))
 
     # Only if the post still has the file this job read. The old file is
     # kept: a feed saved on a phone, a story or a share may still point at it.
