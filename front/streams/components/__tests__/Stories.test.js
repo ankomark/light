@@ -38,6 +38,7 @@ jest.mock('../../services/imageProcessing', () => ({ compressImage: jest.fn(asyn
 const mockVideo = {
   processVideo: jest.fn(async ({ uri }) => ({ uri: `${uri}#720p`, thumbnailUri: 'file:///poster.jpg' })),
   isVideoProcessingAvailable: jest.fn(() => true),
+  extractFrame: jest.fn(async () => 'file:///frame0.jpg'),
 };
 jest.mock('../../services/videoProcessing', () => mockVideo);
 const mockUpload = jest.fn(async (file) => ({ publicId: file.name, url: `https://cdn.test/${file.name}` }));
@@ -138,6 +139,27 @@ describe('creating a story', () => {
     expect(created).toHaveBeenCalled();
     expect(mockNav.goBack).toHaveBeenCalled();
     off();
+  });
+
+  test('a picked photo is drawn, with a fallback if it cannot be; the box behind it is black', async () => {
+    mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'image', uri: 'file:///p.jpg', width: 900, height: 1600 }] });
+    const screen = render(<CreateStoryScreen />);
+    await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
+    const box = [].concat(screen.getByTestId('story-preview').props.style).reduce((x, y) => ({ ...x, ...y }), {});
+    expect(box.backgroundColor).toBe('#000');
+    const img = screen.getByTestId('story-preview-image');
+    expect(img.props.source.uri).toContain('file:///p.jpg');
+    act(() => { img.props.onError(); });
+    expect(screen.getByTestId('story-preview-fallback')).toBeTruthy();
+    expect(screen.getByTestId('story-change')).toBeTruthy();
+  });
+
+  test('a picked video shows a still under the player, which draws on a texture (Android clipping)', async () => {
+    mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'video', uri: 'file:///v2.mp4', duration: 8000, width: 720, height: 1280 }] });
+    const screen = render(<CreateStoryScreen />);
+    await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
+    await waitFor(() => expect(screen.getByTestId('story-preview-still').props.source).toEqual({ uri: 'file:///frame0.jpg' }));
+    expect(screen.getByTestId('app-video').props.surfaceType).toBe('textureView');
   });
 
   test('a clip over 30 s opens the trimmer, and the window chosen is what goes up', async () => {

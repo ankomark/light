@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView,
-  ActivityIndicator, Alert, useWindowDimensions,
+  ActivityIndicator, Alert, useWindowDimensions, Image as RNImage,
 } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,7 +15,7 @@ import VideoTrimmer from './VideoTrimmer';
 import CoverPicker from './CoverPicker';
 import { uploadMedia } from '../services/cloudinary';
 import { compressImage } from '../services/imageProcessing';
-import { processVideo, isVideoProcessingAvailable } from '../services/videoProcessing';
+import { processVideo, isVideoProcessingAvailable, extractFrame } from '../services/videoProcessing';
 import { createStory } from '../services/api';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -71,6 +71,18 @@ const CreateStoryScreen = () => {
   const [showTrim, setShowTrim] = useState(false);
   const [showCover, setShowCover] = useState(false);
   const [status, setStatus] = useState('');      // what the upload is doing
+  // The preview's fallbacks: a still of a picked video, and whether the
+  // photo needs React Native's Image instead.
+  const [still, setStill] = useState(null);
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => {
+    setImageFailed(false);
+    setStill(null);
+    if (media?.type !== 'video') return undefined;
+    let alive = true;
+    extractFrame(media.uri, 0, 720).then((uri) => { if (alive) setStill(uri); }).catch(() => {});
+    return () => { alive = false; };
+  }, [media]);
   const [uploading, setUploading] = useState(false);
   const [picking, setPicking] = useState(false);
   const live = useRef(true);
@@ -214,20 +226,34 @@ const CreateStoryScreen = () => {
   const previewH = previewW / ratio;
 
   const preview = media ? (
-    <TouchableOpacity style={[styles.preview, { width: previewW, height: previewH }]} onPress={pickMedia}
-                      activeOpacity={0.9} accessibilityRole="button" accessibilityLabel={t('story.change')}
-                      testID="story-preview">
+    <View style={[styles.preview, { width: previewW, height: previewH }]} testID="story-preview">
       {media.type === 'video' ? (
-        <AppVideo source={{ uri: media.uri }} style={StyleSheet.absoluteFill} resizeMode="contain"
-                  shouldPlay={!showTrim && !showCover} isMuted isLooping />
+        <>
+          {/* A still of the clip under the player: the picked video shows even
+              before (or if) the player draws. */}
+          {!!(coverUri || still) && (
+            <Image source={{ uri: coverUri || still }} style={StyleSheet.absoluteFill} contentFit="contain"
+                   testID="story-preview-still" />
+          )}
+          {/* textureView: on Android the default surface ignores the rounded,
+              clipped box and could draw nothing in it. */}
+          <AppVideo source={{ uri: media.uri }} style={StyleSheet.absoluteFill} resizeMode="contain"
+                    surfaceType="textureView" shouldPlay={!showTrim && !showCover} isMuted isLooping />
+        </>
+      ) : imageFailed ? (
+        // expo-image couldn't draw this file: React Native's own Image can.
+        <RNImage source={{ uri: media.uri }} style={StyleSheet.absoluteFill} resizeMode="contain"
+                 testID="story-preview-fallback" />
       ) : (
-        <Image source={{ uri: media.uri }} style={StyleSheet.absoluteFill} contentFit="contain" />
+        <Image source={{ uri: media.uri }} style={StyleSheet.absoluteFill} contentFit="contain"
+               onError={() => setImageFailed(true)} testID="story-preview-image" />
       )}
-      <View style={styles.changeOverlay} pointerEvents="none">
+      <TouchableOpacity style={styles.changeOverlay} onPress={pickMedia} accessibilityRole="button"
+                        accessibilityLabel={t('story.change')} hitSlop={8} testID="story-change">
         <Ionicons name="images-outline" size={18} color="#fff" />
         <Text style={styles.changeText}>{t('story.change')}</Text>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </View>
   ) : (
     <TouchableOpacity style={[styles.picker, { width: previewW, height: previewH }]} onPress={pickMedia}
                       activeOpacity={0.8} accessibilityRole="button" testID="story-pick">
@@ -399,7 +425,8 @@ const styles = StyleSheet.create({
   preview: {
     borderRadius: radius.lg,
     overflow: 'hidden',
-    backgroundColor: colors.surface,
+    // Black behind the picture (its letterbox), never the theme's blue.
+    backgroundColor: '#000',
   },
   changeOverlay: {
     position: 'absolute',
