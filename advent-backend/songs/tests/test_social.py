@@ -6,6 +6,7 @@ Run with:
 """
 from django.core.cache import cache
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -108,6 +109,7 @@ class FeedAnnotationTests(APITestCase):
         self.assertFalse(p['is_liked'])
 
 
+@override_settings(R2_PUBLIC_BASE='https://pub-test.r2.dev')
 class SongTrimTests(APITestCase):
     """Creating an image post with a trimmed accompanying audio clip."""
 
@@ -120,7 +122,7 @@ class SongTrimTests(APITestCase):
         return {
             'content_type': 'image',
             'caption': 'with song',
-            'song_audio_url': 'https://res.cloudinary.com/demo/video/upload/song.mp3',
+            'song_audio_url': 'https://pub-test.r2.dev/audio/song.mp3',
             'song_title': 'Hymn',
             'song_artist': 'Choir',
             'song_start_time': start,
@@ -210,6 +212,7 @@ class HealMediaMigrationTests(APITestCase):
         self.assertEqual(healed, 'social_media/xyz')
 
 
+@override_settings(R2_PUBLIC_BASE='https://pub-test.r2.dev')
 class GalleryTests(APITestCase):
     """1–4 image carousel posts: gallery persistence + media_items output."""
 
@@ -294,6 +297,7 @@ class SavedPostsListTests(APITestCase):
         self.assertEqual(len(rows), 0)
 
 
+@override_settings(R2_PUBLIC_BASE='https://pub-test.r2.dev')
 class VideoTrimTests(APITestCase):
     """Video posts: the trim window persists (for the client player), and the
     stored R2 URL is served verbatim — clips are trimmed client-side before

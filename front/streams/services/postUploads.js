@@ -195,6 +195,9 @@ export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => 
  */
 export const buildStoryJob = (snap) => async ({ progress, stage, thumbnail }) => {
   const caption = (snap.caption || '').trim();
+  // The job's id: a retry (or a resumed upload) hands back the story already
+  // shared instead of sharing it twice.
+  const clientId = snap.clientId ? { client_id: snap.clientId } : {};
   if (snap.video?.uri) {
     // Cut to the window, 720p, poster — exactly as a video post.
     stage('processing');
@@ -227,6 +230,7 @@ export const buildStoryJob = (snap) => async ({ progress, stage, thumbnail }) =>
     const created = await createStory({
       media_file: upload.url, media_url: upload.url, content_type: 'video', caption,
       ...(posterUrl ? { thumbnail_url: posterUrl } : {}),
+      ...clientId,
     });
     progress(1);
     cleanupProcessedVideos();
@@ -240,7 +244,7 @@ export const buildStoryJob = (snap) => async ({ progress, stage, thumbnail }) =>
     { ...image, name: `story_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'image', (f) => progress(0.05 + f * 0.9),
   );
   stage('finishing');
-  const created = await createStory({ media_file: upload.url, media_url: upload.url, content_type: 'image', caption });
+  const created = await createStory({ media_file: upload.url, media_url: upload.url, content_type: 'image', caption, ...clientId });
   progress(1);
   return created;
 };

@@ -540,3 +540,13 @@ describe('the stories row keeps up', () => {
     expect(writeCache).toHaveBeenLastCalledWith('u7:stories', []);
   });
 });
+
+test('a video that never draws a paused first frame still plays once loaded', () => {
+  const group = { user: { id: 3, username: 'ann' }, stories: [
+    { id: 91, content_type: 'video', media_url: 'https://cdn.test/91.mp4', created_at: new Date().toISOString() },
+  ] };
+  const screen = render(<StoryViewer route={{ params: { group } }} navigation={mockNav} />);
+  expect(screen.getByTestId('app-video').props.shouldPlay).toBe(false);
+  act(() => { screen.getByTestId('app-video').props.onLoad({ durationMillis: 8000 }); });
+  expect(screen.getByTestId('app-video').props.shouldPlay).toBe(true);
+});

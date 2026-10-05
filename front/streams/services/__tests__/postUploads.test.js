@@ -254,6 +254,11 @@ describe('a story, in the background', () => {
     expect(processVideo).not.toHaveBeenCalled();
   });
 
+  test('the job id goes with the story, so a retry shares it once', async () => {
+    await buildStoryJob({ caption: '', clientId: 'job-9', images: [{ uri: 'file:///p.jpg' }] })(ctx());
+    expect(createStory).toHaveBeenCalledWith(expect.objectContaining({ client_id: 'job-9' }));
+  });
+
   test('a poster that fails to upload costs the poster, not the story', async () => {
     processVideo.mockResolvedValue({ uri: 'file:///cut.mp4', thumbnailUri: 'file:///poster.jpg', processed: true });
     uploadMedia.mockImplementation(async (file, type) => {

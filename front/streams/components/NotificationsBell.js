@@ -199,7 +199,9 @@ const NotificationsBell = ({ navigation }) => {
           ? { commentId: item.related_comment_id, shouldOpenComments: true }
           : {}),
       });
-    } else if (type === 'follow' && item.sender?.id) {
+    } else if ((type === 'follow' || type === 'story_reaction') && item.sender?.id) {
+      // A follow, or a reaction to your story (which is gone within a day):
+      // the person.
       navigation.navigate('UserProfile', {
         userId: item.sender.id,
         username: item.sender.username,

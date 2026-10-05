@@ -210,3 +210,35 @@ class FeedOrderTests(APITestCase):
         self.assertFalse(mine['has_unviewed'])
         self.assertTrue(mine['stories'][0]['is_viewed'])
         self.assertTrue(groups[1]['has_unviewed'])
+
+
+@override_settings(R2_PUBLIC_BASE=BASE)
+class SharingAStoryTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.me = User.objects.create_user('sh_me', 'shm@x.com', 'pw')
+        self.client.force_authenticate(self.me)
+
+    def share(self, **extra):
+        body = {'media_url': f'{BASE}/s/a.jpg', 'media_file': f'{BASE}/s/a.jpg', 'content_type': 'image', **extra}
+        return self.client.post('/api/stories/', body, format='json')
+
+    def test_a_retry_with_the_same_upload_shares_it_once(self):
+        first = self.share(client_id='job-1')
+        again = self.share(client_id='job-1')
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.json()['id'], first.json()['id'])
+        self.assertEqual(Story.objects.count(), 1)
+        self.assertEqual(self.share(client_id='job-2').status_code, 201)
+        self.assertEqual(Story.objects.count(), 2)
+
+    def test_only_our_own_uploads(self):
+        for field in ('media_url', 'media_file', 'thumbnail_url'):
+            res = self.share(**{field: 'https://elsewhere.example/x.jpg'})
+            self.assertEqual(res.status_code, 400, field)
+        self.assertFalse(Story.objects.exists())
+
+    def test_a_story_needs_a_picture(self):
+        res = self.client.post('/api/stories/', {'content_type': 'image', 'caption': 'hi'}, format='json')
+        self.assertEqual(res.status_code, 400)

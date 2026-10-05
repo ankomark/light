@@ -11,6 +11,7 @@ from importlib import import_module
 from django.apps import apps as django_apps
 from django.core.cache import cache
 from django.utils import timezone
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from songs.captions import extract_hashtags, extract_mentions
@@ -178,6 +179,7 @@ class CommentSwitchTests(APITestCase):
         self.assertEqual(row['visibility'], 'public')
 
 
+@override_settings(R2_PUBLIC_BASE='https://media.example.com')
 class HashtagTests(APITestCase):
     def setUp(self):
         cache.clear()
@@ -227,6 +229,7 @@ class HashtagTests(APITestCase):
         self.assertEqual(head, {'tag': 'sabbath', 'posts_count': 2})
 
 
+@override_settings(R2_PUBLIC_BASE='https://media.example.com')
 class MentionTests(APITestCase):
     def setUp(self):
         self.author = User.objects.create_user('mn_author', 'mna@x.com', 'x')
@@ -272,6 +275,7 @@ class MentionTests(APITestCase):
         self.assertEqual(self.notified(self.other), 1)
 
 
+@override_settings(R2_PUBLIC_BASE='https://media.example.com')
 class PrivateAccountMentionTests(APITestCase):
     """A public post on a PRIVATE account is still hidden from non-followers,
     so a mention must not notify them — the tap would open a post they can't
@@ -318,6 +322,7 @@ class PrivateAccountMentionTests(APITestCase):
         self.assertEqual(self.open_first_mention(self.stranger), [])  # gone, not a dead link
 
 
+@override_settings(R2_PUBLIC_BASE='https://media.example.com')
 class IdempotentCreateTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user('id_u', 'idu@x.com', 'x')

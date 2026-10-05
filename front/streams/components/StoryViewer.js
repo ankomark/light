@@ -200,6 +200,11 @@ const StoryViewer = ({ route, navigation }) => {
     if (!isVideo && !pausedRef.current) startImageProgress(0);
   }, [isVideo, startImageProgress]);
 
+  // A video is held paused until it shows, and some Android builds never draw
+  // the first frame of a paused video — so it would wait forever. Loaded is
+  // ready enough: it plays, and the first frame follows.
+  const handleVideoLoad = useCallback(() => { setMediaLoading(false); }, []);
+
   const onVideoStatus = useCallback((s) => {
     if (!s.isLoaded) return;
     const dur = Math.min(s.durationMillis || VIDEO_MAX_MS, VIDEO_MAX_MS);
@@ -420,6 +425,7 @@ const StoryViewer = ({ route, navigation }) => {
           shouldPlay={!paused && !mediaLoading}
           isLooping={false}
           onReadyForDisplay={handleMediaReady}
+          onLoad={handleVideoLoad}
           onPlaybackStatusUpdate={onVideoStatus}
           onError={handleMediaError}
         />
