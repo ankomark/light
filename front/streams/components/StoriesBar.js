@@ -42,21 +42,23 @@ const StoryRing = ({ hasUnviewed, size }) => {
   );
 };
 
-/** The newest photo among a group's stories (videos have no picture yet). */
+/** The picture of a group's newest story: a photo, or a video's poster
+ *  (older video stories have none — the newest one with a picture, then). */
+const pictureOf = (s) => (s?.content_type === 'video' ? s.thumbnail_url : s?.media_url) || null;
 export const storyCover = (stories = []) => {
-  const photos = stories.filter((s) => s && s.content_type !== 'video' && s.media_url);
-  if (!photos.length) return null;
-  const newest = photos.reduce((a, b) => (new Date(b.created_at) > new Date(a.created_at) ? b : a));
-  return newest.media_url;
+  const withPicture = stories.filter((s) => s && pictureOf(s));
+  if (!withPicture.length) return null;
+  const newest = withPicture.reduce((a, b) => (new Date(b.created_at) > new Date(a.created_at) ? b : a));
+  return pictureOf(newest);
 };
 
 const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onCreatePress, ownLabel }) {
   const avatarSize = 58;
   const avatar = group.user.profile_picture;
   const hasStories = group.stories?.length > 0;
-  // With stories up, the bubble shows one of them (the newest photo), as
-  // Facebook does — the profile picture moves to a small badge. Only videos
-  // (no picture to show): the profile picture stays, with a play mark.
+  // With stories up, the bubble shows one of them (the newest photo or video
+  // poster), as Facebook does — the profile picture moves to a small badge.
+  // Only old videos without a poster: the profile picture, with a play mark.
   const cover = hasStories ? storyCover(group.stories) : null;
   const onlyVideos = hasStories && !cover;
 

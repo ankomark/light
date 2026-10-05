@@ -40,9 +40,6 @@ const StoryViewer = ({ route, navigation }) => {
   const [paused, setPaused] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(true);
   const [mediaFailed, setMediaFailed] = useState(false);
-  // Portrait stories fill a portrait screen; turned sideways, the whole story
-  // is shown (letterboxed) rather than cropped to a thin band.
-  const landscape = screenW > screenH;
 
   // Turns with the phone while open (the app is otherwise portrait-only).
   useFocusEffect(useCallback(() => {
@@ -128,7 +125,8 @@ const StoryViewer = ({ route, navigation }) => {
   useEffect(() => {
     markViewed(currentStory);
     const next = stories[currentIndex + 1];
-    if (next && next.content_type !== 'video' && next.media_url) Image.prefetch(next.media_url).catch(() => {});
+    const nextPicture = next && (next.content_type === 'video' ? next.thumbnail_url : next.media_url);
+    if (nextPicture) Image.prefetch(nextPicture).catch(() => {});
   }, [currentStory, markViewed, stories, currentIndex]);
 
   // A story that won't load (offline, deleted) says so and moves on by
@@ -255,7 +253,11 @@ const StoryViewer = ({ route, navigation }) => {
   }, [currentStory, navigation]);
   if (!currentStory) return null;
 
-  const fit = landscape ? 'contain' : 'cover';
+  // Every story is shown whole — a landscape photo or video is never cropped
+  // to fill a portrait screen (or the other way round). The space around it
+  // is the same picture, blurred and dimmed, as Facebook and Instagram do.
+  const fit = 'contain';
+  const backdrop = isVideo ? currentStory.thumbnail_url : currentStory.media_url;
 
   const dragOpacity = translateY.interpolate({
     inputRange: [0, screenH], outputRange: [1, 0.3], extrapolate: 'clamp',
@@ -264,6 +266,25 @@ const StoryViewer = ({ route, navigation }) => {
   return (
     <Animated.View style={[styles.container, { transform: [{ translateY }], opacity: dragOpacity }]}>
       <StatusBar hidden />
+
+      {!!backdrop && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none" testID="story-backdrop">
+          <Image source={{ uri: backdrop }} style={StyleSheet.absoluteFill} contentFit="cover"
+                 blurRadius={30} cachePolicy="memory-disk" />
+          <View style={[StyleSheet.absoluteFill, styles.backdropDim]} />
+        </View>
+      )}
+
+      {/* A video's poster under it while it loads: a picture, not black. */}
+      {isVideo && !!currentStory.thumbnail_url && mediaLoading && (
+        <Image
+          source={{ uri: currentStory.thumbnail_url }}
+          style={[styles.media, { width: screenW, height: screenH }]}
+          contentFit={fit}
+          cachePolicy="memory-disk"
+          testID="story-poster"
+        />
+      )}
 
       {/* Media */}
       {isVideo ? (
@@ -408,6 +429,7 @@ const styles = StyleSheet.create({
   username: { flex: 1, color: '#fff', fontWeight: '600', fontSize: 14 },
   timeAgo: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   closeBtn: { padding: spacing.xs },
+  backdropDim: { backgroundColor: 'rgba(0,0,0,0.45)' },
   failedText: { color: '#fff', fontSize: 14, marginTop: spacing.sm, textAlign: 'center', paddingHorizontal: spacing.lg },
   caption: {
     color: '#fff',

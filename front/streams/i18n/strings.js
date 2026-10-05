@@ -1847,6 +1847,10 @@ export const STRINGS = {
 
     'story.new': 'New Story',
     'story.yours': 'Your story',
+    'story.trim': 'Trim {from}–{to} ({secs}s)',
+    'story.cover': 'Cover',
+    'story.preparing': 'Preparing your video…',
+    'story.uploading': 'Uploading…',
     'story.tooLongTitle': 'Video too long',
     'story.pickFailed': "Couldn't open that photo or video. Try another.",
     'story.discardTitle': 'Discard this story?',
@@ -6747,6 +6751,10 @@ export const STRINGS = {
 
     'story.new': 'Hadithi Mpya',
     'story.yours': 'Hadithi yako',
+    'story.trim': 'Kata {from}–{to} (sek {secs})',
+    'story.cover': 'Picha ya jalada',
+    'story.preparing': 'Inaandaa video yako…',
+    'story.uploading': 'Inapakia…',
     'story.tooLongTitle': 'Video ni ndefu mno',
     'story.pickFailed': 'Imeshindwa kufungua picha au video hiyo. Jaribu nyingine.',
     'story.discardTitle': 'Kuacha hadithi hii?',

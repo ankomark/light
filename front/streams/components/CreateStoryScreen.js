@@ -10,19 +10,37 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppVideo from './AppVideo';
 import KeyboardLift from './tickets/KeyboardLift';
+import FullSheet from './FullSheet';
+import VideoTrimmer from './VideoTrimmer';
+import CoverPicker from './CoverPicker';
 import { uploadMedia } from '../services/cloudinary';
 import { compressImage } from '../services/imageProcessing';
-import { processVideo } from '../services/videoProcessing';
+import { processVideo, isVideoProcessingAvailable } from '../services/videoProcessing';
 import { createStory } from '../services/api';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { allowAllOrientations, lockPortrait } from '../utils/orientation';
 import { emit, EVENTS } from '../utils/appEvents';
 
-// Stories cap video at 30s (WhatsApp-style). expo-image-picker reports asset
-// duration in milliseconds; allow a small tolerance so a ~30s clip isn't
-// rejected for being a few frames over.
-const MAX_VIDEO_TOLERANCE_MS = 31000;
+// Video works as on Home's composer (components/CreatePost): any length is
+// picked, then trimmed to a window of at most 30 s; a cover frame is chosen;
+// on posting the clip is cut to that window, compressed to 720p (~2 Mbps) on
+// the phone, and its poster is uploaded with it (services/videoProcessing).
+const MAX_CLIP_SEC = 30;
+// Where trimming can't run (a build without the native module), only a clip
+// that is already short enough can go up as it is.
+const MAX_RAW_MS = 31000;
+// Like Home: 1080p and below (a little headroom for odd encoder sizes), and a
+// sane raw file size.
+const MAX_VIDEO_SHORT_SIDE = 1130;
+const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+const fmtSec = (sec) => {
+  const n = Math.max(0, Math.round(sec || 0));
+  return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+};
+// A picture's own shape, within the same bounds Home's feed uses (0.5–1.91):
+// shown whole, never cropped to a story-shaped box.
+const aspectOf = (w, h) => (w && h ? Math.min(1.91, Math.max(0.5, w / h)) : 9 / 16);
 const MAX_CAPTION = 200;
 // The header's own height (title row), for sizing the preview to what's left.
 const HEADER_H = 56;
@@ -46,6 +64,13 @@ const CreateStoryScreen = () => {
 
   const [media, setMedia] = useState(null);
   const [caption, setCaption] = useState('');
+  // Video: the window to keep (seconds), and the chosen cover frame.
+  const [trim, setTrim] = useState({ start: 0, end: MAX_CLIP_SEC });
+  const [coverSec, setCoverSec] = useState(null);
+  const [coverUri, setCoverUri] = useState(null);
+  const [showTrim, setShowTrim] = useState(false);
+  const [showCover, setShowCover] = useState(false);
+  const [status, setStatus] = useState('');      // what the upload is doing
   const [uploading, setUploading] = useState(false);
   const [picking, setPicking] = useState(false);
   const live = useRef(true);
@@ -78,26 +103,41 @@ const CreateStoryScreen = () => {
         Alert.alert(t('story.permissionTitle'), t('story.permissionBody'));
         return;
       }
+      // No system editor: it trims video its own way on iOS and not at all on
+      // Android. Video gets the app's trimmer below, as on Home.
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
-        allowsEditing: true,
-        aspect: [9, 16],
+        allowsEditing: false,
         quality: 0.9,
-        videoMaxDuration: 30, // caps in-picker trimming / recording to 30s
       });
       const asset = !result.canceled ? result.assets?.[0] : null;
       if (!asset) return;
-      // Hard 30s cap: in-picker trimming isn't guaranteed on gallery picks, so
-      // reject anything clearly longer rather than uploading an over-length clip.
-      if (asset.type === 'video' && asset.duration && asset.duration > MAX_VIDEO_TOLERANCE_MS) {
-        Alert.alert(t('story.tooLongTitle'), t('story.tooLong'));
-        return;
-      }
       if (asset.type === 'video') {
-        if (live.current) setMedia(asset);
+        const shortSide = asset.width && asset.height ? Math.min(asset.width, asset.height) : 0;
+        if (shortSide > MAX_VIDEO_SHORT_SIDE) {
+          Alert.alert(t('create.post.resolutionTitle'), t('create.post.resolutionBody'));
+          return;
+        }
+        if (asset.fileSize && asset.fileSize > MAX_VIDEO_BYTES) {
+          Alert.alert(t('common.error'), t('create.post.videoTooLarge'));
+          return;
+        }
+        if (!isVideoProcessingAvailable() && asset.duration && asset.duration > MAX_RAW_MS) {
+          Alert.alert(t('story.tooLongTitle'), t('story.tooLong'));
+          return;
+        }
+        if (!live.current) return;
+        const durSec = (asset.duration || 0) / 1000;
+        setMedia(asset);
+        setTrim({ start: 0, end: Math.min(MAX_CLIP_SEC, durSec || MAX_CLIP_SEC) });
+        setCoverSec(null);
+        setCoverUri(null);
+        // Longer than a story allows: straight to the trimmer.
+        if (durSec > MAX_CLIP_SEC) setShowTrim(true);
       } else {
-        // Smaller before upload; a failed squeeze keeps the original.
-        const compressed = await compressImage(asset.uri, { width: 1080, quality: 0.8 }).catch(() => null);
+        // As on Home: 1080 wide at most, JPEG ~0.8; a failed squeeze keeps the original.
+        const compressed = await compressImage(asset.uri, { maxWidth: 1080, sourceWidth: asset.width, quality: 0.8 })
+          .catch(() => null);
         if (live.current) setMedia({ ...asset, type: 'image', uri: compressed?.uri || asset.uri });
       }
     } catch {
@@ -113,22 +153,44 @@ const CreateStoryScreen = () => {
     setUploading(true);
     try {
       const isVideo = media.type === 'video';
-      // R2 stores bytes verbatim, so compress/downscale story video on-device.
-      // Stories are already <=30s, so no trim window — just 720p at a capped bitrate.
+      // R2 stores bytes verbatim: video is cut to the trim window, compressed
+      // to 720p and given its poster on the phone, exactly as Home's posts are.
       let uploadUri = media.uri;
+      let posterUri = null;
       if (isVideo) {
-        const processed = await processVideo({ uri: media.uri, width: media.width, height: media.height });
+        setStatus(t('story.preparing'));
+        const processed = await processVideo({
+          uri: media.uri,
+          startSec: trim.start,
+          endSec: trim.end,
+          width: media.width,
+          height: media.height,
+          thumbnail: true,
+          // The picker gives source-video time; the poster comes from the
+          // trimmed clip, which starts at trim.start.
+          thumbnailAtSec: Math.max(0, (coverSec ?? trim.start) - trim.start),
+        });
         uploadUri = processed.uri;
+        posterUri = processed.thumbnailUri || coverUri || null;
       }
-      const result = await uploadMedia(
-        { uri: uploadUri, name: `story_${Date.now()}`, mimeType: isVideo ? 'video/mp4' : 'image/jpeg' },
-        isVideo ? 'story-video' : 'social-image',
-      );
+      setStatus(t('story.uploading'));
+      const [result, poster] = await Promise.all([
+        uploadMedia(
+          { uri: uploadUri, name: `story_${Date.now()}`, mimeType: isVideo ? 'video/mp4' : 'image/jpeg' },
+          isVideo ? 'story-video' : 'social-image',
+        ),
+        // The poster rides along; without it the story still posts.
+        posterUri
+          ? uploadMedia({ uri: posterUri, name: `story_poster_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'social-image')
+            .catch(() => null)
+          : Promise.resolve(null),
+      ]);
       const story = await createStory({
         media_file: result.publicId,
         media_url: result.url,
         content_type: isVideo ? 'video' : 'image',
         caption: caption.trim(),
+        ...(poster?.url ? { thumbnail_url: poster.url } : {}),
       });
       // The stories row shows it now, not after its next refresh.
       emit(EVENTS.STORY_CREATED, story);
@@ -137,26 +199,29 @@ const CreateStoryScreen = () => {
     } catch (err) {
       if (live.current) Alert.alert(t('common.uploadFailedTitle'), err?.message || t('story.uploadFailed'));
     } finally {
-      if (live.current) setUploading(false);
+      if (live.current) { setUploading(false); setStatus(''); }
     }
   };
 
-  // The preview: 9:16, as large as the space allows.
+  // The preview: the chosen photo or video at its own shape (portrait or
+  // landscape, as Home shows it), as large as the space allows; 9:16 while
+  // nothing is chosen yet.
   const sideRoom = landscape ? Math.min(width * 0.42, 360) : 0;
-  const availH = height - insets.top - insets.bottom - HEADER_H - spacing.md * 2 - (landscape ? 0 : 150);
+  const availH = Math.max(160, height - insets.top - insets.bottom - HEADER_H - spacing.md * 2 - (landscape ? 0 : 150));
   const availW = (landscape ? width - insets.left - insets.right - sideRoom - spacing.md * 3 : width - spacing.md * 2);
-  const previewH = Math.max(160, Math.min(availH, (availW * 16) / 9));
-  const previewW = (previewH * 9) / 16;
+  const ratio = media ? aspectOf(media.width, media.height) : 9 / 16;
+  const previewW = Math.min(availW, availH * ratio);
+  const previewH = previewW / ratio;
 
   const preview = media ? (
     <TouchableOpacity style={[styles.preview, { width: previewW, height: previewH }]} onPress={pickMedia}
                       activeOpacity={0.9} accessibilityRole="button" accessibilityLabel={t('story.change')}
                       testID="story-preview">
       {media.type === 'video' ? (
-        <AppVideo source={{ uri: media.uri }} style={StyleSheet.absoluteFill} resizeMode="cover"
-                  shouldPlay isMuted isLooping />
+        <AppVideo source={{ uri: media.uri }} style={StyleSheet.absoluteFill} resizeMode="contain"
+                  shouldPlay={!showTrim && !showCover} isMuted isLooping />
       ) : (
-        <Image source={{ uri: media.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <Image source={{ uri: media.uri }} style={StyleSheet.absoluteFill} contentFit="contain" />
       )}
       <View style={styles.changeOverlay} pointerEvents="none">
         <Ionicons name="images-outline" size={18} color="#fff" />
@@ -175,6 +240,26 @@ const CreateStoryScreen = () => {
       )}
     </TouchableOpacity>
   );
+
+  // Trim and cover, under a video's preview (as on Home's composer).
+  const videoTools = media?.type === 'video' ? (
+    <View style={[styles.tools, landscape && styles.toolsSide]}>
+      <TouchableOpacity style={styles.chip} onPress={() => setShowTrim(true)} accessibilityRole="button"
+                        testID="story-trim">
+        <Ionicons name="cut-outline" size={16} color={colors.textPrimary} />
+        <Text style={styles.chipText}>
+          {t('story.trim', { from: fmtSec(trim.start), to: fmtSec(trim.end), secs: Math.round(trim.end - trim.start) })}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.chip} onPress={() => setShowCover(true)} accessibilityRole="button"
+                        testID="story-cover">
+        {coverUri
+          ? <Image source={{ uri: coverUri }} style={styles.chipThumb} contentFit="cover" />
+          : <Ionicons name="image-outline" size={16} color={colors.textPrimary} />}
+        <Text style={styles.chipText}>{t('story.cover')}</Text>
+      </TouchableOpacity>
+    </View>
+  ) : null;
 
   const captionBox = (
     <View style={[styles.captionWrap, landscape && styles.captionWrapSide]}>
@@ -228,9 +313,59 @@ const CreateStoryScreen = () => {
           keyboardShouldPersistTaps="handled"
         >
           {preview}
-          {captionBox}
+          <View style={landscape ? styles.sideCol : styles.stackCol}>
+            {videoTools}
+            {captionBox}
+            {!!status && <Text style={styles.status} accessibilityLiveRegion="polite">{status}</Text>}
+          </View>
         </ScrollView>
       </KeyboardLift>
+
+      {/* Trim: a window of up to 30 s, as on Home. */}
+      {showTrim && media?.type === 'video' && (
+        <FullSheet visible title={t('create.post.trimVideo')} onClose={() => setShowTrim(false)}>
+          <ScrollView contentContainerStyle={styles.sheetBody}>
+            <VideoTrimmer
+              uri={media.uri}
+              durationSec={(media.duration || 0) / 1000}
+              aspectRatio={aspectOf(media.width, media.height)}
+              onChange={(start, end) => {
+                setTrim({ start, end });
+                // A cover outside the new window no longer belongs to the clip.
+                if (coverSec != null && (coverSec < start || coverSec > end)) { setCoverSec(null); setCoverUri(null); }
+              }}
+            />
+            <TouchableOpacity style={styles.sheetDone} onPress={() => setShowTrim(false)} accessibilityRole="button"
+                              testID="story-trim-done">
+              <Text style={styles.sheetDoneText}>{t('common.done')}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </FullSheet>
+      )}
+
+      {/* Cover: the frame the stories row and the viewer show before it plays. */}
+      {showCover && media?.type === 'video' && (
+        <FullSheet
+          visible
+          title={t('story.cover')}
+          onClose={() => setShowCover(false)}
+          right={(
+            <TouchableOpacity onPress={() => setShowCover(false)} hitSlop={8}>
+              <Text style={styles.sheetDoneLink}>{t('common.done')}</Text>
+            </TouchableOpacity>
+          )}
+        >
+          <CoverPicker
+            uri={media.uri}
+            start={trim.start}
+            end={trim.end}
+            value={coverSec}
+            aspect={aspectOf(media.width, media.height)}
+            onPick={(sec, uri) => { setCoverSec(sec); setCoverUri(uri); }}
+            t={t}
+          />
+        </FullSheet>
+      )}
     </View>
   );
 };
@@ -292,6 +427,24 @@ const styles = StyleSheet.create({
   },
   pickerTitle: { ...typography.h3, color: colors.textSecondary, textAlign: 'center' },
   pickerSub: { ...typography.body, color: colors.textMuted, textAlign: 'center' },
+  stackCol: { alignSelf: 'stretch', gap: spacing.md },
+  sideCol: { flex: 1, gap: spacing.md, maxWidth: 420 },
+  tools: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginHorizontal: spacing.md },
+  toolsSide: { marginHorizontal: 0 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: spacing.md,
+    borderRadius: radius.full, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card,
+  },
+  chipText: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
+  chipThumb: { width: 22, height: 22, borderRadius: 4 },
+  status: { ...typography.caption, color: colors.textSecondary, textAlign: 'center' },
+  sheetBody: { padding: spacing.md, gap: spacing.md },
+  sheetDone: {
+    alignSelf: 'center', minHeight: 44, minWidth: 140, alignItems: 'center', justifyContent: 'center',
+    borderRadius: radius.full, backgroundColor: colors.primary, paddingHorizontal: spacing.lg,
+  },
+  sheetDoneText: { color: colors.white, fontWeight: '700' },
+  sheetDoneLink: { color: colors.primary, fontWeight: '700' },
   captionWrap: {
     alignSelf: 'stretch',
     marginHorizontal: spacing.md,
@@ -301,7 +454,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.sm,
   },
-  captionWrapSide: { flex: 1, alignSelf: 'flex-start', marginHorizontal: 0, maxWidth: 420 },
+  captionWrapSide: { alignSelf: 'stretch', marginHorizontal: 0 },
   captionInput: { color: colors.textPrimary, fontSize: 15, minHeight: 72, maxHeight: 160 },
   charCount: { ...typography.caption, color: colors.textMuted, textAlign: 'right', marginTop: 4 },
 });

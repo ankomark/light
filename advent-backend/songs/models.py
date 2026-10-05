@@ -710,6 +710,9 @@ class Story(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='stories')
     media_file = models.CharField(max_length=500, blank=True)  # Cloudinary public_id
     media_url = models.URLField(max_length=1000, blank=True)
+    # A video story's poster frame (chosen while trimming): shown on the
+    # stories row and while the video loads. Empty for photos.
+    thumbnail_url = models.URLField(max_length=1000, blank=True, default='')
     content_type = models.CharField(max_length=10, choices=CONTENT_TYPES, default='image')
     caption = models.CharField(max_length=200, blank=True)
     # Soft moderation takedown — hidden from the public story feed.

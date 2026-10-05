@@ -430,9 +430,19 @@ class StorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Story
-        fields = ['id', 'user', 'media_url', 'media_file', 'content_type',
+        fields = ['id', 'user', 'media_url', 'media_file', 'thumbnail_url', 'content_type',
                   'caption', 'created_at', 'expires_at', 'is_viewed', 'views_count']
         read_only_fields = ['id', 'user', 'created_at', 'expires_at', 'is_viewed', 'views_count']
+
+    def validate_thumbnail_url(self, value):
+        """A poster must be one of our own uploads, never an arbitrary link
+        shown to everyone who opens the stories row."""
+        from django.conf import settings as dj_settings
+        from .. import r2
+        value = (value or '').strip()
+        if value and getattr(dj_settings, 'R2_PUBLIC_BASE', '') and not r2.is_r2_url(value):
+            raise serializers.ValidationError('Upload the poster first.')
+        return value
 
     # Both of these prefer an annotation set by story_queryset() — one query for
     # the whole bar — and fall back to a per-object query only for call sites
