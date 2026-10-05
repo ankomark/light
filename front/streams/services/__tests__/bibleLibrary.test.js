@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   __resetBibleLibrary, loadBibleLibrary, toggleFavorite, removeFavorite, setHighlight, saveNote,
   toggleBookmark, recordReading, clearHistory, restoreEntry, chapterMarks, findFavorite, findNote,
-  formatRef, verseRef, HISTORY_MAX,
+  formatRef, verseRef, HISTORY_MAX, setBibleLibraryUser,
 } from '../bibleLibrary';
 
 const KEY = 'bibleLibrary:v1';
@@ -130,4 +130,29 @@ test('it all comes back after a restart; damaged data is ignored', async () => {
   await loadBibleLibrary();
   await recordReading({ bookId: 'GEN', bookName: 'Genesis', chapter: 1, versionId: 'eng_kjv' });
   expect(await read()).toMatchObject({ favorites: [], highlights: {}, history: [{ bookId: 'GEN' }] });
+});
+
+describe('per account', () => {
+  test("each account sees its own notes - not the last person's on a shared phone", async () => {
+    setBibleLibraryUser(1);
+    await loadBibleLibrary();
+    await saveNote(passage([16]), 'mine, private');
+    setBibleLibraryUser(2);
+    await loadBibleLibrary();
+    const two = JSON.parse(await AsyncStorage.getItem(`${KEY}:u2`) || '{"notes":[]}');
+    expect(two.notes).toHaveLength(0);
+    const one = JSON.parse(await AsyncStorage.getItem(`${KEY}:u1`));
+    expect(one.notes[0].note).toBe('mine, private');
+  });
+
+  test('what an older build kept (one shared copy) goes to the first account, then is gone', async () => {
+    await AsyncStorage.setItem(KEY, JSON.stringify({ notes: [{ id: 'n1', bookId: 'JHN', chapter: 3, verses: [16], note: 'old note' }] }));
+    setBibleLibraryUser(5);
+    await loadBibleLibrary();
+    expect(JSON.parse(await AsyncStorage.getItem(`${KEY}:u5`)).notes[0].note).toBe('old note');
+    expect(await AsyncStorage.getItem(KEY)).toBeNull();
+    setBibleLibraryUser(6);
+    await loadBibleLibrary();
+    expect(await AsyncStorage.getItem(`${KEY}:u6`)).toBeNull();      // nothing of account 5's
+  });
 });

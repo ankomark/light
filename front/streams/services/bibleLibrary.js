@@ -10,10 +10,17 @@
 //
 // Every entry has an id and a time, so this can sync to the account later
 // without reshaping anything.
+//
+// Per account: notes are private. On a shared phone the next person to sign
+// in sees their own, not the last person's. What older builds kept under the
+// one shared key goes to the first account that opens the Bible here.
 import { useEffect, useSyncExternalStore } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useOptionalAuth } from '../context/useAuth';
 
 const KEY = 'bibleLibrary:v1';
+let userId = null;
+const keyFor = (uid) => (uid != null ? `${KEY}:u${uid}` : KEY);
 export const HISTORY_MAX = 100;
 export const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink', 'orange'];
 
@@ -25,7 +32,7 @@ let loading = null;
 const subscribers = new Set();
 
 const publish = () => subscribers.forEach((fn) => fn());
-const save = () => AsyncStorage.setItem(KEY, JSON.stringify(state)).catch(() => {});
+const save = () => AsyncStorage.setItem(keyFor(userId), JSON.stringify(state)).catch(() => {});
 const change = (next) => {
   state = { ...state, ...next };
   publish();
@@ -69,17 +76,32 @@ const clean = (raw) => {
   };
 };
 
+/** The data from before it was per account (one shared key): the first
+ *  account to open the Bible on this phone takes it, and the shared copy
+ *  goes, so no one after sees it. */
+const claimShared = async (uid) => {
+  if (uid == null) return null;
+  const shared = await AsyncStorage.getItem(KEY);
+  if (!shared) return null;
+  await AsyncStorage.setItem(keyFor(uid), shared);
+  await AsyncStorage.removeItem(KEY);
+  return shared;
+};
+
 export const loadBibleLibrary = () => {
   if (!loading) {
-    loading = AsyncStorage.getItem(KEY)
+    const uid = userId;
+    loading = AsyncStorage.getItem(keyFor(uid))
+      .then(async (raw) => raw ?? claimShared(uid))
       .then((raw) => {
+        if (uid !== userId) return undefined;    // the account changed meanwhile
         try {
           state = raw ? clean(JSON.parse(raw)) : EMPTY;
         } catch {
           // Unreadable: the next change would overwrite it, so a copy is
           // kept aside first — a reader's notes aren't ours to lose.
           state = EMPTY;
-          return AsyncStorage.setItem(`${KEY}:unreadable`, raw).catch(() => {});
+          return AsyncStorage.setItem(`${keyFor(uid)}:unreadable`, raw).catch(() => {});
         }
         return undefined;
       })
@@ -189,6 +211,18 @@ export const restoreEntry = ready((kind, entry, index = 0) => {
   }
 });
 
+/** Switch to an account's own Bible (null when signed out). */
+export const setBibleLibraryUser = (uid) => {
+  const next = uid ?? null;
+  if (next === userId) return;
+  userId = next;
+  state = EMPTY;
+  loaded = false;
+  loading = null;
+  publish();
+  loadBibleLibrary();
+};
+
 // ── Reading it ─────────────────────────────────────────────────────────────
 
 const subscribe = (fn) => {
@@ -199,7 +233,8 @@ const snapshot = () => state;
 
 /** Everything, live. */
 export const useBibleLibrary = () => {
-  useEffect(() => { loadBibleLibrary(); }, []);
+  const uid = useOptionalAuth()?.currentUser?.id ?? null;
+  useEffect(() => { setBibleLibraryUser(uid); loadBibleLibrary(); }, [uid]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 };
 
@@ -229,6 +264,7 @@ export const findNote = (lib, passage) => lib.notes.find((n) => samePassage(n, p
 
 // Test-only reset.
 export const __resetBibleLibrary = () => {
+  userId = null;
   state = EMPTY;
   loaded = false;
   loading = null;

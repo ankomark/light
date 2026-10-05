@@ -1,7 +1,7 @@
 // A note on a passage: the verses above, the reader's own words below.
 // Saving an empty note deletes it.
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import BottomSheet from './BottomSheet';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { colors, spacing, radius, typography } from '../constants/theme';
@@ -15,15 +15,25 @@ const BibleNoteSheet = ({ visible, reference, verseText, initialNote = '', onSav
   const [text, setText] = useState(initialNote);
   useEffect(() => { if (visible) setText(initialNote); }, [visible, initialNote]);
 
+  // Closing with words not saved (a swipe, Cancel, Back) asks first: a long
+  // note was one accidental swipe from gone.
+  const close = () => {
+    if (text.trim() === String(initialNote || '').trim()) { onClose(); return; }
+    Alert.alert(t('bible.discardNoteTitle'), t('bible.discardNoteBody'), [
+      { text: t('bible.keepEditing'), style: 'cancel' },
+      { text: t('bible.discard'), style: 'destructive', onPress: onClose },
+    ]);
+  };
+
   return (
     <BottomSheet
       visible={visible}
-      onClose={onClose}
+      onClose={close}
       heightRatio={0.6}
       keyboardHeight={kb || 0}
       header={(
         <View style={styles.head}>
-          <TouchableOpacity onPress={onClose} hitSlop={8} accessibilityRole="button">
+          <TouchableOpacity onPress={close} hitSlop={8} accessibilityRole="button">
             <Text style={styles.cancel}>{t('common.cancel')}</Text>
           </TouchableOpacity>
           <Text style={styles.title} numberOfLines={1}>{reference}</Text>

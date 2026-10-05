@@ -10,6 +10,8 @@ jest.setTimeout(20000);
 let mockStack = [{}];
 let mockRedraw = () => {};
 let mockLeftBible = false;
+// Room for the gesture bar / mini player: a number here (the real hook reads the player).
+jest.mock('../../hooks/useBottomSpace', () => ({ __esModule: true, default: () => 40 }));
 jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: mockStack[mockStack.length - 1] }),
   useNavigation: () => ({
@@ -43,8 +45,9 @@ const mockFetchChapter = jest.fn(async (v) => mockChapter[v]);
 const mockFetchPage = jest.fn(async (url) => `<html><head><link rel="stylesheet" href="liberationsans.css" /></head>
 <body><ul class='tnav'></ul><div class='p'><span class="verse" id="V1">Ⅰ&#160;</span>Page ${url}</div></body></html>`);
 
+const mockFetchBooks = jest.fn(async (v) => mockBooks[v]);
 jest.mock('../../services/bible', () => ({
-  fetchBibleBooks: async (v) => mockBooks[v],
+  fetchBibleBooks: (...a) => mockFetchBooks(...a),
   fetchBibleChapter: (...a) => mockFetchChapter(...a),
   fetchWebChapterPage: (url) => mockFetchPage(url),
 }));
@@ -318,4 +321,15 @@ describe('bookmarks, history and continue reading', () => {
     expect(mockStack[mockStack.length - 1]).toEqual({ bookId: 'JHN', chapter: 4 });
     expect(mockStack[mockStack.length - 1].verse).toBeUndefined();
   });
+});
+
+test("book names that couldn't load are fetched again once the phone is back online", async () => {
+  const { __setOnline } = require('../../hooks/useOnline');
+  mockFetchBooks.mockClear();
+  mockFetchBooks.mockRejectedValueOnce(new Error('offline'));
+  const r = render(<BibleReader />);
+  await waitFor(() => expect(mockFetchBooks).toHaveBeenCalledTimes(1));
+  await act(async () => { __setOnline(false); __setOnline(true); });
+  await waitFor(() => expect(mockFetchBooks).toHaveBeenCalledTimes(2));
+  expect(r.getByText('John')).toBeTruthy();
 });

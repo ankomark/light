@@ -5,6 +5,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 let mockParams = {};
 const mockPush = jest.fn();
+// Room for the gesture bar / mini player: a number here (the real hook reads the player).
+jest.mock('../../hooks/useBottomSpace', () => ({ __esModule: true, default: () => 40 }));
 jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: mockParams }),
   useNavigation: () => ({ push: mockPush, goBack: jest.fn() }),

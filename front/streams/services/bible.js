@@ -7,23 +7,63 @@
 // Everything read is kept on the phone (a version's books, each chapter), so
 // a chapter read once opens instantly and with no signal. The texts are
 // public domain or openly licensed, so keeping copies is allowed.
+//
+// Kept as FILES (documentDirectory/bible/), not in AsyncStorage: on Android
+// AsyncStorage is one 6 MB database shared by the whole app - a few books of
+// a few versions filled it, and from then on every save failed silently,
+// Bible notes and highlights included. Copies saved there by older builds
+// are moved over once (moveOldCopies).
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import { BIBLE_BOOKS, EKEGUSII_BOOK_NAMES, getBibleVersion } from '../utils/bibleVersions';
 
 const BASE = 'https://bible.helloao.org/api';
 const PREFIX = 'bible:v1:';
 const MEMORY_CHAPTERS = 30;
+// A request that hasn't answered by then isn't going to (a dead connection):
+// say so and offer Retry rather than spin.
+const FETCH_TIMEOUT_MS = 15000;
 
 const memBooks = new Map();
 const memChapters = new Map();
 
 const getJson = async (url) => {
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 };
 
+const fetchWithTimeout = async (url) => {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => ctrl?.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+// ── Saved copies: files (AsyncStorage only where there is no file system) ──
+const DIR = FileSystem?.documentDirectory ? `${FileSystem.documentDirectory}bible/` : null;
+const fileFor = (key) => `${DIR}${String(key).replace(/[^A-Za-z0-9_.-]/g, '_')}.json`;
+let dirReady = null;
+const ensureDir = () => {
+  if (!dirReady) {
+    dirReady = FileSystem.makeDirectoryAsync(DIR, { intermediates: true }).catch(() => {});
+  }
+  return dirReady;
+};
+
 const readStored = async (key) => {
+  if (DIR) {
+    await moveOldCopies();
+    try {
+      const raw = await FileSystem.readAsStringAsync(fileFor(key));
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;   // not saved yet
+    }
+  }
   try {
     const raw = await AsyncStorage.getItem(PREFIX + key);
     return raw ? JSON.parse(raw) : null;
@@ -31,7 +71,46 @@ const readStored = async (key) => {
     return null;
   }
 };
-const store = (key, value) => AsyncStorage.setItem(PREFIX + key, JSON.stringify(value)).catch(() => {});
+
+const store = async (key, value) => {
+  try {
+    if (DIR) {
+      await ensureDir();
+      await FileSystem.writeAsStringAsync(fileFor(key), JSON.stringify(value));
+    } else {
+      await AsyncStorage.setItem(PREFIX + key, JSON.stringify(value));
+    }
+  } catch { /* a copy we couldn't keep: it is fetched again next time */ }
+};
+
+/** Older builds kept every chapter in AsyncStorage: move them to files (so
+ *  offline reading keeps working) and free that space. Once per install. */
+const MOVED_KEY = `${PREFIX}moved-to-files`;
+let moving = null;
+export const moveOldCopies = () => {
+  if (!DIR) return Promise.resolve();
+  if (!moving) {
+    moving = (async () => {
+      try {
+        if (await AsyncStorage.getItem(MOVED_KEY)) return;
+        const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(PREFIX) && k !== MOVED_KEY);
+        await ensureDir();
+        for (let i = 0; i < keys.length; i += 20) {
+          const batch = keys.slice(i, i + 20);
+          const rows = await AsyncStorage.multiGet(batch);
+          for (const [k, raw] of rows) {
+            if (raw) {
+              await FileSystem.writeAsStringAsync(fileFor(k.slice(PREFIX.length)), raw).catch(() => {});
+            }
+          }
+          await AsyncStorage.multiRemove(batch);
+        }
+        await AsyncStorage.setItem(MOVED_KEY, '1');
+      } catch { /* tried again next start */ }
+    })();
+  }
+  return moving;
+};
 
 const ENGLISH = new Map(BIBLE_BOOKS.map((b) => [b.id, b.english]));
 
@@ -133,7 +212,7 @@ export const fetchBibleChapter = async (versionId, bookId, chapter) => {
 /** A `web` version's chapter page (Ekegusii: eBible's own), fetched to be
  *  shown and nothing more — never stored: the text isn't ours to keep. */
 export const fetchWebChapterPage = async (url) => {
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
   if (!/class=["']verse["']/.test(html)) throw new Error('not a chapter page');
@@ -144,4 +223,6 @@ export const fetchWebChapterPage = async (url) => {
 export const __resetBibleCache = () => {
   memBooks.clear();
   memChapters.clear();
+  moving = null;
+  dirReady = null;
 };

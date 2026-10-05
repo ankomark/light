@@ -94,11 +94,11 @@ beforeEach(() => {
     { type: 'verse', number: 1, parts: [{ text: `${v} ${book} ${ch}:1 maandishi` }] },
   ] }));
   bibleLibrary.__resetBibleLibrary();
-  for (let i = 0; i <= 15; i += 1) dropCache(`verse:${day(i)}`);
+  for (let i = 0; i <= 15; i += 1) dropCache(`uanon:verse:${day(i)}`);
 });
 
 test('the kept copy is painted at once, with no spinner', async () => {
-  writeCache(`verse:${day(0)}`, verse(0, 'Psalms 23:1'));
+  writeCache(`uanon:verse:${day(0)}`, verse(0, 'Psalms 23:1'));
   mockApi.fetchDailyVerse.mockImplementation(() => new Promise(() => {}));   // never answers
 
   const screen = render(<DailyVerse />);
@@ -116,7 +116,7 @@ test('today is asked for without a date, so the server decides what today is', a
 test('yesterday is fetched ahead, so Earlier shows it without a spinner', async () => {
   mockApi.fetchDailyVerse.mockImplementation(async (d) => (d ? verse(1, 'John 3:16') : verse(0, 'Psalms 23:1')));
   const screen = render(<DailyVerse />);
-  await waitFor(() => expect(peekCache(`verse:${day(1)}`)?.reference).toBe('John 3:16'));
+  await waitFor(() => expect(peekCache(`uanon:verse:${day(1)}`)?.reference).toBe('John 3:16'));
   expect(mockApi.fetchDailyVerse).toHaveBeenCalledWith(day(1));
 
   fireEvent.press(screen.getByText('verse.earlier'));
@@ -276,7 +276,7 @@ test("the reflection sits under the verse, in the reader's language", async () =
   screen.unmount();
 
   mockLang = 'sw';
-  dropCache(`verse:${day(0)}`);
+  dropCache(`uanon:verse:${day(0)}`);
   screen = render(<DailyVerse />);
   await waitFor(() => expect(screen.getByText(REFLECTION.sw)).toBeTruthy());
   expect(screen.queryByText(REFLECTION.en)).toBeNull();
@@ -398,4 +398,14 @@ test("today's verse, as shown, is handed to the home-screen widget; earlier days
   fireEvent.press(screen.getByText('verse.earlier'));
   await waitFor(() => expect(screen.getByText('swh_bib PSA 23:1 maandishi')).toBeTruthy());
   expect(mockPublish).toHaveBeenCalledTimes(calls);
+});
+
+test("signed in, the verse (with that reader's streak) is kept per account - not shown to the next on a shared phone", async () => {
+  const auth = require('../../context/useAuth');
+  const spy = jest.spyOn(auth, 'useOptionalAuth').mockReturnValue({ currentUser: { id: 9 } });
+  writeCache(`u8:verse:${day(0)}`, verse(0, 'Psalms 23:1'));             // the last person's copy
+  mockApi.fetchDailyVerse.mockImplementation(() => new Promise(() => {}));
+  const screen = render(<DailyVerse />);
+  expect(screen.queryByText('Text of Psalms 23:1')).toBeNull();
+  spy.mockRestore();
 });

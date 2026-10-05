@@ -848,7 +848,11 @@ const BibleWrapper = ({ navigation }) => (
   <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
     <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
     <Header navigation={navigation} transparentBg />
-    <BibleReader navigation={navigation} />
+    {/* A chapter the outside Bible service sends in an unexpected shape
+        must not take the whole app down with it. */}
+    <ErrorBoundary fallbackMessage="The Bible couldn't load.">
+      <BibleReader navigation={navigation} />
+    </ErrorBoundary>
   </View>
 );
 

@@ -70,7 +70,7 @@ describe('fetching, and keeping what was read', () => {
 
   test('books come named in the language, in order, with their English names', async () => {
     const list = await fetchBibleBooks('luo_bib');
-    expect(global.fetch).toHaveBeenCalledWith('https://bible.helloao.org/api/luo_bib/books.json');
+    expect(global.fetch).toHaveBeenCalledWith('https://bible.helloao.org/api/luo_bib/books.json', expect.anything());   // with its time limit
     expect(list.map((b) => [b.id, b.name, b.english, b.chapters])).toEqual([
       ['GEN', 'Chakruok', 'Genesis', 50], ['JHN', 'Johana', 'John', 21],
     ]);
@@ -78,7 +78,7 @@ describe('fetching, and keeping what was read', () => {
 
   test('a chapter read once opens again with no connection', async () => {
     const first = await fetchBibleChapter('luo_bib', 'JHN', 3);
-    expect(global.fetch).toHaveBeenCalledWith('https://bible.helloao.org/api/luo_bib/JHN/3.json');
+    expect(global.fetch).toHaveBeenCalledWith('https://bible.helloao.org/api/luo_bib/JHN/3.json', expect.anything());
     expect(first.verseCount).toBe(2);
     __resetBibleCache();                                         // the app restarted…
     global.fetch = jest.fn(async () => { throw new Error('offline'); });   // …with no signal

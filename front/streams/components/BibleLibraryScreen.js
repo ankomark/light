@@ -16,6 +16,7 @@ import { confirmAction } from '../utils/adminConfirm';
 import { HIGHLIGHT_SWATCH } from './BibleVerseActions';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import useBottomSpace from '../hooks/useBottomSpace';
 
 export const LIBRARY_TABS = [
   { key: 'favorites', icon: 'heart' },
@@ -28,12 +29,13 @@ const UNDO_MS = 5000;
 
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
-const dateOf = (ms) => {
-  try {
-    return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-  } catch {
-    return '';
-  }
+/** "5 Oct 2026", with the month in the reader's language (not the phone's). */
+const dateOf = (ms, t) => {
+  const d = new Date(ms);
+  if (!ms || Number.isNaN(d.getTime())) return '';
+  const months = t('tix.months').split(',');
+  return months.length === 12 ? `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
 // Each tab's entries as rows: { key, kind, entry, ref, text, note, color, at, verse, index }.
@@ -56,6 +58,7 @@ const rowsFor = (lib, tab) => {
 
 const BibleLibraryScreen = () => {
   const { t } = useI18n();
+  const bottomSpace = useBottomSpace(spacing.md);
   const navigation = useNavigation();
   const { params = {} } = useRoute();
   const lib = useBibleLibrary();
@@ -125,7 +128,7 @@ const BibleLibraryScreen = () => {
         <View style={styles.rowBody}>
           <View style={styles.rowHead}>
             <Text style={styles.rowRef} numberOfLines={1}>{row.ref}</Text>
-            <Text style={styles.rowMeta} numberOfLines={1}>{`${version.abbr} · ${dateOf(row.at)}`}</Text>
+            <Text style={styles.rowMeta} numberOfLines={1}>{`${version.abbr} · ${dateOf(row.at, t)}`}</Text>
           </View>
           {row.note ? <Text style={styles.rowNote} numberOfLines={3}>{row.note}</Text> : null}
           {row.text ? <Text style={[styles.rowText, row.note && styles.rowTextQuoted]} numberOfLines={row.note ? 2 : 4}>{row.text}</Text> : null}
@@ -208,7 +211,7 @@ const BibleLibraryScreen = () => {
         data={rows}
         keyExtractor={(r) => r.key}
         renderItem={renderRow}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomSpace + 80 }]}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={(
           <View style={styles.empty}>
@@ -220,7 +223,7 @@ const BibleLibraryScreen = () => {
       />
 
       {undo ? (
-        <View style={styles.undo} testID="bible-lib-undo">
+        <View style={[styles.undo, { bottom: bottomSpace }]} testID="bible-lib-undo">
           <Text style={styles.undoText} numberOfLines={1}>{undo.label}</Text>
           <TouchableOpacity onPress={undoRemove} hitSlop={8} accessibilityRole="button">
             <Text style={styles.undoBtn}>{t('bible.undo')}</Text>
@@ -256,7 +259,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(13,35,64,0.78)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
   },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
-  list: { padding: spacing.md, paddingBottom: 120 },
+  list: { padding: spacing.md },
   row: {
     flexDirection: 'row', gap: spacing.sm, padding: spacing.sm + 2, marginBottom: spacing.sm, borderRadius: radius.md,
     backgroundColor: 'rgba(16,28,46,0.86)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)',

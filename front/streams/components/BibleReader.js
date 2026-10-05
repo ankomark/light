@@ -24,6 +24,8 @@ import {
 } from '../services/bibleLibrary';
 import BibleVerseActions, { HIGHLIGHT_WASH } from './BibleVerseActions';
 import BibleNoteSheet from './BibleNoteSheet';
+import useBottomSpace from '../hooks/useBottomSpace';
+import { onOnlineChange } from '../hooks/useOnline';
 
 // Book search ignores case and accents ("gĩkũyũ" finds "Gikuyu").
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -105,10 +107,16 @@ const BibleReader = () => {
   // { bookId, chapter } reading. Previous / Next swap the chapter in place.
   const navigation = useNavigation();
   const { params = {} } = useRoute();
-  const { bookId = null, chapter: selectedChapter = null } = params;
+  const { bookId = null } = params;
+  // Always a number: "3" + 1 would be chapter 31.
+  const selectedChapter = params.chapter ? Number(params.chapter) : null;
   // Opened from My Bible (or continue reading) at a verse: it's shown and flashed.
   const targetVerse = params.verse ? Number(params.verse) : null;
   const insets = useSafeAreaInsets();
+  // Clear of the gesture bar and, with music playing, the mini player: the
+  // last verses, Previous / Next and the verse tools were under it.
+  const bottomSpace = useBottomSpace(spacing.xl);
+  const barBottom = useBottomSpace(0);
   const lib = useBibleLibrary();
   const textSize = TEXT_SIZES.includes(preferences[PREF_KEYS.bibleTextSize])
     ? preferences[PREF_KEYS.bibleTextSize] : DEFAULT_TEXT_SIZE;
@@ -168,12 +176,18 @@ const BibleReader = () => {
   }, [versionId]);
   useEffect(() => { showChosenCard(true); }, [showChosenCard]);
 
+  // The version's book names. Couldn't load them (offline on first use of a
+  // language)? English names for now - and again the moment the phone is
+  // back online, not only after switching versions.
   useEffect(() => {
     let alive = true;
-    fetchBibleBooks(versionId)
-      .then((list) => { if (alive) setBooks(list); })
-      .catch(() => { if (alive) setBooks(BIBLE_BOOKS); });
-    return () => { alive = false; };
+    let missing = false;
+    const load = () => fetchBibleBooks(versionId)
+      .then((list) => { if (alive) { missing = false; setBooks(list); } })
+      .catch(() => { if (alive) { missing = true; setBooks(BIBLE_BOOKS); } });
+    load();
+    const off = onOnlineChange((up) => { if (up && missing) load(); });
+    return () => { alive = false; off(); };
   }, [versionId]);
 
   const fetchChapter = useCallback(async (book, chapter, vid = versionId) => {
@@ -347,7 +361,7 @@ const BibleReader = () => {
       activeOpacity={0.85}
     >
       <Text style={styles.bookName} numberOfLines={1}>{book.name}</Text>
-      <Text style={styles.bookMeta}>{book.chapters} {book.chapters === 1 ? 'chapter' : 'chapters'}</Text>
+      <Text style={styles.bookMeta}>{t(book.chapters === 1 ? 'bible.chapterOne' : 'bible.chapterCount', { n: book.chapters })}</Text>
     </TouchableOpacity>
   );
 
@@ -431,15 +445,15 @@ const BibleReader = () => {
         {filteredBooks.length === 0 ? (
           <View style={styles.centered}>
             <Ionicons name="book-outline" size={44} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No book matches “{bookQuery}”.</Text>
+            <Text style={styles.emptyText}>{t('bible.noBookMatch', { q: bookQuery })}</Text>
           </View>
         ) : (
           <>
-            {renderTestamentSection('Old Testament', ot)}
-            {renderTestamentSection('New Testament', nt)}
+            {renderTestamentSection(t('bible.oldTestament'), ot)}
+            {renderTestamentSection(t('bible.newTestament'), nt)}
           </>
         )}
-        <View style={{ height: spacing.xl }} />
+        <View style={{ height: bottomSpace }} />
       </ScrollView>
     );
   };
@@ -454,7 +468,7 @@ const BibleReader = () => {
         key={`chips-${chipCols}`}
         numColumns={chipCols}
         columnWrapperStyle={styles.chipRow}
-        contentContainerStyle={styles.chipGrid}
+        contentContainerStyle={[styles.chipGrid, { paddingBottom: bottomSpace }]}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={<Text style={styles.pickPrompt}>{t('bible.selectChapter')}</Text>}
         renderItem={({ item }) => (
@@ -498,7 +512,7 @@ const BibleReader = () => {
     const url = webUrl;
     const page = webPage?.url === url ? webPage : null;
     return (
-      <View style={styles.webReader}>
+      <View style={[styles.webReader, { paddingBottom: barBottom }]}>
         <View style={[styles.readerPanel, styles.webPanel]}>
           {readerTools}
           <Text style={styles.readerTitle}>{selectedBook.name} {selectedChapter}</Text>
@@ -563,7 +577,7 @@ const BibleReader = () => {
       return (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading {selectedBook.name} {selectedChapter}…</Text>
+          <Text style={styles.loadingText}>{t('bible.loadingChapter', { ref: `${selectedBook.name} ${selectedChapter}` })}</Text>
         </View>
       );
     }
@@ -640,7 +654,7 @@ const BibleReader = () => {
 
         {/* Prev / Next chapter navigation */}
         {chapterNav}
-        <View style={{ height: spacing.xl }} />
+        <View style={{ height: bottomSpace }} />
       </ScrollView>
     );
   };
@@ -656,14 +670,15 @@ const BibleReader = () => {
     subtitle = t('bible.keepReading');
   } else if (selectedBook) {
     title = selectedBook.name;
-    subtitle = `${selectedBook.chapters} chapters`;
+    subtitle = t(selectedBook.chapters === 1 ? 'bible.chapterOne' : 'bible.chapterCount', { n: selectedBook.chapters });
   }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.topBar}>
         {onBack ? (
-          <TouchableOpacity style={styles.backBtn} onPress={onBack} hitSlop={10}>
+          <TouchableOpacity style={styles.backBtn} onPress={onBack} hitSlop={10}
+                            accessibilityRole="button" accessibilityLabel={t('common.back')}>
             <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
         ) : (
@@ -731,7 +746,7 @@ const BibleReader = () => {
           onNote={() => setNoteOpen(true)}
           onShare={onShare}
           onClose={clearSelection}
-          bottom={insets.bottom}
+          bottom={barBottom}
         />
       ) : null}
       {passage ? (

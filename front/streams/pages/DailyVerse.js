@@ -36,7 +36,8 @@ import { PREF_KEYS } from '../utils/preferences';
 import { fetchDailyVerse } from '../services/api';
 import useCachedData from '../utils/useCachedData';
 import useReducedMotion from '../utils/useReducedMotion';
-import { peekCache, readCache, writeCache } from '../utils/screenCache';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { useOptionalAuth } from '../context/useAuth';
 import { bookIdFor, versionForVerse, translateVerse } from '../utils/dailyVerseText';
 import { useBibleLibrary, findFavorite, toggleFavorite } from '../services/bibleLibrary';
 import { publishWidgetVerse } from '../widgets/verseWidgetStore';
@@ -60,7 +61,9 @@ const HISTORY_DAYS = 14;
 // server will still serve that day.
 const KEEP_MS = (HISTORY_DAYS + 1) * 24 * 60 * 60 * 1000;
 const dayFor = (back) => fmt(subDays(new Date(), back), 'yyyy-MM-dd');
-const keyFor = (day) => `verse:${day}`;
+// Per account: today's verse carries the reader's own streak, which must
+// not show for the next person on a shared phone.
+const keyFor = (uid, day) => userKey(uid, `verse:${day}`);
 // Today is asked for without a date: the server's today, not the phone's, so
 // a phone a timezone ahead is never refused for asking about "tomorrow".
 const fetchFor = (back) => fetchDailyVerse(back === 0 ? null : dayFor(back));
@@ -100,12 +103,13 @@ const DailyVerse = ({ navigation }) => {
 
   const reduceMotion = useReducedMotion();
 
+  const uid = useOptionalAuth()?.currentUser?.id;
   const [offset, setOffset] = useState(0);        // days back from today
   // The last copy is painted at once and refreshed behind it — the pattern
   // Home and Music use — so opening from the morning push shows the verse, not
   // a spinner.
   const { data: verse, failed, reload } = useCachedData(
-    keyFor(dayFor(offset)),
+    keyFor(uid, dayFor(offset)),
     () => fetchFor(offset),
   );
 
@@ -235,7 +239,7 @@ const DailyVerse = ({ navigation }) => {
   useEffect(() => {
     if (!hasVerse || offset >= HISTORY_DAYS) return undefined;
     let live = true;
-    const key = keyFor(dayFor(offset + 1));
+    const key = keyFor(uid, dayFor(offset + 1));
     (async () => {
       try {
         let data = peekCache(key) || await readCache(key, KEEP_MS);
