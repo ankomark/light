@@ -38,6 +38,9 @@ class Command(BaseCommand):
         while not stopping['now']:
             if time.monotonic() - last_sweep > 60:
                 jobs.requeue_stale()
+                # Stories past 24 h: deleted for good (throttled inside).
+                from songs import stories
+                stories.maybe_purge_expired()
                 last_sweep = time.monotonic()
             if jobs.run_next():
                 ran += 1

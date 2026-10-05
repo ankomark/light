@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, useWindowDimensions,
-  StatusBar, Animated, Easing, PanResponder, ActivityIndicator, AppState,
+  StatusBar, Animated, Easing, PanResponder, ActivityIndicator, AppState, Modal, FlatList,
 } from 'react-native';
 // expo-image: cached on disk, so a story seen once paints at once next time,
 // and the next one can be fetched while this one shows.
@@ -11,7 +11,8 @@ import AppVideo from './AppVideo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { viewStory } from '../services/api';
+import { viewStory, reactToStory, fetchStoryViewers } from '../services/api';
+import { useAuth } from '../context/useAuth';
 import { spacing } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { allowAllOrientations, lockPortrait } from '../utils/orientation';
@@ -24,9 +25,14 @@ const PREV_ZONE = 0.3;         // left 30% of the screen taps backwards
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
+// The quick reactions (the server accepts exactly these: songs/stories.py).
+export const STORY_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👏', '🔥', '🙌'];
+
 const StoryViewer = ({ route, navigation }) => {
   const { group } = route.params;
   const { t } = useI18n();
+  const { currentUser } = useAuth() || {};
+  const isOwn = !!currentUser?.id && currentUser.id === group.user?.id;
   const insets = useSafeAreaInsets();
   const stories = useMemo(() => group.stories ?? [], [group.stories]);
   // Reactive full-screen size — reflows on rotation / web resize (was a
@@ -40,6 +46,16 @@ const StoryViewer = ({ route, navigation }) => {
   const [paused, setPaused] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(true);
   const [mediaFailed, setMediaFailed] = useState(false);
+  // Reactions: what this viewer picked per story (starts from the server's
+  // my_reaction), the emoji floating up, and — on your own story — the list
+  // of who watched.
+  const [reacted, setReacted] = useState(() => Object.fromEntries(
+    (group.stories || []).map((s) => [s.id, s.my_reaction || null]),
+  ));
+  const [burst, setBurst] = useState(null);
+  const burstAnim = useRef(new Animated.Value(0)).current;
+  const [viewersOpen, setViewersOpen] = useState(false);
+  const [viewers, setViewers] = useState(null);
 
   // Turns with the phone while open (the app is otherwise portrait-only).
   useFocusEffect(useCallback(() => {
@@ -177,6 +193,34 @@ const StoryViewer = ({ route, navigation }) => {
   useEffect(() => { pauseRef.current = pause; }, [pause]);
   useEffect(() => { resumeRef.current = resume; }, [resume]);
   useEffect(() => { dismissRef.current = dismiss; }, [dismiss]);
+
+  const react = useCallback((emoji) => {
+    const story = stories[indexRef.current];
+    if (!story) return;
+    const was = reacted[story.id] || null;
+    const next = was === emoji ? null : emoji;      // the same one again takes it back
+    setReacted((r) => ({ ...r, [story.id]: next }));
+    if (next) {
+      setBurst(next);
+      burstAnim.setValue(0);
+      Animated.timing(burstAnim, { toValue: 1, duration: 900, easing: Easing.out(Easing.quad), useNativeDriver: true })
+        .start(() => setBurst(null));
+    }
+    reactToStory(story.id, next).catch(() => setReacted((r) => ({ ...r, [story.id]: was })));
+  }, [stories, reacted, burstAnim]);
+
+  const openViewers = useCallback(() => {
+    const story = stories[indexRef.current];
+    if (!story) return;
+    pauseRef.current();
+    setViewers(null);
+    setViewersOpen(true);
+    fetchStoryViewers(story.id).then(setViewers).catch(() => setViewers({ results: [], failed: true }));
+  }, [stories]);
+  const closeViewers = useCallback(() => {
+    setViewersOpen(false);
+    resumeRef.current();
+  }, []);
 
   // Leaving the app pauses the story (the clock and the video); coming back
   // carries on — unless the person had paused it themselves by holding.
@@ -384,6 +428,92 @@ const StoryViewer = ({ route, navigation }) => {
           <Text style={styles.caption} numberOfLines={4}>{currentStory.caption}</Text>
         ) : null}
       </View>
+
+      {/* The emoji just sent, floating up. */}
+      {!!burst && (
+        <Animated.Text
+          pointerEvents="none"
+          style={[styles.burst, {
+            opacity: burstAnim.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 1, 0] }),
+            transform: [
+              { translateY: burstAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -screenH * 0.35] }) },
+              { scale: burstAnim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0.6, 1.4, 1.1] }) },
+            ],
+          }]}
+        >
+          {burst}
+        </Animated.Text>
+      )}
+
+      {/* Bottom: react (someone else's story) or who watched (your own). */}
+      <View
+        style={[styles.footer, {
+          paddingBottom: insets.bottom + spacing.sm,
+          paddingLeft: spacing.sm + insets.left,
+          paddingRight: spacing.sm + insets.right,
+        }]}
+        pointerEvents="box-none"
+      >
+        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)']} style={StyleSheet.absoluteFill} pointerEvents="none" />
+        {isOwn ? (
+          <TouchableOpacity style={styles.viewsBtn} onPress={openViewers} accessibilityRole="button"
+                            accessibilityLabel={t('story.viewers')} testID="story-viewers">
+            <Ionicons name="eye-outline" size={18} color="#fff" />
+            <Text style={styles.viewsText}>{t('story.viewsCount', { n: currentStory.views_count || 0 })}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.reactions} accessibilityRole="toolbar">
+            {STORY_REACTIONS.map((e) => {
+              const on = reacted[currentStory.id] === e;
+              return (
+                <TouchableOpacity key={e} onPress={() => react(e)} style={[styles.reaction, on && styles.reactionOn]}
+                                  accessibilityRole="button" accessibilityState={{ selected: on }}
+                                  accessibilityLabel={t('story.reactWith', { emoji: e })} testID={`story-react-${e}`}>
+                  <Text style={styles.reactionText}>{e}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      {/* Your story's viewers, with how they reacted. */}
+      <Modal visible={viewersOpen} transparent animationType="slide" onRequestClose={closeViewers}
+             supportedOrientations={['portrait', 'landscape']}>
+        <TouchableOpacity style={styles.sheetScrim} activeOpacity={1} onPress={closeViewers}
+                          accessibilityLabel={t('common.close')} />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.md, maxHeight: screenH * 0.6 }]}
+              testID="story-viewers-sheet">
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>
+            {viewers ? t('story.viewersTitle', { n: viewers.count || 0 }) : t('story.viewers')}
+          </Text>
+          {!viewers ? <ActivityIndicator color="#fff" style={{ marginVertical: spacing.lg }} /> : (
+            <FlatList
+              data={viewers.results || []}
+              keyExtractor={(r) => String(r.user?.id)}
+              ListEmptyComponent={(
+                <Text style={styles.sheetEmpty}>{viewers.failed ? t('story.viewersFailed') : t('story.noViewers')}</Text>
+              )}
+              renderItem={({ item }) => (
+                <View style={styles.viewerRow}>
+                  <Image
+                    source={item.user?.profile_picture ? { uri: item.user.profile_picture } : DEFAULT_AVATAR}
+                    placeholder={DEFAULT_AVATAR}
+                    cachePolicy="memory-disk"
+                    style={styles.viewerAvatar}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.viewerName} numberOfLines={1}>{item.user?.username}</Text>
+                    <Text style={styles.viewerTime}>{timeAgo(item.viewed_at, t)}</Text>
+                  </View>
+                  {!!item.reaction && <Text style={styles.viewerReaction}>{item.reaction}</Text>}
+                </View>
+              )}
+            />
+          )}
+        </View>
+      </Modal>
     </Animated.View>
   );
 };
@@ -430,6 +560,33 @@ const styles = StyleSheet.create({
   timeAgo: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   closeBtn: { padding: spacing.xs },
   backdropDim: { backgroundColor: 'rgba(0,0,0,0.45)' },
+  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: spacing.lg },
+  reactions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 },
+  reaction: {
+    width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  reactionOn: { backgroundColor: 'rgba(255,255,255,0.35)', transform: [{ scale: 1.08 }] },
+  reactionText: { fontSize: 24 },
+  burst: { position: 'absolute', alignSelf: 'center', bottom: '22%', fontSize: 72 },
+  viewsBtn: {
+    alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44,
+    paddingHorizontal: spacing.md, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  viewsText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  sheetScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: {
+    backgroundColor: '#101722', borderTopLeftRadius: 18, borderTopRightRadius: 18,
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+  },
+  sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)' },
+  sheetTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginVertical: spacing.sm },
+  sheetEmpty: { color: 'rgba(255,255,255,0.7)', textAlign: 'center', marginVertical: spacing.lg },
+  viewerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8 },
+  viewerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1d2a3c' },
+  viewerName: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  viewerTime: { color: 'rgba(255,255,255,0.6)', fontSize: 12 },
+  viewerReaction: { fontSize: 22 },
   failedText: { color: '#fff', fontSize: 14, marginTop: spacing.sm, textAlign: 'center', paddingHorizontal: spacing.lg },
   caption: {
     color: '#fff',

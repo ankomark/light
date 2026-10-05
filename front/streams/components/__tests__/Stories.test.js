@@ -47,7 +47,11 @@ jest.mock('../FullSheet', () => ({ children, visible }) => (visible ? children :
 const mockTrimmer = jest.fn(() => null);
 jest.mock('../VideoTrimmer', () => (props) => mockTrimmer(props));
 jest.mock('../CoverPicker', () => () => null);
-const mockApi = { createStory: jest.fn(async (b) => ({ id: 9, ...b })), viewStory: jest.fn(async () => ({})), fetchStoryFeed: jest.fn(async () => []) };
+const mockApi = {
+  createStory: jest.fn(async (b) => ({ id: 9, ...b })), viewStory: jest.fn(async () => ({})), fetchStoryFeed: jest.fn(async () => []),
+  reactToStory: jest.fn(async (id, emoji) => ({ my_reaction: emoji })),
+  fetchStoryViewers: jest.fn(async () => ({ count: 1, results: [{ user: { id: 3, username: 'ann' }, viewed_at: new Date().toISOString(), reaction: '🙏' }] })),
+};
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 7, username: 'mark' } }) }));
 jest.mock('../../utils/screenCache', () => ({
@@ -256,6 +260,35 @@ describe('watching a story', () => {
     expect(timeAgo(new Date().toISOString(), mockT)).toBe('feed.ago.now');
     expect(timeAgo(new Date(Date.now() - 5 * 60000).toISOString(), mockT)).toBe('feed.ago.m:5');
     expect(timeAgo(new Date(Date.now() - 3 * 3600000).toISOString(), mockT)).toBe('feed.ago.h:3');
+  });
+});
+
+describe('reacting to a story', () => {
+  const others = {
+    user: { id: 3, username: 'ann' },
+    stories: [{ id: 41, content_type: 'image', media_url: 'https://cdn.test/41.jpg', created_at: new Date().toISOString(), my_reaction: null }],
+  };
+
+  test("someone else's story: tap an emoji to react, the same one again takes it back", async () => {
+    mockApi.reactToStory.mockClear();
+    const screen = render(<StoryViewer route={{ params: { group: others } }} navigation={mockNav} />);
+    expect(screen.queryByTestId('story-viewers')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByTestId('story-react-🔥')); });
+    expect(mockApi.reactToStory).toHaveBeenLastCalledWith(41, '🔥');
+    expect(screen.getByTestId('story-react-🔥').props.accessibilityState).toEqual({ selected: true });
+    await act(async () => { fireEvent.press(screen.getByTestId('story-react-🔥')); });
+    expect(mockApi.reactToStory).toHaveBeenLastCalledWith(41, null);
+  });
+
+  test('your own story: who watched and how they reacted, no emoji row', async () => {
+    const mine = { user: { id: 7, username: 'mark' }, stories: [{ ...others.stories[0], id: 42, views_count: 1 }] };
+    const screen = render(<StoryViewer route={{ params: { group: mine } }} navigation={mockNav} />);
+    expect(screen.queryByTestId('story-react-🔥')).toBeNull();
+    expect(screen.getByText('story.viewsCount:1')).toBeTruthy();
+    await act(async () => { fireEvent.press(screen.getByTestId('story-viewers')); });
+    expect(mockApi.fetchStoryViewers).toHaveBeenCalledWith(42);
+    await waitFor(() => expect(screen.getByText('ann')).toBeTruthy());
+    expect(screen.getByText('🙏')).toBeTruthy();
   });
 });
 

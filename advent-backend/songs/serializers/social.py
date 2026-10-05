@@ -431,8 +431,14 @@ class StorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Story
         fields = ['id', 'user', 'media_url', 'media_file', 'thumbnail_url', 'content_type',
-                  'caption', 'created_at', 'expires_at', 'is_viewed', 'views_count']
-        read_only_fields = ['id', 'user', 'created_at', 'expires_at', 'is_viewed', 'views_count']
+                  'caption', 'created_at', 'expires_at', 'is_viewed', 'views_count', 'my_reaction']
+        read_only_fields = ['id', 'user', 'created_at', 'expires_at', 'is_viewed', 'views_count', 'my_reaction']
+
+    my_reaction = serializers.SerializerMethodField()
+
+    def get_my_reaction(self, obj):
+        """The viewer's own emoji on this story, or null (annotated by story_queryset)."""
+        return getattr(obj, 'my_reaction', None) or None
 
     def validate_thumbnail_url(self, value):
         """A poster must be one of our own uploads, never an arbitrary link

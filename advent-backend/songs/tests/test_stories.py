@@ -72,6 +72,9 @@ class StoryFeedQueryCountTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        # The expiry purge runs at most every few minutes, on whichever request
+        # comes first: a fixed query, not per story. Out of the count here.
+        cache.add('stories:purge', 1, 600)
         self.viewer = User.objects.create_user(
             username='viewer', email='viewer@x.com', password='pw')
         self.client.force_authenticate(self.viewer)

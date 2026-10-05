@@ -748,6 +748,19 @@ class StoryView(models.Model):
         unique_together = ('story', 'viewer')
 
 
+class StoryReaction(models.Model):
+    """A viewer's quick emoji on a story — one each, changeable, gone with the
+    story when it expires (songs/stories.py)."""
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='story_reactions')
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('story', 'user')
+
+
 class Report(models.Model):
     REASON_CHOICES = [
         ('spam', 'Spam'),

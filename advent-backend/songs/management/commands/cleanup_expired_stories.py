@@ -13,8 +13,6 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
 
-from songs import r2
-from songs.models import Story
 
 logger = logging.getLogger(__name__)
 
@@ -33,33 +31,22 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # One rule for every path (the endpoints and the worker use it too):
+        # the row, its views and reactions, and all its files — poster included.
+        from songs import stories
         dry_run = options['dry_run']
         cutoff = timezone.now() - timedelta(hours=options['grace_hours'])
-
-        expired = list(
-            Story.objects.filter(expires_at__lt=cutoff)
-            .values('id', 'media_file', 'media_url', 'content_type')
-        )
-        if not expired:
+        total_stories = total_files = 0
+        while True:
+            n, files = stories.purge_expired(now=cutoff, dry_run=dry_run)
+            total_stories += n
+            total_files += files
+            if dry_run or n < stories.PURGE_BATCH:
+                break
+        if not total_stories:
             self.stdout.write('No expired stories to clean up.')
             return
-
-        assets_removed = 0
-        for s in expired:
-            ref = s['media_file'] or s['media_url']
-            if not ref or not r2.is_r2_url(ref):
-                continue
-            if dry_run:
-                assets_removed += 1
-                continue
-            r2.delete(ref)  # best-effort, logs its own failures
-            assets_removed += 1
-
-        ids = [s['id'] for s in expired]
-        if not dry_run:
-            Story.objects.filter(id__in=ids).delete()  # cascades to StoryView
-
         verb = 'Would delete' if dry_run else 'Deleted'
         self.stdout.write(self.style.SUCCESS(
-            f'{verb} {len(ids)} expired stories ({assets_removed} R2 assets).'
+            f'{verb} {total_stories} expired stories ({total_files} R2 assets).'
         ))

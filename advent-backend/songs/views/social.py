@@ -840,6 +840,7 @@ def story_queryset(user):
     queries per story (has_unviewed, is_viewed, views_count). Annotating costs
     none — StorySerializer reads viewed_by_me / views_total when present.
     """
+    from ..models import StoryReaction
     return (
         Story.objects
         .filter(expires_at__gt=timezone.now(), is_removed=False)
@@ -849,6 +850,9 @@ def story_queryset(user):
                 StoryView.objects.filter(story=OuterRef('pk'), viewer=user)
             ),
             views_total=Count('views', distinct=True),
+            my_reaction=Subquery(
+                StoryReaction.objects.filter(story=OuterRef('pk'), user=user).values('emoji')[:1]
+            ),
         )
     )
 
@@ -861,21 +865,80 @@ class StoryViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return story_queryset(self.request.user)
 
+    def get_permissions(self):
+        # Reacting is for anyone who can see the story (not only its owner);
+        # the viewers list checks ownership itself.
+        if self.action in ('react', 'viewers'):
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
+
     def perform_create(self, serializer):
+        from .. import stories
         serializer.save(
             user=self.request.user,
             expires_at=timezone.now() + timedelta(hours=24),
         )
+        stories.maybe_purge_expired()
 
     def destroy(self, request, *args, **kwargs):
+        from .. import stories
         story = self.get_object()
         if story.user != request.user:
             return Response({'error': 'Not your story'}, status=status.HTTP_403_FORBIDDEN)
-        return super().destroy(request, *args, **kwargs)
+        # Deleted is deleted: the files go too, not only the row.
+        stories.delete_files([story])
+        story.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post', 'delete'])
+    def react(self, request, pk=None):
+        """POST {emoji}: react (or change your reaction); DELETE: take it back.
+        The owner is told the first time someone reacts to a story."""
+        from .. import stories
+        from ..models import StoryReaction
+        story = self.get_object()
+        if request.method == 'DELETE':
+            StoryReaction.objects.filter(story=story, user=request.user).delete()
+            return Response({'my_reaction': None})
+        emoji = str(request.data.get('emoji') or '')
+        if emoji not in stories.REACTIONS:
+            return Response({'error': 'Pick one of the story reactions.', 'allowed': list(stories.REACTIONS)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        _, created = StoryReaction.objects.update_or_create(story=story, user=request.user,
+                                                            defaults={'emoji': emoji})
+        StoryView.objects.get_or_create(story=story, viewer=request.user)
+        if created and story.user_id != request.user.id:
+            msg = f"{request.user.username} reacted {emoji} to your story"
+            Notification.objects.create(recipient=story.user, sender=request.user, message=msg,
+                                        notification_type='story_reaction')
+            notify_user(story.user, 'story_reaction', msg)
+        return Response({'my_reaction': emoji})
+
+    @action(detail=True, methods=['get'])
+    def viewers(self, request, pk=None):
+        """Who watched your story, newest first, with their reaction. Yours only."""
+        from ..models import StoryReaction
+        story = self.get_object()
+        if story.user_id != request.user.id:
+            return Response({'error': 'Not your story'}, status=status.HTTP_403_FORBIDDEN)
+        reactions = dict(StoryReaction.objects.filter(story=story).values_list('user_id', 'emoji'))
+        rows = (StoryView.objects.filter(story=story).exclude(viewer=request.user)
+                .select_related('viewer__profile').order_by('-viewed_at')[:500])
+        return Response({
+            'count': len(rows),
+            'reactions': len(reactions),
+            'results': [{
+                'user': SimpleUserSerializer(v.viewer, context={'request': request}).data,
+                'viewed_at': v.viewed_at,
+                'reaction': reactions.get(v.viewer_id),
+            } for v in rows],
+        })
 
     @action(detail=False, methods=['get'])
     def feed(self, request):
         """Stories from followed users, grouped by user. Own stories first."""
+        from .. import stories as story_store
+        story_store.maybe_purge_expired()   # past 24 h: deleted for good, files too
         following_ids = list(request.user.followed_by.values_list('id', flat=True))
         following_ids.append(request.user.id)
 

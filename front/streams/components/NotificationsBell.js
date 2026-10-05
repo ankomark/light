@@ -21,6 +21,7 @@ const TYPE_ICON = {
   comment: { name: 'chatbubble', color: colors.primary },
   comment_reply: { name: 'return-down-forward', color: colors.primary },
   comment_like: { name: 'heart', color: '#E0245E' },
+  story_reaction: { name: 'happy', color: '#F9A825' },
   mention: { name: 'at', color: colors.accent },
   follow: { name: 'person-add', color: '#17BF63' },
   group_join_request: { name: 'people', color: colors.accent },
@@ -228,7 +229,7 @@ const NotificationsBell = ({ navigation }) => {
         return ['comment', 'comment_reply', 'mention'].includes(n.notification_type);
       }
       if (filter === 'like') {
-        return n.notification_type === 'like' || n.notification_type === 'comment_like';
+        return ['like', 'comment_like', 'story_reaction'].includes(n.notification_type);
       }
       return n.notification_type === filter;
     });

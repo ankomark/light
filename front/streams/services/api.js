@@ -2051,6 +2051,12 @@ export const fetchStoryFeed = () => apiRequest('get', '/stories/feed/');
 export const createStory = (data) => apiRequest('post', '/stories/', data);
 export const deleteStory = (id) => apiRequest('delete', `/stories/${id}/`);
 export const viewStory = (id) => apiRequest('post', `/stories/${id}/view_story/`);
+// One emoji per viewer per story (changeable); null takes it back.
+export const reactToStory = (id, emoji) => (emoji
+  ? apiRequest('post', `/stories/${id}/react/`, { emoji })
+  : apiRequest('delete', `/stories/${id}/react/`));
+// Your own story: who watched, newest first, with their reaction.
+export const fetchStoryViewers = (id) => apiRequest('get', `/stories/${id}/viewers/`);
 
 // ── Reports ───────────────────────────────────────────────────────────────────
 export const reportContent = (contentType, objectId, reason, description = '') =>
