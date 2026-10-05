@@ -118,6 +118,9 @@ export const buildPostJob = (snap) => async ({ progress, stage, thumbnail }) => 
       uri: video.uri,
       startSec: trim.start,
       endSec: trim.end,
+      // So a build that can't cut refuses (rather than uploads the parts
+      // trimmed off) — see needsCut.
+      durationSec: (video.duration || 0) / 1000,
       width: video.width,
       height: video.height,
       thumbnail: true,
@@ -201,6 +204,7 @@ export const buildStoryJob = (snap) => async ({ progress, stage, thumbnail }) =>
       uri: video.uri,
       startSec: trim?.start ?? 0,
       endSec: trim?.end,
+      durationSec: (video.duration || 0) / 1000,
       width: video.width,
       height: video.height,
       thumbnail: true,

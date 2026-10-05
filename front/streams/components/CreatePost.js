@@ -20,7 +20,7 @@ import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { compressImage as compressImageFile } from '../services/imageProcessing';
-import { isVideoProcessingAvailable } from '../services/videoProcessing';
+import { isVideoProcessingAvailable, needsCut } from '../services/videoProcessing';
 import { enqueueUpload } from '../services/uploadQueue';
 import * as DocumentPicker from 'expo-document-picker';
 import { useI18n } from '../context/I18nContext';
@@ -641,6 +641,13 @@ const CreatePost = ({ navigation }) => {
   const handlePost = async () => {
     if (contentType === 'image' ? images.length === 0 : !media) {
       Alert.alert(t('common.error'), contentType === 'image' ? t('create.post.needImage') : t('create.post.needVideo'));
+      return;
+    }
+    // What's trimmed off never leaves the phone: a build that can't cut says
+    // so here, rather than the upload sending the whole clip.
+    if (contentType === 'video' && !isVideoProcessingAvailable()
+        && needsCut({ startSec: videoTrim.start, endSec: videoTrim.end, durationSec: (media.duration || 0) / 1000 })) {
+      Alert.alert(t('story.trimUnavailableTitle'), t('story.trimUnavailable'));
       return;
     }
     await stopPreview();

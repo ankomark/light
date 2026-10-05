@@ -113,10 +113,37 @@ const measure = async (uri, fallbackW, fallbackH) => {
  *   width/height are the uploaded file's displayed size. `processed` is false
  *   when the native module was unavailable and the raw clip is returned.
  */
+// Within this much of the clip's own start and end, a window is "the whole
+// clip": no cut is needed.
+const WHOLE_CLIP_SLACK_SEC = 0.3;
+
+/**
+ * Does keeping [startSec, endSec] of a clip `durationSec` long mean cutting
+ * something off? Unknown length counts as yes — when in doubt, assume there
+ * is a part that must not be uploaded.
+ */
+export const needsCut = ({ startSec = 0, endSec, durationSec } = {}) => {
+  if (startSec > WHOLE_CLIP_SLACK_SEC) return true;
+  if (endSec == null) return false;
+  if (!durationSec) return true;
+  return endSec < durationSec - WHOLE_CLIP_SLACK_SEC;
+};
+
+/** Thrown when a clip must be cut but this build can't cut it. */
+export class TrimUnavailableError extends Error {
+  constructor() {
+    super('This phone can\'t trim videos yet. Update the app, or pick a clip that needs no trimming.');
+    this.code = 'trim_unavailable';
+  }
+}
+
 export const processVideo = async ({
-  uri, startSec = 0, endSec, width, height, thumbnail = false, thumbnailAtSec = 0,
+  uri, startSec = 0, endSec, durationSec, width, height, thumbnail = false, thumbnailAtSec = 0,
 }) => {
   if (!isVideoProcessingAvailable()) {
+    // The parts trimmed off must never reach our storage: a clip that needs
+    // cutting is refused here rather than uploaded whole.
+    if (needsCut({ startSec, endSec, durationSec })) throw new TrimUnavailableError();
     return { uri, thumbnailUri: null, width, height, processed: false, compressed: false };
   }
 
