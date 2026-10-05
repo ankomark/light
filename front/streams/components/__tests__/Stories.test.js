@@ -38,6 +38,7 @@ jest.mock('../../services/imageProcessing', () => ({ compressImage: jest.fn(asyn
 const mockVideo = {
   processVideo: jest.fn(async ({ uri }) => ({ uri: `${uri}#720p`, thumbnailUri: 'file:///poster.jpg' })),
   isVideoProcessingAvailable: jest.fn(() => true),
+  needsCut: jest.requireActual('../../services/videoProcessing').needsCut,
   extractFrame: jest.fn(async () => 'file:///frame0.jpg'),
 };
 jest.mock('../../services/videoProcessing', () => mockVideo);
@@ -48,7 +49,11 @@ const mockTrimmer = jest.fn(() => null);
 jest.mock('../VideoTrimmer', () => (props) => mockTrimmer(props));
 jest.mock('../CoverPicker', () => () => null);
 const mockEnqueue = jest.fn();
-jest.mock('../../services/uploadQueue', () => ({ enqueueUpload: (...a) => mockEnqueue(...a) }));
+const mockJobs = { list: [] };
+jest.mock('../../services/uploadQueue', () => ({
+  enqueueUpload: (...a) => mockEnqueue(...a),
+  useUploads: () => mockJobs.list,
+}));
 const mockApi = {
   createStory: jest.fn(async (b) => ({ id: 9, ...b })), viewStory: jest.fn(async () => ({})), fetchStoryFeed: jest.fn(async () => []),
   reactToStory: jest.fn(async (id, emoji) => ({ my_reaction: emoji })),
@@ -391,4 +396,66 @@ describe('the bubble shows a story, not the profile picture', () => {
     await waitFor(() => expect(screen.getByTestId('story-own-cover')).toBeTruthy());
     expect(screen.getByTestId('story-own-cover').props.source).not.toEqual({ uri: 'https://cdn.test/story.jpg' });
   });
+});
+
+describe('sharing in the background', () => {
+  test('your bubble says it is sharing while a story uploads', async () => {
+    mockApi.fetchStoryFeed.mockResolvedValue([]);
+    mockJobs.list = [{ id: 'up1', kind: 'story', status: 'working', progress: 0.4 }];
+    const screen = render(<StoriesBar navigation={mockNav} />);
+    await waitFor(() => expect(screen.getByTestId('story-sharing')).toBeTruthy());
+    expect(screen.getByText('story.sharing')).toBeTruthy();
+    mockJobs.list = [];
+  });
+
+  test("a photo stored rotated takes the resized file's upright size", async () => {
+    mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'image', uri: 'file:///rot.jpg', width: 4000, height: 3000 }] });
+    const { compressImage } = require('../../services/imageProcessing');
+    compressImage.mockResolvedValueOnce({ uri: 'file:///rot-small.jpg', width: 810, height: 1080 });
+    const screen = render(<CreateStoryScreen />);
+    await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
+    const box = [].concat(screen.getByTestId('story-preview').props.style).reduce((x, y) => ({ ...x, ...y }), {});
+    expect(box.width / box.height).toBeCloseTo(810 / 1080, 2);
+  });
+
+  test("a video's still comes from the trimmed part, and its real shape fixes the preview", async () => {
+    mockVideo.extractFrame.mockClear();
+    mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'video', uri: 'file:///side.mp4', duration: 95000, width: 1920, height: 1080 }] });
+    const screen = render(<CreateStoryScreen />);
+    await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
+    act(() => { mockTrimmer.mock.calls.at(-1)[0].onChange(40, 65); });
+    await waitFor(() => expect(mockVideo.extractFrame).toHaveBeenLastCalledWith('file:///side.mp4', 40, 720), { timeout: 2000 });
+    fireEvent.press(screen.getByTestId('story-trim-done'));
+    const still = await screen.findByTestId('story-preview-still');
+    act(() => { still.props.onLoad({ source: { width: 1080, height: 1920 } }); });   // it's portrait after all
+    const box = [].concat(screen.getByTestId('story-preview').props.style).reduce((x, y) => ({ ...x, ...y }), {});
+    expect(box.width / box.height).toBeCloseTo(1080 / 1920, 2);
+  });
+});
+
+test('a phone that cannot cut refuses a trimmed clip before anything is queued', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  mockEnqueue.mockClear();
+  mockPicker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ type: 'video', uri: 'file:///c.mp4', duration: 20000, width: 720, height: 1280 }] });
+  const screen = render(<CreateStoryScreen />);
+  await act(async () => { fireEvent.press(screen.getByTestId('story-pick')); });
+  fireEvent.press(screen.getByTestId('story-trim'));
+  act(() => { mockTrimmer.mock.calls.at(-1)[0].onChange(5, 15); });
+  fireEvent.press(screen.getByTestId('story-trim-done'));
+  mockVideo.isVideoProcessingAvailable.mockReturnValue(false);
+  fireEvent.press(screen.getByTestId('story-share'));
+  expect(alert).toHaveBeenCalledWith('story.trimUnavailableTitle', 'story.trimUnavailable');
+  expect(mockEnqueue).not.toHaveBeenCalled();
+  mockVideo.isVideoProcessingAvailable.mockReturnValue(true);
+  alert.mockRestore();
+});
+
+test('emojis go into the caption where the cursor is', () => {
+  const screen = render(<CreateStoryScreen />);
+  fireEvent.changeText(screen.getByTestId('story-caption'), 'Good morning');
+  fireEvent(screen.getByTestId('story-caption'), 'selectionChange', { nativeEvent: { selection: { start: 4, end: 4 } } });
+  fireEvent.press(screen.getByTestId('story-emoji-quick-🙏'));
+  expect(screen.getByTestId('story-caption').props.value).toBe('Good🙏 morning');
+  fireEvent.press(screen.getByTestId('story-emoji-more'));
+  expect(screen.getByTestId('story-emoji-panel')).toBeTruthy();
 });

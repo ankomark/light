@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView,
-  ActivityIndicator, Alert, useWindowDimensions, Image as RNImage,
+  ActivityIndicator, Alert, useWindowDimensions, Image as RNImage, Keyboard,
 } from 'react-native';
+import EmojiPicker, { insertAt } from './EmojiPicker';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +15,7 @@ import FullSheet from './FullSheet';
 import VideoTrimmer from './VideoTrimmer';
 import CoverPicker from './CoverPicker';
 import { compressImage } from '../services/imageProcessing';
-import { isVideoProcessingAvailable, extractFrame } from '../services/videoProcessing';
+import { isVideoProcessingAvailable, extractFrame, needsCut } from '../services/videoProcessing';
 import { enqueueUpload } from '../services/uploadQueue';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -62,6 +63,27 @@ const CreateStoryScreen = () => {
 
   const [media, setMedia] = useState(null);
   const [caption, setCaption] = useState('');
+  // Emojis: where the cursor is (so one goes there, not only at the end), a
+  // cursor to set after inserting, and whether the full panel is open.
+  const selectionRef = useRef(null);
+  const [forcedSelection, setForcedSelection] = useState(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const captionRef = useRef('');
+  captionRef.current = caption;
+  const addEmoji = useCallback((emoji) => {
+    const out = insertAt(captionRef.current, emoji, selectionRef.current, MAX_CAPTION);
+    if (!out) return;                       // it would pass the limit
+    selectionRef.current = out.selection;
+    captionRef.current = out.text;
+    setCaption(out.text);
+    setForcedSelection(out.selection);
+  }, []);
+  const toggleEmoji = useCallback(() => {
+    setEmojiOpen((o) => {
+      if (!o) Keyboard.dismiss();           // the panel takes the keyboard's place
+      return !o;
+    });
+  }, []);
   // Video: the window to keep (seconds), and the chosen cover frame.
   const [trim, setTrim] = useState({ start: 0, end: MAX_CLIP_SEC });
   const [coverSec, setCoverSec] = useState(null);
@@ -72,14 +94,30 @@ const CreateStoryScreen = () => {
   // photo needs React Native's Image instead.
   const [still, setStill] = useState(null);
   const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => { setImageFailed(false); setStill(null); }, [media?.uri]);
+  // The still is from the part that will be shared (the trim's start), not
+  // the clip's first frame — it's also the pill's thumbnail.
   useEffect(() => {
-    setImageFailed(false);
-    setStill(null);
     if (media?.type !== 'video') return undefined;
     let alive = true;
-    extractFrame(media.uri, 0, 720).then((uri) => { if (alive) setStill(uri); }).catch(() => {});
-    return () => { alive = false; };
-  }, [media]);
+    const at = setTimeout(() => {
+      extractFrame(media.uri, trim.start || 0, 720).then((uri) => { if (alive && uri) setStill(uri); }).catch(() => {});
+    }, 250);
+    return () => { alive = false; clearTimeout(at); };
+  }, [media?.uri, media?.type, trim.start]);
+
+  // Android can report a portrait clip's size sideways. A frame's own size is
+  // the truth: once one is drawn, the preview (and the upload) take its shape.
+  const onStillLoad = useCallback((e) => {
+    const w = e?.source?.width;
+    const h = e?.source?.height;
+    if (!w || !h) return;
+    setMedia((m) => {
+      if (!m || m.type !== 'video') return m;
+      const was = m.width && m.height ? m.width / m.height : 0;
+      return Math.abs(was - w / h) > 0.05 ? { ...m, width: w, height: h } : m;
+    });
+  }, []);
   const [uploading, setUploading] = useState(false);
   const [picking, setPicking] = useState(false);
   const live = useRef(true);
@@ -147,7 +185,17 @@ const CreateStoryScreen = () => {
         // As on Home: 1080 wide at most, JPEG ~0.8; a failed squeeze keeps the original.
         const compressed = await compressImage(asset.uri, { maxWidth: 1080, sourceWidth: asset.width, quality: 0.8 })
           .catch(() => null);
-        if (live.current) setMedia({ ...asset, type: 'image', uri: compressed?.uri || asset.uri });
+        // The resized file's own size: a photo stored rotated reports its
+        // sideways size from the picker, the upright one from the resize.
+        if (live.current) {
+          setMedia({
+            ...asset,
+            type: 'image',
+            uri: compressed?.uri || asset.uri,
+            width: compressed?.width || asset.width,
+            height: compressed?.height || asset.height,
+          });
+        }
       }
     } catch {
       Alert.alert(t('common.error'), t('story.pickFailed'));
@@ -162,8 +210,15 @@ const CreateStoryScreen = () => {
   const handlePost = () => {
     if (!media) { Alert.alert(t('story.noMediaTitle'), t('story.noMediaBody')); return; }
     if (uploading) return;
-    setUploading(true);
     const isVideo = media.type === 'video';
+    // What's trimmed off never leaves the phone: a build that can't cut says
+    // so here, before anything is queued.
+    if (isVideo && !isVideoProcessingAvailable()
+        && needsCut({ startSec: trim.start, endSec: trim.end, durationSec: (media.duration || 0) / 1000 })) {
+      Alert.alert(t('story.trimUnavailableTitle'), t('story.trimUnavailable'));
+      return;
+    }
+    setUploading(true);
     const snap = {
       caption: caption.trim(),
       ...(isVideo
@@ -203,7 +258,7 @@ const CreateStoryScreen = () => {
               before (or if) the player draws. */}
           {!!(coverUri || still) && (
             <Image source={{ uri: coverUri || still }} style={StyleSheet.absoluteFill} contentFit="contain"
-                   testID="story-preview-still" />
+                   onLoad={onStillLoad} testID="story-preview-still" />
           )}
           {/* textureView: on Android the default surface ignores the rounded,
               clipped box and could draw nothing in it. */}
@@ -270,8 +325,16 @@ const CreateStoryScreen = () => {
         textAlignVertical="top"
         accessibilityLabel={t('story.captionPlaceholder')}
         testID="story-caption"
+        // Set only right after an emoji goes in, then left to the typing.
+        selection={forcedSelection || undefined}
+        onSelectionChange={(e) => {
+          selectionRef.current = e.nativeEvent.selection;
+          if (forcedSelection) setForcedSelection(null);
+        }}
+        onFocus={() => setEmojiOpen(false)}
       />
       <Text style={styles.charCount}>{caption.length}/{MAX_CAPTION}</Text>
+      <EmojiPicker onPick={addEmoji} open={emojiOpen} onToggle={toggleEmoji} testID="story-emoji" />
     </View>
   );
 

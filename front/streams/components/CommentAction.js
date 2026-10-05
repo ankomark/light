@@ -433,7 +433,7 @@ const CommentAction = ({
             onPress={() => setShowComments(true)}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel="View comments"
+            accessibilityLabel={t('comments.title')}
           >
             <View style={styles.commentBarIcon}>
               <Feather name="message-circle" size={18} color={colors.accent} />
@@ -585,7 +585,7 @@ const CommentAction = ({
                     onPress={handleSend}
                     disabled={!text.trim()}
                     accessibilityRole="button"
-                    accessibilityLabel="Send comment"
+                    accessibilityLabel={t('comments.send')}
                   >
                     <Feather name="send" size={19} color={colors.white} />
                   </TouchableOpacity>

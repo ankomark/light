@@ -20,7 +20,7 @@ import {
 import { useAuth } from '../context/useAuth';
 import { initDownloads } from '../utils/downloads';
 import { emit, EVENTS } from '../utils/appEvents';
-import { navigate } from '../services/navigationRef';
+import { navigate, useCurrentRouteName } from '../services/navigationRef';
 import { useI18n } from '../context/I18nContext';
 import { colors, radius, spacing, shadows } from '../constants/theme';
 
@@ -184,7 +184,11 @@ const UploadStatus = () => {
     return () => timers.forEach(clearTimeout);
   }, [jobs]);
 
-  const visible = jobs.length > 0;
+  // Watching stories, the pill would sit on the progress bars, the name and
+  // the close button: it stands aside there (the upload carries on, and your
+  // own bubble in the stories row says it's sharing).
+  const route = useCurrentRouteName();
+  const visible = jobs.length > 0 && route !== 'StoryViewer';
   const slide = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(slide, { toValue: visible ? 1 : 0, useNativeDriver: true, friction: 8 }).start();

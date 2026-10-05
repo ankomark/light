@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 // expo-image, not RN's: it keeps a real memory+disk cache keyed by URL, so an
 // avatar already seen anywhere in the app paints from cache instead of being
@@ -13,6 +13,7 @@ import { fetchStoryFeed } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { on, EVENTS } from '../utils/appEvents';
+import { useUploads } from '../services/uploadQueue';
 import { useI18n } from '../context/I18nContext';
 import { colors, spacing, typography } from '../constants/theme';
 
@@ -52,7 +53,7 @@ export const storyCover = (stories = []) => {
   return pictureOf(newest);
 };
 
-const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onCreatePress, ownLabel }) {
+const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onCreatePress, ownLabel, sharing, sharingLabel }) {
   const avatarSize = 58;
   const avatar = group.user.profile_picture;
   const hasStories = group.stories?.length > 0;
@@ -96,6 +97,13 @@ const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onC
             style={styles.ownerBadge}
           />
         )}
+        {/* Your story on its way up (in the background queue). */}
+        {isOwn && sharing && (
+          <View style={[styles.sharing, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
+                pointerEvents="none" testID="story-sharing">
+            <ActivityIndicator color="#fff" />
+          </View>
+        )}
         {onlyVideos && (
           <View style={styles.playBadge} pointerEvents="none">
             <Ionicons name="play" size={11} color="#fff" />
@@ -111,7 +119,7 @@ const StoryBubble = React.memo(function StoryBubble({ group, onPress, isOwn, onC
         )}
       </View>
       <Text style={styles.username} numberOfLines={1}>
-        {isOwn ? ownLabel : group.user.username}
+        {isOwn ? (sharing ? sharingLabel : ownLabel) : group.user.username}
       </Text>
     </TouchableOpacity>
   );
@@ -121,6 +129,8 @@ const StoriesBar = ({ navigation }) => {
   const { currentUser } = useAuth();
   const { t } = useI18n();
   const ownLabel = t('story.yours');
+  const sharingLabel = t('story.sharing');
+  const sharing = useUploads().some((j) => j.kind === 'story' && j.status !== 'done' && j.status !== 'failed');
   const cacheKey = userKey(currentUser?.id, 'stories');
 
   // Same instant-paint rule as the feed: show the last known bar immediately,
@@ -213,8 +223,10 @@ const StoriesBar = ({ navigation }) => {
       isOwn={index === 0}
       onCreatePress={openCreate}
       ownLabel={ownLabel}
+      sharing={index === 0 && sharing}
+      sharingLabel={sharingLabel}
     />
-  ), [openViewer, openCreate, ownLabel]);
+  ), [openViewer, openCreate, ownLabel, sharing, sharingLabel]);
 
   const keyExtractor = useCallback((item) => String(item.user.id), []);
 
@@ -259,6 +271,9 @@ const styles = StyleSheet.create({
   ringViewed: { borderWidth: 2.5, borderColor: colors.textMuted, backgroundColor: 'transparent' },
   ringDashed: { borderWidth: 2, borderColor: colors.border, borderStyle: 'dashed', backgroundColor: 'transparent' },
   avatar: { backgroundColor: colors.surface },
+  sharing: {
+    position: 'absolute', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.45)',
+  },
   ownerBadge: {
     position: 'absolute',
     bottom: 0,
