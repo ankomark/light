@@ -257,7 +257,7 @@ export const ShareButton = ({ postId, caption, username, variant }) => {
     const link = `${PUBLIC_BASE}/post/${postId}/`;
     const parts = [];
     if (caption?.trim()) parts.push(caption.trim());
-    parts.push(username ? `Shared from ${username} on Adventist Life` : t('social.sharedVia'));
+    parts.push(username ? t('social.sharedFrom', { name: username }) : t('social.sharedVia'));
     parts.push(link);
     const message = parts.join('\n\n');
 

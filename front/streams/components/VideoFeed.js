@@ -14,7 +14,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, useWindowDimensions, StyleSheet, ActivityIndicator,
-  TouchableOpacity, Image, StatusBar, Animated,
+  TouchableOpacity, Image, StatusBar, Animated, AppState,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -29,6 +29,7 @@ import {
   fetchSocialPosts, fetchFeedByUrl, followUser, likePost, markPostsViewed, logWatchEvents,
 } from '../services/api';
 import formatCount from '../utils/formatCount';
+import useOnline from '../hooks/useOnline';
 import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
@@ -92,6 +93,9 @@ const VideoItem = ({
     ? (item.optimized_url || item.media_url)
     : (item.media_url || item.optimized_url);
   const playing = isActive && screenFocused && !manualPaused;
+  // The clips either side are got ready ahead, for an instant swipe — except
+  // on Data saver, where nothing streams until it is the one on screen.
+  const load = isActive || quality.tier !== 'data_saver';
 
   // Hard-pause whenever this item is no longer the active one (kills audio on
   // swipe). Also (re)apply the autoplay-derived default on active change OR when
@@ -162,7 +166,7 @@ const VideoItem = ({
 
   return (
     <View style={{ height, width: screenW, backgroundColor: '#000' }} testID={`video-${item.id}`}>
-      {uri && !errored ? (
+      {uri && !errored && load ? (
         <AppVideo
           key={attempt}
           ref={videoRef}
@@ -174,11 +178,14 @@ const VideoItem = ({
           isMuted={muted}
           bufferOptions={quality.bufferOptions}
           onLoad={() => setLoading(false)}
+          // The first frame on screen also ends the wait: a clip already in
+          // the cache can finish loading before the load listener is attached.
+          onReadyForDisplay={() => setLoading(false)}
           onError={() => { setErrored(true); setLoading(false); }}
         />
       ) : null}
 
-      {loading && !errored && uri ? (
+      {loading && !errored && uri && load ? (
         <View style={[StyleSheet.absoluteFill, styles.center]} pointerEvents="none">
           <ActivityIndicator size="large" color="#fff" />
         </View>
@@ -327,6 +334,11 @@ const VideoFeed = () => {
   const [muted, setMuted] = useState(false);
   const [activeId, setActiveId] = useState(() => kept?.results?.[0]?.id ?? null);
   const [screenFocused, setScreenFocused] = useState(true);
+  // In the background the player stops by itself; back in front it must be
+  // told to play again (and the time away is not watch time).
+  const [appActive, setAppActive] = useState(AppState.currentState !== 'background');
+  const online = useOnline();
+  const listRef = useRef(null);
   const [containerH, setContainerH] = useState(winH);
 
   const activeIdRef = useRef(activeId);
@@ -357,6 +369,9 @@ const VideoFeed = () => {
 
   const showPage = useCallback((res) => {
     const items = res?.results || [];
+    // A new page starts at its top: the list would otherwise stay where the
+    // last one was, playing a clip that is not the one on screen.
+    listRef.current?.scrollToOffset?.({ offset: 0, animated: false });
     setPosts(items);
     nextUrlRef.current = res?.next ?? null;
     activeIdRef.current = items.length ? items[0].id : null;
@@ -531,6 +546,36 @@ const VideoFeed = () => {
   }).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
 
+  // The app leaving the screen: the clip stops, its watch time ends; back
+  // in front, both start again.
+  useEffect(() => {
+    const sub = AppState.addEventListener?.('change', (state) => {
+      const active = state === 'active';
+      setAppActive(active);
+      if (active) {
+        watchStartRef.current = { id: activeIdRef.current, at: Date.now() };
+      } else {
+        endWatchRef.current();
+        watchStartRef.current = { id: null, at: Date.now() };
+        flushViews();
+      }
+    });
+    return () => sub?.remove?.();
+  }, [flushViews]);
+
+  // Back online after a failed load: try again by itself.
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnline.current && error) load();
+    wasOnline.current = online;
+  }, [online, error, load]);
+
+  // Turned (or resized): stay on the same clip, not between two.
+  useEffect(() => {
+    const i = posts.findIndex((p) => p.id === activeIdRef.current);
+    if (i > 0) listRef.current?.scrollToOffset?.({ offset: i * containerH, animated: false });
+  }, [containerH]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const getItemLayout = useCallback((_d, index) => (
     { length: containerH, offset: containerH * index, index }
   ), [containerH]);
@@ -542,7 +587,7 @@ const VideoFeed = () => {
       item={item}
       height={containerH}
       isActive={item.id === activeId}
-      screenFocused={screenFocused}
+      screenFocused={screenFocused && appActive}
       muted={muted}
       onToggleMute={toggleMute}
       currentUser={currentUser}
@@ -550,7 +595,7 @@ const VideoFeed = () => {
       bottomOffset={FOOTER_H + 14}
       onRemove={removePost}
     />
-  ), [containerH, activeId, screenFocused, muted, toggleMute, currentUser, navigation, FOOTER_H, removePost]);
+  ), [containerH, activeId, screenFocused, appActive, muted, toggleMute, currentUser, navigation, FOOTER_H, removePost]);
 
   return (
     <View style={styles.root} onLayout={(e) => {
@@ -561,6 +606,7 @@ const VideoFeed = () => {
 
       {posts.length ? (
         <FlatList
+          ref={listRef}
           // Each row hosts a comment sheet (a Modal). Touches inside a Modal still
           // bubble through this list in the React tree, and with the default
           // ('never') the list swallowed the first tap to close the keyboard, so
@@ -713,7 +759,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: '#fff', zIndex: 6, elevation: 6,
   },
 
-  bottomInfo: { position: 'absolute', left: 14, right: 86 },
+  // A tablet keeps the caption a readable width, not across the screen.
+  bottomInfo: { position: 'absolute', left: 14, right: 86, maxWidth: 520 },
   authorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, alignSelf: 'flex-start' },
   authorName: { color: '#fff', fontWeight: '900', fontSize: 17, letterSpacing: 0.2, ...TEXT_SHADOW },
   caption: { color: '#fff', fontSize: 15, lineHeight: 20, fontWeight: '600', ...TEXT_SHADOW },

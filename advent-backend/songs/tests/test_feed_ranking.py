@@ -327,3 +327,33 @@ class VideoForYouTests(APITestCase):
         self.client.post(f'/api/social-posts/{v.id}/not_interested/')
         ids = [p['id'] for p in self.client.get('/api/social-posts/?rank=1&content_type=video').data['results']]
         self.assertNotIn(v.id, ids)
+
+
+class VideoRescanTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.me = User.objects.create_user('viewer2', 'v2@x.com', 'pw')
+        self.maker = User.objects.create_user('maker2', 'm2@x.com', 'pw')
+        self.client.force_authenticate(self.me)
+
+    def test_following_nobody_the_videos_following_tab_is_empty(self):
+        SocialPost.objects.create(user=self.maker, content_type='video', caption='v')
+        res = self.client.get('/api/social-posts/?feed=following&content_type=video&fresh=1')
+        self.assertEqual(res.data['results'], [])
+        # The home feed keeps its fallback (a new user never sees an empty timeline).
+        self.assertTrue(self.client.get('/api/social-posts/?feed=following&fresh=1').data['results'])
+
+    def test_ones_own_videos_are_not_in_for_you(self):
+        mine = SocialPost.objects.create(user=self.me, content_type='video', caption='mine')
+        theirs = SocialPost.objects.create(user=self.maker, content_type='video', caption='theirs')
+        ids = [p['id'] for p in self.client.get('/api/social-posts/?rank=1&fresh=1&content_type=video').data['results']]
+        self.assertIn(theirs.id, ids)
+        self.assertNotIn(mine.id, ids)
+
+    def test_replaying_watch_time_stores_it_once(self):
+        from songs.models import WatchEvent
+        post = SocialPost.objects.create(user=self.maker, content_type='video', caption='v')
+        batch = {'events': [{'post_id': post.id, 'dwell_ms': 5000}]}
+        for _ in range(5):
+            self.client.post('/api/social-posts/watch/', batch, format='json')
+        self.assertEqual(WatchEvent.objects.filter(user=self.me, post=post).count(), 1)

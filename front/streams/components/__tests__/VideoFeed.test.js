@@ -126,3 +126,18 @@ test('a clip that will not play says so and can be tried again', async () => {
   await act(async () => { fireEvent.press(screen.getByText('feed.retry')); });
   expect(screen.getByTestId('app-video')).toBeTruthy();
 });
+
+test('in the background the clip stops and its watch time ends; back in front it plays again', async () => {
+  const { AppState } = require('react-native');
+  let onChange;
+  const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_, fn) => { onChange = fn; return { remove: () => {} }; });
+  mockApi.fetchSocialPosts.mockResolvedValue({ results: [video(1)], next: null });
+  const screen = render(<VideoFeed />);
+  await waitFor(() => expect(screen.getByTestId('app-video').props.shouldPlay).toBe(true));
+  await act(async () => { onChange('background'); });
+  expect(screen.getByTestId('app-video').props.shouldPlay).toBe(false);
+  expect(mockApi.logWatchEvents).toHaveBeenCalledWith([expect.objectContaining({ post_id: 1 })]);
+  await act(async () => { onChange('active'); });
+  expect(screen.getByTestId('app-video').props.shouldPlay).toBe(true);
+  spy.mockRestore();
+});

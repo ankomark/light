@@ -50,6 +50,7 @@ def share_brand_image(request):
 # ── Post view counting ───────────────────────────────────────────────────────
 # How many post ids one batched report may carry.
 VIEW_BATCH_CAP = 200
+WATCH_COOLDOWN_SECONDS = 60 * 60
 # A given viewer only moves a post's counter once per this window. Scrolling a
 # post past twice in a session is one view, and a client replaying the endpoint
 # in a loop can't inflate a number that's shown publicly. Repeat views still
@@ -222,6 +223,10 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             followed_ids = list(user.followed_by.values_list('id', flat=True))
             if followed_ids:
                 qs = qs.filter(Q(user_id__in=followed_ids) | Q(user=user))
+            elif ctype == 'video':
+                # The Videos page's Following tab says whose videos these are:
+                # following nobody, it is empty (and says so), not everyone's.
+                qs = qs.none()
 
         search = self.request.query_params.get('search', '').strip()
         if search:
@@ -621,6 +626,10 @@ class SocialPostViewSet(viewsets.ModelViewSet):
             ms = min(ms, MAX_MS)
             cleaned[pid] = max(cleaned.get(pid, 0), ms)  # keep the longest per post
 
+        # One row per person per post per hour, however often it is sent: the
+        # table cannot be filled by replaying the same batch.
+        cleaned = {pid: ms for pid, ms in cleaned.items()
+                   if cache.add(f'watch:{request.user.id}:{pid}', 1, WATCH_COOLDOWN_SECONDS)}
         if not cleaned:
             return Response({'stored': 0})
         valid_ids = set(SocialPost.objects.filter(id__in=cleaned).values_list('id', flat=True))

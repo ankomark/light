@@ -454,8 +454,8 @@ def _catalogue(user, ctype, have, blocked, hidden, followee_ids):
         .filter(
             Q(visibility=SocialPost.VISIBILITY_PUBLIC)
             | Q(visibility=SocialPost.VISIBILITY_FOLLOWERS, user_id__in=followee_ids)
-            | Q(user_id=user.id)
         )
+        .exclude(user_id=user.id)          # as in the ranked part: not one's own
     )
     if blocked:
         qs = qs.exclude(user_id__in=blocked)
