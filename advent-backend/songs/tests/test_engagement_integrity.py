@@ -13,6 +13,7 @@ that difference down so nobody "fixes" it later.
 from unittest import mock
 
 from django.core.cache import cache
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from songs.models import (
@@ -305,3 +306,80 @@ class LiveReactionsAreUncappedTests(APITestCase):
         self.broadcast.refresh_from_db()
         self.assertEqual(self.broadcast.like_count, 4)
         self.assertEqual(total(self.host), 4)
+
+
+@override_settings(R2_PUBLIC_BASE='https://media.test')
+class PostMediaIsOurOwnTests(APITestCase):
+    """What a post shows and plays on everyone's phone: our own uploads only
+    (or the chosen song's own audio) — never an arbitrary outside link."""
+    OWN = 'https://media.test/social/a.jpg'
+    ELSEWHERE = 'https://elsewhere.example/a.jpg'
+
+    def setUp(self):
+        cache.clear()
+        self.me = User.objects.create_user('om_me', 'om@x.com', 'pw12345!')
+        Profile.objects.create(user=self.me)
+        self.client.force_authenticate(self.me)
+
+    def post(self, **body):
+        return self.client.post('/api/social-posts/', {'content_type': 'image', 'caption': 'x', **body}, format='json')
+
+    def test_our_own_upload_posts(self):
+        self.assertEqual(self.post(media_file=self.OWN, gallery=[{'public_id': self.OWN}]).status_code, 201)
+
+    def test_an_outside_link_is_refused(self):
+        for body in ({'media_file': self.ELSEWHERE},
+                     {'media_file': self.OWN, 'thumbnail': self.ELSEWHERE},
+                     {'media_file': self.OWN, 'gallery': [{'public_id': self.ELSEWHERE}]},
+                     {'media_file': self.OWN, 'song_audio_url': 'https://elsewhere.example/a.mp3',
+                      'song_start_time': 0, 'song_end_time': 10}):
+            self.assertEqual(self.post(**body).status_code, 400, body)
+        self.assertFalse(SocialPost.objects.exists())
+
+    def test_the_chosen_songs_own_audio_is_fine_wherever_it_lives(self):
+        legacy = 'https://legacy-host.example/song.mp3'
+        track = Track.objects.create(title='Song', artist=self.me, audio_file=legacy)
+        res = self.post(media_file=self.OWN, song_id=track.id, song_audio_url=legacy,
+                        song_start_time=0, song_end_time=10)
+        self.assertEqual(res.status_code, 201, res.content[:300])
+
+
+class CommentDeleteTests(APITestCase):
+    """A comment can be taken down by whoever wrote it, or by the author of
+    the post it's on; no one else. The post's count follows, replies too."""
+
+    def setUp(self):
+        cache.clear()
+        self.author = User.objects.create_user('cd_author', 'cda@x.com', 'pw12345!')
+        self.writer = User.objects.create_user('cd_writer', 'cdw@x.com', 'pw12345!')
+        self.other = User.objects.create_user('cd_other', 'cdo@x.com', 'pw12345!')
+        for u in (self.author, self.writer, self.other):
+            Profile.objects.create(user=u)
+        self.post = SocialPost.objects.create(user=self.author, content_type='image')
+        self.client.force_authenticate(self.writer)
+        url = f'/api/social-posts/{self.post.id}/comments/'
+        self.comment = self.client.post(url, {'content': 'hello'}, format='json').json()
+        self.client.force_authenticate(self.other)
+        self.client.post(url, {'content': 'a reply', 'parent': self.comment['id']}, format='json')
+
+    def count(self):
+        return SocialPost.objects.get(pk=self.post.pk).comments_count
+
+    def test_the_writer_is_told_they_may_delete_it_and_others_are_not(self):
+        self.client.force_authenticate(self.writer)
+        self.assertTrue(self.client.get(f'/api/social-posts/{self.post.id}/comments/').json()['results'][0]['can_delete'])
+        self.client.force_authenticate(self.other)
+        self.assertFalse(self.client.get(f'/api/social-posts/{self.post.id}/comments/').json()['results'][0]['can_delete'])
+        self.client.force_authenticate(self.author)
+        self.assertTrue(self.client.get(f'/api/social-posts/{self.post.id}/comments/').json()['results'][0]['can_delete'])
+
+    def test_someone_else_cannot(self):
+        self.client.force_authenticate(self.other)
+        self.assertEqual(self.client.delete(f'/api/post-comments/{self.comment["id"]}/').status_code, 403)
+        self.assertEqual(self.count(), 2)
+
+    def test_the_posts_author_can_and_the_replies_go_with_it(self):
+        self.assertEqual(self.count(), 2)
+        self.client.force_authenticate(self.author)
+        self.assertEqual(self.client.delete(f'/api/post-comments/{self.comment["id"]}/').status_code, 204)
+        self.assertEqual(self.count(), 0)

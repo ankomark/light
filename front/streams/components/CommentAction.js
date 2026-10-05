@@ -30,6 +30,7 @@ import {
 import { useTokenSuggestions, useForcedSelection, SuggestionList } from './MentionSuggestions';
 import RichCaption from './RichCaption';
 import BottomSheet from './BottomSheet';
+import ReportModal from './ReportModal';
 import formatCount from '../utils/formatCount';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -268,6 +269,45 @@ const CommentAction = ({
   const onHeart = useCallback((comment) => react(comment, LIKE), [react]);
   const onReact = useCallback((comment) => setPickerFor(comment), []);
 
+  // ── delete / report (from the same long-press menu) ──
+  const [reportFor, setReportFor] = useState(null);
+  const removeComment = useCallback((comment) => {
+    setPickerFor(null);
+    Alert.alert(t('comments.deleteTitle'), comment.replies_count ? t('comments.deleteBody') : undefined, [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.remove(comment.id);
+          } catch {
+            Alert.alert(t('common.error'), t('comments.deleteFailed'));
+            return;
+          }
+          // A top comment takes its replies with it (the post's count too).
+          const gone = comment.parent ? 1 : 1 + (comment.replies_count || 0);
+          if (comment.parent) {
+            setThreads((prev) => (prev[comment.parent] ? {
+              ...prev,
+              [comment.parent]: { ...prev[comment.parent], items: prev[comment.parent].items.filter((r) => r.id !== comment.id) },
+            } : prev));
+            setComments((prev) => prev.map((c) => (c.id === comment.parent
+              ? { ...c, replies_count: Math.max(0, (c.replies_count || 1) - 1) } : c)));
+          } else {
+            setComments((prev) => {
+              const next = prev.filter((c) => c.id !== comment.id);
+              rememberComments(api.cacheKey, next);
+              return next;
+            });
+          }
+          setAdded((n) => n - gone);
+          onCommentPosted?.(Math.max(0, shownCountRef.current - gone));
+        },
+      },
+    ]);
+  }, [api, t, onCommentPosted]);
+
   // ── replying ──
   const onReply = useCallback((comment) => {
     setReplyTarget(comment);
@@ -493,6 +533,25 @@ const CommentAction = ({
                   </TouchableOpacity>
                 ))}
               </View>
+              {(pickerFor.can_delete && api.remove) || pickerFor.user?.id !== currentUser?.id ? (
+                <View style={styles.pickerActions}>
+                  {pickerFor.can_delete && api.remove ? (
+                    <TouchableOpacity style={styles.pickerAction} onPress={() => removeComment(pickerFor)}
+                                      accessibilityRole="button" testID="comment-delete">
+                      <Feather name="trash-2" size={16} color={colors.error} />
+                      <Text style={[styles.pickerActionText, { color: colors.error }]}>{t('comments.delete')}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {pickerFor.user?.id !== currentUser?.id ? (
+                    <TouchableOpacity style={styles.pickerAction}
+                                      onPress={() => { setReportFor(pickerFor); setPickerFor(null); }}
+                                      accessibilityRole="button" testID="comment-report">
+                      <Feather name="flag" size={16} color={colors.textSecondary} />
+                      <Text style={styles.pickerActionText}>{t('comments.report')}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           </Pressable>
         ) : null}
@@ -593,6 +652,12 @@ const CommentAction = ({
               </View>
             )}
       </BottomSheet>
+      <ReportModal
+        visible={!!reportFor}
+        onClose={() => setReportFor(null)}
+        contentType={trackId != null ? 'trackcomment' : 'comment'}
+        objectId={reportFor?.id}
+      />
     </>
   );
 };
@@ -701,6 +766,12 @@ const styles = StyleSheet.create({
   pickerBtn: { padding: 6, borderRadius: 22 },
   pickerBtnActive: { backgroundColor: 'rgba(29,161,242,0.25)' },
   pickerEmoji: { fontSize: 30 },
+  pickerActions: {
+    marginTop: spacing.sm, paddingTop: spacing.xs, gap: 2,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  pickerAction: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44 },
+  pickerActionText: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
 });
 
 export default CommentAction;

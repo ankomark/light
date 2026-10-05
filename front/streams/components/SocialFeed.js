@@ -1228,6 +1228,11 @@ const SocialFeed = ({ showBackground = true }) => {
     });
   }, []);
 
+  // Deleted from the post's own screen: gone here too.
+  useEffect(() => on(EVENTS.POST_DELETED, ({ postId } = {}) => {
+    if (postId != null) handlePostDelete(postId);
+  }), [handlePostDelete]);
+
   // Persist a post's saved/favorite state so it survives row re-mounts & refresh.
   const handleSaveChange = useCallback((postId, isSaved) => {
     setPosts(prev => prev.map(post =>

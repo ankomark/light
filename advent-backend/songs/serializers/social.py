@@ -16,6 +16,20 @@ class FeedSongSerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'artist', 'album', 'audio_file', 'cover_image', 'slug']
 
 
+def own_upload(value, what='file'):
+    """A media link a client sends must be one of our own uploads (R2) —
+    never an arbitrary link that every viewer's phone would then fetch (an
+    outside server learning who looks, or content no one can moderate).
+    A bare storage key isn't a link (media.resolve serves only absolute ones),
+    so only an absolute link to anywhere else is refused."""
+    from .. import r2
+    value = (value or '').strip() if isinstance(value, str) else value
+    if (value and getattr(settings, 'R2_PUBLIC_BASE', '') and media.is_absolute(value)
+            and not r2.is_r2_url(value)):
+        raise serializers.ValidationError(f'Upload the {what} first.')
+    return value
+
+
 class SocialPostSerializer(serializers.ModelSerializer):
     user = DetailedUserSerializer(read_only=True)
     song = FeedSongSerializer(read_only=True)
@@ -202,6 +216,12 @@ class SocialPostSerializer(serializers.ModelSerializer):
             return obj.saves.filter(user=request.user).exists()
         return False
 
+    def validate_media_file(self, value):
+        return own_upload(value, 'photo or video')
+
+    def validate_thumbnail(self, value):
+        return own_upload(value, 'poster')
+
     def validate_client_id(self, value):
         # '' is not NULL, so two blank keys would collide on the unique
         # (user, client_id) constraint. No key means NULL.
@@ -235,6 +255,18 @@ class SocialPostSerializer(serializers.ModelSerializer):
             for it in gallery:
                 if not isinstance(it, dict) or not (it.get('url') or it.get('public_id')):
                     raise serializers.ValidationError("Each gallery item needs its uploaded media URL")
+                for key in ('url', 'public_id'):
+                    if isinstance(it.get(key), str):
+                        own_upload(it[key], 'photo')
+
+        # A post's song plays on every phone that scrolls past it: our own
+        # upload, or the chosen song's own audio (older songs may live on a
+        # legacy host) — never any other link.
+        audio = data.get('song_audio_url')
+        if audio:
+            song = data.get('song')
+            if not (song and media.resolve(song.audio_file) == audio):
+                own_upload(audio, 'song')
 
         # Validate the accompanying-audio trim window (seconds). Cap the clip at
         # 30s so the feed only plays the short section the user picked.
@@ -376,11 +408,12 @@ class PostCommentSerializer(serializers.ModelSerializer):
     parent = serializers.PrimaryKeyRelatedField(read_only=True)
     reply_to = CommentUserSerializer(read_only=True)
     reactions = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
 
     class Meta:
         model = PostComment
         fields = ['id', 'user', 'post', 'content', 'created_at',
-                  'parent', 'reply_to', 'replies_count', 'reactions']
+                  'parent', 'reply_to', 'replies_count', 'reactions', 'can_delete']
         read_only_fields = ['user', 'post', 'created_at', 'parent', 'reply_to', 'replies_count']
 
     def validate_content(self, value):
@@ -390,6 +423,21 @@ class PostCommentSerializer(serializers.ModelSerializer):
         if len(value) > 2200:
             raise serializers.ValidationError('Comment is too long.')
         return value
+
+    def get_can_delete(self, obj):
+        """Yours, or on your post: you may take it down."""
+        request = self.context.get('request')
+        uid = getattr(getattr(request, 'user', None), 'id', None)
+        if not uid:
+            return False
+        if obj.user_id == uid:
+            return True
+        # post_id alone can't say whose post it is; the post row is cached
+        # per request so a page of comments costs one lookup.
+        owners = self.context.setdefault('_post_owner', {})
+        if obj.post_id not in owners:
+            owners[obj.post_id] = SocialPost.objects.filter(pk=obj.post_id).values_list('user_id', flat=True).first()
+        return owners[obj.post_id] == uid
 
     def get_reactions(self, obj):
         # Lists compute every row's summary in two queries up front and pass
@@ -440,15 +488,21 @@ class StorySerializer(serializers.ModelSerializer):
         """The viewer's own emoji on this story, or null (annotated by story_queryset)."""
         return getattr(obj, 'my_reaction', None) or None
 
+    # The story itself and its poster: our own uploads, never an arbitrary
+    # link shown to everyone who opens the stories row.
     def validate_thumbnail_url(self, value):
-        """A poster must be one of our own uploads, never an arbitrary link
-        shown to everyone who opens the stories row."""
-        from django.conf import settings as dj_settings
-        from .. import r2
-        value = (value or '').strip()
-        if value and getattr(dj_settings, 'R2_PUBLIC_BASE', '') and not r2.is_r2_url(value):
-            raise serializers.ValidationError('Upload the poster first.')
-        return value
+        return own_upload(value, 'poster')
+
+    def validate_media_url(self, value):
+        return own_upload(value, 'photo or video')
+
+    def validate_media_file(self, value):
+        return own_upload(value, 'photo or video')
+
+    def validate(self, data):
+        if self.instance is None and not (data.get('media_url') or data.get('media_file')):
+            raise serializers.ValidationError('A story needs a photo or a video.')
+        return data
 
     # Both of these prefer an annotation set by story_queryset() — one query for
     # the whole bar — and fall back to a per-object query only for call sites

@@ -806,6 +806,20 @@ class PostCommentViewSet(viewsets.ModelViewSet):
         summary = reaction_summaries([comment.id], request.user)[comment.id]
         return Response({'reactions': summary, 'mine': mine})
 
+    def get_permissions(self):
+        # Deleting is checked in destroy(): the comment's author, or the
+        # author of the post it's on (their post, their comment section).
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
+
+    def destroy(self, request, *args, **kwargs):
+        comment = self.get_object()
+        if request.user.id not in (comment.user_id, comment.post.user_id):
+            return Response({'error': 'Not yours to delete.'}, status=status.HTTP_403_FORBIDDEN)
+        comment.delete()   # its replies go with it; the counts follow (signals)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def create(self, request, *args, **kwargs):
         # The post comes from the nested route (/social-posts/<post_pk>/comments/).
         # On the flat /post-comments/ route there is no post_pk at all, so say
@@ -889,6 +903,26 @@ class StoryViewSet(viewsets.ModelViewSet):
         if self.action in ('react', 'viewers', 'view_story'):
             return [permissions.IsAuthenticated()]
         return super().get_permissions()
+
+    # A story lives a day; its upload's key is remembered a little longer.
+    CLIENT_ID_TTL = 25 * 3600
+
+    def create(self, request, *args, **kwargs):
+        # The background uploader retries a failed upload — and resumes one the
+        # OS killed — with the same client_id. If the first attempt reached the
+        # server, hand back that story instead of sharing it twice. (Kept in the
+        # cache, not a column: a story is gone within a day anyway.)
+        client_id = str(request.data.get('client_id') or '').strip()[:64]
+        key = f'story:client:{request.user.id}:{client_id}' if client_id else None
+        if key:
+            known = cache.get(key)
+            story = self.get_queryset().filter(pk=known).first() if known else None
+            if story:
+                return Response(self.get_serializer(story).data, status=status.HTTP_200_OK)
+        response = super().create(request, *args, **kwargs)
+        if key and response.status_code == status.HTTP_201_CREATED:
+            cache.set(key, response.data['id'], self.CLIENT_ID_TTL)
+        return response
 
     def perform_create(self, serializer):
         from .. import stories

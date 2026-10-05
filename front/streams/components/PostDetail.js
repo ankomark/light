@@ -7,6 +7,8 @@ import {
   Image,
   ScrollView,
   TouchableOpacity,
+  Pressable,
+  AppState,
   useWindowDimensions,
 } from 'react-native';
 import { createSound } from '../services/audioPlayer';
@@ -21,6 +23,8 @@ import RichCaption from './RichCaption';
 import PostActions from '../components/PostActions';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
+import ImageViewer from './ImageViewer';
+import { LikeButton, SaveButton } from './SocialActions';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
@@ -37,8 +41,8 @@ const getOptimizedUrl = (url, type = 'image') => {
 const getAspectRatio = (post) => {
   if (post?.width && post?.height && post.height > 0) {
     const ratio = post.width / post.height;
-    // Clamp so very tall/wide posts stay within a comfortable frame.
-    return Math.min(Math.max(ratio, 0.6), 1.91);
+    // The same bounds as the feed (0.5-1.91), so a 9:16 photo isn't cropped here.
+    return Math.min(Math.max(ratio, 0.5), 1.91);
   }
   return post?.content_type === 'video' ? 16 / 9 : 1;
 };
@@ -47,11 +51,23 @@ const processPost = (post) => ({
   ...post,
   mediaUrl: post.optimized_url || post.media_url,
   thumbnailUrl: post.optimized_url || post.media_url,
+  // Every photo of a 1-4 photo post (the feed's carousel), not just the first.
+  photos: (Array.isArray(post.media_items) ? post.media_items : [])
+    .map((m) => m?.optimized_url || m?.media_url).filter(Boolean),
   user: {
     ...post.user,
     profile_picture: post.user?.profile_picture || null,
   },
 });
+
+/** "5 Oct 2026" in the reader's language. */
+const postedOn = (dateStr, t) => {
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  const months = t('tix.months').split(',');
+  return months.length === 12 ? `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`
+    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
 
 const PostDetail = ({ route, navigation }) => {
   const { t } = useI18n();
@@ -69,7 +85,8 @@ const PostDetail = ({ route, navigation }) => {
   const videoRef = useRef(null);
   const [mediaError, setMediaError] = useState(false);
   const audioRef = useRef(null);
-  const timeoutRef = useRef(null);
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [viewerAt, setViewerAt] = useState(null);   // full screen, at this photo
 
   // Auto-open comments if coming from a notification
   useEffect(() => {
@@ -114,51 +131,44 @@ const PostDetail = ({ route, navigation }) => {
   const songEnd = post?.song_end_time ?? post?.song?.end_time ?? null;
   const hasSong = !!(songTitle || songAudioUrl);
 
+  // The attached song of a photo post: its trimmed window, looped. Started
+  // once per post (not again on every change to the post's state), and
+  // stopped for good on leaving - also when leaving while it is still
+  // loading, which used to leave it playing with no screen to stop it.
+  const postKey = post?.content_type === 'image' ? post.id : null;
   useEffect(() => {
-    // Play the attached song for image posts (with trimmed start/end)
-    const playSong = async () => {
-      if (post?.content_type === 'image' && songAudioUrl) {
-        try {
-          if (audioRef.current) {
-            await audioRef.current.unloadAsync();
-            audioRef.current = null;
-          }
-
-          const { sound } = await createSound({ uri: songAudioUrl });
-          audioRef.current = sound;
-
-          await sound.playFromPositionAsync((songStart || 0) * 1000);
-
-          if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-          }
-
-          if (songEnd != null) {
-            const duration = (songEnd - (songStart || 0)) * 1000;
-            timeoutRef.current = setTimeout(async () => {
-              if (audioRef.current) {
-                await audioRef.current.stopAsync();
-              }
-            }, duration);
-          }
-        } catch {
-          // Audio failed — continue silently
+    if (!postKey || !songAudioUrl) return undefined;
+    let alive = true;
+    let sound = null;
+    const start = (songStart || 0) * 1000;
+    const end = songEnd != null && songEnd > (songStart || 0) ? songEnd * 1000 : null;
+    (async () => {
+      try {
+        const created = await createSound({ uri: songAudioUrl }, { shouldPlay: false, isLooping: true });
+        if (!alive) { created.sound.unloadAsync?.().catch?.(() => {}); return; }
+        sound = created.sound;
+        audioRef.current = sound;
+        if (end) {
+          sound.setOnPlaybackStatusUpdate?.((st) => {
+            if (st?.isLoaded && st.positionMillis >= end) sound.setPositionAsync(start).catch(() => {});
+          });
         }
+        await sound.playFromPositionAsync(start);
+      } catch {
+        // Audio failed - continue silently
       }
-    };
-
-    playSong();
-
+    })();
+    // Leaving the app stops it, as on the feed.
+    const appSub = AppState.addEventListener('change', (st) => {
+      if (st === 'background') audioRef.current?.pauseAsync?.()?.catch?.(() => {});
+    });
     return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      if (audioRef.current) {
-        audioRef.current.unloadAsync();
-        audioRef.current = null;
-      }
+      alive = false;
+      appSub.remove();
+      if (sound) sound.unloadAsync?.()?.catch?.(() => {});
+      audioRef.current = null;
     };
-  }, [post]);
+  }, [postKey, songAudioUrl, songStart, songEnd]);
 
   const updateCommentsCount = (newCount) => setCommentsCount(newCount);
   const handleMediaError = () => setMediaError(true);
@@ -246,9 +256,13 @@ const PostDetail = ({ route, navigation }) => {
 
           <PostActions
             post={post}
-            onUpdate={(updatedPost) => setPost(processPost(updatedPost))}
+            // An edit sends back the text it changed; the media stays as shown.
+            onUpdate={(updatedPost) => setPost((prev) => ({
+              ...prev, ...updatedPost, user: prev.user, mediaUrl: prev.mediaUrl, thumbnailUrl: prev.thumbnailUrl,
+              photos: prev.photos, media_url: prev.media_url, optimized_url: prev.optimized_url,
+              media_items: prev.media_items,
+            }))}
             onDelete={() => navigation.goBack()}
-            navigation={navigation}
           />
         </View>
 
@@ -278,34 +292,59 @@ const PostDetail = ({ route, navigation }) => {
               isLooping
               onError={handleMediaError}
             />
+          ) : post.photos.length > 1 ? (
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={(e) => setPhotoIndex(Math.round(e.nativeEvent.contentOffset.x / mediaFrameW))}
+              testID="post-photos"
+            >
+              {post.photos.map((url, i) => (
+                <Pressable key={`${i}_${url}`} onPress={() => setViewerAt(i)} style={{ width: mediaFrameW, height: '100%' }}>
+                  <Image source={{ uri: url }} style={styles.media} resizeMode="cover" onError={handleMediaError} />
+                </Pressable>
+              ))}
+            </ScrollView>
           ) : (
-            <Image
-              source={{ uri: post.mediaUrl }}
-              style={styles.media}
-              resizeMode="cover"
-              onError={handleMediaError}
-            />
+            <Pressable style={styles.media} onPress={() => setViewerAt(0)} testID="post-photo">
+              <Image
+                source={{ uri: post.mediaUrl }}
+                style={styles.media}
+                resizeMode="cover"
+                onError={handleMediaError}
+              />
+            </Pressable>
           )}
+          {post.content_type === 'image' && post.photos.length > 1 && !mediaError ? (
+            <View style={styles.dots} pointerEvents="none">
+              {post.photos.map((_, i) => (
+                <View key={i} style={[styles.dot, i === photoIndex && styles.dotActive]} />
+              ))}
+            </View>
+          ) : null}
         </View>
         )}
 
-        {/* Stats */}
+        {/* Like and save here too: a post opened from a notification is
+            still a post. */}
         <View style={styles.statsRow}>
-          <View style={styles.statChip}>
-            <Ionicons name="heart" size={16} color={colors.error} />
-            <Text style={styles.statText}>{post.likes_count || 0}</Text>
-          </View>
+          <LikeButton
+            postId={post.id}
+            initialLikes={post.likes_count || 0}
+            isLiked={post.is_liked || false}
+            onLikeChange={({ is_liked, likes_count }) => setPost((prev) => ({ ...prev, is_liked, likes_count }))}
+          />
           <View style={styles.statChip}>
             <Ionicons name="chatbubble-outline" size={15} color={colors.textSecondary} />
             <Text style={styles.statText}>{commentsCount}</Text>
           </View>
-          <Text style={styles.timestamp}>
-            {new Date(post.created_at).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </Text>
+          <Text style={styles.timestamp}>{postedOn(post.created_at, t)}</Text>
+          <SaveButton
+            postId={post.id}
+            initialSaved={post.is_saved || false}
+            onSaveChange={(is_saved) => setPost((prev) => ({ ...prev, is_saved }))}
+          />
         </View>
 
         {/* Caption */}
@@ -338,6 +377,15 @@ const PostDetail = ({ route, navigation }) => {
           </View>
         ) : null}
       </ScrollView>
+
+      <ImageViewer
+        visible={viewerAt != null}
+        urls={post.content_type === 'image' ? (post.photos.length ? post.photos : [post.mediaUrl].filter(Boolean)) : []}
+        index={viewerAt || 0}
+        caption={post.caption || ''}
+        author={post.user?.username || ''}
+        onClose={() => setViewerAt(null)}
+      />
 
       <CommentAction
         postId={postId}
@@ -491,6 +539,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.10)',
   },
+  dots: {
+    position: 'absolute', bottom: 10, alignSelf: 'center', flexDirection: 'row', gap: 6,
+  },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.45)' },
+  dotActive: { backgroundColor: '#fff' },
   statChip: {
     flexDirection: 'row',
     alignItems: 'center',

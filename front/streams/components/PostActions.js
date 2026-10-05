@@ -6,10 +6,11 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_URL, getAccessToken, markNotInterested } from '../services/api';
 import ReportModal from './ReportModal';
+import { emit, EVENTS } from '../utils/appEvents';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) => {
+const PostActions = ({ post, onUpdate, onDelete, onNotInterested }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const editScroll = useRef(null);
@@ -77,7 +78,9 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, navigation }) 
                 headers: { Authorization: `Bearer ${token}` }
               });
               onDelete();
-              if (navigation) navigation.goBack();
+              // Every feed that shows it drops it too (deleted from its own
+              // screen, the feed underneath still had it).
+              emit(EVENTS.POST_DELETED, { postId: post.id });
               Alert.alert(t('market.success'), t('post.deletedOk'));
             } catch (error) {
               console.error('Error deleting post:', error);

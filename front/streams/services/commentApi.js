@@ -27,5 +27,7 @@ export const commentApi = (kind, targetId) => {
     create: (content, parent = null) => commentOnPost(targetId, content, parent),
     react: (commentId, emoji) => reactToComment(commentId, emoji),
     get: (commentId) => fetchPostComment(commentId),
+    // Yours, or any on your own post (the comment says so: can_delete).
+    remove: (commentId) => apiRequest('delete', `/post-comments/${commentId}/`),
   };
 };
