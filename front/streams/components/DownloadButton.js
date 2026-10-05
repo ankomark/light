@@ -38,7 +38,7 @@ const DownloadButton = ({ track, size = 20, color = colors.textSecondary, onSave
         Alert.alert(t('downloads.wifiOnlyTitle'), t('downloads.wifiOnlyBody'));
         return;
       }
-      Alert.alert(t('trackItem.downloadFailedTitle'), e?.message || t('trackItem.downloadFailedBody'));
+      Alert.alert(t('trackItem.downloadFailedTitle'), t('trackItem.downloadFailedBody'));   // in words, never the raw error
     });
   };
   const removeOffline = () => removeDownload(track.id);

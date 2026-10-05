@@ -9,8 +9,11 @@ jest.setTimeout(20000);
 
 const mockT = (k, p) => (p ? `${k}:${Object.values(p).join(',')}` : k);
 jest.mock('../../context/I18nContext', () => ({ useI18n: () => ({ t: mockT }) }));
-jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 30, bottom: 20, left: 0, right: 0 }) }));
-jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null, MaterialCommunityIcons: () => null }));
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 30, bottom: 20, left: 0, right: 0 }),
+  SafeAreaView: ({ children }) => children,
+}));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null, MaterialCommunityIcons: () => null, Feather: () => null }));
 jest.mock('expo-image', () => {
   const { View } = require('react-native');
   const Img = (props) => <View {...props} />;
@@ -19,8 +22,11 @@ jest.mock('expo-image', () => {
 });
 jest.mock('../../context/PlayerContext', () => ({ usePlayer: () => ({ playQueue: jest.fn(), currentTrack: null }) }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 7 } }) }));
+const mockSaved = {};
+const mockDrop = jest.fn((k) => { delete mockSaved[k]; });
 jest.mock('../../utils/screenCache', () => ({
-  peekCache: () => null, readCache: async () => null, writeCache: jest.fn(), userKey: (u, n) => `u${u}:${n}`,
+  peekCache: (k) => mockSaved[k] ?? null, readCache: async (k) => mockSaved[k] ?? null, writeCache: jest.fn(),
+  dropCache: (k) => mockDrop(k), userKey: (u, n) => `u${u}:${n}`,
 }));
 const mockNav = { navigate: jest.fn(), goBack: jest.fn() };
 let mockRouteParams = {};
@@ -45,6 +51,9 @@ jest.mock('../ReportModal', () => (props) => mockReport(props));
 jest.mock('../AlbumSheets', () => ({ EditAlbumSheet: () => null, AlbumSongsSheet: () => null }));
 jest.mock('../PlaylistCover', () => () => null);
 jest.mock('../VerifiedBadge', () => () => null);
+// The song page's parts that aren't under test.
+['../RotatingBackground', '../LikeButton', '../DownloadButton', '../CommentAction', '../TrackRail']
+  .forEach((m) => jest.doMock(m, () => () => null));
 
 const mockApi = {
   fetchTracks: jest.fn(async () => ({ results: [], next: null })),
@@ -56,12 +65,17 @@ const mockApi = {
   apiRequest: jest.fn(async () => ({})),
   fetchAlbum: jest.fn(),
   deleteAlbum: jest.fn(),
+  fetchPlaylist: jest.fn(),
+  fetchTrack: jest.fn(),
+  fetchSimilarTracks: jest.fn(async () => []),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => (mockApi[k] ? mockApi[k](...a) : Promise.resolve({})) }));
 
 const TrackList = require('../TrackList').default;
 const EditTrackScreen = require('../EditTrackScreen').default;
 const AlbumScreen = require('../AlbumScreen').default;
+const PlaylistDetail = require('../PlaylistDetail').default;
+const TrackDetailScreen = require('../TrackDetailScreen').default;
 
 const tr = (id, title = `Song ${id}`) => ({ id, title, artist: { id: 1, username: 'choir' }, audio_file: `https://m/${id}.mp3` });
 
@@ -116,5 +130,29 @@ describe("someone else's album", () => {
     await waitFor(() => expect(screen.getByTestId('album-report')).toBeTruthy());
     fireEvent.press(screen.getByTestId('album-report'));
     expect(mockReport).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, contentType: 'album', objectId: 3 }));
+  });
+});
+
+describe('something that is gone', () => {
+  test('a playlist removed since it was saved leaves the screen (and the saved copy), per account', async () => {
+    mockRouteParams = { playlistId: 4 };
+    mockSaved['u7:playlist:4'] = { id: 4, name: 'Old mix', tracks: [], is_owner: false };
+    mockApi.fetchPlaylist.mockRejectedValueOnce(Object.assign(new Error('gone'), { response: { status: 404 } }));
+    const screen = render(<PlaylistDetail />);
+    expect(screen.getByText('Old mix')).toBeTruthy();                   // the saved copy first
+    await waitFor(() => expect(screen.getByText('playlist.unavailable')).toBeTruthy());
+    expect(screen.queryByText('Old mix')).toBeNull();
+    expect(mockDrop).toHaveBeenCalledWith('u7:playlist:4');
+  });
+
+  test("a song that didn't load offline says so and offers a retry - it isn't 'no longer available'", async () => {
+    mockApi.fetchTrack
+      .mockRejectedValueOnce(Object.assign(new Error('Network Error'), { response: undefined }))
+      .mockResolvedValueOnce({ id: 9, title: 'Psalm 23', artist: { id: 1, username: 'choir' } });
+    const screen = render(<TrackDetailScreen route={{ params: { trackId: 9 } }} navigation={mockNav} />);
+    await waitFor(() => expect(screen.getByTestId('track-retry')).toBeTruthy());
+    expect(screen.queryByText('music.trackUnavailable')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByTestId('track-retry')); });
+    await waitFor(() => expect(screen.getByText('Psalm 23')).toBeTruthy());
   });
 });

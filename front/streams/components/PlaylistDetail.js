@@ -22,7 +22,8 @@ import useOnline from '../hooks/useOnline';
 import useBottomSpace from '../hooks/useBottomSpace';
 import OfflineBanner from './OfflineBanner';
 import { useI18n } from '../context/I18nContext';
-import { peekCache, readCache, writeCache } from '../utils/screenCache';
+import { peekCache, readCache, writeCache, dropCache, userKey } from '../utils/screenCache';
+import { useAuth } from '../context/useAuth';
 import { TrackListSkeleton } from './SkeletonLoader';
 import ReportModal from './ReportModal';
 
@@ -54,7 +55,10 @@ const PlaylistDetail = () => {
   const { width } = useWindowDimensions();
   const playlistId = route.params?.playlistId;
 
-  const cacheKey = `playlist:${playlistId}`;
+  // Per account: on a shared phone, one person's (private) playlist must not
+  // paint from the saved copy for the next.
+  const { currentUser } = useAuth();
+  const cacheKey = userKey(currentUser?.id, `playlist:${playlistId}`);
   const cached = peekCache(cacheKey);
 
   const [playlist, setPlaylist] = useState(cached ?? null);
@@ -90,10 +94,17 @@ const PlaylistDetail = () => {
       apply(await fetchPlaylist(playlistId));
     } catch (err) {
       setError(err);
+      // Gone for good (deleted, taken down, made private, or hidden from you):
+      // the saved copy goes too, so the screen says so instead of showing it.
+      if ([403, 404].includes(err?.response?.status)) {
+        setPlaylist(null);
+        setTracks([]);
+        dropCache(cacheKey);
+      }
     } finally {
       setLoading(false);
     }
-  }, [playlistId, apply]);
+  }, [playlistId, apply, cacheKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -237,8 +248,8 @@ const PlaylistDetail = () => {
     return (
       <View style={styles.centered}>
         <MaterialIcons name="error-outline" size={48} color={colors.textMuted} />
-        <Text style={styles.errorText}>{t(error?.response?.status === 404 ? 'playlist.unavailable' : 'playlist.loadFailed')}</Text>
-        {error?.response?.status !== 404 ? (
+        <Text style={styles.errorText}>{t([403, 404].includes(error?.response?.status) ? 'playlist.unavailable' : 'playlist.loadFailed')}</Text>
+        {![403, 404].includes(error?.response?.status) ? (
           <TouchableOpacity style={styles.retryBtn} onPress={load}>
             <Text style={styles.retryText}>{t('common.retry')}</Text>
           </TouchableOpacity>

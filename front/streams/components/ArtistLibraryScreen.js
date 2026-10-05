@@ -11,7 +11,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { fetchArtistLibrary } from '../services/api';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
-import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
+import { peekCache, readCache, writeCache, dropCache, userKey } from '../utils/screenCache';
 import toQueueTrack from '../utils/queueTrack';
 import PlaylistCover from './PlaylistCover';
 import VerifiedBadge from './VerifiedBadge';
@@ -56,7 +56,14 @@ const ArtistLibraryScreen = () => {
       writeCache(cacheKey, data);
       setFailed(null);
     } catch (err) {
-      setFailed(err?.response?.status || 'error');
+      const code = err?.response?.status || 'error';
+      setFailed(code);
+      // Gone for good (deleted, taken down, made private, or hidden from you):
+      // the saved copy goes too, so the screen says so instead of showing it.
+      if (code === 404 || code === 403) {
+        setLib(null);
+        dropCache(cacheKey);
+      }
     }
   }, [userId, cacheKey]);
 

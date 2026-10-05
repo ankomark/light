@@ -58,7 +58,7 @@ const LikeButton = ({ trackId, initialLikes, initialIsLiked, disabled = false })
       desired.current = server.current;      // roll back to the last known truth
       setIsLiked(server.current);
       setLikes(serverLikes.current);
-      Alert.alert(t('common.error'), error.message || t('social.likeStatusFailed'));
+      Alert.alert(t('common.error'), t('social.likeStatusFailed'));   // in words, never the raw error
     } finally {
       inFlight.current = false;
       if (desired.current !== server.current) sync();   // tapped again mid-flight

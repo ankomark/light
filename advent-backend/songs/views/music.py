@@ -766,7 +766,10 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='add-track')
     def add_track(self, request, pk=None):
         playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
-        track = get_object_or_404(Track, id=request.data.get('track_id'), is_removed=False)
+        # A song you could find: live, and not of an account hidden from you.
+        track = get_object_or_404(
+            hide_unseen_artists(Track.objects.filter(is_removed=False), request.user),
+            id=request.data.get('track_id'))
         with transaction.atomic():
             if not PlaylistTrack.objects.filter(playlist=playlist, track=track).exists():
                 last = PlaylistTrack.objects.filter(playlist=playlist).aggregate(m=Max('position'))['m']
@@ -784,18 +787,23 @@ class PlaylistViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def reorder(self, request, pk=None):
-        """{"track_ids": [...]}: the playlist's songs in their new order —
-        exactly the songs it has, each once."""
+        """{"track_ids": [...]}: the playlist's songs in their new order -
+        exactly the songs it shows, each once. Songs it holds but doesn't show
+        (taken down, or of an account hidden from you) keep their place after
+        them: the app can't send what it never saw, and asking it to made
+        reordering fail for good once one song went."""
         playlist = self.get_object()  # owner check via IsOwnerOrReadOnly
-        items = {i.track_id: i for i in PlaylistTrack.objects.filter(playlist=playlist)}
+        items = {i.track_id: i for i in PlaylistTrack.objects.filter(playlist=playlist).order_by('position', 'id')}
+        shown = {t.id for t in self._ordered_tracks(playlist)}
         try:
             ids = [int(i) for i in request.data.get('track_ids')]
         except (TypeError, ValueError):
             return Response({'error': 'track_ids must be a list of song ids'}, status=status.HTTP_400_BAD_REQUEST)
-        if len(ids) != len(set(ids)) or set(ids) != set(items):
+        if len(ids) != len(set(ids)) or set(ids) != shown:
             return Response({'error': "track_ids must be exactly this playlist's songs"},
                             status=status.HTTP_400_BAD_REQUEST)
-        for pos, tid in enumerate(ids):
+        rest = [tid for tid in items if tid not in shown]
+        for pos, tid in enumerate(ids + rest):
             items[tid].position = pos
         PlaylistTrack.objects.bulk_update(list(items.values()), ['position'])
         Playlist.objects.filter(pk=playlist.pk).update(updated_at=timezone.now())
@@ -1154,7 +1162,10 @@ class AlbumViewSet(viewsets.ModelViewSet):
         if mine != set(ids):
             return Response({'error': 'only your own songs can go on your album'}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
-            Track.objects.filter(album_ref=album).exclude(id__in=ids).update(album_ref=None, track_number=None, album=None)
+            # A song taken down isn't offered to choose from, so it can't be
+            # "left out": it stays on the album, ready if it is restored.
+            (Track.objects.filter(album_ref=album, is_removed=False).exclude(id__in=ids)
+             .update(album_ref=None, track_number=None, album=None))
             for n, tid in enumerate(ids, start=1):
                 Track.objects.filter(pk=tid).update(album_ref=album, track_number=n, album=album.title)
             Album.objects.filter(pk=album.pk).update(updated_at=timezone.now())

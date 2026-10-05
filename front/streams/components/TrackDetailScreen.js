@@ -24,19 +24,27 @@ const TrackDetailScreen = ({ route, navigation }) => {
   const { trackId, commentId } = route.params || {};
   const [track, setTrack] = useState(route.params?.track || null);
   const [similar, setSimilar] = useState([]);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState(null);   // the HTTP status, or 'error'
+  const [attempt, setAttempt] = useState(0);
   const { currentTrack, isPlaying, playQueue, togglePlay } = usePlayer();
 
   useEffect(() => {
     let cancelled = false;
+    setFailed(null);
     fetchTrack(trackId)
       .then((tr) => { if (!cancelled) setTrack(tr); })
-      .catch(() => { if (!cancelled) setFailed(true); });
+      .catch((err) => {
+        if (cancelled) return;
+        const code = err?.response?.status || 'error';
+        setFailed(code);
+        // Really gone: not the copy it was opened with either.
+        if (code === 404) setTrack(null);
+      });
     fetchSimilarTracks(trackId)
       .then((rows) => { if (!cancelled && Array.isArray(rows)) setSimilar(rows); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [trackId]);
+  }, [trackId, attempt]);
 
   const art = Math.min(width - spacing.xl * 2, 300);
   const isCurrent = currentTrack?.id === track?.id;
@@ -53,9 +61,18 @@ const TrackDetailScreen = ({ route, navigation }) => {
         </View>
 
         {!track ? (
-          failed
+          failed === 404
             ? <Text style={styles.gone}>{t('music.trackUnavailable')}</Text>
-            : <ActivityIndicator style={styles.spinner} color={colors.primary} />
+            : failed ? (
+              // Offline or a hiccup: not "no longer available" - try again.
+              <View style={styles.retryWrap}>
+                <Text style={styles.gone}>{t('music.trackLoadFailed')}</Text>
+                <TouchableOpacity style={styles.retryBtn} onPress={() => setAttempt((n) => n + 1)}
+                                  accessibilityRole="button" testID="track-retry">
+                  <Text style={styles.retryText}>{t('common.retry')}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : <ActivityIndicator style={styles.spinner} color={colors.primary} />
         ) : (
           <>
             <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSpace }]} showsVerticalScrollIndicator={false}>
@@ -140,6 +157,9 @@ const styles = StyleSheet.create({
   rail: { alignSelf: 'stretch' },
   spinner: { marginTop: spacing.xxl },
   gone: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.xxl },
+  retryWrap: { alignItems: 'center', gap: spacing.md },
+  retryBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  retryText: { color: colors.white, fontWeight: '700' },
 });
 
 export default TrackDetailScreen;

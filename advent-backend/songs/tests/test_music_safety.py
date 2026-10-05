@@ -148,3 +148,46 @@ class AlbumPlaylistTakedownTests(APITestCase):
         self.client.force_authenticate(self.artist)
         self.assertEqual(self.client.get(f'/api/albums/{self.album.id}/').status_code, 200)
         self.assertEqual(self.client.get(f'/api/playlists/{self.playlist.id}/').status_code, 200)
+
+
+@override_settings(R2_PUBLIC_BASE=R2)
+class HiddenSongsInListsTests(APITestCase):
+    """A song taken down (or of an account hidden from you) inside a playlist
+    or an album: reordering still works, saving the album keeps it there, and
+    a hidden artist's song can't be added by id."""
+
+    def setUp(self):
+        cache.clear()
+        self.me = user('hl_me')
+        self.choir = user('hl_choir')
+        self.a, self.b, self.gone = song(self.choir, 'A'), song(self.choir, 'B'), song(self.choir, 'Gone')
+        self.playlist = Playlist.objects.create(user=self.me, name='Mine')
+        self.client.force_authenticate(self.me)
+        for tr in (self.a, self.gone, self.b):
+            self.client.post(f'/api/playlists/{self.playlist.id}/add-track/', {'track_id': tr.id}, format='json')
+        Track.objects.filter(pk=self.gone.pk).update(is_removed=True)
+
+    def test_reorder_with_a_song_taken_down(self):
+        res = self.client.post(f'/api/playlists/{self.playlist.id}/reorder/', {'track_ids': [self.b.id, self.a.id]},
+                               format='json')
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        self.assertEqual([t['id'] for t in res.json()['tracks']], [self.b.id, self.a.id])
+        from songs.models import PlaylistTrack
+        self.assertTrue(PlaylistTrack.objects.filter(playlist=self.playlist, track=self.gone).exists())
+
+    def test_a_blocked_artists_song_cannot_be_added(self):
+        rude = user('hl_rude')
+        theirs = song(rude, 'Theirs')
+        Block.objects.create(blocker=self.me, blocked=rude)
+        res = self.client.post(f'/api/playlists/{self.playlist.id}/add-track/', {'track_id': theirs.id}, format='json')
+        self.assertEqual(res.status_code, 404)
+
+    def test_saving_an_album_keeps_a_song_that_was_taken_down(self):
+        self.client.force_authenticate(self.choir)
+        album = Album.objects.create(artist=self.choir, title='Vespers')
+        Track.objects.filter(pk__in=[self.a.pk, self.gone.pk]).update(album_ref=album)
+        res = self.client.post(f'/api/albums/{album.id}/set-tracks/', {'track_ids': [self.b.id, self.a.id]},
+                               format='json')
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        self.gone.refresh_from_db()
+        self.assertEqual(self.gone.album_ref_id, album.id)

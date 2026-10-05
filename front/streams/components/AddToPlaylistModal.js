@@ -21,13 +21,17 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
   const [busyId, setBusyId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       setPlaylists(await fetchPlaylists());
     } catch {
+      // Not "you have no playlists" - it didn't load.
       setPlaylists([]);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -44,8 +48,8 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
   // so the user sees the song they just added (and can play it).
   const confirmAdded = useCallback((playlistId, name, message) => {
     Alert.alert(t('playlist.added'), message, [
-      { text: 'View', onPress: () => navigation.navigate('PlaylistDetail', { playlistId, name }) },
-      { text: 'OK', style: 'cancel' },
+      { text: t('playlist.view'), onPress: () => navigation.navigate('PlaylistDetail', { playlistId, name }) },
+      { text: t('common.close'), style: 'cancel' },
     ]);
   }, [navigation, t]);
 
@@ -55,7 +59,7 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
     try {
       await addTrackToPlaylist(playlist.id, trackId);
       onClose?.();
-      confirmAdded(playlist.id, playlist.name, `Added to "${playlist.name}".`);
+      confirmAdded(playlist.id, playlist.name, t('playlist.addedTo', { name: playlist.name }));
     } catch {
       Alert.alert(t('common.error'), t('playlist.addTrackFailed'));
     } finally {
@@ -71,7 +75,7 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
       const created = await createPlaylist(name);
       await addTrackToPlaylist(created.id, trackId);
       onClose?.();
-      confirmAdded(created.id, name, `Created "${name}" and added the track.`);
+      confirmAdded(created.id, name, t('playlist.createdAndAdded', { name }));
     } catch {
       Alert.alert(t('common.error'), t('playlist.createFailed'));
     } finally {
@@ -127,9 +131,13 @@ const AddToPlaylistModal = ({ visible, onClose, trackId, trackTitle }) => {
                     : <Text style={styles.rowCount}>{item.track_count ?? 0}</Text>}
                 </TouchableOpacity>
               )}
-              ListEmptyComponent={
+              ListEmptyComponent={loadFailed ? (
+                <TouchableOpacity onPress={load} accessibilityRole="button" testID="add-to-playlist-retry">
+                  <Text style={styles.emptyText}>{t('library.loadFailed')}  {t('common.retry')}</Text>
+                </TouchableOpacity>
+              ) : (
                 <Text style={styles.emptyText}>{t('playlist.none')}</Text>
-              }
+              )}
             />
           )}
 
