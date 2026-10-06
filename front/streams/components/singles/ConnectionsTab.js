@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesLikes } from '../../services/api';
-import { GOLD, FACE, Body, Centered, Title, SkeletonList } from './SinglesKit';
+import { GOLD, FACE, Body, Centered, Title, SkeletonList, Offline } from './SinglesKit';
 import useSingles from './useSingles';
 import GridCard, { useGridWidth } from './GridCard';
 
@@ -30,8 +30,9 @@ function Likes() {
   const { t } = useI18n();
   const width = useGridWidth();
   const { data, failed, reload: load } = useSingles('likes', async () => (await fetchSinglesLikes()).results || []);
-  const rows = data ?? (failed ? [] : null);
+  const rows = data ?? null;
   const [refreshing, setRefreshing] = useState(false);
+  if (rows === null && failed) return <Offline onRetry={load} />;
   if (rows === null) return <SkeletonList rows={3} />;
   return (
     <ScrollView contentContainerStyle={styles.pad}

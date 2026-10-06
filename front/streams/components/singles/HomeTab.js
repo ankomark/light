@@ -8,7 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesHub } from '../../services/api';
-import { GOLD, FACE, Label, Card, Chip, Body, SkeletonList, FadeIn } from './SinglesKit';
+import { GOLD, FACE, Label, Card, Chip, Body, SkeletonList, FadeIn, Offline } from './SinglesKit';
 import useSingles from './useSingles';
 import GridCard, { useGridWidth } from './GridCard';
 
@@ -25,9 +25,7 @@ export default function HomeTab({ onTab }) {
   // Each mode keeps its own last copy, so switching back is instant too.
   const { data: hub, failed, reload } = useSingles(`hub:${mode}`, () => fetchSinglesHub(mode));
 
-  if (!hub && failed) {
-    return <View style={styles.pad}><Body style={{ textAlign: 'center' }}>{t('singles.loadFailed')}</Body></View>;
-  }
+  if (!hub && failed) return <Offline onRetry={reload} />;
   if (!hub) return <SkeletonList rows={4} testID="singles-hub-loading" />;
   const pick = (m) => setMode(m);
 

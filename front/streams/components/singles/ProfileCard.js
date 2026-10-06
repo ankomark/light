@@ -88,7 +88,8 @@ export default function ProfileCard({ profile, testID }) {
 
       {!!profile.about && <Body style={styles.about}>{profile.about}</Body>}
       <View style={styles.chips}>
-        <Chip icon="water-outline" text={t(`singles.baptised.${profile.baptised}`)} />
+        {/* A card painted from the grid has no details yet: none shown, not a raw key. */}
+        {!!profile.baptised && <Chip icon="water-outline" text={t(`singles.baptised.${profile.baptised}`)} />}
         {(profile.languages || []).length > 0 && <Chip icon="translate" text={profile.languages.join(' · ')} />}
         {!!profile.occupation && <Chip icon="briefcase-outline" text={profile.occupation} />}
         {!!profile.education && <Chip icon="school-outline" text={profile.education} />}

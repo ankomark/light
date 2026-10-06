@@ -199,6 +199,19 @@ export const Body = ({ children, style }) => <Text style={[s.body, style]}>{chil
 
 export const Centered = ({ children }) => <View style={s.centered}>{children}</View>;
 
+// Nothing kept and no answer from the network: say so and offer to try
+// again - not "nobody here" / "no matches yet", which was untrue offline.
+export const Offline = ({ onRetry, testID = 'singles-offline' }) => {
+  const { t } = useI18n();
+  return (
+    <View style={s.centered} testID={testID}>
+      <Ionicons name="cloud-offline-outline" size={30} color={GOLD.muted} />
+      <Text style={[s.body, { textAlign: 'center' }]}>{t('singles.loadFailed')}</Text>
+      {onRetry ? <GoldButton label={t('common.retry')} icon="refresh" kind="outline" onPress={onRetry} /> : null}
+    </View>
+  );
+};
+
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: GOLD.bg },
   bar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingBottom: 4, zIndex: 2 },

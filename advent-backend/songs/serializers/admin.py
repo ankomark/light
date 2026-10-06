@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from .common import *  # noqa: F401,F403  (serializers, models, SimpleUserSerializer, timezone)
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITY_KEYS
-from ..models import Album
+from ..models import Album, SinglesProfile, SinglesReply, SinglesTopic
 
 
 # ── Report target previews (batched) ─────────────────────────────────────────
@@ -44,6 +44,19 @@ def _format_user(u):
 
 def _format_group(g):
     return {'type': 'group', 'id': g.id, 'name': getattr(g, 'name', '')}
+
+
+def _format_singles_profile(p):
+    photo = next((ph.url for ph in p.photos.all() if ph.status == 'approved'), None)
+    return {'type': 'singlesprofile', 'id': p.id, 'name': p.first_name, 'status': p.status,
+            'photo': photo, 'about': (p.about or '')[:140], 'author': SimpleUserSerializer(p.user).data}
+
+
+def _format_singles_text(kind):
+    def fmt(x):
+        return {'type': kind, 'id': x.id, 'body': (x.body or '')[:140], 'is_removed': x.is_removed,
+                'author': SimpleUserSerializer(x.author.user).data}
+    return fmt
 
 
 def _format_publication(p):
@@ -108,6 +121,12 @@ _TARGET_FETCHERS = {
     'product': (lambda ids: Product.objects.filter(id__in=ids).select_related('seller__profile'),    _format_product),
     'album':   (lambda ids: Album.objects.filter(id__in=ids).select_related('artist__profile'),      _format_album),
     'playlist': (lambda ids: Playlist.objects.filter(id__in=ids).select_related('user__profile'),    _format_playlist),
+    'singlesprofile': (lambda ids: SinglesProfile.objects.filter(id__in=ids).select_related('user__profile')
+                       .prefetch_related('photos'), _format_singles_profile),
+    'singlestopic': (lambda ids: SinglesTopic.objects.filter(id__in=ids).select_related('author__user__profile'),
+                     _format_singles_text('singlestopic')),
+    'singlesreply': (lambda ids: SinglesReply.objects.filter(id__in=ids).select_related('author__user__profile'),
+                     _format_singles_text('singlesreply')),
 }
 
 

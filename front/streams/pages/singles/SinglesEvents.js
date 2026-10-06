@@ -15,7 +15,7 @@ import {
 } from '../../services/api';
 import { notify } from '../../utils/adminConfirm';
 import {
-  GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body, Card, SkeletonList, useSheetPad,
+  GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body, Card, SkeletonList, useSheetPad, Offline,
 } from '../../components/singles/SinglesKit';
 import useSingles from '../../components/singles/useSingles';
 
@@ -32,8 +32,8 @@ export default function SinglesEvents() {
   const [tab, setTab] = useState(params.tab || 'events');
   const ev = useSingles('gatherings', async () => (await fetchSinglesGatherings()).results || []);
   const rm = useSingles('rooms', async () => (await fetchSinglesRooms()).results || []);
-  const events = ev.data ?? (ev.failed ? [] : null);
-  const rooms = rm.data ?? (rm.failed ? [] : null);
+  const events = ev.data ?? null;
+  const rooms = rm.data ?? null;
   const setEvents = ev.setData;
   const load = () => { ev.reload(); rm.reload(); };
   const [suggesting, setSuggesting] = useState(false);
@@ -65,7 +65,8 @@ export default function SinglesEvents() {
           </TouchableOpacity>
         ))}
       </View>
-      {tab === 'events' ? (events === null ? <SkeletonList rows={2} /> : events.length ? events.map((g) => (
+      {tab === 'events' ? (events === null && ev.failed ? <Offline onRetry={ev.reload} />
+        : events === null ? <SkeletonList rows={2} /> : events.length ? events.map((g) => (
         <Card key={g.id} style={{ marginTop: 12 }} testID={`singles-event-${g.id}`}>
           <View style={styles.head}>
             <MaterialCommunityIcons name={KIND_ICON[g.kind] || 'calendar'} size={22} color={GOLD.gold} />
@@ -89,7 +90,8 @@ export default function SinglesEvents() {
           )}
         </Card>
       )) : <Body style={styles.empty}>{t('singles.events.none')}</Body>) : (
-        rooms === null ? <SkeletonList rows={2} /> : rooms.length ? rooms.map((r) => (
+        rooms === null && rm.failed ? <Offline onRetry={rm.reload} />
+          : rooms === null ? <SkeletonList rows={2} /> : rooms.length ? rooms.map((r) => (
           <TouchableOpacity key={r.id} style={styles.room} onPress={() => join(r)} accessibilityRole="button" testID={`singles-room-${r.id}`}>
             <View style={styles.liveDot} />
             <View style={{ flex: 1 }}>

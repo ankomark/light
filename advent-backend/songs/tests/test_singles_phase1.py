@@ -47,8 +47,18 @@ def body(**extra):
             'about': 'Nurse. I sing alto.', **extra}
 
 
+def jpeg_bytes():
+    """A real (tiny) JPEG: uploads are checked by their content now."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new('RGB', (8, 8), (200, 160, 60)).save(buf, 'JPEG')
+    return buf.getvalue()
+
+
 def image(name='a.jpg', kind='image/jpeg', size=10):
-    return SimpleUploadedFile(name, b'x' * size, content_type=kind)
+    body = jpeg_bytes() if kind == 'image/jpeg' else b'x' * size
+    return SimpleUploadedFile(name, body, content_type=kind)
 
 
 class Base(APITestCase):

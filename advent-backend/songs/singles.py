@@ -80,6 +80,30 @@ def ready_on(user):
     return (user.date_joined + timedelta(days=MIN_ACCOUNT_DAYS)).date() if user.date_joined else None
 
 
+# ── Photos ───────────────────────────────────────────────────────────────────
+PHOTO_TYPES = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'WEBP': 'image/webp'}
+
+
+def photo_type(fileobj):
+    """The real type of an uploaded picture ('image/jpeg' …), read from its
+    content by Pillow - never the type the phone claimed - or None when it
+    isn't a JPEG, PNG or WebP picture (an SVG can carry script)."""
+    from PIL import Image
+    try:
+        fileobj.seek(0)
+        with Image.open(fileobj) as im:
+            kind = im.format
+            im.verify()
+    except Exception:  # noqa: BLE001 — anything Pillow can't read isn't a photo
+        return None
+    finally:
+        try:
+            fileobj.seek(0)
+        except Exception:  # noqa: BLE001
+            pass
+    return PHOTO_TYPES.get(kind)
+
+
 # ── Contact details out ─────────────────────────────────────────────────────
 _URL = re.compile(r'(https?://\S+|www\.\S+|\b[\w-]+\.(?:com|net|org|co|ke|tz|ug|io|me|ly|app|info|biz)\b\S*)',
                   re.IGNORECASE)
@@ -274,6 +298,10 @@ def can_view(viewer, target):
         return False
     if SinglesMatch.objects.filter(Q(profile_a=viewer, profile_b=target) | Q(profile_a=target, profile_b=viewer)).exists():
         return True
+    # Only someone approved looks at others (paused is fine: they may still
+    # answer who liked them). A draft made to look around saw everyone.
+    if viewer.status != viewer.APPROVED:
+        return False
     if not visible_profiles().filter(pk=target.pk).exists() or target.gender == viewer.gender:
         return False
     if target.discoverable == target.LIKED_ONLY:

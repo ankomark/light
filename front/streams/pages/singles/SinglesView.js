@@ -18,16 +18,25 @@ export default function SinglesView() {
   const navigation = useNavigation();
   const { params = {} } = useRoute();
   const [profile, setProfile] = useState(null);
-  const [failed, setFailed] = useState(false);
+  // 'gone' (404: not there for me) or 'offline' (no answer): only the first
+  // says the profile isn't available - offline used to say it too.
+  const [failed, setFailed] = useState(null);
+  // The grid already had the photo, name, age and why: drawn at once while
+  // the rest comes (it was a spinner).
+  const card = params.card;
+  const preview = card ? { ...card, photos: card.photo ? [{ id: 'card', url: card.photo }] : [] } : null;
   const [busy, setBusy] = useState(false);
   const [safety, setSafety] = useState(false);
   const [match, setMatch] = useState(null);
 
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
-    fetchSinglesProfile(params.id).then((p) => live && setProfile(p)).catch(() => live && setFailed(true));
+    setFailed(null);
+    fetchSinglesProfile(params.id).then((p) => live && setProfile(p))
+      .catch((e) => live && setFailed(e?.status === 404 ? 'gone' : 'offline'));
     return () => { live = false; };
-  }, [params.id]);
+  }, [params.id, attempt]);
 
   const answer = async (kind) => {
     setBusy(true);
@@ -58,11 +67,25 @@ export default function SinglesView() {
             testID="singles-view-interested" />
         </>
       ) : null}>
-      {failed ? (
+      {failed === 'gone' ? (
         <Centered><Body style={{ textAlign: 'center' }}>{t('singles.view.gone')}</Body></Centered>
-      ) : !profile ? <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} /> : (
-        <View><ProfileCard profile={profile} testID="singles-view-card" /></View>
-      )}
+      ) : profile || preview ? (
+        <View>
+          <ProfileCard profile={profile || preview} testID={profile ? 'singles-view-card' : 'singles-view-preview'} />
+          {!profile && (failed === 'offline' ? (
+            <View style={{ alignItems: 'center', gap: 12, marginTop: 8 }} testID="singles-view-offline">
+              <Body style={{ textAlign: 'center' }}>{t('singles.loadFailed')}</Body>
+              <GoldButton label={t('common.retry')} icon="refresh" kind="outline" onPress={() => setAttempt((n) => n + 1)} />
+            </View>
+          ) : <ActivityIndicator color={GOLD.gold} style={{ marginTop: 8 }} />)}
+        </View>
+      ) : failed === 'offline' ? (
+        <Centered>
+          <Body style={{ textAlign: 'center' }}>{t('singles.loadFailed')}</Body>
+          <GoldButton label={t('common.retry')} icon="refresh" kind="outline" onPress={() => setAttempt((n) => n + 1)}
+            testID="singles-view-retry" />
+        </Centered>
+      ) : <ActivityIndicator color={GOLD.gold} style={{ marginTop: 60 }} />}
       {profile && (
         <SafetySheet profile={profile} visible={safety} onClose={() => setSafety(false)} onDone={() => navigation.goBack()} />
       )}

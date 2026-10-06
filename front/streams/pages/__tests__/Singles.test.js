@@ -49,6 +49,7 @@ jest.mock('../../services/api', () => ({
   fetchSinglesStats: jest.fn(async () => ({ waiting: {} })), fetchSinglesReviewList: jest.fn(), decideSinglesItem: jest.fn(),
   fetchUnreadMessageCount: jest.fn(async () => ({ singles: 0 })), fetchSinglesChats: jest.fn(async () => ({ results: [] })),
   orderSinglesPhotos: jest.fn(async () => ({})),
+  fetchSinglesTopic: jest.fn(), replySinglesTopic: jest.fn(), reportContent: jest.fn(),
 }));
 jest.mock('../../context/useAuth', () => ({ useAuth: () => ({ currentUser: { id: 1 } }) }));
 jest.mock('../../components/RotatingBackground', () => () => null);
@@ -440,4 +441,149 @@ test('Interested and Not now clear the home indicator', async () => {
   let node = screen.getByTestId('singles-interested');
   while (node && RN.StyleSheet.flatten(node.props?.style || {})?.paddingBottom == null) node = node.parent;
   expect(RN.StyleSheet.flatten(node.props.style).paddingBottom).toBe(14 + 34);
+});
+
+
+describe('Deep scan: slow and offline', () => {
+  const offline = () => Object.assign(new Error('Network issue'), {});       // no status: no answer
+  const notFound = () => Object.assign(new Error('Not found'), { status: 404 });
+
+  test('a profile opened from the grid is drawn at once from its card', async () => {
+    mockParams = { id: 7, card: { id: 7, first_name: 'Grace', age: 27, country: 'Kenya', photo: 'https://x/1.jpg' } };
+    const SinglesView = require('../singles/SinglesView').default;
+    let answer;
+    api.fetchSinglesProfile.mockImplementation(() => new Promise((res) => { answer = res; }));
+    const screen = render(<SinglesView />);
+    expect(screen.getByTestId('singles-view-preview')).toBeTruthy();       // no spinner-only screen
+    expect(screen.queryByTestId('singles-view-interested')).toBeNull();    // not before the real one
+    await act(async () => { answer(grace); });
+    await waitFor(() => expect(screen.getByTestId('singles-view-card')).toBeTruthy());
+  });
+
+  test('offline is not "this profile is gone": it offers to try again', async () => {
+    mockParams = { id: 7 };
+    const SinglesView = require('../singles/SinglesView').default;
+    api.fetchSinglesProfile.mockRejectedValueOnce(offline()).mockResolvedValueOnce(grace);
+    const screen = render(<SinglesView />);
+    await waitFor(() => expect(screen.getByTestId('singles-view-retry')).toBeTruthy());
+    expect(screen.queryByText('singles.view.gone')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByText('common.retry')); });
+    await waitFor(() => expect(screen.getByTestId('singles-view-card')).toBeTruthy());
+  });
+
+  test('a profile really gone (404) says so', async () => {
+    mockParams = { id: 7 };
+    const SinglesView = require('../singles/SinglesView').default;
+    api.fetchSinglesProfile.mockRejectedValue(notFound());
+    const screen = render(<SinglesView />);
+    await waitFor(() => expect(screen.getByText('singles.view.gone')).toBeTruthy());
+  });
+
+  test('browse offline offers a retry, not "nobody here"', async () => {
+    mockParams = {};
+    const SinglesBrowse = require('../singles/SinglesBrowse').default;
+    api.browseSingles.mockRejectedValue(offline());
+    const screen = render(<SinglesBrowse />);
+    await waitFor(() => expect(screen.getByTestId('singles-browse-failed')).toBeTruthy());
+    expect(screen.queryByText('singles.mode.foryouEmpty')).toBeNull();
+  });
+
+  test('browse: a slow answer for the tab just left never lands on the tab picked', async () => {
+    mockParams = {};
+    const SinglesBrowse = require('../singles/SinglesBrowse').default;
+    const card = (id, name) => ({ id, first_name: name, age: 30, photo: null, badges: {}, reasons: [] });
+    let slowForYou;
+    api.browseSingles.mockImplementation((mode) => (mode === 'foryou'
+      ? new Promise((res) => { slowForYou = res; })
+      : Promise.resolve({ results: [card(2, 'Newcomer')], more: false })));
+    const screen = render(<SinglesBrowse />);
+    await waitFor(() => expect(slowForYou).toBeDefined());                // For You is on its way
+    await act(async () => { fireEvent.press(screen.getByText('singles.mode.new')); });
+    await waitFor(() => expect(screen.getByTestId('singles-browse-2')).toBeTruthy());
+    await act(async () => { slowForYou({ results: [card(1, 'Old')], more: false }); });
+    expect(screen.queryByTestId('singles-browse-1')).toBeNull();
+    expect(screen.getByTestId('singles-browse-2')).toBeTruthy();
+  });
+
+  test('a question thread offline offers a retry', async () => {
+    mockParams = { id: 3 };
+    const SinglesTopic = require('../singles/SinglesTopic').default;
+    api.fetchSinglesTopic.mockRejectedValue(offline());
+    const screen = render(<SinglesTopic />);
+    await waitFor(() => expect(screen.getByTestId('singles-topic-offline')).toBeTruthy());
+  });
+});
+
+describe('Re-scan: honest empties, and back to review', () => {
+  const offline = () => new Error('Network issue');
+  const approved = () => api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+  const openTab = async (screen, tab) => {
+    await waitFor(() => expect(screen.getByTestId('singles-hub')).toBeTruthy());
+    await act(async () => { fireEvent.press(screen.getByTestId(`singles-tab-${tab}`)); });
+  };
+
+  test('discover offline offers a retry, not "no one new"', async () => {
+    approved();
+    api.fetchSinglesHub.mockResolvedValue(HUB);
+    api.fetchSinglesDiscover.mockRejectedValueOnce(offline()).mockResolvedValueOnce({ results: [grace], left_today: 20 });
+    const screen = render(<SinglesHome />);
+    await openTab(screen, 'discover');
+    await waitFor(() => expect(screen.getByTestId('singles-discover-offline')).toBeTruthy());
+    expect(screen.queryByText('singles.discover.emptyTitle')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByText('common.retry')); });
+    await waitFor(() => expect(screen.getByTestId('singles-card-7')).toBeTruthy());
+  });
+
+  test('flagged for answering too fast: told, and the screen shows where they stand', async () => {
+    approved();
+    api.fetchSinglesHub.mockResolvedValue(HUB);
+    api.fetchSinglesDiscover.mockResolvedValue({ results: [grace], left_today: 20 });
+    api.answerSingles.mockRejectedValue(Object.assign(new Error('slow'), { status: 429, data: { code: 'slow_down' } }));
+    const screen = render(<SinglesHome />);
+    await openTab(screen, 'discover');
+    await waitFor(() => expect(screen.getByTestId('singles-interested')).toBeTruthy());
+    api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('pending') });
+    await act(async () => { fireEvent.press(screen.getByTestId('singles-interested')); });
+    expect(require('../../utils/adminConfirm').notify).toHaveBeenCalledWith('singles.discover.reviewTitle', 'singles.discover.reviewBody');
+    await waitFor(() => expect(screen.getByTestId('singles-mine')).toBeTruthy());
+  });
+
+  test('matches offline offer a retry; a hidden age leaves no dangling comma', async () => {
+    approved();
+    api.fetchSinglesHub.mockResolvedValue(HUB);
+    api.fetchSinglesLikes.mockResolvedValue({ results: [] });
+    api.fetchSinglesMatches.mockRejectedValueOnce(offline())
+      .mockResolvedValue({ results: [{ id: 5, profile: { ...grace, age: null }, opener: { kind: 'general' },
+        conversation_id: 9, user: { id: 2, username: 'grace' } }] });
+    const screen = render(<SinglesHome />);
+    await openTab(screen, 'connections');
+    await act(async () => { fireEvent.press(screen.getByTestId('singles-conn-matches')); });
+    await waitFor(() => expect(screen.getByTestId('singles-offline')).toBeTruthy());
+    expect(screen.queryByText('singles.matches.emptyTitle')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByText('common.retry')); });
+    await waitFor(() => expect(screen.getByTestId('singles-match-5')).toBeTruthy());
+    expect(screen.queryByText(', ', { exact: false })).toBeNull();
+  });
+
+  test('the match moment sits inside the notch and the home indicator', () => {
+    mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
+    const { MatchMoment } = require('../singles/SinglesHome');
+    const screen = render(<MatchMoment match={{ id: 1, profile: grace, opener: { kind: 'general' } }}
+      onClose={() => {}} onHello={() => {}} />);
+    const style = RN.StyleSheet.flatten(screen.getByTestId('singles-match').props.contentContainerStyle);
+    expect([style.paddingTop, style.paddingBottom]).toEqual([24 + 47, 24 + 34]);
+  });
+});
+
+test('agreeing to a story while offline says it failed, not that you agreed', async () => {
+  const notify = require('../../utils/adminConfirm').notify;
+  mockParams = { match: { id: 5, profile: grace, opener: { kind: 'general' }, starters: [], conversation_id: 9,
+    user: { id: 2, username: 'grace' }, story: { id: 4, title: 'How we met', agreed: false } } };
+  api.agreeSinglesStory.mockRejectedValueOnce(new Error('Network issue'));
+  const SinglesPerson = require('../singles/SinglesPerson').default;
+  const screen = render(<SinglesPerson />);
+  await act(async () => { fireEvent.press(screen.getByTestId('singles-story-agree')); });
+  expect(notify).toHaveBeenCalledWith('common.error', 'singles.mine.failed');
+  expect(notify).not.toHaveBeenCalledWith('singles.stories.agreedTitle', 'singles.stories.agreedBody');
+  expect(mockNav.goBack).not.toHaveBeenCalled();
 });

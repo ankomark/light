@@ -36,6 +36,18 @@ def _singles_signals(conversation, me, message):
         singles.signal(mine, 'link_shared', other)
 
 
+def _closed_to(conversation, me):
+    """Why `me` may not change anything in this chat now (a 403 Response),
+    or None. Sending checked this; editing and reacting didn't - someone
+    unmatched or blocked could still rewrite their last message."""
+    other = conversation.participants.exclude(id=me.id).first()
+    if other and is_blocked_between(me, other):
+        return Response({'error': 'You cannot message this user.'}, status=status.HTTP_403_FORBIDDEN)
+    if SinglesMatch.objects.filter(conversation=conversation, ended_at__isnull=False).exists():
+        return Response({'error': 'This match has ended.', 'code': 'unmatched'}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
 class ConversationViewSet(viewsets.ModelViewSet):
     """Direct messages (songs/messaging.py has the rules and the live fan-out).
 
@@ -343,6 +355,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
         m = self._message(conversation, mid)
         if m.sender_id != request.user.id or m.is_deleted:
             raise PermissionDenied('Only its sender edits a message.')
+        closed = _closed_to(conversation, request.user)
+        if closed:
+            return closed
         if m.message_type != 'text' or (timezone.now() - m.created_at).total_seconds() > dm.EDIT_WINDOW_S:
             return Response({'error': 'This message can no longer be edited.', 'code': 'too_late'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -387,6 +402,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
         from ..models import MessageReaction
         conversation = self.get_object()
         m = self._message(conversation, mid)
+        closed = _closed_to(conversation, request.user)
+        if closed:
+            return closed
         emoji = str(request.data.get('emoji') or '')
         if emoji not in dm.REACTIONS or m.is_deleted:
             return Response({'error': 'Not a reaction.'}, status=status.HTTP_400_BAD_REQUEST)

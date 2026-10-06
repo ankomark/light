@@ -25,7 +25,7 @@ import { tap, celebrate } from '../../components/singles/feel';
 import useSingles from '../../components/singles/useSingles';
 import {
   GOLD, FACE, SinglesScreen, GoldButton, Label, Card, Chip, Portrait, Ring, Title, Body, Centered, FadeIn,
-  SkeletonList, useSheetPad,
+  SkeletonList, useSheetPad, Offline,
 } from '../../components/singles/SinglesKit';
 import ProfileCard from '../../components/singles/ProfileCard';
 import SafetySheet from '../../components/singles/SafetySheet';
@@ -114,7 +114,8 @@ export default function SinglesHome() {
       <View style={{ flex: 1 }}>
         {tab === 'home' && <HomeTab onTab={setTab} />}
         {tab === 'discover' && (
-          <Discover paused={me.profile.is_paused} onMine={() => setTab('me')} mePhoto={me.profile.photos?.[0]?.url} />
+          <Discover paused={me.profile.is_paused} onMine={() => setTab('me')} mePhoto={me.profile.photos?.[0]?.url}
+            onChanged={load} />
         )}
         {tab === 'connections' && <ConnectionsTab Matches={Matches} />}
         {tab === 'chats' && <ChatsTab />}
@@ -211,7 +212,7 @@ function Welcome() {
 }
 
 // ── Discover ─────────────────────────────────────────────────────────────────
-function Discover({ paused, onMine, mePhoto }) {
+function Discover({ paused, onMine, mePhoto, onChanged }) {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { currentUser } = useAuth();
@@ -223,6 +224,7 @@ function Discover({ paused, onMine, mePhoto }) {
   const [busy, setBusy] = useState(false);
   const [safety, setSafety] = useState(false);
   const [match, setMatch] = useState(null);
+  const [failed, setFailed] = useState(false);
   const scroll = useRef(null);
   const insets = useSafeAreaInsets();
 
@@ -232,6 +234,7 @@ function Discover({ paused, onMine, mePhoto }) {
       const kept = await readCache(cacheKey);
       if (kept) { setQueue((q) => q ?? kept.results); setLeft((l) => l ?? kept.left_today); }
     }
+    setFailed(false);
     try {
       const res = await fetchSinglesDiscover(f);
       setQueue(res.results || []);
@@ -241,10 +244,12 @@ function Discover({ paused, onMine, mePhoto }) {
       const next = (res.results || []).slice(1).map((p) => p.photos?.[0]?.url).filter(Boolean);
       if (next.length) Image.prefetch?.(next);
     } catch (e) {
-      setQueue((q) => q ?? []);
-      if (e?.data?.code === 'paused') setLeft(-1);
+      if (e?.data?.code === 'paused') { setLeft(-1); setQueue((q) => q ?? []); return; }
+      // Their profile left Discover meanwhile (back in review): the hub redraws.
+      if (e?.data?.code === 'not_approved') { onChanged?.(); return; }
+      setFailed(true);
     }
-  }, [cacheKey]);
+  }, [cacheKey, onChanged]);
   useEffect(() => { if (!paused) load(filters); }, [load, filters, paused]);
 
   if (paused) {
@@ -258,6 +263,7 @@ function Discover({ paused, onMine, mePhoto }) {
       </View>
     );
   }
+  if (queue === null && failed) return <Offline onRetry={() => load(filters)} testID="singles-discover-offline" />;
   if (queue === null) return <SkeletonList rows={2} />;
 
   const current = queue[0];
@@ -275,7 +281,15 @@ function Discover({ paused, onMine, mePhoto }) {
       scroll.current?.scrollTo?.({ y: 0, animated: false });
       if (!rest.length && res.left_today > 0) load(filters);
     } catch (e) {
-      if (e?.data?.code === 'daily_limit') { setLeft(0); setQueue([]); } else notify(t('common.error'), t('singles.discover.failed'));
+      const code = e?.data?.code;
+      if (code === 'daily_limit') { setLeft(0); setQueue([]); }
+      // Flagged for answering very fast, or no longer approved: their
+      // profile is back in review - say so and show where they stand, not
+      // a generic error on every tap after.
+      else if (code === 'slow_down' || code === 'not_approved') {
+        notify(t('singles.discover.reviewTitle'), t('singles.discover.reviewBody'));
+        onChanged?.();
+      } else notify(t('common.error'), t('singles.discover.failed'));
     } finally {
       setBusy(false);
     }
@@ -410,13 +424,15 @@ export function openerText(t, opener, name) {
 export function MatchMoment({ match, onClose, onHello, mePhoto }) {
   const { t } = useI18n();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   // Two rings and the heart between them, inside the page's margins.
   const size = Math.max(84, Math.min(118, Math.floor((Math.min(width, 560) - 48 - 30 - 26) / 2)));
   if (!match) return null;
   const p = match.profile;
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.matchWrap} testID="singles-match">
+    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <ScrollView style={styles.matchScrim} testID="singles-match" bounces={false}
+        contentContainerStyle={[styles.matchWrap, { paddingTop: 24 + insets.top, paddingBottom: 24 + insets.bottom }]}>
         <Label>{t('singles.match.eyebrow')}</Label>
         <Title size={46}>{t('singles.match.title')}</Title>
         <View style={styles.pair}>
@@ -437,7 +453,7 @@ export function MatchMoment({ match, onClose, onHello, mePhoto }) {
           <Ionicons name="shield-checkmark-outline" size={14} color={GOLD.muted} />
           <Text style={styles.safeText}>{t('singles.match.safety')}</Text>
         </View>
-      </View>
+      </ScrollView>
     </Modal>
   );
 }
@@ -447,8 +463,9 @@ function Matches() {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { data, reload: load, failed } = useSingles('matches', async () => (await fetchSinglesMatches()).results || []);
-  const rows = data ?? (failed ? [] : null);
+  const rows = data ?? null;
   const [refreshing, setRefreshing] = useState(false);
+  if (rows === null && failed) return <Offline onRetry={load} />;
   if (rows === null) return <SkeletonList rows={3} />;
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 48 }}
@@ -465,7 +482,8 @@ function Matches() {
           accessibilityLabel={m.profile.first_name}>
           <Ring style={{ padding: 3 }}><Portrait uri={m.profile.photos?.[0]?.url} size={58} /></Ring>
           <View style={{ flex: 1 }}>
-            <Text style={styles.matchName}>{m.profile.first_name}<Text style={styles.matchAge}>, {m.profile.age}</Text></Text>
+            <Text style={styles.matchName}>{m.profile.first_name}{m.profile.age != null
+              ? <Text style={styles.matchAge}>, {m.profile.age}</Text> : null}</Text>
             <Text style={styles.matchSub} numberOfLines={2}>{openerText(t, m.opener, m.profile.first_name)}</Text>
           </View>
           <TouchableOpacity style={styles.chatBtn} accessibilityRole="button" accessibilityLabel={t('singles.match.hello')}
@@ -535,8 +553,9 @@ const styles = StyleSheet.create({
   },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   sheetActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  matchScrim: { flex: 1, backgroundColor: 'rgba(10,22,40,0.97)' },
   matchWrap: {
-    flex: 1, backgroundColor: 'rgba(10,22,40,0.97)', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14,
+    flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, gap: 14,
   },
   opener: { color: GOLD.text, fontSize: 15, lineHeight: 22, fontFamily: FACE.body },
   safeNote: { flexDirection: 'row', alignItems: 'center', gap: 6 },

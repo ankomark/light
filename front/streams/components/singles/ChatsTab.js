@@ -9,7 +9,7 @@ import { fetchSinglesChats } from '../../services/api';
 import useSingles from './useSingles';
 import { previewText } from '../../utils/dmView';
 import { useAuth } from '../../context/useAuth';
-import { GOLD, FACE, Body, Centered, Title, SkeletonList } from './SinglesKit';
+import { GOLD, FACE, Body, Centered, Title, SkeletonList, Offline } from './SinglesKit';
 
 export default function ChatsTab() {
   const { t } = useI18n();
@@ -21,8 +21,9 @@ export default function ChatsTab() {
     const res = await fetchSinglesChats();
     return Array.isArray(res) ? res : res?.results || [];
   });
-  const rows = data ?? (failed ? [] : null);
+  const rows = data ?? null;
   const [refreshing, setRefreshing] = useState(false);
+  if (rows === null && failed) return <Offline onRetry={load} />;
   if (rows === null) return <SkeletonList rows={3} />;
   return (
     <ScrollView contentContainerStyle={styles.pad}

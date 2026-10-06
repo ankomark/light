@@ -82,6 +82,13 @@ def _own_json(profile):
     }
 
 
+def _flag(value):
+    """A yes/no as sent: bool('false') is True, so a form's "false" meant yes."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 def _apply(profile, data, creating=False):
     """Copy what was sent onto `profile`, cleaned; a dict of field errors if
     anything is wrong (nothing is saved then)."""
@@ -125,7 +132,7 @@ def _apply(profile, data, creating=False):
             profile.diet = data['diet']
     for field in ('show_age', 'show_town', 'show_online'):
         if field in data:
-            setattr(profile, field, bool(data[field]))
+            setattr(profile, field, _flag(data[field]))
     if 'discoverable' in data:
         if data['discoverable'] not in dict(SinglesProfile.DISCOVERABLE):
             errors['discoverable'] = 'everyone or liked'
@@ -234,6 +241,9 @@ class SinglesMeView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
         urls = list(profile.photos.values_list('url', flat=True))
         _end_all_matches(profile, by=request.user)
+        # A couple's published story names them: leaving takes it down.
+        from ..models import SinglesStory
+        SinglesStory.objects.filter(Q(match__profile_a=profile) | Q(match__profile_b=profile)).delete()
         if profile.status == profile.BANNED:
             profile.photos.all().delete()
             SinglesProfile.objects.filter(pk=profile.pk).update(
@@ -287,7 +297,7 @@ class SinglesPauseView(APIView):
     def post(self, request):
         _require_on()
         profile = _mine(request.user)
-        profile.is_paused = bool(request.data.get('paused'))
+        profile.is_paused = _flag(request.data.get('paused'))
         profile.save(update_fields=['is_paused', 'updated_at'])
         return Response(_own_json(profile))
 
@@ -302,15 +312,18 @@ class SinglesPhotosView(APIView):
         image = request.FILES.get('image')
         if image is None:
             return Response({'image': 'Choose a photo.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not (getattr(image, 'content_type', '') or '').startswith('image/'):
-            return Response({'image': 'That is not a photo.'}, status=status.HTTP_400_BAD_REQUEST)
         if image.size > MAX_PHOTO_BYTES:
             return Response({'image': 'That photo is too large.'}, status=status.HTTP_400_BAD_REQUEST)
+        # What it is, from its content: the type the phone claims was all that
+        # was checked, and anything said to be image/* went to public storage.
+        kind = rules.photo_type(image)
+        if kind is None:
+            return Response({'image': 'That is not a photo.'}, status=status.HTTP_400_BAD_REQUEST)
         kept = profile.photos.exclude(status=SinglesPhoto.REJECTED)
         if kept.count() >= rules.MAX_PHOTOS:
             return Response({'image': f'At most {rules.MAX_PHOTOS} photos.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            url = r2.upload_file(image, 'singles')
+            url = r2.upload_file(image, 'singles', content_type=kind)
         except Exception:  # noqa: BLE001
             logger.exception('Singles photo upload failed')
             return Response({'error': 'The photo could not be uploaded.'}, status=status.HTTP_502_BAD_GATEWAY)
@@ -346,7 +359,11 @@ class SinglesPhotoOrderView(APIView):
         profile = _mine(request.user)
         ids = request.data.get('ids')
         mine = list(profile.photos.exclude(status=SinglesPhoto.REJECTED).values_list('id', flat=True))
-        if not isinstance(ids, list) or sorted(ids) != sorted(mine):
+        try:
+            ids = [int(i) for i in ids] if isinstance(ids, list) else None
+        except (TypeError, ValueError):
+            ids = None   # ['a', 1] made sorted() fail: a 500, not a 400
+        if ids is None or sorted(ids) != sorted(mine):
             return Response({'ids': 'Every one of your photo ids, in order.'}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
             for position, pk in enumerate(ids):
@@ -488,9 +505,12 @@ class AdminSinglesViewSet(viewsets.ViewSet):
         if refused:
             return refused
         # Back to the start of review: they look again before anyone sees it.
-        profile.status, profile.review_note = profile.DRAFT, ''
-        profile.save(update_fields=['status', 'review_note', 'updated_at'])
+        # The ban paused it; unpaused now, or once approved again it stayed
+        # hidden with nobody telling them why.
+        profile.status, profile.review_note, profile.is_paused = profile.DRAFT, '', False
+        profile.save(update_fields=['status', 'review_note', 'is_paused', 'updated_at'])
         log_admin_action(request.user, 'singles_unban', 'singlesprofile', profile.pk, reason=reason)
+        _tell(profile.user, 'You can use Single & Searching again. Send your profile for review when it’s ready.')
         return Response(_review_json(profile))
 
 
@@ -712,8 +732,9 @@ class SinglesMatchesView(APIView):
         _require_on()
         me = _mine(request.user)
         qs = (SinglesMatch.objects.filter(Q(profile_a=me) | Q(profile_b=me), ended_at__isnull=True)
-              .select_related('profile_a__user', 'profile_b__user')
-              .prefetch_related('profile_a__photos', 'profile_b__photos').order_by('-created_at'))
+              .select_related('profile_a__user', 'profile_b__user', 'story')
+              .prefetch_related('profile_a__photos', 'profile_b__photos', 'profile_a__answers',
+                                'profile_b__answers').order_by('-created_at'))
         blocked = blocked_ids_for(request.user)
         rows = [m for m in qs if m.other(me).user_id not in blocked
                 and m.other(me).status != SinglesProfile.BANNED]

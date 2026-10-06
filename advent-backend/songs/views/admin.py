@@ -536,12 +536,33 @@ class AdminReportViewSet(viewsets.GenericViewSet):
     def dismiss(self, request, pk=None):
         return self._set_status(request, pk, 'dismissed', 'dismiss_report')
 
+    def _hide_single(self, request, report, reason):
+        from ..admin_security import outranks
+        from ..models import SinglesProfile
+        profile = SinglesProfile.objects.filter(pk=report.object_id).select_related('user').first()
+        if profile is None:
+            return Response({'error': 'Target not found or not removable'}, status=status.HTTP_400_BAD_REQUEST)
+        if profile.user_id != request.user.pk and not outranks(request.user, profile.user):
+            return _rank_refusal()
+        if profile.status != SinglesProfile.BANNED:
+            SinglesProfile.objects.filter(pk=profile.pk).update(
+                status=SinglesProfile.PENDING, submitted_at=timezone.now(),
+                review_note=f'Reported, sent back for review: {reason}'[:255])
+        notify_moderation(profile.user, 'Single & Searching',
+                          f'Your Single & Searching profile was hidden and sent back for review. Reason: {reason}')
+        report.status, report.resolved_by, report.resolved_at = 'resolved', request.user, timezone.now()
+        report.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+        log_admin_action(request.user, 'remove_singlesprofile', 'singlesprofile', profile.pk, reason=reason)
+        return Response(self.get_serializer(report).data)
+
     @action(detail=True, methods=['post'])
     def remove_target(self, request, pk=None):
         report = get_object_or_404(Report, pk=pk)
         reason, refused = reason_of(request)
         if refused:
             return refused
+        if report.content_type == 'singlesprofile':
+            return self._hide_single(request, report, reason)
         if _protected_ids(request.user, report.content_type, [report.object_id]):
             return _rank_refusal()
         if not _soft_remove(report.content_type, report.object_id, True):

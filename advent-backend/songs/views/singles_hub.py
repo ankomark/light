@@ -27,7 +27,7 @@ import logging
 import random
 
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import Count, Exists, F, OuterRef, Q
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -96,7 +96,8 @@ class SinglesHubView(APIView):
             rows, _more = rules.browse(me, mode)
             preview = [_card(p, me, rules.reasons_for(me, p) if mode == 'foryou' else None) for p in rows[:6]]
         today = rules.apply_preferences(rules.candidates(me), me).count() if not me.is_paused else 0
-        topic = SinglesTopic.objects.filter(is_removed=False).exclude(author__user_id__in=blocked_ids_for(request.user)).first()
+        topic = (SinglesTopic.objects.filter(is_removed=False, author__status=SinglesProfile.APPROVED)
+                 .exclude(author__user_id__in=blocked_ids_for(request.user)).first())
         upcoming = (SinglesGathering.objects.filter(status=SinglesGathering.APPROVED, starts_at__gte=timezone.now())
                     .annotate(n=Count('rsvps')).first())
         return {
@@ -270,6 +271,7 @@ class SinglesIcebreakerAnswerView(APIView):
 
 # ── Phase 10: the singles community ─────────────────────────────────────────
 TOPIC_LEN, REPLY_LEN = 300, 600
+REPLIES_PER_HOUR = 30
 
 
 def _author_json(profile):
@@ -278,10 +280,13 @@ def _author_json(profile):
 
 
 def _topic_json(topic, me):
+    hearted = getattr(topic, 'my_heart', None)
+    if hearted is None:
+        hearted = SinglesHeart.objects.filter(topic=topic, profile=me).exists()
     return {
         'id': topic.id, 'body': topic.body, 'author': _author_json(topic.author),
         'reply_count': topic.reply_count, 'heart_count': topic.heart_count,
-        'hearted': SinglesHeart.objects.filter(topic=topic, profile=me).exists(),
+        'hearted': bool(hearted),
         'mine': topic.author_id == me.pk,
         'created_at': topic.created_at.isoformat(),
     }
@@ -295,7 +300,8 @@ class SinglesTopicsView(APIView):
         me = _approved(request.user)
         qs = (SinglesTopic.objects.filter(is_removed=False, author__status=SinglesProfile.APPROVED)
               .exclude(author__user_id__in=blocked_ids_for(request.user))
-              .select_related('author').prefetch_related('author__photos')[:50])
+              .select_related('author').prefetch_related('author__photos')
+              .annotate(my_heart=Exists(SinglesHeart.objects.filter(topic=OuterRef('pk'), profile=me)))[:50])
         return Response({'results': [_topic_json(t, me) for t in qs]})
 
     def post(self, request):
@@ -312,7 +318,7 @@ class SinglesTopicsView(APIView):
 
 
 def _visible_topic(pk, user):
-    return (SinglesTopic.objects.filter(pk=pk, is_removed=False)
+    return (SinglesTopic.objects.filter(pk=pk, is_removed=False, author__status=SinglesProfile.APPROVED)
             .exclude(author__user_id__in=blocked_ids_for(user))
             .select_related('author').prefetch_related('author__photos').first())
 
@@ -327,7 +333,8 @@ class SinglesTopicView(APIView):
         if topic is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         blocked = blocked_ids_for(request.user)
-        replies = (topic.replies.filter(is_removed=False).exclude(author__user_id__in=blocked)
+        replies = (topic.replies.filter(is_removed=False, author__status=SinglesProfile.APPROVED)
+                   .exclude(author__user_id__in=blocked)
                    .select_related('author').prefetch_related('author__photos'))
         return Response({**_topic_json(topic, me), 'replies': [
             {'id': r.id, 'body': r.body, 'author': _author_json(r.author), 'mine': r.author_id == me.pk,
@@ -346,6 +353,9 @@ class SinglesReplyView(APIView):
         body = rules.clean(request.data.get('body'), REPLY_LEN)
         if not body:
             return Response({'body': 'Write a reply.'}, status=status.HTTP_400_BAD_REQUEST)
+        hour_ago = timezone.now() - timezone.timedelta(hours=1)
+        if SinglesReply.objects.filter(author=me, created_at__gte=hour_ago).count() >= REPLIES_PER_HOUR:
+            return Response({'code': 'slow_down'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         reply = SinglesReply.objects.create(topic=topic, author=me, body=body)
         SinglesTopic.objects.filter(pk=topic.pk).update(reply_count=F('reply_count') + 1)
         return Response({'id': reply.id, 'body': reply.body, 'author': _author_json(me), 'mine': True,
@@ -371,17 +381,34 @@ class SinglesHeartView(APIView):
         return Response({'hearted': created, 'heart_count': topic.heart_count})
 
 
-def _gathering_json(g, me):
+def _gathering_rows(gatherings, me):
+    """Events as JSON, the RSVPs of all of them read at once (it was four
+    queries per event: a slow list on a slow line)."""
+    gatherings = list(gatherings)
     matched = SinglesMatch.objects.filter(Q(profile_a=me) | Q(profile_b=me), ended_at__isnull=True)
     friend_ids = {m.profile_b_id if m.profile_a_id == me.pk else m.profile_a_id for m in matched}
-    going = SinglesRsvp.objects.filter(gathering=g)
-    friends = [r.profile.first_name for r in going.filter(profile_id__in=friend_ids).select_related('profile')[:3]]
-    return {
-        'id': g.id, 'kind': g.kind, 'title': g.title, 'description': g.description,
-        'starts_at': g.starts_at.isoformat(), 'place': g.place, 'country': g.country, 'online': g.online,
-        'status': g.status, 'going': going.count(), 'interested': going.filter(profile=me).exists(),
-        'friends_going': friends, 'mine': g.created_by_id == me.user_id,
-    }
+    by = {}
+    for gid, pid, name in (SinglesRsvp.objects.filter(gathering__in=gatherings)
+                           .values_list('gathering_id', 'profile_id', 'profile__first_name')):
+        by.setdefault(gid, []).append((pid, name))
+    out = []
+    for g in gatherings:
+        going = by.get(g.id, [])
+        out.append({
+            'id': g.id, 'kind': g.kind, 'title': g.title, 'description': g.description,
+            'starts_at': g.starts_at.isoformat(), 'place': g.place, 'country': g.country, 'online': g.online,
+            'status': g.status, 'going': len(going), 'interested': any(pid == me.pk for pid, _ in going),
+            'friends_going': [name for pid, name in going if pid in friend_ids][:3],
+            'mine': g.created_by_id == me.user_id,
+        })
+    return out
+
+
+def _gathering_json(g, me):
+    return _gathering_rows([g], me)[0]
+
+
+MAX_PENDING_GATHERINGS = 3
 
 
 class SinglesGatheringsView(APIView):
@@ -392,7 +419,7 @@ class SinglesGatheringsView(APIView):
         me = _approved(request.user)
         qs = SinglesGathering.objects.filter(starts_at__gte=timezone.now() - timezone.timedelta(hours=6)).filter(
             Q(status=SinglesGathering.APPROVED) | Q(created_by=request.user, status=SinglesGathering.PENDING))
-        return Response({'results': [_gathering_json(g, me) for g in qs[:40]]})
+        return Response({'results': _gathering_rows(qs.order_by('starts_at')[:40], me)})
 
     def post(self, request):
         _require_on()
@@ -406,10 +433,16 @@ class SinglesGatheringsView(APIView):
             return Response({'title': 'Required.'}, status=status.HTTP_400_BAD_REQUEST)
         from django.utils.dateparse import parse_datetime
         starts = parse_datetime(str(data.get('starts_at') or ''))
-        if starts is None or (timezone.is_aware(starts) and starts < timezone.now()):
-            return Response({'starts_at': 'A future date and time.'}, status=status.HTTP_400_BAD_REQUEST)
-        if timezone.is_naive(starts):
+        # Made aware first: a time sent without a zone skipped the "future"
+        # check (one in 2020 was taken).
+        if starts is not None and timezone.is_naive(starts):
             starts = timezone.make_aware(starts)
+        if starts is None or starts < timezone.now():
+            return Response({'starts_at': 'A future date and time.'}, status=status.HTTP_400_BAD_REQUEST)
+        if SinglesGathering.objects.filter(created_by=request.user, status=SinglesGathering.PENDING).count() \
+                >= MAX_PENDING_GATHERINGS:
+            return Response({'code': 'slow_down', 'detail': 'Wait until your suggestions are reviewed.'},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
         g = SinglesGathering.objects.create(
             created_by=request.user, kind=kind, title=title, description=rules.clean(data.get('description'), 1500),
             starts_at=starts, place=rules.clean(data.get('place'), 160), country=rules.clean(data.get('country'), 60),
@@ -520,35 +553,53 @@ class SinglesStoryConsentView(APIView):
 
 
 # ── Phase 11: photo verification ────────────────────────────────────────────
+GESTURE_SECONDS = 2 * 3600
+
+
+def gesture_key(profile_id):
+    return f'singles:gesture:{profile_id}'
+
 class SinglesVerifyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
+        from django.core.cache import cache
         _require_on()
         me = _mine(request.user)
         last = me.verifications.first()
-        return Response({'gesture': random.choice(rules.GESTURES), 'verified': me.photo_verified_at is not None,
+        # The gesture is ours to choose and is remembered: the selfie must
+        # show the one asked for (any one was accepted - an old photo with a
+        # thumbs-up would do). The same one if they come back meanwhile.
+        key = gesture_key(me.pk)
+        gesture = cache.get(key) or random.choice(rules.GESTURES)
+        cache.set(key, gesture, GESTURE_SECONDS)
+        return Response({'gesture': gesture, 'verified': me.photo_verified_at is not None,
                          'last': last.status if last else None})
 
     def post(self, request):
         _require_on()
         me = _mine(request.user)
+        from django.core.cache import cache
         gesture = request.data.get('gesture')
         if gesture not in rules.GESTURES:
             return Response({'gesture': f'one of {list(rules.GESTURES)}'}, status=status.HTTP_400_BAD_REQUEST)
+        if cache.get(gesture_key(me.pk)) != gesture:
+            return Response({'code': 'gesture_expired', 'gesture': 'Show the gesture we asked for (open this again).'},
+                            status=status.HTTP_400_BAD_REQUEST)
         image = request.FILES.get('image')
-        if image is None or not (getattr(image, 'content_type', '') or '').startswith('image/') \
-                or image.size > MAX_PHOTO_BYTES:
+        kind = rules.photo_type(image) if image is not None and image.size <= MAX_PHOTO_BYTES else None
+        if kind is None:
             return Response({'image': 'A photo, please.'}, status=status.HTTP_400_BAD_REQUEST)
         if me.verifications.filter(status=SinglesVerification.PENDING).exists():
             return Response({'code': 'waiting'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            url = r2.upload_file(image, 'singles_verify')
+            url = r2.upload_file(image, 'singles_verify', content_type=kind)
         except Exception:  # noqa: BLE001
             logger.exception('Singles selfie upload failed')
             return Response({'error': 'The photo could not be uploaded.'}, status=status.HTTP_502_BAD_GATEWAY)
         SinglesVerification.objects.create(profile=me, selfie=url, gesture=gesture)
+        cache.delete(gesture_key(me.pk))   # one selfie per gesture asked
         rules.notify_reviewers('selfie', 'A Single & Searching selfie is waiting to be checked.')
         return Response({'last': 'pending'}, status=status.HTTP_201_CREATED)
 

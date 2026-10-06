@@ -2,24 +2,29 @@
 // line; moderators can take it down.
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useFocusEffect, useRoute } from '@react-navigation/native';
+import { useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesTopic, replySinglesTopic, heartSinglesTopic, reportContent } from '../../services/api';
 import { notify, confirmAction } from '../../utils/adminConfirm';
-import { GOLD, FACE, SinglesScreen, Portrait, Body } from '../../components/singles/SinglesKit';
+import { GOLD, FACE, SinglesScreen, Portrait, Body, GoldButton } from '../../components/singles/SinglesKit';
+import useSingles from '../../components/singles/useSingles';
 import { TopicRow } from './SinglesCommunity';
 
 export default function SinglesTopic() {
   const { t } = useI18n();
   const { params = {} } = useRoute();
-  const [topic, setTopic] = useState(null);
+  // The last copy of this thread at once (and offline), refreshed behind it;
+  // the network's "not there" (404) is told apart from no network.
+  const [gone, setGone] = useState(false);
+  const fetchTopic = useCallback(() => fetchSinglesTopic(params.id).catch((e) => {
+    if (e?.status === 404) setGone(true);
+    throw e;
+  }), [params.id]);
+  const { data: kept, setData: setTopic, failed: offline, reload } = useSingles(`topic:${params.id}`, fetchTopic);
+  const topic = gone ? { failed: true } : kept;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
-    try { setTopic(await fetchSinglesTopic(params.id)); } catch { setTopic({ failed: true }); }
-  }, [params.id]);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const send = async () => {
     setBusy(true);
@@ -27,7 +32,9 @@ export default function SinglesTopic() {
       const reply = await replySinglesTopic(topic.id, text.trim());
       setTopic((tp) => ({ ...tp, replies: [...tp.replies, reply], reply_count: tp.reply_count + 1 }));
       setText('');
-    } catch { notify(t('common.error'), t('singles.mine.failed')); } finally { setBusy(false); }
+    } catch (e) {
+      notify(t('common.error'), e?.data?.code === 'slow_down' ? t('singles.community.replySlowDown') : t('singles.mine.failed'));
+    } finally { setBusy(false); }
   };
   const report = async (kind, id) => {
     if (!(await confirmAction({ title: t('singles.community.reportTitle'), message: t('singles.community.reportBody'),
@@ -49,7 +56,12 @@ export default function SinglesTopic() {
           </TouchableOpacity>
         </View>
       ) : null}>
-      {!topic ? <ActivityIndicator color={GOLD.gold} style={{ marginTop: 40 }} /> : topic.failed ? (
+      {!topic && offline ? (
+        <View style={{ alignItems: 'center', gap: 12, marginTop: 40 }} testID="singles-topic-offline">
+          <Body style={{ textAlign: 'center' }}>{t('singles.loadFailed')}</Body>
+          <GoldButton label={t('common.retry')} icon="refresh" kind="outline" onPress={reload} />
+        </View>
+      ) : !topic ? <ActivityIndicator color={GOLD.gold} style={{ marginTop: 40 }} /> : topic.failed ? (
         <Body style={{ textAlign: 'center' }}>{t('singles.view.gone')}</Body>
       ) : (
         <View style={{ gap: 12 }}>

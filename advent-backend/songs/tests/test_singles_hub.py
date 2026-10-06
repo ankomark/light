@@ -297,7 +297,8 @@ class StoryAndVerifyTests(Base):
     def test_photo_verification(self, _up, _tell):
         gesture = self.client.get('/api/singles/me/verify/').data['gesture']
         self.assertIn(gesture, singles.GESTURES)
-        img = SimpleUploadedFile('s.jpg', b'x' * 10, content_type='image/jpeg')
+        from songs.tests.test_singles_phase1 import jpeg_bytes
+        img = SimpleUploadedFile('s.jpg', jpeg_bytes(), content_type='image/jpeg')
         self.assertEqual(self.client.post('/api/singles/me/verify/', {'image': img, 'gesture': gesture},
                                           format='multipart').status_code, 201)
         v = SinglesVerification.objects.get()

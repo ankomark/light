@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { fetchSinglesTopics, askSinglesTopic, heartSinglesTopic } from '../../services/api';
 import { notify } from '../../utils/adminConfirm';
-import { GOLD, FACE, SinglesScreen, GoldButton, Portrait, Body, SkeletonList } from '../../components/singles/SinglesKit';
+import { GOLD, FACE, SinglesScreen, GoldButton, Portrait, Body, SkeletonList, Offline } from '../../components/singles/SinglesKit';
 import useSingles from '../../components/singles/useSingles';
 
 export function TopicRow({ topic, onPress, onHeart }) {
@@ -41,7 +41,7 @@ export default function SinglesCommunity() {
   const { t } = useI18n();
   const navigation = useNavigation();
   const { data, setData: setRows, failed, reload: load } = useSingles('topics', async () => (await fetchSinglesTopics()).results || []);
-  const rows = data ?? (failed ? [] : null);
+  const rows = data ?? null;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,7 +79,8 @@ export default function SinglesCommunity() {
               testID="singles-ask" />
           </View>
         )}
-        ListEmptyComponent={rows === null ? <SkeletonList rows={3} /> : <Body style={{ textAlign: 'center' }}>{t('singles.community.empty')}</Body>}
+        ListEmptyComponent={rows === null && failed ? <Offline onRetry={load} />
+          : rows === null ? <SkeletonList rows={3} /> : <Body style={{ textAlign: 'center' }}>{t('singles.community.empty')}</Body>}
         renderItem={({ item }) => (
           <TopicRow topic={item} onHeart={() => heart(item)} onPress={() => navigation.navigate('SinglesTopic', { id: item.id })} />
         )} />

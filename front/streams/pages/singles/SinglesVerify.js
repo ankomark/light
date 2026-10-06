@@ -38,8 +38,14 @@ export default function SinglesVerify() {
       await sendSinglesSelfie(form);
       notify(t('singles.verify.sentTitle'), t('singles.verify.sentBody'));
       navigation.goBack();
-    } catch {
-      notify(t('common.error'), t('singles.mine.failed'));
+    } catch (e) {
+      if (e?.data?.code === 'gesture_expired') {
+        // The gesture we asked for has lapsed: show the new one to make.
+        fetchSinglesVerify().then(setState).catch(() => {});
+        notify(t('singles.verify.title'), t('singles.verify.newGesture'));
+      } else {
+        notify(t('common.error'), t('singles.mine.failed'));
+      }
     } finally {
       setBusy(false);
     }

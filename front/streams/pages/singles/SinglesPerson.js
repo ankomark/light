@@ -124,14 +124,18 @@ export default function SinglesPerson() {
           <Label>{t('singles.stories.askTitle')}</Label>
           <Body>{t('singles.stories.askBody', { name: p.first_name, title: match.story.title })}</Body>
           <View style={{ flexDirection: 'row', gap: 10 }}>
+            {/* Failures are said, not swallowed: "you agreed" while offline
+                was untrue, and a decline that didn't go through looked done. */}
             <GoldButton label={t('singles.stories.decline')} kind="outline" onPress={async () => {
-              await withdrawSinglesStory(match.story.id).catch(() => null);
-              navigation.goBack();
-            }} />
+              try { await withdrawSinglesStory(match.story.id); navigation.goBack(); }
+              catch { notify(t('common.error'), t('singles.mine.failed')); }
+            }} testID="singles-story-decline" />
             <GoldButton label={t('singles.stories.agree')} onPress={async () => {
-              await agreeSinglesStory(match.story.id).catch(() => null);
-              notify(t('singles.stories.agreedTitle'), t('singles.stories.agreedBody'));
-              navigation.goBack();
+              try {
+                await agreeSinglesStory(match.story.id);
+                notify(t('singles.stories.agreedTitle'), t('singles.stories.agreedBody'));
+                navigation.goBack();
+              } catch { notify(t('common.error'), t('singles.mine.failed')); }
             }} testID="singles-story-agree" />
           </View>
         </Card>
@@ -161,7 +165,11 @@ function StorySheet({ visible, matchId, name, onClose }) {
       await tellSinglesStory(matchId, title.trim(), body.trim());
       notify(t('singles.stories.sentTitle'), t('singles.stories.sentBody', { name }));
       onClose();
-    } catch { notify(t('singles.edit.checkTitle'), t('singles.stories.tooShort')); } finally { setBusy(false); }
+    } catch (e) {
+      // "Too short" only when the server said so - not for every failure.
+      if (e?.status === 400) notify(t('singles.edit.checkTitle'), t('singles.stories.tooShort'));
+      else notify(t('common.error'), t('singles.mine.failed'));
+    } finally { setBusy(false); }
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
