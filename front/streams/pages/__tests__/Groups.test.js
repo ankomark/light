@@ -552,3 +552,52 @@ describe('Groups re-scan', () => {
     await waitFor(() => expect(m.getByTestId('media-failed')).toBeTruthy());
   });
 });
+
+describe('Not yet joined', () => {
+  const open = (slug, g) => render(
+    <GroupDetail navigation={nav} route={{ params: { groupSlug: slug, group: g } }} />,
+  );
+
+  it('a super admin who reads every chat still sees Join, not the composer, until they join', async () => {
+    // is_member: the master key that unlocks reading; is_joined: really in it.
+    const g = group('sa1', { is_member: true, is_joined: false, is_admin: true });
+    mockApi.fetchGroupDetails.mockResolvedValue(g);
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: [], next: null });
+    const r = open('sa1', g);
+    await waitFor(() => expect(r.getByTestId('group-join')).toBeTruthy());
+    expect(r.queryByTestId('group-send')).toBeNull();
+    expect(r.queryByPlaceholderText('chat.messagePlaceholder')).toBeNull();
+  });
+
+  it('a member sees the composer (and an older server without is_joined still works)', async () => {
+    const g = group('sa2');
+    mockApi.fetchGroupDetails.mockResolvedValue(g);
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: [], next: null });
+    const r = open('sa2', g);
+    await waitFor(() => expect(r.getByPlaceholderText('chat.messagePlaceholder')).toBeTruthy());
+    expect(r.queryByTestId('group-join')).toBeNull();
+  });
+});
+
+describe('Group row preview', () => {
+  // eslint-disable-next-line global-require
+  const GroupItem = require('../GroupItem').default;
+  const row = (g) => render(<GroupItem group={g} onPress={() => {}} />);
+
+  it('a public group I am not in invites me to join, not "No messages yet"', () => {
+    const r = row(group('p1', { is_member: false, last_message: null }));
+    expect(r.getByText('group.preview.requestToJoin')).toBeTruthy();
+    expect(r.queryByText('group.preview.noMessages')).toBeNull();
+  });
+
+  it('says so when my request is waiting', () => {
+    const r = row(group('p2', { is_member: false, has_pending_request: true, last_message: null }));
+    expect(r.getByText('group.preview.requestPending')).toBeTruthy();
+  });
+
+  it('a super admin who has not joined is invited too; a quiet group I am in is still "No messages yet"', () => {
+    expect(row(group('p3', { is_member: true, is_joined: false, last_message: null }))
+      .getByText('group.preview.requestToJoin')).toBeTruthy();
+    expect(row(group('p4', { last_message: null })).getByText('group.preview.noMessages')).toBeTruthy();
+  });
+});

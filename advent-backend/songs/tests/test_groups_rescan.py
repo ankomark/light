@@ -264,3 +264,24 @@ class PrivateGroupVisibilityTests(APITestCase):
         self.assertIsNone(data['parent'])
         self.client.force_authenticate(self.creator)
         self.assertEqual(self.client.get(f'/api/groups/{child.slug}/').data['parent_slug'], self.community.slug)
+
+
+class JoinedVsMemberTests(APITestCase):
+    def test_super_admin_reads_but_is_not_joined_until_they_join(self):
+        owner = User.objects.create_user('jvowner', 'jo@x.com', 'pw12345!')
+        boss = User.objects.create_user('jvboss', 'jb@x.com', 'pw12345!', is_superuser=True)
+        group = Group.objects.create(name='Open', creator=owner, is_private=False)
+        GroupMember.objects.create(group=group, user=owner, is_admin=True)
+        self.client.force_authenticate(boss)
+        for data in (self.client.get(f'/api/groups/{group.slug}/').data,
+                     self.client.get('/api/groups/?scope=public').data['results'][0]):
+            self.assertEqual((data['is_member'], data['is_joined']), (True, False))
+        GroupMember.objects.create(group=group, user=boss)
+        self.assertTrue(self.client.get(f'/api/groups/{group.slug}/').data['is_joined'])
+        # An ordinary member and an outsider: the two agree.
+        self.client.force_authenticate(owner)
+        self.assertTrue(self.client.get(f'/api/groups/{group.slug}/').data['is_joined'])
+        outsider = User.objects.create_user('jvout', 'jx@x.com', 'pw12345!')
+        self.client.force_authenticate(outsider)
+        data = self.client.get(f'/api/groups/{group.slug}/').data
+        self.assertEqual((data['is_member'], data['is_joined']), (False, False))

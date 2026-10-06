@@ -1012,7 +1012,11 @@ const GroupDetail = ({ route, navigation }) => {
     catch { notify(t('common.error'), t('group.detail.leaveFailed')); }
   }, [groupSlug, navigation, t]);
 
-  const canLeave = isMember && group?.creator?.id !== currentUser?.id;
+  // Actually in the group. A super admin reads every chat (isMember) but
+  // still joins like anyone else: until then, Join - not the composer.
+  // (Older servers don't send is_joined: membership is the answer there.)
+  const joined = isMember && (group?.is_joined ?? true);
+  const canLeave = joined && group?.creator?.id !== currentUser?.id;
 
   const togglePostingPolicy = useCallback(async () => {
     setMenuSheet(false);
@@ -1348,7 +1352,7 @@ const GroupDetail = ({ route, navigation }) => {
     : notifyLevel === 'mentions' ? t('group.detail.mentionsOnly') : t('group.detail.allMessages');
   const adminsOnly = !!group?.only_admins_can_post;
   const slowSeconds = group?.slow_mode_seconds || 0;
-  const canChat = isMember && (!adminsOnly || isAdmin);
+  const canChat = joined && (!adminsOnly || isAdmin);
   // Others here: the server's count (me excluded), or — from an older server — the roster.
   const othersOnline = onlineCount != null
     ? Math.max(0, onlineCount - 1)
@@ -1632,7 +1636,7 @@ const GroupDetail = ({ route, navigation }) => {
             </>
           )}
         </View>
-      ) : isMember ? (
+      ) : joined ? (
         <View style={styles.joinBar}>
           <View style={styles.lockedPill}>
             <Ionicons name="lock-closed" size={16} color={colors.textSecondary} />
@@ -1828,7 +1832,7 @@ const GroupDetail = ({ route, navigation }) => {
               </TouchableOpacity>
             )}
 
-            {isMember && (
+            {joined && (
               <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} testID="notify-option"
                 onPress={() => { setMenuSheet(false); setTimeout(() => setNotifySheet(true), 220); }}>
                 <View style={[styles.sheetIcon, styles.sheetIconFile]}>
@@ -1841,7 +1845,7 @@ const GroupDetail = ({ route, navigation }) => {
               </TouchableOpacity>
             )}
 
-            {isMember && (
+            {joined && (
               <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} testID="archive-option"
                 onPress={() => { setMenuSheet(false); changeMine({ archived: !archived }); }}>
                 <View style={[styles.sheetIcon, styles.sheetIconFile]}>

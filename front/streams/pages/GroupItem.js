@@ -19,6 +19,12 @@ const previewText = (lm, t, group) => {
       if (about) return about;
       return t(group.is_private ? 'community.preview.private' : 'community.preview.public');
     }
+    // Not in it (a public group in the list): no message is ever shown to
+    // an outsider, so "No messages yet" was simply untrue - say how to get in.
+    const joined = group?.is_member && (group?.is_joined ?? true);
+    if (group && !joined) {
+      return t(group.has_pending_request ? 'group.preview.requestPending' : 'group.preview.requestToJoin');
+    }
     return t('group.preview.noMessages');
   }
   if (lm.message_type === 'system') return lm.content;

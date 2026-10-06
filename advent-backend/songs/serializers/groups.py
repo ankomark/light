@@ -76,6 +76,9 @@ class GroupSerializer(serializers.ModelSerializer):
     creator = SimpleUserSerializer(read_only=True)
     member_count = serializers.SerializerMethodField()
     is_member = serializers.SerializerMethodField()
+    # Actually in it. `is_member` is also true for a super admin (it unlocks
+    # the chat for moderation); this one is what decides Join vs. the composer.
+    is_joined = serializers.SerializerMethodField()
     is_admin = serializers.SerializerMethodField()
     is_moderator = serializers.SerializerMethodField()
     has_pending_request = serializers.SerializerMethodField()
@@ -231,6 +234,10 @@ class GroupSerializer(serializers.ModelSerializer):
         # the app unlocks the chat for them (drives the frontend, no app update).
         if self._is_super():
             return True
+        v = getattr(obj, 'anno_is_member', None)
+        return v if v is not None else (self._membership(obj) is not None)
+
+    def get_is_joined(self, obj):
         v = getattr(obj, 'anno_is_member', None)
         return v if v is not None else (self._membership(obj) is not None)
 
