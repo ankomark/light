@@ -433,7 +433,7 @@ const QuizPlay = ({ navigation, route }) => {
             {mode === 'duel' && <DuelCard duel={duel} t={t} />}
 
             {!!challenge && mode !== 'duel' && (
-              <View style={[styles.verdict, mine > challenge.score && styles.verdictWon]}
+              <View style={[styles.challengeVerdict, mine > challenge.score && styles.verdictWon]}
                     accessibilityLiveRegion="polite">
                 <Ionicons name={mine > challenge.score ? 'trophy' : 'flag-outline'} size={16} color={GOLD} />
                 <Text style={styles.verdictText}>
@@ -802,7 +802,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(244,162,97,0.12)',
   },
   challengeText: { fontFamily: DISPLAY_MID, fontSize: 11.5, letterSpacing: 0.4, color: GOLD },
-  verdict: {
+  // The challenge's result card. It was a second `verdict` in this object:
+  // the later key wins, so every answer's "Correct" / "Not quite" was drawn
+  // as this card instead of its uppercase line.
+  challengeVerdict: {
     flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'stretch',
     padding: 12, borderRadius: 14, marginBottom: 4,
     backgroundColor: 'rgba(255,255,255,0.05)',

@@ -1,3 +1,4 @@
+/* global Buffer */  // Jest runs in Node, where Buffer is a global
 import { decodeBase64, parseSpectrum, levelsAt } from '../spectrum';
 
 const b64 = (bytes) => Buffer.from(Uint8Array.from(bytes)).toString('base64');
