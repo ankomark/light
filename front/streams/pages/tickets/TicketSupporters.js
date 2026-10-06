@@ -53,7 +53,7 @@ const TicketSupporters = ({ route }) => {
 
   const rows = [...(first || []), ...older];
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <FlatList
         data={rows}
         keyExtractor={(s, i) => `${s.paid_at}-${i}`}

@@ -22,7 +22,7 @@ import { useI18n } from '../../context/I18nContext';
 import { fetchMyEvents, fetchOverview, fetchTills, logOut } from '../../services/ticketsOrganiser';
 import { confirmAction } from '../../utils/adminConfirm';
 import { formatKes, formatWhen } from '../../services/tickets';
-import { T, F, tap, Kicker, Pill, Notice, GoldButton } from '../../components/tickets/TicketKit';
+import { T, F, tap, Kicker, Pill, Notice, GoldButton, thumbShape } from '../../components/tickets/TicketKit';
 import { Spark } from '../../components/tickets/Charts';
 import { eventState, groupEvents, soldOf, staffNote } from './eventState';
 import { ticketErrorText } from './ticketText';
@@ -131,7 +131,7 @@ const TicketMyEvents = ({ navigation }) => {
                         accessibilityRole="button" accessibilityLabel={`${e.title}, ${t(`tix.mine.state.${state.key}`)}`}
                         testID={`mine-event-${e.id}`}>
         {e.poster ? (
-          <Image source={{ uri: e.poster }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
+          <Image source={{ uri: e.poster }} style={[styles.thumb, thumbShape(e, 72)]} contentFit="cover" cachePolicy="memory-disk" />
         ) : (
           <LinearGradient colors={['#2A2418', '#141210']} style={[styles.thumb, styles.thumbBlank]}>
             <Text style={styles.thumbLetter}>{(e.title || '?').trim().charAt(0).toUpperCase()}</Text>
@@ -191,7 +191,7 @@ const TicketMyEvents = ({ navigation }) => {
   );
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <SectionList
         sections={sections}
         keyExtractor={(e) => String(e.id)}

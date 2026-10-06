@@ -27,7 +27,9 @@ import {
   fetchEvents, formatKes, formatWhen, dateTile, refreshSavedOrders, useSavedOrders,
 } from '../../services/tickets';
 import { hasSession } from '../../services/ticketsOrganiser';
-import { T, F, tap, Kicker, DateTile, Pill, Notice } from '../../components/tickets/TicketKit';
+import {
+  T, F, tap, Kicker, DateTile, Pill, Notice, bannerRatio, bannerHeight, isWideBanner, BANNER_FALLBACK,
+} from '../../components/tickets/TicketKit';
 import { ticketErrorText } from './ticketText';
 
 const CACHE_KEY = 'tix:events';
@@ -110,7 +112,7 @@ const Poster = ({ uri, title, style }) => (uri ? (
 
 const TicketsHome = ({ navigation }) => {
   const { t } = useI18n();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const months = t('tix.months').split(',');
   const weekdays = t('tix.weekdays').split(',');
 
@@ -186,6 +188,14 @@ const TicketsHome = ({ navigation }) => {
   const closedLabel = (e) => (e.on_sale ? null : t('tix.salesClosed'));
 
   const heroWidth = Math.min(width, 720) - 32;
+  // The lead banner at its own shape. Portrait: text over it, as before (and
+  // tall enough to hold that text). Landscape: the whole picture, then the
+  // words beneath it on the card - over a short wide picture they covered it.
+  const heroRatio = featured?.poster ? bannerRatio(featured) : BANNER_FALLBACK;
+  const heroWide = !!featured?.poster && isWideBanner(heroRatio);
+  const heroImageH = heroWide
+    ? bannerHeight(heroWidth, heroRatio, { maxHeight: height * 0.5 })
+    : bannerHeight(heroWidth, heroRatio, { minHeight: heroWidth * 1.05, maxHeight: Math.min(heroWidth * 1.6, height * 0.72) });
 
   const header = (
     <View>
@@ -295,21 +305,26 @@ const TicketsHome = ({ navigation }) => {
           <TouchableOpacity
             activeOpacity={0.9}
             onPress={() => open(featured)}
-            style={[styles.hero, { width: heroWidth, height: heroWidth * 1.18 }]}
+            style={[styles.hero, { width: heroWidth }, !heroWide && { height: heroImageH }]}
             accessibilityRole="button"
             accessibilityLabel={`${featured.title}, ${kindOf(featured)}`}
+            testID={heroWide ? 'hero-wide' : 'hero-tall'}
           >
-            <Poster uri={featured.poster} title={featured.title} style={StyleSheet.absoluteFill} />
-            <LinearGradient
-              colors={['rgba(10,10,13,0)', 'rgba(10,10,13,0.35)', 'rgba(10,10,13,0.96)']}
-              locations={[0.25, 0.55, 1]}
-              style={StyleSheet.absoluteFill}
-            />
-            <View style={styles.heroTop}>
-              {fund ? <View /> : <DateTile {...dateTile(featured.starts_at, months)} />}
-              {!!closedLabel(featured) && <Pill label={closedLabel(featured)} />}
+            <View style={heroWide ? { height: heroImageH } : StyleSheet.absoluteFill}>
+              <Poster uri={featured.poster} title={featured.title} style={StyleSheet.absoluteFill} />
+              {!heroWide && (
+                <LinearGradient
+                  colors={['rgba(10,10,13,0)', 'rgba(10,10,13,0.35)', 'rgba(10,10,13,0.96)']}
+                  locations={[0.25, 0.55, 1]}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
+              <View style={styles.heroTop}>
+                {fund ? <View /> : <DateTile {...dateTile(featured.starts_at, months)} />}
+                {!!closedLabel(featured) && <Pill label={closedLabel(featured)} />}
+              </View>
             </View>
-            <View style={styles.heroText}>
+            <View style={heroWide ? styles.heroBelow : styles.heroText}>
               {fund ? (!!featured.category && <Kicker>{t(`tix.cat.${featured.category}`)}</Kicker>)
                 : (!!featured.city && <Kicker>{featured.city}</Kicker>)}
               <Text style={styles.heroTitle} numberOfLines={3}>{featured.title}</Text>
@@ -342,7 +357,8 @@ const TicketsHome = ({ navigation }) => {
       accessibilityRole="button"
       accessibilityLabel={`${e.title}, ${kindOf(e)}`}
     >
-      <Poster uri={e.poster} title={e.title} style={styles.thumb} />
+      <Poster uri={e.poster} title={e.title}
+              style={e.poster && isWideBanner(bannerRatio(e)) ? styles.thumbWide : styles.thumb} />
       <View style={styles.rowBody}>
         <Text style={styles.rowWhen} numberOfLines={1}>
           {e.kind === 'fundraiser' ? (e.category ? t(`tix.cat.${e.category}`) : '') : formatWhen(e.starts_at, { months, weekdays })}
@@ -377,7 +393,7 @@ const TicketsHome = ({ navigation }) => {
   );
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <FlatList
         data={rows}
         keyExtractor={(e) => e.slug}
@@ -463,6 +479,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
   },
   heroText: { position: 'absolute', left: 20, right: 20, bottom: 20 },
+  // A landscape banner's words: on the card beneath the picture.
+  heroBelow: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 20 },
   heroTitle: { fontFamily: F.display, fontSize: 34, lineHeight: 37, color: T.ivory, marginTop: 6 },
   heroMeta: { fontFamily: F.uiSemi, fontSize: 13, color: T.muted, marginTop: 8 },
   kinds: { flexDirection: 'row', gap: 8, marginTop: 14 },
@@ -486,6 +504,8 @@ const styles = StyleSheet.create({
     backgroundColor: T.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: T.line,
   },
   thumb: { width: 92, height: 116, borderRadius: 14, overflow: 'hidden' },
+  // A landscape banner in a row: wide, not a centre-cropped sliver of it.
+  thumbWide: { width: 132, height: 88, borderRadius: 14, overflow: 'hidden', alignSelf: 'center' },
   rowBody: { flex: 1, paddingVertical: 2 },
   rowWhen: { fontFamily: F.uiBold, fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase', color: T.gold },
   rowTitle: { fontFamily: F.display, fontSize: 22, lineHeight: 25, color: T.ivory, marginTop: 4 },

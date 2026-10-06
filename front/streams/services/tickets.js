@@ -145,26 +145,41 @@ export const fetchEvent = (slug) => request(`public/events/${encodeURIComponent(
  * Sends the M-Pesa prompt to `phone`. Comes back `pending` at once; the
  * order is then polled until `paid`, `failed` or `expired`.
  */
-export const createOrder = ({ ticketType, quantity, phone, name, showName = false }) => request('public/orders/', {
+export const createOrder = ({ ticketType, quantity, phone, name, showName = false, clientKey }) => request('public/orders/', {
   method: 'POST',
   timeout: ORDER_TIMEOUT_MS,
   body: {
     ticket_type: ticketType, quantity, phone: phone.trim(), show_name: !!showName,
     ...(name?.trim() ? { name: name.trim() } : {}),
+    ...(clientKey ? { client_key: clientKey } : {}),
   },
 });
+
+/**
+ * A one-time key for a checkout. Sent with the order and again on a retry:
+ * the server answers a repeat with the same order, so a connection lost
+ * while M-Pesa was prompting can be retried without a second charge - and
+ * the buyer still gets the reference (their tickets).
+ */
+export const newCheckoutKey = () => {
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let s = `co-${Date.now().toString(36)}-`;
+  for (let i = 0; i < 24; i += 1) s += abc[Math.floor(Math.random() * abc.length)];
+  return s;
+};
 
 /**
  * Give to a fundraiser: any whole-shilling amount, the same M-Pesa prompt,
  * and a receipt instead of tickets. `showName`: the giver agreed to appear by
  * name on the public supporters list.
  */
-export const createDonation = ({ slug, amount, phone, name, showName = false }) => request('public/orders/', {
+export const createDonation = ({ slug, amount, phone, name, showName = false, clientKey }) => request('public/orders/', {
   method: 'POST',
   timeout: ORDER_TIMEOUT_MS,
   body: {
     fundraiser: slug, amount: Number(amount), phone: phone.trim(), show_name: !!showName,
     ...(name?.trim() ? { name: name.trim() } : {}),
+    ...(clientKey ? { client_key: clientKey } : {}),
   },
 });
 
@@ -324,7 +339,14 @@ export const saveReference = (reference) => serial(async () => {
 export const cacheOrder = async (order) => {
   if (!order?.reference) return;
   await saveReference(order.reference);
-  try { await secure.setItemAsync(orderKey(order.reference), JSON.stringify(order)); } catch { /* best effort */ }
+  // When it was last heard of: how long a failed one has been kept.
+  // Since when it has been as it is: kept across refreshes that bring no
+  // change (a failed order is asked about for two days from when it failed,
+  // not from its latest refresh).
+  const before = await readCachedOrder(order.reference);
+  const since = before && before.status === order.status && before.cached_at ? before.cached_at : null;
+  const kept = { ...order, cached_at: since || order.cached_at || new Date().toISOString() };
+  try { await secure.setItemAsync(orderKey(order.reference), JSON.stringify(kept)); } catch { /* best effort */ }
   announce();
 };
 
@@ -349,10 +371,50 @@ export const listSavedOrders = async () => {
  * app may have closed mid-wait — and about the rest, so a ticket scanned at
  * the gate shows as used. Never throws.
  */
-export const refreshSavedOrders = async () => {
+// A failed or expired order is kept a week (so its screen can say what went
+// wrong), then let go; one paid for an event long over isn't asked about
+// again (nothing about it changes) but stays, as the buyer's record.
+const DROP_UNPAID_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+const SETTLED_AFTER_MS = 2 * 24 * 60 * 60 * 1000;
+const REFRESH_AT_ONCE = 4;
+
+const LATE_MONEY_MS = 2 * 24 * 60 * 60 * 1000;
+
+const stillChanging = (order, now) => {
+  if (!order) return true;                                   // never fetched: ask
+  if (order.status === 'pending') return true;
+  // Failed or expired is not final at once: the server honours money that
+  // arrives late (a slow M-Pesa), turning the order paid - so it is asked
+  // about for two days, or the buyer would never see the tickets they paid for.
+  if (order.status !== 'paid') {
+    return now - Date.parse(order.cached_at || 0) < LATE_MONEY_MS;
+  }
+  const when = Date.parse(order.starts_at || '');
+  return Number.isNaN(when) || now - when < SETTLED_AFTER_MS;   // a gate may yet scan it
+};
+
+const dropOldUnpaid = (saved, now) => serial(async () => {
+  const gone = saved.filter(({ order }) => order && (order.status === 'failed' || order.status === 'expired')
+    && now - Date.parse(order.cached_at || order.starts_at || 0) > DROP_UNPAID_AFTER_MS)
+    .map(({ reference }) => reference);
+  if (!gone.length) return;
+  const refs = (await readRefs()).filter((r) => !gone.includes(r));
+  refsCache = { owner, refs };
+  await secure.setItemAsync(refsKey(), JSON.stringify(refs)).catch(() => {});
+  await Promise.all(gone.map((r) => secure.deleteItemAsync(orderKey(r)).catch(() => {})));
+  announce();
+});
+
+export const refreshSavedOrders = async (now = Date.now()) => {
   const saved = await listSavedOrders();
-  for (const { reference } of saved) {
-    try { await cacheOrder(await fetchOrder(reference)); } catch { /* keep the copy we have */ }
+  await dropOldUnpaid(saved, now);
+  // Only what can still change, a few at a time: one by one, every saved
+  // order on every visit, was slow on a slow line and grew without end.
+  const ask = saved.filter(({ order }) => stillChanging(order, now)).map(({ reference }) => reference);
+  for (let i = 0; i < ask.length; i += REFRESH_AT_ONCE) {
+    await Promise.all(ask.slice(i, i + REFRESH_AT_ONCE).map(async (reference) => {
+      try { await cacheOrder(await fetchOrder(reference)); } catch { /* keep the copy we have */ }
+    }));
   }
   return listSavedOrders();
 };

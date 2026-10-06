@@ -22,7 +22,9 @@ import { useI18n } from '../../context/I18nContext';
 import { fetchMyEvent, updateEvent, uploadEventFiles } from '../../services/ticketsOrganiser';
 import { formatWhen, formatKes } from '../../services/tickets';
 import { confirmAction } from '../../utils/adminConfirm';
-import { T, F, tap, Kicker, GoldButton, Notice } from '../../components/tickets/TicketKit';
+import {
+  T, F, tap, Kicker, GoldButton, Notice, bannerRatio, isWideBanner, BANNER_FALLBACK,
+} from '../../components/tickets/TicketKit';
 import DateTimeField from '../../components/tickets/DateTimeField';
 import { pickBanner, BannerPermissionError } from '../../components/tickets/pickBanner';
 import { validateStep, serverErrorsByStep, TITLE_MAX, wholeNumber } from './eventDraft';
@@ -102,6 +104,13 @@ const TicketEditEvent = ({ navigation, route }) => {
 
   const save = async () => {
     const e = { ...validateStep('details', draft), ...validateStep(fund ? 'goal' : 'when', draft) };
+    // "Must be in the future" is for a date being set, not one left as it
+    // was: once an event had begun, nothing about it could be saved - not
+    // even a typo in its description.
+    const PAST = { startsAt: 'tix.host.err.startPast', endsAt: 'tix.host.err.endPast', salesEndAt: 'tix.host.err.salesPast' };
+    Object.entries(PAST).forEach(([k, code]) => {
+      if (e[k] === code && (draft[k] || '') === (before[k] || '')) delete e[k];
+    });
     setErrors(e);
     if (Object.keys(e).length || !changed || busy) return;
     if (goesToReview && event.status === 'published') {
@@ -126,9 +135,13 @@ const TicketEditEvent = ({ navigation, route }) => {
   };
 
   const shownPoster = poster?.uri || event.poster;
+  // At its own shape: the one just chosen, else the saved one's sizes.
+  const shownRatio = poster?.width ? bannerRatio({ poster_width: poster.width, poster_height: poster.height })
+    : event.poster ? bannerRatio(event) : BANNER_FALLBACK;
+  const bannerW = isWideBanner(shownRatio) ? 300 : 190;
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <KeyboardLift scrollRef={kbScroll}>
         <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Kicker>{t('tix.edit.kicker')}</Kicker>
@@ -141,7 +154,8 @@ const TicketEditEvent = ({ navigation, route }) => {
             </View>
           )}
 
-          <TouchableOpacity onPress={chooseBanner} activeOpacity={0.85} style={styles.banner} accessibilityRole="button"
+          <TouchableOpacity onPress={chooseBanner} activeOpacity={0.85}
+                            style={[styles.banner, { width: bannerW, height: bannerW / shownRatio }]} accessibilityRole="button"
                             accessibilityLabel={shownPoster ? t('tix.host.changeBanner') : t('tix.host.addBanner')}
                             testID="edit-banner">
             {shownPoster ? (
@@ -244,7 +258,7 @@ const styles = StyleSheet.create({
   noteText: { fontFamily: F.uiSemi, fontSize: 14, lineHeight: 20, color: T.ivory, marginTop: 4 },
 
   banner: {
-    alignSelf: 'center', marginTop: 20, width: 190, height: 238, borderRadius: 20, overflow: 'hidden',
+    alignSelf: 'center', marginTop: 20, borderRadius: 20, overflow: 'hidden',
     alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: T.surface, borderWidth: 1, borderStyle: 'dashed', borderColor: T.lineStrong,
   },

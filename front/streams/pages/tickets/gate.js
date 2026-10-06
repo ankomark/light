@@ -62,8 +62,13 @@ export const syncGate = async (eventId, gate, now = Date.now()) => {
   const since = gate.syncedAt ? new Date(new Date(gate.syncedAt).getTime() - SYNC_OVERLAP_MS).toISOString() : null;
   const tickets = { ...gate.tickets };
   let page = null;
+  let serverTime = null;
   do {
     const res = await fetchGateTickets(eventId, { since, page });
+    // The server's clock, from the first page: the phone's (used before)
+    // could run fast, and tickets bought just before a sync were then never
+    // fetched - their holders turned away as "not a ticket".
+    if (!serverTime && res.server_time) serverTime = res.server_time;
     (res.results || []).forEach((t) => {
       const mine = tickets[t.code];
       // A check-in made on this phone and not yet sent stays checked in.
@@ -71,16 +76,18 @@ export const syncGate = async (eventId, gate, now = Date.now()) => {
     });
     page = nextPage(res.next);
   } while (page);
-  return { ...gate, tickets, syncedAt: new Date(now).toISOString() };
+  return { ...gate, tickets, syncedAt: serverTime || new Date(now).toISOString() };
 };
 
 /**
  * A scan with no network: decided from the list, the check-in queued.
- * `{ gate, outcome: { result: 'admitted_offline' | 'already_used' | 'invalid', ticket } }`
+ * `{ gate, outcome: { result: 'admitted_offline' | 'already_used' | 'unknown_offline', ticket } }`
  */
 export const scanOffline = (gate, code, now = Date.now()) => {
   const ticket = gate.tickets[code];
-  if (!ticket) return { gate, outcome: { result: 'invalid' } };
+  // Not on this phone's list - which may only be older than the ticket.
+  // Online, the server would have said; offline, it can't be called invalid.
+  if (!ticket) return { gate, outcome: { result: 'unknown_offline' } };
   if (ticket.c) return { gate, outcome: { result: 'already_used', ticket, checkedInAt: ticket.c } };
   const at = new Date(now).toISOString();
   return {
@@ -110,7 +117,7 @@ export const flushQueue = async (eventId, gate) => {
   for (const item of gate.queue) {
     let result;
     try {
-      result = await checkIn(eventId, item.code);
+      result = await checkIn(eventId, item.code, item.at);
     } catch {
       break;
     }

@@ -26,6 +26,7 @@ const mockSecure = new Map();
 jest.mock('../../services/secureStorage', () => ({
   getItemAsync: async (k) => (mockSecure.has(k) ? mockSecure.get(k) : null),
   setItemAsync: async (k, v) => { mockSecure.set(k, v); },
+  deleteItemAsync: async (k) => { mockSecure.delete(k); },
 }));
 // Poll fast, give up fast: the behaviour is the same, the test is quicker.
 jest.mock('../../services/tickets', () => ({
@@ -190,7 +191,10 @@ test('checkout: pay saves the reference first, then waits on the order', async (
   fireEvent.press(screen.getByTestId('checkout-pay'));
 
   await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketOrder', { reference: 'ref-123', fresh: true }));
-  expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ ticket_type: 2, quantity: 2, phone: '0712 345 678', name: 'Amani', show_name: false });
+  expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+    ticket_type: 2, quantity: 2, phone: '0712 345 678', name: 'Amani', show_name: false,
+    client_key: expect.stringMatching(/^[A-Za-z0-9_-]{16,64}$/),
+  });
   expect(JSON.parse(mockSecure.get('tickets_refs_u7'))).toEqual(['ref-123']);
   // And the details are offered next time.
   await waitFor(() => expect(JSON.parse(mockSecure.get('tickets_buyer_u7'))).toEqual({ phone: '0712 345 678', name: 'Amani' }));
@@ -291,4 +295,113 @@ test('recover: a receipt that matches nothing says so; one that matches opens th
   fireEvent.press(screen.getByTestId('recover-find'));
   await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketOrder', { reference: 'ref-123' }));
   expect(JSON.parse(mockSecure.get('tickets_refs_u7'))).toContain('ref-123');
+});
+
+describe('Events & Tickets deep scan', () => {
+  test('checkout: a lost answer is retried with the same key - the order, not a second charge', async () => {
+    let calls = 0;
+    routes['POST public/orders/'] = () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError('Network request failed');     // the answer is lost
+      return reply(200, ORDER);                                          // the server: the same order
+    };
+    const navigation = nav();
+    const screen = render(<TicketCheckout navigation={navigation} route={{ params: checkoutParams }} />);
+    fireEvent.changeText(screen.getByTestId('checkout-phone'), '0712 345 678');
+    fireEvent.press(screen.getByTestId('checkout-pay'));
+    await waitFor(() => expect(screen.getByText('tix.payLost')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('checkout-pay'));
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketOrder', { reference: 'ref-123', fresh: true }));
+    const keys = global.fetch.mock.calls.map(([, init]) => JSON.parse(init.body).client_key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
+  test('checkout: another phone number is another checkout', async () => {
+    routes['POST public/orders/'] = () => { throw new TypeError('Network request failed'); };
+    const screen = render(<TicketCheckout navigation={nav()} route={{ params: checkoutParams }} />);
+    fireEvent.changeText(screen.getByTestId('checkout-phone'), '0712 345 678');
+    fireEvent.press(screen.getByTestId('checkout-pay'));
+    await waitFor(() => expect(screen.getByText('tix.payLost')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('checkout-phone'), '0722 000 000');
+    fireEvent.press(screen.getByTestId('checkout-pay'));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    const [a, b] = global.fetch.mock.calls.map(([, init]) => JSON.parse(init.body).client_key);
+    expect(a).not.toBe(b);
+  });
+
+  test('my tickets: a failed order over a week old is let go; a long-past paid one is kept but not asked about', async () => {
+    const { refreshSavedOrders, listSavedOrders } = require('../../services/tickets');
+    const old = new Date(Date.now() - 10 * 86400000).toISOString();
+    await cacheOrder({ reference: 'gone', status: 'failed', starts_at: old, cached_at: old });
+    await cacheOrder({ reference: 'past', status: 'paid', starts_at: old, tickets: [] });
+    await cacheOrder({ reference: 'live', status: 'pending', starts_at: future(3) });
+    routes['GET public/orders/live/'] = reply(200, { reference: 'live', status: 'paid', starts_at: future(3), tickets: [] });
+    await refreshSavedOrders();
+    const refs = (await listSavedOrders()).map((o) => o.reference).sort();
+    expect(refs).toEqual(['live', 'past']);
+    const asked = global.fetch.mock.calls.map(([url]) => url.replace(API, ''));
+    expect(asked).toEqual(['public/orders/live/']);
+  });
+});
+
+test('my tickets: an expired order is asked about again - late money still brings the tickets', async () => {
+  const { refreshSavedOrders, listSavedOrders } = require('../../services/tickets');
+  await cacheOrder({ reference: 'late', status: 'expired', starts_at: future(3) });
+  routes['GET public/orders/late/'] = reply(200, {
+    reference: 'late', status: 'paid', starts_at: future(3), tickets: [{ code: 't1', checked_in: false }],
+  });
+  await refreshSavedOrders();
+  const late = (await listSavedOrders()).find((o) => o.reference === 'late');
+  expect(late.order.status).toBe('paid');
+});
+
+test('my tickets: a gift sits under Your gifts, never under Past', () => {
+  const { groupOrders } = require('../tickets/MyTickets');
+  const old = new Date(Date.now() - 30 * 86400000).toISOString();
+  const sections = groupOrders([
+    { order: { reference: 'g', kind: 'donation', status: 'paid', starts_at: old } },
+    { order: { reference: 'e', kind: 'tickets', status: 'paid', starts_at: future(3) } },
+    { order: { reference: 'p', kind: 'tickets', status: 'paid', starts_at: old } },
+  ]);
+  expect(sections.map((s) => [s.key, s.data.map((o) => o.reference)])).toEqual([
+    ['tix.upcoming', ['e']], ['tix.gifts', ['g']], ['tix.past', ['p']],
+  ]);
+});
+
+describe('Banners at their own shape (as the home feed does photos)', () => {
+  const { bannerRatio, thumbShape, isWideBanner } = require('../../components/tickets/TicketKit');
+  const sized = (w, h) => ({ poster: 'https://x/p.jpg', poster_width: w, poster_height: h });
+
+  test('the ratio is the banner’s own, clamped as the feed clamps; unknown keeps 4:5', () => {
+    expect(bannerRatio(sized(1600, 900))).toBeCloseTo(1.778, 2);       // landscape 16:9
+    expect(bannerRatio(sized(1080, 1350))).toBeCloseTo(0.8, 2);        // portrait 4:5
+    expect(bannerRatio(sized(4000, 500))).toBe(1.91);                  // a panorama: clamped
+    expect(bannerRatio(sized(500, 4000))).toBe(0.5);                   // a ribbon: clamped
+    expect(bannerRatio({ poster: 'x' })).toBe(0.8);                    // an older server
+    expect(isWideBanner(bannerRatio(sized(1080, 1080)))).toBe(false); // square sits with portrait
+  });
+
+  test('small boxes: portrait 5:4 as before, landscape wider at its shape', () => {
+    expect(thumbShape(sized(1080, 1350), 72)).toEqual({ width: 72, height: 90 });
+    expect(thumbShape(sized(1600, 900), 72)).toEqual({ width: 104, height: 59 });
+  });
+
+  test('the Events list leads with a landscape banner whole, its words beneath', async () => {
+    routes['GET public/events/?kind=event'] = reply(200, { count: 1, next: null, results: [{ ...EVENT, ...sized(1600, 900) }] });
+    const screen = render(<TicketsHome navigation={nav()} />);
+    await waitFor(() => expect(screen.getByTestId('hero-wide')).toBeTruthy());
+  });
+
+  test('a portrait banner keeps its words over it', async () => {
+    routes['GET public/events/?kind=event'] = reply(200, { count: 1, next: null, results: [{ ...EVENT, ...sized(1080, 1350) }] });
+    const screen = render(<TicketsHome navigation={nav()} />);
+    await waitFor(() => expect(screen.getByTestId('hero-tall')).toBeTruthy());
+  });
+
+  test('the event page draws a landscape banner whole', async () => {
+    routes['GET public/events/gospel-night/'] = reply(200, { ...DETAIL, ...sized(1600, 900) });
+    const screen = render(<TicketEvent navigation={nav()} route={{ params: { slug: 'gospel-night' } }} />);
+    await waitFor(() => expect(screen.getByTestId('banner-wide')).toBeTruthy());
+  });
 });

@@ -20,12 +20,20 @@ const SHOWN = ['paid', 'pending'];
 
 /** `[{ key, data }]`: upcoming soonest first, past most recent first. */
 export const groupOrders = (saved, now = Date.now()) => {
-  const orders = (saved || []).map((s) => s.order).filter((o) => o && SHOWN.includes(o.status));
+  const all = (saved || []).map((s) => s.order).filter((o) => o && SHOWN.includes(o.status));
+  // A gift to a fundraiser is a receipt, not a night out: it has no date to
+  // be "past" by (the fundraiser's start is only when it opened, which put
+  // every gift under Past the moment it was given). Its own section, newest
+  // first.
+  const gifts = all.filter((o) => o.kind === 'donation')
+    .sort((a, b) => (Date.parse(b.cached_at || '') || 0) - (Date.parse(a.cached_at || '') || 0));
+  const orders = all.filter((o) => o.kind !== 'donation');
   const time = (o) => new Date(o.starts_at).getTime() || 0;
   const upcoming = orders.filter((o) => !isPast(o.starts_at, now)).sort((a, b) => time(a) - time(b));
   const past = orders.filter((o) => isPast(o.starts_at, now)).sort((a, b) => time(b) - time(a));
   return [
     ...(upcoming.length ? [{ key: 'tix.upcoming', data: upcoming }] : []),
+    ...(gifts.length ? [{ key: 'tix.gifts', data: gifts }] : []),
     ...(past.length ? [{ key: 'tix.past', data: past }] : []),
   ];
 };
@@ -67,7 +75,7 @@ const MyTickets = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <SectionList
         sections={sections}
         keyExtractor={(o) => o.reference}
@@ -79,7 +87,7 @@ const MyTickets = ({ navigation }) => {
         )}
         renderSectionHeader={({ section }) => <Kicker style={styles.kicker}>{t(section.key)}</Kicker>}
         renderItem={({ item: o }) => {
-          const past = isPast(o.starts_at);
+          const past = o.kind !== 'donation' && isPast(o.starts_at);
           return (
             <TouchableOpacity
               onPress={() => open(o)}

@@ -29,8 +29,9 @@ import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import {
   createOrder, createDonation, saveReference, cacheOrder, normalizeKePhone, formatKes, formatWhen, readBuyer, saveBuyer,
+  newCheckoutKey,
 } from '../../services/tickets';
-import { T, F, Kicker, GoldButton } from '../../components/tickets/TicketKit';
+import { T, F, Kicker, GoldButton, thumbShape } from '../../components/tickets/TicketKit';
 import { ticketErrorText } from './ticketText';
 
 const TicketCheckout = ({ navigation, route }) => {
@@ -56,6 +57,15 @@ const TicketCheckout = ({ navigation, route }) => {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // This checkout's one-time key: the same on every retry (no second charge
+  // if the first went through and only its answer was lost), a new one for
+  // another phone number (a prompt that went to a mistyped number isn't this).
+  const checkoutKey = useRef({ phone: null, key: null });
+  const keyFor = (p) => {
+    const n = normalizeKePhone(p);
+    if (checkoutKey.current.phone !== n || !checkoutKey.current.key) checkoutKey.current = { phone: n, key: newCheckoutKey() };
+    return checkoutKey.current.key;
+  };
   const [fieldErrors, setFieldErrors] = useState({});
   const [showPhoneError, setShowPhoneError] = useState(false);
   const phoneOk = !!normalizeKePhone(phone);
@@ -68,9 +78,10 @@ const TicketCheckout = ({ navigation, route }) => {
     setError('');
     setFieldErrors({});
     try {
+      const clientKey = keyFor(phone);
       const order = donation
-        ? await createDonation({ slug: event.slug, amount: donation.amount, phone, name, showName })
-        : await createOrder({ ticketType: ticketType.id, quantity, phone, name, showName });
+        ? await createDonation({ slug: event.slug, amount: donation.amount, phone, name, showName, clientKey })
+        : await createOrder({ ticketType: ticketType.id, quantity, phone, name, showName, clientKey });
       // The key to the tickets, kept before anything else can go wrong.
       await saveReference(order.reference);
       cacheOrder(order);
@@ -83,13 +94,15 @@ const TicketCheckout = ({ navigation, route }) => {
       // (Only the fields on this screen; a quantity or ticket-type problem
       // has nowhere else to show.)
       const shownBelow = !!err?.message && [fields.phone, fields.name].includes(err.message);
-      setError(shownBelow ? '' : ticketErrorText(err, t));
+      // The answer was lost, not the order: if a prompt came, pay it, then
+      // Pay again here - the same checkout, so never a second charge.
+      setError(shownBelow ? '' : err?.code === 'network' ? t('tix.payLost') : ticketErrorText(err, t));
       setBusy(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <KeyboardLift scrollRef={kbScroll}>
         <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Kicker>{t('tix.checkout')}</Kicker>
@@ -99,7 +112,7 @@ const TicketCheckout = ({ navigation, route }) => {
           <View style={styles.stub}>
             <View style={styles.stubTop}>
               {event.poster ? (
-                <Image source={{ uri: event.poster }} style={styles.stubPoster} contentFit="cover"
+                <Image source={{ uri: event.poster }} style={[styles.stubPoster, thumbShape(event, 64)]} contentFit="cover"
                        cachePolicy="memory-disk" accessibilityIgnoresInvertColors />
               ) : null}
               <View style={styles.flex}>
@@ -208,7 +221,7 @@ const styles = StyleSheet.create({
 
   stub: { backgroundColor: T.paper, borderRadius: 22, overflow: 'hidden' },
   stubTop: { flexDirection: 'row', gap: 14, padding: 18 },
-  stubPoster: { width: 64, height: 80, borderRadius: 10 },
+  stubPoster: { borderRadius: 10 },
   stubTitle: { fontFamily: F.display, fontSize: 23, lineHeight: 26, color: T.paperInk },
   stubMeta: { fontFamily: F.uiSemi, fontSize: 12.5, color: 'rgba(22,19,14,0.62)', marginTop: 4 },
   perf: { height: NOTCH, justifyContent: 'center' },

@@ -191,7 +191,7 @@ const TicketOrder = ({ navigation, route }) => {
   // A gift: a thank-you and its receipt, no tickets.
   if (order.status === 'paid' && order.kind === 'donation') {
     return (
-      <SafeAreaView style={styles.root} edges={['bottom']}>
+      <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
         <ScrollView contentContainerStyle={styles.thanksScroll} showsVerticalScrollIndicator={false}>
           <View style={styles.thanksIcon}><Ionicons name="heart" size={36} color={T.paperInk} /></View>
           <Text style={styles.thanksTitle} accessibilityRole="header">{t('tix.fund.thanks')}</Text>
@@ -211,7 +211,7 @@ const TicketOrder = ({ navigation, route }) => {
   if (order.status === 'paid') {
     const tickets = order.tickets || [];
     return (
-      <SafeAreaView style={styles.root} edges={['bottom']}>
+      <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
         <ScrollView contentContainerStyle={styles.paidScroll} showsVerticalScrollIndicator={false}>
           <View style={styles.paidHead}>
             <Kicker>{t('tix.youreGoing')}</Kicker>
@@ -252,7 +252,7 @@ const TicketOrder = ({ navigation, route }) => {
 
   const failed = order.status === 'failed' || order.status === 'expired';
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.waitScroll}>
         {failed ? (
           <View style={styles.failIcon}>

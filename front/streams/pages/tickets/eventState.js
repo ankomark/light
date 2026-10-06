@@ -7,9 +7,20 @@
 // one thing to do next, so the organiser never has to work it out. Skylink
 // can also pause an event or remove it for good; both outrank the rest.
 
-/** True once the event is over (its end, or its start when it has none). */
+/**
+ * True once it is over. An event: at its end, or its start when it has none
+ * (it happened). A fundraiser: at its end or its sales end - and with neither
+ * it runs until it is closed, as the server has it (events/models.py,
+ * sales_close_at). Its start is only when it opened (the moment it was made,
+ * when no date was given), so falling back to it called every open-ended
+ * fundraiser "Ended" a moment after it was created - approved and taking
+ * money, with its controls hidden.
+ */
 export const isOver = (event, now = Date.now()) => {
-  const end = new Date(event?.ends_at || event?.starts_at).getTime();
+  const fundraiser = event?.kind === 'fundraiser';
+  const close = fundraiser ? (event?.ends_at || event?.sales_end_at) : (event?.ends_at || event?.starts_at);
+  if (!close) return false;
+  const end = new Date(close).getTime();
   return !Number.isNaN(end) && end < now;
 };
 

@@ -108,6 +108,18 @@ describe('where an event stands', () => {
     expect(s({ status: 'cancelled', removed_at: past(1), paused_by_staff: true })).toMatchObject({ key: 'removed', action: null });
   });
 
+  it('an approved fundraiser with no end date is on sale, not "ended" (it opened when it was made)', () => {
+    const fund = (extra) => eventState(ev({ kind: 'fundraiser', starts_at: past(3), ends_at: null, ...extra }));
+    expect(fund({ status: 'published', review_status: 'approved' })).toMatchObject({ key: 'onSale' });
+    expect(fund({ review_status: 'approved' })).toMatchObject({ key: 'approved', action: 'publish' });
+    // It does end: at its end date, or when its giving closes.
+    expect(fund({ status: 'published', ends_at: past(1) })).toMatchObject({ key: 'ended' });
+    expect(fund({ status: 'published', sales_end_at: past(1) })).toMatchObject({ key: 'ended' });
+    expect(fund({ status: 'published', ends_at: future(30) })).toMatchObject({ key: 'onSale' });
+    // An event with a start in the past and no end still happened.
+    expect(eventState(ev({ kind: 'event', status: 'published', starts_at: past(2) }))).toMatchObject({ key: 'ended' });
+  });
+
   test('grouped: what needs them first, what is over last', () => {
     const groups = groupEvents([
       ev({ id: 1, status: 'cancelled' }),

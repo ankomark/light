@@ -40,7 +40,7 @@ import {
 } from '../../services/ticketsOrganiser';
 import { formatKes, formatWhen, dateTile } from '../../services/tickets';
 import {
-  T, F, tap, Kicker, DateTile, Pill, GoldButton, GhostButton,
+  T, F, tap, Kicker, DateTile, Pill, GoldButton, GhostButton, bannerRatio, bannerHeight, isWideBanner, BANNER_FALLBACK,
 } from '../../components/tickets/TicketKit';
 import DateTimeField from '../../components/tickets/DateTimeField';
 import { pickBanner as chooseBanner, BannerPermissionError } from '../../components/tickets/pickBanner';
@@ -57,7 +57,12 @@ import { ticketErrorText } from './ticketText';
 const draftKey = () => `tix:hostDraft:${organiserScope() || 'none'}`;
 const SAVE_WAIT_MS = 400;
 const PRESETS = ['regular', 'vip', 'vvip', 'earlyBird', 'couple', 'group'];
-const BANNER_RATIO = 4 / 5;     // as the Events list shows posters
+// The empty banner slot's shape; a chosen banner is shown at its own.
+const BANNER_RATIO = BANNER_FALLBACK;
+/** The shape of a banner just picked ({width, height}) or saved (the event's sizes). */
+const shapeOf = (picked, event) => bannerRatio(picked?.width ? { poster_width: picked.width, poster_height: picked.height }
+  : event || null);
+
 
 // The fields the server keeps (no files), and as a string to tell whether
 // they changed after the event was first saved (and so need sending again).
@@ -322,7 +327,7 @@ const TicketCreateEvent = ({ navigation }) => {
       : publishNote || (done.tillActive ? t('tix.host.sentBody')
         : t('tix.host.sentBodyTill', { till: till?.till_number || '' }));
     return (
-      <SafeAreaView style={styles.root} edges={['bottom']}>
+      <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
         <ScrollView contentContainerStyle={styles.doneScroll}>
           <View style={[styles.doneIcon, published && styles.doneIconLive]}>
             <Ionicons name={published ? 'sparkles' : publishNote ? 'bookmark' : 'hourglass-outline'} size={34}
@@ -361,9 +366,12 @@ const TicketCreateEvent = ({ navigation }) => {
   const fund = draft.kind === 'fundraiser';
   const range = priceRange(draft.levels);
   const previewWidth = Math.min(width, 620) - 40;
+  // The review preview at the banner's shape, as the Events list will show it.
+  const previewRatio = draft.poster ? shapeOf(draft.poster) : BANNER_FALLBACK;
+  const previewWide = !!draft.poster && isWideBanner(previewRatio);
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <KeyboardLift scrollRef={scroll}>
         {/* Where they are: five bars, the current one gold. */}
         <View style={styles.progress}>
@@ -409,7 +417,12 @@ const TicketCreateEvent = ({ navigation }) => {
               <TouchableOpacity
                 onPress={pickBanner}
                 activeOpacity={0.85}
-                style={[styles.banner, { width: previewWidth * 0.62, height: (previewWidth * 0.62) / BANNER_RATIO }]}
+                style={[styles.banner, (() => {
+                  // Portrait: a poster-sized slot. Landscape: nearly the width.
+                  const r = draft.poster ? shapeOf(draft.poster) : BANNER_RATIO;
+                  const w = previewWidth * (isWideBanner(r) ? 0.94 : 0.62);
+                  return { width: w, height: w / r };
+                })()]}
                 accessibilityRole="button"
                 accessibilityLabel={draft.poster ? t('tix.host.changeBanner') : t('tix.host.addBanner')}
                 testID="host-banner"
@@ -619,16 +632,23 @@ const TicketCreateEvent = ({ navigation }) => {
               <Text style={styles.body}>{t('tix.host.reviewBody')}</Text>
 
               {/* As it will stand at the top of Events. */}
-              <View style={[styles.preview, { width: previewWidth, height: previewWidth * 1.18 }]}>
-                {draft.poster ? (
-                  <Image source={{ uri: draft.poster.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                ) : (
-                  <LinearGradient colors={['#2A2418', '#141210']} style={StyleSheet.absoluteFill} />
-                )}
-                <LinearGradient colors={['rgba(10,10,13,0)', 'rgba(10,10,13,0.35)', 'rgba(10,10,13,0.96)']}
-                                locations={[0.25, 0.55, 1]} style={StyleSheet.absoluteFill} />
-                {!fund && !!draft.startsAt && <DateTile {...dateTile(draft.startsAt, months)} style={styles.previewTile} />}
-                <View style={styles.previewText}>
+              <View style={[styles.preview, { width: previewWidth },
+                !previewWide && { height: bannerHeight(previewWidth, previewRatio, { minHeight: previewWidth * 1.05, maxHeight: previewWidth * 1.6 }) }]}
+                    testID={previewWide ? 'preview-wide' : 'preview-tall'}>
+                <View style={previewWide ? { height: bannerHeight(previewWidth, previewRatio) } : StyleSheet.absoluteFill}>
+                  {draft.poster ? (
+                    <Image source={{ uri: draft.poster.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                  ) : (
+                    <LinearGradient colors={['#2A2418', '#141210']} style={StyleSheet.absoluteFill} />
+                  )}
+                  {!previewWide && (
+                    <LinearGradient colors={['rgba(10,10,13,0)', 'rgba(10,10,13,0.35)', 'rgba(10,10,13,0.96)']}
+                                    locations={[0.25, 0.55, 1]} style={StyleSheet.absoluteFill} />
+                  )}
+                  {!fund && !!draft.startsAt && <DateTile {...dateTile(draft.startsAt, months)} style={styles.previewTile} />}
+                </View>
+                {/* As the Events list will show it: a landscape banner's words beneath it. */}
+                <View style={previewWide ? styles.previewBelow : styles.previewText}>
                   {fund ? (!!draft.category && <Kicker>{t(`tix.cat.${draft.category}`)}</Kicker>)
                     : (!!draft.city && <Kicker>{draft.city}</Kicker>)}
                   <Text style={styles.previewTitle} numberOfLines={3}>{draft.title}</Text>
@@ -830,6 +850,7 @@ const styles = StyleSheet.create({
   preview: { alignSelf: 'center', marginTop: 20, borderRadius: 26, overflow: 'hidden', backgroundColor: T.surface },
   previewTile: { position: 'absolute', top: 14, left: 14 },
   previewText: { position: 'absolute', left: 20, right: 20, bottom: 20 },
+  previewBelow: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 20 },
   previewTitle: { fontFamily: F.display, fontSize: 32, lineHeight: 35, color: T.ivory, marginTop: 6 },
   previewMeta: { fontFamily: F.uiSemi, fontSize: 13, color: T.muted, marginTop: 8 },
   previewPrice: { fontFamily: F.uiHeavy, fontSize: 15, color: T.champagne, marginTop: 10 },

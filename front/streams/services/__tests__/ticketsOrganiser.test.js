@@ -130,6 +130,17 @@ describe('session', () => {
     await expect(org.fetchTills()).rejects.toMatchObject({ code: 'signed_out' });
   });
 
+  it('keeps the session through a server error or a rate limit on the refresh', async () => {
+    for (const status of [500, 502, 429]) {
+      signIn();
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce(reply(401, {}))
+        .mockResolvedValueOnce(reply(status, { detail: 'busy' }));
+      await expect(org.fetchMe()).rejects.toMatchObject({ status });
+      expect(stored()).toEqual({ access: 'a1', refresh: 'r1' });
+    }
+  });
+
   it('keeps the session when the refresh only failed to reach the server', async () => {
     signIn();
     global.fetch
@@ -297,5 +308,15 @@ describe('the draft', () => {
       step: 'when', errors: { till: 'Not your till', startsAt: 'Must be in the future' },
     });
     expect(serverErrorsByStep({})).toEqual({ step: null, errors: {} });
+  });
+});
+
+describe('third pass', () => {
+  it('signs in with the email in lower case (a phone capitalises the first letter)', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(reply(200, { access: 'a1', refresh: 'r1' }))
+      .mockResolvedValueOnce(reply(200, { id: 1, email: 'mark@x.com' }));
+    await org.logIn({ email: '  Mark@X.com ', password: 'pw' });
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).email).toBe('mark@x.com');
   });
 });

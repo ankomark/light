@@ -28,7 +28,9 @@ import {
 import { formatKes, formatWhen } from '../../services/tickets';
 import { confirmAction } from '../../utils/adminConfirm';
 import { DailyBars, LevelShare, Ring } from '../../components/tickets/Charts';
-import { T, F, tap, Kicker, Pill, Notice, GoldButton, GhostButton } from '../../components/tickets/TicketKit';
+import {
+  T, F, tap, Kicker, Pill, Notice, GoldButton, GhostButton, thumbShape,
+} from '../../components/tickets/TicketKit';
 import { eventState, isOver, staffNote } from './eventState';
 import { VisibilityControls, pickDocument } from './HostSteps';
 import { Progress } from '../../components/tickets/Supporters';
@@ -143,6 +145,18 @@ const TicketManageEvent = ({ navigation, route }) => {
     if (!(quantity >= 1)) { setFormError(t('tix.host.err.quantity')); return; }
     if (tt && quantity < tt.sold) { setFormError(t('tix.mine.belowSold', { n: tt.sold })); return; }
     setFormError('');
+    // A new level, or a name or price changed, is checked again by Skylink
+    // (the server sends an approved event back to review): said before it
+    // takes a live event off sale, as editing its title is. More seats alone
+    // are not.
+    const reviewed = !tt || form.name.trim() !== tt.name || (!tt.sold && price !== tt.price);
+    if (reviewed && event.review_status === 'approved' && event.status === 'published') {
+      const ok = await confirmAction({
+        title: t('tix.edit.pauseTitle'), message: t('tix.edit.pauseBody'),
+        confirmLabel: t('tix.edit.saveAnyway'), cancelLabel: t('common.cancel'),
+      });
+      if (!ok) return;
+    }
     const done = await act('level', async () => {
       if (tt) {
         const patch = { name: form.name.trim(), quantity };
@@ -182,7 +196,7 @@ const TicketManageEvent = ({ navigation, route }) => {
   const capacity = (summary?.tickets_sold || 0) + (summary?.tickets_available || 0);
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <KeyboardLift scrollRef={kbScroll}>
       <ScrollView ref={kbScroll}
         contentContainerStyle={styles.scroll}
@@ -190,7 +204,7 @@ const TicketManageEvent = ({ navigation, route }) => {
         refreshControl={<RefreshControl refreshing={pulling} onRefresh={pull} tintColor={T.gold} colors={[T.gold]} />}
       >
         <View style={styles.head}>
-          {event.poster ? <Image source={{ uri: event.poster }} style={styles.poster} contentFit="cover" cachePolicy="memory-disk" /> : null}
+          {event.poster ? <Image source={{ uri: event.poster }} style={[styles.poster, thumbShape(event, 76)]} contentFit="cover" cachePolicy="memory-disk" /> : null}
           <View style={styles.flex}>
             <Text style={styles.when}>{formatWhen(event.starts_at, { months, weekdays })}</Text>
             <Text style={styles.title} accessibilityRole="header">{event.title}</Text>
@@ -407,7 +421,7 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 40, width: '100%', maxWidth: 720, alignSelf: 'center' },
 
   head: { flexDirection: 'row', gap: 14, alignItems: 'center' },
-  poster: { width: 76, height: 95, borderRadius: 14 },
+  poster: { borderRadius: 14 },
   when: { fontFamily: F.uiBold, fontSize: 11, letterSpacing: 1.1, textTransform: 'uppercase', color: T.gold },
   title: { fontFamily: F.display, fontSize: 28, lineHeight: 31, color: T.ivory, marginTop: 4 },
   venue: { fontFamily: F.uiSemi, fontSize: 13, color: T.muted, marginTop: 4 },

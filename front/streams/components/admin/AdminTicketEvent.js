@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
 import { fetchAdminTicketEvent, adminTicketEventAction } from '../../services/api';
 import { formatKes, formatWhen } from '../../services/tickets';
+import { bannerRatio } from '../tickets/TicketKit';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { ADMIN, ErrorState, useReasonSheet } from './AdminKit';
 import { Badge, TILL_COLOR, STATE_COLOR, adminState, stateLabel } from './AdminTickets';
@@ -113,7 +114,10 @@ export default function AdminTicketEvent({ navigation, route }) {
   return (
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        {!!event.poster && <Image source={{ uri: event.poster }} style={styles.poster} contentFit="cover" />}
+        {!!event.poster && (
+          // At its own shape: a landscape flyer whole, as staff must judge it.
+          <Image source={{ uri: event.poster }} style={[styles.poster, { aspectRatio: bannerRatio(event) }]} contentFit="cover" />
+        )}
         {event.kind === 'fundraiser' && (
           <Text style={styles.kind}>
             {[t('tix.kind.fundraiser'), event.category ? t(`tix.cat.${event.category}`) : ''].filter(Boolean).join(' · ')}
@@ -268,7 +272,7 @@ const styles = StyleSheet.create({
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   container: { flex: 1 },
   content: { padding: 18, paddingBottom: 32, width: '100%', maxWidth: 760, alignSelf: 'center' },
-  poster: { width: '100%', aspectRatio: 4 / 5, maxHeight: 420, borderRadius: 16, marginBottom: 14 },
+  poster: { width: '100%', maxHeight: 420, borderRadius: 16, marginBottom: 14 },
   title: { color: ADMIN.text, fontSize: 22, fontWeight: '800' },
   kind: { color: ADMIN.gold, fontSize: 12, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
   docBtn: {

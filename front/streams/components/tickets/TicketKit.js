@@ -41,6 +41,43 @@ export const F = {
 };
 
 export const tap = () => { Haptics.selectionAsync().catch(() => {}); };
+
+// ── Banners at their own shape ───────────────────────────────────────────────
+// As the home feed draws photos (components/SocialFeed.js): each banner at its
+// true width:height, uncropped - portrait or landscape - from the size the
+// ticketing server keeps (poster_width/poster_height). Clamped to the feed's
+// [1:2, 1.91:1] so an extreme one can't run off the screen; a banner whose
+// size isn't known (none uploaded, an older server) keeps the old 4:5.
+export const BANNER_FALLBACK = 4 / 5;
+export const bannerRatio = (event) => {
+  const w = Number(event?.poster_width);
+  const h = Number(event?.poster_height);
+  if (!w || !h) return BANNER_FALLBACK;
+  const r = w / h;
+  return Number.isFinite(r) && r > 0 ? Math.min(1.91, Math.max(0.5, r)) : BANNER_FALLBACK;
+};
+/** Wider than tall (a little past square): laid out as a landscape banner. */
+export const isWideBanner = (ratio) => ratio > 1.05;
+/**
+ * The height a banner `width` wide is drawn at: its own shape, no taller than
+ * `maxHeight` (the screen allows) and - where text sits over it - no shorter
+ * than `minHeight`. Past either bound, contentFit="cover" centre-crops, as the
+ * feed does at its extremes.
+ */
+export const bannerHeight = (width, ratio, { maxHeight = Infinity, minHeight = 0 } = {}) => (
+  Math.round(Math.max(minHeight, Math.min(maxHeight, width / ratio)))
+);
+/**
+ * A small banner's box (a row, a stub): `base` wide and 5:4 tall for a
+ * portrait one, as before; for a landscape one wider and at its own shape
+ * (up to 16:9), not a centre-cropped sliver of it.
+ */
+export const thumbShape = (event, base) => {
+  const r = event?.poster ? bannerRatio(event) : BANNER_FALLBACK;
+  if (!isWideBanner(r)) return { width: base, height: Math.round(base * 1.25) };
+  const w = Math.round(base * 1.45);
+  return { width: w, height: Math.round(w / Math.min(r, 16 / 9)) };
+};
 export const thud = () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); };
 
 /** The one gold action on a screen. */

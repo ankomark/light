@@ -132,7 +132,11 @@ const refresh = () => {
         // A refresh the server refused ends the session. One that never
         // reached it (no network) does not: the tokens may still be good.
         if (err?.code === 'signed_out') throw err;
-        if (err?.code !== 'network') { await keepTokens(null, whose); throw signedOut(); }
+        // Only the server refusing the token (400/401: expired, retired, or
+        // the password reset everywhere) ends it. A server error or a rate
+        // limit did too - and signed every organiser out mid-event, the gate
+        // scanner included - though their session was fine.
+        if (err?.status === 400 || err?.status === 401) { await keepTokens(null, whose); throw signedOut(); }
         throw err;
       }
     })();
@@ -194,7 +198,8 @@ export const signUp = async ({ email, password, displayName, phone }) => {
 };
 
 export const logIn = async ({ email, password }) => {
-  const res = await request('auth/login/', { method: 'POST', body: { email: email.trim(), password } });
+  // As stored: lower case (a phone capitalises the first letter).
+  const res = await request('auth/login/', { method: 'POST', body: { email: email.trim().toLowerCase(), password } });
   await keepTokens(res);
   await rememberEmail(email);
   return fetchMe();
@@ -378,9 +383,12 @@ export const fetchGateTickets = (id, { since, page } = {}) => {
  * Check a ticket in. Resolves `{ result: 'admitted' | 'already_used' |
  * 'invalid', ... }` for all three: 409 and 404 are answers here, not errors.
  */
-export const checkIn = async (id, code) => {
+export const checkIn = async (id, code, scannedAt = null) => {
   try {
-    return await authed(`organiser/events/${id}/checkin/`, { method: 'POST', body: { code } });
+    // A scan made offline says when it was made, so "used at" is when they came in.
+    return await authed(`organiser/events/${id}/checkin/`, {
+      method: 'POST', body: scannedAt ? { code, scanned_at: scannedAt } : { code },
+    });
   } catch (err) {
     if (err?.status === 409) return { result: 'already_used', ...(err.body || {}) };
     if (err?.status === 404 && err?.body?.result === 'invalid') return { result: 'invalid', ...err.body };

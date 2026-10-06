@@ -22,7 +22,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
 import useCachedData from '../../utils/useCachedData';
 import { fetchEvent, formatKes, formatWhen, MAX_QUANTITY } from '../../services/tickets';
-import { T, F, tap, Kicker, Pill, GoldButton, Notice } from '../../components/tickets/TicketKit';
+import {
+  T, F, tap, Kicker, Pill, GoldButton, Notice, bannerRatio, bannerHeight, isWideBanner, BANNER_FALLBACK,
+} from '../../components/tickets/TicketKit';
 import Supporters, { Progress, useLive } from '../../components/tickets/Supporters';
 import { ticketErrorText } from './ticketText';
 
@@ -75,13 +77,20 @@ const TicketEvent = ({ navigation, route }) => {
 
   const [aboutOpen, setAboutOpen] = useState(false);
   const total = selected ? selected.price * quantity : 0;
-  const heroHeight = Math.min(width * 1.08, height * 0.58, 560);
+  // The banner at its own shape (components/tickets/TicketKit: bannerRatio).
+  // Portrait: full bleed, the title over its foot. Landscape: the whole
+  // picture, the title beneath it - over a short wide banner it hid it.
+  const ratio = event?.poster ? bannerRatio(event) : BANNER_FALLBACK;
+  const wide = !!event?.poster && isWideBanner(ratio);
+  const heroHeight = wide
+    ? bannerHeight(width, ratio, { maxHeight: height * 0.55 })
+    : bannerHeight(width, ratio, { minHeight: Math.min(width * 0.9, height * 0.45), maxHeight: Math.min(height * 0.62, 640) });
 
   const go = () => {
     if (!selected || !event) return;
     navigation.push('TicketCheckout', {
       event: {
-        slug, title: event.title, starts_at: event.starts_at, venue: event.venue, city: event.city, poster: event.poster,
+        slug, title: event.title, starts_at: event.starts_at, venue: event.venue, city: event.city, poster: event.poster, poster_width: event.poster_width, poster_height: event.poster_height,
         show_supporters: !!full.data?.show_supporters,
       },
       ticketType: { id: selected.id, name: selected.name, price: selected.price },
@@ -107,20 +116,23 @@ const TicketEvent = ({ navigation, route }) => {
   }
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <View style={[styles.hero, { height: heroHeight }]}>
-          {event.poster ? (
-            <Image source={{ uri: event.poster }} style={StyleSheet.absoluteFill} contentFit="cover"
-                   cachePolicy="memory-disk" transition={200} accessibilityIgnoresInvertColors />
-          ) : (
-            <LinearGradient colors={['#2A2418', T.ink]} style={StyleSheet.absoluteFill} />
-          )}
-          <LinearGradient
-            colors={['rgba(10,10,13,0)', 'rgba(10,10,13,0.55)', T.ink]}
-            locations={[0.35, 0.72, 1]}
-            style={StyleSheet.absoluteFill}
-          />
+        <View style={[styles.hero, wide ? styles.heroWide : { height: heroHeight }]} testID={wide ? 'banner-wide' : 'banner-tall'}>
+          <View style={wide ? { height: heroHeight } : StyleSheet.absoluteFill}>
+            {event.poster ? (
+              <Image source={{ uri: event.poster }} style={StyleSheet.absoluteFill} contentFit="cover"
+                     cachePolicy="memory-disk" transition={200} accessibilityIgnoresInvertColors />
+            ) : (
+              <LinearGradient colors={['#2A2418', T.ink]} style={StyleSheet.absoluteFill} />
+            )}
+            {/* Landscape: only a soft fade into the page at its foot. */}
+            <LinearGradient
+              colors={wide ? ['rgba(10,10,13,0)', T.ink] : ['rgba(10,10,13,0)', 'rgba(10,10,13,0.55)', T.ink]}
+              locations={wide ? [0.78, 1] : [0.35, 0.72, 1]}
+              style={StyleSheet.absoluteFill}
+            />
+          </View>
           <View style={styles.heroText}>
             {!!event.city && <Kicker>{event.city}</Kicker>}
             <Text style={styles.title} accessibilityRole="header">{event.title}</Text>
@@ -245,6 +257,8 @@ const styles = StyleSheet.create({
 
   hero: { width: '100%', justifyContent: 'flex-end', backgroundColor: T.surface },
   heroText: { paddingHorizontal: 20, paddingBottom: 6, width: '100%', maxWidth: 720, alignSelf: 'center' },
+  // A landscape banner: the picture, then its title on the page itself.
+  heroWide: { backgroundColor: 'transparent', justifyContent: 'flex-start' },
   title: { fontFamily: F.display, fontSize: 38, lineHeight: 41, color: T.ivory, marginTop: 6 },
   host: { fontFamily: F.uiSemi, fontSize: 13.5, color: T.muted, marginTop: 8 },
 

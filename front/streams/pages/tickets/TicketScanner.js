@@ -38,6 +38,7 @@ const VERDICT = {
   admitted_offline: { color: '#D9952B', icon: 'checkmark-circle', key: 'admittedOffline' },
   already_used: { color: '#D2493C', icon: 'close-circle', key: 'used' },
   invalid: { color: '#D2493C', icon: 'alert-circle', key: 'invalid' },
+  unknown_offline: { color: '#D2493C', icon: 'cloud-offline', key: 'unknownOffline' },
 };
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -149,7 +150,7 @@ const TicketScanner = ({ navigation, route }) => {
   const v = verdict && VERDICT[verdict.result];
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <KeyboardLift scrollRef={kbScroll}>
       <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Kicker>{t('tix.gate.kicker')}</Kicker>
@@ -215,6 +216,9 @@ const TicketScanner = ({ navigation, route }) => {
                   <Text style={styles.verdictLine}>{t('tix.gate.usedAt', { at: clock(verdict.checkedInAt) })}</Text>
                 )}
                 {verdict.result === 'invalid' && <Text style={styles.verdictLine}>{t('tix.gate.invalidHint')}</Text>}
+                {verdict.result === 'unknown_offline' && (
+                  <Text style={styles.verdictLine}>{t('tix.gate.unknownOfflineHint')}</Text>
+                )}
               </TouchableOpacity>
             </Animated.View>
           )}

@@ -136,7 +136,7 @@ const TicketBuyers = ({ navigation, route }) => {
   );
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <FlatList
         data={rows || []}
         keyExtractor={(p) => p.code}

@@ -84,7 +84,7 @@ const TicketPasswordReset = ({ navigation, route }) => {
   const goTo = (s) => { tap(); setStep(s); setTried(false); setError(''); };
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <KeyboardLift scrollRef={kbScroll}>
         <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Kicker>{t('tix.host.kicker')}</Kicker>

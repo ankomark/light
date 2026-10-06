@@ -6,7 +6,8 @@
  * The total (and the supporters list) shows only when the organiser made it
  * public, and climbs while the page is open — re-read every 10 s.
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { peekCache, readCache, writeCache } from '../../utils/screenCache';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
@@ -17,7 +18,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import KeyboardLift from '../../components/tickets/KeyboardLift';
 import { useI18n } from '../../context/I18nContext';
 import { fetchEvent, formatKes, formatWhen, DEFAULT_SUGGESTED, MIN_GIFT, MAX_GIFT } from '../../services/tickets';
-import { T, F, tap, Kicker, Pill, GoldButton, Notice } from '../../components/tickets/TicketKit';
+import {
+  T, F, tap, Kicker, Pill, GoldButton, Notice, bannerRatio, bannerHeight, isWideBanner, BANNER_FALLBACK,
+} from '../../components/tickets/TicketKit';
 import Supporters, { Progress, useLive } from '../../components/tickets/Supporters';
 import { wholeNumber } from './eventDraft';
 import { ticketErrorText } from './ticketText';
@@ -36,18 +39,28 @@ const TicketFundraiser = ({ navigation, route }) => {
   const weekdays = t('tix.weekdays').split(',');
   const { slug, preview } = route.params;
 
-  const [event, setEvent] = useState(preview || null);
+  // The last copy (shared with the event page's) at once, then the list's
+  // preview, then the network every few seconds while open.
+  const cacheKey = `tix:event:${slug}`;
+  const [event, setEvent] = useState(() => peekCache(cacheKey) || preview || null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
-  useLive(async () => {
+  useEffect(() => {
+    if (peekCache(cacheKey)) return;
+    readCache(cacheKey).then((kept) => { if (kept) setEvent((e) => (e && e !== preview ? e : kept)); });
+  }, [cacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const refresh = useCallback(async () => {
     try {
-      setEvent(await fetchEvent(slug));
+      const fresh = await fetchEvent(slug);
+      setEvent(fresh);
+      writeCache(cacheKey, fresh);
       setLoaded(true);
       setError(null);
     } catch (err) {
-      if (!loaded) setError(err);
+      setError(err);
     }
-  });
+  }, [slug, cacheKey]);
+  useLive(refresh);
 
   const [amount, setAmount] = useState('');
   const [picked, setPicked] = useState(null);
@@ -59,7 +72,8 @@ const TicketFundraiser = ({ navigation, route }) => {
   if (!event) {
     return (
       <View style={[styles.root, styles.centre]}>
-        {error ? <Notice title={ticketErrorText(error, t)} action={t('common.retry')} onAction={() => setError(null)} />
+        {/* Try again now - it only cleared the message, and waited for the next tick. */}
+        {error ? <Notice title={ticketErrorText(error, t)} action={t('common.retry')} onAction={() => { setError(null); refresh(); }} />
           : <ActivityIndicator color={T.gold} size="large" />}
       </View>
     );
@@ -67,32 +81,45 @@ const TicketFundraiser = ({ navigation, route }) => {
 
   const suggested = (event.suggested_amounts?.length ? event.suggested_amounts : DEFAULT_SUGGESTED).slice(0, 6);
   const open = loaded && event.on_sale;
-  const heroHeight = Math.min(width * 1.0, height * 0.5, 520);
+  // The banner at its own shape (components/tickets/TicketKit: bannerRatio).
+  // Portrait: full bleed, the title over its foot. Landscape: the whole
+  // picture, the title beneath it - over a short wide banner it hid it.
+  const ratio = event?.poster ? bannerRatio(event) : BANNER_FALLBACK;
+  const wide = !!event?.poster && isWideBanner(ratio);
+  const heroHeight = wide
+    ? bannerHeight(width, ratio, { maxHeight: height * 0.55 })
+    : bannerHeight(width, ratio, { minHeight: Math.min(width * 0.9, height * 0.45), maxHeight: Math.min(height * 0.62, 640) });
 
   const give = () => {
     if (!valid) return;
     navigation.push('TicketCheckout', {
       event: {
         slug, title: event.title, starts_at: event.starts_at, venue: event.venue, city: event.city,
-        poster: event.poster, kind: 'fundraiser', show_supporters: event.show_supporters,
+        poster: event.poster, poster_width: event.poster_width, poster_height: event.poster_height, kind: 'fundraiser', show_supporters: event.show_supporters,
       },
       donation: { amount: value },
     });
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
       <KeyboardLift scrollRef={kbScroll}>
       <ScrollView ref={kbScroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <View style={[styles.hero, { height: heroHeight }]}>
-          {event.poster ? (
-            <Image source={{ uri: event.poster }} style={StyleSheet.absoluteFill} contentFit="cover"
-                   cachePolicy="memory-disk" transition={200} accessibilityIgnoresInvertColors />
-          ) : (
-            <LinearGradient colors={['#2A2418', T.ink]} style={StyleSheet.absoluteFill} />
-          )}
-          <LinearGradient colors={['rgba(10,10,13,0)', 'rgba(10,10,13,0.55)', T.ink]} locations={[0.35, 0.72, 1]}
-                          style={StyleSheet.absoluteFill} />
+        <View style={[styles.hero, wide ? styles.heroWide : { height: heroHeight }]} testID={wide ? 'banner-wide' : 'banner-tall'}>
+          <View style={wide ? { height: heroHeight } : StyleSheet.absoluteFill}>
+            {event.poster ? (
+              <Image source={{ uri: event.poster }} style={StyleSheet.absoluteFill} contentFit="cover"
+                     cachePolicy="memory-disk" transition={200} accessibilityIgnoresInvertColors />
+            ) : (
+              <LinearGradient colors={['#2A2418', T.ink]} style={StyleSheet.absoluteFill} />
+            )}
+            {/* Landscape: only a soft fade into the page at its foot. */}
+            <LinearGradient
+              colors={wide ? ['rgba(10,10,13,0)', T.ink] : ['rgba(10,10,13,0)', 'rgba(10,10,13,0.55)', T.ink]}
+              locations={wide ? [0.78, 1] : [0.35, 0.72, 1]}
+              style={StyleSheet.absoluteFill}
+            />
+          </View>
           <View style={styles.heroText}>
             {!!event.category && (
               <View style={styles.cause}>
@@ -174,6 +201,8 @@ const styles = StyleSheet.create({
   scroll: { paddingBottom: 30 },
   hero: { width: '100%', justifyContent: 'flex-end', backgroundColor: T.surface },
   heroText: { paddingHorizontal: 20, paddingBottom: 6, width: '100%', maxWidth: 720, alignSelf: 'center' },
+  // A landscape banner: the picture, then its title on the page itself.
+  heroWide: { backgroundColor: 'transparent', justifyContent: 'flex-start' },
   cause: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: { fontFamily: F.display, fontSize: 36, lineHeight: 39, color: T.ivory, marginTop: 6 },
   host: { fontFamily: F.uiSemi, fontSize: 13.5, color: T.muted, marginTop: 8 },
