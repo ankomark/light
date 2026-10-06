@@ -14,6 +14,15 @@ def pinned_preview(post):
     }
 
 
+# Query params the group/community list reads for itself. A category's field
+# keys become list filters of the same name, so a key like "scope" or "page"
+# would filter everyone's list by it (anyone may make a category).
+RESERVED_FIELD_KEYS = frozenset({
+    'scope', 'search', 'category', 'parent', 'page', 'page_size', 'paged',
+    'q', 'format', 'ordering', 'kind', 'type', 'before', 'after', 'limit', 'offset', 'cursor',
+})
+
+
 class CommunityCategorySerializer(serializers.ModelSerializer):
     """A kind of community. `field_schema` travels to the client so the create
     form and the browse filters build themselves from the category rather than
@@ -30,7 +39,9 @@ class CommunityCategorySerializer(serializers.ModelSerializer):
         read_only_fields = ['slug', 'is_builtin', 'created_by', 'created_at']
 
     def get_community_count(self, obj):
-        return obj.communities.filter(is_removed=False).count()
+        # The list annotates it (one query, not one per category).
+        n = getattr(obj, 'anno_community_count', None)
+        return n if n is not None else obj.communities.filter(is_removed=False).count()
 
     def validate_field_schema(self, value):
         """Field descriptors are consumed by the client to render inputs and by
@@ -47,6 +58,8 @@ class CommunityCategorySerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     f'Invalid field key {key!r}: letters, digits and underscores only.'
                 )
+            if key.lower() in RESERVED_FIELD_KEYS:
+                raise serializers.ValidationError(f'{key!r} is a reserved name; choose another key.')
             cleaned.append({
                 'key': key,
                 'label': str(item.get('label') or key.replace('_', ' ').title())[:60],
@@ -86,7 +99,11 @@ class GroupSerializer(serializers.ModelSerializer):
     )
 
     def get_pinned_message(self, obj):
-        return pinned_preview(obj.pinned_post)
+        # Chat content: members only, like the last-message preview.
+        if not self.get_is_member(obj):
+            return None
+        post = obj.pinned_post
+        return pinned_preview(post) if post and not post.is_removed else None
 
     def get_my_settings(self, obj):
         if hasattr(obj, 'anno_archived'):
@@ -241,8 +258,8 @@ class GroupSerializer(serializers.ModelSerializer):
             return 0
         request = self.context.get('request')
         hidden = self.context.get('hide_super_ids') or ()
-        qs = (obj.posts.exclude(user=request.user).exclude(message_type='system')
-              .exclude(user_id__in=hidden))
+        qs = (obj.posts.filter(is_removed=False).exclude(user=request.user)
+              .exclude(message_type='system').exclude(user_id__in=hidden))
         if member.last_read_at:
             qs = qs.filter(created_at__gt=member.last_read_at)
         return qs.count()
@@ -264,7 +281,7 @@ class GroupSerializer(serializers.ModelSerializer):
                 'created_at': obj.anno_last_at,
             }
         hidden = self.context.get('hide_super_ids') or ()
-        last = obj.posts.exclude(user_id__in=hidden).order_by('-created_at').first()
+        last = obj.posts.filter(is_removed=False).exclude(user_id__in=hidden).order_by('-created_at').first()
         if not last:
             return None
         return {

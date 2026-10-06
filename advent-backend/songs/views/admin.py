@@ -251,7 +251,36 @@ def _soft_remove(content_type, object_id, removed=True):
     obj.save(update_fields=['is_removed'])
     if removed and Model is LiveBroadcast:
         _end_live([obj.pk])
+    if removed and Model is Group:
+        _close_groups([obj.pk])
+    if removed and Model is GroupPost:
+        _drop_group_posts([obj.pk])
     return True
+
+
+def _drop_group_posts(ids):
+    """Group messages taken down: gone from every open chat now (a chat's
+    poll only asks for newer messages, so it stayed until reopened), and
+    unpinned if one was pinned."""
+    from ..consumers import broadcast_group_deleted, broadcast_group_pinned
+    pinned_in = list(Group.objects.filter(pinned_post_id__in=ids).values_list('slug', flat=True))
+    Group.objects.filter(pinned_post_id__in=ids).update(pinned_post=None)
+    try:
+        for pk, slug in GroupPost.objects.filter(pk__in=ids).values_list('pk', 'group__slug'):
+            broadcast_group_deleted(slug, pk)
+        for slug in pinned_in:
+            broadcast_group_pinned(slug, None)
+    except Exception:
+        # Live is a courtesy: the takedown itself stands either way.
+        logger.exception('Group message takedown broadcast failed')
+
+
+def _close_groups(ids):
+    """A group taken down: everyone with its chat open is told, and cut off
+    (the socket refuses a removed group only on the next connect)."""
+    from .. import group_live
+    for slug in Group.objects.filter(pk__in=ids).values_list('slug', flat=True):
+        group_live.tell_group(slug, {'type': 'group_deleted'})
 
 
 def _end_live(ids):
@@ -929,6 +958,10 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         count = Model.objects.filter(id__in=changing).update(is_removed=(op == 'remove'))
         if Model is LiveBroadcast and op == 'remove':
             _end_live(changing)
+        if Model is Group and op == 'remove':
+            _close_groups(changing)
+        if Model is GroupPost and op == 'remove':
+            _drop_group_posts(changing)
         _tell_authors(ctype, changing, op == 'remove', reason, request.user)
         if ctype == 'track' and changing:
             if op == 'remove':

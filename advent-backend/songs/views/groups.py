@@ -10,7 +10,7 @@ from .common import *  # noqa: F401,F403
 from ..consumers import (
     broadcast_group_message, broadcast_group_deleted, broadcast_group_pinned, broadcast_group_edited,
 )
-from ..serializers.groups import pinned_preview, GroupAuditLogSerializer
+from ..serializers.groups import pinned_preview, GroupAuditLogSerializer, RESERVED_FIELD_KEYS
 from .. import group_live as live
 
 # Floor for "never read this group" — Coalesced in for a NULL last_read_at so a
@@ -210,7 +210,11 @@ class GroupViewSet(viewsets.ModelViewSet):
                   else CommunityCategory.objects.all())
         for cat in cat_qs:
             for field in (cat.field_schema or []):
-                if isinstance(field, dict) and field.get('key'):
+                # A key named like one of the list's own params ("scope",
+                # "page") would filter everyone's list by it - skipped, for
+                # categories made before such keys were refused.
+                if (isinstance(field, dict) and field.get('key')
+                        and str(field['key']).lower() not in RESERVED_FIELD_KEYS):
                     allowed.setdefault(field['key'], field)
 
         for key, field in allowed.items():
@@ -299,7 +303,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         # communities, so drop them rather than trusting the client.
         extra = {'kind': self.kind}
         if self.kind == Group.KIND_GROUP:
-            extra.update(category=None, details={})
+            extra.update(category=None, details={}, parent=None)
         group = serializer.save(creator=self.request.user, **extra)
         GroupMember.objects.create(
             group=group,
@@ -384,6 +388,11 @@ class GroupViewSet(viewsets.ModelViewSet):
         return response
 
     def perform_update(self, serializer):
+        # A group has no category, details or parent (communities only) -
+        # dropped on an edit as they are on create.
+        if serializer.instance.kind == Group.KIND_GROUP:
+            for k in ('category', 'details', 'parent'):
+                serializer.validated_data.pop(k, None)
         group = serializer.save()
         # Name, description, cover, privacy: everyone in the chat sees it now.
         group_changed(group, self.request, ['name', 'description', 'cover_image', 'is_private',
@@ -421,7 +430,10 @@ class GroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='request-join')
     def request_join(self, request, slug=None):
         group = self.get_object()
-        
+        # As for an invite link or starting a group: not while suspended.
+        if request.user.is_currently_suspended:
+            raise PermissionDenied('Your account is suspended.')
+
         if GroupMember.objects.filter(group=group, user=request.user).exists():
             return Response(
                 {"error": "You are already a member of this group"},
@@ -510,6 +522,10 @@ class GroupViewSet(viewsets.ModelViewSet):
         user_id = request.data.get('user_id')
         if not user_id:
             return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        # Removing yourself is leaving - without the week's lock-out a removal
+        # carries.
+        if str(user_id) == str(request.user.id):
+            return Response({"error": "To go, leave the group instead."}, status=status.HTTP_400_BAD_REQUEST)
 
         removed = GroupMember.objects.filter(group=group, user_id=user_id).select_related('user').first()
         if removed:
@@ -547,7 +563,10 @@ class GroupViewSet(viewsets.ModelViewSet):
 
         if target.is_admin != make_admin:
             target.is_admin = make_admin
-            target.save(update_fields=['is_admin'])
+            # An admin is more than a moderator: the lesser role goes.
+            if make_admin:
+                target.is_moderator = False
+            target.save(update_fields=['is_admin', 'is_moderator'])
             verb = "is now an admin" if make_admin else "is no longer an admin"
             group_system_message(group, f"{target.user.username} {verb}", request.user)
             log_group_action(group, request.user, 'grant_admin' if make_admin else 'revoke_admin',
@@ -697,6 +716,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             msg = f"You were added to {group.name}"
             Notification.objects.create(
                 recipient=user, sender=request.user, message=msg, notification_type='group_added',
+                group=group,
             )
             notify_user(user, 'group_added', msg, data={'groupSlug': group.slug},
                         category=_push_category(group))
@@ -758,22 +778,29 @@ class GroupViewSet(viewsets.ModelViewSet):
         group = Group.objects.filter(invite_code=code_uuid, is_removed=False).first()
         if not group:
             return Response({"error": "This invite link is invalid or has expired"}, status=status.HTTP_404_NOT_FOUND)
-        already = GroupMember.objects.filter(group=group, user=request.user).exists()
-        if not already:
+        created = False
+        if not GroupMember.objects.filter(group=group, user=request.user).exists():
             until = _turned_away(group, request.user)
             if until:
                 return Response({"error": f"You can join again after {until.date().isoformat()}.",
                                  'code': 'cooldown'}, status=status.HTTP_403_FORBIDDEN)
             if group.invite_expires_at and group.invite_expires_at <= timezone.now():
                 return Response({"error": "This invite link has expired"}, status=status.HTTP_410_GONE)
-            if group.invite_max_uses and group.invite_uses >= group.invite_max_uses:
-                return Response({"error": "This invite link has been used up"}, status=status.HTTP_410_GONE)
             if request.user.is_currently_suspended:
                 raise PermissionDenied('Your account is suspended.')
-
-        member, created = GroupMember.objects.get_or_create(group=group, user=request.user)
+            with transaction.atomic():
+                # Claim a use in the same statement that checks the limit: a
+                # read-then-write let several people in on the last use.
+                claimed = Group.objects.filter(pk=group.pk, invite_code=code_uuid).filter(
+                    Q(invite_max_uses__isnull=True) | Q(invite_uses__lt=F('invite_max_uses'))
+                ).update(invite_uses=F('invite_uses') + 1)
+                if not claimed:
+                    return Response({"error": "This invite link has been used up"}, status=status.HTTP_410_GONE)
+                _, created = GroupMember.objects.get_or_create(group=group, user=request.user)
+                if not created:
+                    # A second tap got in first: that one used the link.
+                    Group.objects.filter(pk=group.pk).update(invite_uses=F('invite_uses') - 1)
         if created:
-            Group.objects.filter(pk=group.pk).update(invite_uses=F('invite_uses') + 1)
             group_system_message(group, f"{request.user.username} joined via invite", request.user)
             members_changed(group, 'joined', request.user)
         return Response(GroupSerializer(group, context={'request': request}).data, status=status.HTTP_200_OK)
@@ -882,7 +909,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         group_slug = self.kwargs.get('group_slug')
-        group = get_object_or_404(Group, slug=group_slug)
+        # A group taken down by moderation is gone for its chat too.
+        group = get_object_or_404(Group, slug=group_slug, is_removed=False)
         # Group chats are members-only — for public groups too. A non-member must
         # be approved (request-join → admin approval, or an invite) before they can
         # read any messages; the public group is discoverable, its chat is not.
@@ -903,9 +931,9 @@ class GroupPostViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         group_slug = self.kwargs.get('group_slug')
-        group = get_object_or_404(Group, slug=group_slug)
+        group = get_object_or_404(Group, slug=group_slug, is_removed=False)
 
-        member = GroupMember.objects.filter(group=group, user=self.request.user).first()
+        member =GroupMember.objects.filter(group=group, user=self.request.user).first()
         is_super = self.request.user.is_super_admin
         if not member and not is_super:
             raise PermissionDenied("You are not a member of this group")
@@ -1359,6 +1387,10 @@ class CommunityCategoryViewSet(viewsets.ModelViewSet):
     still in use can't be deleted out from under its communities."""
     queryset = CommunityCategory.objects.all()
     serializer_class = CommunityCategorySerializer
+
+    def get_queryset(self):
+        return CommunityCategory.objects.select_related('created_by', 'created_by__profile').annotate(
+            anno_community_count=Count('communities', filter=Q(communities__is_removed=False)))
     permission_classes = [IsAuthenticatedOrReadOnly]
     lookup_field = 'slug'
     pagination_class = None
