@@ -1356,6 +1356,8 @@ export const STRINGS = {
 
     'inbox.title': 'Messages',
     'inbox.empty': 'No conversations yet',
+    'dm.offline': 'Offline — showing your last chats',
+    'dm.loadFailed': "Couldn't load your messages.",
     'notice.coverFailed': "Couldn't add the picture.",
     'notice.search': "Search notices",
     'notice.all': "All",
@@ -6433,6 +6435,8 @@ export const STRINGS = {
 
     'inbox.title': 'Ujumbe',
     'inbox.empty': 'Hakuna mazungumzo bado',
+    'dm.offline': 'Nje ya mtandao — mazungumzo yako ya mwisho',
+    'dm.loadFailed': 'Imeshindwa kupakia ujumbe wako.',
     'notice.coverFailed': "Imeshindwa kuongeza picha.",
     'notice.search': "Tafuta matangazo",
     'notice.all': "Yote",

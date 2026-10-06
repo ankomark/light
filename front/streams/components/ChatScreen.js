@@ -37,6 +37,7 @@ import {
 import { subscribeDM, isDMOpen, sendDMTyping, announceDM } from '../services/dmSocket';
 import { uploadMedia } from '../services/cloudinary';
 import { useAuth } from '../context/useAuth';
+import useOnline, { isOnline } from '../hooks/useOnline';
 import { useI18n } from '../context/I18nContext';
 import RotatingBackground from './RotatingBackground';
 import ChoiceSheet from './ChoiceSheet';
@@ -56,6 +57,9 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const POLL_MS = 3000;          // no socket: ask often
 const POLL_LIVE_MS = 20000;    // the socket tells us; this only catches up
+// Failing polls back off (3 s, 6, 12, 24, then every 30 s) instead of asking
+// every 3 seconds on a dead connection, flattening battery and data.
+const POLL_BACKOFF_MAX_MS = 30000;
 const MAX_FILE_BYTES = 6 * 1024 * 1024; // 6 MB cap for document attachments
 const TYPING_EVERY_MS = 3000;  // "typing" at most this often…
 const TYPING_IDLE_MS = 4000;   // …and "stopped" after this long without a key
@@ -290,6 +294,10 @@ const ChatScreen = ({ route, navigation }) => {
   const typingOut = useRef({ sentAt: 0, stop: null });
   const typingIn = useRef(null);
   const readSoon = useRef(null);
+  // Polls that failed in a row, and when the next may go.
+  const pollFails = useRef(0);
+  const pollWaitUntil = useRef(0);
+  const online = useOnline();
   // playAudio reads this instead of the state, so it stays a stable callback
   // and toggling playback re-renders only the two affected bubbles.
   const playingIdRef = useRef(null);
@@ -327,6 +335,8 @@ const ChatScreen = ({ route, navigation }) => {
   const scrollToEndSoon = (animated = true) => setTimeout(() => listRef.current?.scrollToEnd({ animated }), 80);
 
   const loadMessages = useCallback(async (silent = false) => {
+    // A background poll: not while offline, nor before a failed one's wait.
+    if (silent && (!isOnline() || Date.now() < pollWaitUntil.current)) return;
     try {
       if (!silent) setLoading(true);
 
@@ -345,6 +355,8 @@ const ChatScreen = ({ route, navigation }) => {
             scrollToEndSoon(!silent);
           }
         }
+        pollFails.current = 0;
+        pollWaitUntil.current = 0;
         return;
       }
 
@@ -367,7 +379,14 @@ const ChatScreen = ({ route, navigation }) => {
         lastIdRef.current = Math.max(lastIdRef.current, maxNumericId(incoming));
         scrollToEndSoon();
       }
-    } catch { /* ignore */ } finally { setLoading(false); }
+      pollFails.current = 0;
+      pollWaitUntil.current = 0;
+    } catch {
+      // The messages on screen stay; the next poll waits longer each time.
+      pollFails.current += 1;
+      pollWaitUntil.current = Date.now()
+        + Math.min(POLL_BACKOFF_MAX_MS, POLL_MS * 2 ** (pollFails.current - 1));
+    } finally { setLoading(false); }
   }, [conversationId]);
 
   // Read — but a request stays unread (and unseen by its sender) until accepted.
@@ -529,7 +548,7 @@ const ChatScreen = ({ route, navigation }) => {
       if (isRequestRef.current) setIsRequest(false);   // answering is accepting
       return true;
     } catch (e) {
-      setMessages((prev) => markFailed(prev, tempId));
+      setMessages((prev) => markFailed(prev, tempId, !e?.response));
       if ((e?.data || e?.response?.data)?.code === 'unmatched') {
         setClosed(true);
         notify(t('singles.chatClosed'));
@@ -619,6 +638,19 @@ const ChatScreen = ({ route, navigation }) => {
     else if (m._payload) deliver(m.id, () => m._payload);
     else deliver(m.id, () => ({ content: m.content, message_type: 'text', client_id: m.client_id || m.id }));
   }, [deliver]);
+
+  // Back online: what failed for want of a signal goes again by itself (each
+  // carries its client id, so nothing can arrive twice), and the chat catches up.
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnline.current && isFocused.current) {
+      pollFails.current = 0;
+      pollWaitUntil.current = 0;
+      messagesRef.current.filter((m) => m.failed && m.failedOffline).forEach((m) => retry(m));
+      loadMessages(true);
+    }
+    wasOnline.current = online;
+  }, [online, retry, loadMessages]);
 
   const saveEdit = useCallback(async () => {
     const m = editing;

@@ -55,6 +55,7 @@ jest.mock('@react-navigation/native', () => {
   return { useFocusEffect: (cb) => { R.useEffect(() => cb(), [cb]); } };
 });
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null }));
+jest.mock('../../hooks/useBottomSpace', () => () => 0);
 jest.mock('expo-image', () => {
   const { View } = require('react-native');
   return { Image: (p) => <View testID={p.testID} /> };
@@ -337,5 +338,51 @@ describe('Chat', () => {
     const closed = await open({ singles: true, closed: true });
     expect(closed.r.getByTestId('chat-closed')).toBeTruthy();
     expect(closed.r.queryByTestId('chat-input')).toBeNull();
+  });
+});
+
+describe('Messages deep scan', () => {
+  it('an inbox that cannot load says so with Retry (never "no messages")', async () => {
+    // Nothing kept from the tests before: a first open with no saved list.
+    const { dropCache, userKey } = require('../../utils/screenCache');
+    dropCache(userKey(1, 'inbox'));
+    mockApi.fetchConversations.mockRejectedValueOnce(new Error('Network Error'));
+    mockApi.fetchUnreadMessageCount.mockResolvedValue({ requests: 0 });
+    const r = render(<InboxScreen navigation={nav} />);
+    await waitFor(() => expect(r.getByTestId('inbox-failed')).toBeTruthy());
+    expect(r.queryByText('inbox.empty')).toBeNull();
+    mockApi.fetchConversations.mockResolvedValueOnce({ results: [conv(1)], next: null });
+    await act(async () => { fireEvent.press(r.getByTestId('inbox-retry')); });
+    await waitFor(() => expect(r.getByTestId('chat-row-1')).toBeTruthy());
+  });
+
+  it('a kept list stays when a refresh fails, with an Offline note', async () => {
+    mockApi.fetchConversations.mockResolvedValueOnce({ results: [conv(2)], next: null });
+    mockApi.fetchUnreadMessageCount.mockResolvedValue({ requests: 0 });
+    const r = render(<InboxScreen navigation={nav} />);
+    await waitFor(() => expect(r.getByTestId('chat-row-2')).toBeTruthy());
+    mockApi.fetchConversations.mockRejectedValueOnce(new Error('Network Error'));
+    await act(async () => { r.UNSAFE_getByType(require('react-native').RefreshControl).props.onRefresh(); });
+    await waitFor(() => expect(r.getByTestId('inbox-offline')).toBeTruthy());
+    expect(r.getByTestId('chat-row-2')).toBeTruthy();
+  });
+
+  it('a message that failed for want of a signal goes again by itself when back online', async () => {
+    const { __setOnline } = require('../../hooks/useOnline');
+    const id = ++convSeq;
+    mockApi.fetchMessages.mockImplementation(async (_c, after) => (after ? { messages: [], read_ids: [] } : [msg(1)]));
+    const r = render(<ChatScreen navigation={nav}
+      route={{ params: { conversationId: id, otherUser: { id: 2, username: 'them' } } }} />);
+    await waitFor(() => expect(r.getByText('m1')).toBeTruthy());
+    mockApi.sendMessage.mockRejectedValueOnce(new Error('Network Error'));   // no answer at all
+    await act(async () => { __setOnline(false); });
+    fireEvent.changeText(r.getByTestId('chat-input'), 'are you there');
+    await act(async () => { fireEvent.press(r.getByTestId('chat-send')); });
+    expect(mockApi.sendMessage).toHaveBeenCalledTimes(1);
+    mockApi.sendMessage.mockResolvedValueOnce({ id: 50, content: 'are you there', sender: { id: 1 }, created_at: now() });
+    await act(async () => { __setOnline(true); });
+    await waitFor(() => expect(mockApi.sendMessage).toHaveBeenCalledTimes(2));
+    // The same message (its client id), not a second one.
+    expect(mockApi.sendMessage.mock.calls[1][1].client_id).toBe(mockApi.sendMessage.mock.calls[0][1].client_id);
   });
 });

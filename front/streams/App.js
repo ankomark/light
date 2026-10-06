@@ -592,7 +592,7 @@ const App = () => {
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxWrapper} />
-                <Stack.Screen name="Chat" component={ChatScreen} />
+                <Stack.Screen name="Chat" component={ChatWrapper} />
                 <Stack.Screen name="Explore" component={ExploreWrapper} />
                 <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
                 <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
@@ -822,6 +822,13 @@ const CommunityListWrapper = ({ navigation, route }) => (
       <GroupList navigation={navigation} route={route} mode="community" />
     </ErrorBoundary>
   </View>
+);
+
+// A chat that fails to draw shows a message, not a crashed app.
+const ChatWrapper = ({ navigation, route }) => (
+  <ErrorBoundary fallbackMessage="This chat couldn't load.">
+    <ChatScreen navigation={navigation} route={route} />
+  </ErrorBoundary>
 );
 
 const InboxWrapper = ({ navigation }) => (

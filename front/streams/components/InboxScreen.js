@@ -24,6 +24,7 @@ import { PersonListSkeleton } from './SkeletonLoader';
 import ChoiceSheet from './ChoiceSheet';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import useBottomSpace from '../hooks/useBottomSpace';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const FOLDERS = ['primary', 'requests', 'archived'];
@@ -96,6 +97,9 @@ const InboxScreen = ({ navigation }) => {
   const [requests, setRequests] = useState(0);
   const [typingIn, setTypingIn] = useState({});   // conversation id → true
   const [menuFor, setMenuFor] = useState(null);
+  // The last load failed: a message (nothing kept) or a note (a kept list).
+  const [failed, setFailed] = useState(false);
+  const bottomSpace = useBottomSpace(spacing.xl);
   const appState = useRef(AppState.currentState);
   const pollRef = useRef(null);
   const conversationsRef = useRef(conversations);
@@ -146,6 +150,7 @@ const InboxScreen = ({ navigation }) => {
         fetchUnreadMessageCount().catch(() => null),
       ]);
       if (viewRef.current.folder !== view.folder || viewRef.current.q !== view.q) return; // they moved on
+      setFailed(false);
       if (counts) setRequests(counts.requests || 0);
       const page1 = res?.results ?? (Array.isArray(res) ? res : []);
       setConversations((prev) => {
@@ -159,7 +164,8 @@ const InboxScreen = ({ navigation }) => {
         setNextUrl(res?.next ?? null);
       }
     } catch {
-      // the list stays; pull to refresh recovers
+      // The list stays (with a note); with none, a message and Retry.
+      if (viewRef.current.folder === view.folder && viewRef.current.q === view.q) setFailed(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -367,13 +373,19 @@ const InboxScreen = ({ navigation }) => {
         })}
       </View>
       {folder === 'requests' && !searching ? <Text style={styles.folderNote}>{t('dm.requestsNote')}</Text> : null}
+      {failed && conversations.length > 0 ? (
+        <View style={styles.offline} testID="inbox-offline">
+          <Ionicons name="cloud-offline-outline" size={13} color={colors.textPrimary} />
+          <Text style={styles.offlineText}>{t('dm.offline')}</Text>
+        </View>
+      ) : null}
 
       <FlatList
         data={conversations}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderItem}
         extraData={typingIn}
-        contentContainerStyle={[styles.listContent, conversations.length === 0 && styles.emptyContent]}
+        contentContainerStyle={[styles.listContent, { paddingBottom: bottomSpace }, conversations.length === 0 && styles.emptyContent]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -383,7 +395,15 @@ const InboxScreen = ({ navigation }) => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" colors={[colors.accent]} />}
         ListEmptyComponent={
           // Nothing cached yet: rows that are about to fill in, not a spinner.
-          loading ? <PersonListSkeleton count={7} avatar={52} /> : (
+          loading ? <PersonListSkeleton count={7} avatar={52} /> : failed ? (
+            <View style={styles.emptyContainer} testID="inbox-failed">
+              <Ionicons name="cloud-offline-outline" size={56} color={colors.textMuted} />
+              <Text style={styles.emptyTitle}>{t('dm.loadFailed')}</Text>
+              <TouchableOpacity onPress={() => load(false)} accessibilityRole="button" testID="inbox-retry">
+                <Text style={styles.retryText}>{t('common.retry')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
             <View style={styles.emptyContainer}>
               <Ionicons name={searching ? 'search' : 'chatbubbles-outline'} size={56} color={colors.textMuted} />
               <Text style={styles.emptyTitle}>{emptyText}</Text>
@@ -424,6 +444,12 @@ const styles = StyleSheet.create({
   tabCountText: { color: '#0A1628', fontSize: 11, fontWeight: '800' },
   folderNote: { ...typography.caption, color: colors.textMuted, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
 
+  offline: {
+    flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 6, marginTop: spacing.xs,
+    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  offlineText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+  retryText: { color: colors.accent, fontWeight: '700', marginTop: spacing.sm, fontSize: 15 },
   listContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl, width: '100%', maxWidth: 820, alignSelf: 'center' },
   more: { marginVertical: 16 },
   item: {

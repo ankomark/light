@@ -1,5 +1,5 @@
 from .common import *  # noqa: F401,F403
-from django.db.models import OuterRef, Subquery, Count, IntegerField, F, Q, Value, Case, When, CharField
+from django.db.models import Exists, OuterRef, Subquery, Count, IntegerField, F, Q, Value, Case, When, CharField
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.utils import timezone
@@ -12,6 +12,9 @@ from ..models import ConversationState, SinglesMatch
 # caps uploads at 6 MB, but the server enforces its own bound (clients lie).
 MAX_ATTACHMENT_CHARS = 9 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
+# Message requests (a first message to someone who hasn't accepted you) one
+# account may start in a day: enough for anyone, too few for a spam run.
+REQUESTS_PER_DAY = 30
 
 
 def _singles_signals(conversation, me, message):
@@ -119,6 +122,14 @@ class ConversationViewSet(viewsets.ModelViewSet):
             others = User.objects.filter(username__icontains=q).exclude(pk=user.pk)
             qs = qs.filter(Q(participants__in=others)
                            | Q(messages__content__icontains=q, messages__is_removed=False, messages__is_deleted=False)).distinct()
+        if self.request.query_params.get('folder') == 'requests':
+            # Requests: from people who already follow you first (likely
+            # someone you know), then strangers - each newest first.
+            Follow = User.followers.through
+            qs = qs.annotate(follows_me=Exists(
+                Follow.objects.filter(from_user_id=user.id, to_user__conversations=OuterRef('pk'))
+                .exclude(to_user_id=user.id)))
+            return qs.order_by('-follows_me', F('last_msg_at').desc(nulls_last=True), '-id')
         # Most-recent activity first; a stable second key so pages can't drift.
         return qs.order_by(F('last_msg_at').desc(nulls_last=True), '-id')
 
@@ -249,6 +260,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 if len(attachment) > MAX_ATTACHMENT_CHARS:
                     return Response({'error': 'Attachment is too large (max ~6 MB).'},
                                     status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+                # Older app builds send the file itself as text. Kept in the
+                # database it rode along in every load of the chat (megabytes
+                # per message): it goes to storage, and the message keeps a link.
+                attachment = _store_data_uri(attachment, message_type) or attachment
             else:
                 return Response({'error': 'Invalid attachment'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -259,6 +274,12 @@ class ConversationViewSet(viewsets.ModelViewSet):
         mine = dm.state_of(conversation, me)
         theirs = dm.state_of(conversation, other) if other else None
         first_request = bool(theirs and not theirs.accepted and not conversation.messages.filter(sender=me).exists())
+        if first_request:
+            day_key = f'dm_requests:{me.id}:{timezone.localdate().isoformat()}'
+            cache.add(day_key, 0, 26 * 3600)
+            if cache.incr(day_key) > REQUESTS_PER_DAY:
+                return Response({'error': "You've sent a lot of message requests today. Try again tomorrow.",
+                                 'code': 'request_limit'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         message = Message.objects.create(
             conversation=conversation, sender=me, content=content, message_type=message_type,
             attachment=attachment, file_name=file_name, reply_to=reply_to, client_id=client_id,
@@ -338,8 +359,14 @@ class ConversationViewSet(viewsets.ModelViewSet):
             if (timezone.now() - m.created_at).total_seconds() > dm.DELETE_FOR_ALL_WINDOW_S:
                 return Response({'error': 'This message can no longer be deleted for everyone.', 'code': 'too_late'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            # Truly gone: the words and the file, not just hidden.
+            # Truly gone: the words and the file, not just hidden - the stored
+            # file too, unless another message still uses it (a forward).
+            stored = m.attachment if m.attachment and m.attachment.startswith('https://') else ''
             Message.objects.filter(pk=m.pk).update(is_deleted=True, content='', attachment='', file_name='')
+            if stored and not Message.objects.filter(attachment=stored).exists():
+                from .. import r2
+                if r2.is_r2_url(stored):
+                    r2.delete(stored)
             m.reactions.all().delete()
             dm.tell(self._others(conversation), {'type': 'deleted', 'conversation_id': conversation.id, 'id': m.id})
         else:
@@ -412,13 +439,58 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # Of those, in Single & Searching chats (its own badge on the menu).
         singles = unread.filter(conversation__singles_match__isnull=False,
                                 conversation__singles_match__ended_at__isnull=True).count() if count else 0
-        requests_n = (ConversationState.objects.filter(user=user, accepted=False)
-                      .filter(conversation__messages__isnull=False).values('conversation').distinct().count())
+        # Requests: what the Requests list would show - something from them
+        # after anything cleared (a declined request is cleared, and kept
+        # counting for ever), nobody blocked either way, no closed account.
+        blocked = blocked_ids_for(user)
+        waiting = Message.objects.filter(
+            conversation=OuterRef('conversation'), is_removed=False,
+            id__gt=Coalesce(OuterRef('cleared_before_id'), Value(0)),
+        ).exclude(sender=user)
+        req = (ConversationState.objects.filter(user=user, accepted=False)
+               .filter(Exists(waiting))
+               .exclude(conversation__participants__is_deactivated=True))
+        if blocked:
+            req = req.exclude(conversation__participants__id__in=blocked)
+        requests_n = req.values('conversation').distinct().count()
         # And groups with something new (communities count too; muted ones don't).
         from ..group_live import unread_groups
         from .directory import unseen_notices
         return Response({'unread_count': count, 'requests': requests_n, **unread_groups(user),
                          'notices': unseen_notices(user), 'singles': singles})
+
+
+DATA_TYPES = {
+    'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+    'audio/m4a': '.m4a', 'audio/mp4': '.m4a', 'audio/x-m4a': '.m4a', 'audio/aac': '.aac', 'audio/mpeg': '.mp3',
+    'application/pdf': '.pdf',
+}
+
+
+def _store_data_uri(data_uri, message_type):
+    """A legacy data: attachment, uploaded to our storage. Its URL, or None
+    (no storage set up, or not something we take) - then it's kept as before."""
+    import base64
+    import re as _re
+    import uuid
+    from .. import r2
+    if not r2.is_configured():
+        return None
+    m = _re.match(r'^data:([\w.+/-]+)?(;[^,]*)?;base64,(.*)$', data_uri, _re.S)
+    if not m:
+        return None
+    ctype = (m.group(1) or '').lower()
+    ext = DATA_TYPES.get(ctype)
+    if ext is None:
+        ctype, ext = 'application/octet-stream', '.bin'
+    try:
+        raw = base64.b64decode(m.group(3), validate=False)
+    except (ValueError, TypeError):
+        return None
+    try:
+        return r2.put_bytes(f'messages/{message_type}/{uuid.uuid4().hex}{ext}', raw, ctype)
+    except Exception:  # noqa: BLE001 - storage trouble: keep the old way
+        return None
 
 
 def _our_upload(url):

@@ -248,6 +248,12 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
                 sync_to_async(_stamp_last_seen_now, thread_sensitive=False)(self.user.id)))
             task.add_done_callback(_background.discard)
 
+    # "typing" from one device: at most this often per chat (the app sends it
+    # every few seconds; a misbehaving client must not get more through).
+    TYPING_MIN_S = 1.0
+    # Who is on the other side of a chat, remembered for this connection.
+    OTHER_TTL_S = 60.0
+
     async def receive_json(self, content):
         if content.get('type') != 'typing':
             return
@@ -255,7 +261,25 @@ class DMConsumer(AsyncJsonWebsocketConsumer):
             conv_id = int(content.get('conversation_id'))
         except (TypeError, ValueError):
             return
-        other = await self._other_in(conv_id)
+        import time
+        now = time.monotonic()
+        last = getattr(self, '_typing_at', None)
+        if last is None:
+            last = self._typing_at = {}
+        if now - last.get(conv_id, 0) < self.TYPING_MIN_S and content.get('is_typing'):
+            return
+        last[conv_id] = now
+        # One lookup per chat per minute, not one per keystroke (a block made
+        # meanwhile is seen within the minute).
+        known = getattr(self, '_others', None)
+        if known is None:
+            known = self._others = {}
+        hit = known.get(conv_id)
+        if hit and now - hit[1] < self.OTHER_TTL_S:
+            other = hit[0]
+        else:
+            other = await self._other_in(conv_id)
+            known[conv_id] = (other, now)
         if other:
             from songs.messaging import dm_room
             await self.channel_layer.group_send(dm_room(other), {'type': 'dm_event', 'payload': {

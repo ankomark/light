@@ -64,8 +64,10 @@ export const addIncoming = (list, msg) => {
 };
 
 // A send that failed: the bubble stays, marked, for "Tap to retry".
-export const markFailed = (list, tempId) =>
-  list.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m));
+// `offline`: no answer came back (no signal) - sent again by itself once the
+// phone is back online. A refusal (blocked, the match ended) is not.
+export const markFailed = (list, tempId, offline = false) =>
+  list.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true, failedOffline: !!offline } : m));
 
 // Retrying: sending again.
 export const markRetrying = (list, tempId) =>

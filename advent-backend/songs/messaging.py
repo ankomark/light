@@ -47,8 +47,17 @@ def _online_key(uid):
 
 
 def went_online(uid):
-    n = (cache.get(_online_key(uid)) or 0) + 1
-    cache.set(_online_key(uid), n, ONLINE_TTL)
+    """One more device connected. Counted with the cache's own atomic
+    increment: a read-then-write let two devices connecting at once count as
+    one (and later leave someone "online" for hours, or offline while on)."""
+    key = _online_key(uid)
+    cache.add(key, 0, ONLINE_TTL)
+    try:
+        n = cache.incr(key)
+    except ValueError:              # expired between add and incr
+        cache.set(key, 1, ONLINE_TTL)
+        n = 1
+    cache.touch(key, ONLINE_TTL)
     return n == 1
 
 
@@ -56,9 +65,15 @@ def left(uid):
     """A device of theirs went away: the count only, in the cache — no
     database, so a socket closing never waits on it. True if it was their
     last device (they are offline now)."""
-    n = max(0, (cache.get(_online_key(uid)) or 0) - 1)
-    cache.set(_online_key(uid), n, ONLINE_TTL)
-    return n == 0
+    key = _online_key(uid)
+    try:
+        n = cache.decr(key)
+    except ValueError:              # nothing counted (expired): offline
+        return True
+    if n <= 0:
+        cache.set(key, 0, ONLINE_TTL)
+        return True
+    return False
 
 
 def stamp_last_seen(uid):
@@ -78,9 +93,15 @@ def is_online(uid):
 
 
 def partner_ids(user, limit=300):
-    """People this user has a chat with (who to tell they came online)."""
-    return list(User.objects.filter(conversations__participants=user).exclude(pk=user.pk)
-                .values_list('pk', flat=True).distinct()[:limit])
+    """People this user has a chat with (who to tell they came online) -
+    never anyone blocked either way: being told someone is online is
+    exactly what a block must stop."""
+    from .models import blocked_ids_for
+    blocked = blocked_ids_for(user)
+    qs = User.objects.filter(conversations__participants=user).exclude(pk=user.pk)
+    if blocked:
+        qs = qs.exclude(pk__in=blocked)
+    return list(qs.values_list('pk', flat=True).distinct()[:limit])
 
 
 # ── Each side of a chat ─────────────────────────────────────────────────────
