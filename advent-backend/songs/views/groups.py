@@ -227,6 +227,21 @@ class GroupViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    def _order(self, qs):
+        """The list's order. One's own groups: the latest activity first, like
+        any chat list (a new message moved a group up live, and a refresh put
+        it back in the order the groups were made). Finding one to join: the
+        liveliest first - most members, then most recently active - rather
+        than simply the newest."""
+        if self.action != 'list':
+            return qs
+        scope = self.request.query_params.get('scope')
+        if scope in ('mine', 'archived'):
+            return qs.order_by(F('anno_last_at').desc(nulls_last=True), '-updated_at', '-id')
+        if (self.request.query_params.get('search') or '').strip():
+            return qs          # a search keeps its own (newest) order
+        return qs.order_by('-anno_member_count', '-updated_at', '-id')
+
     def get_queryset(self):
         # For authenticated users
         if self.request.user.is_authenticated:
@@ -239,9 +254,10 @@ class GroupViewSet(viewsets.ModelViewSet):
                     Q(creator=self.request.user) |  # Show groups user created
                     Q(members__user=self.request.user)  # Show groups user is member of
                 ).filter(is_removed=False).distinct().order_by('-created_at')
-            return self._annotate(
+            qs = self._annotate(
                 self._apply_scope(self._apply_discovery_filters(self._scope_to_kind(base)))
             )
+            return self._order(qs)
         # For unauthenticated users (if needed)
         return self._apply_scope(self._apply_discovery_filters(self._scope_to_kind(
             Group.objects.filter(is_private=False, is_removed=False).order_by('-created_at')

@@ -149,3 +149,34 @@ class GroupLiveTests(APITestCase):
                 live.fan_out(self.group, self.owner, p, '@la look')
         mention_calls = [c for c in many.call_args_list if c.args[1] == 'group_mention']
         self.assertEqual(len(mention_calls), 1)
+
+
+class ListOrderTests(APITestCase):
+    """Re-scan 2: one's own groups by latest activity; finding one to join,
+    the liveliest first."""
+
+    def setUp(self):
+        cache.clear()
+        self.me = User.objects.create_user('orderer', 'or@x.com', 'x')
+        self.client.force_authenticate(self.me)
+
+    def make(self, name, members=0, **extra):
+        g = Group.objects.create(creator=self.me, name=name, is_private=False, **extra)
+        GroupMember.objects.create(group=g, user=self.me, is_admin=True)
+        for i in range(members):
+            GroupMember.objects.create(group=g, user=User.objects.create_user(f'{name}{i}', f'{name}{i}@x.com', 'x'))
+        return g
+
+    def slugs(self, scope):
+        return [g['slug'] for g in self.client.get(f'/api/groups/?scope={scope}').data['results']]
+
+    def test_my_groups_by_latest_message_not_by_when_they_were_made(self):
+        old = self.make('Old')
+        new = self.make('New')                        # made later
+        GroupPost.objects.create(group=old, user=self.me, content='still talking', message_type='text')
+        self.assertEqual(self.slugs('mine')[:2], [old.slug, new.slug])
+
+    def test_finding_a_group_the_liveliest_first(self):
+        quiet = self.make('Quiet', members=0)
+        busy = self.make('Busy', members=3)
+        self.assertEqual(self.slugs('public')[:2], [busy.slug, quiet.slug])
