@@ -134,3 +134,13 @@ test('the edit form sends the name and link, and shows the server\'s words under
   expect(screen.getByText('Enter a web address, like example.org.')).toBeTruthy();
   alert.mockRestore();
 });
+
+test('tapping "Requested" withdraws the request, and does not ask again', async () => {
+  const FollowButton = require('../FollowButton').default;
+  mockApi.followUser.mockResolvedValueOnce({ is_following: false, follow_status: 'none', followers_count: 0 });
+  const screen = render(<FollowButton userId={9} initialFollowStatus="requested" />);
+  expect(screen.getByText('profile.requested')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByText('profile.requested')); });
+  await waitFor(() => expect(screen.getByText('profile.follow')).toBeTruthy());
+  expect(mockApi.followUser).toHaveBeenCalledTimes(1);
+});

@@ -68,6 +68,8 @@ const FollowList = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
+  // The list could not be read (not "private", not "empty").
+  const [failed, setFailed] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions?.({
@@ -87,6 +89,7 @@ const FollowList = () => {
     }
     try {
       if (isRefresh) setRefreshing(true);
+      setFailed(false);
       const res = await fetchPage(1);
       const list = Array.isArray(res) ? res : (res?.results ?? []);
       setRows(list);
@@ -99,7 +102,7 @@ const FollowList = () => {
         setIsPrivate(true);
         setRows([]);
       } else {
-        console.error('Error loading follow list:', err);
+        setFailed(true);
       }
     } finally {
       setLoading(false);
@@ -129,7 +132,11 @@ const FollowList = () => {
       const next = page + 1;
       const res = await fetchPage(next);
       const list = Array.isArray(res) ? res : (res?.results ?? []);
-      setRows((prev) => [...prev, ...list]);
+      // Follows change while scrolling: a person who moved pages shows once.
+      setRows((prev) => {
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...list.filter((r) => !seen.has(r.id))];
+      });
       setPage(next);
       setHasMore(!!res?.next);
     } catch (err) {
@@ -167,14 +174,20 @@ const FollowList = () => {
     <View style={styles.skeletonWrap}><PersonListSkeleton count={9} avatar={46} withButton /></View>
   ) : (
     <View style={styles.empty}>
-      <MaterialIcons name={isPrivate ? 'lock-outline' : 'people-outline'} size={48} color={colors.textMuted} />
+      <MaterialIcons name={isPrivate ? 'lock-outline' : failed ? 'wifi-off' : 'people-outline'} size={48} color={colors.textMuted} />
       <Text style={styles.emptyText}>
         {isPrivate
           ? t('profile.private')
-          : type === 'followers' ? t('follow.noFollowers') : t('follow.notFollowingAnyone')}
+          : failed ? t('profile.loadFailed')
+            : type === 'followers' ? t('follow.noFollowers') : t('follow.notFollowingAnyone')}
       </Text>
+      {failed ? (
+        <TouchableOpacity onPress={() => { setLoading(true); load(); }} accessibilityRole="button" testID="follow-retry">
+          <Text style={styles.retryText}>{t('common.retry')}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
-  )), [type, t, loading, isPrivate]);
+  )), [type, t, loading, isPrivate, failed, load]);
 
   return (
     <FlatList
@@ -245,6 +258,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.xl,
   },
+  retryText: { color: colors.primary, fontWeight: '700', marginTop: spacing.sm },
   emptyText: {
     ...typography.body,
     color: colors.textMuted,

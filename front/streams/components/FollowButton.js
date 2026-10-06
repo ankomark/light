@@ -2,6 +2,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { followUser } from '../services/api';
+import { useI18n } from '../context/I18nContext';
+
+// On = following OR a request waiting with a private account. The server's
+// follow endpoint is one toggle for both: tapping "Requested" withdraws it.
+// Counting a request as "off" made a withdraw look unfinished, so the button
+// asked again — sending a new request (and a new notification) every time.
+const isOn = (status) => status === 'following' || status === 'requested';
 
 const FollowButton = ({
   userId,
@@ -12,6 +19,7 @@ const FollowButton = ({
 }) => {
   // Three states, not two: following a private account leaves the request
   // pending, and the button has to say so rather than claim it worked.
+  const { t } = useI18n();
   const resolved = initialFollowStatus ?? (initialFollowing ? 'following' : 'none');
   const [followStatus, setFollowStatus] = useState(resolved);
   const [followersCount, setFollowersCount] = useState(initialFollowersCount || 0);
@@ -21,8 +29,9 @@ const FollowButton = ({
   // the optimistic update was computed and then immediately covered by an
   // ActivityIndicator, so following someone looked like waiting rather than
   // following, and a re-tap during the request was dropped on the floor.
-  const desired = useRef(resolved === 'following');   // what the user wants
-  const server = useRef(resolved === 'following');    // what we think is stored
+  const desired = useRef(isOn(resolved));   // what the user wants
+  const server = useRef(isOn(resolved));    // what we think is stored
+  const serverStatus = useRef(resolved);
   const serverCount = useRef(initialFollowersCount || 0);
   const inFlight = useRef(false);
 
@@ -33,8 +42,9 @@ const FollowButton = ({
     const next = initialFollowStatus ?? (initialFollowing ? 'following' : 'none');
     setFollowStatus(next);
     setFollowersCount(initialFollowersCount || 0);
-    desired.current = next === 'following';
-    server.current = next === 'following';
+    desired.current = isOn(next);
+    server.current = isOn(next);
+    serverStatus.current = next;
     serverCount.current = initialFollowersCount || 0;
   }, [initialFollowing, initialFollowersCount, initialFollowStatus]);
 
@@ -44,9 +54,9 @@ const FollowButton = ({
     try {
       const response = await followUser(userId);
       const serverFollowing = !!response.is_following;
-      const serverStatus =
-        response.follow_status ?? (serverFollowing ? 'following' : 'none');
-      server.current = serverFollowing;
+      const status = response.follow_status ?? (serverFollowing ? 'following' : 'none');
+      server.current = isOn(status);
+      serverStatus.current = status;
       if (typeof response.followers_count === 'number') {
         serverCount.current = response.followers_count;
       }
@@ -54,24 +64,24 @@ const FollowButton = ({
       if (server.current === desired.current) {
         // Settled. The server's answer is authoritative — and it's the only
         // thing that can tell us a private account turned this into a request.
-        setFollowStatus(serverStatus);
+        setFollowStatus(status);
         setFollowersCount(serverCount.current);
         onFollowChange?.({
           id: userId,
           is_following: serverFollowing,
-          follow_status: serverStatus,
+          follow_status: status,
           followers_count: serverCount.current,
         });
       }
     } catch (error) {
       console.error('Follow error:', error);
       desired.current = server.current;                   // roll back
-      setFollowStatus(server.current ? 'following' : 'none');
+      setFollowStatus(serverStatus.current);
       setFollowersCount(serverCount.current);
       onFollowChange?.({
         id: userId,
-        is_following: server.current,
-        follow_status: server.current ? 'following' : 'none',
+        is_following: serverStatus.current === 'following',
+        follow_status: serverStatus.current,
         followers_count: serverCount.current,
       });
     } finally {
@@ -108,7 +118,7 @@ const FollowButton = ({
     >
       <View style={styles.buttonContent}>
         <Text style={styles.buttonText}>
-          {isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow'}
+          {isFollowing ? t('profile.following') : isRequested ? t('profile.requested') : t('profile.follow')}
         </Text>
         {/* Only show count when following and count > 0 */}
         {isFollowing && followersCount > 0 && (

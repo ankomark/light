@@ -125,3 +125,24 @@ class ClearProfileTests(APITestCase):
         self.assertEqual(self.client.post(f'/api/admin/users/{self.boss.id}/clear-profile/',
                                           {'reason': 'x'}, format='json').status_code, 400)
         self.assertTrue(AdminActionLog.objects.filter(action='clear_profile', target_id=self.troll.id).exists())
+
+
+@mock.patch('songs.views.accounts.notify_user')
+class FollowNoticeTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.me = make('fan')
+        self.star = make('star')
+        self.client.force_authenticate(self.me)
+
+    def test_following_again_and_again_rings_once(self, notify):
+        for _ in range(3):
+            self.client.post(f'/api/users/{self.star.id}/follow/')   # follow
+            self.client.post(f'/api/users/{self.star.id}/follow/')   # unfollow
+        self.assertEqual(notify.call_count, 1)
+
+    def test_asking_withdrawing_and_asking_again_rings_once(self, notify):
+        Profile.objects.create(user=self.star, is_public=False)
+        for _ in range(3):
+            self.client.post(f'/api/users/{self.star.id}/follow/')
+        self.assertEqual(notify.call_count, 1)

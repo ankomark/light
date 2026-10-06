@@ -9,6 +9,16 @@ from ..models import Album
 from .music import annotated_tracks
 
 
+
+# Following, unfollowing and following again (or asking, withdrawing and
+# asking again) must not ring someone's phone each time: one follow
+# notification per person per day.
+FOLLOW_NOTICE_SECONDS = 24 * 60 * 60
+
+
+def _first_follow_notice(sender, recipient):
+    return cache.add(f'follow-notice:{sender.pk}:{recipient.pk}', 1, FOLLOW_NOTICE_SECONDS)
+
 class NotificationPreferenceView(APIView):
     """Get or update the signed-in user's per-category push preferences.
     The row is created on first access so the client always has something to
@@ -234,13 +244,14 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
                     defaults={'status': 'pending'},
                 )
                 msg = f"{current_user.username} requested to follow you"
-                Notification.objects.create(
-                    recipient=user_to_follow,
-                    sender=current_user,
-                    message=msg,
-                    notification_type='follow',
-                )
-                notify_user(user_to_follow, 'follow', msg)
+                if _first_follow_notice(current_user, user_to_follow):
+                    Notification.objects.create(
+                        recipient=user_to_follow,
+                        sender=current_user,
+                        message=msg,
+                        notification_type='follow',
+                    )
+                    notify_user(user_to_follow, 'follow', msg)
                 return Response({
                     "status": "Follow request sent",
                     "follow_status": "requested",
@@ -252,13 +263,14 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
             user_to_follow.followers.add(current_user)
             action = 'followed'
             msg = f"{current_user.username} started following you"
-            Notification.objects.create(
-                recipient=user_to_follow,
-                sender=current_user,
-                message=msg,
-                notification_type='follow'
-            )
-            notify_user(user_to_follow, 'follow', msg)
+            if _first_follow_notice(current_user, user_to_follow):
+                Notification.objects.create(
+                    recipient=user_to_follow,
+                    sender=current_user,
+                    message=msg,
+                    notification_type='follow'
+                )
+                notify_user(user_to_follow, 'follow', msg)
 
         # Return updated counts
         is_following = user_to_follow.followers.filter(pk=current_user.pk).exists()
