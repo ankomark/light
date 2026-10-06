@@ -52,12 +52,33 @@ def review_eligibility(user, publication):
         return False, 'sign_in'
     if publication.author_id == user.id:
         return False, 'own'
-    rp = ReadingProgress.objects.filter(user=user, publication=publication).values_list('percent', 'finished_at').first()
-    if rp and (rp[1] or rp[0] >= REVIEW_MIN_PERCENT):
-        return True, None
     if BookReview.objects.filter(user=user, publication=publication).exists():
         return True, None                           # kept a review from before: may edit it
-    return False, 'read_more'
+    rp = ReadingProgress.objects.filter(user=user, publication=publication).values_list('percent', 'finished_at').first()
+    if not (rp and (rp[1] or rp[0] >= REVIEW_MIN_PERCENT)):
+        return False, 'read_more'
+    # A place in the book is one call away (opening the last chapter set it
+    # "read"), so time actually spent reading it counts too: a fifth of it
+    # at a brisk pace. Real readers pass at once; a drive-by review doesn't.
+    if _seconds_read(user, publication) < _seconds_needed(publication):
+        return False, 'read_more'
+    return True, None
+
+
+REVIEW_WPM = 600                # brisk reading: a fifth of the book at this pace
+REVIEW_MIN_SECONDS, REVIEW_MAX_SECONDS = 60, 600
+
+
+def _seconds_needed(publication):
+    from .publishing import reader_chapters
+    words = sum(reader_chapters(publication, None).values_list('word_count', flat=True))
+    needed = words * REVIEW_MIN_PERCENT / REVIEW_WPM * 60
+    return max(REVIEW_MIN_SECONDS, min(REVIEW_MAX_SECONDS, needed))
+
+
+def _seconds_read(user, publication):
+    from django.db.models import Sum
+    return ReadingActivity.objects.filter(user=user, publication=publication).aggregate(n=Sum('seconds'))['n'] or 0
 
 
 # ── Discover ─────────────────────────────────────────────────────────────────
@@ -148,18 +169,25 @@ def home_sections(user):
     def ids(qs, n=SECTION):
         return list(qs.values_list('id', flat=True)[:n])
 
+    # Discovery is for what they haven't read: a book they finished took a
+    # place in New, Trending and From authors you follow (it's on their
+    # Finished shelf). Editor's picks stay as chosen.
+    fresh = visible
+    if authed:
+        done = ReadingProgress.objects.filter(user=user, finished_at__isnull=False).values('publication')
+        fresh = visible.exclude(pk__in=done)
     out = {
         'picks': ids(visible.filter(featured_at__isnull=False).order_by('-featured_at')),
-        'new': ids(visible.order_by('-published_at', '-id')),
+        'new': ids(fresh.order_by('-published_at', '-id')),
     }
-    allowed = set(visible.filter(id__in=trending_ids()).values_list('id', flat=True))
+    allowed = set(fresh.filter(id__in=trending_ids()).values_list('id', flat=True))
     out['trending'] = [i for i in trending_ids() if i in allowed][:SECTION]
     if authed:
         out['continue'] = ids(
             visible.filter(progresses__user=user, progresses__finished_at__isnull=True)
             .order_by('-progresses__updated_at'), 6)
         follows = User.followers.through.objects.filter(to_user_id=user.id).values('from_user_id')
-        out['following'] = ids(visible.filter(author_id__in=follows).order_by('-published_at', '-id'))
+        out['following'] = ids(fresh.filter(author_id__in=follows).order_by('-published_at', '-id'))
         out['because'] = because_highlighted(user, visible)
     else:
         out['continue'], out['following'], out['because'] = [], [], None

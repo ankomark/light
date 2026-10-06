@@ -253,6 +253,8 @@ REST_FRAMEWORK = {
         'ai': '20/min',
         # Books and passages shared to the feed (a post each).
         'book_share': '30/hour',
+        # Book discussion comments and reviews.
+        'book_write': '30/min',
         # Services: requests to providers, and how they're found and reached.
         'service_booking': '20/hour',
         'service_event': '120/min',

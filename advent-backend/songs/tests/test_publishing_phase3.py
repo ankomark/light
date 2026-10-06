@@ -94,6 +94,11 @@ class ReviewTests(Base):
         res = self.client.post(url, {'rating': 5, 'body': 'Great'}, format='json')
         self.assertEqual((res.status_code, res.json()['code']), (403, 'read_more'))
         ReadingProgress.objects.create(user=self.me, publication=self.pub, percent=0.3)
+        # A place in the book alone (one call away) is not reading it: time spent reading is asked too.
+        res = self.client.post(url, {'rating': 5, 'body': 'Great'}, format='json')
+        self.assertEqual((res.status_code, res.json()['code']), (403, 'read_more'))
+        ReadingActivity.objects.create(user=self.me, publication=self.pub, chapter_index=0,
+                                       day=timezone.localdate(), seconds=600)
         with mock.patch('songs.push.notify_user') as notify:
             res = self.client.post(url, {'rating': 5, 'body': 'Great'}, format='json')
         self.assertEqual(res.status_code, 201, res.content)
@@ -124,6 +129,8 @@ class ReviewTests(Base):
 
     def test_bad_ratings_are_refused(self):
         ReadingProgress.objects.create(user=self.me, publication=self.pub, percent=1)
+        ReadingActivity.objects.create(user=self.me, publication=self.pub, chapter_index=0,
+                                       day=timezone.localdate(), seconds=600)
         self.assertEqual(self.client.post(self.URL.format(self.pub.id), {'rating': 6}, format='json').status_code, 400)
 
 

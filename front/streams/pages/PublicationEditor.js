@@ -386,13 +386,31 @@ const PublicationEditor = ({ route, navigation }) => {
   }, []);
 
   // ── Local autosave / crash recovery ──────────────────────────────────────
-  const draftKey = `pubdraft:${editId || 'new'}`;
+  // Kept per account: unsaved, unpublished writing is its author's alone. It
+  // was one key for the phone, so the next person to open the editor was
+  // offered it - and could publish it as theirs. It also outlives a sign-out,
+  // so the author still has it when they come back.
+  const draftKey = `pubdraft:u${currentUser?.id ?? 'anon'}:${editId || 'new'}`;
+  const legacyKey = `pubdraft:${editId || 'new'}`;
 
   // A snapshot left by a crash (or a closed app) — offered back once. For an
   // edit, only when it's newer than what the server has.
   const offerRestore = useCallback(async (serverAt) => {
     let d;
-    try { d = JSON.parse(await AsyncStorage.getItem(draftKey)); } catch { return; }
+    try {
+      d = JSON.parse(await AsyncStorage.getItem(draftKey));
+      const legacy = await AsyncStorage.getItem(legacyKey);
+      if (legacy != null) {
+        // From before drafts were per account. A book's: only those who may
+        // edit it get this far, so it is theirs to have back. A new book's
+        // can't be told whose it was: let go.
+        if (!d && editId) {
+          d = JSON.parse(legacy);
+          await AsyncStorage.setItem(draftKey, legacy);
+        }
+        await AsyncStorage.removeItem(legacyKey);
+      }
+    } catch { return; }
     const hasContent = d?.title?.trim() || (d?.chapters || []).some((c) => c.title || c.body);
     if (!hasContent) return;
     if (serverAt && !(d.at > Date.parse(serverAt))) return;
@@ -402,7 +420,7 @@ const PublicationEditor = ({ route, navigation }) => {
     });
     // Restored work is unsaved work: leaving still asks.
     if (ok) { fill(d); dirty.current = true; } else AsyncStorage.removeItem(draftKey).catch(() => {});
-  }, [draftKey, fill, t]);
+  }, [draftKey, legacyKey, editId, fill, t]);
 
   // Load the publication when editing (bodies included — it's the editor).
   useEffect(() => {

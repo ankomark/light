@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from .common import *  # noqa: F401,F403  (serializers, models, SimpleUserSerializer, timezone)
 from ..models import AdminActionLog, Appeal, Role, ADMIN_CAPABILITY_KEYS
-from ..models import Album, SinglesProfile, SinglesReply, SinglesTopic
+from ..models import Album, BookReview, ChapterComment, SinglesProfile, SinglesReply, SinglesTopic
 
 
 # ── Report target previews (batched) ─────────────────────────────────────────
@@ -56,6 +56,15 @@ def _format_singles_text(kind):
     def fmt(x):
         return {'type': kind, 'id': x.id, 'body': (x.body or '')[:140], 'is_removed': x.is_removed,
                 'author': SimpleUserSerializer(x.author.user).data}
+    return fmt
+
+
+def _format_book_words(kind):
+    """A reported review or chapter comment: what was written, on which book."""
+    def fmt(x):
+        return {'type': kind, 'id': x.id, 'body': (x.body or '')[:140], 'is_removed': x.is_removed,
+                'book': getattr(x.publication, 'title', ''), 'rating': getattr(x, 'rating', None),
+                'author': SimpleUserSerializer(x.user).data}
     return fmt
 
 
@@ -121,6 +130,10 @@ _TARGET_FETCHERS = {
     'product': (lambda ids: Product.objects.filter(id__in=ids).select_related('seller__profile'),    _format_product),
     'album':   (lambda ids: Album.objects.filter(id__in=ids).select_related('artist__profile'),      _format_album),
     'playlist': (lambda ids: Playlist.objects.filter(id__in=ids).select_related('user__profile'),    _format_playlist),
+    'bookreview': (lambda ids: BookReview.objects.filter(id__in=ids).select_related('user__profile', 'publication'),
+                   _format_book_words('bookreview')),
+    'chaptercomment': (lambda ids: ChapterComment.objects.filter(id__in=ids).select_related('user__profile', 'publication'),
+                       _format_book_words('chaptercomment')),
     'singlesprofile': (lambda ids: SinglesProfile.objects.filter(id__in=ids).select_related('user__profile')
                        .prefetch_related('photos'), _format_singles_profile),
     'singlestopic': (lambda ids: SinglesTopic.objects.filter(id__in=ids).select_related('author__user__profile'),

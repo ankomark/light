@@ -1798,3 +1798,30 @@ describe('Instant opens', () => {
     expect(again.getByTestId('book-club-3')).toBeTruthy();
   });
 });
+describe('Publishing deep scan', () => {
+  const draft = JSON.stringify({ title: 'My unpublished book', chapters: [{ title: 'One', body: 'secret words' }], at: Date.now() });
+
+  test('an unsaved draft is kept per account: another person on the phone is never offered it', async () => {
+    await AsyncStorage.setItem('pubdraft:u1:new', draft);              // account 1's
+    mockAuth = { isAuthenticated: true, currentUser: { id: 2, username: 'other' } };
+    render(<PublicationEditor route={{ params: {} }} navigation={nav()} />);
+    await act(async () => { await new Promise((res) => setTimeout(res, 50)); });
+    expect(mockConfirm).not.toHaveBeenCalled();                         // nothing offered to account 2
+    expect(await AsyncStorage.getItem('pubdraft:u1:new')).toBe(draft);  // and account 1's is kept
+  });
+
+  test('its own author is offered it back', async () => {
+    await AsyncStorage.setItem('pubdraft:u1:new', draft);
+    mockConfirm.mockResolvedValue(true);
+    render(<PublicationEditor route={{ params: {} }} navigation={nav()} />);
+    await waitFor(() => expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'pub.unsavedTitle' })));
+  });
+
+  test('a new-book draft from before accounts were kept apart is let go, not offered', async () => {
+    await AsyncStorage.setItem('pubdraft:new', draft);
+    render(<PublicationEditor route={{ params: {} }} navigation={nav()} />);
+    await act(async () => { await new Promise((res) => setTimeout(res, 50)); });
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem('pubdraft:new')).toBeNull();
+  });
+});

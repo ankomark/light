@@ -2,7 +2,9 @@
 // this date". The page shows the book, the plan with this week's step, how
 // many members are there (a count, not who), your own place, and the way to
 // the club's chat and to a live reading room.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import useCachedData from '../utils/useCachedData';
+import { userKey } from '../utils/screenCache';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,21 +23,17 @@ const BookClub = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const { clubId } = route.params || {};
-  const [club, setClub] = useState(null);
+  // The last copy of the club at once (and offline), refreshed behind it:
+  // it was a spinner on every visit.
+  const clubKey = currentUser?.id ? userKey(currentUser.id, `bookclub:${clubId}`) : null;
+  const { data: club, failed, reload: load } = useCachedData(clubKey, () => fetchBookClub(clubId));
   const [book, setBook] = useState(null);
-  const [failed, setFailed] = useState(false);
-
-  const load = useCallback(async () => {
-    setFailed(false);
-    try {
-      const c = await fetchBookClub(clubId);
-      setClub(c);
-      setBook(peekBook(currentUser?.id, c.publication) || await fetchBook(currentUser?.id, c.publication).catch(() => null));
-    } catch {
-      setFailed(true);
-    }
-  }, [clubId, currentUser?.id]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!club?.publication) return;
+    const kept = peekBook(currentUser?.id, club.publication);
+    if (kept) { setBook(kept); return; }
+    fetchBook(currentUser?.id, club.publication).then(setBook).catch(() => {});
+  }, [club?.publication, currentUser?.id]);
 
   const chapterName = (i) => book?.chapters?.[i]?.title || t('pubDetail.chapterN', { n: i + 1 });
   const current = club?.plan?.find((s) => s.state === 'current');

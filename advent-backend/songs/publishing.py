@@ -470,10 +470,18 @@ def apply_highlight_ops(user, ops):
             continue
         if op.get('op') != 'upsert':
             continue
-        pub = visible.filter(pk=op.get('publication')).first()
+        # One op with a broken id (a phone's corrupted copy) failed the whole
+        # batch with a 500 - and the same batch again on every sync after.
+        pub_id, chapter_id = op.get('publication'), op.get('chapter_id')
+        if not str(pub_id).isdigit():
+            applied.append(cid)                        # can never apply: let the phone drop it
+            continue
+        pub = visible.filter(pk=pub_id).first()
         if pub is None:
             continue
-        chapter = pub.chapters.filter(pk=op.get('chapter_id')).first()
+        # A chapter its reader may read (not an author's draft).
+        chapter = (reader_chapters(pub, user).filter(pk=chapter_id).first()
+                   if str(chapter_id).isdigit() else None)
         try:
             block = max(0, int(op.get('block') or 0))
         except (TypeError, ValueError):

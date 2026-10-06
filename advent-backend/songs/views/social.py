@@ -1620,7 +1620,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
 
         author_id = self.request.query_params.get('author')
         if author_id:
-            qs = qs.filter(author_id=author_id)
+            # Not a number: no author by that id (it was a 500).
+            qs = qs.filter(author_id=author_id) if str(author_id).isdigit() else qs.none()
 
         # An organisation's page: the books under its name.
         org = self.request.query_params.get('organization')
@@ -1706,6 +1707,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
                 mine.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
         if request.method == 'POST':
+            if user.is_currently_suspended:
+                raise PermissionDenied('Your account is suspended.')
             may, why = book_community.review_eligibility(user, pub)
             if not may:
                 return Response({'error': 'You can review a book once you have read some of it.', 'code': why},
@@ -1757,13 +1760,17 @@ class PublicationViewSet(viewsets.ModelViewSet):
         user = request.user
 
         if request.method == 'POST':
+            # As everywhere else people write: not while suspended.
+            if user.is_currently_suspended:
+                raise PermissionDenied('Your account is suspended.')
             body = str(request.data.get('body') or '').strip()
             if not body or len(body) > 2000:
                 return Response({'error': 'A comment is 1 to 2000 characters.'}, status=status.HTTP_400_BAD_REQUEST)
             parent = None
             if request.data.get('parent'):
-                parent = ChapterComment.objects.filter(pk=request.data.get('parent'), chapter_id=chapter_id,
-                                                       is_removed=False).first()
+                pid = str(request.data.get('parent'))
+                parent = (ChapterComment.objects.filter(pk=pid, chapter_id=chapter_id, is_removed=False).first()
+                          if pid.isdigit() else None)       # not a number: no such comment (was a 500)
                 if parent is None:
                     return Response({'error': 'That comment is gone.'}, status=status.HTTP_400_BAD_REQUEST)
                 parent = parent.parent or parent               # one level of replies
@@ -1790,7 +1797,9 @@ class PublicationViewSet(viewsets.ModelViewSet):
         reach = book_community.reader_reach(user, pub)
         if i > reach and request.query_params.get('reveal') not in ('1', 'true'):
             return Response({'locked': True, 'reached': reach, 'count': count, 'results': []})
-        rows = list(qs[:500])
+        # The newest 500, in order: oldest-first and cut at 500, a busy
+        # chapter's new comments were the ones never shown.
+        rows = list(qs.order_by('-created_at', '-id')[:500])[::-1]
         replies = defaultdict(list)
         for c in rows:
             if c.parent_id:
@@ -2160,6 +2169,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
             every = int(request.data.get('every_days') or 7)
         except (TypeError, ValueError):
             return Response({'error': 'The plan needs numbers.'}, status=status.HTTP_400_BAD_REQUEST)
+        # A plan people can keep: a day of a huge "every" ran past the calendar (a 500).
+        per, every = max(1, min(per, 50)), max(1, min(every, 60))
         club = author_studio.create_club(request.user, pub, name,
                                          is_private=str(request.data.get('private', True)).lower() not in ('0', 'false'),
                                          starts_on=starts_on, chapters_per_step=per, every_days=every)
@@ -2189,6 +2200,12 @@ class PublicationViewSet(viewsets.ModelViewSet):
             self.throttle_scope = 'ai'
         elif self.action == 'share_to_feed':
             self.throttle_scope = 'book_share'
+        elif self.action == 'clubs' and self.request.method == 'POST':
+            # Each club is a group: as making groups is limited.
+            self.throttle_scope = 'group_join'
+        elif self.action in ('discussion', 'reviews') and self.request.method == 'POST':
+            # Comments and reviews had only the app-wide 300 a minute.
+            self.throttle_scope = 'book_write'
         return super().get_throttles()
 
     @staticmethod
@@ -2340,6 +2357,8 @@ class BookHighlightViewSet(viewsets.GenericViewSet):
         qs = self.get_queryset()
         pub = request.query_params.get('publication')
         if pub:
+            if not str(pub).isdigit():
+                return Response({'error': 'publication is a number'}, status=status.HTTP_400_BAD_REQUEST)
             qs = qs.filter(publication_id=pub)
         coll = request.query_params.get('collection')
         if coll:
