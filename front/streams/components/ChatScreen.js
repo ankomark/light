@@ -61,6 +61,7 @@ const POLL_LIVE_MS = 20000;    // the socket tells us; this only catches up
 // every 3 seconds on a dead connection, flattening battery and data.
 const POLL_BACKOFF_MAX_MS = 30000;
 const MAX_FILE_BYTES = 6 * 1024 * 1024; // 6 MB cap for document attachments
+const VOICE_MIN_MS = 800;      // shorter than this is a tap on the mic, not a voice note
 const TYPING_EVERY_MS = 3000;  // "typing" at most this often…
 const TYPING_IDLE_MS = 4000;   // …and "stopped" after this long without a key
 
@@ -850,7 +851,12 @@ const ChatScreen = ({ route, navigation }) => {
       const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.length) return;
       const file = res.assets[0];
-      if (file.size && file.size > MAX_FILE_BYTES) {
+      // Some Android pickers give no size: read it, so the limit holds.
+      let size = file.size;
+      if (!size) {
+        try { size = (await FileSystem.getInfoAsync(file.uri, { size: true }))?.size; } catch { size = 0; }
+      }
+      if (size && size > MAX_FILE_BYTES) {
         notify(t('chat.fileTooLargeTitle'), t('chat.fileTooLargeBody'));
         return;
       }
@@ -878,7 +884,8 @@ const ChatScreen = ({ route, navigation }) => {
   const openFile = useCallback(async (msg) => {
     try {
       const safeName = (msg.file_name || 'file').replace(/[^\w.\-]/g, '_');
-      const dest = `${FileSystem.cacheDirectory}${safeName}`;
+      // Its own name per message: two "invoice.pdf" in a chat are two files.
+      const dest = `${FileSystem.cacheDirectory}dm_${msg.id}_${safeName}`;
       let path;
       if (isData(msg.attachment)) {
         const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
@@ -886,8 +893,9 @@ const ChatScreen = ({ route, navigation }) => {
         await FileSystem.writeAsStringAsync(dest, m[2], { encoding: FileSystem.EncodingType.Base64 });
         path = dest;
       } else if (typeof msg.attachment === 'string' && msg.attachment.startsWith('http')) {
-        const dl = await FileSystem.downloadAsync(msg.attachment, dest);
-        path = dl.uri;
+        // Fetched once: opening it again is from the phone.
+        const have = await FileSystem.getInfoAsync(dest).catch(() => null);
+        path = have?.exists ? dest : (await FileSystem.downloadAsync(msg.attachment, dest)).uri;
       } else {
         path = msg.attachment; // local file:// from an optimistic, still-uploading message
       }
@@ -934,7 +942,10 @@ const ChatScreen = ({ route, navigation }) => {
       await setAudioModeAsync({ allowsRecordingIOS: false });
       if (cancel) return;
       const uri = rec.getURI();
-      const seconds = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
+      const heldMs = Date.now() - recordStartRef.current;
+      // A tap on the mic, not a message: nothing is sent.
+      if (heldMs < VOICE_MIN_MS) { notify(t('chat.voiceTooShort')); return; }
+      const seconds = Math.max(1, Math.round(heldMs / 1000));
       if (!uri) return;
       sendMediaMessage({
         localUri: uri, uploadType: 'chat-audio', message_type: 'audio',
@@ -988,7 +999,12 @@ const ChatScreen = ({ route, navigation }) => {
   // Cleanup audio on unmount.
   useEffect(() => () => {
     clearInterval(recordTimerRef.current);
-    recordingRef.current?.stopAndUnloadAsync?.().catch(() => {});
+    if (recordingRef.current) {
+      recordingRef.current.stopAndUnloadAsync?.().catch(() => {});
+      // Out of recording mode: on an iPhone it would keep all sound in the
+      // quiet earpiece afterwards.
+      setAudioModeAsync?.({ allowsRecordingIOS: false })?.catch?.(() => {});
+    }
     soundRef.current?.unloadAsync?.().catch(() => {});
   }, []);
 

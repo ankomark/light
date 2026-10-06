@@ -123,7 +123,13 @@ const refreshAuthToken = async () => {
       await storeTokens(response.data.access, response.data.refresh || refreshToken);
       return response.data.access;
     } catch (error) {
-      await clearTokens();
+      // Signed out only when the server turned the refresh token down (it
+      // expired, or was revoked). No answer at all - a dropped connection,
+      // a lift, a tunnel - is not a reason to sign anyone out.
+      const status = error?.response?.status;
+      if (status === 400 || status === 401 || status === 403 || error?.message?.startsWith('Session expired')) {
+        await clearTokens();
+      }
       throw error;
     } finally {
       _refreshPromise = null;
@@ -132,6 +138,9 @@ const refreshAuthToken = async () => {
 
   return _refreshPromise;
 };
+
+/** A fresh access token (the realtime sockets, when theirs was turned away). */
+export const refreshAccessToken = () => refreshAuthToken();
 
 
 // Request interceptor for adding auth token

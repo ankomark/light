@@ -5,7 +5,18 @@
 // instantly instead of on the fallback poll. Auto-reconnects with backoff and
 // authenticates by passing the JWT as a ?token= query param (RN can't set WS
 // headers).
-import { API_BASE, getAccessToken } from './api';
+import { AppState } from 'react-native';
+import { API_BASE, getAccessToken, refreshAccessToken } from './api';
+import { onOnlineChange } from '../hooks/useOnline';
+
+// Turned away for good (not a member, banned): asking again can't help.
+const FORBIDDEN = 4403;
+// Turned away for the sign-in: a fresh token first, then again.
+const UNAUTHORIZED = 4401;
+// Back from the background after this long: a fresh connection. A socket
+// the phone suspended often never says it closed, and the app would wait on
+// a dead line (messages arriving only at the slow catch-up poll).
+const STALE_AFTER_MS = 10000;
 
 // http(s)://host → ws(s)://host
 const wsBase = () => API_BASE.replace(/^http(s?):\/\//i, (_m, s) => `ws${s}://`);
@@ -21,6 +32,8 @@ export function createSocket(path, handlers = {}) {
   let closedByUs = false;
   let retry = 0;
   let reconnectTimer = null;
+  let refreshNext = false;
+  let backgroundAt = 0;
 
   const scheduleReconnect = () => {
     if (closedByUs) return;
@@ -32,7 +45,22 @@ export function createSocket(path, handlers = {}) {
 
   async function connect() {
     if (closedByUs) return;
-    const token = await getAccessToken();
+    let token;
+    if (refreshNext) {
+      refreshNext = false;
+      try {
+        token = await refreshAccessToken();
+      } catch (e) {
+        // Turned down by the server: signed out - nothing to reconnect to.
+        if (e?.response) return;
+        token = await getAccessToken();
+      }
+    } else {
+      token = await getAccessToken();
+    }
+    // Closed while the token was being read: open nothing (it would be an
+    // orphan, keeping them "online" and reconnecting for ever).
+    if (closedByUs) return;
     if (!token) { scheduleReconnect(); return; }
     try {
       ws = new WebSocket(`${wsBase()}/${path}?token=${encodeURIComponent(token)}`);
@@ -40,6 +68,7 @@ export function createSocket(path, handlers = {}) {
       scheduleReconnect();
       return;
     }
+    const mine = ws;
     ws.onopen = () => { retry = 0; handlers.onStatus?.('open'); };
     ws.onmessage = (e) => {
       let data;
@@ -55,12 +84,44 @@ export function createSocket(path, handlers = {}) {
         default: break;
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
+      if (ws !== mine) return;          // an old socket, replaced already
       handlers.onStatus?.('closed');
-      if (!closedByUs) scheduleReconnect();
+      if (closedByUs || e?.code === FORBIDDEN) return;
+      if (e?.code === UNAUTHORIZED) refreshNext = true;
+      scheduleReconnect();
     };
-    ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
+    ws.onerror = () => { try { mine.close(); } catch { /* noop */ } };
   }
+
+  // Start again at once (not at the end of a back-off): the network came
+  // back, or the app came back from a while away.
+  const reconnectNow = () => {
+    if (closedByUs) return;
+    clearTimeout(reconnectTimer);
+    retry = 0;
+    const old = ws;
+    ws = null;
+    if (old) {
+      old.onclose = null;
+      old.onerror = null;
+      try { old.close(); } catch { /* noop */ }
+      handlers.onStatus?.('closed');
+    }
+    connect();
+  };
+
+  const appSub = AppState.addEventListener?.('change', (state) => {
+    if (state === 'active') {
+      if (backgroundAt && Date.now() - backgroundAt > STALE_AFTER_MS) reconnectNow();
+      backgroundAt = 0;
+    } else if (!backgroundAt) {
+      backgroundAt = Date.now();
+    }
+  });
+  const offOnline = onOnlineChange((online) => {
+    if (online && !(ws && ws.readyState === 1)) reconnectNow();
+  });
 
   const send = (obj) => {
     if (ws && ws.readyState === 1 /* OPEN */) {
@@ -78,6 +139,8 @@ export function createSocket(path, handlers = {}) {
   const close = () => {
     closedByUs = true;
     clearTimeout(reconnectTimer);
+    appSub?.remove?.();
+    offOnline?.();
     try { ws?.close(); } catch { /* noop */ }
     ws = null;
   };
