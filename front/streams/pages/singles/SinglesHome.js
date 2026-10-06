@@ -10,7 +10,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ScrollView, RefreshControl, useWindowDimensions,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { Image } from 'expo-image';
@@ -47,7 +47,10 @@ export default function SinglesHome() {
   const { t } = useI18n();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState('home');
+  const route = useRoute();
+  const [tab, setTab] = useState(route?.params?.tab || 'home');
+  // Opened again from a push (a new match) while already here: that tab.
+  useEffect(() => { if (route?.params?.tab) setTab(route.params.tab); }, [route?.params?.tab]);
   const [unread, setUnread] = useState(0);
   // Drawn from the last copy at once (no spinner on a return visit), then
   // refreshed. "Switched off" is an answer, not an error.
@@ -66,7 +69,7 @@ export default function SinglesHome() {
   useFocusEffect(countUnread);
   // A match made while you're here, or a message: refresh at once.
   useEffect(() => subscribeDM((e) => {
-    if (e.type === 'singles_match') load();
+    if (e.type === 'singles_match' || e.type === 'singles_unmatched') load();
     if (e.type === 'message' || e.type === 'read') countUnread();
   }), [load, countUnread]);
 

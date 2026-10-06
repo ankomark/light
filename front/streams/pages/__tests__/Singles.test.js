@@ -587,3 +587,46 @@ test('agreeing to a story while offline says it failed, not that you agreed', as
   expect(notify).not.toHaveBeenCalledWith('singles.stories.agreedTitle', 'singles.stories.agreedBody');
   expect(mockNav.goBack).not.toHaveBeenCalled();
 });
+
+
+describe('Final scan', () => {
+  const notify = () => require('../../utils/adminConfirm').notify;
+  const confirm = () => require('../../utils/adminConfirm').confirmAction;
+  const fill = (screen) => {
+    fireEvent.changeText(screen.getByTestId('singles-field-first_name'), 'Mark');
+    fireEvent.changeText(screen.getByTestId('singles-birth-day'), '7');
+    fireEvent.changeText(screen.getByTestId('singles-birth-month'), '3');
+    fireEvent.changeText(screen.getByTestId('singles-birth-year'), '1997');
+    fireEvent.press(screen.getByTestId('singles-gender-man'));
+    fireEvent.changeText(screen.getByTestId('singles-field-country'), 'Kenya');
+    fireEvent.press(screen.getByTestId('singles-baptised-yes'));
+  };
+
+  test('the locked birth date and gender are confirmed before the profile is made', async () => {
+    mockParams = { create: true };
+    confirm().mockResolvedValueOnce(false);                       // "Let me fix it"
+    const screen = render(<SinglesEdit />);
+    fill(screen);
+    await act(async () => { fireEvent.press(screen.getByTestId('singles-save')); });
+    expect(confirm()).toHaveBeenCalledWith(expect.objectContaining({ title: 'singles.edit.confirmTitle' }));
+    expect(api.createSinglesProfile).not.toHaveBeenCalled();
+  });
+
+  test('saving offline says so - not "check your details"', async () => {
+    mockParams = { create: true };
+    api.createSinglesProfile.mockRejectedValueOnce(new Error('Network issue'));
+    const screen = render(<SinglesEdit />);
+    fill(screen);
+    await act(async () => { fireEvent.press(screen.getByTestId('singles-save')); });
+    expect(notify()).toHaveBeenCalledWith('common.error', 'singles.edit.saveOffline');
+    expect(notify()).not.toHaveBeenCalledWith('singles.edit.checkTitle', 'singles.edit.checkBody');
+  });
+
+  test('a new-match push opens Connections', async () => {
+    mockParams = { tab: 'connections' };
+    api.fetchSinglesMe.mockResolvedValue({ eligible: true, blockers: [], profile: mine('approved') });
+    api.fetchSinglesLikes.mockResolvedValue({ results: [] });
+    const screen = render(<SinglesHome />);
+    await waitFor(() => expect(screen.getByTestId('singles-conn-likes')).toBeTruthy());
+  });
+});

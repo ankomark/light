@@ -123,7 +123,13 @@ function SuggestSheet({ visible, onClose, onDone }) {
     try {
       onDone(await suggestSinglesGathering({ kind: f.kind, title: f.title.trim(), description: f.description.trim(),
         starts_at: starts.toISOString(), place: f.place.trim(), country: f.country.trim(), online: f.online }));
-    } catch { notify(t('singles.edit.checkTitle'), t('singles.events.whenBad')); } finally { setBusy(false); }
+    } catch (e) {
+      // Each failure says what it was: three already waiting, no connection,
+      // or (only then) the name or time.
+      if (e?.data?.code === 'slow_down') notify(t('singles.events.waitTitle'), t('singles.events.waitBody'));
+      else if (!e?.status) notify(t('common.error'), t('singles.edit.saveOffline'));
+      else notify(t('singles.edit.checkTitle'), t('singles.events.whenBad'));
+    } finally { setBusy(false); }
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

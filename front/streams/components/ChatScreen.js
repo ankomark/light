@@ -503,6 +503,13 @@ const ChatScreen = ({ route, navigation }) => {
             setMessages((prev) => prev.map((m) => (m.sender?.id === meId && typeof m.id === 'number' && !m.read ? { ...m, read: true } : m)));
           }
           break;
+        // The match ended (either of them, a ban, a block): the box goes now,
+        // not at the next failed send.
+        case 'singles_unmatched':
+          setClosed(true);
+          setEditing(null);
+          setReplyTo(null);
+          break;
         case 'typing':
           if (e.user_id !== meId) {
             clearTimeout(typingIn.current);
@@ -655,6 +662,15 @@ const ChatScreen = ({ route, navigation }) => {
     wasOnline.current = online;
   }, [online, retry, loadMessages]);
 
+  // The server closed this chat to me (match ended, or a block): say why and
+  // close it, as a failed send does. True when it was that.
+  const refusedHere = useCallback((e) => {
+    const body = e?.data || e?.response?.data;
+    if (body?.code === 'unmatched') { setClosed(true); notify(t('singles.chatClosed')); return true; }
+    if ((e?.status || e?.response?.status) === 403) { notify(t('dm.cantMessage')); return true; }
+    return false;
+  }, [t]);
+
   const saveEdit = useCallback(async () => {
     const m = editing;
     const content = text.trim();
@@ -667,9 +683,9 @@ const ChatScreen = ({ route, navigation }) => {
       if (saved?.id) setMessages((prev) => patchMessage(prev, m.id, { content: saved.content, edited_at: saved.edited_at }));
     } catch (e) {
       setMessages((prev) => patchMessage(prev, m.id, { content: m.content, edited_at: m.edited_at || null }));
-      notify(e?.response?.data?.code === 'too_late' ? t('dm.editTooLate') : t('dm.editFailed'));
+      if (!refusedHere(e)) notify(e?.response?.data?.code === 'too_late' ? t('dm.editTooLate') : t('dm.editFailed'));
     }
-  }, [editing, text, conversationId, t]);
+  }, [editing, text, conversationId, t, refusedHere]);
 
   const handleSend = useCallback(() => {
     if (editing) { saveEdit(); return; }
@@ -691,11 +707,11 @@ const ChatScreen = ({ route, navigation }) => {
     try {
       const r = await reactToMessage(conversationId, m.id, emoji);
       if (Array.isArray(r?.reactions)) setMessages((prev) => patchMessage(prev, m.id, { reactions: r.reactions }));
-    } catch {
+    } catch (e) {
       setMessages((prev) => patchMessage(prev, m.id, { reactions: before }));
-      notify(t('dm.actionFailed'));
+      if (!refusedHere(e)) notify(t('dm.actionFailed'));
     }
-  }, [conversationId, t]);
+  }, [conversationId, t, refusedHere]);
 
   const removeMessage = useCallback(async (m, scope) => {
     if (typeof m.id !== 'number') {   // a failed bubble: just let it go

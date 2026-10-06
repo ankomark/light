@@ -361,8 +361,10 @@ const App = () => {
         // Something waits in the Single & Searching review queue (reviewers).
         navigate('AdminSingles');
       } else if (data?.type === 'singles_match' || data?.screen === 'Singles' || data?.screen === 'SinglesMatches') {
-        // Single & Searching: a new match, or word about your profile's review.
-        navigate('Singles');
+        // Single & Searching: a new match (straight to Connections, where it
+        // is), or word about your profile's review.
+        const match = data?.type === 'singles_match' || data?.screen === 'SinglesMatches';
+        navigate('Singles', match ? { tab: 'connections' } : undefined);
       } else if (data?.type === 'quiz_duel') {
         // Someone played the duel you sent: back to the quiz.
         navigate('QuizHome');

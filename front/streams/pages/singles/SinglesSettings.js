@@ -36,8 +36,9 @@ export default function SinglesSettings() {
         },
       });
       navigation.goBack();
-    } catch {
-      notify(t('singles.edit.checkTitle'), t('singles.settings.ageBad'));
+    } catch (e) {
+      if (!e?.status) notify(t('common.error'), t('singles.edit.saveOffline'));
+      else notify(t('singles.edit.checkTitle'), t('singles.settings.ageBad'));
     } finally {
       setBusy(false);
     }

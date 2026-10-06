@@ -221,7 +221,13 @@ class SinglesMeView(APIView):
         errors.update(_apply(profile, data, creating=True))
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-        profile.save()
+        from django.db import IntegrityError
+        try:
+            with transaction.atomic():
+                profile.save()
+        except IntegrityError:
+            # Two quick taps: the first made it (one profile a person).
+            return Response({'error': 'You already have a profile.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(_own_json(profile), status=status.HTTP_201_CREATED)
 
     def patch(self, request):
@@ -774,11 +780,20 @@ def _end_match(me, pk=None, other=None, by=None):
         return None
     match.ended_at, match.ended_by = timezone.now(), by
     match.save(update_fields=['ended_at', 'ended_by'])
+    # Their story told of a couple: it comes down when they part.
+    from ..models import SinglesStory
+    SinglesStory.objects.filter(match=match).delete()
     # Both sides' menu counts (the Singles badge) change at once.
     from ..messaging import forget_unread
-    forget_unread([match.profile_a.user_id, match.profile_b.user_id])
+    # Either side may be gone already (a profile left: SET_NULL).
+    users = [p.user_id for p in (match.profile_a, match.profile_b) if p is not None]
+    forget_unread(users)
     if match.conversation_id:
         ConversationState.objects.filter(conversation_id=match.conversation_id).update(archived=True)
+        # An open chat closes at once on both phones (it learned only when a
+        # send was refused).
+        from .. import messaging as dm
+        dm.tell(users, {'type': 'singles_unmatched', 'conversation_id': match.conversation_id, 'match_id': match.id})
     return match
 
 

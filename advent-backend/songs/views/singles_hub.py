@@ -496,7 +496,13 @@ class SinglesStoriesView(APIView):
 
     def get(self, request):
         _require_on()
+        # Not a couple either of whom I blocked (or who blocked me), nor one
+        # where either is now banned from here.
+        blocked = blocked_ids_for(request.user)
         qs = (SinglesStory.objects.filter(status=SinglesStory.PUBLISHED)
+              .exclude(match__profile_a__user_id__in=blocked).exclude(match__profile_b__user_id__in=blocked)
+              .exclude(match__profile_a__status=SinglesProfile.BANNED)
+              .exclude(match__profile_b__status=SinglesProfile.BANNED)
               .select_related('match__profile_a', 'match__profile_b').order_by('-published_at')[:30])
         return Response({'results': [_story_json(s) for s in qs]})
 
@@ -509,7 +515,8 @@ class SinglesMatchStoryView(APIView):
     def post(self, request, pk):
         _require_on()
         me = _mine(request.user)
-        match = (SinglesMatch.objects.filter(Q(profile_a=me) | Q(profile_b=me), pk=pk)
+        # Only a match still together tells how they met.
+        match = (SinglesMatch.objects.filter(Q(profile_a=me) | Q(profile_b=me), pk=pk, ended_at__isnull=True)
                  .select_related('profile_a', 'profile_b').first())
         if match is None:
             return Response(status=status.HTTP_404_NOT_FOUND)

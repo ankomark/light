@@ -268,3 +268,61 @@ class AlgorithmTests(Base):
         for i in range(10):                                               # ten suitors this fortnight
             SinglesInterest.objects.create(from_profile=single(f'm{i}', 'man'), to_profile=busy, kind='interested')
         self.assertEqual(self.foryou()[:2], [quiet.id, busy.id])
+
+
+class FinalScanTests(Base):
+    def _match_with_chat(self, other):
+        from songs.models import Conversation
+        conv = Conversation.objects.create()
+        conv.participants.add(self.mark.user, other.user)
+        return SinglesMatch.objects.create(profile_a=self.mark, profile_b=other, conversation=conv)
+
+    def test_unmatching_closes_the_open_chat_on_both_phones(self):
+        ann = single('ann')
+        match = self._match_with_chat(ann)
+        with mock.patch('songs.messaging.tell') as tell:
+            self.client.post(f'/api/singles/matches/{match.id}/unmatch/')
+        users, payload = tell.call_args.args
+        self.assertEqual(set(users), {self.mark.user_id, ann.user_id})
+        self.assertEqual((payload['type'], payload['conversation_id']), ('singles_unmatched', match.conversation_id))
+
+    def test_parting_takes_down_their_story(self):
+        ann = single('ann')
+        match = self._match_with_chat(ann)
+        SinglesStory.objects.create(match=match, title='How we met', body='x' * 50, status='published',
+                                    consents=[self.mark.user_id, ann.user_id])
+        self.client.post(f'/api/singles/matches/{match.id}/unmatch/')
+        self.assertFalse(SinglesStory.objects.exists())
+
+    def test_no_story_on_an_ended_match(self):
+        match = self._match_with_chat(single('ann'))
+        SinglesMatch.objects.filter(pk=match.pk).update(ended_at=timezone.now())
+        r = self.client.post(f'/api/singles/matches/{match.id}/story/', {'title': 'Us', 'body': 'y' * 60}, format='json')
+        self.assertEqual(r.status_code, 404)
+
+    def test_stories_leave_out_blocked_and_banned_couples(self):
+        from songs.models import Block
+        def story(a, b, title):
+            m = SinglesMatch.objects.create(profile_a=a, profile_b=b)
+            SinglesStory.objects.create(match=m, title=title, body='z' * 50, status='published',
+                                        consents=[a.user_id, b.user_id])
+        story(single('h1', 'man'), single('w1'), 'Fine')
+        blocked_man = single('h2', 'man')
+        story(blocked_man, single('w2'), 'Blocked')
+        banned = single('w3')
+        story(single('h3', 'man'), banned, 'Banned')
+        Block.objects.create(blocker=self.mark.user, blocked=blocked_man.user)
+        SinglesProfile.objects.filter(pk=banned.pk).update(status='banned')
+        titles = [s['title'] for s in self.client.get('/api/singles/stories/').data['results']]
+        self.assertEqual(titles, ['Fine'])
+
+    def test_two_quick_creates_are_one_profile_not_a_500(self):
+        from django.db import IntegrityError
+        fresh = User.objects.create_user('newbie', 'n@x.com', 'pw', is_email_verified=True)
+        User.objects.filter(pk=fresh.pk).update(date_joined=timezone.now() - timedelta(days=30))
+        self.client.force_authenticate(User.objects.get(pk=fresh.pk))
+        body = {'agree_rules': True, 'birth_date': '1995-05-05', 'gender': 'man', 'first_name': 'Newbie',
+                'country': 'Kenya', 'baptised': 'yes'}
+        with mock.patch('songs.models.SinglesProfile.save', side_effect=IntegrityError('duplicate')):
+            r = self.client.post('/api/singles/me/', body, format='json')
+        self.assertEqual(r.status_code, 400)

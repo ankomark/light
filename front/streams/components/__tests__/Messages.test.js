@@ -339,6 +339,26 @@ describe('Chat', () => {
     expect(closed.r.getByTestId('chat-closed')).toBeTruthy();
     expect(closed.r.queryByTestId('chat-input')).toBeNull();
   });
+
+  it('a match ended while the chat is open: the box goes at once', async () => {
+    const { r, id } = await open({ singles: true });
+    expect(r.getByTestId('chat-input')).toBeTruthy();
+    await live({ type: 'singles_unmatched', conversation_id: id, match_id: 3 });
+    expect(r.getByTestId('chat-closed')).toBeTruthy();
+    expect(r.queryByTestId('chat-input')).toBeNull();
+  });
+
+  it('an edit refused because the match ended closes the chat and says why', async () => {
+    const { r } = await open({ singles: true });
+    mockApi.editMessage.mockRejectedValueOnce(Object.assign(new Error('ended'),
+      { status: 403, data: { code: 'unmatched' } }));
+    await act(async () => { fireEvent(r.getByTestId('msg-2'), 'longPress'); });
+    await act(async () => { fireEvent.press(r.getByTestId('action-edit')); await new Promise((res) => setTimeout(res, 250)); });
+    fireEvent.changeText(r.getByTestId('chat-input'), 'changed my mind');
+    await act(async () => { fireEvent.press(r.getByTestId('chat-send')); });
+    expect(r.getByTestId('chat-closed')).toBeTruthy();
+    expect(r.getByText('m2')).toBeTruthy();                       // the old words stay
+  });
 });
 
 describe('Messages deep scan', () => {

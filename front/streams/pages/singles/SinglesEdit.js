@@ -6,7 +6,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-nativ
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
 import { createSinglesProfile, updateSinglesProfile } from '../../services/api';
-import { notify } from '../../utils/adminConfirm';
+import { notify, confirmAction } from '../../utils/adminConfirm';
 import {
   GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body,
 } from '../../components/singles/SinglesKit';
@@ -52,6 +52,15 @@ export default function SinglesEdit() {
         agree_rules: true, gender: f.gender,
         birth_date: f.year && f.month && f.day ? `${f.year}-${pad(f.month)}-${pad(f.day)}` : '',
       });
+      // Both are set for good once the profile is made: one wrong digit in
+      // the year was a wrong age for ever. Asked to check them first.
+      if (payload.birth_date && f.gender && !(await confirmAction({
+        title: t('singles.edit.confirmTitle'),
+        message: t('singles.edit.confirmBody', {
+          date: `${pad(f.day)}/${pad(f.month)}/${f.year}`, gender: t(`singles.gender.${f.gender}`),
+        }),
+        confirmLabel: t('singles.edit.confirmYes'), cancelLabel: t('singles.edit.confirmFix'),
+      }))) return;
     }
     setBusy(true);
     setErrors({});
@@ -60,6 +69,11 @@ export default function SinglesEdit() {
       navigation.goBack();
     } catch (e) {
       const data = e?.data || {};
+      // No answer at all: the connection, not their details.
+      if (!e?.status) {
+        notify(t('common.error'), t('singles.edit.saveOffline'));
+        return;
+      }
       if (data.code === 'under_18') {
         notify(t('singles.edit.under18Title'), t('singles.edit.under18Body'));
       } else if (data.code === 'not_eligible') {
