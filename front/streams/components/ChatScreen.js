@@ -273,6 +273,8 @@ const ChatScreen = ({ route, navigation }) => {
   const [searchQ, setSearchQ] = useState('');
   const [results, setResults] = useState(null);
   const [highlight, setHighlight] = useState(null);
+  // The search itself failed (no signal): not the same as "nothing found".
+  const [searchFailed, setSearchFailed] = useState(false);
 
   const listRef = useRef(null);
   const inputRef = useRef(null);
@@ -798,12 +800,13 @@ const ChatScreen = ({ route, navigation }) => {
   // ── In-chat search ──
   useEffect(() => {
     const q = searchQ.trim();
-    if (!searchOpen || !q) { setResults(null); return undefined; }
+    if (!searchOpen || !q) { setResults(null); setSearchFailed(false); return undefined; }
     let cancelled = false;
     const id = setTimeout(() => {
+      setSearchFailed(false);
       searchMessages(conversationId, q)
         .then((r) => { if (!cancelled) setResults(Array.isArray(r) ? r : []); })
-        .catch(() => { if (!cancelled) setResults([]); });
+        .catch(() => { if (!cancelled) { setResults([]); setSearchFailed(true); } });
     }, 350);
     return () => { cancelled = true; clearTimeout(id); };
   }, [searchQ, searchOpen, conversationId]);
@@ -1148,7 +1151,8 @@ const ChatScreen = ({ route, navigation }) => {
           )}
           ListEmptyComponent={
             <Text style={styles.searchEmpty}>
-              {!searchQ.trim() ? t('dm.searchHint') : results === null ? t('dm.searching') : t('dm.noResults')}
+              {!searchQ.trim() ? t('dm.searchHint') : results === null ? t('dm.searching')
+                : searchFailed ? t('dm.searchFailed') : t('dm.noResults')}
             </Text>
           }
         />

@@ -141,6 +141,8 @@ class NoticeViewSet(viewsets.ModelViewSet):
     def seen(self, request):
         """I've looked at the board: nothing is new any more."""
         User.objects.filter(pk=request.user.pk).update(notices_seen_at=timezone.now())
+        from ..messaging import forget_unread
+        forget_unread([request.user.id])          # the menu's notices badge
         return Response({'count': 0})
 
 

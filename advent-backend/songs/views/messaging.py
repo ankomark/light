@@ -294,6 +294,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
             ConversationState.objects.filter(pk=theirs.pk).update(archived=False)
 
         data = self._ser(message)
+        dm.forget_unread([me.id, other.id if other else None])
         dm.tell([me.id, other.id if other else None], {'type': 'message', 'conversation_id': conversation.id, 'message': data})
 
         if other and theirs:
@@ -312,6 +313,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         conversation = self.get_object()
         n = conversation.messages.filter(read=False).exclude(sender=request.user).update(read=True)
         if n:
+            dm.forget_unread([request.user.id])
             # Read receipts, live: everything they sent here is now read.
             others = conversation.participants.exclude(id=request.user.id).values_list('id', flat=True)
             dm.tell(list(others), {'type': 'read', 'conversation_id': conversation.id, 'reader_id': request.user.id})
@@ -412,6 +414,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         if str(request.data.get('clear', '')).lower() in ('1', 'true'):
             st.cleared_before_id = conversation.messages.order_by('-id').values_list('id', flat=True).first() or 0
         st.save()
+        dm.forget_unread([request.user.id])
         return Response({'accepted': st.accepted, 'muted': st.muted, 'archived': st.archived,
                          'cleared_before_id': st.cleared_before_id})
 
@@ -426,8 +429,16 @@ class ConversationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
         """Unread in accepted, unmuted chats (requests and muted chats don't
-        light the badge), after what was cleared."""
-        user = request.user
+        light the badge), after what was cleared. Kept a few seconds per
+        person (messaging.unread_key) and forgotten on any change."""
+        cached = cache.get(dm.unread_key(request.user.id))
+        if cached is not None:
+            return Response(cached)
+        data = self._unread_counts(request.user)
+        cache.set(dm.unread_key(request.user.id), data, dm.UNREAD_TTL)
+        return Response(data)
+
+    def _unread_counts(self, user):
         states = ConversationState.objects.filter(conversation=OuterRef('conversation'), user=user)
         unread = (Message.objects.filter(conversation__participants=user, read=False, is_removed=False)
                   .exclude(sender=user)
@@ -456,8 +467,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # And groups with something new (communities count too; muted ones don't).
         from ..group_live import unread_groups
         from .directory import unseen_notices
-        return Response({'unread_count': count, 'requests': requests_n, **unread_groups(user),
-                         'notices': unseen_notices(user), 'singles': singles})
+        return {'unread_count': count, 'requests': requests_n, **unread_groups(user),
+                'notices': unseen_notices(user), 'singles': singles}
 
 
 DATA_TYPES = {

@@ -27,9 +27,28 @@ def dm_room(user_id):
     return f'dm_{user_id}'
 
 
+# The menu's unread counts (unread_count): asked on every screen, every
+# minute and after every event, by everyone signed in - and among the
+# heaviest queries there are. Kept a few seconds per person, and forgotten the
+# moment anything that changes them happens (every live event comes through
+# tell(); the rest call forget_unread()).
+UNREAD_TTL = 10
+
+
+def unread_key(uid):
+    return f'dm_unread:{uid}'
+
+
+def forget_unread(user_ids):
+    keys = [unread_key(u) for u in {u for u in user_ids if u}]
+    if keys:
+        cache.delete_many(keys)
+
+
 def tell(user_ids, payload):
     """Send a live event to each person's room (all their devices). Never
     fails the request that caused it — the fallback poll catches up."""
+    forget_unread(user_ids)            # whatever it was, their counts may have moved
     layer = get_channel_layer()
     if not layer:
         return

@@ -44,6 +44,9 @@ class RequestsBadgeTests(APITestCase):
         self.assertEqual(self.badge(), 2)
         Block.objects.create(blocker=self.me, blocked=self.stranger)
         User.objects.filter(pk=other.pk).update(is_deactivated=True)
+        # Changed behind the endpoints' back (which forget the kept counts):
+        # someone else's account closing shows within the counts' few seconds.
+        cache.clear()
         self.assertEqual(self.badge(), 0)
 
 
@@ -149,3 +152,44 @@ class RequestRulesTests(APITestCase):
             ok = self.client.post(f'/api/conversations/{c}/send_message/', {'content': 'hi'}, format='json')
         self.assertEqual(codes, [201, 201, 201, 429])
         self.assertEqual(ok.status_code, 201)
+
+
+@mock.patch('songs.views.messaging.notify_user')
+class UnreadCacheTests(APITestCase):
+    """The menu's counts are kept a few seconds, and forgotten on any change."""
+
+    def setUp(self):
+        cache.clear()
+        self.me = User.objects.create_user('reader', 'r@x.com', 'x')
+        self.friend = User.objects.create_user('writer', 'w@x.com', 'x')
+        self.me.followers.add(self.friend)
+        self.friend.followers.add(self.me)
+        self.client.force_authenticate(self.friend)
+        self.conv = self.client.post('/api/conversations/', {'user_id': self.me.id}, format='json').data['id']
+
+    def count(self):
+        self.client.force_authenticate(self.me)
+        return self.client.get('/api/conversations/unread_count/').data['unread_count']
+
+    def send(self):
+        self.client.force_authenticate(self.friend)
+        self.client.post(f'/api/conversations/{self.conv}/send_message/', {'content': 'hi'}, format='json')
+
+    def test_a_new_message_and_reading_it_show_at_once(self, notify):
+        self.assertEqual(self.count(), 0)
+        self.send()
+        self.assertEqual(self.count(), 1)          # not the 0 kept a moment ago
+        self.client.post(f'/api/conversations/{self.conv}/mark_read/')
+        self.assertEqual(self.count(), 0)
+
+    def test_muting_shows_at_once(self, notify):
+        self.send()
+        self.assertEqual(self.count(), 1)
+        self.client.post(f'/api/conversations/{self.conv}/state/', {'muted': True}, format='json')
+        self.assertEqual(self.count(), 0)
+
+    def test_it_is_kept_between_changes(self, notify):
+        self.count()
+        with mock.patch('songs.views.messaging.ConversationViewSet._unread_counts') as heavy:
+            self.count()
+        heavy.assert_not_called()

@@ -328,3 +328,14 @@ def queue_video_faststart(sender, instance, created=False, raw=False, **kwargs):
         # A small still for grids (songs/image_thumbs.py).
         from .image_thumbs import queue_thumbnail
         transaction.on_commit(lambda: queue_thumbnail(instance))
+
+
+@receiver(post_save, sender='songs.GroupMember')
+@receiver(post_delete, sender='songs.GroupMember')
+def forget_group_badge(sender, instance, raw=False, **kwargs):
+    """A membership changed (read, muted, its settings, joined, left): that
+    person's menu counts are counted again (songs/messaging.forget_unread)."""
+    if raw:
+        return
+    from .messaging import forget_unread
+    forget_unread([instance.user_id])

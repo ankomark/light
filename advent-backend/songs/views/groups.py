@@ -277,6 +277,9 @@ class GroupViewSet(viewsets.ModelViewSet):
     def mark_read(self, request, slug=None):
         group = self.get_object()
         GroupMember.objects.filter(group=group, user=request.user).update(last_read_at=timezone.now())
+        # .update() sends no signal: the menu's group badge is forgotten here.
+        from ..messaging import forget_unread
+        forget_unread([request.user.id])
         return Response({'status': 'ok'})
 
     @action(detail=True, methods=['post'], url_path='me')

@@ -310,6 +310,8 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
             return Response({'error': "You can't block yourself"}, status=status.HTTP_400_BAD_REQUEST)
 
         Block.objects.get_or_create(blocker=request.user, blocked=target)
+        from ..messaging import forget_unread
+        forget_unread([request.user.id, target.id])   # their chats leave both badges
         # A block implies an unfollow both ways - and no request left waiting.
         target.followers.remove(request.user)
         request.user.followers.remove(target)

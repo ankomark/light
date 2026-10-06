@@ -746,6 +746,9 @@ def _end_match(me, pk=None, other=None, by=None):
         return None
     match.ended_at, match.ended_by = timezone.now(), by
     match.save(update_fields=['ended_at', 'ended_by'])
+    # Both sides' menu counts (the Singles badge) change at once.
+    from ..messaging import forget_unread
+    forget_unread([match.profile_a.user_id, match.profile_b.user_id])
     if match.conversation_id:
         ConversationState.objects.filter(conversation_id=match.conversation_id).update(archived=True)
     return match
