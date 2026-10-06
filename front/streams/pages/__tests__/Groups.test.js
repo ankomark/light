@@ -84,6 +84,7 @@ jest.mock('@react-navigation/native', () => {
   return { useFocusEffect: (cb) => { R.useEffect(() => cb(), [cb]); } };
 });
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null }));
+jest.mock('../../hooks/useBottomSpace', () => () => 0);
 jest.mock('expo-image', () => {
   const { View } = require('react-native');
   return { Image: (p) => <View testID={p.testID} /> };
@@ -329,6 +330,21 @@ describe('Group chat, live', () => {
     await waitFor(() => expect(r.queryByText('group.detail.tapToRetry')).toBeNull());
     expect(mockApi.sendGroupMessage.mock.calls[1][1].client_id).toBe(first.client_id);
     expect(r.getAllByText('hello all')).toHaveLength(1);
+  });
+
+  it('a send that failed for want of a signal goes again by itself when back online', async () => {
+    const { __setOnline } = require('../../hooks/useOnline');
+    const r = await ready('l9');
+    mockApi.sendGroupMessage.mockRejectedValueOnce(new Error('Network Error'));   // no answer at all
+    await act(async () => { __setOnline(false); });
+    const input = r.UNSAFE_getAllByType(require('react-native').TextInput).find((n) => n.props.multiline);
+    fireEvent.changeText(input, 'still there?');
+    await act(async () => { fireEvent.press(r.getByTestId('group-send')); });
+    await waitFor(() => expect(r.getByText('group.detail.tapToRetry')).toBeTruthy());
+    mockApi.sendGroupMessage.mockImplementationOnce(async (_s, p) => post(52, 52, { content: p.content, client_id: p.client_id, user: { id: 1, username: 'me' } }));
+    await act(async () => { __setOnline(true); });
+    await waitFor(() => expect(mockApi.sendGroupMessage).toHaveBeenCalledTimes(2));
+    expect(mockApi.sendGroupMessage.mock.calls[1][1].client_id).toBe(mockApi.sendGroupMessage.mock.calls[0][1].client_id);
   });
 
   it('my message from another device shows; reactions, member count and removal are live', async () => {

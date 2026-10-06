@@ -28,6 +28,7 @@ import { PersonListSkeleton } from '../components/SkeletonLoader';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { subscribeDM } from '../services/dmSocket';
 import { useI18n } from '../context/I18nContext';
+import useBottomSpace from '../hooks/useBottomSpace';
 
 const TAB_KEYS = [
   { key: 'public', icon: 'earth' },
@@ -174,6 +175,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   const answeredRef = useRef(null);   // the view the network last answered for
   viewRef.current = `${view}|${debouncedSearch}`;
   const [failed, setFailed] = useState(false);
+  const bottomSpace = useBottomSpace(spacing.xl);
 
   // Another view: its cached list at once (or rows about to fill in).
   const firstView = useRef(true);
@@ -563,6 +565,12 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
           </TouchableOpacity>
         </View>
 
+        {failed && filtered.length > 0 ? (
+          <View style={styles.offline} testID="groups-offline">
+            <Ionicons name="cloud-offline-outline" size={13} color={colors.textPrimary} />
+            <Text style={styles.offlineText}>{t('dm.offline')}</Text>
+          </View>
+        ) : null}
         <FlatList
           data={filtered}
           keyExtractor={(item) => item.slug}
@@ -577,7 +585,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
             />
           }
           style={loading && filtered.length > 0 && !refreshing ? styles.fading : null}
-          contentContainerStyle={filtered.length === 0 && styles.listContent}
+          contentContainerStyle={[{ paddingBottom: bottomSpace }, filtered.length === 0 && styles.listContent]}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={11}
@@ -714,6 +722,11 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 17, fontWeight: '700', color: colors.textPrimary, marginTop: spacing.sm },
   emptySubtext: { fontSize: 13.5, color: colors.textSecondary, textAlign: 'center' },
   listContent: { flexGrow: 1 },
+  offline: {
+    flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 6, marginBottom: spacing.xs,
+    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  offlineText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
 
   // Join-with-code modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },

@@ -112,11 +112,36 @@ class GroupSerializer(serializers.ModelSerializer):
         model = Group
         fields = '__all__'
         # The invite link's limits are set through /invite-link/ only.
+        # Read-only here, each for a reason:
+        # - the invite link's limits: set through /invite-link/ only;
+        # - kind: a group can't turn itself into a community (or back) after
+        #   it was made - each has its own rules;
+        # - pinned_post: set through /posts/<id>/pin/, which checks the post is
+        #   this group's. Writable here, any post's words - another private
+        #   group's - showed as this group's pinned message;
+        # - is_removed: a moderator's takedown, never the group's own.
         read_only_fields = ['creator', 'slug', 'created_at', 'updated_at',
-                            'invite_expires_at', 'invite_max_uses', 'invite_uses']
+                            'invite_expires_at', 'invite_max_uses', 'invite_uses',
+                            'kind', 'pinned_post', 'is_removed']
 
     def validate_slow_mode_seconds(self, v):
         return max(0, min(int(v or 0), 3600))
+
+    def validate_parent(self, parent):
+        """A parent is a community anyone may see (or one the asker is in) -
+        never a private group someone else runs, named under theirs."""
+        if parent is None:
+            return parent
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if parent.is_removed or parent.kind != Group.KIND_COMMUNITY:
+            raise serializers.ValidationError('Choose a community as the parent.')
+        if parent.is_private and not (user and (user.is_super_admin
+                                                or parent.members.filter(user=user).exists())):
+            raise serializers.ValidationError('Choose a community as the parent.')
+        if self.instance is not None and parent.pk == self.instance.pk:
+            raise serializers.ValidationError('A community cannot be its own parent.')
+        return parent
 
     def to_representation(self, obj):
         data = super().to_representation(obj)
@@ -339,6 +364,26 @@ class GroupPostSerializer(serializers.ModelSerializer):
     def get_is_owner(self, obj):
         request = self.context.get('request')
         return bool(request and request.user.is_authenticated and obj.user_id == request.user.id)
+
+    # A message is a message, not a document: the text had no limit at all,
+    # and every member's chat would load whatever was sent.
+    CONTENT_MAX = 5000
+
+    def validate_content(self, value):
+        value = value or ''
+        if len(value) > self.CONTENT_MAX:
+            raise serializers.ValidationError(f'Keep a message under {self.CONTENT_MAX} characters.')
+        return value
+
+    def validate_duration(self, value):
+        # Seconds of a voice note, within reason (a negative or a billion
+        # breaks the player).
+        if value is None:
+            return value
+        try:
+            return max(0, min(int(value), 3600))
+        except (TypeError, ValueError):
+            return None
 
     def get_reactions(self, obj):
         """Aggregate emoji → count, plus the caller's own pick. Relies on the

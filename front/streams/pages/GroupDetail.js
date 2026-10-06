@@ -30,6 +30,7 @@ import {
 import { uploadMedia } from '../services/cloudinary';
 import { createGroupSocket } from '../services/groupSocket';
 import { useAuth } from '../context/useAuth';
+import useOnline, { isOnline } from '../hooks/useOnline';
 import RotatingBackground from '../components/RotatingBackground';
 import ReportModal from '../components/ReportModal';
 import BookClubBanner from '../components/BookClubBanner';
@@ -61,6 +62,10 @@ try { Blurhash = require('react-native-blurhash').Blurhash; } catch { Blurhash =
 const POLL_LIVE_MS = 30000;
 const POLL_MS = 5000;
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
+const VOICE_MIN_MS = 800;      // shorter: a tap on the mic, not a voice note
+// Failing polls back off (5 s, 10, 20, then every 30 s) and wait while offline,
+// instead of asking every 5 seconds on a dead connection.
+const POLL_BACKOFF_MAX_MS = 30000;
 const EMOJIS = ['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','🥰','😘','😋','😜','🤪','🤔','🤭','😎','🥳','😢','😭','😤','😡','🥺','😱','🙏','👍','👎','👏','🙌','🤝','💪','🫶','❤️','🧡','💛','💚','💙','💜','🔥','✨','🎉','💯','✅','🕊️','📖','🎵','☀️','⭐'];
 const REACTIONS = ['❤️', '👍', '🙏', '🎵', '😂', '🔥']; // quick-react row
 const SWIPE_TRIGGER = 56; // px of right-swipe to fire a reply
@@ -341,6 +346,8 @@ const GroupDetail = ({ route, navigation }) => {
   const [joinAnswer, setJoinAnswer] = useState(null); // string when the join-question modal is open
   const [jqEditor, setJqEditor] = useState(null);     // string when the admin join-question editor is open
   const [reportMsg, setReportMsg] = useState(null);   // message being reported
+  // The whole group (a scam, something hateful): reported to the app's moderators.
+  const [reportGroup, setReportGroup] = useState(false);
   const [slowSheet, setSlowSheet] = useState(false);   // admin: slow mode choices
   const [notifySheet, setNotifySheet] = useState(false); // my notifications for this group
   const [unreadId, setUnreadId] = useState(null);      // where "unread messages" starts
@@ -401,9 +408,14 @@ const GroupDetail = ({ route, navigation }) => {
   const recordTimerRef = useRef(null);
   const recordStartRef = useRef(0);
   const soundRef = useRef(null);
+  const pollFails = useRef(0);
+  const pollWaitUntil = useRef(0);
+  const online = useOnline();
+  const [searchFailed, setSearchFailed] = useState(false);
 
   // ── Load ──
   const loadPosts = useCallback(async (silent = false) => {
+    if (silent && (!isOnline() || Date.now() < pollWaitUntil.current)) return undefined;
     try {
       // After the first page, a poll asks only for what's newer than the
       // newest message held — a few rows, not the page of 30 every time.
@@ -448,7 +460,13 @@ const GroupDetail = ({ route, navigation }) => {
         if (!silent && merged.length) setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
         return merged;
       });
-    } catch { /* ignore */ }
+      pollFails.current = 0;
+      pollWaitUntil.current = 0;
+    } catch {
+      // What's on screen stays; the next poll waits longer each time.
+      pollFails.current += 1;
+      pollWaitUntil.current = Date.now() + Math.min(POLL_BACKOFF_MAX_MS, POLL_MS * 2 ** (pollFails.current - 1));
+    }
     return undefined;
   }, [groupSlug]);
 
@@ -703,7 +721,11 @@ const GroupDetail = ({ route, navigation }) => {
 
   useEffect(() => () => {
     clearInterval(recordTimerRef.current);
-    recordingRef.current?.stopAndUnloadAsync?.().catch(() => {});
+    if (recordingRef.current) {
+      recordingRef.current.stopAndUnloadAsync?.().catch(() => {});
+      // Out of recording mode, or an iPhone keeps sound on the earpiece.
+      setAudioModeAsync?.({ allowsRecordingIOS: false })?.catch?.(() => {});
+    }
     soundRef.current?.unloadAsync?.().catch(() => {});
     Object.values(typingTimersRef.current).forEach(clearTimeout);
     clearTimeout(myTypingRef.current.idle);
@@ -749,7 +771,7 @@ const GroupDetail = ({ route, navigation }) => {
       const saved = await sendGroupMessage(groupSlug, body);
       setMessages((prev) => settle(prev, tempId, saved));
     } catch (e) {
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed', _offline: !e?.response } : m)));
       const code = e?.response?.status;
       if (code === 403) notify(t('common.error'), e?.response?.data?.detail || t('group.detail.cantPost'));
       else if (code === 429) notify(t('group.detail.slowMode'), t('group.detail.slowModeHint', { time: slowLabel(slowSecondsRef.current || 0, t) }));
@@ -778,8 +800,8 @@ const GroupDetail = ({ route, navigation }) => {
         file_name, duration, reply_to_id: replyDisplay?.id, client_id: tempId,
       });
       setMessages((prev) => settle(prev, tempId, saved));
-    } catch {
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
+    } catch (e) {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed', _offline: !e?.response } : m)));
     }
   }, [groupSlug, putBubble]);
 
@@ -795,6 +817,19 @@ const GroupDetail = ({ route, navigation }) => {
     if (m._retryMedia) sendMedia(m._retryMedia, m._replyDisplay, m.id);
     else deliver(m._payload, m._replyDisplay, m.id);
   }, [deliver, sendMedia]);
+
+  // Back online: what failed for want of a signal goes again by itself (same
+  // client id - never twice) and the chat catches up. Refusals stay put.
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnline.current) {
+      pollFails.current = 0;
+      pollWaitUntil.current = 0;
+      messagesRef.current.filter((m) => m._status === 'failed' && m._offline).forEach((m) => retrySend(m));
+      if (canReadRef.current) loadPosts(true);
+    }
+    wasOnline.current = online;
+  }, [online, retrySend, loadPosts]);
 
   const handleSendText = useCallback(() => {
     const content = text.trim();
@@ -825,7 +860,11 @@ const GroupDetail = ({ route, navigation }) => {
       const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.length) return;
       const f = res.assets[0];
-      if (f.size && f.size > MAX_FILE_BYTES) { notify(t('chat.fileTooLargeTitle'), t('group.detail.fileTooLargeBody')); return; }
+      let size = f.size;
+      if (!size) {
+        try { size = (await FileSystem.getInfoAsync(f.uri, { size: true }))?.size; } catch { size = 0; }
+      }
+      if (size && size > MAX_FILE_BYTES) { notify(t('chat.fileTooLargeTitle'), t('group.detail.fileTooLargeBody')); return; }
       sendMediaMessage({
         localUri: f.uri, uploadType: 'chat-file', message_type: 'file',
         file_name: f.name || 'file', mimeType: f.mimeType || 'application/octet-stream',
@@ -848,7 +887,8 @@ const GroupDetail = ({ route, navigation }) => {
   const openFile = useCallback(async (msg) => {
     try {
       const safeName = (msg.file_name || 'file').replace(/[^\w.\-]/g, '_');
-      const dest = `${FileSystem.cacheDirectory}${safeName}`;
+      // Its own name per message (two "notes.pdf" are two files), fetched once.
+      const dest = `${FileSystem.cacheDirectory}grp_${msg.id}_${safeName}`;
       let path;
       if (isData(msg.attachment)) {
         const m = /^data:(.*?);base64,(.*)$/.exec(msg.attachment || '');
@@ -856,8 +896,8 @@ const GroupDetail = ({ route, navigation }) => {
         await FileSystem.writeAsStringAsync(dest, m[2], { encoding: FileSystem.EncodingType.Base64 });
         path = dest;
       } else if (typeof msg.attachment === 'string' && msg.attachment.startsWith('http')) {
-        const dl = await FileSystem.downloadAsync(msg.attachment, dest);
-        path = dl.uri;
+        const have = await FileSystem.getInfoAsync(dest).catch(() => null);
+        path = have?.exists ? dest : (await FileSystem.downloadAsync(msg.attachment, dest)).uri;
       } else {
         path = msg.attachment; // local file:// (optimistic, still uploading)
       }
@@ -892,7 +932,9 @@ const GroupDetail = ({ route, navigation }) => {
       await setAudioModeAsync({ allowsRecordingIOS: false });
       if (cancel) return;
       const uri = rec.getURI();
-      const seconds = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
+      const heldMs = Date.now() - recordStartRef.current;
+      if (heldMs < VOICE_MIN_MS) { notify(t('chat.voiceTooShort')); return; }
+      const seconds = Math.max(1, Math.round(heldMs / 1000));
       if (!uri) return;
       sendMediaMessage({
         localUri: uri, uploadType: 'chat-audio', message_type: 'audio',
@@ -1059,7 +1101,8 @@ const GroupDetail = ({ route, navigation }) => {
       try {
         const res = await searchGroupMessages(groupSlug, q);
         setSearchResults(res?.results ?? (Array.isArray(res) ? res : []));
-      } catch { setSearchResults([]); }
+        setSearchFailed(false);
+      } catch { setSearchResults([]); setSearchFailed(true); }
       finally { setSearching(false); }
     }, 350);
   }, [groupSlug]);
@@ -1380,7 +1423,9 @@ const GroupDetail = ({ route, navigation }) => {
               contentContainerStyle={styles.searchList}
               ListEmptyComponent={
                 searchQuery.trim().length >= 2 ? (
-                  <Text style={styles.searchEmpty}>{t('group.detail.searchNone')}</Text>
+                  <Text style={styles.searchEmpty}>
+                    {searchFailed ? t('dm.searchFailed') : t('group.detail.searchNone')}
+                  </Text>
                 ) : null
               }
             />
@@ -1799,6 +1844,19 @@ const GroupDetail = ({ route, navigation }) => {
               </TouchableOpacity>
             )}
 
+            {group?.creator?.id !== currentUser?.id && (
+              <TouchableOpacity style={styles.sheetOption} activeOpacity={0.85} testID="group-report"
+                onPress={() => { setMenuSheet(false); setTimeout(() => setReportGroup(true), 220); }}>
+                <View style={styles.sheetIcon}>
+                  <Ionicons name="flag-outline" size={22} color={colors.warning} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionLabel}>{t('group.detail.reportGroup')}</Text>
+                  <Text style={styles.sheetOptionHint}>{t('group.detail.reportGroupHint')}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity style={styles.sheetCancel} activeOpacity={0.85} onPress={() => setMenuSheet(false)}>
               <Text style={styles.sheetCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
@@ -1981,6 +2039,13 @@ const GroupDetail = ({ route, navigation }) => {
             catch { notify(t('common.error'), t('group.detail.settingFailed')); }
           },
         }))}
+      />
+      <ReportModal
+        visible={reportGroup}
+        onClose={() => setReportGroup(false)}
+        contentType="group"
+        objectId={group?.id}
+        title={group?.name}
       />
       <ReportModal
         visible={!!reportMsg}

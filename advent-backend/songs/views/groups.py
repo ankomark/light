@@ -17,8 +17,26 @@ from .. import group_live as live
 # never-opened group counts every message as unread (matches the old behaviour).
 EPOCH = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 
-# How long after a rejection before someone may request to join again.
+# How long after a rejection - or being removed - before someone may join again.
 REJOIN_COOLDOWN_DAYS = 7
+
+
+def _flag(value):
+    """A yes/no from a request: True / 'true' / '1'. bool('false') is True, so
+    a form-encoded "false" used to mean yes (an admin couldn't be demoted)."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _turned_away(group, user):
+    """When this person may (re)join, if they were declined or removed lately;
+    None if they may join now. An admin adding them back clears it."""
+    held = GroupJoinRequest.objects.filter(group=group, user=user, status='rejected').first()
+    if held is None:
+        return None
+    until = held.updated_at + timedelta(days=REJOIN_COOLDOWN_DAYS)
+    return until if timezone.now() < until else None
 
 
 def group_system_message(group, text, actor):
@@ -107,14 +125,14 @@ class GroupViewSet(viewsets.ModelViewSet):
         pending = GroupJoinRequest.objects.filter(group=OuterRef('pk'), user=user, status='pending')
 
         # Latest visible post's fields (excludes super-admin-authored posts).
-        last = (GroupPost.objects.filter(group=OuterRef('pk'))
+        last = (GroupPost.objects.filter(group=OuterRef('pk'), is_removed=False)
                 .exclude(user_id__in=hidden).order_by('-created_at'))
 
         # Unread = my group's posts after my last_read_at, minus my own/system/
         # hidden. The nested subquery resolves my last_read for this same group.
         my_last_read = (GroupMember.objects
                         .filter(group=OuterRef('group'), user=user).values('last_read_at')[:1])
-        unread = (GroupPost.objects.filter(group=OuterRef('pk'))
+        unread = (GroupPost.objects.filter(group=OuterRef('pk'), is_removed=False)
                   .exclude(user=user).exclude(message_type='system').exclude(user_id__in=hidden)
                   .filter(created_at__gt=Coalesce(
                       Subquery(my_last_read, output_field=DateTimeField()),
@@ -395,6 +413,10 @@ class GroupViewSet(viewsets.ModelViewSet):
         # petition. Private communities and all groups still go through approval,
         # so the creator controls who gets in.
         if group.kind == Group.KIND_COMMUNITY and not group.is_private:
+            until = _turned_away(group, request.user)
+            if until:
+                return Response({"error": f"You can join again after {until.date().isoformat()}.",
+                                 'code': 'cooldown'}, status=status.HTTP_403_FORBIDDEN)
             GroupMember.objects.create(group=group, user=request.user)
             GroupJoinRequest.objects.filter(group=group, user=request.user).update(
                 status='approved'
@@ -472,6 +494,10 @@ class GroupViewSet(viewsets.ModelViewSet):
                 return Response({"error": "The group creator cannot be removed"}, status=status.HTTP_400_BAD_REQUEST)
             uname, gone = removed.user.username, removed.user
             removed.delete()
+            # Not straight back in (an open community, an invite link): the
+            # same wait as a declined request. An admin adding them clears it.
+            GroupJoinRequest.objects.update_or_create(
+                group=group, user=gone, defaults={'status': 'rejected', 'message': ''})
             group_system_message(group, f"{uname} was removed", request.user)
             members_changed(group, 'removed', gone)
             log_group_action(group, request.user, 'remove_member', f"Removed {uname}")
@@ -486,7 +512,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only admins can change roles")
 
         user_id = request.data.get('user_id')
-        make_admin = bool(request.data.get('is_admin', True))
+        make_admin = _flag(request.data.get('is_admin', True))
         if not user_id:
             return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -516,7 +542,7 @@ class GroupViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only admins can change roles")
 
         user_id = request.data.get('user_id')
-        make_mod = bool(request.data.get('is_moderator', True))
+        make_mod = _flag(request.data.get('is_moderator', True))
         if not user_id:
             return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -542,7 +568,7 @@ class GroupViewSet(viewsets.ModelViewSet):
         if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can change this setting")
 
-        only_admins = bool(request.data.get('only_admins_can_post'))
+        only_admins = _flag(request.data.get('only_admins_can_post'))
         if group.only_admins_can_post != only_admins:
             group.only_admins_can_post = only_admins
             group.save(update_fields=['only_admins_can_post'])
@@ -640,7 +666,9 @@ class GroupViewSet(viewsets.ModelViewSet):
 
         member, created = GroupMember.objects.get_or_create(group=group, user=user)
         if created:
-            GroupJoinRequest.objects.filter(group=group, user=user, status='pending').update(status='approved')
+            # Added back by an admin: any wait (declined, removed) is over.
+            GroupJoinRequest.objects.filter(group=group, user=user, status__in=('pending', 'rejected')) \
+                .update(status='approved')
             group_system_message(group, f"{user.username} was added", request.user)
             members_changed(group, 'joined', user)
             msg = f"You were added to {group.name}"
@@ -662,14 +690,14 @@ class GroupViewSet(viewsets.ModelViewSet):
         if not (request.user.is_super_admin or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             raise PermissionDenied("Only admins can manage invite links")
         # {revoke: true}: the link stops working, and no new one is made.
-        if request.data.get('revoke'):
+        if _flag(request.data.get('revoke', False)):
             group.invite_code = None
             group.invite_expires_at = group.invite_max_uses = None
             group.invite_uses = 0
             group.save(update_fields=['invite_code', 'invite_expires_at', 'invite_max_uses', 'invite_uses'])
             log_group_action(group, request.user, 'invite', 'Revoked the invite link')
             return Response({'code': None, 'group_name': group.name})
-        fresh = bool(request.data.get('regenerate')) or not group.invite_code
+        fresh = _flag(request.data.get('regenerate', False)) or not group.invite_code
         if fresh:
             group.invite_code = uuid.uuid4()
             group.invite_uses = 0
@@ -709,6 +737,10 @@ class GroupViewSet(viewsets.ModelViewSet):
             return Response({"error": "This invite link is invalid or has expired"}, status=status.HTTP_404_NOT_FOUND)
         already = GroupMember.objects.filter(group=group, user=request.user).exists()
         if not already:
+            until = _turned_away(group, request.user)
+            if until:
+                return Response({"error": f"You can join again after {until.date().isoformat()}.",
+                                 'code': 'cooldown'}, status=status.HTTP_403_FORBIDDEN)
             if group.invite_expires_at and group.invite_expires_at <= timezone.now():
                 return Response({"error": "This invite link has expired"}, status=status.HTTP_410_GONE)
             if group.invite_max_uses and group.invite_uses >= group.invite_max_uses:
@@ -743,9 +775,11 @@ class GroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='upload-cover')
     def upload_cover(self, request, slug=None):
         group = self.get_object()
-        if group.creator != request.user:
+        # Its admins, as for every other setting (it was the creator alone).
+        if not (request.user.is_super_admin or group.creator_id == request.user.id
+                or GroupMember.objects.filter(group=group, user=request.user, is_admin=True).exists()):
             return Response(
-                {"error": "Only the group creator can upload cover images"},
+                {"error": "Only the group's admins can change its cover"},
                 status=status.HTTP_403_FORBIDDEN
             )
             
@@ -755,6 +789,14 @@ class GroupViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
             
+        # A picture (checked by Pillow, not by the name it came with): this
+        # goes to public storage and into every member's list.
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        try:
+            serializers.ImageField().run_validation(request.FILES['cover_image'])
+        except (serializers.ValidationError, DjangoValidationError):
+            return Response({"error": "The cover must be a picture."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             # Upload to R2; store the public URL as the reference.
             group.cover_image = r2.upload_file(request.FILES['cover_image'], 'group_covers')
@@ -1019,6 +1061,9 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         if not content:
             return Response({'error': 'Message cannot be empty'},
                             status=status.HTTP_400_BAD_REQUEST)
+        if len(content) > GroupPostSerializer.CONTENT_MAX:
+            return Response({'error': f'Keep a message under {GroupPostSerializer.CONTENT_MAX} characters.'},
+                            status=status.HTTP_400_BAD_REQUEST)
         post.content = content
         post.edited_at = timezone.now()
         post.save(update_fields=['content', 'edited_at', 'updated_at'])
@@ -1176,6 +1221,12 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
     serializer_class = GroupJoinRequestSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardPagination
+    # The list and approve / reject. Requests are made through /request-join/
+    # (its rules, its cooldown); not edited, nor deleted, here.
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    def create(self, request, *args, **kwargs):
+        return Response({'error': 'Ask to join from the group itself.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def get_queryset(self):
         qs = GroupJoinRequest.objects.filter(
@@ -1281,12 +1332,27 @@ class CommunityCategoryViewSet(viewsets.ModelViewSet):
     lookup_field = 'slug'
     pagination_class = None
 
+    def get_throttles(self):
+        # A new kind of community now and then - not a flood in the list
+        # everyone picks from.
+        if self.action == 'create':
+            self.throttle_scope = 'group_join'
+        return super().get_throttles()
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user, is_builtin=False)
 
     def _guard_builtin(self, instance):
-        if instance.is_builtin and not getattr(self.request.user, 'is_super_admin', False):
+        """Built-ins: super admins only. Anyone else's: theirs alone - any
+        signed-in person could rename (or rewrite the fields of) a category
+        every community in it is filed under."""
+        u = self.request.user
+        if getattr(u, 'is_super_admin', False):
+            return
+        if instance.is_builtin:
             raise PermissionDenied('Built-in categories cannot be changed.')
+        if instance.created_by_id != u.id:
+            raise PermissionDenied('Only the person who made this category can change it.')
 
     def perform_update(self, serializer):
         self._guard_builtin(serializer.instance)
