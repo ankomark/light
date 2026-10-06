@@ -95,3 +95,24 @@ it('the lists catch up only chats that are behind', async () => {
   expect(mockApi.fetchGroupPostsAfter).toHaveBeenCalledWith('d', 3);
   expect(ids('d')).toEqual([3, 4]);
 });
+
+it('a chat opened over another: closing the top one leaves the one beneath claimed', async () => {
+  const closeA = setOpenGroupChat('a');
+  const closeA2 = setOpenGroupChat('a');
+  closeA2();
+  await catchUpChat(ME, 'a');
+  expect(mockApi.fetchGroupPosts).not.toHaveBeenCalled();
+  closeA();
+});
+
+it('signed out mid-fetch: nothing is written', async () => {
+  const stop = startGroupChatSync(ME);
+  let answer;
+  mockApi.fetchGroupPosts.mockImplementation(() => new Promise((r) => { answer = r; }));
+  const p = catchUpChat(ME, 'c');
+  await new Promise((r) => { const tick = () => (answer ? r() : setTimeout(tick, 5)); tick(); });
+  stop();
+  answer({ results: [msg(1)] });
+  await p;
+  expect(peekCache(key('c'))).toBeNull();
+});

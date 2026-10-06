@@ -1044,8 +1044,11 @@ const GroupDetail = ({ route, navigation }) => {
   };
 
   const join = () => {
-    // If the group asks a question, collect the answer first; else request straight away.
-    if (group?.join_question) setJoinAnswer('');
+    // If the group asks a question, collect the answer first; else request
+    // straight away. An open community is joined at once - nobody reads an
+    // answer there, so none is asked.
+    const open = group?.kind === 'community' && !group?.is_private;
+    if (group?.join_question && !open) setJoinAnswer('');
     else submitJoin('');
   };
 

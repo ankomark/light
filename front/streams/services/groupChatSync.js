@@ -27,15 +27,23 @@ const WARM_MAX = 8;              // chats per kind kept warm from the lists
 const SOON_MS = 1500;            // a burst of messages is one fetch
 const SWEEP_EVERY_MS = 60000;    // the lists aren't asked again sooner than this
 
-let openSlug = null;
+// Chats on screen, counted: a chat opened over another (a sub-group) closing
+// mustn't leave the one beneath unclaimed.
+const openChats = new Map();
+const isOpen = (slug) => (openChats.get(slug) || 0) > 0;
+const SIGNED_OUT = 'signed-out';
+let activeMe = null;             // whose chats are kept (SIGNED_OUT once stopped)
 const timers = new Map();        // slug -> pending live catch-up
 const busy = new Set();          // slugs being fetched
 const again = new Set();         // told again while fetching: one more pass
 
 /** The chat on screen (it fetches for itself); returns the "closed" call. */
 export const setOpenGroupChat = (slug) => {
-  openSlug = slug;
-  return () => { if (openSlug === slug) openSlug = null; };
+  openChats.set(slug, (openChats.get(slug) || 0) + 1);
+  return () => {
+    const n = (openChats.get(slug) || 1) - 1;
+    if (n > 0) openChats.set(slug, n); else openChats.delete(slug);
+  };
 };
 
 const newestId = (list) => {
@@ -51,7 +59,7 @@ const newestId = (list) => {
  * or (nothing held, or too far behind) the newest page. Never throws.
  */
 export async function catchUpChat(meId, slug, group = null) {
-  if (!meId || !slug || slug === openSlug || !isOnline()) return false;
+  if (!meId || !slug || isOpen(slug) || !isOnline()) return false;
   if (busy.has(slug)) { again.add(slug); return false; }
   busy.add(slug);
   try {
@@ -72,8 +80,8 @@ export async function catchUpChat(meId, slug, group = null) {
       const res = await fetchGroupPosts(slug, 1);
       messages = freshPage(held, (res?.results ?? []).slice().reverse());
     }
-    // Opened meanwhile: that screen has the chat now, and writes it itself.
-    if (slug === openSlug) return false;
+    // Opened meanwhile (that screen writes it itself), or signed out.
+    if (isOpen(slug) || (activeMe != null && activeMe !== meId)) return false;
     writeCache(key, {
       ...(kept || {}),
       group: group || kept?.group || null,
@@ -84,7 +92,7 @@ export async function catchUpChat(meId, slug, group = null) {
     return false;                                     // the chat fetches when opened
   } finally {
     busy.delete(slug);
-    if (again.delete(slug)) soon(meId, slug);
+    if (again.delete(slug) && activeMe === meId) soon(meId, slug);
   }
 }
 
@@ -130,8 +138,9 @@ async function sweep(meId) {
  */
 export function startGroupChatSync(meId) {
   if (!meId) return () => {};
+  activeMe = meId;
   const unsub = subscribeDM((e) => {
-    if (e?.type === 'group_message' && e.group_slug && e.group_slug !== openSlug) soon(meId, e.group_slug);
+    if (e?.type === 'group_message' && e.group_slug && !isOpen(e.group_slug)) soon(meId, e.group_slug);
     // Back online after a drop: whatever was missed meanwhile.
     else if (e?.type === 'status' && e.open) sweep(meId);
   });
@@ -145,6 +154,7 @@ export function startGroupChatSync(meId) {
     timers.forEach((id) => clearTimeout(id));
     timers.clear();
     lastSweep = 0;
+    if (activeMe === meId) activeMe = SIGNED_OUT;
   };
 }
 
@@ -154,6 +164,7 @@ export function _resetGroupChatSync() {
   timers.clear();
   busy.clear();
   again.clear();
-  openSlug = null;
+  openChats.clear();
+  activeMe = null;
   lastSweep = 0;
 }

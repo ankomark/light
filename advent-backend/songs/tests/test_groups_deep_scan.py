@@ -217,3 +217,22 @@ class CursorTests(APITestCase):
         self.assertTrue(r.data['has_more'])
         r = self.client.get(f'/api/groups/{g.slug}/posts/?before={gone_id}')
         self.assertFalse(r.data['has_more'])
+
+
+class OpenJoinTests(APITestCase):
+    def test_two_quick_taps_on_join_are_one_member_and_one_notice(self):
+        owner = User.objects.create_user('oj', 'oj@x.com', 'x')
+        me = User.objects.create_user('oj2', 'oj2@x.com', 'x')
+        g = Group.objects.create(creator=owner, name='Open', kind=Group.KIND_COMMUNITY, is_private=False)
+        GroupMember.objects.create(group=g, user=owner, is_admin=True)
+        self.client.force_authenticate(me)
+        url = f'/api/communities/{g.slug}/request-join/'
+        first = self.client.post(url, {}, format='json')
+        if first.status_code == 404:
+            url = f'/api/groups/{g.slug}/request-join/'
+            first = self.client.post(url, {}, format='json')
+        self.assertTrue(first.data.get('joined'))
+        # A second tap is "already a member" (400), never a second row or notice.
+        self.assertEqual(self.client.post(url, {}, format='json').status_code, 400)
+        self.assertEqual(GroupMember.objects.filter(group=g, user=me).count(), 1)
+        self.assertEqual(GroupPost.objects.filter(group=g, message_type='system', content__contains='joined').count(), 1)

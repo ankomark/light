@@ -435,12 +435,14 @@ class GroupViewSet(viewsets.ModelViewSet):
             if until:
                 return Response({"error": f"You can join again after {until.date().isoformat()}.",
                                  'code': 'cooldown'}, status=status.HTTP_403_FORBIDDEN)
-            GroupMember.objects.create(group=group, user=request.user)
+            # Two quick taps: the second finds the first's row (not a 500).
+            _, made = GroupMember.objects.get_or_create(group=group, user=request.user)
             GroupJoinRequest.objects.filter(group=group, user=request.user).update(
                 status='approved'
             )
-            group_system_message(group, f"{request.user.username} joined", request.user)
-            members_changed(group, 'joined', request.user)
+            if made:
+                group_system_message(group, f"{request.user.username} joined", request.user)
+                members_changed(group, 'joined', request.user)
             return Response(
                 {"status": "joined", "joined": True},
                 status=status.HTTP_200_OK,
