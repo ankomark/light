@@ -180,3 +180,24 @@ class ListOrderTests(APITestCase):
         quiet = self.make('Quiet', members=0)
         busy = self.make('Busy', members=3)
         self.assertEqual(self.slugs('public')[:2], [busy.slug, quiet.slug])
+
+
+class FinalScanTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.owner = User.objects.create_user('fo', 'fo@x.com', 'x')
+        self.a = User.objects.create_user('fa', 'fa@x.com', 'x')
+        self.b = User.objects.create_user('fb', 'fb@x.com', 'x')
+        self.group = Group.objects.create(creator=self.owner, name='Final')
+        for u in (self.owner, self.a, self.b):
+            GroupMember.objects.create(group=self.group, user=u, is_admin=(u == self.owner))
+        self.post = GroupPost.objects.create(group=self.group, user=self.a, content='hi', message_type='text')
+
+    def receipts(self, who):
+        self.client.force_authenticate(who)
+        return self.client.get(f'/api/groups/{self.group.slug}/posts/{self.post.id}/receipts/').status_code
+
+    def test_who_read_a_message_is_its_authors_and_the_admins(self):
+        self.assertEqual(self.receipts(self.a), 200)        # the author
+        self.assertEqual(self.receipts(self.owner), 200)    # an admin
+        self.assertEqual(self.receipts(self.b), 403)        # anyone else

@@ -270,11 +270,13 @@ class GroupViewSet(viewsets.ModelViewSet):
 
     def get_throttles(self):
         # Cap mass join-request spam (the global ScopedRateThrottle reads this).
-        if self.action in ('request_join', 'join_by_code'):
+        if self.action in ('request_join', 'join_by_code', 'create'):
+            # Making a group is a now-and-then thing: the general action rate
+            # (120 a minute) let one account fill the directory.
             self.throttle_scope = 'group_join'
         elif self.action == 'invite_link':
             self.throttle_scope = 'group_invite'
-        elif self.action in ('create', 'add_member', 'remove_member', 'set_admin', 'set_moderator',
+        elif self.action in ('add_member', 'remove_member', 'set_admin', 'set_moderator',
                              'set_posting_policy', 'set_join_question', 'set_slow_mode', 'mute', 'my_settings'):
             self.throttle_scope = 'group_action'
         return super().get_throttles()
@@ -1107,6 +1109,11 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         last_read_at reaches the message's timestamp. Author + hidden super-admins
         excluded. Members-only (get_object enforces the same gate as the list)."""
         post = self.get_object()
+        # Who read a message is its author's to know (and the group's admins
+        # and moderators): any member could see who read anyone's message -
+        # in a big community, when each person reads.
+        if post.user_id != request.user.id and not self._is_group_mod(post.group):
+            raise PermissionDenied("Only the message's author can see who read it.")
         readers = (
             GroupMember.objects
             .filter(group=post.group, last_read_at__gte=post.created_at)
