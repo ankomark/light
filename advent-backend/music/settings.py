@@ -390,6 +390,21 @@ if DATABASE_URL:
     }
     if USE_PGBOUNCER:
         DATABASES['default']['DISABLE_SERVER_SIDE_CURSORS'] = True
+    # A connection the network drops silently (a phone hotspot's NAT, a Wi-Fi
+    # change) or one that never completes used to hang its request until the
+    # OS gave up - and under Daphne sync views share one thread, so every
+    # request queued behind it and the dev server froze, past even Ctrl+C.
+    # Now a new connection gives up after 10 s, keepalives notice a dead one
+    # within about a minute, and a kept one (CONN_MAX_AGE > 0, i.e. without
+    # the pooler) is checked before a request reuses it.
+    DATABASES['default']['CONN_HEALTH_CHECKS'] = True
+    DATABASES['default'].setdefault('OPTIONS', {}).update({
+        'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
+        'keepalives': 1,
+        'keepalives_idle': 20,
+        'keepalives_interval': 5,
+        'keepalives_count': 3,
+    })
 else:
     # Local dev fallback when DATABASE_URL isn't set — use a local SQLite file
     # so `runserver`/`migrate`/admin work without the production database.
