@@ -995,7 +995,10 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         spot = (qs.select_related(None).prefetch_related(None).filter(pk=anchor_id)
                 .values_list('created_at', 'id').first())
         if not spot:
-            return Response({'results': [], 'has_more': False})
+            # The anchor is gone (deleted, or taken down). Going newer, that's
+            # "lost my place", not "nothing new": has_more sends the client to
+            # the newest page instead of polling after it forever.
+            return Response({'results': [], 'has_more': bool(after)})
         # (time, id) — two messages in the same instant are both reached.
         at, anchor_pk = spot
         if before:

@@ -17,16 +17,17 @@ import { useAuth } from '../context/useAuth';
 import {
   fetchGroups, fetchGroupsByUrl,
   fetchCommunities, fetchCommunitiesByUrl, fetchCommunityCategories,
-  deleteGroup, joinGroupByCode, fetchGroupPosts,
+  deleteGroup, joinGroupByCode,
 } from '../services/api';
 import GroupItem from './GroupItem';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { peekCache, readCache, writeCache } from '../utils/screenCache';
-import { groupListKey, groupChatKey, cacheableGroupMessages } from '../utils/groupChat';
+import { groupListKey } from '../utils/groupChat';
 import { PersonListSkeleton } from '../components/SkeletonLoader';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { subscribeDM } from '../services/dmSocket';
+import { warmChats } from '../services/groupChatSync';
 import { useI18n } from '../context/I18nContext';
 import useBottomSpace from '../hooks/useBottomSpace';
 import { isOnline } from '../hooks/useOnline';
@@ -42,23 +43,6 @@ const TAB_KEYS = [
  * engine. `mode` decides which: 'community' adds the category browse and the
  * per-category directory filters; 'group' is the plain list it has always been.
  */
-// The first chats you're likely to open, fetched quietly in the background
-// (one at a time, once a session each) so even a first open paints at once.
-const PREFETCH_MAX = 5;
-const prefetched = new Set();
-async function prefetchChats(rows, meId) {
-  const todo = rows.filter((g) => g.is_member && !prefetched.has(g.slug)).slice(0, PREFETCH_MAX);
-  for (const g of todo) {
-    prefetched.add(g.slug);
-    const key = groupChatKey(meId, g.slug);
-    try {
-      if (peekCache(key)?.messages?.length || (await readCache(key))?.messages?.length) continue;
-      const res = await fetchGroupPosts(g.slug, 1);
-      const messages = (res?.results ?? []).slice().reverse();
-      if (!peekCache(key)) writeCache(key, { group: g, messages: cacheableGroupMessages(messages) });
-    } catch { /* a miss just means that chat loads when opened */ }
-  }
-}
 
 // Which list is on screen — the cache keeps one per view (a search isn't kept).
 const viewOf = (tab, category, filters) => {
@@ -231,7 +215,9 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
       setNextUrl(data?.next ?? null);
       setFailed(false);
       if (cacheKey) writeCache(cacheKey, { results, next: data?.next ?? null });
-      prefetchChats(results, currentUser?.id);
+      // The chats on this list you're likely to open, caught up quietly (only
+      // those with something newer than what's kept) so they open at once.
+      warmChats(results, currentUser?.id);
       return data;
     } catch {
       // Whatever is on screen stays; an empty screen offers a retry.

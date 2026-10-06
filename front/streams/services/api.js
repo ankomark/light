@@ -1430,7 +1430,8 @@ export const requestJoinGroup = async (slug, message = "") => {
 
 
 export const fetchGroupPosts = async (slug, page = 1) => {
-  return apiRequest('get', `/groups/${slug}/posts/`, null, { params: { page, page_size: 30 } });
+  // The newest few (a screenful or so): older ones load when scrolled to.
+  return apiRequest('get', `/groups/${slug}/posts/`, null, { params: { page, page_size: 20 } });
 };
 
 // Group chat: send a message (JSON, base64 attachments).

@@ -209,7 +209,7 @@ describe('No spinners', () => {
   });
 
   it('the list quietly fetches the top chats, so opening one paints at once', async () => {
-    mockApi.fetchGroups.mockResolvedValue({ results: [group('pf1'), group('pf2', { is_member: false })], next: null });
+    mockApi.fetchGroups.mockResolvedValue({ results: [group('pf1', { last_message: { id: 300 } }), group('pf2', { is_member: false })], next: null });
     mockApi.fetchGroupPosts.mockImplementation(async (slug) => ({ results: [post(300, 300, { content: `prefetched ${slug}` })], next: null }));
     render(<GroupList navigation={nav} route={{}} mode="group" />);
     await waitFor(() => expect(mockApi.fetchGroupPosts).toHaveBeenCalledWith('pf1', 1));

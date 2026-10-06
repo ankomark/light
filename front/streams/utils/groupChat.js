@@ -4,7 +4,9 @@
 
 import { userKey } from './screenCache';
 
-export const GROUP_CACHE_SIZE = 60;
+// Only the newest messages are kept per chat (a screenful or two): opening
+// paints them at once; older history loads when scrolled to.
+export const GROUP_CACHE_SIZE = 40;
 
 export const groupChatKey = (userId, slug) => userKey(userId, `group-chat:${slug}`);
 export const groupListKey = (userId, mode, view) => userKey(userId, `groups:${mode}:${view}`);

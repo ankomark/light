@@ -201,3 +201,19 @@ class FinalScanTests(APITestCase):
         self.assertEqual(self.receipts(self.a), 200)        # the author
         self.assertEqual(self.receipts(self.owner), 200)    # an admin
         self.assertEqual(self.receipts(self.b), 403)        # anyone else
+
+
+class CursorTests(APITestCase):
+    def test_after_a_deleted_message_is_lost_place_not_nothing_new(self):
+        me = User.objects.create_user('cur', 'cur@x.com', 'x')
+        g = Group.objects.create(creator=me, name='Cursor')
+        GroupMember.objects.create(group=g, user=me, is_admin=True)
+        gone = GroupPost.objects.create(group=g, user=me, content='soon gone', message_type='text')
+        GroupPost.objects.create(group=g, user=me, content='newer', message_type='text')
+        gone_id = gone.id
+        gone.delete()
+        self.client.force_authenticate(me)
+        r = self.client.get(f'/api/groups/{g.slug}/posts/?after={gone_id}')
+        self.assertTrue(r.data['has_more'])
+        r = self.client.get(f'/api/groups/{g.slug}/posts/?before={gone_id}')
+        self.assertFalse(r.data['has_more'])

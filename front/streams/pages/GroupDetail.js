@@ -47,6 +47,7 @@ import {
 import { dayLabel, newDay } from '../utils/dmView';
 import { nextTempId } from '../utils/chatMessages';
 import { announceDM } from '../services/dmSocket';
+import { setOpenGroupChat } from '../services/groupChatSync';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -305,6 +306,8 @@ const GroupDetail = ({ route, navigation }) => {
   // straight from memory when this session has them, from disk otherwise
   // (below); the network then refreshes it in place instead of a spinner.
   const cacheKey = groupChatKey(currentUser?.id, groupSlug);
+  // While open, this screen fetches its own chat: the background sync leaves it be.
+  useEffect(() => setOpenGroupChat(groupSlug), [groupSlug]);
   const cached = peekCache(cacheKey);
   const seed = initialGroup || cached?.group || null;
   const [group, setGroup] = useState(seed);

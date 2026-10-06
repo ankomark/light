@@ -206,6 +206,7 @@ import { API_BASE, PUBLIC_BASE } from './services/api';
 
 
 import { useAuth, AuthProvider } from './context/useAuth';
+import { startGroupChatSync } from './services/groupChatSync';
 import { PlayerProvider } from './context/PlayerContext';
 import { PreferencesProvider } from './context/PreferencesContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -284,7 +285,11 @@ const navTheme = {
 
 const Stack = createNativeStackNavigator();
 const AuthInitializer = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, currentUser } = useAuth();
+  // Group and community chats kept warm while signed in: they open on the
+  // newest messages at once, even ones that came while elsewhere in the app.
+  const meId = isAuthenticated ? currentUser?.id : null;
+  React.useEffect(() => (meId ? startGroupChatSync(meId) : undefined), [meId]);
 
   if (isLoading) {
     return (
