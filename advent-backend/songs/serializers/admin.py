@@ -165,6 +165,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
     # themselves, never someone of their rank or above.
     can_act = serializers.SerializerMethodField()
     two_factor_enabled = serializers.SerializerMethodField()
+    # What the profile says, for a moderator deciding whether to clear it.
+    profile_text = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -175,8 +177,15 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'suspension_reason', 'suspended_at', 'suspended_until', 'strikes',
             'is_email_verified', 'is_superuser',
             'posts_count', 'followers_count', 'profile_picture', 'date_joined',
-            'can_act', 'two_factor_enabled',
+            'can_act', 'two_factor_enabled', 'profile_text',
         ]
+
+    def get_profile_text(self, obj):
+        prof = getattr(obj, 'profile', None)
+        if prof is None:
+            return None
+        return {'display_name': prof.display_name or '', 'bio': prof.bio or '',
+                'website': prof.website or '', 'location': prof.location or ''}
 
     def get_can_act(self, obj):
         from ..admin_security import outranks

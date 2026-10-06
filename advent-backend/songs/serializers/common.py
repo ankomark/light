@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db import models
 from ..models import User
 from ..models import User,Track,Playlist,Profile,LiveEvent, Comment,Like,Category,SocialPost,PostLike,PostComment,PostSave,Notification,Conversation,Message,Story,StoryView,Report,CommunityCategory,PuzzleTheme,WordPuzzle,PuzzleProgress,CoinSpend,Group,Videostudio,GroupMember, GroupJoinRequest, GroupPost,GroupAuditLog,GroupPostAttachment,GroupPostReaction,ProductCategory,ProductImage,Product,CartItem,Cart,OrderItem,Order,ProductReview,Wishlist,MediaStation,Notice,AdminNote,NotificationPreference,FollowRequest,can_view_profile,Wallpaper,WeatherPlace
 import re
@@ -66,6 +67,27 @@ CloudinaryFieldSerializer = MediaReferenceField
 
 
 
+PROFILE_BIO_MAX = 150
+PROFILE_MIN_AGE = 13
+
+
+def clean_website(value):
+    """A profile link: http(s) only (never javascript:, data:, a phone's own
+    file), at most 200 characters; 'example.org' is read as https://."""
+    value = (value or '').strip()
+    if not value:
+        return ''
+    if '://' not in value:
+        value = f'https://{value}'
+    from urllib.parse import urlparse
+    parts = urlparse(value)
+    if parts.scheme not in ('http', 'https') or not parts.netloc or ' ' in value or '.' not in parts.netloc:
+        raise serializers.ValidationError('Enter a web address, like example.org.')
+    if len(value) > 200:
+        raise serializers.ValidationError('That link is too long.')
+    return value
+
+
 class ProfileSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source='user.id')
     picture_url = serializers.SerializerMethodField()
@@ -88,6 +110,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = Profile
         fields = ['bio', 'user_id','username', 'email', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
                   'birth_date', 'location', 'is_public', 'picture','picture_url',
+                  'display_name', 'website',
                   'followers_count', 'following_count', 'posts_count', 'total_likes']
         read_only_fields = ['user_id', 'username', 'email', 'is_staff', 'admin_role', 'is_super_admin', 'capabilities', 'is_suspended',
                             'picture_url', 'followers_count', 'following_count', 'posts_count', 'total_likes']
@@ -97,6 +120,49 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def get_picture_url(self, obj):
         return media.resolve(obj.picture)
+
+    # ── what may be saved (the app checks the same; the server must too) ──
+    def validate_picture(self, value):
+        # Our own uploads only: an outside link would be fetched by every
+        # viewer's phone (telling that server who looks) and skip moderation.
+        if value and len(value) > 500:
+            raise serializers.ValidationError('Picture link is too long.')
+        return own_upload(value, 'photo') or ''
+
+    def validate_bio(self, value):
+        value = (value or '').strip()
+        if len(value) > PROFILE_BIO_MAX:
+            raise serializers.ValidationError(f'Keep the bio to {PROFILE_BIO_MAX} characters.')
+        return value
+
+    def validate_location(self, value):
+        value = ' '.join((value or '').split())
+        if len(value) > 100:
+            raise serializers.ValidationError('Keep the location to 100 characters.')
+        return value
+
+    def validate_display_name(self, value):
+        value = ' '.join((value or '').split())      # one line, single spaces
+        if len(value) > 50:
+            raise serializers.ValidationError('Keep the name to 50 characters.')
+        return value
+
+    def validate_website(self, value):
+        return clean_website(value)
+
+    def validate_birth_date(self, value):
+        if value is None:
+            return value
+        from datetime import date
+        today = date.today()
+        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+        if value > today:
+            raise serializers.ValidationError('That date is in the future.')
+        if age < PROFILE_MIN_AGE:
+            raise serializers.ValidationError(f'You must be at least {PROFILE_MIN_AGE}.')
+        if age > 120:
+            raise serializers.ValidationError('Check the year.')
+        return value
 
     def get_followers_count(self, obj):
         # obj.user.followers are the users who follow this profile's owner.
@@ -307,10 +373,14 @@ class PublicProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Profile
-        fields = ['user_id', 'username', 'bio', 'location', 'is_public', 'picture_url']
+        fields = ['user_id', 'username', 'bio', 'location', 'is_public', 'picture_url', 'display_name', 'website']
 
     def get_picture_url(self, obj):
         return media.resolve(obj.picture)
+
+
+# A profile's grid: pinned posts first (the latest pin on top), then newest.
+PROFILE_GRID_ORDER = (models.F('pinned_at').desc(nulls_last=True), '-created_at')
 
 
 class ProfileDetailSerializer(serializers.ModelSerializer):
@@ -370,8 +440,9 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
     def get_profile(self, obj):
         prof = self._profile(obj)
         if prof is None:
-            return {'bio': '', 'location': '', 'is_public': True}
-        data = {'bio': prof.bio or '', 'location': prof.location or '', 'is_public': prof.is_public}
+            return {'bio': '', 'location': '', 'is_public': True, 'display_name': '', 'website': ''}
+        data = {'bio': prof.bio or '', 'location': prof.location or '', 'is_public': prof.is_public,
+                'display_name': prof.display_name or '', 'website': prof.website or ''}
         if self._is_self(obj):
             data['birth_date'] = prof.birth_date
         return data
@@ -404,7 +475,7 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
     def _visible_posts(self, obj):
         from songs.models import visible_posts_q
         return (obj.social_posts.filter(is_removed=False)
-                .filter(visible_posts_q(self._viewer())).order_by('-created_at'))
+                .filter(visible_posts_q(self._viewer())).order_by(*PROFILE_GRID_ORDER))
 
     def get_posts_count(self, obj):
         # The count stays visible on a private account (as on other networks);
@@ -423,9 +494,9 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
         return self._page_cache[obj.pk]
 
     def get_social_posts(self, obj):
-        from songs.serializers import ProfilePostThumbSerializer
+        from songs.serializers.social import ProfileGridPostSerializer
         rows, _ = self._first_page(obj)
-        return ProfilePostThumbSerializer(rows, many=True, context=self.context).data
+        return ProfileGridPostSerializer(rows, many=True, context=self.context).data
 
     def get_posts_has_more(self, obj):
         return self._first_page(obj)[1]

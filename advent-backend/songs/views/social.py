@@ -639,6 +639,27 @@ class SocialPostViewSet(viewsets.ModelViewSet):
         return Response({'stored': len(rows)}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def pin(self, request, pk=None):
+        """POST {pinned?: bool} — pin a post to the top of your own profile grid
+        (at most SocialPost.PINNED_MAX), or unpin it. Without `pinned`, toggles."""
+        post = get_object_or_404(SocialPost, pk=pk, is_removed=False)
+        if post.user_id != request.user.id:
+            return Response({'error': 'You can only pin your own posts.'}, status=status.HTTP_403_FORBIDDEN)
+        want = request.data.get('pinned') if hasattr(request.data, 'get') else None
+        want = (post.pinned_at is None) if want is None else want in (True, 'true', '1', 1)
+        if want and post.pinned_at is None:
+            pinned = SocialPost.objects.filter(user=request.user, pinned_at__isnull=False, is_removed=False).count()
+            if pinned >= SocialPost.PINNED_MAX:
+                return Response({'error': f'You can pin up to {SocialPost.PINNED_MAX} posts. Unpin one first.',
+                                 'code': 'pin_limit'}, status=status.HTTP_400_BAD_REQUEST)
+            post.pinned_at = timezone.now()
+            post.save(update_fields=['pinned_at'])
+        elif not want and post.pinned_at is not None:
+            post.pinned_at = None
+            post.save(update_fields=['pinned_at'])
+        return Response({'id': post.id, 'pinned': post.pinned_at is not None, 'pinned_at': post.pinned_at})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def not_interested(self, request, pk=None):
         """Record a private "not interested" signal: hide this post from the
         user's feeds and demote its author/tags in the ranked blend."""
@@ -2440,6 +2461,47 @@ _SHARE_PAGE = """<!doctype html>
   </script>
 </body>
 </html>"""
+
+
+def profile_share_page(request, username):
+    """A person's public page for a shared profile link: a rich card (photo,
+    name, bio) and a hand-off into the app at that profile. Only what anyone
+    may see: a closed account is "not found"; a private one shows its name and
+    photo, never its posts or bio."""
+    from ..models import Profile
+    user = (User.objects.select_related('profile')
+            .filter(username__iexact=username, is_deactivated=False, is_active=True).first())
+    if user is None:
+        return HttpResponseNotFound('Profile not found')
+    try:
+        prof = user.profile
+    except Profile.DoesNotExist:
+        prof = None
+    private = prof is not None and not prof.is_public
+    name = (prof.display_name if prof else '') or user.username
+    about = '' if private or prof is None else (prof.bio or '').strip()
+    desc = about or f'@{user.username} on Adventist Life.'
+    fallback = getattr(settings, 'SHARE_FALLBACK_IMAGE', '') or request.build_absolute_uri('/share-og.png')
+    image = (media.resolve(prof.picture) if prof and prof.picture else '') or fallback
+    deep = f'streams://u/{user.username}'
+    html = (
+        _SHARE_PAGE
+        .replace('__OGTYPE__', 'profile')
+        .replace('__VIDEO_TAGS__', '')
+        .replace('__IMG_BLOCK__', f'<img src="{_esc(image)}" alt="">')
+        .replace('__PLAY_BLOCK__', '')
+        .replace('__CAPTION_BLOCK__', f'\n      <p class="caption">{_esc(desc[:300])}</p>')
+        .replace('__STORE_BLOCK__', '')
+        .replace('__USER__', _esc(f'@{user.username}'))
+        .replace('__TITLE__', _esc(f'{name} on Adventist Life'))
+        .replace('__DESC__', _esc(desc[:200]))
+        .replace('__IMAGE__', _esc(image))
+        .replace('__URL__', _esc(request.build_absolute_uri()))
+        .replace('__DEEP__', _esc(deep))
+    )
+    resp = HttpResponse(html)
+    resp['Cache-Control'] = 'public, max-age=300'
+    return resp
 
 
 def post_share_page(request, post_id):

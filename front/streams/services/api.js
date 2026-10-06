@@ -2069,6 +2069,10 @@ export const fetchStoryViewers = (id) => apiRequest('get', `/stories/${id}/viewe
 export const reportContent = (contentType, objectId, reason, description = '') =>
   apiRequest('post', '/reports/', { content_type: contentType, object_id: objectId, reason, description });
 
+// Pin a post to the top of your own profile grid (at most 3), or unpin it.
+export const pinPost = (postId, pinned) =>
+  apiRequest('post', `/social-posts/${postId}/pin/`, typeof pinned === 'boolean' ? { pinned } : {});
+
 // "Not interested" — hide a post and demote similar content in the ranked feed.
 export const markNotInterested = (postId) =>
   apiRequest('post', `/social-posts/${postId}/not_interested/`, {});
@@ -2330,6 +2334,10 @@ export const suspendUser = (id, reason = '', days = 0) =>
 
 export const unsuspendUser = (id) =>
   apiRequest('post', `/admin/users/${id}/unsuspend/`);
+
+// Clear what a profile says (bio, name, link, location, photo) — moderation.
+export const clearUserProfile = (id, reason = '', fields = null) =>
+  apiRequest('post', `/admin/users/${id}/clear-profile/`, { reason, ...(fields ? { fields } : {}) });
 
 export const warnUser = (id, reason = '') =>
   apiRequest('post', `/admin/users/${id}/warn/`, { reason });

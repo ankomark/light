@@ -261,6 +261,8 @@ const linking = {
       PuzzlePlay: 'puzzle/:puzzleId',
       // A seller's shop, shared: streams://shop/mark.
       SellerShop: 'shop/:username',
+      // A person's profile, shared: streams://u/mark (and https://<host>/u/mark/).
+      UserProfile: 'u/:username',
       // A product, shared: streams://product/hymnal-2.
       ProductDetail: 'product/:slug',
     },

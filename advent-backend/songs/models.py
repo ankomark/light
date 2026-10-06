@@ -446,6 +446,10 @@ class Profile(models.Model):
     bio = models.TextField(blank=True, null=True)
     birth_date = models.DateField(blank=True, null=True)
     location = models.CharField(max_length=100, blank=True, null=True)
+    # The name shown above the @handle ("Mark Ankomah"); the handle stays the
+    # username. And one link (a website, a ministry page), http(s) only.
+    display_name = models.CharField(max_length=50, blank=True, default='')
+    website = models.CharField(max_length=200, blank=True, default='')
 
     is_public = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -540,8 +544,12 @@ class SocialPost(models.Model):
     mentions = models.ManyToManyField(User, related_name='mentioned_in_posts', blank=True)
     # Idempotency key from the background uploader (see Track.client_id).
     client_id = models.CharField(max_length=64, null=True, blank=True)
+    # Pinned to the top of its author's profile grid (at most PINNED_MAX).
+    pinned_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    PINNED_MAX = 3
 
     class Meta:
         constraints = [

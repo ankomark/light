@@ -642,6 +642,35 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         log_admin_action(request.user, 'unsuspend_user', 'user', user.id)
         return Response(self.get_serializer(user).data)
 
+    @action(detail=True, methods=['post'], url_path='clear-profile')
+    def clear_profile(self, request, pk=None):
+        """POST {fields: [...], reason} — clear what a profile says: any of
+        bio, display_name, website, location, picture (all of them by default).
+        For an offensive bio, a scam link or an indecent photo; the account
+        itself is untouched. The person is told why."""
+        user, refused = self._target(request, pk, 'edit')
+        if refused:
+            return refused
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
+        allowed = ('bio', 'display_name', 'website', 'location', 'picture')
+        asked = request.data.get('fields') or list(allowed)
+        if not isinstance(asked, list) or not asked or any(f not in allowed for f in asked):
+            return Response({'error': f'fields must be some of {list(allowed)}'}, status=status.HTTP_400_BAD_REQUEST)
+        prof = getattr(user, 'profile', None)
+        if prof is None:
+            return Response({'error': 'This account has no profile.'}, status=status.HTTP_400_BAD_REQUEST)
+        for f in asked:
+            setattr(prof, f, '')
+        prof.save(update_fields=asked + ['updated_at'])
+        notify_moderation(user, 'Profile edited by a moderator',
+                          'Part of your profile was removed for breaking the community rules.'
+                          + (f' Reason: {reason}' if reason else ''))
+        log_admin_action(request.user, 'clear_profile', 'user', user.id,
+                         reason=', '.join(asked) + (f' — {reason}' if reason else ''))
+        return Response(self.get_serializer(user).data)
+
     @action(detail=True, methods=['post'])
     def warn(self, request, pk=None):
         """Issue a warning (strike). Auto-escalates to a temporary suspension at

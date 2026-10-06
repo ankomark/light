@@ -7,7 +7,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  fetchAdminUsers, fetchAdminByUrl, suspendUser, unsuspendUser, banUser, unbanUser, warnUser,
+  fetchAdminUsers, fetchAdminByUrl, suspendUser, unsuspendUser, banUser, unbanUser, warnUser, clearUserProfile,
   fetchRoles, setUserSuperAdmin, assignUserRole, resetAdminTwoFactor, fetchUserHistory,
 } from '../../services/api';
 import { useAdminMe, useReasonSheet, ErrorState } from './AdminKit';
@@ -293,6 +293,21 @@ const AdminUsers = () => {
 
                 {selected.can_act === false && (
                   <Text style={styles.rankNote} testID="users-rank-note">{t('adminUsers.rankNote')}</Text>
+                )}
+                {selected.profile_text && (selected.profile_text.display_name || selected.profile_text.bio
+                  || selected.profile_text.website) ? (
+                  <View style={styles.history} testID="users-profile-text">
+                    <Text style={styles.historyLine}>{t('adminUsers.profileText')}</Text>
+                    {[selected.profile_text.display_name, selected.profile_text.bio, selected.profile_text.website]
+                      .filter(Boolean).map((line, i) => (
+                        <Text key={i} style={styles.historyAction} numberOfLines={3}>{line}</Text>
+                      ))}
+                  </View>
+                ) : null}
+                {selected.can_act !== false && canManage && (
+                  <SheetBtn icon="trash-outline" label={t('adminUsers.clearProfile')} testID="users-clear-profile"
+                    onPress={() => withReason('adminUsers.clearProfileTitle', 'adminUsers.clearProfileConfirm', true,
+                      (id, reason) => clearUserProfile(id, reason))} disabled={busy} />
                 )}
                 {selected.can_act !== false && canManage && (
                   <SheetBtn icon="alert-circle-outline" label={t('adminUsers.warn')} testID="users-warn"

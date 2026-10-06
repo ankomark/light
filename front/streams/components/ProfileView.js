@@ -11,14 +11,17 @@
 //   - follow / unfollow is optimistic and survives into the cache.
 import React, { useCallback, useEffect, useRef, useState, memo } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, RefreshControl,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, RefreshControl, Share, Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   fetchUserById, fetchUserPosts, fetchUserTracks, fetchUserPlaylists, fetchArtist, followUser, getOrCreateConversation, blockUser,
+  pinPost, PUBLIC_BASE,
 } from '../services/api';
+import useBottomSpace from '../hooks/useBottomSpace';
+import { parseDay } from '../utils/calendarDay';
 import { usePlayer } from '../context/PlayerContext';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
@@ -55,6 +58,19 @@ const getPostThumb = (post) => (post.content_type === 'video'
   ? post.thumbnail_url || null
   : post.thumbnail_url || post.optimized_url || post.media_url || null);
 
+/** A profile link the app will open: http(s) only (the server allows no
+ *  other, but a copy kept on the phone predates that). */
+const safeLink = (url) => (/^https?:\/\/[^\s]+$/i.test(url || '') ? url : null);
+/** "adventist.org/youth" — the link as people read it. */
+const shortLink = (url) => url.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+/** Pinned posts first (the latest pin on top), then newest — as the server orders them. */
+const byPin = (a, b) => {
+  const pa = a.pinned_at ? Date.parse(a.pinned_at) : 0;
+  const pb = b.pinned_at ? Date.parse(b.pinned_at) : 0;
+  if (pa || pb) return pb - pa;
+  return 0;
+};
+
 const StatBox = ({ value, label, onPress }) => {
   const body = (
     <>
@@ -69,10 +85,12 @@ const StatBox = ({ value, label, onPress }) => {
   );
 };
 
-const PostTile = memo(({ post, size, isSelf, onPress }) => {
+const PostTile = memo(({ post, size, isSelf, onPress, onLongPress }) => {
   const thumb = getPostThumb(post);
   return (
-    <TouchableOpacity style={[styles.tile, { width: size, height: tileHeightFor(size) }]} activeOpacity={0.85} onPress={() => onPress(post)}>
+    <TouchableOpacity style={[styles.tile, { width: size, height: tileHeightFor(size) }]} activeOpacity={0.85}
+                      onPress={() => onPress(post)} onLongPress={isSelf && onLongPress ? () => onLongPress(post) : undefined}
+                      delayLongPress={350} testID={`profile-tile-${post.id}`}>
       {thumb ? (
         <Image source={{ uri: thumb }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" transition={120} recyclingKey={String(post.id)} />
       ) : (
@@ -92,6 +110,11 @@ const PostTile = memo(({ post, size, isSelf, onPress }) => {
           <Feather name={post.visibility === 'private' ? 'lock' : 'users'} size={11} color={colors.white} />
         </View>
       )}
+      {post.pinned_at ? (
+        <View style={styles.pinBadge} testID={`profile-pinned-${post.id}`}>
+          <MaterialIcons name="push-pin" size={11} color={colors.white} />
+        </View>
+      ) : null}
       {/* Play count, bottom-left over the thumbnail — the TikTok grid badge. */}
       <View style={styles.viewsBadge}>
         <Ionicons name="play" size={11} color={colors.white} />
@@ -150,7 +173,10 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   const [messageBusy, setMessageBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [pinFor, setPinFor] = useState(null);   // your own post, long-pressed
   const pageRef = useRef(1);
+  // The list ends above the gesture bar and, with music playing, the mini player.
+  const bottomSpace = useBottomSpace(spacing.xl);
 
   // Music tab: loaded the first time it's opened, from cache first.
   const tracksKey = userKey(currentUser?.id, `profile:${userId}:tracks`);
@@ -186,7 +212,10 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
 
   const apply = useCallback((data) => {
     setUser(data);
-    setPosts(Array.isArray(data?.social_posts) ? data.social_posts : []);
+    const first = Array.isArray(data?.social_posts) ? data.social_posts : [];
+    const thumbs = first.map(getPostThumb).filter(Boolean).slice(0, 18);
+    if (thumbs.length) Image.prefetch?.(thumbs)?.catch?.(() => {});
+    setPosts(first);
     setHasMore(!!data?.posts_has_more);
     pageRef.current = 1;
   }, []);
@@ -423,6 +452,30 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     ]);
   }, [name, userId, cacheKey, navigation, t]);
 
+  // A link to the profile: the web page shows a card and opens the app there.
+  const handleShare = useCallback(() => {
+    if (!user?.username) return;
+    const shown = user.profile?.display_name || `@${user.username}`;
+    const link = `${PUBLIC_BASE}/u/${encodeURIComponent(user.username)}/`;
+    Share.share({ message: `${t('profile.shareMessage', { name: shown })}\n${link}`, url: link }).catch(() => {});
+  }, [user, t]);
+
+  const handlePin = useCallback(async (post) => {
+    const on = !post.pinned_at;
+    const before = posts;
+    // At once on screen: to the top, or back among the rest.
+    const now = new Date().toISOString();
+    setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, pinned_at: on ? now : null } : p))
+      .sort((a, b) => byPin(a, b) || (Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0)) || (b.id - a.id)));
+    try {
+      await pinPost(post.id, on);
+      load();
+    } catch (e) {
+      setPosts(before);
+      Alert.alert(t('common.error'), e?.response?.data?.error || t('profile.pinFailed'));
+    }
+  }, [posts, load, t]);
+
   const openList = useCallback((type) => {
     navigation.navigate('FollowList', { userId, type, username: name });
   }, [navigation, userId, name]);
@@ -434,7 +487,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   const canView = user ? user.can_view !== false : false;
   const bornText = isSelf && profile.birth_date
     ? t('profile.born', {
-      date: new Date(profile.birth_date).toLocaleDateString(resolvedLanguage === 'sw' ? 'sw-KE' : 'en-US', {
+      date: (parseDay(profile.birth_date) || new Date(profile.birth_date)).toLocaleDateString(resolvedLanguage === 'sw' ? 'sw-KE' : 'en-US', {
         year: 'numeric', month: 'long', day: 'numeric',
       }),
     })
@@ -466,8 +519,11 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
           />
         </View>
 
-        <View style={styles.nameRow}>
-          <Text style={styles.handle} numberOfLines={1}>@{user.username}</Text>
+        {profile.display_name ? (
+          <Text style={styles.displayName} numberOfLines={1} testID="profile-display-name">{profile.display_name}</Text>
+        ) : null}
+        <View style={[styles.nameRow, profile.display_name && styles.nameRowUnder]}>
+          <Text style={[styles.handle, profile.display_name && styles.handleUnder]} numberOfLines={1}>@{user.username}</Text>
           {verified ? <VerifiedBadge size={17} /> : null}
           {user.is_private && <Feather name="lock" size={14} color={P.muted} />}
         </View>
@@ -501,6 +557,16 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
                 accessibilityLabel={t('profile.myFavorites')}
               >
                 <Ionicons name="heart-outline" size={20} color={P.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.squareBtn}
+                onPress={handleShare}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={t('profile.share')}
+                testID="profile-share"
+              >
+                <Ionicons name="share-social-outline" size={19} color={P.text} />
               </TouchableOpacity>
               {isArtist ? (
                 <TouchableOpacity
@@ -536,6 +602,13 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
         </View>
 
         {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
+        {safeLink(profile.website) ? (
+          <TouchableOpacity style={styles.linkRow} onPress={() => Linking.openURL(profile.website).catch(() => {})}
+                            accessibilityRole="link" accessibilityLabel={t('profile.openLink')} testID="profile-link">
+            <Ionicons name="link" size={14} color={P.gold} />
+            <Text style={styles.linkText} numberOfLines={1}>{shortLink(profile.website)}</Text>
+          </TouchableOpacity>
+        ) : null}
         {(profile.location || bornText) ? (
           <View style={styles.metaRow}>
             {profile.location ? (
@@ -723,7 +796,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   ), [playFrom, onTrackDeleted, loadTracks]);
 
   const renderPost = useCallback(
-    ({ item }) => <PostTile post={item} size={tileSize} isSelf={isSelf} onPress={openPost} />,
+    ({ item }) => <PostTile post={item} size={tileSize} isSelf={isSelf} onPress={openPost} onLongPress={setPinFor} />,
     [tileSize, isSelf, openPost],
   );
 
@@ -788,12 +861,34 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onPull} tintColor={P.text} colors={[P.gold]} progressBackgroundColor={P.raised} />
         )}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: bottomSpace }]}
         removeClippedSubviews
         initialNumToRender={cols * 5}
         maxToRenderPerBatch={cols * 5}
         windowSize={7}
       />
+
+      {error === 'failed' ? (
+        <View style={styles.offline} pointerEvents="none" testID="profile-offline">
+          <Ionicons name="cloud-offline-outline" size={13} color={P.text} />
+          <Text style={styles.offlineText}>{t('profile.offline')}</Text>
+        </View>
+      ) : null}
+
+      {isSelf && (
+        <ChoiceSheet
+          visible={!!pinFor}
+          title={t('profile.posts')}
+          onClose={() => setPinFor(null)}
+          cancelLabel={t('common.cancel')}
+          options={pinFor ? [{
+            key: 'pin',
+            label: pinFor.pinned_at ? t('profile.unpin') : t('profile.pin'),
+            icon: 'push-pin',
+            onPress: () => handlePin(pinFor),
+          }] : []}
+        />
+      )}
 
       {!isSelf && (
         <>
@@ -803,6 +898,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
             onClose={() => setMenuOpen(false)}
             cancelLabel={t('common.cancel')}
             options={[
+              { key: 'share', label: t('profile.share'), icon: 'share', onPress: handleShare },
               { key: 'report', label: t('common.report'), icon: 'flag', onPress: () => setReportOpen(true) },
               { key: 'block', label: t('common.block'), icon: 'block', destructive: true, onPress: handleBlock },
             ]}
@@ -839,7 +935,18 @@ const styles = StyleSheet.create({
   },
   avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2, backgroundColor: P.raised },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm + 4, maxWidth: '100%' },
+  nameRowUnder: { marginTop: 2 },
+  displayName: { fontSize: 20, fontWeight: '800', color: P.text, marginTop: spacing.sm + 4, maxWidth: '100%' },
   handle: { fontSize: 17, fontWeight: '600', color: P.text, flexShrink: 1 },
+  handleUnder: { fontSize: 14, fontWeight: '500', color: P.muted },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, maxWidth: 300 },
+  linkText: { fontSize: 13.5, fontWeight: '700', color: P.gold, flexShrink: 1 },
+  offline: {
+    position: 'absolute', top: 8, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  offlineText: { color: P.text, fontSize: 12, fontWeight: '700' },
+  pinBadge: { position: 'absolute', bottom: 5, right: 5, padding: 3, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.6)' },
   followsYou: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, backgroundColor: 'rgba(232,198,107,0.14)' },
   followsYouText: { color: P.gold, fontSize: 11, fontWeight: '700' },
 

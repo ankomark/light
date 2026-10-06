@@ -346,15 +346,17 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         denied = self._require_can_view(user)
         if denied:
             return denied
+        from ..serializers.common import PROFILE_GRID_ORDER
         posts = (SocialPost.objects.filter(user=user, is_removed=False)
-                 .filter(visible_posts_q(request.user)).order_by('-created_at'))
+                 .filter(visible_posts_q(request.user)).order_by(*PROFILE_GRID_ORDER))
         content_type = request.query_params.get('content_type')
         if content_type in ('image', 'video'):
             posts = posts.filter(content_type=content_type)
         paginator = StandardPagination()
         paginator.page_size = 30
         page = paginator.paginate_queryset(posts, request, view=self)
-        data = ProfilePostThumbSerializer(page, many=True, context=self.get_serializer_context()).data
+        from ..serializers.social import ProfileGridPostSerializer
+        data = ProfileGridPostSerializer(page, many=True, context=self.get_serializer_context()).data
         return paginator.get_paginated_response(data)
     @action(detail=True, methods=['get'])
     def tracks(self, request, pk=None):

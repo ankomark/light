@@ -519,3 +519,10 @@ class ReportSerializer(serializers.ModelSerializer):
         fields = ['id', 'content_type', 'object_id', 'reason', 'description', 'status', 'created_at']
         read_only_fields = ['id', 'status', 'created_at']
 
+
+class ProfileGridPostSerializer(ProfilePostThumbSerializer):
+    """A tile on its author's profile grid: the thumb, and whether it is
+    pinned (a profile matter only — Explore and the rest don't carry it)."""
+
+    class Meta(ProfilePostThumbSerializer.Meta):
+        fields = ProfilePostThumbSerializer.Meta.fields + ['pinned_at']

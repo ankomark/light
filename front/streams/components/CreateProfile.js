@@ -16,6 +16,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
+import { parseDay, formatDay } from '../utils/calendarDay';
+
+const BIO_MAX = 150;
+// Shown as typed; the server reads "example.org" as https://example.org.
+const looksLikeLink = (v) => /^(https?:\/\/)?[^\s/.]+\.[^\s]+$/i.test(v.trim());
+// The server's own words for a field, when it refuses one.
+const FIELDS = ['display_name', 'website', 'bio', 'birth_date', 'location', 'picture'];
 
 const CreateProfile = () => {
   const { t } = useI18n();
@@ -25,6 +32,8 @@ const CreateProfile = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [checkingProfile, setCheckingProfile] = useState(true);
   const [profileData, setProfileData] = useState({
+    display_name: '',
+    website: '',
     bio: '',
     birth_date: '',
     location: '',
@@ -43,6 +52,8 @@ const CreateProfile = () => {
         if (existing) {
           setIsEditMode(true);
           setProfileData({
+            display_name: existing.display_name ?? '',
+            website: existing.website ?? '',
             bio: existing.bio ?? '',
             birth_date: existing.birth_date ?? '',
             location: existing.location ?? '',
@@ -50,7 +61,7 @@ const CreateProfile = () => {
             // as picture_url (reading `picture` left the photo blank).
             picture: existing.picture_url ?? null,
           });
-          if (existing.birth_date) setSelectedDate(new Date(existing.birth_date));
+          if (existing.birth_date) setSelectedDate(parseDay(existing.birth_date) || new Date());
         }
       } catch {
         // No profile yet — stay in create mode
@@ -99,7 +110,7 @@ const CreateProfile = () => {
   const handleDateChange = (event, date) => {
     setShowDatePicker(false);
     if (date) {
-      const formattedDate = date.toISOString().split('T')[0];
+      const formattedDate = formatDay(date);
       setSelectedDate(date);
       handleChange('birth_date', formattedDate);
     }
@@ -110,16 +121,15 @@ const CreateProfile = () => {
     const newErrors = {};
     
     if (!profileData.bio.trim()) {
-      newErrors.bio = 'Bio is required';
-    } else if (profileData.bio.length > 150) {
+      newErrors.bio = t('createProfile.bioRequired');
+    } else if (profileData.bio.length > BIO_MAX) {
       newErrors.bio = t('createProfile.bioTooLong');
     }
     
     if (!profileData.birth_date) {
       newErrors.birth_date = t('createProfile.birthRequired');
     } else {
-      const birthDate = new Date(profileData.birth_date);
-      const currentDate = new Date();
+      const birthDate = parseDay(profileData.birth_date);
       const minAgeDate = new Date();
       minAgeDate.setFullYear(minAgeDate.getFullYear() - 13);
       
@@ -131,6 +141,10 @@ const CreateProfile = () => {
     if (!profileData.location.trim()) {
       newErrors.location = t('createProfile.locationRequired');
     }
+
+    if (profileData.website.trim() && !looksLikeLink(profileData.website)) {
+      newErrors.website = t('createProfile.websiteInvalid');
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -141,9 +155,11 @@ const CreateProfile = () => {
     setIsLoading(true);
     try {
       const payload = {
-        bio: profileData.bio,
+        display_name: profileData.display_name.trim(),
+        website: profileData.website.trim(),
+        bio: profileData.bio.trim(),
         birth_date: profileData.birth_date,
-        location: profileData.location,
+        location: profileData.location.trim(),
       };
 
       // A newly picked photo is a local file — upload it to R2 first and send
@@ -187,14 +203,20 @@ const CreateProfile = () => {
       
       let errorMessage = t('createProfile.createFailed');
       
-      if (error.response?.data) {
-        // Handle backend validation errors
-        if (error.response.data.birth_date) {
-          errorMessage = error.response.data.birth_date[0];
-        } else if (error.response.data.non_field_errors) {
-          errorMessage = error.response.data.non_field_errors[0];
+      const data = error.response?.data;
+      if (data && typeof data === 'object') {
+        // The server's words, under the field it refused (and in the alert).
+        const fieldErrors = {};
+        FIELDS.forEach((f) => { if (Array.isArray(data[f]) && data[f][0]) fieldErrors[f] = String(data[f][0]); });
+        if (Object.keys(fieldErrors).length) {
+          setErrors((prev) => ({ ...prev, ...fieldErrors }));
+          errorMessage = Object.values(fieldErrors)[0];
+        } else if (data.non_field_errors) {
+          errorMessage = data.non_field_errors[0];
+        } else if (data.detail) {
+          errorMessage = String(data.detail);
         }
-      } else if (error.message.includes('timeout')) {
+      } else if (String(error?.message || '').includes('timeout')) {
         errorMessage = t('createProfile.timeout');
       }
       
@@ -219,7 +241,7 @@ const CreateProfile = () => {
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.header}>{isEditMode ? 'Edit Profile' : t('createProfile.completeTitle')}</Text>
+      <Text style={styles.header}>{isEditMode ? t('createProfile.editTitle') : t('createProfile.completeTitle')}</Text>
       <Text style={styles.subHeader}>
         {isEditMode ? t('createProfile.updateSub') : t('createProfile.addSub')}
       </Text>
@@ -240,13 +262,29 @@ const CreateProfile = () => {
           </View>
         )}
         <Text style={styles.avatarText}>
-          {profileData.picture ? 'Change Photo' : 'Add Profile Photo'}
+          {profileData.picture ? t('createProfile.changePhoto') : t('createProfile.addPhoto')}
         </Text>
       </TouchableOpacity>
 
+      {/* Name (above the @handle on the profile) */}
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>{t('createProfile.displayName')}</Text>
+        <TextInput
+          style={[styles.input, errors.display_name && styles.inputError]}
+          placeholder={t('createProfile.displayNamePlaceholder')}
+          placeholderTextColor="#a0aec0"
+          value={profileData.display_name}
+          onChangeText={(value) => handleChange('display_name', value)}
+          maxLength={50}
+          autoCapitalize="words"
+          testID="profile-name-input"
+        />
+        {errors.display_name && <Text style={styles.errorText}>{errors.display_name}</Text>}
+      </View>
+
       {/* Bio Input */}
       <View style={styles.inputContainer}>
-        <Text style={styles.label}>Bio</Text>
+        <Text style={styles.label}>{t('createProfile.bio')}</Text>
         <TextInput
           style={[styles.input, errors.bio && styles.inputError]}
           placeholder={t('createProfile.bioPlaceholder')}
@@ -254,10 +292,10 @@ const CreateProfile = () => {
           value={profileData.bio}
           onChangeText={(value) => handleChange('bio', value)}
           multiline
-          maxLength={150}
+          maxLength={BIO_MAX}
         />
         <Text style={styles.charCount}>
-          {profileData.bio.length}/150
+          {profileData.bio.length}/{BIO_MAX}
         </Text>
         {errors.bio && <Text style={styles.errorText}>{errors.bio}</Text>}
       </View>
@@ -299,6 +337,25 @@ const CreateProfile = () => {
         {errors.location && <Text style={styles.errorText}>{errors.location}</Text>}
       </View>
 
+      {/* One link: a website or ministry page */}
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>{t('createProfile.website')}</Text>
+        <TextInput
+          style={[styles.input, errors.website && styles.inputError]}
+          placeholder={t('createProfile.websitePlaceholder')}
+          placeholderTextColor="#a0aec0"
+          value={profileData.website}
+          onChangeText={(value) => handleChange('website', value)}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          maxLength={200}
+          testID="profile-link-input"
+        />
+        {errors.website && <Text style={styles.errorText}>{errors.website}</Text>}
+        {errors.picture && <Text style={styles.errorText}>{errors.picture}</Text>}
+      </View>
+
       {/* Submit Button */}
       <TouchableOpacity 
         style={styles.submitButton}
@@ -308,7 +365,7 @@ const CreateProfile = () => {
         {isLoading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.submitButtonText}>{isEditMode ? 'Save Changes' : 'Complete Profile'}</Text>
+          <Text style={styles.submitButtonText}>{isEditMode ? t('createProfile.save') : t('createProfile.complete')}</Text>
         )}
       </TouchableOpacity>
     </ScrollView>
