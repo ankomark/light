@@ -257,11 +257,14 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         elif scope.startswith('group:'):
             # A church, a youth group, a choir: its members' board — for its
             # members only, as the group's own posts are.
-            group = Group.objects.filter(slug=scope[len('group:'):]).first()
+            group = Group.objects.filter(slug=scope[len('group:'):], is_removed=False).first()
             if not group:
                 raise NotFound('No such group.')
             members = set(group.members.values_list('user_id', flat=True))
             if request.user.pk not in members:
+                # A private group isn't there for an outsider at all.
+                if group.is_private:
+                    raise NotFound('No such group.')
                 raise PermissionDenied("Only members can see this group's board.")
             circle = members
 

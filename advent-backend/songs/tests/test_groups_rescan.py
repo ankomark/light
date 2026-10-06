@@ -179,3 +179,88 @@ class GroupRescanMinorTests(APITestCase):
         r = self.client.post(f'/api/groups/{group.slug}/set-admin/', {'user_id': mod.id, 'is_admin': True},
                              format='json')
         self.assertEqual((r.data['is_admin'], r.data['is_moderator']), (True, False))
+
+
+class PrivateGroupVisibilityTests(APITestCase):
+    """A private group is seen only by its creator, its members (joined by
+    invite, added by an admin, approved) and super admins - nobody else,
+    by any route."""
+
+    def setUp(self):
+        cache.clear()
+        self.creator = User.objects.create_user('pvcreator', 'pc@x.com', 'pw12345!')
+        self.added = User.objects.create_user('pvadded', 'pa@x.com', 'pw12345!')
+        self.invited = User.objects.create_user('pvinvited', 'pi@x.com', 'pw12345!')
+        self.stranger = User.objects.create_user('pvstranger', 'ps@x.com', 'pw12345!')
+        self.cat = CommunityCategory.objects.create(name='Pv cat', slug='pv-cat')
+        self.group = Group.objects.create(name='Zebra Hidden Circle', description='zebra secrets',
+                                          creator=self.creator, kind=Group.KIND_GROUP, is_private=True)
+        self.community = Group.objects.create(name='Zebra Hidden Church', description='zebra secrets',
+                                              creator=self.creator, kind=Group.KIND_COMMUNITY,
+                                              is_private=True, category=self.cat)
+        for g in (self.group, self.community):
+            GroupMember.objects.create(group=g, user=self.creator, is_admin=True)
+            GroupPost.objects.create(group=g, user=self.creator, content='hi')
+
+    def _list_slugs(self, url):
+        r = self.client.get(url)
+        rows = r.data['results'] if isinstance(r.data, dict) and 'results' in r.data else r.data
+        return {row['slug'] for row in rows}
+
+    def _sees(self, user):
+        self.client.force_authenticate(user)
+        slugs = set()
+        for base in ('/api/groups/', '/api/communities/'):
+            for q in ('', '?scope=private', '?scope=mine', '?search=zebra', '?category=pv-cat'):
+                slugs |= self._list_slugs(base + q)
+        s = self.client.get('/api/explore/search/?q=zebra&type=groups').data
+        slugs |= {g['slug'] for g in (s.get('groups') or [])}
+        return slugs
+
+    def test_stranger_cannot_see_or_detect_private_groups(self):
+        self.assertEqual(self._sees(self.stranger) & {self.group.slug, self.community.slug}, set())
+        for g in (self.group, self.community):
+            for path in ('', 'members/', 'check-membership/', 'posts/', 'posts/media/'):
+                r = self.client.get(f'/api/groups/{g.slug}/{path}')
+                self.assertEqual(r.status_code, 404, f'{g.kind} {path}: {r.status_code}')
+            r = self.client.post(f'/api/groups/{g.slug}/posts/', {'content': 'x'}, format='json')
+            self.assertEqual(r.status_code, 404)
+            self.assertEqual(self.client.post(f'/api/groups/{g.slug}/request-join/').status_code, 404)
+            # The group boards answer exactly as for a slug that names nothing.
+            for board in ('/api/quiz/leaderboard/', '/api/puzzles/daily/leaderboard/'):
+                real = self.client.get(f'{board}?scope=group:{g.slug}')
+                fake = self.client.get(f'{board}?scope=group:no-such-group-xyz')
+                self.assertEqual(real.status_code, fake.status_code, board)
+
+    def test_anonymous_cannot_see_private_groups(self):
+        for base in ('/api/groups/', '/api/communities/'):
+            r = self.client.get(base)
+            if r.status_code == 200:
+                self.assertEqual(self._list_slugs(base) & {self.group.slug, self.community.slug}, set())
+
+    def test_creator_added_and_invited_members_see_it(self):
+        import uuid
+        self.client.force_authenticate(self.creator)
+        self.client.post(f'/api/groups/{self.group.slug}/add-member/', {'user_id': self.added.id}, format='json')
+        Group.objects.filter(pk=self.group.pk).update(invite_code=uuid.uuid4())
+        code = str(Group.objects.get(pk=self.group.pk).invite_code)
+        self.client.force_authenticate(self.invited)
+        self.assertEqual(self.client.post('/api/groups/join-by-code/', {'code': code}, format='json').status_code, 200)
+        for user in (self.creator, self.added, self.invited):
+            self.assertIn(self.group.slug, self._sees(user), user.username)
+            self.assertEqual(self.client.get(f'/api/groups/{self.group.slug}/posts/').status_code, 200)
+        self.assertIn(self.community.slug, self._sees(self.creator))
+        # Search on its own finds it for a member (so the stranger's miss is real).
+        self.client.force_authenticate(self.invited)
+        found = self.client.get('/api/explore/search/?q=zebra&type=groups').data['groups']
+        self.assertIn(self.group.slug, {g['slug'] for g in found})
+
+    def test_private_parent_is_not_named_to_outsiders(self):
+        child = Group.objects.create(name='Open Choir', creator=self.creator, kind=Group.KIND_COMMUNITY,
+                                     is_private=False, parent=self.community)
+        self.client.force_authenticate(self.stranger)
+        data = self.client.get(f'/api/groups/{child.slug}/').data
+        self.assertIsNone(data['parent_slug'])
+        self.assertIsNone(data['parent'])
+        self.client.force_authenticate(self.creator)
+        self.assertEqual(self.client.get(f'/api/groups/{child.slug}/').data['parent_slug'], self.community.slug)

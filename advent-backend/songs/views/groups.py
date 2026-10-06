@@ -142,7 +142,7 @@ class GroupViewSet(viewsets.ModelViewSet):
                   .order_by().values('group').annotate(c=Count('id')).values('c'))
 
         return qs.select_related(
-            'creator', 'creator__profile', 'pinned_post', 'pinned_post__user',
+            'creator', 'creator__profile', 'pinned_post', 'pinned_post__user', 'parent',
         ).annotate(
             anno_member_count=Coalesce(Subquery(member_count, output_field=IntegerField()), 0),
             anno_is_member=Exists(my_member),
@@ -916,6 +916,10 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         # read any messages; the public group is discoverable, its chat is not.
         if (not self.request.user.is_super_admin
                 and not GroupMember.objects.filter(group=group, user=self.request.user).exists()):
+            # A private group isn't there at all for an outsider (a 403
+            # would confirm the slug names one).
+            if group.is_private:
+                raise Http404
             raise PermissionDenied("You are not a member of this group")
         # Newest first (paginated); the chat reverses for chronological display.
         # Super admins operate invisibly — regular clients never see a message a
@@ -936,6 +940,8 @@ class GroupPostViewSet(viewsets.ModelViewSet):
         member =GroupMember.objects.filter(group=group, user=self.request.user).first()
         is_super = self.request.user.is_super_admin
         if not member and not is_super:
+            if group.is_private:
+                raise Http404
             raise PermissionDenied("You are not a member of this group")
         if group.only_admins_can_post and not (is_super or (member and member.is_admin)):
             raise PermissionDenied("Only admins can send messages in this group")

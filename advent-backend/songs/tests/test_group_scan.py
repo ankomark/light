@@ -33,7 +33,8 @@ class GroupPrivacyScanTests(APITestCase):
         """A non-member should NOT be able to read a private group's messages."""
         self.client.force_authenticate(self.outsider)
         r = self.client.get(f'/api/groups/{self.group.slug}/posts/')
-        self.assertEqual(r.status_code, 403, f'private posts should be members-only, got {r.status_code}')
+        # 404, not 403: a private group isn't there at all for an outsider.
+        self.assertEqual(r.status_code, 404, f'private posts should be members-only, got {r.status_code}')
 
     def test_member_can_read_private_group_posts(self):
         member = User.objects.create_user('scanmember', 'sm@x.com', 'x')

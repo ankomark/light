@@ -50,7 +50,8 @@ class GroupReactionTests(APITestCase):
 
     def test_non_member_cannot_react(self):
         self.client.force_authenticate(self.outsider)
-        self.assertEqual(self._react('👍').status_code, 403)
+        # The group is private: an outsider gets 404, as if it weren't there.
+        self.assertEqual(self._react('👍').status_code, 404)
 
     def test_empty_emoji_rejected(self):
         self.client.force_authenticate(self.member)

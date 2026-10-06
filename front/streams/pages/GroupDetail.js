@@ -777,6 +777,8 @@ const GroupDetail = ({ route, navigation }) => {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed', _offline: !e?.response } : m)));
       const code = e?.response?.status;
       if (code === 403) notify(t('common.error'), e?.response?.data?.detail || t('group.detail.cantPost'));
+      // A private group no longer mine (removed, or it's gone) answers 404.
+      else if (code === 404) notify(t('group.detail.goneTitle'), t('group.detail.goneBody'));
       else if (code === 429) notify(t('group.detail.slowMode'), t('group.detail.slowModeHint', { time: slowLabel(slowSecondsRef.current || 0, t) }));
     }
   }, [groupSlug, putBubble, t]);

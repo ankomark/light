@@ -1182,7 +1182,10 @@ class GroupBoardTests(APITestCase):
     def test_only_members_see_it(self):
         self.client.force_authenticate(self.outsider)
         res = self.client.get(f'/api/quiz/leaderboard/?scope=group:{self.group.slug}')
-        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        # A private group: not there for an outsider (404, like an unknown one);
+        # a public group's board is still members-only (403).
+        expected = status.HTTP_404_NOT_FOUND if self.group.is_private else status.HTTP_403_FORBIDDEN
+        self.assertEqual(res.status_code, expected)
 
     def test_an_unknown_group(self):
         self.assertEqual(self.client.get('/api/quiz/leaderboard/?scope=group:nope').status_code,

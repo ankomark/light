@@ -162,6 +162,10 @@ class GroupSerializer(serializers.ModelSerializer):
 
     def to_representation(self, obj):
         data = super().to_representation(obj)
+        # A private parent is named only to those who may see it: a public
+        # community filed under one would otherwise give its slug to anyone.
+        if obj.parent_id and not self._may_see(obj.parent):
+            data['parent'] = data['parent_slug'] = None
         # How the invite link is limited is the admins' business, like the code.
         if data.get('invite_code') is None:
             for k in ('invite_expires_at', 'invite_max_uses', 'invite_uses'):
@@ -193,6 +197,17 @@ class GroupSerializer(serializers.ModelSerializer):
         if is_admin and obj.invite_code:
             return str(obj.invite_code)
         return None
+
+    def _may_see(self, group):
+        """Private groups: their creator, members and super admins only."""
+        if not group.is_private:
+            return True
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not (user and user.is_authenticated):
+            return False
+        return (user.is_super_admin or group.creator_id == user.id
+                or group.members.filter(user=user).exists())
 
     def _membership(self, obj):
         request = self.context.get('request')

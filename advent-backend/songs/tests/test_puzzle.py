@@ -1323,7 +1323,12 @@ class DailyLeaderboardTests(APITestCase):
         GroupMember.objects.create(group=group, user=other)
         self._finished(other, 2)
         res = self.client.get('/api/puzzles/daily/leaderboard/?scope=group:choir')
+        # Private (the default): an outsider can't tell it from no group at all.
+        self.assertEqual(res.status_code, 404)
+        Group.objects.filter(pk=group.pk).update(is_private=False)
+        res = self.client.get('/api/puzzles/daily/leaderboard/?scope=group:choir')
         self.assertEqual(res.status_code, 403)
+        Group.objects.filter(pk=group.pk).update(is_private=True)
         GroupMember.objects.create(group=group, user=self.me)
         res = self.client.get('/api/puzzles/daily/leaderboard/?scope=group:choir')
         self.assertEqual([r['user']['username'] for r in res.data['results']], ['ann'])
