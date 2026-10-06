@@ -31,6 +31,10 @@ const CreateProfile = () => {
   const kbScroll = useRef(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [checkingProfile, setCheckingProfile] = useState(true);
+  // Your profile couldn't be read (offline): not the same as having none —
+  // the form would otherwise offer to create a second one.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [profileData, setProfileData] = useState({
     display_name: '',
     website: '',
@@ -47,6 +51,8 @@ const CreateProfile = () => {
   // Detect edit mode: pre-fill if profile already exists
   useEffect(() => {
     (async () => {
+      setLoadFailed(false);
+      setCheckingProfile(true);
       try {
         const existing = await fetchProfile();
         if (existing) {
@@ -63,13 +69,14 @@ const CreateProfile = () => {
           });
           if (existing.birth_date) setSelectedDate(parseDay(existing.birth_date) || new Date());
         }
-      } catch {
-        // No profile yet — stay in create mode
+      } catch (err) {
+        // Only "there is none" means create; anything else is a failed read.
+        if (err?.response?.status !== 404) setLoadFailed(true);
       } finally {
         setCheckingProfile(false);
       }
     })();
-  }, []);
+  }, [attempt]);
 
   // Handle text input changes
   const handleChange = (key, value) => {
@@ -226,6 +233,18 @@ const CreateProfile = () => {
     }
   };
 
+  if (!checkingProfile && loadFailed) {
+    return (
+      <View style={styles.loadFailed} testID="profile-form-failed">
+        <MaterialIcons name="wifi-off" size={40} color={colors.textMuted} />
+        <Text style={styles.subHeader}>{t('profile.loadFailed')}</Text>
+        <TouchableOpacity style={styles.submitButton} onPress={() => setAttempt((n) => n + 1)} accessibilityRole="button">
+          <Text style={styles.submitButtonText}>{t('common.retry')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (checkingProfile) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg }}>
@@ -374,6 +393,7 @@ const CreateProfile = () => {
 };
 
 const styles = StyleSheet.create({
+  loadFailed: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg, backgroundColor: colors.bg },
   container: {
     flexGrow: 1,
     backgroundColor: colors.bg,

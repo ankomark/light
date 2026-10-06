@@ -2571,6 +2571,10 @@ export const STRINGS = {
     'followReq.title': 'Follow requests',
     'followReq.none': 'No pending requests',
     'followReq.updateFailed': 'Could not update that request. Please try again.',
+    'followReq.declineTitle': 'Decline request',
+    'followReq.declineBody': "Decline @{name}? They won't be told, and they can ask again later.",
+    'followReq.noneSub': 'While your account is private, people who want to follow you appear here first.',
+    'followReq.loadFailed': "Couldn't load your requests.",
 
     'articles.title': 'Publishing',
     'articles.subtitle': 'Read and publish long-form writing',
@@ -7641,6 +7645,10 @@ export const STRINGS = {
     'followReq.title': 'Maombi ya kufuata',
     'followReq.none': 'Hakuna maombi yanayosubiri',
     'followReq.updateFailed': 'Imeshindwa kusasisha ombi hilo. Tafadhali jaribu tena.',
+    'followReq.declineTitle': 'Kataa ombi',
+    'followReq.declineBody': 'Kukataa @{name}? Hawataambiwa, na wanaweza kuomba tena baadaye.',
+    'followReq.noneSub': 'Akaunti yako ikiwa ya faragha, wanaotaka kukufuata huonekana hapa kwanza.',
+    'followReq.loadFailed': 'Imeshindwa kupakia maombi yako.',
 
     'articles.title': 'Uchapishaji',
     'articles.subtitle': 'Soma na uchapishe maandishi marefu',

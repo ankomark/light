@@ -144,3 +144,22 @@ test('tapping "Requested" withdraws the request, and does not ask again', async 
   await waitFor(() => expect(screen.getByText('profile.follow')).toBeTruthy());
   expect(mockApi.followUser).toHaveBeenCalledTimes(1);
 });
+
+test('the edit form, offline, offers Retry - never a second "create profile"', async () => {
+  mockApi.fetchProfile.mockRejectedValueOnce(new Error('Network Error'));
+  const screen = render(<CreateProfile />);
+  await waitFor(() => expect(screen.getByTestId('profile-form-failed')).toBeTruthy());
+  expect(screen.queryByText('createProfile.complete')).toBeNull();
+  mockApi.fetchProfile.mockResolvedValueOnce({ bio: 'Choir', birth_date: '1990-05-12', location: 'Nairobi' });
+  await act(async () => { fireEvent.press(screen.getByText('common.retry')); });
+  await waitFor(() => expect(screen.getByText('createProfile.save')).toBeTruthy());
+});
+
+test('follow requests that could not load say so, with Retry', async () => {
+  jest.doMock('../../context/ThemeContext', () => ({ useTheme: () => ({ colors: require('../../constants/theme').colors }) }));
+  mockApi.fetchFollowRequests = jest.fn().mockRejectedValueOnce(new Error('Network Error'));
+  const FollowRequests = require('../../pages/FollowRequests').default;
+  const screen = render(<FollowRequests />);
+  await waitFor(() => expect(screen.getByTestId('followreq-failed')).toBeTruthy());
+  expect(screen.queryByText('followReq.none')).toBeNull();
+});

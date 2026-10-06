@@ -21,6 +21,7 @@ import {
 import { typography, spacing, radius, shadows } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
+import useBottomSpace from '../hooks/useBottomSpace';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -35,13 +36,17 @@ const FollowRequests = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  // Could not be read: said, with Retry - never shown as "no requests".
+  const [failed, setFailed] = useState(false);
+  const bottomSpace = useBottomSpace(spacing.xl);
 
   const load = useCallback(async () => {
     try {
       const data = await fetchFollowRequests();
       setRequests(Array.isArray(data) ? data : (data?.results || []));
+      setFailed(false);
     } catch {
-      setRequests([]);
+      setFailed(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -71,11 +76,11 @@ const FollowRequests = () => {
 
   const handleReject = (item) => {
     Alert.alert(
-      'Decline request',
-      `Decline @${item.requester?.username}? They won't be told, and they can ask again later.`,
+      t('followReq.declineTitle'),
+      t('followReq.declineBody', { name: item.requester?.username || '' }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Decline', style: 'destructive', onPress: () => act(item, false) },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('common.decline'), style: 'destructive', onPress: () => act(item, false) },
       ]
     );
   };
@@ -144,19 +149,25 @@ const FollowRequests = () => {
           data={requests}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: bottomSpace }]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
           }
-          ListEmptyComponent={
+          ListEmptyComponent={failed ? (
+            <View style={styles.empty} testID="followreq-failed">
+              <MaterialCommunityIcons name="wifi-off" size={56} color={colors.border} />
+              <Text style={styles.emptyTitle}>{t('followReq.loadFailed')}</Text>
+              <TouchableOpacity onPress={() => { setLoading(true); load(); }} accessibilityRole="button">
+                <Text style={styles.retryText}>{t('common.retry')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
             <View style={styles.empty}>
               <MaterialCommunityIcons name="account-clock-outline" size={56} color={colors.border} />
               <Text style={styles.emptyTitle}>{t('followReq.none')}</Text>
-              <Text style={styles.emptySub}>
-                While your account is private, people who want to follow you appear here first.
-              </Text>
+              <Text style={styles.emptySub}>{t('followReq.noneSub')}</Text>
             </View>
-          }
+          )}
         />
       )}
     </View>
@@ -165,6 +176,7 @@ const FollowRequests = () => {
 
 const makeStyles = (colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  retryText: { color: colors.primary, fontWeight: '700', marginTop: spacing.sm },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row',
