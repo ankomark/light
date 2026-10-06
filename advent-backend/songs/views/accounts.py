@@ -290,9 +290,11 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
             return Response({'error': "You can't block yourself"}, status=status.HTTP_400_BAD_REQUEST)
 
         Block.objects.get_or_create(blocker=request.user, blocked=target)
-        # A block implies an unfollow both ways.
+        # A block implies an unfollow both ways - and no request left waiting.
         target.followers.remove(request.user)
         request.user.followers.remove(target)
+        FollowRequest.objects.filter(
+            Q(requester=request.user, target=target) | Q(requester=target, target=request.user)).delete()
         return Response({'status': 'blocked', 'is_blocked': True})
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
@@ -600,9 +602,13 @@ class FollowRequestViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        # Not from someone blocked either way, nor a closed account: approving
+        # one of those would make a follow across a block.
         return (
             FollowRequest.objects
             .filter(target=self.request.user, status='pending')
+            .exclude(requester__is_deactivated=True)
+            .filter(not_blocked_q(self.request.user, 'requester_id'))
             .select_related('requester', 'requester__profile')
         )
 

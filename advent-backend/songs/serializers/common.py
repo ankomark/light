@@ -180,6 +180,24 @@ class ProfileSerializer(serializers.ModelSerializer):
         viewer = getattr(request, 'user', None) if request else None
         return obj.user.social_posts.filter(is_removed=False).filter(visible_posts_q(viewer)).count()
 
+    def update(self, instance, validated_data):
+        was_private = not instance.is_public
+        instance = super().update(instance, validated_data)
+        if was_private and instance.is_public:
+            # Open now: the requests still waiting would read "Requested" for
+            # ever on an account anyone may follow. Let them in.
+            from ..models import Block
+            owner = instance.user
+            blocked = set(Block.objects.filter(blocker=owner).values_list('blocked_id', flat=True)) | set(
+                Block.objects.filter(blocked=owner).values_list('blocker_id', flat=True))
+            waiting = FollowRequest.objects.filter(target=owner, status='pending')
+            ids = [r for r in waiting.exclude(requester__is_deactivated=True)
+                   .values_list('requester_id', flat=True) if r not in blocked]
+            if ids:
+                owner.followers.add(*ids)
+            waiting.delete()
+        return instance
+
     def create(self, validated_data):
         """Handles profile creation with request context"""
         try:

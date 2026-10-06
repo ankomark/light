@@ -146,3 +146,30 @@ class FollowNoticeTests(APITestCase):
         for _ in range(3):
             self.client.post(f'/api/users/{self.star.id}/follow/')
         self.assertEqual(notify.call_count, 1)
+
+
+@mock.patch('songs.views.accounts.notify_user')
+class FollowRequestHygieneTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.owner = make('owner')
+        Profile.objects.create(user=self.owner, is_public=False)
+        self.fan = make('fan2')
+        self.client.force_authenticate(self.fan)
+        self.client.post(f'/api/users/{self.owner.id}/follow/')      # a request
+
+    def test_blocking_drops_the_request_and_a_blocked_one_is_never_listed(self, notify):
+        from songs.models import Block, FollowRequest
+        Block.objects.create(blocker=self.owner, blocked=self.fan)
+        self.client.force_authenticate(self.owner)
+        data = self.client.get('/api/follow-requests/').data
+        self.assertEqual(data['results'] if isinstance(data, dict) else data, [])
+        self.client.post(f'/api/users/{self.fan.id}/block/')
+        self.assertFalse(FollowRequest.objects.filter(requester=self.fan, target=self.owner).exists())
+
+    def test_going_public_lets_those_waiting_in(self, notify):
+        from songs.models import FollowRequest
+        self.client.force_authenticate(self.owner)
+        self.client.patch('/api/profiles/update_me/', {'is_public': True}, format='json')
+        self.assertTrue(self.owner.followers.filter(pk=self.fan.pk).exists())
+        self.assertFalse(FollowRequest.objects.filter(target=self.owner).exists())
