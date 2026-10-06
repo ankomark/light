@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator,
   Modal, Pressable, useWindowDimensions, Linking,
@@ -35,25 +35,37 @@ const GroupMedia = (props) => {
   const [page, setPage] = useState(1);
   const [hasNext, setHasNext] = useState(false);
   const [viewer, setViewer] = useState(null);
+  // Couldn't be read: said (with Retry), not "nothing shared yet".
+  const [failed, setFailed] = useState(false);
+  // Each load numbered: switching Photos / Files / Voice mid-load must not
+  // fill one tab with another's answer.
+  const reqRef = useRef(0);
   const [kind, setKind] = useState('');   // '' all · image · file · audio
 
   const load = useCallback(async (pageNum = 1) => {
+    const n = ++reqRef.current;
     try {
+      setFailed(false);
       if (pageNum === 1) {
         const hit = peekCache(keyFor(kind)) ?? await readCache(keyFor(kind));
+        if (n !== reqRef.current) return;
         if (hit?.results) { setItems(hit.results); setHasNext(!!hit.next); setLoading(false); } else setLoading(true);
       } else setLoadingMore(true);
       const res = await fetchGroupMedia(groupSlug, pageNum, kind);
+      if (n !== reqRef.current) return;
       const rows = res?.results ?? (Array.isArray(res) ? res : []);
       setItems((prev) => (pageNum === 1 ? rows : [...prev, ...rows]));
       if (pageNum === 1) writeCache(keyFor(kind), { results: rows, next: res?.next ?? null });
       setHasNext(!!res?.next);
       setPage(pageNum);
     } catch {
-      // silent — the screen just shows what loaded
+      // What's on screen stays; with nothing, a message and Retry.
+      if (n === reqRef.current && pageNum === 1) setFailed(true);
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (n === reqRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [groupSlug, kind, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -127,12 +139,20 @@ const GroupMedia = (props) => {
               onEndReachedThreshold={0.5}
               onEndReached={() => { if (hasNext && !loadingMore) load(page + 1); }}
               ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
-              ListEmptyComponent={
+              ListEmptyComponent={failed ? (
+                <View style={styles.empty} testID="media-failed">
+                  <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>{t('group.media.loadFailed')}</Text>
+                  <TouchableOpacity onPress={() => load(1)} accessibilityRole="button">
+                    <Text style={styles.retryText}>{t('common.retry')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
                 <View style={styles.empty}>
                   <Ionicons name="images-outline" size={48} color={colors.textMuted} />
                   <Text style={styles.emptyText}>{t('group.media.empty')}</Text>
                 </View>
-              }
+              )}
             />
           )}
         </SafeAreaView>
@@ -149,6 +169,7 @@ const GroupMedia = (props) => {
 };
 
 const styles = StyleSheet.create({
+  retryText: { color: colors.accent, fontWeight: '700', marginTop: spacing.sm, fontSize: 15 },
   skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP },
   kinds: { flexDirection: 'row', gap: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   kind: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },

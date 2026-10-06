@@ -1354,8 +1354,10 @@ export const fetchDailyVerse = async (day = null, { via } = {}) => {
 // `scope`: 'public' | 'private' | 'mine' — resolved by the server, so each tab
 // pages correctly. One try: the list paints from cache while this runs, and a
 // failure keeps what's shown (retrying three times only held the spinner up).
-export const fetchGroups = async ({ scope } = {}) =>
-  apiRequest('get', '/groups/', null, { params: { page_size: 20, ...(scope ? { scope } : {}) } });
+export const fetchGroups = async ({ scope, search } = {}) =>
+  apiRequest('get', '/groups/', null, {
+    params: { page_size: 20, ...(scope ? { scope } : {}), ...(search ? { search } : {}) },
+  });
 
 // Follow a paginated `next` link (preserves path + query) for infinite scroll.
 export const fetchGroupsByUrl = async (nextUrl) => {

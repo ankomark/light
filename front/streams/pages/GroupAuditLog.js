@@ -10,6 +10,8 @@ import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { PersonListSkeleton } from '../components/SkeletonLoader';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import { peekCache, readCache, writeCache, userKey } from '../utils/screenCache';
 
 const DEFAULT_AVATAR = require('../assets/user-placeholder.png');
 
@@ -40,27 +42,36 @@ const GroupAuditLog = (props) => {
   const groupSlug = props.groupSlug ?? props.route?.params?.groupSlug;
   const onClose = props.onClose ?? (() => props.navigation?.goBack());
 
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  // The first page, kept: it opens at once next time, and offline.
+  const cacheKey = userKey(currentUser?.id, `group-audit:${groupSlug}`);
+  const [items, setItems] = useState(() => peekCache(cacheKey) ?? []);
+  const [loading, setLoading] = useState(() => !peekCache(cacheKey));
+  const [failed, setFailed] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [hasNext, setHasNext] = useState(false);
 
   const load = useCallback(async (pageNum = 1) => {
     try {
-      if (pageNum === 1) setLoading(true); else setLoadingMore(true);
+      setFailed(false);
+      if (pageNum === 1) {
+        const kept = peekCache(cacheKey) ?? await readCache(cacheKey);
+        if (Array.isArray(kept) && kept.length) { setItems(kept); setLoading(false); } else setLoading(true);
+      } else setLoadingMore(true);
       const res = await fetchGroupAuditLog(groupSlug, pageNum);
       const rows = res?.results ?? (Array.isArray(res) ? res : []);
+      if (pageNum === 1) writeCache(cacheKey, rows);
       setItems((prev) => (pageNum === 1 ? rows : [...prev, ...rows]));
       setHasNext(!!res?.next);
       setPage(pageNum);
     } catch {
-      // silent
+      if (pageNum === 1) setFailed(true);
     } finally {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [groupSlug]);
+  }, [groupSlug, cacheKey]);
 
   useEffect(() => { load(1); }, [load]);
 
@@ -112,12 +123,20 @@ const GroupAuditLog = (props) => {
               onEndReachedThreshold={0.5}
               onEndReached={() => { if (hasNext && !loadingMore) load(page + 1); }}
               ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
-              ListEmptyComponent={
+              ListEmptyComponent={failed ? (
+                <View style={styles.empty} testID="audit-failed">
+                  <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>{t('group.audit.loadFailed')}</Text>
+                  <TouchableOpacity onPress={() => load(1)} accessibilityRole="button">
+                    <Text style={styles.retryText}>{t('common.retry')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
                 <View style={styles.empty}>
                   <Ionicons name="document-text-outline" size={48} color={colors.textMuted} />
                   <Text style={styles.emptyText}>{t('group.audit.empty')}</Text>
                 </View>
-              }
+              )}
             />
           )}
         </SafeAreaView>
@@ -127,6 +146,7 @@ const GroupAuditLog = (props) => {
 };
 
 const styles = StyleSheet.create({
+  retryText: { color: colors.accent, fontWeight: '700', marginTop: spacing.sm, fontSize: 15 },
   root: { flex: 1, backgroundColor: '#0A1628' },
   safe: { flex: 1, backgroundColor: 'transparent' },
   header: {

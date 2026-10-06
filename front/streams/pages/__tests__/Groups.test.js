@@ -384,9 +384,17 @@ describe('Group list, live', () => {
     mockApi.fetchGroups.mockResolvedValue({ results: [group('a'), group('b')], next: null });
     const r = render(<GroupList navigation={nav} route={{}} mode="group" />);
     await waitFor(() => expect(r.getByTestId('group-row-b')).toBeTruthy());
+    const order = () => r.getAllByTestId(/^group-row-/).map((n) => n.props.testID);
+    // Discover keeps its order (the liveliest first): the row updates in place.
+    await dmLive({ type: 'group_message', group_slug: 'b', kind: 'group',
+      message: { id: 8, content: 'in place', message_type: 'text', sender_id: 2, sender_username: 'them', created_at: new Date().toISOString() } });
+    expect(order()).toEqual(['group-row-a', 'group-row-b']);
+    // My groups: like a chat list, the newest activity goes to the top.
+    await act(async () => { fireEvent.press(r.getByTestId('groups-tab-mine')); });
+    await waitFor(() => expect(r.getByTestId('group-row-b')).toBeTruthy());
     await dmLive({ type: 'group_message', group_slug: 'b', kind: 'group',
       message: { id: 9, content: 'fresh news', message_type: 'text', sender_id: 2, sender_username: 'them', created_at: new Date().toISOString() } });
-    const rows = r.getAllByTestId(/^group-row-/).map((n) => n.props.testID);
+    const rows = order();
     expect(rows[0]).toBe('group-row-b');
     expect(r.getByText(/fresh news/)).toBeTruthy();
     expect(r.getByText('1')).toBeTruthy();
@@ -510,5 +518,37 @@ describe('Members', () => {
     fireEvent.changeText(r.getByTestId('members-search'), 'mem7');
     await waitFor(() => expect(r.getByText('member7')).toBeTruthy());
     expect(mockApi.fetchGroupMembers).toHaveBeenLastCalledWith('m1', { page: 1, q: 'mem7' });
+  });
+});
+
+describe('Groups re-scan', () => {
+  it('groups can be searched (it was communities only)', async () => {
+    mockApi.fetchGroups.mockResolvedValue({ results: [group('a1')], next: null });
+    const r = render(<GroupList navigation={nav} route={{}} mode="group" />);
+    await waitFor(() => expect(r.getByText('Group a1')).toBeTruthy());
+    mockApi.fetchGroups.mockResolvedValue({ results: [group('youth')], next: null });
+    fireEvent.changeText(r.getByTestId('groups-search'), 'youth');
+    await waitFor(() => expect(mockApi.fetchGroups).toHaveBeenLastCalledWith({ scope: 'public', search: 'youth' }));
+  });
+
+  it('joining an open community goes straight in (not "request sent")', async () => {
+    const outside = group('open1', { is_member: false, kind: 'community' });
+    mockApi.fetchGroupDetails.mockResolvedValueOnce(outside)
+      .mockResolvedValue({ ...outside, is_member: true });
+    mockApi.fetchGroupPosts.mockResolvedValue({ results: [post(70, 70)], next: null });
+    mockApi.requestJoinGroup.mockResolvedValueOnce({ status: 'joined', joined: true });
+    const r = render(<GroupDetail navigation={nav} route={{ params: { groupSlug: 'open1', group: outside } }} />);
+    await waitFor(() => expect(mockApi.fetchGroupDetails).toHaveBeenCalled());
+    const joinBtn = await waitFor(() => r.getByTestId('group-join'));
+    await act(async () => { fireEvent.press(joinBtn); });
+    await waitFor(() => expect(mockNotify).toHaveBeenCalledWith('group.detail.joinedTitle', expect.anything()));
+    expect(mockNotify).not.toHaveBeenCalledWith('group.detail.requestSentTitle', expect.anything());
+    await waitFor(() => expect(r.getByText('post 70')).toBeTruthy());
+  });
+
+  it('media that could not load says so (not "nothing shared")', async () => {
+    mockApi.fetchGroupMedia.mockRejectedValueOnce(new Error('Network Error'));
+    const m = render(<GroupMedia groupSlug="mfail" onClose={() => {}} />);
+    await waitFor(() => expect(m.getByTestId('media-failed')).toBeTruthy());
   });
 });

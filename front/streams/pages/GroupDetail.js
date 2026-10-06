@@ -1022,7 +1022,14 @@ const GroupDetail = ({ route, navigation }) => {
 
   const submitJoin = async (answer) => {
     try {
-      await requestJoinGroup(groupSlug, answer || '');
+      const res = await requestJoinGroup(groupSlug, answer || '');
+      // An open community lets them straight in: into the chat, not "wait
+      // for approval" on a screen that still thinks they're outside.
+      if (res?.joined) {
+        await loadGroup();
+        notify(t('group.detail.joinedTitle'), t('group.detail.joinedBody', { name: group?.name || '' }));
+        return;
+      }
       setRequested(true);
       notify(t('group.detail.requestSentTitle'), t('group.detail.requestSentBody'));
     } catch (e) {
@@ -1632,7 +1639,12 @@ const GroupDetail = ({ route, navigation }) => {
       ) : (
         <View style={styles.joinBar}>
           <Text style={styles.joinText}>{t('group.detail.notAMember')}</Text>
-          <TouchableOpacity style={styles.joinBtn} onPress={join}><Text style={styles.joinBtnText}>{t('group.detail.requestToJoin')}</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.joinBtn} onPress={join} testID="group-join" accessibilityRole="button">
+            <Text style={styles.joinBtnText}>
+              {/* An open community is joined, not asked: the button says so. */}
+              {group?.kind === 'community' && !group?.is_private ? t('group.detail.joinNow') : t('group.detail.requestToJoin')}
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
       </SafeAreaView>

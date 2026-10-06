@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity, ActivityIndicator,
   ScrollView,
@@ -36,6 +36,7 @@ const GroupForm = ({ navigation, route }) => {
   );
   const [coverImage, setCoverImage] = useState(existingGroup?.cover_image || null);
   const [isLoading, setIsLoading] = useState(false);
+  const submitting = useRef(false);
 
   // What kind of community this is. Categories are rows, not code, so this list
   // grows whenever anyone starts a kind that doesn't exist yet.
@@ -137,6 +138,9 @@ const GroupForm = ({ navigation, route }) => {
   };
 
   const doSubmit = async () => {
+    // One tap, one group: a second tap before the button greys out does nothing.
+    if (submitting.current) return;
+    submitting.current = true;
     try {
       setIsLoading(true);
 
@@ -187,10 +191,11 @@ const GroupForm = ({ navigation, route }) => {
       const body = error?.response?.data || (error instanceof Error ? null : error);
       const nameErr = Array.isArray(body?.name) ? body.name[0]
         : (typeof body?.name === 'string' ? body.name : null);
-      const msg = nameErr || body?.detail || body?.error || body?.message
-        || error?.message || t(`${ns}.saveFailed`);
+      // The server's words when it gave some - never a raw "Network Error".
+      const msg = nameErr || body?.detail || body?.error || body?.message || t(`${ns}.saveFailed`);
       notify(t('common.error'), msg);
     } finally {
+      submitting.current = false;
       setIsLoading(false);
     }
   };

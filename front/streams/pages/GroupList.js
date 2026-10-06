@@ -29,6 +29,7 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { subscribeDM } from '../services/dmSocket';
 import { useI18n } from '../context/I18nContext';
 import useBottomSpace from '../hooks/useBottomSpace';
+import { isOnline } from '../hooks/useOnline';
 
 const TAB_KEYS = [
   { key: 'public', icon: 'earth' },
@@ -78,6 +79,8 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState(null);
   const [activeTab, setActiveTab] = useState('public');
+  const tabRef = useRef('public');
+  tabRef.current = activeTab;
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
@@ -220,7 +223,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
     try {
       const data = isCommunity
         ? await fetchCommunities({ category: activeCategory, search: debouncedSearch, scope: activeTab, ...filters })
-        : await fetchGroups({ scope: activeTab });
+        : await fetchGroups({ scope: activeTab, ...(debouncedSearch ? { search: debouncedSearch } : {}) });
       if (viewRef.current !== asked) return data;
       const results = data?.results ?? (Array.isArray(data) ? data : []);
       setGroups(results);
@@ -267,7 +270,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
   // While on screen: a slow poll (big communities aren't told live).
   useFocusEffect(useCallback(() => {
     loadRef.current();
-    const id = setInterval(() => loadRef.current(), 60000);
+    const id = setInterval(() => { if (isOnline()) loadRef.current(); }, 60000);
     return () => clearInterval(id);
   }, []));
 
@@ -297,6 +300,9 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
           last_message: { ...m, sender_username: mine ? null : m.sender_username },
           unread_count: mine ? row.unread_count : (row.unread_count || 0) + 1,
         };
+        // One's own lists move it to the top, like a chat list; Discover
+        // (ordered by how lively each is) updates the row where it stands.
+        if (tabRef.current === 'public') return prev.map((g) => (g.slug === e.group_slug ? updated : g));
         return [updated, ...prev.filter((g) => g.slug !== e.group_slug)];
       });
     });
@@ -324,7 +330,8 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
       await deleteGroup(group.slug);
       setGroups((prev) => prev.filter((g) => g.slug !== group.slug));
     } catch (error) {
-      notify(t('common.error'), error?.detail || error?.message || t(`${ns}.deleteFailed`));
+      // The server's words when it gave some; never a raw "Network Error".
+      notify(t('common.error'), error?.response?.data?.detail || error?.detail || t(`${ns}.deleteFailed`));
     }
   }, [t, ns, nsCreate]);
 
@@ -427,6 +434,7 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
                 key={tab.key}
                 style={[styles.tab, active && styles.tabActive]}
                 onPress={() => setActiveTab(tab.key)}
+                testID={`groups-tab-${tab.key}`}
                 activeOpacity={0.85}
               >
                 <Ionicons name={tab.icon} size={15} color={active ? '#0A1628' : colors.textSecondary} />
@@ -441,15 +449,15 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
           })}
         </View>
 
-        {/* Search + category browse — the old Churches/Choirs directory. */}
-        {isCommunity && (
+        {/* Search (groups too) + category browse — the old Churches/Choirs directory. */}
         <View style={styles.searchRow}>
           <Ionicons name="search" size={16} color={colors.textMuted} />
           <TextInput
             style={styles.searchInput}
             value={search}
             onChangeText={setSearch}
-            placeholder={t('community.browseSearch')}
+            placeholder={isCommunity ? t('community.browseSearch') : t('group.list.search')}
+            testID="groups-search"
             placeholderTextColor={colors.placeholder}
             autoCapitalize="none"
             returnKeyType="search"
@@ -478,7 +486,6 @@ const GroupList = ({ navigation, route, mode = 'group' }) => {
             </TouchableOpacity>
           )}
         </View>
-        )}
 
         {isCommunity && (
         <View style={styles.railWrap}>
