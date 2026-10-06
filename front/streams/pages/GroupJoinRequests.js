@@ -8,7 +8,7 @@ import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing } from '../constants/theme';
 import { PersonListSkeleton } from '../components/SkeletonLoader';
 import { useI18n } from '../context/I18nContext';
-import { confirmAction } from '../utils/adminConfirm';
+import { confirmAction, notify } from '../utils/adminConfirm';
 
 const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClose: onCloseProp }) => {
   const { t } = useI18n();
@@ -20,6 +20,9 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  // Couldn't be read: said, with Retry - "all clear" would hide people waiting.
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!groupSlug) {
@@ -31,9 +34,9 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
       try {
         setLoading(true);
         const data = await fetchGroupJoinRequests(groupSlug);
-        if (active) setRequests(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error('Failed to load requests:', error);
+        if (active) { setRequests(Array.isArray(data) ? data : []); setFailed(false); }
+      } catch {
+        if (active) setFailed(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -41,7 +44,7 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
 
     loadRequests();
     return () => { active = false; };
-  }, [groupSlug]);
+  }, [groupSlug, attempt]);
 
   const handleApprove = async (requestId) => {
     setBusyId(requestId);
@@ -49,7 +52,7 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
       await approveJoinRequest(requestId);
       setRequests((prev) => prev.filter((req) => req.id !== requestId));
     } catch (error) {
-      console.error('Failed to approve request:', error);
+      notify(t('common.error'), error?.response?.data?.error || t('groupReq.actionFailed'));
     } finally {
       setBusyId(null);
     }
@@ -61,7 +64,7 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
       await rejectJoinRequest(requestId);
       setRequests((prev) => prev.filter((req) => req.id !== requestId));
     } catch (error) {
-      console.error('Failed to reject request:', error);
+      notify(t('common.error'), error?.response?.data?.error || t('groupReq.actionFailed'));
     } finally {
       setBusyId(null);
     }
@@ -83,7 +86,7 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
           <View style={styles.header}>
             <View style={styles.headerTitleWrap}>
               <Text style={styles.title}>{t('groupReq.title')}</Text>
-              {!loading && (
+              {!loading && !failed && (
                 <Text style={styles.subtitle}>
                   {requests.length > 0
                     ? t('groupReq.pending', { count: requests.length })
@@ -110,12 +113,20 @@ const GroupJoinRequests = ({ route, navigation, groupSlug: groupSlugProp, onClos
                   onReject={() => handleReject(item.id)}
                 />
               )}
-              ListEmptyComponent={
+              ListEmptyComponent={failed ? (
+                <View style={styles.emptyWrap} testID="groupreq-failed">
+                  <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>{t('groupReq.loadFailed')}</Text>
+                  <TouchableOpacity onPress={() => setAttempt((n) => n + 1)} accessibilityRole="button">
+                    <Text style={styles.retryText}>{t('common.retry')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
                 <View style={styles.emptyWrap}>
                   <Ionicons name="checkmark-done-circle-outline" size={48} color={colors.textMuted} />
                   <Text style={styles.emptyText}>{t('groupReq.none')}</Text>
                 </View>
-              }
+              )}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
             />
@@ -145,6 +156,7 @@ const styles = StyleSheet.create({
   emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 80, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
   listContent: { padding: spacing.md, paddingBottom: spacing.xl, flexGrow: 1 },
+  retryText: { color: colors.accent, fontWeight: '700', marginTop: spacing.sm, fontSize: 15 },
 });
 
 export default GroupJoinRequests;

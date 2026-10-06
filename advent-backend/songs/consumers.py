@@ -126,8 +126,17 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
         return GroupMember.objects.filter(group=group, user=self.user).exists()
 
     # ── inbound (from the client) ────────────────────────────────────────────
+    # "typing" from one device: at most once a second (it reaches everyone in
+    # the room - thousands, in a big community).
+    TYPING_MIN_S = 1.0
+
     async def receive_json(self, content):
         if content.get('type') == 'typing':
+            import time
+            now = time.monotonic()
+            if content.get('is_typing') and now - getattr(self, '_typing_at', 0) < self.TYPING_MIN_S:
+                return
+            self._typing_at = now
             await self.channel_layer.group_send(self.group_name, {
                 'type': 'typing',
                 'user_id': self.user.id, 'username': self.user.username,

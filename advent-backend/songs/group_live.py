@@ -61,26 +61,50 @@ def _count_key(slug):
     return f'grp_on_n:{slug}'
 
 
+def _incr(key):
+    """Add one - with the cache's own atomic increment: a read-then-write
+    lost a count whenever two devices arrived together."""
+    cache.add(key, 0, ONLINE_TTL)
+    try:
+        n = cache.incr(key)
+    except ValueError:          # expired between add and incr
+        cache.set(key, 1, ONLINE_TTL)
+        n = 1
+    cache.touch(key, ONLINE_TTL)
+    return n
+
+
+def _decr(key):
+    """Take one away, never below nothing. None when there was nothing to
+    take (already gone: a second close of the same socket, an expired count)."""
+    try:
+        n = cache.decr(key)
+    except ValueError:
+        return None
+    if n < 0:
+        cache.set(key, 0, ONLINE_TTL)
+        return None
+    return n
+
+
 def came_online(slug, uid):
     """This device joined the room. Returns (first device of theirs?, count)."""
-    n = (cache.get(_user_key(slug, uid)) or 0) + 1
-    cache.set(_user_key(slug, uid), n, ONLINE_TTL)
-    total = cache.get(_count_key(slug)) or 0
-    if n == 1:
-        total += 1
-        cache.set(_count_key(slug), total, ONLINE_TTL)
+    n = _incr(_user_key(slug, uid))
+    total = _incr(_count_key(slug)) if n == 1 else (cache.get(_count_key(slug)) or 0)
     return n == 1, total
 
 
 def went_offline(slug, uid):
     """This device left. Returns (their last device?, count)."""
-    n = max(0, (cache.get(_user_key(slug, uid)) or 0) - 1)
-    cache.set(_user_key(slug, uid), n, ONLINE_TTL)
-    total = cache.get(_count_key(slug)) or 0
+    n = _decr(_user_key(slug, uid))
     if n == 0:
-        total = max(0, total - 1)
-        cache.set(_count_key(slug), total, ONLINE_TTL)
-    return n == 0, total
+        # Their last device just left: one fewer here.
+        total = _decr(_count_key(slug)) or 0
+    else:
+        # Still here on another device - or already counted gone (nothing to
+        # take from the room's total twice).
+        total = cache.get(_count_key(slug)) or 0
+    return n is None or n == 0, total
 
 
 def online_count(slug):
@@ -98,6 +122,10 @@ def watching(slug, user_ids):
 
 MENTION_RE = re.compile(r'(?<![\w@])@([\w.]{1,40})')
 MAX_MENTIONS = 20
+# Being named rings through a mute - so not more than once in this long from
+# the same person in the same group (twenty names a message, ninety messages
+# a minute, was a way to flood people who had muted the group).
+MENTION_PUSH_EVERY_S = 10 * 60
 
 
 def mentioned_ids(group, text, exclude=None):
@@ -124,20 +152,30 @@ def fan_out(group, sender, post, preview):
     from .push import notify_many
     from . import messaging as dm
 
+    from .models import Group, blocked_ids_for
+
     now = timezone.now()
     rows = list(GroupMember.objects.filter(group=group).exclude(user=sender)
                 .values_list('user_id', 'muted_until', 'notify_level'))
     ids = [r[0] for r in rows]
     if not ids:
         return
+    # The group's own switch in Settings ("Groups" / "Communities").
+    category = 'communities' if group.kind == Group.KIND_COMMUNITY else 'groups'
+    # Nobody gets a push from someone blocked either way (the message is in
+    # the chat as it is for everyone; their phone just doesn't ring for it).
+    blocked = blocked_ids_for(sender)
     here = watching(group.slug, ids)
     named = mentioned_ids(group, post.content, exclude=sender.id) if post.message_type == 'text' else set()
+    named -= blocked
+    named = {u for u in named
+             if cache.add(f'grp_mention:{group.pk}:{sender.pk}:{u}', 1, MENTION_PUSH_EVERY_S)}
     quiet = {uid for uid, until, level in rows
              if (until and until > now) or level == GroupMember.NOTIFY_MENTIONS}
-    everyone = [u for u in ids if u not in quiet and u not in here and u not in named]
+    everyone = [u for u in ids if u not in quiet and u not in here and u not in named and u not in blocked]
     if everyone:
         notify_many(everyone, 'message', f"{group.name} — {sender.username}: {preview}",
-                    data={'groupSlug': group.slug})
+                    data={'groupSlug': group.slug}, category=category)
     if named:
         Notification.objects.bulk_create([
             Notification(recipient_id=u, sender=sender, group=group, notification_type='group_mention',
@@ -147,7 +185,7 @@ def fan_out(group, sender, post, preview):
         reach = [u for u in named if u not in here]
         if reach:
             notify_many(reach, 'group_mention', f"{sender.username} mentioned you in {group.name}: {preview}",
-                        data={'groupSlug': group.slug, 'messageId': post.id})
+                        data={'groupSlug': group.slug, 'messageId': post.id}, category=category)
 
     if len(ids) <= LIVE_LIST_MAX_MEMBERS:
         dm.tell(ids + [sender.id], {

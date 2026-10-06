@@ -105,3 +105,47 @@ class CategoryTests(APITestCase):
         self.client.force_authenticate(maker)
         self.assertEqual(self.client.patch(f'/api/community-categories/{cat.slug}/', {'name': 'Choirs & bands'},
                                            format='json').status_code, 200)
+
+
+class GroupLiveTests(APITestCase):
+    """Re-scan 1: counts that can't drift, pushes by the group's own switch,
+    none from someone blocked, and mentions that can't flood a mute."""
+
+    def setUp(self):
+        cache.clear()
+        self.owner = User.objects.create_user('lo', 'lo@x.com', 'x')
+        self.a = User.objects.create_user('la', 'la@x.com', 'x')
+        self.b = User.objects.create_user('lb', 'lb@x.com', 'x')
+        self.group = Group.objects.create(creator=self.owner, name='Youth', kind=Group.KIND_COMMUNITY)
+        for u in (self.owner, self.a, self.b):
+            GroupMember.objects.create(group=self.group, user=u, is_admin=(u == self.owner))
+
+    def test_two_devices_count_once(self):
+        from songs import group_live as live
+        self.assertEqual(live.came_online('g', 1), (True, 1))
+        self.assertEqual(live.came_online('g', 1), (False, 1))
+        self.assertEqual(live.came_online('g', 2), (True, 2))
+        self.assertEqual(live.went_offline('g', 1), (False, 2))
+        self.assertEqual(live.went_offline('g', 1), (True, 1))
+        self.assertEqual(live.went_offline('g', 1), (True, 1))      # never below zero
+
+    def test_pushes_go_by_the_groups_switch_and_not_from_the_blocked(self):
+        from songs import group_live as live
+        from songs.models import Block
+        Block.objects.create(blocker=self.b, blocked=self.owner)
+        post = GroupPost.objects.create(group=self.group, user=self.owner, content='hello', message_type='text')
+        with mock.patch('songs.push.notify_many') as many:
+            live.fan_out(self.group, self.owner, post, 'hello')
+        args, kwargs = many.call_args
+        self.assertEqual(sorted(args[0]), [self.a.id])            # not the one who blocked them
+        self.assertEqual(kwargs['category'], 'communities')
+
+    def test_naming_someone_again_and_again_rings_once(self):
+        from songs import group_live as live
+        GroupMember.objects.filter(user=self.a).update(notify_level=GroupMember.NOTIFY_MENTIONS)
+        with mock.patch('songs.push.notify_many') as many:
+            for i in range(3):
+                p = GroupPost.objects.create(group=self.group, user=self.owner, content='@la look', message_type='text')
+                live.fan_out(self.group, self.owner, p, '@la look')
+        mention_calls = [c for c in many.call_args_list if c.args[1] == 'group_mention']
+        self.assertEqual(len(mention_calls), 1)

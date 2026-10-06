@@ -3313,6 +3313,8 @@ export const STRINGS = {
 
     'groupReq.title': 'Join Requests',
     'groupReq.none': 'No pending requests',
+    'groupReq.loadFailed': "Couldn't load the requests.",
+    'groupReq.actionFailed': "Couldn't do that. Try again.",
     'groupReq.pending': '{count} awaiting approval',
     'groupReq.rejectTitle': 'Decline this request?',
     'groupReq.rejectBody': "They won't be able to request to join again for 7 days.",
@@ -8393,6 +8395,8 @@ export const STRINGS = {
 
     'groupReq.title': 'Maombi ya Kujiunga',
     'groupReq.none': 'Hakuna maombi yanayosubiri',
+    'groupReq.loadFailed': 'Imeshindwa kupakia maombi.',
+    'groupReq.actionFailed': 'Imeshindwa kufanya hivyo. Jaribu tena.',
     'groupReq.pending': '{count} yanasubiri idhini',
     'groupReq.rejectTitle': 'Kataa ombi hili?',
     'groupReq.rejectBody': 'Hawataweza kuomba kujiunga tena kwa siku 7.',

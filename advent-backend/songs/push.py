@@ -189,7 +189,7 @@ def send_expo_push(tokens, title, body, data=None):
 EXPO_BATCH = 100   # Expo takes up to 100 messages per request
 
 
-def notify_many(user_ids, notification_type, message, data=None, title=None):
+def notify_many(user_ids, notification_type, message, data=None, title=None, category=None):
     """One push to many people (a group message): two queries for everyone's
     devices — whoever turned the category off is left out — then the sends in
     batches of 100, off the request thread. notify_user per person was two
@@ -201,7 +201,9 @@ def notify_many(user_ids, notification_type, message, data=None, title=None):
     if not user_ids:
         return 0
     tokens = DeviceToken.objects.filter(user_id__in=user_ids, is_active=True)
-    category = NOTIFICATION_CATEGORIES.get(notification_type)
+    # `category` given: that switch decides (a group's chat is "Groups" or
+    # "Communities" in Settings, not "Messages", which is for direct messages).
+    category = category or NOTIFICATION_CATEGORIES.get(notification_type)
     if category:
         tokens = tokens.exclude(**{f'user__notification_preference__{category}': False})
         # Quiet hours hold back what can be switched off.
