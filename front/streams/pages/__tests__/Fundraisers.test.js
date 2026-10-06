@@ -149,7 +149,11 @@ describe('a fundraiser', () => {
     fireEvent.changeText(screen.getByTestId('checkout-name'), 'Wanjiru');
     fireEvent.press(screen.getByTestId('checkout-pay'));
     await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('TicketOrder', { reference: 'ref-d', fresh: true }));
-    expect(calls[0].body).toEqual({ fundraiser: 'help-amani', amount: 1000, phone: '0712345678', name: 'Wanjiru', show_name: true });
+    expect(calls[0].body).toEqual({
+      fundraiser: 'help-amani', amount: 1000, phone: '0712345678', name: 'Wanjiru', show_name: true,
+      // The checkout's one-time key: a retry is the same order, never a second charge.
+      client_key: expect.stringMatching(/^[A-Za-z0-9_-]{16,64}$/),
+    });
   });
 
   test('asked even while the list is private, and says so', () => {
@@ -279,7 +283,8 @@ describe('the gate, offline', () => {
     expect(first.gate.queue.map((q) => q.code)).toEqual(['AAA']);
     expect(gate.scanOffline(first.gate, 'AAA').outcome.result).toBe('already_used');
     expect(gate.scanOffline(g0, 'BBB').outcome.result).toBe('already_used');
-    expect(gate.scanOffline(g0, 'ZZZ').outcome.result).toBe('invalid');
+    // Not on this phone's list - which may only be older than the ticket.
+    expect(gate.scanOffline(g0, 'ZZZ').outcome.result).toBe('unknown_offline');
   });
 
   test("the list is this account's alone, and goes when the organiser signs out", async () => {
