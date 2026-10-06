@@ -487,7 +487,7 @@ describe('Phase 3', () => {
     const r = render(<ServiceVerification route={{ params: { id: 5, name: 'Hope Clinic' } }} navigation={nav()} />);
     await waitFor(() => expect(r.getByTestId('verify-form')).toBeTruthy());
     await act(async () => { fireEvent.press(r.getByTestId('verify-send')); });
-    expect(mockNotify).toHaveBeenCalledWith('verify.title', 'verify.missing');
+    expect(mockNotify).toHaveBeenCalledWith('verify.serviceTitle', 'verify.missing');
     fireEvent.changeText(r.getByTestId('verify-legal'), 'Hope Clinic Ltd');
     await act(async () => { fireEvent.press(r.getByTestId('verify-add-doc')); });
     await act(async () => { fireEvent.press(r.getByTestId('verify-send')); });

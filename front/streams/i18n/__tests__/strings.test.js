@@ -19,6 +19,26 @@ describe('string catalog', () => {
     }
   });
 
+  it('defines no key twice in a language', () => {
+    // A repeated key is legal JavaScript: the later one silently wins. Two
+    // screens' titles shared 'verify.title', and new messages were masked by
+    // older ones of the same name - each shipped showing the wrong words.
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'strings.js'), 'utf8');
+    const blocks = src.split(/\n {2}[a-z]{2}: \{/).slice(1);
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of blocks) {
+      const seen = new Set();
+      const twice = [];
+      for (const [, key] of block.matchAll(/^ {4}'([^']+)':/gm)) {
+        if (seen.has(key)) twice.push(key);
+        seen.add(key);
+      }
+      expect(twice).toEqual([]);
+    }
+  });
+
   it('has no translation key absent from the English baseline', () => {
     // A key only in `sw` is a typo: `en` is the fallback, so the English build
     // would render the raw key string to the user.

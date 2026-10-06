@@ -51,7 +51,7 @@ const ServiceVerification = ({ route, navigation }) => {
   };
 
   const send = async () => {
-    if (form.legal_name.trim().length < 2 || !docs.length) { notify(t('verify.title'), t('verify.missing')); return; }
+    if (form.legal_name.trim().length < 2 || !docs.length) { notify(t('verify.serviceTitle'), t('verify.missing')); return; }
     setSending(true);
     try {
       const v = await requestServiceVerification(id, {
@@ -77,7 +77,7 @@ const ServiceVerification = ({ route, navigation }) => {
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.flex}>
-          <Text style={styles.topTitle}>{t('verify.title')}</Text>
+          <Text style={styles.topTitle}>{t('verify.serviceTitle')}</Text>
           {name ? <Text style={styles.topSub} numberOfLines={1}>{name}</Text> : null}
         </View>
       </View>
