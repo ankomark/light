@@ -140,7 +140,7 @@ const VideoItem = ({
     setFollowBusy(true);
     setFollowing(true); // optimistic — the + vanishes immediately
     try {
-      const res = await followUser(author.id);          // POST /users/:id/follow/
+      const res = await followUser(author.id, true);    // the + only ever follows
       setFollowing(res?.is_following ?? true);           // trust the server, like FollowButton
     } catch {
       setFollowing(false); // revert if it failed

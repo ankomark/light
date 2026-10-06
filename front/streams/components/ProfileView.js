@@ -44,6 +44,12 @@ const tileHeightFor = (size) => Math.round((size * 4) / 3);
 const PAGE_SIZE = 30;
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const STALE_MS = 30 * 1000;
+// Your own profile refreshes on each return (you may have just posted) —
+// but not again within this, coming straight back from a post you opened.
+const SELF_STALE_MS = 5 * 1000;
+// The other tabs are read quietly this long after the header, so they open
+// at once when tapped (and never compete with the header's own request).
+const TABS_AHEAD_MS = 800;
 // On a tablet the header and song rows stay a readable width, centred; the
 // post grid still uses the full width (more columns).
 const CONTENT_MAX = 560;
@@ -168,6 +174,8 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   const [loading, setLoading] = useState(!initial);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // A next page that failed: tap to try again (it used to stop for good).
+  const [moreFailed, setMoreFailed] = useState(false);
   const [error, setError] = useState(null);
   const [followBusy, setFollowBusy] = useState(false);
   const [messageBusy, setMessageBusy] = useState(false);
@@ -269,31 +277,37 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   // Fetch on focus: always for your own profile, when stale for others.
   useFocusEffect(useCallback(() => {
     const age = Date.now() - lastFetchRef.current;
-    if (isSelf || age > STALE_MS) load();
+    if (age > (isSelf ? SELF_STALE_MS : STALE_MS)) load();
   }, [load, isSelf]));
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || loading) return;
     setLoadingMore(true);
+    setMoreFailed(false);
     try {
       const next = pageRef.current + 1;
       const res = await fetchUserPosts(userId, next, PAGE_SIZE);
       const list = Array.isArray(res) ? res : (res?.results ?? []);
       pageRef.current = next;
       setHasMore(!!res?.next);
+      const thumbs = list.map(getPostThumb).filter(Boolean);
+      if (thumbs.length) Image.prefetch?.(thumbs)?.catch?.(() => {});
       setPosts((prev) => mergePage(prev, list));
     } catch {
-      setHasMore(false);
+      // Kept: a moment without signal must not end the grid for good.
+      setMoreFailed(true);
     } finally {
       setLoadingMore(false);
     }
   }, [loadingMore, hasMore, loading, userId]);
+  const [tracksMoreFailed, setTracksMoreFailed] = useState(false);
 
   const loadTracks = useCallback(async ({ more = false } = {}) => {
     if (!userId) return;
     const req = ++tracksReqRef.current;
     const page = more ? tracksPageRef.current + 1 : 1;
     setTracksLoading(true);
+    setTracksMoreFailed(false);
     try {
       const res = await fetchUserTracks(userId, page);
       if (req !== tracksReqRef.current) return;
@@ -310,7 +324,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     } catch {
       if (req !== tracksReqRef.current) return;
       setTracksError(true);
-      if (more) setTracksHasMore(false);
+      if (more) setTracksMoreFailed(true);
     } finally {
       if (req === tracksReqRef.current) setTracksLoading(false);
     }
@@ -361,15 +375,37 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
   }, [tracks, tracksKey, loadTracks, playlists, playlistsKey, loadPlaylists]);
 
   const onEndReached = useCallback(() => {
-    if (tab === 'posts') loadMore();
-    else if (tab === 'music' && tracksHasMore && !tracksLoading) loadTracks({ more: true });
-  }, [tab, loadMore, tracksHasMore, tracksLoading, loadTracks]);
+    // After a failed page, only the "try again" row asks (no request loop).
+    if (tab === 'posts' && !moreFailed) loadMore();
+    else if (tab === 'music' && tracksHasMore && !tracksLoading && !tracksMoreFailed) loadTracks({ more: true });
+  }, [tab, loadMore, tracksHasMore, tracksLoading, loadTracks, moreFailed, tracksMoreFailed]);
+
+  // The Music and Playlists tabs, read ahead once the header is here: the
+  // tap then shows them at once (from the cache next time, too).
+  const aheadFor = useRef(null);
+  useEffect(() => {
+    if (!user || !canSee || aheadFor.current === userId) return undefined;
+    const wantSongs = (user.tracks_count ?? 0) > 0 && tracks === null;
+    const wantLists = (user.playlists_count ?? 0) > 0 && playlists === null;
+    if (!wantSongs && !wantLists) return undefined;
+    aheadFor.current = userId;
+    const timer = setTimeout(() => {
+      if (wantSongs) loadTracks();
+      if (wantLists) loadPlaylists();
+    }, TABS_AHEAD_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, canSee, userId]);
 
   const onPull = useCallback(() => {
     load({ pull: true });
     if (tab === 'music') loadTracks();
     if (tab === 'playlists') loadPlaylists();
-  }, [load, tab, loadTracks, loadPlaylists]);
+    // The artist block (popular songs, listeners) is refreshed with the rest.
+    if (hasSongs && canSee) {
+      fetchArtist(userId).then((data) => { if (data) { setArtist(data); writeCache(artistKey, data); } }).catch(() => {});
+    }
+  }, [load, tab, loadTracks, loadPlaylists, hasSongs, canSee, userId, artistKey]);
 
   // Play from this row, with the rest of the account's songs as the queue.
   const tracksRef = useRef(tracks);
@@ -397,7 +433,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
     setUser(optimistic);
     setFollowBusy(true);
     try {
-      const res = await followUser(userId);
+      const res = await followUser(userId, !wasOn);
       const next = {
         ...optimistic,
         is_following: !!res.is_following,
@@ -844,7 +880,13 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
           keyExtractor: (item) => `pt_${item.id}`,
           renderItem: renderTrack,
           ListEmptyComponent: musicEmpty,
-          ListFooterComponent: tracksLoading && tracks?.length ? <ActivityIndicator style={styles.more} color={P.muted} /> : null,
+          ListFooterComponent: tracksLoading && tracks?.length ? <ActivityIndicator style={styles.more} color={P.muted} />
+            : tracksMoreFailed && tracks?.length ? (
+              <TouchableOpacity style={styles.moreRetry} onPress={() => loadTracks({ more: true })} testID="profile-tracks-retry">
+                <Ionicons name="refresh" size={16} color={P.gold} />
+                <Text style={styles.moreRetryText}>{t('common.retry')}</Text>
+              </TouchableOpacity>
+            ) : null,
         } : {
           data: canView ? posts : [],
           numColumns: cols,
@@ -852,7 +894,13 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
           keyExtractor: (item) => `pp_${item.id}`,
           renderItem: renderPost,
           ListEmptyComponent: empty,
-          ListFooterComponent: loadingMore ? <ActivityIndicator style={styles.more} color={P.muted} /> : null,
+          ListFooterComponent: loadingMore ? <ActivityIndicator style={styles.more} color={P.muted} />
+            : moreFailed && canView ? (
+              <TouchableOpacity style={styles.moreRetry} onPress={loadMore} testID="profile-more-retry">
+                <Ionicons name="refresh" size={16} color={P.gold} />
+                <Text style={styles.moreRetryText}>{t('common.retry')}</Text>
+              </TouchableOpacity>
+            ) : null,
         })}
         ListHeaderComponent={onMusic && musicIntro ? <>{header}{musicIntro}</> : header}
         onEndReached={onEndReached}
@@ -946,6 +994,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.7)',
   },
   offlineText: { color: P.text, fontSize: 12, fontWeight: '700' },
+  moreRetry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: spacing.md },
+  moreRetryText: { color: P.gold, fontWeight: '700', fontSize: 14 },
   pinBadge: { position: 'absolute', bottom: 5, right: 5, padding: 3, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.6)' },
   followsYou: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, backgroundColor: 'rgba(232,198,107,0.14)' },
   followsYouText: { color: P.gold, fontSize: 11, fontWeight: '700' },

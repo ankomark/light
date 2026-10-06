@@ -163,3 +163,44 @@ test('follow requests that could not load say so, with Retry', async () => {
   await waitFor(() => expect(screen.getByTestId('followreq-failed')).toBeTruthy());
   expect(screen.queryByText('followReq.none')).toBeNull();
 });
+
+test('a next page that fails offers Retry instead of ending the grid', async () => {
+  mockApi.fetchUserById.mockResolvedValue(person({ posts_has_more: true }));
+  mockApi.fetchUserPosts.mockRejectedValueOnce(new Error('Network Error'));
+  const screen = render(<ProfileView userId={7} />);
+  await waitFor(() => expect(screen.getByTestId('profile-tile-1')).toBeTruthy(), { timeout: 5000 });
+  const list = screen.UNSAFE_getByType(require('react-native').FlatList);
+  await act(async () => { list.props.onEndReached(); });
+  await waitFor(() => expect(screen.getByTestId('profile-more-retry')).toBeTruthy());
+  mockApi.fetchUserPosts.mockResolvedValueOnce({ results: [{ id: 3, content_type: 'image', thumbnail_url: 'https://cdn/3.jpg' }], next: null });
+  await act(async () => { fireEvent.press(screen.getByTestId('profile-more-retry')); });
+  await waitFor(() => expect(screen.getByTestId('profile-tile-3')).toBeTruthy());
+});
+
+test('the songs tab is read ahead, so it opens at once', async () => {
+  jest.useFakeTimers();
+  mockApi.fetchUserById.mockResolvedValue(person({ tracks_count: 2 }));
+  render(<ProfileView userId={7} />);
+  await act(async () => { await Promise.resolve(); });
+  await act(async () => { jest.advanceTimersByTime(1000); });
+  jest.useRealTimers();
+  await waitFor(() => expect(mockApi.fetchUserTracks).toHaveBeenCalledWith(7, 1));
+});
+
+test('the edit form opens filled in from what the app knows - no spinner', () => {
+  mockMe = { id: 7, username: 'mark', bio: 'Choir', birth_date: '1990-05-12', location: 'Nairobi', display_name: 'Mark A', website: '' };
+  mockApi.fetchProfile.mockImplementation(() => new Promise(() => {}));   // still on its way
+  const screen = render(<CreateProfile />);
+  expect(screen.getByDisplayValue('Mark A')).toBeTruthy();
+  expect(screen.getByText('createProfile.save')).toBeTruthy();
+});
+
+test('Follow on a profile asks for "follow", never a blind toggle', async () => {
+  mockMe = { id: 1, username: 'viewer' };
+  mockApi.fetchUserById.mockResolvedValue(person({ is_self: false, is_following: false, follow_status: 'none' }));
+  mockApi.followUser.mockResolvedValueOnce({ is_following: true, follow_status: 'following', followers_count: 4 });
+  const screen = render(<ProfileView userId={7} />);
+  await waitFor(() => expect(screen.getByText('profile.follow')).toBeTruthy(), { timeout: 5000 });
+  await act(async () => { fireEvent.press(screen.getByText('profile.follow')); });
+  expect(mockApi.followUser).toHaveBeenCalledWith(7, true);
+});

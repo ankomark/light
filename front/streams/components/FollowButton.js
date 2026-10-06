@@ -52,7 +52,7 @@ const FollowButton = ({
     if (inFlight.current || desired.current === server.current) return;
     inFlight.current = true;
     try {
-      const response = await followUser(userId);
+      const response = await followUser(userId, desired.current);
       const serverFollowing = !!response.is_following;
       const status = response.follow_status ?? (serverFollowing ? 'following' : 'none');
       server.current = isOn(status);

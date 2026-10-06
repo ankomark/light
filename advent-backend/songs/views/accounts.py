@@ -215,6 +215,26 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
 
         already_following = user_to_follow.followers.filter(pk=current_user.pk).exists()
 
+        # {"follow": true|false} says what is wanted, so a stale copy on the
+        # phone (or a second tap) can never turn "follow" into an unfollow.
+        # Without it, the old toggle (older app builds).
+        want = request.data.get('follow') if hasattr(request.data, 'get') else None
+        if isinstance(want, str):
+            want = want.lower() in ('1', 'true', 'yes')
+        if want is not None:
+            pending = FollowRequest.objects.filter(requester=current_user, target=user_to_follow,
+                                                   status='pending').exists()
+            on = already_following or pending
+            if bool(want) == on:
+                # Already as asked: nothing changes, nobody is told again.
+                return Response({
+                    "status": "Unchanged",
+                    "is_following": already_following,
+                    "follow_status": 'following' if already_following else ('requested' if pending else 'none'),
+                    "followers_count": user_to_follow.followers.count(),
+                    "following_count": user_to_follow.followed_by.count(),
+                })
+
         if already_following:
             user_to_follow.followers.remove(current_user)
             action = 'unfollowed'

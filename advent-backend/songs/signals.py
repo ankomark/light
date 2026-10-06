@@ -319,7 +319,12 @@ def watch_report_bursts(sender, instance, created, **kwargs):
 def queue_video_faststart(sender, instance, created=False, raw=False, **kwargs):
     """A new video post: its file is checked (and if need be rewritten) so it
     starts playing at once in the feed (songs/video_processing.py)."""
-    if raw or not created or instance.content_type != 'video' or not instance.media_file:
+    if raw or not created or not instance.media_file:
         return
-    from .video_processing import queue_faststart
-    transaction.on_commit(lambda: queue_faststart(instance))
+    if instance.content_type == 'video':
+        from .video_processing import queue_faststart
+        transaction.on_commit(lambda: queue_faststart(instance))
+    elif instance.content_type == 'image' and not instance.thumbnail:
+        # A small still for grids (songs/image_thumbs.py).
+        from .image_thumbs import queue_thumbnail
+        transaction.on_commit(lambda: queue_thumbnail(instance))

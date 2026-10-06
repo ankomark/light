@@ -757,9 +757,12 @@ export const fetchFollowers = async (userId, page = 1) => {
   });
 };
 
-export const followUser = async (userId) => {
-  return apiRequest('post', `/users/${userId}/follow/`);
-};
+// `follow` (true / false) asks for that state; left out, the server toggles.
+// Always pass it where the screen knows what the person tapped for: a stale
+// copy then can't turn "Follow" into an unfollow.
+export const followUser = async (userId, follow) => apiRequest(
+  'post', `/users/${userId}/follow/`, typeof follow === 'boolean' ? { follow } : null,
+);
 
 // ── Follow requests (private accounts) ───────────────────────────────────────
 // Following a private account raises a pending request instead of following;

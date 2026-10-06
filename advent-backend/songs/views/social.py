@@ -2384,13 +2384,15 @@ def _share_image(post, fallback=''):
     video poster frame the client captures at upload (post.thumbnail), or the
     image itself for photo posts — then falls back to a branded image so the card
     is never blank. Mirrors the serializer's get_thumbnail_url resolution."""
-    poster = media.resolve(post.thumbnail) if post.thumbnail else ''
-    if poster:
-        return poster
+    # A photo post's own photo first: its `thumbnail` is the small grid still
+    # (songs/image_thumbs.py), too soft for a link card.
     if post.content_type == 'image':
         img = media.resolve(post.media_file) or ''
         if img:
             return img
+    poster = media.resolve(post.thumbnail) if post.thumbnail else ''
+    if poster:
+        return poster
     return fallback or ''
 
 

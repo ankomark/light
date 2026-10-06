@@ -244,7 +244,7 @@ const RoomInner = ({
     const prev = followState;
     setFollowState(prev === 'none' ? 'following' : 'none'); // optimistic
     try {
-      const res = await followUser(hostUser.id);
+      const res = await followUser(hostUser.id, prev === 'none');   // what was tapped for
       if (res?.follow_status) setFollowState(res.follow_status);
       else if (typeof res?.is_following === 'boolean') setFollowState(res.is_following ? 'following' : 'none');
     } catch {

@@ -27,35 +27,40 @@ const FIELDS = ['display_name', 'website', 'bio', 'birth_date', 'location', 'pic
 const CreateProfile = () => {
   const { t } = useI18n();
   const navigation = useNavigation();
-  const { updateUser } = useAuth();
+  const { updateUser, currentUser } = useAuth();
+  // Your profile as the app last read it (/profiles/me/): the form opens
+  // filled in at once, and the fresh copy follows.
+  const known = currentUser && 'bio' in currentUser ? currentUser : null;
   const kbScroll = useRef(null);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [checkingProfile, setCheckingProfile] = useState(true);
+  const [isEditMode, setIsEditMode] = useState(!!(currentUser && 'bio' in currentUser));
+  const [checkingProfile, setCheckingProfile] = useState(!known);
   // Your profile couldn't be read (offline): not the same as having none —
   // the form would otherwise offer to create a second one.
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [profileData, setProfileData] = useState({
-    display_name: '',
-    website: '',
-    bio: '',
-    birth_date: '',
-    location: '',
-    picture: null,
-  });
+  const [profileData, setProfileData] = useState(() => ({
+    display_name: known?.display_name ?? '',
+    website: known?.website ?? '',
+    bio: known?.bio ?? '',
+    birth_date: known?.birth_date ?? '',
+    location: known?.location ?? '',
+    picture: known?.picture_url ?? null,
+  }));
+  // Typing has begun: the fresh copy must not overwrite it.
+  const touched = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [errors, setErrors] = useState({});
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(() => parseDay(known?.birth_date) || new Date());
 
   // Detect edit mode: pre-fill if profile already exists
   useEffect(() => {
     (async () => {
       setLoadFailed(false);
-      setCheckingProfile(true);
+      if (!known) setCheckingProfile(true);
       try {
         const existing = await fetchProfile();
-        if (existing) {
+        if (existing && !touched.current) {
           setIsEditMode(true);
           setProfileData({
             display_name: existing.display_name ?? '',
@@ -70,8 +75,9 @@ const CreateProfile = () => {
           if (existing.birth_date) setSelectedDate(parseDay(existing.birth_date) || new Date());
         }
       } catch (err) {
-        // Only "there is none" means create; anything else is a failed read.
-        if (err?.response?.status !== 404) setLoadFailed(true);
+        // Only "there is none" means create; anything else is a failed read
+        // (with the known copy on screen, it simply stays).
+        if (err?.response?.status !== 404 && !known) setLoadFailed(true);
       } finally {
         setCheckingProfile(false);
       }
@@ -80,6 +86,7 @@ const CreateProfile = () => {
 
   // Handle text input changes
   const handleChange = (key, value) => {
+    touched.current = true;
     setProfileData(prev => ({ ...prev, [key]: value }));
     // Clear error when user types
     if (errors[key]) setErrors(prev => ({ ...prev, [key]: null }));
@@ -105,6 +112,7 @@ const CreateProfile = () => {
         // Compress image
         const compressedImage = await compressImage(result.assets[0].uri, { width: 800, quality: 0.7 });
 
+        touched.current = true;
         setProfileData(prev => ({ ...prev, picture: compressedImage.uri }));
       }
     } catch (error) {

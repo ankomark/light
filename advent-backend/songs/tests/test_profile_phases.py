@@ -173,3 +173,84 @@ class FollowRequestHygieneTests(APITestCase):
         self.client.patch('/api/profiles/update_me/', {'is_public': True}, format='json')
         self.assertTrue(self.owner.followers.filter(pk=self.fan.pk).exists())
         self.assertFalse(FollowRequest.objects.filter(target=self.owner).exists())
+
+
+class ImageThumbnailTests(APITestCase):
+    def setUp(self):
+        self.user = make('snap')
+        self.post = SocialPost.objects.create(user=self.user, content_type='image',
+                                              media_file='https://cdn.ours.example/posts/big.jpg')
+
+    def photo(self, size=(3000, 2000), orientation=None):
+        import io as _io
+        from PIL import Image
+        img = Image.new('RGB', size, 'blue')
+        buf = _io.BytesIO()
+        exif = Image.Exif()
+        if orientation:
+            exif[0x0112] = orientation
+        img.save(buf, 'JPEG', exif=exif.tobytes())
+        return buf.getvalue()
+
+    def test_a_small_upright_still_and_the_photo_untouched(self):
+        from PIL import Image
+        import io as _io
+        from songs import image_thumbs as it
+        thumb = it.make_thumbnail(self.photo(orientation=6))      # a phone held upright
+        img = Image.open(_io.BytesIO(thumb))
+        self.assertEqual(max(img.size), it.GRID_EDGE)
+        self.assertGreater(img.size[1], img.size[0])            # rotated as the phone showed it
+        self.assertIsNone(it.make_thumbnail(b'not a picture'))
+
+        with mock.patch.object(it.r2, 'is_r2_url', return_value=True), \
+                mock.patch.object(it.r2, 'is_configured', return_value=True), \
+                mock.patch('songs.audio_tags._fetch', return_value=(self.photo(), 'image/jpeg')), \
+                mock.patch.object(it.r2, 'put_bytes', return_value='https://cdn.ours.example/thumbs/x.jpg') as put:
+            it.image_thumbnail(self.post.pk)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.thumbnail, 'https://cdn.ours.example/thumbs/x.jpg')
+        self.assertEqual(self.post.media_file, 'https://cdn.ours.example/posts/big.jpg')
+        self.assertTrue(put.call_args[0][0].startswith(f'thumbs/posts/{self.post.pk}/'))
+        # The grid now gets the small one.
+        tile = self.client.get(f'/api/users/{self.user.id}/social_posts/')
+        self.client.force_authenticate(self.user)
+        tile = self.client.get(f'/api/users/{self.user.id}/social_posts/').data['results'][0]
+        self.assertEqual(tile['thumbnail_url'], 'https://cdn.ours.example/thumbs/x.jpg')
+
+    def test_a_new_photo_post_is_queued(self):
+        from songs.models import Job
+        with self.captureOnCommitCallbacks(execute=True):
+            p = SocialPost.objects.create(user=self.user, content_type='image', media_file='https://cdn.x/p.jpg')
+        self.assertTrue(Job.objects.filter(kind='image_thumbnail', key=f'post:{p.pk}').exists())
+
+
+@mock.patch('songs.views.accounts.notify_user')
+class FollowSetStateTests(APITestCase):
+    """{"follow": true} from a stale screen must never unfollow."""
+
+    def setUp(self):
+        cache.clear()
+        self.me = make('setter')
+        self.them = make('them')
+        self.client.force_authenticate(self.me)
+
+    def post(self, **data):
+        return self.client.post(f'/api/users/{self.them.id}/follow/', data, format='json')
+
+    def test_follow_true_twice_stays_following(self, notify):
+        self.assertTrue(self.post(follow=True).data['is_following'])
+        self.assertTrue(self.post(follow=True).data['is_following'])      # a stale "Follow" tap
+        self.assertTrue(self.them.followers.filter(pk=self.me.pk).exists())
+        self.assertFalse(self.post(follow=False).data['is_following'])
+        self.assertFalse(self.post(follow=False).data['is_following'])
+        self.assertEqual(notify.call_count, 1)
+
+    def test_a_private_request_is_not_withdrawn_by_asking_again(self, notify):
+        Profile.objects.create(user=self.them, is_public=False)
+        self.assertEqual(self.post(follow=True).data['follow_status'], 'requested')
+        self.assertEqual(self.post(follow=True).data['follow_status'], 'requested')
+        self.assertEqual(self.post(follow=False).data['follow_status'], 'none')
+
+    def test_without_it_the_old_toggle_still_works(self, notify):
+        self.assertTrue(self.post().data['is_following'])
+        self.assertFalse(self.post().data['is_following'])
