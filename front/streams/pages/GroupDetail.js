@@ -1038,6 +1038,8 @@ const GroupDetail = ({ route, navigation }) => {
     } catch (e) {
       // requestJoinGroup rejects with the response body itself ({ error } / { message }).
       const msg = e?.error || e?.response?.data?.error || e?.message || t('group.detail.requestFailed');
+      // Already in (joined on another device): into the chat, not "requested".
+      if (/already a member/i.test(msg)) { await loadGroup(); return; }
       if (/already/i.test(msg)) setRequested(true);
       notify(t('common.notice'), msg);
     }

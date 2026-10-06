@@ -236,3 +236,16 @@ class OpenJoinTests(APITestCase):
         self.assertEqual(self.client.post(url, {}, format='json').status_code, 400)
         self.assertEqual(GroupMember.objects.filter(group=g, user=me).count(), 1)
         self.assertEqual(GroupPost.objects.filter(group=g, message_type='system', content__contains='joined').count(), 1)
+
+
+class JoinMessageTests(APITestCase):
+    def test_a_join_answer_is_a_few_lines(self):
+        owner = User.objects.create_user('jm', 'jm@x.com', 'x')
+        me = User.objects.create_user('jm2', 'jm2@x.com', 'x')
+        g = Group.objects.create(creator=owner, name='Asking', is_private=False)
+        GroupMember.objects.create(group=g, user=owner, is_admin=True)
+        self.client.force_authenticate(me)
+        with mock.patch('songs.views.groups.notify_user'):
+            self.client.post(f'/api/groups/{g.slug}/request-join/', {'message': 'x' * 100000}, format='json')
+        from songs.models import GroupJoinRequest
+        self.assertEqual(len(GroupJoinRequest.objects.get(group=g, user=me).message), 500)

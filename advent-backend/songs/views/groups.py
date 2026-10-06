@@ -19,6 +19,7 @@ EPOCH = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 
 # How long after a rejection - or being removed - before someone may join again.
 REJOIN_COOLDOWN_DAYS = 7
+JOIN_MESSAGE_MAX = 500
 
 
 def _flag(value):
@@ -448,7 +449,9 @@ class GroupViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        message = request.data.get('message', '')
+        # The answer to the group's question: a few lines, not a document the
+        # admins' requests screen has to carry.
+        message = str(request.data.get('message') or '').strip()[:JOIN_MESSAGE_MAX]
         # One row per (group, user) — reopen the existing one instead of inserting
         # a duplicate (which would hit the unique constraint).
         existing = GroupJoinRequest.objects.filter(group=group, user=request.user).first()
