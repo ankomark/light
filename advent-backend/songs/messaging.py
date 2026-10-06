@@ -111,13 +111,23 @@ def is_online(uid):
     return (cache.get(_online_key(uid)) or 0) > 0
 
 
+def shares_presence(conversation, owner):
+    """Does `owner` let the other person in this chat see when they're online?
+    Only once they accepted the chat (a request they never answered: no)."""
+    return ConversationState.objects.filter(conversation=conversation, user=owner, accepted=True).exists()
+
+
 def partner_ids(user, limit=300):
     """People this user has a chat with (who to tell they came online) -
     never anyone blocked either way: being told someone is online is
     exactly what a block must stop."""
     from .models import blocked_ids_for
     blocked = blocked_ids_for(user)
-    qs = User.objects.filter(conversations__participants=user).exclude(pk=user.pk)
+    # Only people whose chat this user accepted: a stranger's message request
+    # is not an invitation to see when they're online.
+    accepted = ConversationState.objects.filter(user=user, accepted=True).values('conversation_id')
+    qs = (User.objects.filter(conversations__participants=user, conversations__in=accepted)
+          .exclude(pk=user.pk))
     if blocked:
         qs = qs.exclude(pk__in=blocked)
     return list(qs.values_list('pk', flat=True).distinct()[:limit])

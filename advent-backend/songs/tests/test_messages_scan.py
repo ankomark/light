@@ -193,3 +193,35 @@ class UnreadCacheTests(APITestCase):
         with mock.patch('songs.views.messaging.ConversationViewSet._unread_counts') as heavy:
             self.count()
         heavy.assert_not_called()
+
+
+@mock.patch('songs.views.messaging.notify_user')
+class PresencePrivacyTests(APITestCase):
+    """A message request is not an invitation to see when someone is online."""
+
+    def setUp(self):
+        cache.clear()
+        self.me = User.objects.create_user('quietone', 'q@x.com', 'x')
+        self.stranger = User.objects.create_user('nosy', 'n@x.com', 'x')
+        self.client.force_authenticate(self.stranger)
+        self.conv = self.client.post('/api/conversations/', {'user_id': self.me.id}, format='json').data['id']
+        self.client.post(f'/api/conversations/{self.conv}/send_message/', {'content': 'hi'}, format='json')
+        dm.went_online(self.me.id)
+
+    def test_a_stranger_sees_nothing_until_accepted(self, notify):
+        r = self.client.get(f'/api/conversations/{self.conv}/presence/').data
+        self.assertEqual(r, {'online': False, 'last_seen': None})
+        row = self.client.get('/api/conversations/').data['results'][0]
+        self.assertNotIn('online', row)
+        self.assertEqual(dm.partner_ids(self.me), [])            # not told when I come online
+        # I accept: now they may.
+        self.client.force_authenticate(self.me)
+        self.client.post(f'/api/conversations/{self.conv}/state/', {'accepted': True}, format='json')
+        self.client.force_authenticate(self.stranger)
+        self.assertTrue(self.client.get(f'/api/conversations/{self.conv}/presence/').data['online'])
+        self.assertEqual(dm.partner_ids(self.me), [self.stranger.id])
+
+    def test_a_voice_note_length_is_within_reason(self, notify):
+        r = self.client.post(f'/api/conversations/{self.conv}/send_message/',
+                             {'content': 'x', 'duration': 10 ** 9}, format='json')
+        self.assertEqual(Message.objects.get(pk=r.data['id']).duration, 3600)

@@ -129,7 +129,9 @@ class ConversationSerializer(serializers.ModelSerializer):
         data['singles'] = singles is not None
         data['closed'] = singles == 'ended'
         other = data.get('other_participant') or {}
-        if other.get('id'):
+        # Their dot only once they accepted the chat (a request you sent them
+        # doesn't show you when they're online).
+        if other.get('id') and getattr(obj, 'other_accepted', True):
             data['online'] = is_online(other['id'])
         last = data.get('last_message')
         if last and getattr(obj, 'last_msg_deleted', False):

@@ -93,6 +93,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 st_accepted=Subquery(mine.values('accepted')[:1]),
                 st_muted=Subquery(mine.values('muted')[:1]),
                 st_archived=Subquery(mine.values('archived')[:1]),
+                # Whether the other one accepted this chat: only then is their
+                # online dot shown here (messaging.shares_presence).
+                other_accepted=Exists(ConversationState.objects.filter(
+                    conversation=OuterRef('pk'), accepted=True).exclude(user=user)),
             )
             .annotate(
                 last_msg_id=Subquery(last.values('id')[:1]),
@@ -283,7 +287,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
         message = Message.objects.create(
             conversation=conversation, sender=me, content=content, message_type=message_type,
             attachment=attachment, file_name=file_name, reply_to=reply_to, client_id=client_id,
-            duration=duration if isinstance(duration, (int, float)) else None,
+            # Seconds of a voice note: a number, within reason (a client
+            # can send anything - a negative or a billion breaks the player).
+            duration=max(0, min(int(duration), 3600)) if isinstance(duration, (int, float)) else None,
         )
         Conversation.objects.filter(pk=conversation.pk).update(updated_at=message.created_at)
         _singles_signals(conversation, me, message)
@@ -422,7 +428,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
     def presence(self, request, pk=None):
         conversation = self.get_object()
         other = conversation.participants.exclude(id=request.user.id).first()
-        if other is None or is_blocked_between(request.user, other):
+        if (other is None or is_blocked_between(request.user, other)
+                or not dm.shares_presence(conversation, other)):
             return Response({'online': False, 'last_seen': None})
         return Response({'online': dm.is_online(other.id), 'last_seen': other.last_seen_at})
 
