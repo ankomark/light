@@ -211,3 +211,60 @@ class ClosedChatTests(Base):
         Block.objects.create(blocker=self.ann.user, blocked=self.mark.user)
         self.assertEqual(self.edit().status_code, 403)
         self.assertEqual(self.react().status_code, 403)
+
+
+class AlgorithmTests(Base):
+    """Mark (a 29-year-old man in Kenya looking for marriage) and who he sees."""
+
+    def foryou(self):
+        return [c['id'] for c in self.client.get('/api/singles/browse/', {'mode': 'foryou'}).data['results']]
+
+    def test_preferences_work_both_ways(self):
+        open_ = single('open')                                            # no preferences: sees anyone
+        young = single('young', pref_max_age=25)                          # Mark is too old for her
+        older = single('older', pref_min_age=26, pref_max_age=40)         # Mark fits
+        away = single('away', pref_countries=['Uganda'])                  # not Kenya
+        kenya = single('kenya', pref_countries=['uganda', 'KENYA'])       # Kenya, any case
+        friends = single('friends', pref_intents=['friendship'])          # not what Mark wants
+        both = single('both', pref_intents=['serious', 'marriage'])
+        seen = set(self.foryou())
+        self.assertEqual(seen & {open_.id, older.id, kenya.id, both.id}, {open_.id, older.id, kenya.id, both.id})
+        self.assertEqual(seen & {young.id, away.id, friends.id}, set())
+        self.assertNotIn(young.id, set(self.ids()))                       # Discover too
+
+    def test_a_not_now_fades_after_ninety_days_both_ways(self):
+        from songs.models import SinglesInterest
+        mine = single('mine')                                             # Mark passed her
+        theirs = single('theirs')                                         # she passed Mark
+        SinglesInterest.objects.create(from_profile=self.mark, to_profile=mine, kind='pass')
+        SinglesInterest.objects.create(from_profile=theirs, to_profile=self.mark, kind='pass')
+        self.assertEqual(set(self.foryou()) & {mine.id, theirs.id}, set())
+        SinglesInterest.objects.update(created_at=timezone.now() - timedelta(days=91))
+        self.assertEqual(set(self.foryou()) & {mine.id, theirs.id}, {mine.id, theirs.id})
+        # Answered again: a new answer (today's count, a fresh 90 days).
+        r = self.client.post(f'/api/singles/profiles/{mine.id}/interest/', {'kind': 'pass'}, format='json')
+        self.assertEqual(r.data['left_today'], 19)
+        self.assertNotIn(mine.id, self.foryou())
+
+    def test_an_interested_answer_never_fades(self):
+        from songs.models import SinglesInterest
+        her = single('her')
+        SinglesInterest.objects.create(from_profile=self.mark, to_profile=her, kind='interested')
+        SinglesInterest.objects.update(created_at=timezone.now() - timedelta(days=400))
+        self.assertNotIn(her.id, self.foryou())
+
+    def test_someone_who_liked_me_comes_first_among_equals(self):
+        from songs.models import SinglesInterest
+        a, b, c = single('a'), single('b'), single('c')
+        SinglesInterest.objects.create(from_profile=b, to_profile=self.mark, kind='interested')
+        self.assertEqual(self.foryou()[0], b.id)
+
+    def test_a_much_liked_profile_is_lowered_a_little(self):
+        from songs.models import SinglesInterest
+        quiet, busy = single('quiet'), single('busy')
+        SinglesProfile.objects.filter(pk=busy.pk).update(last_active_at=timezone.now())
+        SinglesProfile.objects.filter(pk=quiet.pk).update(last_active_at=timezone.now() - timedelta(minutes=5))
+        self.assertEqual(self.foryou()[:2], [busy.id, quiet.id])         # equal: the more recent first
+        for i in range(10):                                               # ten suitors this fortnight
+            SinglesInterest.objects.create(from_profile=single(f'm{i}', 'man'), to_profile=busy, kind='interested')
+        self.assertEqual(self.foryou()[:2], [quiet.id, busy.id])

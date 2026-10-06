@@ -234,8 +234,15 @@ def candidates(me, filters=None):
     blocked = blocked_ids_for(me.user)
     if blocked:
         qs = qs.exclude(user_id__in=blocked)
-    answered = SinglesInterest.objects.filter(from_profile=me).values('to_profile_id')
-    passed_me = SinglesInterest.objects.filter(to_profile=me, kind=SinglesInterest.PASS).values('from_profile_id')
+    # A "not now" is not forever: after PASS_DAYS the person may be shown
+    # again (people change, profiles change; a small community ran dry). Both
+    # ways - my pass of them, and theirs of me.
+    fresh_pass = timezone.now() - timedelta(days=PASS_DAYS)
+    answered = (SinglesInterest.objects.filter(from_profile=me)
+                .filter(Q(kind=SinglesInterest.INTERESTED) | Q(created_at__gte=fresh_pass))
+                .values('to_profile_id'))
+    passed_me = SinglesInterest.objects.filter(to_profile=me, kind=SinglesInterest.PASS,
+                                               created_at__gte=fresh_pass).values('from_profile_id')
     matched_a = SinglesMatch.objects.filter(profile_a=me).values('profile_b_id')
     matched_b = SinglesMatch.objects.filter(profile_b=me).values('profile_a_id')
     qs = (qs.exclude(pk__in=answered).exclude(pk__in=passed_me)
@@ -243,6 +250,7 @@ def candidates(me, filters=None):
     # Incognito: shown only to the people they have shown interest in.
     liked_me = SinglesInterest.objects.filter(to_profile=me, kind=SinglesInterest.INTERESTED).values('from_profile_id')
     qs = qs.filter(Q(discoverable='everyone') | Q(pk__in=liked_me))
+    qs = fits_them(qs, me)
 
     today = timezone.localdate()
     if filters.get('min_age'):
@@ -272,6 +280,26 @@ def candidates(me, filters=None):
     # one per profile.
     return qs.select_related('user').prefetch_related('photos', 'answers').order_by(
         '-near', '-same_church', '-last_active_at', '-id')
+
+
+def fits_them(qs, me):
+    """Only those whose own "who I'd like to see" includes me: my age within
+    their range, my country among theirs, my intent among theirs (each when
+    they set one). Preferences were one-way - I saw people who would never
+    be shown me, and every interest there was one that could not be returned."""
+    from django.db.models import Q
+    age = age_on(me.birth_date)
+    qs = qs.filter(Q(pref_min_age__isnull=True) | Q(pref_min_age__lte=age),
+                   Q(pref_max_age__isnull=True) | Q(pref_max_age__gte=age))
+    # The lists are short JSON arrays; matching the quoted item in their text
+    # form works on every database (JSON contains does not).
+    if me.country:
+        qs = qs.filter(Q(pref_countries=[]) | Q(pref_countries__isnull=True)
+                       | Q(pref_countries__icontains=f'"{me.country.strip()}"'))
+    if me.looking_for:
+        qs = qs.filter(Q(pref_intents=[]) | Q(pref_intents__isnull=True)
+                       | Q(pref_intents__icontains=f'"{me.looking_for}"'))
+    return qs
 
 
 def _shift_years(d, years):
@@ -357,7 +385,12 @@ def clean_ministries(values):
 # ── Phase 8: the discovery engine ───────────────────────────────────────────
 ONLINE_MINUTES = 15
 NEW_DAYS = 30
-POOL = 300           # candidates scored for For You (most recently active first)
+POOL = 500           # candidates scored for For You (most recently active first)
+PASS_DAYS = 90       # a "not now" is kept this long, then they may be shown again
+LIKED_ME_BOOST = 5   # one tap from a match: shown before strangers who share as much
+BUSY_DAYS = 14       # interest received in this long counts towards "busy"
+BUSY_STEP = 5        # each this many interests lowers a profile one point...
+BUSY_MAX = 4         # ...up to this many
 PAGE = 20
 MODES = ('foryou', 'new', 'nearby', 'online')
 
@@ -405,9 +438,14 @@ def _agreed_values(me, other):
 WEIGHTS = {'ministries': 4, 'interests': 3, 'intent': 3, 'church': 3, 'town': 2, 'languages': 1, 'values': 2}
 
 
-def score(me, other, now=None):
+def score(me, other, now=None, liked_me=(), busy=None):
     """Shared things count; being around recently counts a little; a verified
-    photo a little. Activity is a tie-breaker, not the point."""
+    photo a little. Activity is a tie-breaker, not the point.
+
+    Someone who already showed interest in me is one tap from a match, so
+    comes first among equals. Someone who has received a great deal of
+    interest lately is lowered a little: otherwise the same few faces top
+    everyone's list (and their inbox), while others are never seen."""
     now = now or timezone.now()
     total = sum(WEIGHTS[r['kind']] * (len(r.get('values', [])) or 1) for r in reasons_for(me, other))
     if other.last_active_at:
@@ -415,7 +453,27 @@ def score(me, other, now=None):
         total += max(0, 3 - days // 2)
     if other.photo_verified_at:
         total += 1
+    if other.pk in liked_me:
+        total += LIKED_ME_BOOST
+    if busy:
+        total -= min(BUSY_MAX, busy.get(other.pk, 0) // BUSY_STEP)
     return total
+
+
+def exposure(me, pool):
+    """(who liked me, {profile id: interest received lately}) for a pool -
+    two queries for the whole pool."""
+    from django.db.models import Count
+    from .models import SinglesInterest
+    ids = [p.pk for p in pool]
+    liked_me = set(SinglesInterest.objects.filter(to_profile=me, from_profile_id__in=ids,
+                                                  kind=SinglesInterest.INTERESTED)
+                   .values_list('from_profile_id', flat=True))
+    since = timezone.now() - timedelta(days=BUSY_DAYS)
+    busy = dict(SinglesInterest.objects.filter(to_profile_id__in=ids, kind=SinglesInterest.INTERESTED,
+                                               created_at__gte=since)
+                .values('to_profile_id').annotate(n=Count('id')).values_list('to_profile_id', 'n'))
+    return liked_me, busy
 
 
 def _with_answers(profiles):
@@ -456,7 +514,9 @@ def browse(me, mode='foryou', filters=None, page=1):
         pool = _with_answers(list(qs.order_by('-last_active_at', '-id')[:POOL]))
         _with_answers([me])
         now = timezone.now()
-        ranked = sorted(pool, key=lambda o: (-score(me, o, now), -(o.last_active_at.timestamp() if o.last_active_at else 0)))
+        liked_me, busy = exposure(me, pool)
+        ranked = sorted(pool, key=lambda o: (-score(me, o, now, liked_me, busy),
+                                             -(o.last_active_at.timestamp() if o.last_active_at else 0)))
         start = (page - 1) * PAGE
         return ranked[start:start + PAGE], len(ranked) > start + PAGE
     if mode == 'new':

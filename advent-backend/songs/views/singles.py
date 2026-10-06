@@ -19,6 +19,7 @@ review queue.
 Nobody sees anyone else's profile in this phase: Discover comes in phase 2.
 """
 import logging
+from datetime import timedelta
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
@@ -687,6 +688,12 @@ class SinglesInterestView(APIView):
         if target is None or not rules.can_view(me, target) or target.pk == me.pk:
             return Response(status=status.HTTP_404_NOT_FOUND)
         already = SinglesInterest.objects.filter(from_profile=me, to_profile=target).first()
+        if (already is not None and already.kind == SinglesInterest.PASS
+                and already.created_at < timezone.now() - timedelta(days=rules.PASS_DAYS)):
+            # A "not now" long past: shown again, so answered afresh - it
+            # counts toward today, and its own 90 days start now.
+            already.delete()
+            already = None
         if already is None and rules.answered_today(me) >= rules.DAILY_NEW:
             return Response({'code': 'daily_limit', 'left_today': 0}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         SinglesInterest.objects.update_or_create(from_profile=me, to_profile=target, defaults={'kind': kind})
