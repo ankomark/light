@@ -98,6 +98,7 @@ const ServiceForm = ({ route, navigation }) => {
   useEffect(() => {
     fetchOrganizations({ mine: 1 }).then((r) => { const rows = r?.results || []; setMyOrgs(rows); writeCache(orgsKey, rows); }).catch(() => {});
   }, [orgsKey]);
+  const [progress, setProgress] = useState(null);           // {done, total} while several photos go up
   const [uploading, setUploading] = useState(null);           // 'logo' | 'cover'
   const [saving, setSaving] = useState(false);
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
@@ -136,19 +137,22 @@ const ServiceForm = ({ route, navigation }) => {
     setUploading(which);
     try {
       const assets = which === 'gallery' ? r.assets.slice(0, Math.max(1, room)) : r.assets.slice(0, 1);
-      for (const asset of assets) {
+      if (assets.length > 1) setProgress({ done: 0, total: assets.length });
+      for (const [n, asset] of assets.entries()) {
         const small = await compressImage(asset.uri, {
           width: which === 'logo' ? 400 : which === 'gallery' ? 1600 : 1000, quality: which === 'gallery' ? 0.75 : 0.65,
           sourceWidth: asset.width,
         });
-        const up = await uploadMedia({ uri: small.uri, name: `service_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'cover');
+        const up = await uploadMedia({ uri: small.uri, name: `service_${Date.now()}_${n}.jpg`, mimeType: 'image/jpeg' }, 'cover');
         if (which === 'gallery') setGallery((g) => [...g, { url: up.url, caption: '' }].slice(0, GALLERY_MAX));
+        if (assets.length > 1) setProgress({ done: n + 1, total: assets.length });
         else (which === 'logo' ? setLogo : setCover)(up.url);
       }
     } catch (e) {
       notify(t('common.uploadFailedTitle'), e?.message || t('common.uploadImageFailed'));
     } finally {
       setUploading(null);
+      setProgress(null);
     }
   };
 
@@ -369,7 +373,12 @@ const ServiceForm = ({ route, navigation }) => {
           {gallery.length < GALLERY_MAX ? (
             <TouchableOpacity style={[styles.galleryItem, styles.galleryAdd]} onPress={() => pick('gallery')} disabled={!!uploading}
               testID="service-gallery-add">
-              {uploading === 'gallery' ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="add" size={26} color={colors.textMuted} />}
+              {uploading === 'gallery' ? (
+                <>
+                  <ActivityIndicator color={colors.primary} />
+                  {progress ? <Text style={styles.galleryProgress} testID="service-gallery-progress">{`${progress.done} / ${progress.total}`}</Text> : null}
+                </>
+              ) : <Ionicons name="add" size={26} color={colors.textMuted} />}
             </TouchableOpacity>
           ) : null}
         </View>
@@ -526,6 +535,7 @@ const styles = StyleSheet.create({
   },
   galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
   galleryCount: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
+  galleryProgress: { ...typography.caption, color: colors.textMuted, marginTop: 4 },
   galleryFirst: {
     position: 'absolute', left: 4, top: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center', justifyContent: 'center',

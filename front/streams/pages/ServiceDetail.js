@@ -85,7 +85,7 @@ export const portfolioOf = (s) => (Array.isArray(s?.gallery_items) && s.gallery_
   ? s.gallery_items.filter((g) => g?.url)
   : (s?.gallery || []).filter(Boolean).map((url) => ({ url, caption: '' })));
 
-/** The portfolio's mosaic: a feature, then pairs whose heights alternate. */
+/** The portfolio's mosaic: a feature, then pairs whose widths alternate. */
 export const mosaicRows = (items) => {
   const rows = [];
   if (!items.length) return rows;
@@ -93,7 +93,7 @@ export const mosaicRows = (items) => {
   for (let i = 1; i < items.length; i += 2) {
     const pair = [{ ...items[i], index: i }];
     if (items[i + 1]) pair.push({ ...items[i + 1], index: i + 1 });
-    rows.push({ kind: (rows.length % 2) ? 'tallLeft' : 'tallRight', items: pair });
+    rows.push({ kind: (rows.length % 2) ? 'wideLeft' : 'wideRight', items: pair });
   }
   return rows;
 };
@@ -132,6 +132,7 @@ const ServiceDetail = ({ route, navigation }) => {
   const scrollY = useRef(new Animated.Value(0)).current;
   const scroller = useRef(null);
   const anchors = useRef({});
+  const pageY = useRef(0);
 
   // How it's found and reached, for its owner's numbers (never who). A
   // failure is silent — it's only counting.
@@ -201,7 +202,8 @@ const ServiceDetail = ({ route, navigation }) => {
   const gutter = 20 + Math.max(insets.left || 0, insets.right || 0);
   const innerW = pageW - gutter * 2;
   // The masthead: tall and cinematic on a phone, never more than most of the screen.
-  const heroH = Math.round(Math.min(Math.max(width * 1.02, 380), height * 0.68, 620));
+  // On its side (a short screen) it keeps room for the logo, the name and the place.
+  const heroH = Math.round(Math.min(Math.max(width * 1.02, 380), Math.max(height * 0.68, 330), 620));
   const directions = () => {
     track('directions');
     open(s.latitude != null ? directionsUrl(`${s.latitude},${s.longitude}`) : directionsUrl(s.location));
@@ -229,7 +231,7 @@ const ServiceDetail = ({ route, navigation }) => {
   const anchor = (key) => (e) => { anchors.current[key] = e.nativeEvent.layout.y; };
   const goTo = (key) => {
     const y = anchors.current[key];
-    if (y != null) scroller.current?.scrollTo({ y: Math.max(0, y - insets.top - 64), animated: true });
+    if (y != null) scroller.current?.scrollTo({ y: Math.max(0, pageY.current + y - insets.top - 64), animated: true });
   };
 
   // The slim bar: in once the masthead has scrolled away.
@@ -243,7 +245,7 @@ const ServiceDetail = ({ route, navigation }) => {
   const longAbout = (s.description || '').length > 420;
   const highlights = [
     s.rating_count ? { key: 'rating', value: String(s.rating_avg), label: t('reviews.count', { n: s.rating_count }), stars: true } : null,
-    s.responds_in_hours != null ? { key: 'responds', value: '⚡', label: respondsLabel(s.responds_in_hours, t) } : null,
+    s.responds_in_hours != null ? { key: 'responds', icon: 'flash-outline', label: respondsLabel(s.responds_in_hours, t) } : null,
     s.member_since ? { key: 'since', value: String(s.member_since), label: t('services.site.since') } : null,
     price ? { key: 'price', value: price, label: t('services.site.rates'), small: true } : null,
   ].filter(Boolean);
@@ -300,7 +302,8 @@ const ServiceDetail = ({ route, navigation }) => {
           </View>
         </View>
 
-        <View style={[styles.page, { width: pageW, paddingHorizontal: gutter }]}>
+        <View style={[styles.page, { width: pageW, paddingHorizontal: gutter }]}
+          onLayout={(e) => { pageY.current = e.nativeEvent.layout.y; }}>
           {s.organization ? (
             <TouchableOpacity style={styles.orgRow} testID="service-org"
               onPress={() => navigation.navigate('OrganizationPage', { slug: s.organization.slug, name: s.organization.name })}>
@@ -327,8 +330,11 @@ const ServiceDetail = ({ route, navigation }) => {
               {highlights.map((h, i) => (
                 <View key={h.key} style={[styles.highlight, i > 0 && styles.highlightRule]}
                   testID={h.key === 'rating' ? 'service-stars' : h.key === 'responds' ? 'service-responds' : undefined}>
-                  <Text style={[styles.highlightValue, h.small && styles.highlightValueSmall]} numberOfLines={1}>{h.value}</Text>
-                  {h.stars ? <StarRow value={s.rating_avg} size={11} /> : null}
+                  {h.icon ? <Ionicons name={h.icon} size={24} color={M.gold} style={styles.highlightIcon} /> : (
+                    <Text style={[styles.highlightValue, h.small && styles.highlightValueSmall]} numberOfLines={1}
+                      adjustsFontSizeToFit minimumFontScale={0.6}>{h.value}</Text>
+                  )}
+                  {h.stars ? <StarRow value={s.rating_avg} size={11} color={M.gold} /> : null}
                   <Text style={styles.highlightLabel} numberOfLines={2}>{h.label}</Text>
                 </View>
               ))}
@@ -441,17 +447,18 @@ const ServiceDetail = ({ route, navigation }) => {
                       </TouchableOpacity>
                     );
                   }
-                  const half = (innerW - 10) / 2;
-                  const tall = Math.round(half * 1.32);
-                  const short = Math.round(half * 0.95);
+                  const wide = Math.round((innerW - 10) * 0.58);
+                  const narrow = innerW - 10 - wide;
+                  const rowH = Math.round((innerW - 10) * 0.5 * 1.18);
+                  const single = row.items.length === 1;
                   return (
                     <View key={`r${r}`} style={styles.mosaicRow}>
                       {row.items.map((p, j) => {
-                        const isTall = row.items.length === 1 ? false : (row.kind === 'tallLeft' ? j === 0 : j === 1);
+                        const isWide = row.kind === 'wideLeft' ? j === 0 : j === 1;
                         return (
                           <TouchableOpacity key={p.index} activeOpacity={0.92} onPress={() => { setViewer(p.index); setViewerAt(p.index); }}
                             testID={`service-photo-${p.index}`}
-                            style={[styles.tile, { width: row.items.length === 1 ? innerW : half, height: row.items.length === 1 ? Math.round(innerW * 0.6) : (isTall ? tall : short) }]}>
+                            style={[styles.tile, { width: single ? innerW : (isWide ? wide : narrow), height: single ? Math.round(innerW * 0.6) : rowH }]}>
                             <Image source={{ uri: p.url }} style={StyleSheet.absoluteFill} contentFit="cover" transition={180} />
                             {p.caption ? <TileCaption text={p.caption} /> : null}
                           </TouchableOpacity>
@@ -602,7 +609,7 @@ const ServiceDetail = ({ route, navigation }) => {
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })} showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={(e) => setViewerAt(Math.round(e.nativeEvent.contentOffset.x / width))}
             renderItem={({ item }) => (
-              <View style={{ width, justifyContent: 'center' }}>
+              <View style={{ width, height, justifyContent: 'center' }}>
                 <Image source={{ uri: item.url }} style={styles.viewerImg} contentFit="contain" />
               </View>
             )} />
@@ -686,6 +693,7 @@ const styles = StyleSheet.create({
   highlightRule: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: M.line },
   highlightValue: { fontFamily: FONT.display, fontSize: 26, color: M.ivory },
   highlightValueSmall: { fontSize: 18, marginTop: 5 },
+  highlightIcon: { marginVertical: 3 },
   highlightLabel: { fontFamily: FONT.ui, fontSize: 11, color: M.muted, textAlign: 'center' },
 
   // Calls to action
@@ -745,7 +753,7 @@ const styles = StyleSheet.create({
 
   // The portfolio
   mosaic: { gap: 10 },
-  mosaicRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  mosaicRow: { flexDirection: 'row', gap: 10 },
   tile: { borderRadius: 14, overflow: 'hidden', backgroundColor: M.raised },
   tileCaption: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 12, paddingTop: 26, paddingBottom: 10 },
   tileCaptionText: { fontFamily: FONT.uiSemi, fontSize: 12.5, color: M.ivory },
@@ -756,7 +764,7 @@ const styles = StyleSheet.create({
   hourRule: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: M.line },
   hourToday: { backgroundColor: M.goldSoft },
   hourDay: { fontFamily: FONT.uiSemi, fontSize: 14, color: M.text },
-  hourDots: { flex: 1, height: 1, borderBottomWidth: 1, borderBottomColor: M.line, borderStyle: 'dotted' },
+  hourDots: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: M.line },
   hourTime: { fontFamily: FONT.uiBold, fontSize: 14, color: M.ivory },
   hourClosed: { color: M.faint, fontFamily: FONT.ui },
   hourTodayText: { color: M.gold },
@@ -825,6 +833,7 @@ const REVIEWS_SKIN = {
   spreadLabel: { color: M.muted },
   track: { backgroundColor: M.raised },
   fill: { backgroundColor: M.gold },
+  star: M.gold,
   none: { color: M.muted },
   mine: { borderColor: M.lineStrong, backgroundColor: M.panel },
   mineLabel: { color: M.gold },

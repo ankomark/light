@@ -764,7 +764,7 @@ describe('Maison: the provider’s own site', () => {
   test('the portfolio: a feature, then pairs; captions ride along; older listings have addresses only', () => {
     const rows = mosaicRows(pics(6));
     expect(rows.map((r) => [r.kind, r.items.map((p) => p.index)])).toEqual([
-      ['feature', [0]], ['tallLeft', [1, 2]], ['tallRight', [3, 4]], ['tallLeft', [5]],
+      ['feature', [0]], ['wideLeft', [1, 2]], ['wideRight', [3, 4]], ['wideLeft', [5]],
     ]);
     expect(portfolioOf({ gallery: ['https://r2.test/a.jpg'] })).toEqual([{ url: 'https://r2.test/a.jpg', caption: '' }]);
     expect(portfolioOf({ gallery_items: pics(1), gallery: ['ignored'] })[0].caption).toBe('Bridal makeup');

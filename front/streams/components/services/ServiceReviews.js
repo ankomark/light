@@ -23,7 +23,7 @@ const Review = ({ r, t, ownerName, onReply, onReport, k = {} }) => (
   <View style={[styles.review, k.review]} testID={`service-review-${r.id}`}>
     <View style={styles.reviewHead}>
       <Text style={[styles.who, k.who]} numberOfLines={1}>{r.user?.username}</Text>
-      <StarRow value={r.rating} size={12} />
+      <StarRow value={r.rating} size={12} color={k.star} />
       {/* A customer: booked here through the app, and taken on. */}
       {r.booked ? (
         <View style={styles.booked} testID={`service-review-booked-${r.id}`}>
@@ -122,7 +122,7 @@ const ServiceReviews = ({ service, uid, t, isAuthenticated, navigation, skin }) 
         <View style={styles.summary}>
           <View style={styles.avgBox}>
             <Text style={[styles.avg, k.avg]}>{summary.average}</Text>
-            <StarRow value={summary.average} />
+            <StarRow value={summary.average} color={k.star} />
             <Text style={[styles.count, k.count]}>{t('reviews.count', { n: summary.count })}</Text>
           </View>
           <View style={styles.spread}>
