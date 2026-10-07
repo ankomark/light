@@ -17,6 +17,8 @@ import { notify } from '../../utils/adminConfirm';
 import { useReasonSheet, ErrorState, StaleNote } from './AdminKit';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
+// The reasons that come first in the queue (advent-backend/songs/reporting.py URGENT).
+const URGENT = ['child_safety', 'self_harm', 'violence', 'sexual'];
 
 const FILTERS = [
   { key: 'pending', label: 'adminReports.filter.pending' },
@@ -195,7 +197,13 @@ const AdminReports = () => {
               {checked && <Ionicons name="checkmark" size={13} color="#0A1628" />}
             </View>
           )}
-          <View style={styles.reasonPill}><Text style={styles.reasonText}>{item.reason}</Text></View>
+          {/* The reason in words; the urgent ones (a child, self-harm,
+              violence, sexual content) stand out — they come first too. */}
+          <View style={[styles.reasonPill, URGENT.includes(item.reason) && styles.reasonUrgent]}>
+            <Text style={[styles.reasonText, URGENT.includes(item.reason) && styles.reasonUrgentText]}>
+              {t(`report.reason.${item.reason}`) === `report.reason.${item.reason}` ? item.reason : t(`report.reason.${item.reason}`)}
+            </Text>
+          </View>
           {dup > 1 && (
             <View style={styles.dupPill}>
               <Ionicons name="people" size={11} color="#FFD27A" />
@@ -414,6 +422,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(224,36,94,0.18)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(224,36,94,0.5)',
   },
   reasonText: { ...typography.caption, color: '#FF6B9A', fontWeight: '700', textTransform: 'capitalize' },
+  reasonUrgent: { backgroundColor: '#E0245E', borderColor: '#E0245E' },
+  reasonUrgentText: { color: '#FFFFFF' },
   dupPill: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
     paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.full,

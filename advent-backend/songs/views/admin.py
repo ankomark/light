@@ -454,9 +454,14 @@ class AdminReportViewSet(viewsets.GenericViewSet):
         if self.request.query_params.get('assigned') == 'me':
             qs = qs.filter(assigned_to=self.request.user)
         if self.request.query_params.get('order') == 'priority':
-            # The most reported first: many people saying the same is the
-            # strongest sign something needs seeing.
-            qs = qs.order_by('-dup_count', '-created_at')
+            # Urgent reasons (a child's safety, self-harm, violence, sexual
+            # content) first; then the most reported — many people saying the
+            # same is the strongest sign something needs seeing.
+            from django.db.models import Case, IntegerField, Value, When
+            from ..reporting import URGENT
+            qs = qs.annotate(urgent=Case(When(reason__in=URGENT, then=Value(1)), default=Value(0),
+                                         output_field=IntegerField())
+                             ).order_by('-urgent', '-dup_count', '-created_at')
         return qs
 
     def list(self, request):

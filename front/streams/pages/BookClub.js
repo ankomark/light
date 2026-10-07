@@ -14,6 +14,7 @@ import { SERIES } from '../components/BookCharts';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import ReportModal from '../components/ReportModal';
 
 const dateLabel = (iso) => {
   try { return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }); } catch { return iso; }
@@ -28,6 +29,7 @@ const BookClub = ({ route, navigation }) => {
   const clubKey = currentUser?.id ? userKey(currentUser.id, `bookclub:${clubId}`) : null;
   const { data: club, failed, reload: load } = useCachedData(clubKey, () => fetchBookClub(clubId));
   const [book, setBook] = useState(null);
+  const [reporting, setReporting] = useState(false);
   useEffect(() => {
     if (!club?.publication) return;
     const kept = peekBook(currentUser?.id, club.publication);
@@ -46,8 +48,14 @@ const BookClub = ({ route, navigation }) => {
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.topTitle} numberOfLines={1}>{club?.name || t('club.title')}</Text>
-        <View style={styles.iconBtn} />
+        {club && currentUser ? (
+          <TouchableOpacity onPress={() => setReporting(true)} style={styles.iconBtn} hitSlop={10}
+            accessibilityRole="button" accessibilityLabel={t('report.action')} testID="club-report">
+            <Ionicons name="flag-outline" size={20} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : <View style={styles.iconBtn} />}
       </View>
+      <ReportModal visible={reporting} onClose={() => setReporting(false)} contentType="bookclub" objectId={club?.id} />
       {!club ? (
         <View style={styles.centered}>
           {failed ? (

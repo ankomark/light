@@ -4,17 +4,27 @@ import {
   ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { reportContent } from '../services/api';
+import KeyboardSheetPad from './KeyboardSheetPad';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
 // Module scope can't call t(); each row carries a key the render resolves.
+// The same reasons as the server (advent-backend/songs/reporting.py); the
+// most serious first, and they reach moderators first too.
 const REASONS = [
-  { key: 'spam', labelKey: 'report.reason.spam', icon: 'mail-unread-outline' },
-  { key: 'hate', labelKey: 'report.reason.hate', icon: 'warning-outline' },
+  { key: 'child_safety', labelKey: 'report.reason.child_safety', icon: 'shield-outline' },
+  { key: 'self_harm', labelKey: 'report.reason.self_harm', icon: 'heart-dislike-outline' },
   { key: 'violence', labelKey: 'report.reason.violence', icon: 'skull-outline' },
-  { key: 'inappropriate', labelKey: 'report.reason.inappropriate', icon: 'eye-off-outline' },
+  { key: 'sexual', labelKey: 'report.reason.sexual', icon: 'eye-off-outline' },
+  { key: 'harassment', labelKey: 'report.reason.harassment', icon: 'sad-outline' },
+  { key: 'hate', labelKey: 'report.reason.hate', icon: 'warning-outline' },
+  { key: 'scam', labelKey: 'report.reason.scam', icon: 'cash-outline' },
+  { key: 'impersonation', labelKey: 'report.reason.impersonation', icon: 'people-outline' },
+  { key: 'spam', labelKey: 'report.reason.spam', icon: 'mail-unread-outline' },
   { key: 'misinformation', labelKey: 'report.reason.misinformation', icon: 'information-circle-outline' },
+  { key: 'inappropriate', labelKey: 'report.reason.inappropriate', icon: 'alert-circle-outline' },
   { key: 'copyright', labelKey: 'report.reason.copyright', icon: 'copy-outline' },
   { key: 'other', labelKey: 'report.reason.other', icon: 'ellipsis-horizontal-outline' },
 ];
@@ -30,6 +40,7 @@ const REASONS = [
  */
 const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const [selectedReason, setSelectedReason] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
@@ -81,7 +92,8 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
     >
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={handleClose} />
 
-      <View style={styles.sheet}>
+      <KeyboardSheetPad>
+      <View style={[styles.sheet, { paddingBottom: spacing.xxl + insets.bottom }]}>
         {/* Handle */}
         <View style={styles.handle} />
 
@@ -89,21 +101,22 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
           <View style={styles.successBox}>
             <Ionicons name="checkmark-circle" size={52} color={colors.success ?? '#43A047'} />
             <Text style={styles.successTitle}>{t('report.submitted')}</Text>
-            <Text style={styles.successSub}>
-              Thanks for keeping Adventist Life safe. We'll review this within 24 hours.
-            </Text>
+            <Text style={styles.successSub}>{t('report.thanks')}</Text>
             <TouchableOpacity style={styles.doneBtn} onPress={handleClose}>
               <Text style={styles.doneBtnText}>{t('common.done')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.title}>{title || `Report ${contentType}`}</Text>
+            <Text style={styles.title}>{title || t('report.title')}</Text>
             <Text style={styles.subtitle}>{t('report.why')}</Text>
 
             {REASONS.map(r => (
               <TouchableOpacity
                 key={r.key}
+                testID={`report-reason-${r.key}`}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: selectedReason === r.key }}
                 style={[styles.reasonRow, selectedReason === r.key && styles.reasonSelected]}
                 onPress={() => setSelectedReason(r.key)}
                 activeOpacity={0.7}
@@ -130,7 +143,8 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
               value={description}
               onChangeText={setDescription}
               multiline
-              maxLength={500}
+              maxLength={2000}
+              testID="report-details"
             />
 
             <TouchableOpacity
@@ -138,6 +152,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
               onPress={handleSubmit}
               disabled={!selectedReason || loading || !detailsOk}
               activeOpacity={0.8}
+              testID="report-submit"
             >
               {loading
                 ? <ActivityIndicator color={colors.white} />
@@ -151,6 +166,7 @@ const ReportModal = ({ visible, onClose, contentType, objectId, title }) => {
           </ScrollView>
         )}
       </View>
+      </KeyboardSheetPad>
     </Modal>
   );
 };

@@ -19,6 +19,7 @@ import { notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import ReportModal from '../components/ReportModal';
 
 export const ORG_KINDS = ['conference', 'union', 'church', 'school', 'publisher', 'ministry', 'other'];
 export const ORG_ICON = {
@@ -38,6 +39,7 @@ export const OrgLogo = ({ org, size = 64 }) => (org?.logo ? (
 const OrganizationPage = ({ route, navigation }) => {
   const { t } = useI18n();
   const { currentUser, isAuthenticated } = useAuth();
+  const [reporting, setReporting] = useState(false);
   const { slug, name } = route.params || {};
   const key = userKey(currentUser?.id, `org:${slug}`);
   const [org, setOrg] = useState(() => peekCache(key)?.org || null);
@@ -171,8 +173,16 @@ const OrganizationPage = ({ route, navigation }) => {
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.topTitle} numberOfLines={1}>{org?.name || name || ''}</Text>
-        <View style={styles.iconBtn} />
+        {/* A page someone does not belong to can be reported. */}
+        {org && !org.my_role && isAuthenticated ? (
+          <TouchableOpacity onPress={() => setReporting(true)} style={styles.iconBtn} hitSlop={10}
+            accessibilityRole="button" accessibilityLabel={t('report.action')} testID="org-report">
+            <Ionicons name="flag-outline" size={20} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : <View style={styles.iconBtn} />}
       </View>
+      <ReportModal visible={reporting} onClose={() => setReporting(false)} contentType="organization"
+        objectId={org?.id} />
       {!org ? (
         <View style={styles.centered}>
           {failed ? (

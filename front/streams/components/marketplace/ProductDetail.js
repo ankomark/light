@@ -126,6 +126,7 @@ const ProductPage = () => {
   const [myComment, setMyComment] = useState('');
   const [postingReview, setPostingReview] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [reportingReview, setReportingReview] = useState(null);   // a buyer's review being reported
   const [buying, setBuying] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [galleryW, setGalleryW] = useState(0);
@@ -637,6 +638,12 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
         contentType="product"
         objectId={product.id}
       />
+      <ReportModal
+        visible={!!reportingReview}
+        onClose={() => setReportingReview(null)}
+        contentType="productreview"
+        objectId={reportingReview?.id}
+      />
 
       {/* Reviews */}
       <View style={styles.reviewsContainer}>
@@ -677,6 +684,14 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
                     />
                   ))}
                 </View>
+                {/* Someone else's review can be reported. */}
+                {currentUser && review.reviewer?.id !== currentUser.id ? (
+                  <TouchableOpacity onPress={() => setReportingReview(review)} hitSlop={10} style={{ marginLeft: 8 }}
+                    accessibilityRole="button" accessibilityLabel={t('report.action')}
+                    testID={`product-review-report-${review.id}`}>
+                    <Icon name="flag-o" size={12} color="#8E99A8" />
+                  </TouchableOpacity>
+                ) : null}
               </View>
               {review.comment ? (
                 <Text style={styles.reviewComment}>{review.comment}</Text>

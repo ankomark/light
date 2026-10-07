@@ -14,6 +14,7 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { notePublicationsChanged } from '../services/publicationStore';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import ReportModal from './ReportModal';
 
 export const StarRow = ({ value, size = 14, onPick, testPrefix, color }) => (
   <View style={styles.starRow}>
@@ -28,11 +29,18 @@ export const StarRow = ({ value, size = 14, onPick, testPrefix, color }) => (
   </View>
 );
 
-const Review = ({ r, t }) => (
+const Review = ({ r, t, onReport }) => (
   <View style={styles.review}>
     <View style={styles.reviewHead}>
       <Text style={styles.reviewer} numberOfLines={1}>{r.user?.username}</Text>
       <StarRow value={r.rating} size={12} />
+      {/* Someone else's review can be reported (yours is edited instead). */}
+      {onReport ? (
+        <TouchableOpacity onPress={() => onReport(r)} hitSlop={10} accessibilityRole="button"
+          accessibilityLabel={t('report.action')} testID={`review-report-${r.id}`}>
+          <Ionicons name="flag-outline" size={14} color={colors.textMuted} />
+        </TouchableOpacity>
+      ) : null}
     </View>
     {r.body ? <Text style={styles.reviewBody}>{r.body}</Text> : null}
   </View>
@@ -42,6 +50,7 @@ const BookReviews = ({ pubId, navigation, onChanged }) => {
   const { t } = useI18n();
   const kbHeight = useKeyboardHeight();       // the sheet rises with the keyboard
   const { currentUser } = useAuth();
+  const [reporting, setReporting] = useState(null);   // the review being reported
   const [more, setMore] = useState([]);
   const [page, setPage] = useState(1);
   // The book page's reviews: the last copy at once (not popping in after
@@ -148,13 +157,15 @@ const BookReviews = ({ pubId, navigation, onChanged }) => {
         <TouchableOpacity onPress={() => navigation.navigate('Login')}><Text style={styles.link}>{t('reviews.signIn')}</Text></TouchableOpacity>
       ) : null}
 
-      {others.map((r) => <Review key={r.id} r={r} t={t} />)}
+      {others.map((r) => <Review key={r.id} r={r} t={t} onReport={currentUser ? setReporting : null} />)}
       {data.next ? (
         <TouchableOpacity onPress={loadMore} style={styles.moreBtn} testID="reviews-more">
           <Text style={styles.link}>{t('reviews.more')}</Text>
         </TouchableOpacity>
       ) : null}
 
+      <ReportModal visible={!!reporting} onClose={() => setReporting(null)} contentType="bookreview"
+                   objectId={reporting?.id} />
       <BottomSheet
 
         keyboardHeight={kbHeight}

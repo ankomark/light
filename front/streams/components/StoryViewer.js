@@ -17,6 +17,7 @@ import { useAuth } from '../context/useAuth';
 import { spacing } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { allowAllOrientations, lockPortrait } from '../utils/orientation';
+import ReportModal from './ReportModal';
 
 const IMAGE_DURATION = 5000;   // ms an image story is shown
 const VIDEO_MAX_MS = 30000;    // hard 30s cap for video stories
@@ -56,6 +57,8 @@ const StoryViewer = ({ route, navigation }) => {
     return unseen > 0 ? unseen : 0;
   });
   const [paused, setPaused] = useState(false);
+  // Reporting someone's story: it holds still while the sheet is open.
+  const [reporting, setReporting] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(true);
   const mediaLoadingRef = useRef(true);
   mediaLoadingRef.current = mediaLoading;
@@ -502,6 +505,13 @@ const StoryViewer = ({ route, navigation }) => {
           />
           <Text style={styles.username} numberOfLines={1}>{group.user.username}</Text>
           <Text style={styles.timeAgo}>{timeAgo(currentStory.created_at, t)}</Text>
+          {!isOwn && (
+            <TouchableOpacity onPress={() => { pause(); setReporting(true); }} style={styles.closeBtn}
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                              accessibilityRole="button" accessibilityLabel={t('report.action')} testID="story-report">
+              <Ionicons name="flag-outline" size={21} color="#fff" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={leave} style={styles.closeBtn}
                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                             accessibilityRole="button" accessibilityLabel={t('common.close')} testID="story-close">
@@ -606,6 +616,14 @@ const StoryViewer = ({ route, navigation }) => {
           )}
         </View>
       </Modal>
+      {!isOwn && (
+        <ReportModal
+          visible={reporting}
+          onClose={() => { setReporting(false); resume(); }}
+          contentType="story"
+          objectId={currentStory.id}
+        />
+      )}
     </Animated.View>
   );
 };

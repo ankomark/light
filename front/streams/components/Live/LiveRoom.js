@@ -35,6 +35,7 @@ import LiveGraphic from './LiveGraphic';
 import GraphicComposer from './GraphicComposer';
 import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 import { useI18n } from '../../context/I18nContext';
+import ReportModal from '../ReportModal';
 
 // Quiet LiveKit's very chatty info/debug logging; keep genuine warnings/errors.
 setLogLevel('warn');
@@ -216,6 +217,7 @@ const RoomInner = ({
   const [camOn, setCamOn] = useState(canPublish && initialCamOn);
   const facingRef = useRef('user');
   const [requests, setRequests] = useState([]);     // host: pending co-host requests
+  const [reporting, setReporting] = useState(false);
   const [requested, setRequested] = useState(false); // viewer: asked to join
 
   // Host + viewer engagement: follow the broadcaster, and a running tally of the
@@ -618,17 +620,26 @@ const RoomInner = ({
           style={[styles.followBtn, followState !== 'none' && styles.followingBtn]}
         >
           {followState === 'following' ? (
-            <Text style={styles.followingText}>Following</Text>
+            <Text style={styles.followingText}>{t('profile.following')}</Text>
           ) : followState === 'requested' ? (
-            <Text style={styles.followingText}>Requested</Text>
+            <Text style={styles.followingText}>{t('profile.requested')}</Text>
           ) : (
             <>
               <Ionicons name="add" size={14} color={live.onGold} />
-              <Text style={styles.followText}>Follow</Text>
+              <Text style={styles.followText}>{t('profile.follow')}</Text>
             </>
           )}
         </TouchableOpacity>
       )}
+      {/* Viewers can report a broadcast; taking it down also ends it. */}
+      {!isHost && !!broadcast?.id && (
+        <TouchableOpacity onPress={() => setReporting(true)} hitSlop={10} style={{ marginLeft: 8 }}
+          accessibilityRole="button" accessibilityLabel={t('report.action')} testID="live-report">
+          <Ionicons name="flag-outline" size={18} color="#fff" />
+        </TouchableOpacity>
+      )}
+      <ReportModal visible={reporting} onClose={() => setReporting(false)} contentType="livebroadcast"
+        objectId={broadcast?.id} />
     </View>
   );
 

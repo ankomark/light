@@ -1080,25 +1080,30 @@ class ReportViewSet(viewsets.ViewSet):
     throttle_scope = 'reports'
 
     def create(self, request):
-        content_type = request.data.get('content_type', '').lower()
-        object_id = request.data.get('object_id')
-        reason = request.data.get('reason', '')
-        description = request.data.get('description', '')
+        from .. import reporting
+        content_type = str(request.data.get('content_type') or '').lower()
+        reason = str(request.data.get('reason') or '')
+        description = str(request.data.get('description') or '').strip()[:reporting.DESCRIPTION_MAX]
+        try:
+            object_id = int(request.data.get('object_id'))
+        except (TypeError, ValueError):
+            object_id = 0
 
-        # Every moderatable content type (mirrors _CONTENT_MODELS) plus 'user'.
-        # Admins can act on all of these from the reports screen.
-        valid_types = {
-            'post', 'comment', 'track', 'trackcomment', 'group', 'story', 'user',
-            'publication', 'chapter', 'bookreview', 'chaptercomment', 'product', 'productreview', 'grouppost',
-            'videostudio', 'mediastation', 'servicereview', 'message', 'singlestopic', 'singlesreply',
-            'album', 'playlist',
-        }
-        if content_type not in valid_types:
-            return Response({'error': f'content_type must be one of {list(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)
-        if not object_id:
+        # Every kind moderators can act on (songs/reporting.py), plus 'user'.
+        if content_type not in reporting.KINDS:
+            return Response({'error': f'content_type must be one of {list(reporting.KINDS)}'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if object_id <= 0:
             return Response({'error': 'object_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        if not reason:
-            return Response({'error': 'reason is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if reason not in reporting.REASONS:
+            return Response({'error': f'reason must be one of {list(reporting.REASONS)}'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if content_type == 'user' and object_id == request.user.pk:
+            return Response({'error': "You can't report yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        # A report on something not there (or already taken down) only
+        # clutters the queue.
+        if not reporting.target_exists(content_type, object_id):
+            return Response({'error': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         # A copyright claim has to say what's being copied (a moderator can't
         # judge "copyright" alone).
         from ..rights import MIN_COPYRIGHT_REPORT_CHARS
@@ -1116,7 +1121,7 @@ class ReportViewSet(viewsets.ViewSet):
             if not GroupPost.objects.filter(pk=object_id, group__members__user=request.user).exists():
                 return Response({'error': 'Message not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        _, created = Report.objects.get_or_create(
+        report, created = Report.objects.get_or_create(
             reporter=request.user,
             content_type=content_type,
             object_id=object_id,
@@ -1124,6 +1129,12 @@ class ReportViewSet(viewsets.ViewSet):
         )
         if not created:
             return Response({'message': 'Already reported'})
+        # Enough established people saying the same: hidden until a moderator
+        # decides (songs/reporting.py).
+        try:
+            reporting.maybe_auto_hide(report)
+        except Exception:  # noqa: BLE001 — the report itself is taken either way
+            logger.exception('auto-hide check failed for report %s', report.pk)
         return Response({'message': 'Content reported successfully'}, status=status.HTTP_201_CREATED)
 
 

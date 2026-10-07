@@ -775,10 +775,17 @@ class StoryReaction(models.Model):
 
 
 class Report(models.Model):
+    # The same list as songs/reporting.py REASONS (and the app's ReportModal).
     REASON_CHOICES = [
         ('spam', 'Spam'),
+        ('harassment', 'Harassment or Bullying'),
         ('hate', 'Hate Speech'),
         ('violence', 'Violence or Threats'),
+        ('sexual', 'Sexual Content'),
+        ('child_safety', 'Child Safety'),
+        ('self_harm', 'Self-harm or Suicide'),
+        ('scam', 'Scam or Fraud'),
+        ('impersonation', 'Impersonation'),
         ('inappropriate', 'Inappropriate Content'),
         ('misinformation', 'Misinformation'),
         ('copyright', 'Copyright Violation'),
