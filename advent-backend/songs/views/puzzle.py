@@ -313,7 +313,10 @@ class WordPuzzleViewSet(PuzzleSwitch, viewsets.GenericViewSet):
         people you follow, and you), or `group:<slug>` (members only).
         `me` is your own place, even below the fifty shown.
         """
-        day = timezone.localdate()
+        # The players' day (songs/days.py), like the quiz and the streak: the
+        # UTC day kept yesterday's board up until 3 a.m. in Nairobi.
+        from ..days import local_today
+        day = local_today()
         raw = request.query_params.get('date')
         if raw:
             from datetime import date as date_cls
@@ -379,7 +382,8 @@ class WordPuzzleViewSet(PuzzleSwitch, viewsets.GenericViewSet):
         Opening it starts the clock (the progress row is made here), so a time
         on the daily board means the same thing for everyone who has one.
         """
-        day = timezone.localdate()
+        from ..days import local_today
+        day = local_today()
         try:
             puzzle = daily_puzzle(day, _language(request))
         except ValueError as exc:

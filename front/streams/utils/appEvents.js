@@ -31,4 +31,6 @@ export const EVENTS = {
   STORY_DELETED: 'story:deleted',
   STORY_REACTED: 'story:reacted',
   STORY_VIEWED: 'story:viewed',
+  // The server refused a write: this account is suspended ({ reason, until }).
+  ACCOUNT_SUSPENDED: 'account:suspended',
 };

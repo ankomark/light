@@ -62,8 +62,12 @@ const SignUpPage = () => {
       let msg;
       if (err.response) {
         // Server responded — surface the real validation/server message.
-        msg = data?.message || data?.username?.[0] || data?.email?.[0]
-          || data?.password?.[0] || data?.detail || `Server error (${err.response.status})`;
+        // New accounts paused (an attack, or many from this network): said plainly.
+        const code = data?.code;
+        msg = code === 'signups_paused' || code === 'signups_burst' ? t('auth.signupsPaused')
+          : code === 'blocked' ? t('auth.networkBlocked')
+            : data?.message || data?.username?.[0] || data?.email?.[0]
+              || data?.password?.[0] || data?.error || data?.detail || `Server error (${err.response.status})`;
       } else {
         // No response — couldn't reach the backend at all.
         msg = `Can't reach the server at ${API_BASE}. Is the backend running and on the same network?`;

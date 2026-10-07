@@ -3,6 +3,7 @@ English when it is not there, and still once a day across both.
 
     python manage.py test songs.tests.test_quiz_languages --settings=music.settings_test
 """
+from songs.days import local_today  # the players' day, as the app counts it
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -94,7 +95,7 @@ class SwahiliQuizTests(APITestCase):
         forget_recorded_plays()
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
-        self.today = timezone.localdate()
+        self.today = local_today()
 
     def test_a_swahili_quiz_is_built_from_the_swahili_bible(self):
         quiz = generate_for_date(self.today, language='sw')

@@ -46,10 +46,14 @@ const LoginPage = () => {
       // password" sends you chasing a password that was never checked.
       if (e?.response) {
         const status = e.response.status;
+        const code = e.response.data?.code;
+        // Locked after too many wrong passwords, or a blocked network: said
+        // in the reader's language, with what to do.
         setError(
-          status === 429
-            ? t('auth.tooManyAttempts')
-            : (e.response.data?.detail || t('auth.invalidCredentials'))
+          status === 429 ? t('auth.tooManyAttempts')
+            : code === 'account_locked' ? t('auth.accountLocked')
+              : code === 'blocked' ? t('auth.networkBlocked')
+                : (e.response.data?.detail || t('auth.invalidCredentials'))
         );
       } else {
         setError(`Can't reach the server at ${API_BASE}. ${e?.message || ''}`.trim());

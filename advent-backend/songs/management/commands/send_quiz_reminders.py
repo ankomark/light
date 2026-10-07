@@ -64,12 +64,12 @@ class Command(BaseCommand):
             ))
             return
 
-        # The window is judged in local time — a push should land over
-        # breakfast — but the *day* is the app's day, which everything else
-        # (the quiz's date, the streak) is keyed on. For the three hours after
-        # local midnight the two disagree, and dating a reminder by the local
-        # clock would nag someone about a quiz they had already played.
-        today = timezone.localdate()
+        # The players' day (songs/days.py), which the quiz's date and the
+        # streak are keyed on: the UTC day disagreed with them for the three
+        # hours after midnight in Nairobi, and would have nagged someone about
+        # a quiz they had already played.
+        from songs.days import local_today
+        today = local_today()
         cutoff = today - timedelta(days=DORMANT_AFTER_DAYS)
 
         # Everyone who has played recently — anything, not just the quiz. The

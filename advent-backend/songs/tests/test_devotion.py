@@ -2,6 +2,7 @@
 
     python manage.py test songs.tests.test_devotion
 """
+from songs.days import local_today  # the players' day, as the app counts it
 from datetime import date, timedelta
 
 from django.core.cache import cache
@@ -98,7 +99,7 @@ class DailyVerseApiTests(APITestCase):
         self.assertTrue(res.data['is_today'])
 
     def test_a_recent_day_can_be_read_back(self):
-        day = (timezone.localdate() - timedelta(days=3)).isoformat()
+        day = (local_today() - timedelta(days=3)).isoformat()
         res = self.client.get(f'/api/daily-verse/?date={day}')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data['date'], day)
@@ -106,12 +107,12 @@ class DailyVerseApiTests(APITestCase):
 
     def test_tomorrow_is_refused(self):
         """The verse of the day is not a thing to read ahead."""
-        day = (timezone.localdate() + timedelta(days=1)).isoformat()
+        day = (local_today() + timedelta(days=1)).isoformat()
         self.assertEqual(self.client.get(f'/api/daily-verse/?date={day}').status_code,
                          status.HTTP_400_BAD_REQUEST)
 
     def test_the_distant_past_is_refused(self):
-        day = (timezone.localdate() - timedelta(days=90)).isoformat()
+        day = (local_today() - timedelta(days=90)).isoformat()
         self.assertEqual(self.client.get(f'/api/daily-verse/?date={day}').status_code,
                          status.HTTP_400_BAD_REQUEST)
 
@@ -140,7 +141,7 @@ class DailyVerseApiTests(APITestCase):
         self.assertTrue(again.data['is_today'])
 
     def test_a_cached_day_still_knows_it_is_no_longer_today(self):
-        day = (timezone.localdate() - timedelta(days=1)).isoformat()
+        day = (local_today() - timedelta(days=1)).isoformat()
         self.client.get(f'/api/daily-verse/?date={day}')
         self.assertFalse(self.client.get(f'/api/daily-verse/?date={day}').data['is_today'])
 
@@ -190,7 +191,7 @@ class VerseStreakApiTests(APITestCase):
         cache.clear()
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
-        self.today = timezone.localdate()
+        self.today = local_today()
 
     def test_the_verse_comes_with_its_reflection(self):
         res = self.client.get('/api/daily-verse/')

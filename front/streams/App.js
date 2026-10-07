@@ -179,6 +179,7 @@ import SinglesEvents from './pages/singles/SinglesEvents';
 import SinglesStories from './pages/singles/SinglesStories';
 import { AppStatusProvider, useFeature } from './context/AppStatusContext';
 import SectionGate from './components/SectionGate';
+import SuspendedNotice from './components/SuspendedNotice';
 import MarketClosed from './components/marketplace/MarketClosed';
 import MaintenanceGate from './components/MaintenanceGate';
 import VideoFeed from './components/VideoFeed';
@@ -644,6 +645,8 @@ const App = () => {
             <AdminCodeHost />
             {/* A part of the app an admin switched off: its screens covered, however reached. */}
             <SectionGate />
+            {/* A suspended account trying to post: told why, with the way to appeal. */}
+            <SuspendedNotice />
         </NavigationContainer>
       </MaintenanceGate>
       </PlayerProvider>

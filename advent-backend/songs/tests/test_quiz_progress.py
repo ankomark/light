@@ -2,6 +2,7 @@
 
     python manage.py test songs.tests.test_quiz_progress --settings=music.settings_test
 """
+from songs.days import local_today  # the players' day, as the app counts it
 from datetime import timedelta
 
 from django.core.cache import cache
@@ -25,7 +26,7 @@ class ProgressBase(APITestCase):
         forget_recorded_plays()
         self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.user)
-        self.today = timezone.localdate()
+        self.today = local_today()
 
     def played(self, *days_back):
         for n in days_back:

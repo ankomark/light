@@ -2,6 +2,7 @@
 
     python manage.py test songs.tests.test_puzzle
 """
+from songs.days import local_today  # the players' day, as the app counts it
 from collections import Counter
 from datetime import timedelta
 from unittest import mock
@@ -625,7 +626,7 @@ class SharedStreakTests(APITestCase):
     def test_both_games_on_one_day_are_one_day(self):
         from songs.models import DailyQuiz, PlayDay
         self._play_puzzle()
-        quiz = DailyQuiz.objects.create(date=timezone.localdate())
+        quiz = DailyQuiz.objects.create(date=local_today())
         QuizAttempt.objects.create(user=self.user, quiz=quiz, score=1, total=1, points=10)
         self.assertEqual(PlayDay.objects.filter(user=self.user).count(), 1)
         self.assertEqual(self.client.get('/api/quiz/stats/').data['day_streak'], 1)
@@ -633,19 +634,19 @@ class SharedStreakTests(APITestCase):
     def test_yesterday_s_puzzle_keeps_today_s_streak_alive(self):
         from songs.models import PlayDay
         PlayDay.objects.filter(user=self.user).delete()
-        PlayDay.objects.create(user=self.user, date=timezone.localdate() - timedelta(days=1))
+        PlayDay.objects.create(user=self.user, date=local_today() - timedelta(days=1))
         res = self.client.get('/api/quiz/stats/')
         self.assertEqual(res.data['day_streak'], 1)
         self.assertFalse(res.data['played_today'])
 
     def test_buying_a_hint_counts_as_playing(self):
         from songs.models import DailyQuiz, PlayDay
-        quiz = DailyQuiz.objects.create(date=timezone.localdate() - timedelta(days=5))
+        quiz = DailyQuiz.objects.create(date=local_today() - timedelta(days=5))
         QuizAttempt.objects.create(user=self.user, quiz=quiz, score=1, total=1, points=500)
         PlayDay.objects.filter(user=self.user).delete()
         self.client.post(f'/api/puzzles/{self.puzzle.id}/hint/', {}, format='json')
         self.assertTrue(PlayDay.objects.filter(
-            user=self.user, date=timezone.localdate()).exists())
+            user=self.user, date=local_today()).exists())
 
 
 class ThemeChoiceTests(APITestCase):
@@ -1225,7 +1226,7 @@ class DailyPuzzleTests(APITestCase):
         self.client.force_authenticate(self.other)
         theirs = self.client.get('/api/puzzles/daily/')
         self.assertEqual(mine.data['id'], theirs.data['id'])
-        self.assertEqual(str(mine.data['day']), str(timezone.localdate()))
+        self.assertEqual(str(mine.data['day']), str(local_today()))
         self.assertIn('wallet', mine.data)
         self.assertEqual(WordPuzzle.objects.filter(day__isnull=False).count(), 1)
 
@@ -1288,7 +1289,7 @@ class DailyLeaderboardTests(APITestCase):
         self.me = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(self.me)
         from songs.puzzle import daily_puzzle
-        self.puzzle = daily_puzzle(timezone.localdate())
+        self.puzzle = daily_puzzle(local_today())
 
     def _finished(self, user, minutes, hints=0, letters=0):
         start = timezone.now() - timedelta(hours=1)

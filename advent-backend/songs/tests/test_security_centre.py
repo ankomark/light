@@ -27,7 +27,7 @@ class SignInWatchTests(APITestCase):
         cache.clear()
         self.victim = make('victim')
 
-    def _login(self, username, password='wrong', ip='10.0.0.9'):
+    def _login(self, username, password='wrong', ip='41.0.0.9'):
         return self.client.post('/api/auth/token/', {'username': username, 'password': password},
                                 format='json', REMOTE_ADDR=ip)
 
@@ -50,10 +50,10 @@ class SignInWatchTests(APITestCase):
     def test_one_address_trying_many_accounts_is_blocked(self, *_):
         names = [make(f'u{i}').username for i in range(security.IP_ACCOUNTS)]
         for i in range(security.IP_FAILS):
-            self._login(names[i % len(names)], ip='10.6.6.6')
-        self.assertTrue(BlockedIP.objects.filter(network='10.6.6.6/32', automatic=True).exists())
-        self.assertTrue(SecurityEvent.objects.filter(kind='credential_stuffing', ip='10.6.6.6').exists())
-        self.assertTrue(security.is_blocked('10.6.6.6'))
+            self._login(names[i % len(names)], ip='41.6.6.6')
+        self.assertTrue(BlockedIP.objects.filter(network='41.6.6.6/32', automatic=True).exists())
+        self.assertTrue(SecurityEvent.objects.filter(kind='credential_stuffing', ip='41.6.6.6').exists())
+        self.assertTrue(security.is_blocked('41.6.6.6'))
 
     def test_strict_lockdown_halves_the_limits(self, *_):
         security.set_lockdown({'strict': True}, None)
@@ -63,11 +63,11 @@ class SignInWatchTests(APITestCase):
 
     def test_a_banned_persons_address_flags_a_new_account(self, *_):
         banned = make('banned')
-        LoginAttempt.objects.create(username='banned', user=banned, ip='10.1.1.1', outcome='ok')
+        LoginAttempt.objects.create(username='banned', user=banned, ip='41.1.1.1', outcome='ok')
         User.objects.filter(pk=banned.pk).update(is_active=False)
         self.client.post('/api/signup/', {'username': 'newface', 'email': 'nf@x.com', 'password': 'Zx9kLmq2-play'},
-                         format='json', REMOTE_ADDR='10.1.1.1')
-        self.assertTrue(SecurityEvent.objects.filter(kind='ban_evasion', ip='10.1.1.1').exists())
+                         format='json', REMOTE_ADDR='41.1.1.1')
+        self.assertTrue(SecurityEvent.objects.filter(kind='ban_evasion', ip='41.1.1.1').exists())
 
 
 @NO_THROTTLE
@@ -76,7 +76,7 @@ class SignUpWatchTests(APITestCase):
     def setUp(self):
         cache.clear()
 
-    def _signup(self, n, ip='10.2.2.2'):
+    def _signup(self, n, ip='41.2.2.2'):
         return self.client.post('/api/signup/', {'username': f'new{n}', 'email': f'new{n}@x.com',
                                                   'password': 'Zx9kLmq2-play'}, format='json', REMOTE_ADDR=ip)
 
@@ -85,7 +85,7 @@ class SignUpWatchTests(APITestCase):
             self.assertEqual(self._signup(n).status_code, 201, n)
         r = self._signup(99)
         self.assertEqual((r.status_code, r.data['code']), (403, 'signups_burst'))
-        self.assertEqual(self._signup(100, ip='10.3.3.3').status_code, 201)   # others still can
+        self.assertEqual(self._signup(100, ip='41.3.3.3').status_code, 201)   # others still can
 
     def test_an_admin_can_pause_all_sign_ups(self, *_):
         security.set_lockdown({'signups_paused': True}, None)
@@ -98,10 +98,10 @@ class BlockTests(APITestCase):
         cache.clear()
 
     def test_a_blocked_range_is_refused_everything(self):
-        security.block('10.9.0.0/16', 'attack')
-        r = self.client.get('/api/app-status/', REMOTE_ADDR='10.9.4.4')
+        security.block('41.9.0.0/16', 'attack')
+        r = self.client.get('/api/app-status/', REMOTE_ADDR='41.9.4.4')
         self.assertEqual((r.status_code, r.json()['code']), (403, 'blocked'))
-        self.assertEqual(self.client.get('/api/app-status/', REMOTE_ADDR='10.8.4.4').status_code, 200)
+        self.assertEqual(self.client.get('/api/app-status/', REMOTE_ADDR='41.8.4.4').status_code, 200)
 
 
 class CentreTests(APITestCase):
@@ -112,25 +112,25 @@ class CentreTests(APITestCase):
         self.client.force_authenticate(self.boss)
 
     def test_the_picture(self):
-        LoginAttempt.objects.create(username='member', ip='10.0.0.1', outcome='bad_password')
-        security.raise_event('password_guessing', 'test', ip='10.0.0.1', user=self.member)
+        LoginAttempt.objects.create(username='member', ip='41.0.0.1', outcome='bad_password')
+        security.raise_event('password_guessing', 'test', ip='41.0.0.1', user=self.member)
         data = self.client.get('/api/admin/security-centre/').data
         self.assertEqual(data['day']['failed'], 1)
         self.assertEqual(data['events'][0]['kind'], 'password_guessing')
-        self.assertEqual(data['top_failing_ips'][0]['ip'], '10.0.0.1')
+        self.assertEqual(data['top_failing_ips'][0]['ip'], '41.0.0.1')
 
     def test_block_and_unblock_with_guards(self):
         url = '/api/admin/security-centre/'
-        self.assertEqual(self.client.post(url + 'block/', {'network': '10.0.0.0/8', 'reason': 'flood'},
+        self.assertEqual(self.client.post(url + 'block/', {'network': '41.0.0.0/8', 'reason': 'flood'},
                                           format='json').status_code, 400)          # too wide
         self.assertEqual(self.client.post(url + 'block/', {'network': '127.0.0.1', 'reason': 'flood'},
                                           format='json').status_code, 400)          # yourself
-        r = self.client.post(url + 'block/', {'network': '10.4.0.0/24', 'reason': 'flood', 'hours': 2},
+        r = self.client.post(url + 'block/', {'network': '41.4.0.0/24', 'reason': 'flood', 'hours': 2},
                              format='json')
         self.assertEqual(r.status_code, 201, r.content[:200])
-        self.assertTrue(security.is_blocked('10.4.0.7'))
-        self.client.post(url + 'unblock/', {'network': '10.4.0.0/24'}, format='json')
-        self.assertFalse(security.is_blocked('10.4.0.7'))
+        self.assertTrue(security.is_blocked('41.4.0.7'))
+        self.client.post(url + 'unblock/', {'network': '41.4.0.0/24'}, format='json')
+        self.assertFalse(security.is_blocked('41.4.0.7'))
 
     def test_force_reset_and_lock(self):
         url = '/api/admin/security-centre/'
@@ -148,7 +148,7 @@ class CentreTests(APITestCase):
     def test_lockdown_and_resolve(self):
         url = '/api/admin/security-centre/'
         self.assertTrue(self.client.post(url + 'lockdown/', {'strict': True}, format='json').data['strict'])
-        event = security.raise_event('signup_burst', 'x', ip='10.0.0.2')
+        event = security.raise_event('signup_burst', 'x', ip='41.0.0.2')
         self.client.post(url + 'resolve/', {'id': event.pk}, format='json')
         event.refresh_from_db()
         self.assertIsNotNone(event.resolved_at)
@@ -156,3 +156,38 @@ class CentreTests(APITestCase):
     def test_only_with_the_power(self):
         self.client.force_authenticate(self.member)
         self.assertEqual(self.client.get('/api/admin/security-centre/').status_code, 403)
+
+
+@NO_THROTTLE
+@NO_ANON_THROTTLE
+class GuardTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def _login(self, username, password='wrong', ip='41.0.0.9'):
+        return self.client.post('/api/auth/token/', {'username': username, 'password': password},
+                                format='json', REMOTE_ADDR=ip)
+
+    def test_an_internal_address_is_never_blocked_by_the_rules(self, *_):
+        """Behind a proxy that is not set up, every request is 127.0.0.1:
+        blocking it would shut everyone out."""
+        names = [make(f'p{i}').username for i in range(security.IP_ACCOUNTS)]
+        for i in range(security.IP_FAILS):
+            self._login(names[i % len(names)], ip='127.0.0.1')
+        self.assertFalse(BlockedIP.objects.exists())
+        self.assertIn('TRUSTED_PROXY_COUNT', SecurityEvent.objects.get(kind='credential_stuffing').detail)
+
+    def test_the_owner_at_their_usual_address_is_not_locked_out(self, *_):
+        make('owner')
+        self._login('owner', 'right-pass-123', ip='41.1.1.1')        # their usual place
+        for _ in range(security.ACCOUNT_FAILS):
+            self._login('owner', ip='41.66.66.66')                    # someone guessing
+        self.assertEqual(self._login('owner', 'right-pass-123', ip='41.66.66.66').status_code, 403)
+        self.assertEqual(self._login('owner', 'right-pass-123', ip='41.1.1.1').status_code, 200)
+
+    def test_an_admin_cannot_block_an_internal_address(self, *_):
+        boss = make('boss', admin_role='super_admin', is_superuser=True)
+        self.client.force_authenticate(boss)
+        r = self.client.post('/api/admin/security-centre/block/', {'network': '192.168.1.0/24', 'reason': 'x'},
+                             format='json')
+        self.assertEqual((r.status_code, r.data['code']), (400, 'internal'))

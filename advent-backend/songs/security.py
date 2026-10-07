@@ -72,6 +72,18 @@ def _limit(n):
 
 # ── blocked addresses ───────────────────────────────────────────────────────
 
+def is_internal(ip):
+    """A private or loopback address. Seen on the sign-ins, it means the
+    proxy hops are not set (TRUSTED_PROXY_COUNT): every request then looks as
+    if it came from the proxy, and blocking it would shut everyone out. The
+    rules never act on one — they say so instead."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return addr.is_private or addr.is_loopback or addr.is_link_local
+
+
 def parse_network(text):
     """An address or a range as typed ('41.90.1.2', '41.90.0.0/16'), or None."""
     try:
@@ -188,11 +200,20 @@ def _lock_key(username):
     return f'security:locked:{username.lower()}'
 
 
-def login_refusal(username):
-    """Seconds left on this account's sign-in lock, else 0."""
+def login_refusal(username, ip=None):
+    """Seconds left on this account's sign-in lock, else 0.
+
+    Not on an address the owner signed in from in the last 30 days: anyone
+    can type wrong passwords at someone's name, and the lock must stop the
+    guesser without locking the owner out at home."""
     until = cache.get(_lock_key(username))
     if not until:
         return 0
+    if ip:
+        from .models import LoginAttempt
+        if LoginAttempt.objects.filter(username__iexact=username, ip=ip, outcome=LoginAttempt.OK,
+                                       created_at__gte=timezone.now() - timedelta(days=30)).exists():
+            return 0
     return max(0, int(until - timezone.now().timestamp()))
 
 
@@ -232,10 +253,15 @@ def after_failure(request, username, user):
         from_ip = failed.filter(ip=ip)
         tries, accounts = from_ip.count(), from_ip.values('username').distinct().count()
         if tries >= _limit(IP_FAILS) and accounts >= _limit(IP_ACCOUNTS) and not is_blocked(ip):
-            block(ip, f'{tries} failed sign-ins on {accounts} accounts', hours=IP_BLOCK.total_seconds() / 3600,
-                  automatic=True)
-            raise_event('credential_stuffing', f'{tries} failed sign-ins on {accounts} accounts from {ip}; '
-                        f'address blocked for an hour.', ip=ip, severity='high')
+            if is_internal(ip):
+                raise_event('credential_stuffing', f'{tries} failed sign-ins on {accounts} accounts from the '
+                            f'internal address {ip} — not blocked. If every sign-in shows this address, set '
+                            f'TRUSTED_PROXY_COUNT.', ip=ip, severity='medium')
+            else:
+                block(ip, f'{tries} failed sign-ins on {accounts} accounts',
+                      hours=IP_BLOCK.total_seconds() / 3600, automatic=True)
+                raise_event('credential_stuffing', f'{tries} failed sign-ins on {accounts} accounts from {ip}; '
+                            f'address blocked for an hour.', ip=ip, severity='high')
 
 
 def after_success(request, user):
@@ -247,7 +273,7 @@ def after_success(request, user):
 def _check_evasion(ip, user):
     """An address a banned person signed in from lately, now used by someone
     else: maybe them, back under a new name. Flagged, never acted on alone."""
-    if not ip:
+    if not ip or is_internal(ip):
         return
     from .models import LoginAttempt
     since = timezone.now() - timedelta(days=EVASION_DAYS)
@@ -277,7 +303,7 @@ def after_signup(request, user):
     from .admin_security import client_ip
     ip = client_ip(request) or ''
     _check_evasion(ip, user)
-    if not ip:
+    if not ip or is_internal(ip):
         return
     key = f'security:signups:{ip}'
     cache.add(key, 0, 60 * 60)

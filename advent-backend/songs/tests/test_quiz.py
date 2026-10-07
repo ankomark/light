@@ -2,6 +2,7 @@
 
     python manage.py test songs.tests.test_quiz
 """
+from songs.days import local_today  # the players' day, as the app counts it
 from datetime import date, timedelta
 
 from django.core.cache import cache
@@ -229,7 +230,7 @@ class QuizApiTests(APITestCase):
         self.assertEqual(len(res.data), 1)
 
     def test_a_past_date_can_be_replayed_read_only(self):
-        day = (timezone.localdate() - timedelta(days=3)).isoformat()
+        day = (local_today() - timedelta(days=3)).isoformat()
         res = self.client.get('/api/quiz/today/?date=%s' % day)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data['date'], day)
@@ -708,7 +709,7 @@ class DayStreakTests(APITestCase):
     def _played_on(self, *days_ago):
         """Record an attempt for each given number of days before today."""
         from songs.models import QuizAttempt
-        today = timezone.localdate()
+        today = local_today()
         for n in days_ago:
             day = today - timedelta(days=n)
             quiz = generate_for_date(day)
@@ -882,7 +883,7 @@ class QuizReminderTests(APITestCase):
 
     def _played(self, user, days_ago):
         from songs.models import QuizAttempt
-        day = timezone.localdate() - timedelta(days=days_ago)
+        day = local_today() - timedelta(days=days_ago)
         quiz = generate_for_date(day)
         QuizAttempt.objects.create(user=user, quiz=quiz, score=10, total=20, points=100)
 
@@ -1060,7 +1061,7 @@ class LeaderboardPeriodTests(APITestCase):
         self.stranger = User.objects.create_user('zed', 'z@x.com', 'pw12345!')
         # `followers` holds who follows a person: mark follows ivy.
         self.friend.followers.add(self.me)
-        self.today = timezone.localdate()
+        self.today = local_today()
 
     def _attempt(self, user, day, points, score=10):
         from songs.models import QuizAttempt
@@ -1186,7 +1187,7 @@ class GroupBoardTests(APITestCase):
         self.group = Group.objects.create(name='Rongo Youth', creator=self.me)
         for u in (self.me, self.friend):
             GroupMember.objects.get_or_create(group=self.group, user=u)
-        today = timezone.localdate()
+        today = local_today()
         quiz = DailyQuiz.objects.create(date=today)
         for u, p in ((self.outsider, 900), (self.me, 100), (self.friend, 150)):
             QuizAttempt.objects.create(user=u, quiz=quiz, score=10, total=20, points=p)

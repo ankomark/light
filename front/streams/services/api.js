@@ -198,6 +198,10 @@ axios.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config;
+    if (error.response?.status === 403 && error.response?.data?.code === 'suspended') {
+      // Suspended: every write is refused (components/SuspendedNotice.js says so, once).
+      require('../utils/appEvents').emit('account:suspended', error.response.data);
+    }
     if (error.response?.status === 403 && error.response?.data?.code === 'feature_off') {
       // A part of the app switched off since the app last asked.
       require('../context/AppStatusContext').reportFeatureOff();

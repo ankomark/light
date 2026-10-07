@@ -119,7 +119,8 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
             # Locked after too many wrong passwords (songs/security.py): not
             # even the right one opens it until the lock runs out — the owner
             # can still reset their password by email.
-            left = security.login_refusal(username)
+            from ..admin_security import client_ip
+            left = security.login_refusal(username, client_ip(request))
             if left:
                 security.record_login(request, username, None, LoginAttempt.LOCKED)
                 return Response({'detail': 'Too many wrong passwords. Try again later or reset your password.',

@@ -188,6 +188,9 @@ class AdminSecurityCentreViewSet(viewsets.ViewSet):
         if net is None:
             return Response({'error': 'An address (41.90.1.2) or a range (41.90.0.0/16).'},
                             status=status.HTTP_400_BAD_REQUEST)
+        if security.is_internal(str(net.network_address)):
+            return Response({'error': 'That is an internal address (the server or its proxy).',
+                             'code': 'internal'}, status=status.HTTP_400_BAD_REQUEST)
         # A range wider than a /16 (or /48) would shut out a whole country's network.
         if net.prefixlen < (16 if net.version == 4 else 48):
             return Response({'error': 'That range is too wide.', 'code': 'too_wide'},
