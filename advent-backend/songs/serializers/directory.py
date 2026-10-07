@@ -158,6 +158,9 @@ GALLERY_MAX = 12
 _HHMM = re.compile(r'^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$')
 
 
+DESCRIPTION_MAX = 5000
+
+
 class VideoStudioSerializer(serializers.ModelSerializer):
     created_by = SimpleUserSerializer(read_only=True)
     is_owner = serializers.SerializerMethodField()
@@ -171,7 +174,21 @@ class VideoStudioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Videostudio
         fields = '__all__'
-        read_only_fields = ('created_by', 'is_verified', 'featured_at', 'organization')
+        # is_removed is a moderator's takedown, never the owner's to set.
+        read_only_fields = ('created_by', 'is_verified', 'featured_at', 'organization', 'is_removed')
+        # The description had no limit: one listing could carry megabytes
+        # into every list and page that shows it.
+        extra_kwargs = {'description': {'max_length': DESCRIPTION_MAX}}
+
+    def validate_latitude(self, v):
+        if v is not None and not -90 <= v <= 90:
+            raise serializers.ValidationError('A latitude is between -90 and 90.')
+        return v
+
+    def validate_longitude(self, v):
+        if v is not None and not -180 <= v <= 180:
+            raise serializers.ValidationError('A longitude is between -180 and 180.')
+        return v
 
     def get_is_owner(self, obj):
         request = self.context.get('request')
@@ -340,11 +357,21 @@ class ServiceReviewSerializer(serializers.ModelSerializer):
     """A review of a service (and its owner's reply)."""
     user = SimpleUserSerializer(read_only=True)
     is_mine = serializers.SerializerMethodField()
+    # The reviewer booked this listing through the app and was accepted: a
+    # customer, not just anyone - shown on the review.
+    booked = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceReview
-        fields = ['id', 'user', 'rating', 'body', 'reply', 'replied_at', 'is_mine', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'user', 'reply', 'replied_at', 'is_mine', 'created_at', 'updated_at']
+        fields = ['id', 'user', 'rating', 'body', 'reply', 'replied_at', 'is_mine', 'booked', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'reply', 'replied_at', 'is_mine', 'booked', 'created_at', 'updated_at']
+
+    def get_booked(self, obj):
+        booked = self.context.get('booked_ids')
+        if booked is not None:
+            return obj.user_id in booked
+        return ServiceBooking.objects.filter(service_id=obj.service_id, customer_id=obj.user_id,
+                                             status=ServiceBooking.ACCEPTED).exists()
 
     def get_is_mine(self, obj):
         request = self.context.get('request')

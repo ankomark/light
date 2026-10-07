@@ -24,6 +24,13 @@ const Review = ({ r, t, ownerName, onReply, onReport }) => (
     <View style={styles.reviewHead}>
       <Text style={styles.who} numberOfLines={1}>{r.user?.username}</Text>
       <StarRow value={r.rating} size={12} />
+      {/* A customer: booked here through the app, and taken on. */}
+      {r.booked ? (
+        <View style={styles.booked} testID={`service-review-booked-${r.id}`}>
+          <Ionicons name="checkmark-circle" size={11} color={colors.success} />
+          <Text style={styles.bookedText}>{t('services.bookedHere')}</Text>
+        </View>
+      ) : null}
       <Text style={styles.when}>{when(r.updated_at)}</Text>
       {onReport ? (
         <TouchableOpacity onPress={() => onReport(r)} hitSlop={8} accessibilityLabel={t('common.report')} testID={`service-review-report-${r.id}`}>
@@ -80,7 +87,8 @@ const ServiceReviews = ({ service, uid, t, isAuthenticated, navigation }) => {
       // A review changes the summary (fetch it); a reply came back whole.
       if (wasReview) await reload();
     } catch (err) {
-      notify(t('common.error'), err?.data?.error || t('reviews.saveFailed'));
+      notify(t('common.error'), err?.data?.code === 'account_too_new'
+        ? t('services.reviewTooNew') : err?.data?.error || t('reviews.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -184,6 +192,8 @@ const ServiceReviews = ({ service, uid, t, isAuthenticated, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  booked: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  bookedText: { ...typography.caption, fontSize: 11, color: colors.textSecondary },
   section: {
     marginHorizontal: spacing.md, marginTop: spacing.lg, paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,

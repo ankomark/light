@@ -5,6 +5,8 @@ listing.
 
     python manage.py test songs.tests.test_services_phase3 --settings=music.settings_test
 """
+from datetime import timedelta
+
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -25,6 +27,11 @@ class Base(APITestCase):
         self.owner = User.objects.create_user('owner', 'o@x.com', 'x')
         self.ann = User.objects.create_user('ann', 'a@x.com', 'x')
         self.bob = User.objects.create_user('bob', 'b@x.com', 'x')
+        # Established accounts: a review needs one at least a week old.
+        User.objects.filter(pk__in=[self.ann.pk, self.bob.pk]).update(
+            date_joined=timezone.now() - timedelta(days=30))
+        self.ann.refresh_from_db()
+        self.bob.refresh_from_db()
         self.s = listing(self.owner)
         self.url = f'/api/video-studios/{self.s.id}/'
 

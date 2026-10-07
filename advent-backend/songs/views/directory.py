@@ -248,6 +248,12 @@ def _verification_json(v, service):
     return {'id': v.id, 'status': v.status, 'legal_name': v.legal_name, 'decision_note': v.decision_note,
             'created_at': v.created_at, 'decided_at': v.decided_at}
 
+REVIEW_ACCOUNT_DAYS = 7
+# Only pictures are served from the stored base64 of older listings: one
+# claiming text/html would be a page on this API's own address.
+SERVED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+
+
 class VideoStudioViewSet(viewsets.ModelViewSet):
     # select_related avoids an N+1 on created_by (+ its profile) during listing.
     queryset = (Videostudio.objects.filter(is_removed=False)
@@ -275,7 +281,8 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
             qs = qs.filter(category=category)
         user_id = self.request.query_params.get('user_id')
         if user_id:
-            qs = qs.filter(created_by=user_id)
+            # Not a number: nobody's listings (it was a 500).
+            qs = qs.filter(created_by=user_id) if str(user_id).isdigit() else qs.none()
         # An organisation's page: the services it runs.
         org = self.request.query_params.get('organization')
         if org:
@@ -336,7 +343,11 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         if sort == 'near' and point:
             return qs.order_by(F('dist2').asc(nulls_last=True), '-id')
         if sort == 'rating':
-            return qs.order_by(F('rating_avg_anno').desc(nulls_last=True), '-rating_count_anno', '-id')
+            # A weighted average (svc_dir.weighted_rating): a few reviews
+            # count, many count more - a single 5 star no longer topped fifty
+            # reviews at 4.8.
+            return svc_dir.with_weighted_rating(qs).order_by(
+                F('rating_weighted').desc(nulls_last=True), '-rating_count_anno', '-id')
         if sort == 'new':
             return qs.order_by('-created_at', '-id')
         # Verified first, then newest: a directory people can trust.
@@ -396,7 +407,7 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         s = self.get_object()
         if s.created_by_id == request.user.id:
             return Response({'error': 'This is your own listing.'}, status=status.HTTP_400_BAD_REQUEST)
-        if getattr(request.user, 'is_suspended', False):
+        if request.user.is_currently_suspended:
             return Response({'error': 'Your account is suspended.'}, status=status.HTTP_403_FORBIDDEN)
         ser = ServiceBookingSerializer(data=request.data, context=self.get_serializer_context())
         ser.is_valid(raise_exception=True)
@@ -471,6 +482,8 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
             self.throttle_scope = 'service_booking'
         elif self.action == 'events':
             self.throttle_scope = 'service_event'
+        elif self.action in ('reviews', 'review_reply') and self.request.method == 'POST':
+            self.throttle_scope = 'service_review'
         return super().get_throttles()
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
@@ -528,8 +541,15 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
             if s.created_by_id == user.id:
                 return Response({'error': 'You can’t review your own listing.', 'code': 'own'},
                                 status=status.HTTP_403_FORBIDDEN)
-            if getattr(user, 'is_suspended', False):
+            if user.is_currently_suspended:
                 return Response({'error': 'Your account is suspended.'}, status=status.HTTP_403_FORBIDDEN)
+            # A rating reaches every customer: not from an account made the
+            # same day (a rival's throwaway). Staff are trusted accounts; a
+            # review already written may still be changed.
+            if mine is None and not user.is_platform_admin and user.date_joined \
+                    and user.date_joined > timezone.now() - timedelta(days=REVIEW_ACCOUNT_DAYS):
+                return Response({'error': f'You can review once your account is {REVIEW_ACCOUNT_DAYS} days old.',
+                                 'code': 'account_too_new'}, status=status.HTTP_403_FORBIDDEN)
             ser = ServiceReviewSerializer(mine, data=request.data, context={'request': request}, partial=bool(mine))
             ser.is_valid(raise_exception=True)
             review = ser.save(service=s, user=user)
@@ -548,7 +568,10 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         total = sum(spread.values())
         others = qs.exclude(user=user) if user.is_authenticated else qs
         page = self.paginate_queryset(others)
-        resp = self.get_paginated_response(ServiceReviewSerializer(page, many=True, context={'request': request}).data)
+        booked = set(ServiceBooking.objects.filter(service=s, status=ServiceBooking.ACCEPTED)
+                     .values_list('customer_id', flat=True))
+        resp = self.get_paginated_response(ServiceReviewSerializer(
+            page, many=True, context={'request': request, 'booked_ids': booked}).data)
         resp.data.update({
             'summary': {
                 'count': total,
@@ -623,13 +646,16 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         if not data_uri or ',' not in data_uri:
             raise Http404('No image.')
         header, _, payload = data_uri.partition(',')
-        mime = header[5:].split(';')[0] if header.startswith('data:') else ''
+        mime = (header[5:].split(';')[0] if header.startswith('data:') else '').lower() or 'image/jpeg'
+        if mime not in SERVED_IMAGE_TYPES:
+            raise Http404('No image.')
         try:
             raw = base64.b64decode(payload)
         except Exception:
             raise Http404('Bad image data.')
-        resp = HttpResponse(raw, content_type=mime or 'image/jpeg')
+        resp = HttpResponse(raw, content_type=mime)
         resp['Cache-Control'] = 'public, max-age=31536000, immutable'  # URLs are version-busted
+        resp['X-Content-Type-Options'] = 'nosniff'
         return resp
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
@@ -644,7 +670,7 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if instance.created_by != request.user:
             return Response(
-                {"error": "You can only edit video studios you created"},
+                {"error": "You can only edit services you listed."},
                 status=status.HTTP_403_FORBIDDEN
             )
         return super().update(request, *args, **kwargs)
@@ -653,13 +679,13 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if instance.created_by != request.user:
             return Response(
-                {"error": "You can only delete video studios you created"},
+                {"error": "You can only delete services you listed."},
                 status=status.HTTP_403_FORBIDDEN
             )
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def my_videostudios(self, request):
         studios = Videostudio.objects.filter(created_by=request.user)
         serializer = self.get_serializer(studios, many=True)

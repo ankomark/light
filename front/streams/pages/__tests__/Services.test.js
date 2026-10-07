@@ -433,6 +433,23 @@ describe('Phase 3', () => {
     expect(n.navigate).toHaveBeenCalledWith('OrganizationPage', { slug: 'kmh', name: 'Kisumu Mission Hospital' });
   });
 
+  test('a customer who booked here is marked; others are not', async () => {
+    mockApi.fetchServiceReviews.mockResolvedValue(noReviews({ results: [review(6, { booked: true }), review(7)] }));
+    const r = await open(page());
+    await waitFor(() => expect(r.getByTestId('service-review-booked-6')).toBeTruthy());
+    expect(r.queryByTestId('service-review-booked-7')).toBeNull();
+  });
+
+  test('an account too new to review is told so, in its language', async () => {
+    mockApi.saveServiceReview.mockRejectedValueOnce(Object.assign(new Error('x'), { status: 403,
+      data: { code: 'account_too_new', error: 'You can review once your account is 7 days old.' } }));
+    const r = await open(page());
+    fireEvent.press(r.getByTestId('service-review-write'));
+    fireEvent.press(r.getByTestId('service-star-4'));
+    await act(async () => { fireEvent.press(r.getByTestId('service-review-save')); });
+    expect(mockNotify).toHaveBeenCalledWith('common.error', 'services.reviewTooNew');
+  });
+
   test('rate a service; it shows as yours', async () => {
     mockApi.saveServiceReview.mockResolvedValue(review(1));
     const r = await open(page());

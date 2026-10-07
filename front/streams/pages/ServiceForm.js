@@ -111,7 +111,9 @@ const ServiceForm = ({ route, navigation }) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { notify(t('chat.permissionRequired'), t('dir.permissionPhotos')); return; }
     const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true,
+      // iOS ignores the crop's shape and crops square: a 16:9 cover then lost
+      // its top and bottom. On iOS the cover goes in whole (shown as cover).
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: which !== 'cover' || Platform.OS !== 'ios',
       aspect: which === 'logo' ? [1, 1] : which === 'gallery' ? [1, 1] : [16, 9], quality: 0.8,
     });
     if (r.canceled || !r.assets?.length) return;

@@ -88,7 +88,7 @@ const ServiceDetail = ({ route, navigation }) => {
 
   if (!s) {
     return (
-      <SafeAreaView style={[styles.container, styles.centered]} edges={['top', 'bottom']}>
+      <SafeAreaView style={[styles.container, styles.centered]} edges={['top', 'bottom', 'left', 'right']}>
         {failed ? (
           <>
             <Ionicons name="cloud-offline-outline" size={44} color={colors.textMuted} />

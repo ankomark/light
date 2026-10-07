@@ -45,6 +45,26 @@ def with_distance(qs, point):
     return qs.annotate(dist2=(dlat * dlat + dlng * dlng) * Value(1.0, output_field=FloatField()))
 
 
+# "Best rated": each listing's stars as if it also had PRIOR_REVIEWS reviews
+# at PRIOR_STARS - a Bayesian average. Volume earns trust; one review can't
+# top the list.
+PRIOR_REVIEWS = 5
+PRIOR_STARS = 3.5
+
+
+def with_weighted_rating(qs):
+    """Annotate `rating_weighted` (needs rating_avg_anno / rating_count_anno).
+    No reviews: none, sorted last."""
+    from django.db.models import Case, When
+    from django.db.models.functions import Coalesce
+    avg = Coalesce(F('rating_avg_anno'), Value(0.0), output_field=FloatField())
+    n = F('rating_count_anno') * Value(1.0, output_field=FloatField())
+    return qs.annotate(rating_weighted=Case(
+        When(rating_count_anno__gt=0,
+             then=(avg * n + Value(PRIOR_STARS * PRIOR_REVIEWS)) / (n + Value(float(PRIOR_REVIEWS)))),
+        default=None, output_field=FloatField()))
+
+
 def km_between(a, b):
     """Great-circle distance (km) between two (lat, lng) points."""
     lat1, lng1 = map(math.radians, a)
