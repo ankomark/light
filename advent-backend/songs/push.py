@@ -191,6 +191,22 @@ def send_expo_push(tokens, title, body, data=None):
 
 EXPO_BATCH = 100   # Expo takes up to 100 messages per request
 
+DEFAULT_TITLE = "\U0001f514 Adventist Life"
+
+
+def _send_by_language(rows, notification_type, title, message, data, title_given):
+    """`rows` are (token, language) pairs: one batch of sends per language,
+    each written in it (songs/push_text.py), in batches of 100."""
+    from .push_text import localize
+    from .tasks import run_in_background
+    by_language = {}
+    for token, language in rows:
+        by_language.setdefault(language or 'en', []).append(token)
+    for language, tokens in by_language.items():
+        heading, body = localize(notification_type, title, message, language, title_given=title_given)
+        for i in range(0, len(tokens), EXPO_BATCH):
+            run_in_background(send_expo_push, tokens[i:i + EXPO_BATCH], heading, body, data)
+
 
 def notify_many(user_ids, notification_type, message, data=None, title=None, category=None):
     """One push to many people (a group message): two queries for everyone's
@@ -213,13 +229,13 @@ def notify_many(user_ids, notification_type, message, data=None, title=None, cat
         quiet = _quiet_user_ids(user_ids)
         if quiet:
             tokens = tokens.exclude(user_id__in=quiet)
-    tokens = list(tokens.values_list('token', flat=True).distinct())
-    if not tokens:
+    rows = list(tokens.values_list('token', 'user__notification_preference__language').distinct())
+    if not rows:
         return 0
-    title = title or NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
-    for i in range(0, len(tokens), EXPO_BATCH):
-        run_in_background(send_expo_push, tokens[i:i + EXPO_BATCH], title, message, data)
-    return len(tokens)
+    given = title is not None
+    title = title or NOTIFICATION_TITLES.get(notification_type, DEFAULT_TITLE)
+    _send_by_language(rows, notification_type, title, message, data, given)
+    return len(rows)
 
 
 def notify_user(recipient, notification_type, message, data=None, title=None,
@@ -263,8 +279,16 @@ def notify_user(recipient, notification_type, message, data=None, title=None,
     )
     if not tokens:
         return
+    given = bool(title)
     if not title:
-        title = NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
+        title = NOTIFICATION_TITLES.get(notification_type, DEFAULT_TITLE)
+    # In the language their app is in (songs/push_text.py).
+    from .push_text import localize
+    try:
+        language = recipient.notification_preference.language or 'en'
+    except Exception:  # noqa: BLE001 — no preference row: English
+        language = 'en'
+    title, message = localize(notification_type, title, message, language, title_given=given)
     run_in_background(send_expo_push, tokens, title, message, data)
 
 def notify_everyone(notification_type, message, data=None, exclude_ids=(), title=None):
@@ -283,8 +307,8 @@ def notify_everyone(notification_type, message, data=None, exclude_ids=(), title
         quiet = _quiet_user_ids(None)
         if quiet:
             tokens = tokens.exclude(user_id__in=quiet)
-    tokens = list(tokens.values_list('token', flat=True).distinct())
-    title = title or NOTIFICATION_TITLES.get(notification_type, "\U0001f514 Adventist Life")
-    for i in range(0, len(tokens), EXPO_BATCH):
-        run_in_background(send_expo_push, tokens[i:i + EXPO_BATCH], title, message, data)
-    return len(tokens)
+    rows = list(tokens.values_list('token', 'user__notification_preference__language').distinct())
+    given = title is not None
+    title = title or NOTIFICATION_TITLES.get(notification_type, DEFAULT_TITLE)
+    _send_by_language(rows, notification_type, title, message, data, given)
+    return len(rows)
